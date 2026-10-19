@@ -124,6 +124,10 @@ pub(super) mod fault {
         /// last statement is such a construct then ends in its raw value
         /// instead of its accumulator (`FoldLocalsNotCarried`).
         SplitFoldStatementGate,
+        /// BT-3911: an assignment to a local its arm frame does not carry is
+        /// lowered with the scratch-map `Put` every assignment used to get,
+        /// whatever the frame carries (`ArmLocalPutNotCarried`).
+        PutUncarriedLocal,
     }
 
     thread_local! {

@@ -1525,3 +1525,87 @@ fn a_held_rebind_that_is_not_an_identity_put_fails_verification() {
         not_identity
     );
 }
+
+// ── ArmLocalPutNotCarried (BT-3911) ──────────────────────────────────────
+
+/// An arm that assigns `local`: the `Put` of its slot in the arm's scratch map
+/// that `lower_local_var_assignment_bind` builds for a local its frame carries.
+fn arm_local_put(local: &str, frame: FrameId) -> ThreadedStmt {
+    ThreadedStmt::Bind {
+        target: state(1, frame),
+        source: state(0, frame),
+        op: BindOp::Put {
+            field: CoreErlangGenerator::local_state_key(local),
+            value: ValueRef::Var("_Val0".to_string()),
+        },
+        span: span(),
+    }
+}
+
+#[test]
+fn an_arm_that_puts_a_local_its_frame_does_not_carry_is_reported() {
+    // BT-3891: `[i < n and: [x := i. x < 5]] whileTrue: [...]` wrote the arm-local `x`
+    // into the scratch map of an arm whose frame carries nothing.
+    let frame = FrameId::new(1);
+    let ir = vec![build_method_body(
+        FrameId::ROOT,
+        Vec::new(),
+        vec![build_branch_arm(
+            frame,
+            Vec::new(),
+            vec![arm_local_put("x", frame)],
+        )],
+    )];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::ArmLocalPutNotCarried {
+            local: "x".to_string(),
+            at: span(),
+        }]
+    );
+    // A local the arm carries is its slot to write; a carried `y` does not
+    // excuse `x`.
+    let carried = vec![build_method_body(
+        FrameId::ROOT,
+        Vec::new(),
+        vec![build_branch_arm(
+            frame,
+            threads(&["x"]),
+            vec![arm_local_put("x", frame)],
+        )],
+    )];
+    assert_eq!(verify(&carried), Vec::new());
+    let other = vec![build_method_body(
+        FrameId::ROOT,
+        Vec::new(),
+        vec![build_branch_arm(
+            frame,
+            threads(&["y"]),
+            vec![arm_local_put("x", frame)],
+        )],
+    )];
+    assert_eq!(verify(&other).len(), 1);
+}
+
+#[test]
+fn a_put_of_a_field_is_not_an_arm_local_put() {
+    let frame = FrameId::new(1);
+    let ir = vec![build_method_body(
+        FrameId::ROOT,
+        Vec::new(),
+        vec![build_branch_arm(
+            frame,
+            Vec::new(),
+            vec![ThreadedStmt::Bind {
+                target: state(1, frame),
+                source: state(0, frame),
+                op: BindOp::Put {
+                    field: "n".to_string(),
+                    value: ValueRef::Var("_Val0".to_string()),
+                },
+                span: span(),
+            }],
+        )],
+    )];
+    assert_eq!(verify(&ir), Vec::new());
+}

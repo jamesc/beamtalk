@@ -1643,9 +1643,31 @@ impl CoreErlangGenerator {
                     })
                 });
             }
+            // ADR 0133 Phase 3 (BT-3911): an arm of an `on:do:`/`ensure:` that
+            // is not a producer is a `BranchArm` frame too (see
+            // `generate_plain_arm`): it carries the locals its block threads
+            // and registers no producer sites.
+            if !this.is_repl_mode() {
+                let arm = ArmFrame {
+                    threads: this.branch_threaded_locals(&[body]),
+                };
+                let rebind = RebindFrame {
+                    frame: this.current_branch_frame(),
+                    kind: RebindFrameKind::BranchArm,
+                    threads: arm.threads.clone(),
+                };
+                return this.with_rebind_frame(rebind, |this| {
+                    this.generate_exception_body_with_threading_inner(
+                        body,
+                        families,
+                        Some(&arm),
+                        entry,
+                    )
+                });
+            }
             // BT-3823: in the REPL the block is inlined over the bindings map,
             // and a producer at one of its statements' sites adopts it
-            // (`with_repl_arm_producer_sites`; a no-op outside the REPL).
+            // (`with_repl_arm_producer_sites`).
             this.with_repl_arm_producer_sites(&statements, |this| {
                 this.generate_exception_body_with_threading_inner(body, families, None, entry)
             })

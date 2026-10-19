@@ -2002,6 +2002,12 @@ impl CoreErlangGenerator {
         if self.is_repl_mode() {
             return true;
         }
+        #[cfg(test)]
+        if super::super::threaded_expr::fault::active()
+            == Some(super::super::threaded_expr::fault::LocalRebindFault::PutUncarriedLocal)
+        {
+            return true;
+        }
         match self.rebind_frames.get(&frame) {
             Some(rebind) if rebind.kind == RebindFrameKind::BranchArm => {
                 rebind.threads_local(local)
