@@ -496,6 +496,46 @@ mod tests {
         );
     }
 
+    /// BT-3915: a dependency's `uses: Comparable` of its *own* `Comparable`
+    /// resolves to that protocol in the offline (MCP) export, as in the real
+    /// compile (`deps/path.rs`) — never to the stdlib's same-named one, which
+    /// only a *consumer's* bare `uses: Comparable` gets.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_own_stdlib_named_protocol_is_flattened_not_the_stdlibs() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nranks = { git = \"https://example.com/ranks.git\", tag = \"v1.0.0\" }\n",
+        );
+        let dep_src = tmp.path().join("_build/deps/ranks/src");
+        write(
+            dep_src.join("comparable.bt").as_path(),
+            "Protocol define: Comparable\n  < other -> Boolean\n\n  foo => 1\n",
+        );
+        write(
+            dep_src.join("rank.bt").as_path(),
+            "Object subclass: Rank\n  uses: Comparable\n  < other => true\n",
+        );
+
+        let (_, infos, _) = resolve_dependency_class_infos(root);
+        let rank = infos
+            .iter()
+            .find(|c| c.name == "Rank")
+            .expect("Rank resolved from the dependency checkout");
+        let selectors: Vec<_> = rank.methods.iter().map(|m| &m.selector).collect();
+        assert!(
+            selectors.iter().any(|s| *s == "foo"),
+            "Rank must carry its own package's `foo`: {selectors:?}"
+        );
+        assert!(
+            !selectors.iter().any(|s| *s == "between:and:"),
+            "Rank must not carry the stdlib Comparable's provisions: {selectors:?}"
+        );
+    }
+
     /// ADR 0127 §10a / BT-3591: a dependency's *provision-bearing* protocol
     /// (a trait) is yielded as a full AST alongside its `ClassInfo`s, so a
     /// cross-package `uses: http@Retryable` can flatten against it — the

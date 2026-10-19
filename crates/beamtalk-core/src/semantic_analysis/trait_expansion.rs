@@ -297,13 +297,29 @@ pub fn flatten_trait_user_class_infos<'a>(
     protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
     package: Option<&str>,
 ) -> Vec<EcoString> {
+    flatten_class_infos_as(all_class_infos, modules, protocol_defs, package, package)
+}
+
+/// [`flatten_trait_user_class_infos`] with the package the modules' `uses:`
+/// lines resolve as (`resolve_package`) apart from the `package` stamp their
+/// `ClassInfo` slots carry — a dependency scanned with unstamped slots still
+/// resolves as itself, so its own stdlib-named protocol is never mistaken for
+/// another package's shadow of the stdlib's (BT-3915).
+fn flatten_class_infos_as<'a>(
+    all_class_infos: &mut [ClassInfo],
+    modules: impl IntoIterator<Item = TraitUserModule<'a>>,
+    protocol_defs: impl IntoIterator<Item = ProtocolDefinition>,
+    package: Option<&str>,
+    resolve_package: Option<&str>,
+) -> Vec<EcoString> {
     let mut flattened_names = Vec::new();
     let external_protocols = first_wins_protocol_map(protocol_defs);
     for TraitUserModule { module, shadowed } in modules {
         if !module.classes.iter().any(|c| !c.uses.is_empty()) {
             continue;
         }
-        let mut flattened = extract_flattened_class_infos(module, &external_protocols, package);
+        let mut flattened =
+            extract_flattened_class_infos(module, &external_protocols, resolve_package);
         if let Some(pkg) = package {
             ClassHierarchy::stamp_package_on_infos(&mut flattened, pkg);
         }
@@ -387,6 +403,12 @@ impl TraitUserCollector {
     /// Flattens the collected trait users into `all_class_infos` with
     /// [`flatten_trait_user_class_infos`], resolving protocols from this
     /// collection first, then `extra_protocol_defs` (e.g. dependencies').
+    ///
+    /// `package` is the stamp on the `ClassInfo` slots to replace. A
+    /// [`Self::for_package`] collector resolves `uses:` as its own package
+    /// whatever that stamp, since its protocols are stamped with it: its own
+    /// `Comparable` is the current package's, not a dependency's shadow of
+    /// the stdlib's (BT-3915).
     pub fn flatten(
         &self,
         all_class_infos: &mut [ClassInfo],
@@ -408,7 +430,7 @@ impl TraitUserCollector {
             redeclared_later.extend(collected.declared.iter().cloned());
         }
         shadowed_sets.reverse();
-        flatten_trait_user_class_infos(
+        flatten_class_infos_as(
             all_class_infos,
             self.modules
                 .iter()
@@ -424,6 +446,7 @@ impl TraitUserCollector {
                 .cloned()
                 .chain(extra_protocol_defs),
             package,
+            self.package.as_deref().or(package),
         )
     }
 }
