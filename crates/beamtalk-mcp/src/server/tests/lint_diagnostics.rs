@@ -704,3 +704,51 @@ fn compute_diagnostic_summary_resolves_cross_file_trait_provided_method_bt_3673(
         "only the control `bogus` call may be a DNU, got: {result:?}"
     );
 }
+
+/// BT-3915: a package's own requirements-only `Comparable` in a sibling file
+/// shadows the stdlib's for `uses: Comparable` in MCP `lint`, as in `beamtalk
+/// lint` (`package_requirements_only_protocol_shadows_the_stdlib_one_bt_3915`):
+/// `Rank` gains none of the stdlib's provisions, so its own
+/// `self between: ...` is a DNU, and no "unknown protocol" is reported.
+#[test]
+fn run_lint_structured_package_comparable_shadows_the_stdlib_one_bt_3915() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let src = temp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        temp.path().join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("comparable.bt"),
+        "Protocol define: Comparable\n  < other -> Boolean\n",
+    )
+    .unwrap();
+    let rank = src.join("Rank.bt");
+    std::fs::write(
+        &rank,
+        "Value subclass: Rank\n  uses: Comparable\n  field: level :: Integer = 0\n\n  \
+         < other :: Rank -> Boolean => self.level < other level\n\n  \
+         inside -> Boolean => self between: self and: self\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(rank.to_str().unwrap());
+    let messages: Vec<&str> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .map(|d| d.message.as_str())
+        .collect();
+    assert!(
+        !messages.iter().any(|m| m.contains("unknown protocol")),
+        "the package's own Comparable must resolve, got: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("does not understand 'between:and:'")),
+        "Rank must not gain the stdlib Comparable's provisions, got: {messages:?}"
+    );
+}

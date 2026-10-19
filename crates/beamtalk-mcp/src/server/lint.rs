@@ -115,9 +115,8 @@ pub(crate) fn run_module_analysis(
     let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_options(&options)
         .with_pre_loaded_classes(cross_file_classes)
-        // Dependency-sourced provision-bearing protocol ASTs (ADR 0127
-        // §10a; BT-3591) — see `merge_dependency_class_infos`'s doc for why
-        // same-package cross-file protocols aren't included here.
+        // Carried protocol ASTs (ADR 0127 §10a; BT-3591): the package's own,
+        // then the dependencies' — see `package_then_dependency_protocol_defs`.
         .with_pre_loaded_protocol_defs(pre_loaded_protocol_defs)
         .with_native_type_registry(native_type_registry)
         .with_is_stub_file(is_stub_file);
@@ -265,6 +264,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
+    let pre_loaded_protocol_defs =
+        package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
 
     // Pass 2: Analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
@@ -292,7 +293,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             module,
             source,
             &all_class_infos,
-            all_protocol_defs.clone(),
+            pre_loaded_protocol_defs.clone(),
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),
@@ -446,12 +447,12 @@ fn resolve_current_package(path: &str) -> Option<String> {
 /// protocol defined in a dependency (ADR 0127 §10a; BT-3591), so a
 /// cross-package `uses:` can flatten in MCP `lint`/`diagnostic_summary` the
 /// same way `beamtalk build` already does — see
-/// `resolve_dependency_class_infos`'s doc. Same-package
-/// cross-file protocol resolution (a protocol declared in a sibling source
-/// file) is a pre-existing, separate gap in this pipeline — Pass 1 above
-/// extracts only `ClassInfo` from project source files, never protocol
-/// metadata of any kind, unlike CLI `beamtalk lint`'s
-/// `parse_and_extract_class_infos` — not widened here.
+/// `resolve_dependency_class_infos`'s doc. The package's own carried
+/// protocols (a sibling source file's) are collected by Pass 1's
+/// `TraitUserCollector` and put ahead of these
+/// ([`package_then_dependency_protocol_defs`]); same-package `ProtocolInfo`
+/// metadata (conformance/`extending:`) is still not collected here, unlike
+/// CLI `beamtalk lint`'s `parse_and_extract_class_infos`.
 ///
 /// Returns whether the project's manifest declares any dependencies, for use
 /// as `CompilerOptions::has_package_dependencies`.
@@ -474,6 +475,23 @@ fn merge_dependency_class_infos(
     all_class_infos.extend(dep_class_infos);
     all_protocol_defs.extend(dep_protocol_defs);
     has_package_dependencies
+}
+
+/// The protocol ASTs Pass 2 carries into each file's analysis: the package's
+/// own carried protocols (`trait_users`, every source file) first, then the
+/// dependencies' — the precedence `beamtalk lint`/`build` use, so a package's
+/// own `Comparable` in a sibling file shadows the stdlib's for a `uses:` in
+/// the file being analysed, as on every other surface (BT-3915).
+fn package_then_dependency_protocol_defs(
+    trait_users: &beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    dependency_protocol_defs: &[beamtalk_core::ast::ProtocolDefinition],
+) -> Vec<beamtalk_core::ast::ProtocolDefinition> {
+    trait_users
+        .protocol_defs()
+        .iter()
+        .chain(dependency_protocol_defs)
+        .cloned()
+        .collect()
 }
 
 /// Run lint passes on `path` (file or directory) and return structured results.
@@ -594,6 +612,8 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
+    let pre_loaded_protocol_defs =
+        package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
 
     // Pass 2: Analyse each target file with cross-file class context.
     for (file, source, module, parse_diags) in parsed_targets {
@@ -621,7 +641,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             &module,
             &source,
             &all_class_infos,
-            all_protocol_defs.clone(),
+            pre_loaded_protocol_defs.clone(),
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),

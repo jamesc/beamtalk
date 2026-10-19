@@ -919,6 +919,15 @@ flattening implementation):
   package's own *requirements-only* `Comparable` in another file is carried
   and shadows the stdlib's (resolving to it, with a "provides no methods"
   hint) instead of silently falling through to the stdlib's provisions.
+  MCP `lint`/`diagnostic_summary` carry the package's own protocols ahead of
+  the dependencies' into each file's analysis, as `beamtalk lint` does.
+  Only the package being compiled may shadow a stdlib protocol name
+  (Option A): a *dependency's* `Comparable` never wins a bare
+  `uses: Comparable` (`trait_expansion::resolve_use_key` /
+  `is_dependency_shadow`) and is reached as `dep@Comparable` instead, while
+  the dependency's own `uses: Comparable` resolves to its own protocol — also
+  in the offline dependency export MCP uses (`TraitUserCollector::for_package`
+  resolves as its package).
   The fallback is off while compiling the stdlib itself
   (`current_package == "stdlib"` / `stdlib_mode`), which carries its own
   protocols live.
