@@ -1409,7 +1409,8 @@ pub enum LocalThreadingFamily {
     Conditional,
     /// `on:do:` / `ensure:`.
     Exception,
-    /// `value`/`value:`… sent to a block literal.
+    /// `value`/`value:`… sent to a block literal of the send's arity
+    /// ([`block_literal_arity_matches`], BT-3884).
     BlockValue,
     /// A block-taking lookup selector
     /// ([`crate::state_threading_selectors::LOOKUP_SHAPES`]). Threaded only
@@ -1469,6 +1470,12 @@ impl LocalThreadingConstruct<'_> {
 /// - a unary loop selector (`whileTrue`, `whileFalse`, `timesRepeat`,
 ///   `repeat`) or a block `value` send: its literal block receiver.
 ///
+/// A `value`-family send is a [`LocalThreadingFamily::BlockValue`] construct
+/// only when its block literal's arity is the send's (BT-3884): a block
+/// literal of another arity ([`block_literal_of_other_arity`], the predicate
+/// codegen's lowering reads) is applied and raises `arity_mismatch`, so the
+/// send is no construct.
+///
 /// Only direct `[...]` literals count, because only those are inlined. A
 /// parenthesized or stored block is a block value (ADR 0131 §6).
 ///
@@ -1496,6 +1503,13 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
         Expression::Block(b) => Some(b),
         _ => None,
     };
+    // BT-3884: a `value`-family send is a block evaluation only when the
+    // block literal's arity is the send's. One of another arity
+    // ([`block_literal_of_other_arity`]: `[t := t + 1] value: 1`) is applied,
+    // never inlined: it raises `arity_mismatch` and its body never runs, so it
+    // is no construct and its writes are no state effect of the send.
+    let evaluated_block = receiver_block
+        .filter(|_| block_literal_of_other_arity(receiver, selector, arguments.len()).is_none());
     let literal_args = || {
         arguments.iter().filter_map(|a| match a {
             Expression::Block(b) => Some(b),
@@ -1524,7 +1538,7 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
                     LocalThreadingFamily::Fold
                 }
             } else if is_state_threaded_block_receiver(&sel) {
-                blocks.extend(receiver_block);
+                blocks.extend(evaluated_block);
                 LocalThreadingFamily::BlockValue
             } else if !lookup_block_arg_indices(&sel).is_empty() {
                 blocks.extend(lookup_block_arg_indices(&sel).iter().filter_map(|&i| {
@@ -1542,10 +1556,11 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
             }
         }
         MessageSelector::Unary(_) => {
-            blocks.extend(receiver_block);
             if is_state_threading_unary_selector(&sel) || sel == "repeat" {
+                blocks.extend(receiver_block);
                 LocalThreadingFamily::Loop
             } else if is_state_threaded_block_receiver(&sel) {
+                blocks.extend(evaluated_block);
                 LocalThreadingFamily::BlockValue
             } else {
                 return None;
@@ -2386,12 +2401,39 @@ pub fn repl_producer_writes(
 /// `[:k | t := t + k] value`) is never inlined, in the REPL (root or arm) or
 /// in a class, value-type or actor method: it is applied, so it raises the
 /// same structured `arity_mismatch` error as any other block called with the
-/// wrong number of arguments, and its body never runs (codegen's
-/// `applies_block_of_other_arity`). The one arity rule every inlining of a
+/// wrong number of arguments, and its body never runs
+/// ([`block_literal_of_other_arity`]). The one arity rule every inlining of a
 /// block literal `value` send reads.
 #[must_use]
 pub fn block_literal_arity_matches(block: &Block, arity: usize) -> bool {
     block.parameters.len() == arity
+}
+
+/// BT-3884: the block literal `receiver` when it is sent the `value`-family
+/// `selector` ([`is_safe_value_family_selector`]) with `arity` arguments and
+/// its arity is not the send's ([`block_literal_arity_matches`]), or `None`.
+/// Such a send is applied, never inlined: codegen lowers it through
+/// `generate_block_arity_mismatch`, a stand-in fun of the block's own arity
+/// whose application raises the structured `arity_mismatch` error, and the
+/// body never runs. So it is no [`LocalThreadingFamily::BlockValue`]
+/// construct ([`local_threading_construct`]), and the ADR 0133 escaping-block
+/// check reports no write of it. The one predicate codegen's lowering, the
+/// recognizer and the escape check read.
+#[must_use]
+pub fn block_literal_of_other_arity<'a>(
+    receiver: &'a Expression,
+    selector: &MessageSelector,
+    arity: usize,
+) -> Option<&'a Block> {
+    match receiver {
+        Expression::Block(block)
+            if is_safe_value_family_selector(selector)
+                && !block_literal_arity_matches(block, arity) =>
+        {
+            Some(block)
+        }
+        _ => None,
+    }
 }
 
 /// BT-3823: the block of an *evaluated block* in the REPL sense: a
@@ -2404,21 +2446,9 @@ pub fn block_literal_arity_matches(block: &Block, arity: usize) -> bool {
 /// and codegen read.
 #[must_use]
 pub fn repl_evaluated_block(expr: &Expression) -> Option<&Block> {
-    let inner = expr.unwrap_parens();
-    let Expression::MessageSend {
-        receiver,
-        arguments,
-        ..
-    } = inner
-    else {
-        return None;
-    };
-    let Expression::Block(block) = receiver.as_ref() else {
-        return None;
-    };
-    (local_threading_construct(inner)?.family == LocalThreadingFamily::BlockValue
-        && block_literal_arity_matches(block, arguments.len()))
-    .then_some(block)
+    local_threading_construct(expr)
+        .filter(|construct| construct.family == LocalThreadingFamily::BlockValue)
+        .and_then(|construct| construct.blocks.first().copied())
 }
 
 /// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): the sub-expressions of

@@ -806,6 +806,22 @@ reports the same message at the same span. No operation is surface-specific.
   read from the workspace binding of the same name) and keep its write; it
   now raises and leaves the bindings unchanged. It is a run-time error, not a
   compile error: no new compile error, and the display format is unchanged.
+  The same holds for a class method that writes a class variable this way
+  (`[self.n := self.n + 1] value: 1`): it raises `arity_mismatch` and leaves
+  the class variable unchanged. BT-3884: the analyser reads the same rule
+  (`local_threading_construct` classifies no such send as a block
+  evaluation, and the ADR 0133 escaping-block check does not report its
+  block literal), so a send of another arity draws no compile error
+  about a write that can never happen. A class method that writes a local
+  this way (in any position), such a send as the value of an assignment or an
+  operand in a value-type or actor method (`x := [t := t + 1] value: 1`,
+  `([:k | t := t + k] value) printString`), and such a send as an operand or
+  a literal element at the REPL (`#[[t := t + 1] value: 1]`), used to be
+  rejected with "`value:` writes outer local `t`"; they now compile and raise
+  `arity_mismatch` at run time (a diagnostic replaced by the run-time error
+  every other such send raises). A parenthesized block (`([t := t + 1])
+  value: 1`) is a block value, not a literal, and keeps its ADR 0133
+  escaping-block error.
 - **Residuals made loud (ADR 0133 Phase 3, BT-3909).** Three shapes that
   crashed or answered wrong without a diagnostic are compile errors
   (`UnmigratedLocalThreading`, `RESIDUAL_DENY_SET` in `local_threading.rs`) in

@@ -3,7 +3,9 @@
 
 // BT-3881: a block literal sent a `value`-family selector of another arity is
 // never inlined, so it raises the run-time arity error any block raises and
-// its body (and its writes) never run. The columns are
+// its body (and its writes) never run. The analyser reads the same rule
+// (BT-3884), so such a send is accepted in every position, a class method
+// included, and reports no write. The columns are
 // adr0131block_arity_{class,value,actor}.bt; the expected answers are in
 // stdlib/test/adr0131block_arity_test.bt.
 
@@ -27,6 +29,15 @@ Value subclass: Adr0131BlockArityValue
   last =>
     t := 0
     [t := t + 1] value: 1
+
+  dropArgValue =>
+    t := 0
+    x := [t := t + 1] value: 1
+    #[x, t]
+
+  missingArgOperand =>
+    t := 0
+    ([:k | t := t + k] value) printString size + t
 
   matched =>
     t := 0

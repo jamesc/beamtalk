@@ -7,12 +7,23 @@
 // missing parameter read as an unbound name), nor in a class method: it is
 // applied, so it raises the same structured `arity_mismatch` error as any
 // block called with the wrong number of arguments, and its body, with its
-// writes, never runs. A class method that writes a local this way, and such a
-// send anywhere but a method-body statement, keep their compile error. The
-// methods under test are in
+// writes, never runs.
+//
+// BT-3884: the analyser reads the same arity rule
+// (`block_literal_arity_matches`), so such a send is no block evaluation and
+// reports no write: a class method that writes a local this way, and such a
+// send in any position (the value of an assignment, an operand), compile and
+// raise `arity_mismatch` at run time instead of keeping a compile error about
+// a write that can never happen.
+// The methods under test are in
 // stdlib/test/fixtures/adr0131block_arity_{class,value,actor}.bt.
 
 TestCase subclass: Adr0131BlockArityTest
+  field: a = nil
+
+  setUp => self withA: Adr0131BlockArityActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   // The kind is read through `on:do:`, which classifies a raw `badarity` the
   // way the REPL and `printString` do (`should:raise:` sees an unclassified
@@ -24,60 +35,100 @@ TestCase subclass: Adr0131BlockArityTest
 
   testDropArg =>
     self assert: ([
+      Adr0131BlockArityClass dropArg
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+    self assert: ([
       (Adr0131BlockArityValue new) dropArg
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
     self assert: ([
-      (Adr0131BlockArityActor spawn) dropArg
+      self.a dropArg
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
 
   testMissingArg =>
     self assert: ([
+      Adr0131BlockArityClass missingArg
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+    self assert: ([
       (Adr0131BlockArityValue new) missingArg
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
     self assert: ([
-      (Adr0131BlockArityActor spawn) missingArg
+      self.a missingArg
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
 
   testExtraArgs =>
     self assert: ([
+      Adr0131BlockArityClass extraArgs
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+    self assert: ([
       (Adr0131BlockArityValue new) extraArgs
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
     self assert: ([
-      (Adr0131BlockArityActor spawn) extraArgs
+      self.a extraArgs
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
 
   testLast =>
     self assert: ([
+      Adr0131BlockArityClass last
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+    self assert: ([
       (Adr0131BlockArityValue new) last
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
     self assert: ([
-      (Adr0131BlockArityActor spawn) last
+      self.a last
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
 
   testArm =>
     self assert: ([
-      (Adr0131BlockArityActor spawn) arm
+      self.a arm
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+
+  // BT-3884: the value of an assignment and an operand, in every method
+  // kind.
+  testDropArgValue =>
+    self assert: ([
+      Adr0131BlockArityClass dropArgValue
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+    self assert: ([
+      (Adr0131BlockArityValue new) dropArgValue
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+    self assert: ([
+      self.a dropArgValue
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+
+  testMissingArgOperand =>
+    self assert: ([
+      Adr0131BlockArityClass missingArgOperand
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+    self assert: ([
+      (Adr0131BlockArityValue new) missingArgOperand
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+    self assert: ([
+      self.a missingArgOperand
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
 
   testFieldDrop =>
-    a := Adr0131BlockArityActor spawn
     self assert: ([
       Adr0131BlockArityClass fieldDrop
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
     self assert: ([
-      a fieldDrop
+      self.a fieldDrop
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
-    self assert: #[Adr0131BlockArityClass fieldN, a fieldN] equals: #[0, 0]
+    self assert: #[Adr0131BlockArityClass fieldN, self.a fieldN] equals: #[0, 0]
+
+  testFieldDropValue =>
+    self assert: ([
+      Adr0131BlockArityClass fieldDropValue
+    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
+    self assert: Adr0131BlockArityClass fieldN equals: 0
 
   testFieldMissing =>
-    a := Adr0131BlockArityActor spawn
     self assert: ([
       Adr0131BlockArityClass fieldMissing
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
     self assert: ([
-      a fieldMissing
+      self.a fieldMissing
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
-    self assert: #[Adr0131BlockArityClass fieldN, a fieldN] equals: #[0, 0]
+    self assert: #[Adr0131BlockArityClass fieldN, self.a fieldN] equals: #[0, 0]
 
   testMatchedArityStillInlines =>
-    self assert: #[(Adr0131BlockArityValue new) matched, (Adr0131BlockArityActor spawn) matched] equals: #[5, 5]
+    self assert: #[(Adr0131BlockArityValue new) matched, self.a matched] equals: #[5, 5]
