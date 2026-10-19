@@ -124,11 +124,6 @@ a table deleted between an existence check and the op (teardown/shutdown).
     put_direct_class_methods/2,
     lookup_direct_class_methods/1,
     lookup_direct_class_method/2,
-    %% ADR 0132 §1/§4: advertised threaded entry points (`tier2_methods` /
-    %% `tier2_class_methods` from `__beamtalk_meta/0`).
-    put_tier2_methods/3,
-    lookup_tier2_methods/1,
-    lookup_tier2_method/3,
     %% ADR 0125 §2.2/§3.4, BT-3574: the `field_types`/`field_kinds` ->
     %% `beamtalk_shape_diff:shape()`-shaped normalisation shared by the live
     %% (`beamtalk_workspace_shape_store`) and build-time
@@ -158,9 +153,6 @@ a table deleted between an existence check and the op (teardown/shutdown).
 -type superclass() :: class_name() | none.
 -type selector() :: atom().
 -type class_method_fun_info() :: #{block := fun(), arity := non_neg_integer()}.
-%% ADR 0132 §1: selector => {EntryFn, ThreadingPositions}.
--type tier2_entries() :: #{selector() => {atom(), [non_neg_integer()]}}.
--export_type([tier2_entries/0]).
 
 %% A class's flattened field shape: field name -> `{DeclaredType, Kind}`,
 %% rendered exactly as `beamtalk_shape_diff:shape()` (ADR 0105 Phase 2)
@@ -199,13 +191,6 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% without the class gen_server. Empty for dynamic classes, classes with
     %% class state, and modules compiled before the key existed.
     direct_class_methods = #{} :: #{selector() => atom()},
-    %% ADR 0132 §1: `tier2_methods` / `tier2_class_methods` from the compiled
-    %% module's `__beamtalk_meta/0` — selector => {entry function, threading
-    %% positions} for the methods that have a threaded entry (answering
-    %% `{Result, Acc}`). Empty for dynamic classes and modules compiled before
-    %% the keys existed.
-    tier2_methods = #{} :: tier2_entries(),
-    tier2_class_methods = #{} :: tier2_entries(),
     %% BT-3826: the class process's reflection state, mirrored here so another
     %% class process (or anything else) can read it without a blocking
     %% `gen_server:call` into the owning class. Written only by
@@ -1120,72 +1105,6 @@ lookup_direct_class_method(Name, Selector) ->
             {ok, Module, SafeFn};
         _ ->
             error
-    end.
-
--doc """
-Store a class's advertised threaded entries (ADR 0132 §1).
-
-`Instance` and `Class` are the `tier2_methods` and `tier2_class_methods` values
-of the class's `__beamtalk_meta/0` (`#{Selector => {EntryFn, Positions}}`);
-pass `#{}` to clear them. Updates the existing row in place; a no-op when no
-row exists, like `put_direct_class_methods/2`.
-""".
--spec put_tier2_methods(class_name(), tier2_entries(), tier2_entries()) -> ok.
-put_tier2_methods(Name, Instance, Class) when is_map(Instance), is_map(Class) ->
-    new(),
-    try
-        ets:update_element(?TABLE, Name, [
-            {#class_metadata.tier2_methods, Instance},
-            {#class_metadata.tier2_class_methods, Class}
-        ]),
-        ok
-    catch
-        error:badarg -> ok
-    end.
-
--doc """
-Read a class's whole threaded-entry sets as `{Instance, Class}` (`{#{}, #{}}`
-when none or unknown).
-""".
--spec lookup_tier2_methods(class_name()) -> {tier2_entries(), tier2_entries()}.
-lookup_tier2_methods(Name) ->
-    case row(Name) of
-        {ok, #class_metadata{tier2_methods = I, tier2_class_methods = C}} -> {I, C};
-        not_found -> {#{}, #{}}
-    end.
-
--doc """
-Resolve a selector to the class's threaded entry `{ok, Module, EntryFn}` on the
-given side (ADR 0132 §4), or `error` when the class advertises none.
-
-Metadata only: the caller checks `erlang:function_exported/3` (see
-`beamtalk_class_dispatch:lookup_threaded_entry/3`). On the class side, a class
-with runtime-installed class-method funs (ADR 0084) has no usable entry, as in
-`lookup_direct_class_method/2`: a runtime fun can shadow the compiled method.
-""".
--spec lookup_tier2_method(class_name(), side(), selector()) ->
-    {ok, module(), atom()} | error.
-lookup_tier2_method(Name, Side, Selector) ->
-    case row(Name) of
-        {ok, #class_metadata{module = Module} = Row} when Module =/= undefined ->
-            tier2_entry(Side, Selector, Module, Row);
-        _ ->
-            error
-    end.
-
-tier2_entry(instance, Selector, Module, #class_metadata{tier2_methods = Entries}) ->
-    tier2_entry_fn(Selector, Module, Entries);
-tier2_entry(class, Selector, Module, #class_metadata{
-    has_runtime_class_methods = false, tier2_class_methods = Entries
-}) ->
-    tier2_entry_fn(Selector, Module, Entries);
-tier2_entry(class, _Selector, _Module, #class_metadata{}) ->
-    error.
-
-tier2_entry_fn(Selector, Module, Entries) ->
-    case Entries of
-        #{Selector := {EntryFn, _Positions}} when is_atom(EntryFn) -> {ok, Module, EntryFn};
-        _ -> error
     end.
 
 -doc """
