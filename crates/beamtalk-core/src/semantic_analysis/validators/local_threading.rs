@@ -2088,10 +2088,14 @@ impl<'d> Walker<'d> {
         };
         let is_lookup = construct.family == LocalThreadingFamily::Lookup;
         let writes = construct_outer_local_writes(&construct, &|name| self.is_bound(name));
-        // BT-3922: a lookup handler that writes object state (`self.field :=`)
-        // and no outer local is lowered in place like one that writes a local,
-        // so the §6 check must not take it for an escaping block.
+        // BT-3922: in a class method, a lookup handler that writes object
+        // state (a class variable) and no outer local writes it in place
+        // (ADR 0130), so the §6 check must not take it for an escaping block
+        // (`lookup_field_write_test.bt` proves the write survives). In an
+        // actor or value-type method codegen runs the handler as a closure and
+        // the field write is dropped, so it stays an escape.
         let state_only_lookup = is_lookup
+            && self.context == Class
             && writes.is_empty()
             && construct
                 .blocks
@@ -2738,11 +2742,10 @@ impl<'d> Walker<'d> {
         // A `self.field` write (BT-3922) is named as written and has its own
         // fix: the field is object state, which a block that has left this
         // scope cannot hand back.
-        let written: EcoString = match write.kind {
+        let name: &EcoString = &match write.kind {
             WriteKind::Local => write.name.clone(),
             WriteKind::ObjectState => format!("self.{}", write.name).into(),
         };
-        let name = &written;
         let hint = hint.or_else(|| {
             (write.kind == WriteKind::ObjectState).then(|| {
                 format!(

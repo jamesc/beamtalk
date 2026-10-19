@@ -35414,6 +35414,36 @@
       "explanation": "LoggingCounter - demonstrates super keyword for method dispatch This fixture tests super calls in inheritance hierarchy:   Actor -> Counter -> LoggingCounter"
     },
     {
+      "id": "stdlib-test-fixtures-lookup-field-write-class",
+      "title": "LookupFieldWriteClass",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "LookupFieldWriteClass",
+        "Object",
+        "absent",
+        "assign",
+        "assignment",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "lookup_field_write_class",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "present",
+        "presentOrAbsent",
+        "property",
+        "reset",
+        "set",
+        "subclassing"
+      ],
+      "source": "// BT-3922: a `Dictionary` lookup handler that writes only a class variable\n// (no outer local), in a class method. lookup_field_write_test.bt asserts\n// whether the write survives.\n\nObject subclass: LookupFieldWriteClass\n  classState: misses = 0\n\n  class reset => self.misses := 0\n\n  class absent =>\n    self reset\n    #{#a => 1}\n      at: #zz\n      ifAbsent: [\n        self.misses := self.misses + 1\n        nil\n      ]\n    self.misses\n\n  class present =>\n    self reset\n    #{#a => 1}\n      at: #a\n      ifPresent: [:v |\n        self.misses := self.misses + v\n        v\n      ]\n    self.misses\n\n  class presentOrAbsent =>\n    self reset\n    #{#a => 1}\n      at: #a\n      ifPresent: [:v |\n        self.misses := self.misses + v\n        v\n      ]\n      ifAbsent: [nil]\n    self.misses",
+      "explanation": "BT-3922: a `Dictionary` lookup handler that writes only a class variable (no outer local), in a class method. lookup_field_write_test.bt asserts whether the write survives."
+    },
+    {
       "id": "stdlib-test-fixtures-loop-class-var-mutation",
       "title": "LoopClassVarMutation",
       "category": "stdlib-fixtures",
@@ -42725,6 +42755,36 @@
       ],
       "source": "// Tests the Logger class — info:, warn:, error:, debug:, metadata variants, and runtime\n// logging configuration (logLevel, logFormat, debug targets)\n\nTestCase subclass: LoggerTest\n\n  // The tests mutate the node-wide log level, so they must not run concurrently.\n  class serial -> Boolean => true\n\n  testInfoReturnsNil =>\n    // info: returns nil\n    self assert: (Logger info: \"test info message\") equals: nil\n\n  testInfoWithMetadata =>\n    // info:metadata: returns nil\n    self assert: (Logger info: \"test info\" metadata: #{\n      \"key\" => \"value\"\n    }) equals: nil\n\n  testWarnReturnsNil =>\n    // warn: returns nil\n    self assert: (Logger warn: \"test warn message\") equals: nil\n\n  testWarnWithMetadata =>\n    // warn:metadata: returns nil\n    self assert: (Logger warn: \"test warn\" metadata: #{\n      \"attempt\" => 2\n    }) equals: nil\n\n  testErrorReturnsNil =>\n    // error: returns nil\n    self assert: (Logger error: \"test error message\") equals: nil\n\n  testErrorWithMetadata =>\n    // error:metadata: returns nil\n    self assert: (Logger error: \"test error\" metadata: #{\n      \"reason\" => \"timeout\"\n    }) equals: nil\n\n  testDebugReturnsNil =>\n    // debug: returns nil\n    self assert: (Logger debug: \"test debug message\") equals: nil\n\n  testDebugWithMetadata =>\n    // debug:metadata: returns nil\n    self assert: (Logger debug: \"test debug\" metadata: #{\n      \"count\" => 42\n    }) equals: nil\n\n  // === Logging configuration (BT-3653: moved from Beamtalk) ===\n  testLogLevelReturnsSymbol => self assert: (Logger logLevel isKindOf: Symbol)\n\n  testLogLevelRoundTrip =>\n    saved := Logger logLevel\n    [\n      Logger logLevel: #notice\n      self assert: Logger logLevel equals: #notice\n    ]\n      ensure: [\n        // Restore the level BUnit started with, even if the assertion above fails.\n        Logger logLevel: saved\n      ]\n    self assert: (saved isKindOf: Symbol)\n\n  testLogLevelErrorIsSymbol =>\n    saved := Logger logLevel\n    [\n      Logger logLevel: #error\n      self assert: Logger logLevel equals: #error\n      Logger logLevel: Logger logLevel\n      self assert: Logger logLevel equals: #error\n    ] ensure: [Logger logLevel: saved]\n\n  testLogFormatIsTextOrJson =>\n    fmt := Logger logFormat\n    self assert: ((fmt == #text) or: [fmt == #json])\n\n  testDebugTargetsIsList => self assert: (Logger debugTargets isKindOf: List)\n\n  testActiveDebugTargetsIsList =>\n    self assert: (Logger activeDebugTargets isKindOf: List)\n\n  testLoggerInfoIsString => self assert: (Logger loggerInfo isKindOf: String)",
       "explanation": "Tests the Logger class — info:, warn:, error:, debug:, metadata variants, and runtime logging configuration (logLevel, logFormat, debug targets)"
+    },
+    {
+      "id": "stdlib-test-lookup-field-write-test",
+      "title": "LookupFieldWriteTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "LookupFieldWriteTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "lookup_field_write_test",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "testClassAbsent",
+        "testClassPresent",
+        "testClassPresentOrAbsent"
+      ],
+      "source": "// BT-3922: a `Dictionary` lookup handler that writes only object state\n// (`self.field :=`, no outer local): does the write survive? In a class\n// method it writes a class variable in place (ADR 0130), so the ADR 0133\n// escaping-block rule accepts it (semantic_analysis/tests/local_threading.rs,\n// `section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape`). The other method kinds\n// have no column here because the same handler does not compile there: an\n// actor method reports \"Cannot mutate Actor state inside a closure\" and a\n// value-type method \"Cannot assign to slot ... on value type\".\n\nTestCase subclass: LookupFieldWriteTest\n\n  testClassAbsent => self assert: LookupFieldWriteClass absent equals: 1\n\n  testClassPresent => self assert: LookupFieldWriteClass present equals: 1\n\n  testClassPresentOrAbsent =>\n    self assert: LookupFieldWriteClass presentOrAbsent equals: 1",
+      "explanation": "BT-3922: a `Dictionary` lookup handler that writes only object state (`self.field :=`, no outer local): does the write survive? In a class method it writes a class variable in place (ADR 0130), so the ADR 0133 escaping-block rule accepts it (semantic_analysis/tests/local_threading.rs, `section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape`). The other method kinds have no column here because the same handler does not compile there: an actor method reports \"Cannot mutate Actor state inside a closure\" and a value-type method \"Cannot assign to slot ... on value type\"."
     },
     {
       "id": "stdlib-test-loop-class-var-mutation-test",

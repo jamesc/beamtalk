@@ -2600,22 +2600,30 @@ fn section6_field_stored_literal_that_writes_a_field_is_an_error() {
     }
 }
 
-/// BT-3922: a `Dictionary` lookup handler that writes only `self.field` is
-/// lowered in place like one that writes a captured local, so it is not an
-/// escape (it was accepted before the field half of the rule, and is correct
-/// at run time).
+/// BT-3922: in a class method a `Dictionary` lookup handler that writes only a
+/// class variable writes it in place (ADR 0130), so it is not an escape;
+/// `stdlib/test/lookup_field_write_test.bt` proves the write survives.
 #[test]
-fn section6_lookup_handler_that_writes_a_field_is_not_an_escape() {
+fn section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape() {
     for body in [
         "self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]\nnil",
         "x := self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. 0]\n^x",
         "self.cache at: 1 ifPresent: [:v | self.hits := self.hits + 1. v] ifAbsent: [self.misses := 1. nil]\nnil",
         "^self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]",
     ] {
-        for src in [in_class(body), in_value(body), in_actor(body)] {
-            assert_eq!(
-                section6_errors(&src),
-                0,
+        let src = in_class(body);
+        assert_eq!(
+            section6_errors(&src),
+            0,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
+        );
+        // An actor or value-type method runs the handler as a closure and the
+        // field write is dropped, so the handler is an escape there.
+        for src in [in_value(body), in_actor(body)] {
+            // One diagnostic per writing handler.
+            assert!(
+                section6_errors(&src) >= 1,
                 "{src}: {:?}",
                 adr0131_diagnostics(&src)
             );
