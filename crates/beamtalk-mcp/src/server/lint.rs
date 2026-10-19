@@ -257,8 +257,14 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // collects dependency-sourced provision-bearing protocol ASTs (ADR 0127
     // §10a; BT-3591) so a cross-package `uses:` flattens too.
     let mut all_protocol_defs = Vec::new();
-    let has_package_dependencies =
-        merge_dependency_class_infos(path, &mut all_class_infos, &mut all_protocol_defs);
+    let mut dependency_protocol_sources =
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
+    let has_package_dependencies = merge_dependency_class_infos(
+        path,
+        &mut all_class_infos,
+        &mut all_protocol_defs,
+        &mut dependency_protocol_sources,
+    );
 
     // Flatten cross-file trait provisions into the same-package infos (BT-3673),
     // via the helper `beamtalk lint` and `build` use.
@@ -272,6 +278,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     let native_type_registry = build_native_type_registry(path);
     let pre_loaded_protocol_defs =
         package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
+    let protocol_sources =
+        package_then_dependency_protocol_sources(&trait_users, dependency_protocol_sources);
 
     // Pass 2: Analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
@@ -301,7 +309,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             source,
             &all_class_infos,
             pre_loaded_protocol_defs.clone(),
-            trait_users.protocol_sources().clone(),
+            protocol_sources.clone(),
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),
@@ -475,6 +483,7 @@ fn merge_dependency_class_infos(
     path: &str,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     all_protocol_defs: &mut Vec<beamtalk_core::ast::ProtocolDefinition>,
+    protocol_sources: &mut beamtalk_core::semantic_analysis::ProtocolSourceMap,
 ) -> bool {
     let Some(project_root) =
         beamtalk_project::package::find_package_root(std::path::Path::new(path))
@@ -485,10 +494,13 @@ fn merge_dependency_class_infos(
         return false;
     };
 
-    let (has_package_dependencies, dep_class_infos, dep_protocol_defs) =
-        beamtalk_cli::dependency_classes::resolve_dependency_class_infos(&project_root);
+    let (has_package_dependencies, dep_class_infos, dep_protocol_defs, dep_protocol_sources) =
+        beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources(
+            &project_root,
+        );
     all_class_infos.extend(dep_class_infos);
     all_protocol_defs.extend(dep_protocol_defs);
+    protocol_sources.extend(dep_protocol_sources);
     has_package_dependencies
 }
 
@@ -562,6 +574,21 @@ fn push_lint_diagnostic(
     } else {
         warnings.push(entry);
     }
+}
+
+/// The protocol sources Pass 2 carries, in the same precedence as
+/// [`package_then_dependency_protocol_defs`]: the package's own first, then
+/// the dependencies' — so a provision diagnostic of either is reported against
+/// its protocol's file and line.
+fn package_then_dependency_protocol_sources(
+    trait_users: &beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    dependency_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
+) -> beamtalk_core::semantic_analysis::ProtocolSourceMap {
+    let mut sources = trait_users.protocol_sources().clone();
+    for (name, source) in dependency_protocol_sources {
+        sources.entry(name).or_insert(source);
+    }
+    sources
 }
 
 /// Run lint passes on `path` (file or directory) and return structured results.
@@ -675,8 +702,14 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
     // collects dependency-sourced provision-bearing protocol ASTs (ADR 0127
     // §10a; BT-3591) so a cross-package `uses:` flattens too.
     let mut all_protocol_defs = Vec::new();
-    let has_package_dependencies =
-        merge_dependency_class_infos(path, &mut all_class_infos, &mut all_protocol_defs);
+    let mut dependency_protocol_sources =
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
+    let has_package_dependencies = merge_dependency_class_infos(
+        path,
+        &mut all_class_infos,
+        &mut all_protocol_defs,
+        &mut dependency_protocol_sources,
+    );
 
     // Flatten cross-file trait provisions into the same-package infos (BT-3673),
     // via the helper `beamtalk lint` and `build` use.
@@ -690,6 +723,8 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
     let native_type_registry = build_native_type_registry(path);
     let pre_loaded_protocol_defs =
         package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
+    let protocol_sources =
+        package_then_dependency_protocol_sources(&trait_users, dependency_protocol_sources);
 
     let mut all_provision_diags = Vec::new();
 
@@ -720,7 +755,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             &source,
             &all_class_infos,
             pre_loaded_protocol_defs.clone(),
-            trait_users.protocol_sources().clone(),
+            protocol_sources.clone(),
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),
@@ -749,9 +784,8 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
     // Publish each flattened-provision diagnostic once, against its
     // protocol's file (its spans are offsets into that file, not the using
     // class's) — `beamtalk lint`'s routing (ADR 0127 §3, BT-3665).
-    let protocol_sources = trait_users.protocol_sources();
     for diag in dedupe_provision_diagnostics(all_provision_diags) {
-        let Some((path, text)) = provision_report_target(&diag, protocol_sources) else {
+        let Some((path, text)) = provision_report_target(&diag, &protocol_sources) else {
             continue;
         };
         let line = (!text.is_empty()).then(|| diag.span.line_number(text));

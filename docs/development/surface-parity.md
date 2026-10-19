@@ -923,7 +923,9 @@ flattening implementation):
   their sources, `TraitUserCollector::add_source_file`) ahead of the
   dependencies' into each file's analysis, as `beamtalk lint` does, and report
   a diagnostic raised in a flattened provision once, against the protocol's
-  file and line, through the same shared helpers as `beamtalk lint`
+  file and line (a dependency's too — the offline dependency scan carries
+  its protocol sources; a stdlib provision is labelled `<stdlib Name>`),
+  through the same shared helpers as `beamtalk lint`
   (`protocol_source::dedupe_provision_diagnostics` /
   `provision_report_target`). A dependency compiles, and codegen re-flattens
   (`lower_analysed_module_for_codegen`, `AnalysisResult::trait_package`), as
