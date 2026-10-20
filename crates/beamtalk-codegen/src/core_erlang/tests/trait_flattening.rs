@@ -584,12 +584,16 @@ fn package_local_protocol_provisions_are_not_recorded_as_stdlib() {
 fn defining_any_overridable_collection_selector_sets_the_override_flag() {
     let mut checked = 0;
     for selector in beamtalk_core::state_threading_selectors::overridable_collection_selectors() {
-        let signature = selector
-            .split_inclusive(':')
-            .enumerate()
-            .map(|(i, part)| format!("{part} arg{i}"))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let signature = if selector.contains(':') {
+            selector
+                .split_inclusive(':')
+                .enumerate()
+                .map(|(i, part)| format!("{part} arg{i}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            selector.to_string()
+        };
         let src = format!("Value subclass: Bag\n  field: n :: Integer = 0\n  {signature} => nil\n");
         let mut module = parse_fixture(&src);
         let analysis = analyse_full(&module, AnalysisContext::default());
@@ -609,6 +613,45 @@ fn defining_any_overridable_collection_selector_sets_the_override_flag() {
         checked += 1;
     }
     assert!(checked >= 15, "only {checked} selectors checked");
+}
+
+/// BT-3951: `species` and a class-side `withAll:` (what `Collection`'s
+/// `collect:`/`select:` end in) set `overrides_species_construction`, and only
+/// that: refusing every writing send because a class has the usual collection
+/// constructor would turn the main shape of a user collection into a refusal.
+#[test]
+fn defining_a_species_construction_message_sets_only_the_species_flag() {
+    use beamtalk_core::state_threading_selectors::{
+        species_construction_class_selectors, species_construction_selectors,
+    };
+    let mut sources: Vec<String> = species_construction_selectors()
+        .map(|sel| format!("Value subclass: Bag\n  field: n :: Integer = 0\n  {sel} => nil\n"))
+        .collect();
+    sources.extend(species_construction_class_selectors().map(|sel| {
+        format!("Value subclass: Bag\n  field: n :: Integer = 0\n  class {sel} arg0 => nil\n")
+    }));
+    assert!(sources.len() >= 2);
+    for src in sources {
+        let mut module = parse_fixture(&src);
+        let analysis = analyse_full(&module, AnalysisContext::default());
+        lower_analysed_module_for_codegen(&mut module, &analysis);
+        let code = generate_module(
+            &module,
+            CodegenOptions::new("bag")
+                .with_source(&src)
+                .with_source_path_opt(Some("bag.bt"))
+                .with_analysis(analysis),
+        )
+        .expect("codegen should succeed");
+        assert!(
+            code.contains("'overrides_species_construction' => 'true'"),
+            "must set the species flag:\n{src}\ngot:\n{code}"
+        );
+        assert!(
+            !code.contains("overrides_collection_selector"),
+            "must not set the collection flag:\n{src}\ngot:\n{code}"
+        );
+    }
 }
 
 /// BT-3916: `do:`, ordinary methods and the provisions of a stdlib protocol do

@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3951 (ADR 0133): a Collection with only `do:`. The test file gives it a
+// runtime class-side `withAll:` extension that the stdlib's `collect:` reaches
+// through `self species withAll:`. Driven by adr0133enumerable_user_test.bt.
+
+Collection subclass: Adr0133EnumerableExtWithAll
+  field: items :: List = #()
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    self.items do: block
+    nil
+
+  printString -> String => "Adr0133EnumerableExtWithAll"

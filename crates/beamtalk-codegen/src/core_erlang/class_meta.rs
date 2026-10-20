@@ -59,6 +59,11 @@ pub(crate) struct MetaProvenance<'a> {
     /// stdlib's collection methods run through; emitted as
     /// `'overrides_collection_selector' => 'true'` (omitted when `false`).
     pub overrides_collection_selector: bool,
+    /// BT-3951: the class defines, outside the stdlib, a message the stdlib's
+    /// `Collection` provisions build their answer with (`species`, class-side
+    /// `withAll:`); emitted as `'overrides_species_construction' => 'true'`
+    /// (omitted when `false`). Read only for the species-dependent selectors.
+    pub overrides_species_construction: bool,
 }
 
 /// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
@@ -406,6 +411,11 @@ impl CoreErlangGenerator {
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
             if provenance.overrides_collection_selector {
                 Document::Str(",\n      'overrides_collection_selector' => 'true'")
+            } else {
+                Document::Nil
+            },
+            if provenance.overrides_species_construction {
+                Document::Str(",\n      'overrides_species_construction' => 'true'")
             } else {
                 Document::Nil
             },

@@ -412,6 +412,9 @@ fn has_erlang_class_ref_at(expr: &Expression, offset: u32) -> bool {
                 })
         }
         Expression::Return { value, .. } => has_erlang_class_ref_at(value, offset),
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            elements.iter().any(|e| has_erlang_class_ref_at(e, offset))
+        }
         _ => false,
     }
 }
@@ -829,6 +832,11 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
         }
         Expression::Return { value, .. } => {
             collect_identifiers_from_expr(value, identifiers);
+        }
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            for e in elements {
+                collect_identifiers_from_expr(e, identifiers);
+            }
         }
         Expression::Parenthesized { expression, .. } => {
             collect_identifiers_from_expr(expression, identifiers);

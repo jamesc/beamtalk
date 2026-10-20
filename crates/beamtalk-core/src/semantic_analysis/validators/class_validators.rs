@@ -761,14 +761,13 @@ pub(crate) fn check_value_slot_assignment(
 ) {
     for class in &module.classes {
         let class_name = class.name.name.as_str();
-        let is_value = hierarchy.is_value_subclass(class_name);
-
         // TestCase subclasses are permanently exempt from slot
         // assignment checks (see this function's own doc comment) — not a
         // migration in progress.
         if hierarchy.is_testcase_subclass(class_name) {
             continue;
         }
+        let is_value = hierarchy.rejects_slot_assignment(class_name);
 
         // Check instance methods only — classState: slots on class methods are
         // separate and not subject to value-type immutability rules.
@@ -795,12 +794,11 @@ pub(crate) fn check_value_slot_assignment(
             continue; // Class-side methods are not subject to value-type rules.
         }
         let class_name = standalone.class_name.name.as_str();
-        let is_value = hierarchy.is_value_subclass(class_name);
-
         // TestCase subclasses exempt (see above).
         if hierarchy.is_testcase_subclass(class_name) {
             continue;
         }
+        let is_value = hierarchy.rejects_slot_assignment(class_name);
 
         let method_selector = standalone.method.selector.name();
         for stmt in &standalone.method.body {
@@ -1525,7 +1523,7 @@ fn check_expr_for_unsafe_field_mutation(
                 check_expr_for_unsafe_field_mutation(t, class_name, diagnostics);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 check_expr_for_unsafe_field_mutation(elem, class_name, diagnostics);
             }

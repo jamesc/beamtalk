@@ -228,6 +228,34 @@ impl TokenKind {
         )
     }
 
+    /// Returns `true` if this token opens a bracketed group closed by `)`,
+    /// `]` or `}`: `(`, `#(`, `[`, `#[`, `{`, `#{`.
+    ///
+    /// Binary `<<`/`>>` are excluded because `>>` is also a binary selector.
+    /// Used by depth-tracking parser lookahead and error recovery.
+    #[must_use]
+    pub const fn is_opening_bracket(&self) -> bool {
+        matches!(
+            self,
+            Self::LeftParen
+                | Self::ListOpen
+                | Self::LeftBracket
+                | Self::ArrayOpen
+                | Self::LeftBrace
+                | Self::MapOpen
+        )
+    }
+
+    /// Returns `true` if this token closes a group opened by a token for
+    /// which [`Self::is_opening_bracket`] holds: `)`, `]`, `}`.
+    #[must_use]
+    pub const fn is_closing_bracket(&self) -> bool {
+        matches!(
+            self,
+            Self::RightParen | Self::RightBracket | Self::RightBrace
+        )
+    }
+
     /// Returns `true` if this is the end-of-file marker.
     #[must_use]
     pub const fn is_eof(&self) -> bool {

@@ -64,8 +64,27 @@ Module {
                         },
                     },
                 ),
-                value: Error {
-                    message: "Tuple literal used as expression",
+                value: TupleLiteral {
+                    elements: [
+                        Literal(
+                            Integer(
+                                10,
+                            ),
+                            Span {
+                                start: 132,
+                                end: 134,
+                            },
+                        ),
+                        Literal(
+                            Integer(
+                                20,
+                            ),
+                            Span {
+                                start: 136,
+                                end: 138,
+                            },
+                        ),
+                    ],
                     span: Span {
                         start: 131,
                         end: 139,
@@ -96,8 +115,36 @@ Module {
                         },
                     },
                 ),
-                value: Error {
-                    message: "Tuple literal used as expression",
+                value: TupleLiteral {
+                    elements: [
+                        Literal(
+                            Integer(
+                                255,
+                            ),
+                            Span {
+                                start: 148,
+                                end: 151,
+                            },
+                        ),
+                        Literal(
+                            Integer(
+                                128,
+                            ),
+                            Span {
+                                start: 153,
+                                end: 156,
+                            },
+                        ),
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 158,
+                                end: 159,
+                            },
+                        ),
+                    ],
                     span: Span {
                         start: 147,
                         end: 160,
@@ -128,8 +175,8 @@ Module {
                         },
                     },
                 ),
-                value: Error {
-                    message: "Tuple literal used as expression",
+                value: TupleLiteral {
+                    elements: [],
                     span: Span {
                         start: 170,
                         end: 172,
@@ -1131,52 +1178,132 @@ Module {
                         },
                     },
                 ),
-                value: Error {
-                    message: "Tuple literal used as expression",
+                value: MessageSend {
+                    receiver: TupleLiteral {
+                        elements: [
+                            Literal(
+                                Integer(
+                                    1,
+                                ),
+                                Span {
+                                    start: 671,
+                                    end: 672,
+                                },
+                            ),
+                            Literal(
+                                Integer(
+                                    2,
+                                ),
+                                Span {
+                                    start: 674,
+                                    end: 675,
+                                },
+                            ),
+                        ],
+                        span: Span {
+                            start: 670,
+                            end: 676,
+                        },
+                    },
+                    selector: Binary(
+                        "++",
+                    ),
+                    arguments: [
+                        TupleLiteral {
+                            elements: [
+                                Literal(
+                                    Integer(
+                                        3,
+                                    ),
+                                    Span {
+                                        start: 681,
+                                        end: 682,
+                                    },
+                                ),
+                                Literal(
+                                    Integer(
+                                        4,
+                                    ),
+                                    Span {
+                                        start: 684,
+                                        end: 685,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 680,
+                                end: 686,
+                            },
+                        },
+                    ],
+                    is_cast: false,
                     span: Span {
                         start: 670,
-                        end: 676,
+                        end: 686,
                     },
                 },
                 type_annotation: None,
                 span: Span {
                     start: 658,
-                    end: 676,
+                    end: 686,
                 },
             },
             preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "Conversion to list",
+                        span: Span {
+                            start: 710,
+                            end: 716,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
                 trailing: None,
-                leading_blank_line: false,
+                leading_blank_line: true,
                 blank_line_after_comments: false,
             },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ++",
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "asList",
+                        span: Span {
+                            start: 710,
+                            end: 716,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "point",
+                            span: Span {
+                                start: 720,
+                                end: 725,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "asList",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 720,
+                        end: 732,
+                    },
+                },
+                type_annotation: None,
                 span: Span {
-                    start: 677,
-                    end: 679,
+                    start: 710,
+                    end: 732,
                 },
             },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-                leading_blank_line: false,
-                blank_line_after_comments: false,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found }",
-                span: Span {
-                    start: 685,
-                    end: 686,
-                },
-            },
-            preceding_blank_line: false,
+            preceding_blank_line: true,
         },
     ],
     span: Span {
@@ -1186,11 +1313,3 @@ Module {
     file_leading_comments: [],
     file_trailing_comments: [],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 131, end: 139 }, hint: None, category: None, notes: [], provision: None }
-Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 147, end: 160 }, hint: None, category: None, notes: [], provision: None }
-Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 170, end: 172 }, hint: None, category: None, notes: [], provision: None }
-Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 670, end: 676 }, hint: None, category: None, notes: [], provision: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ++", span: Span { start: 677, end: 679 }, hint: None, category: None, notes: [], provision: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 685, end: 686 }, hint: None, category: None, notes: [], provision: None }

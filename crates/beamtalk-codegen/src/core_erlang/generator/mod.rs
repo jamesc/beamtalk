@@ -364,6 +364,10 @@ pub struct CoreErlangGenerator {
     /// (`state_threading_selectors::overridable_collection_selectors`). Baked
     /// into `__beamtalk_meta/0` as `overrides_collection_selector`.
     pub(in crate::core_erlang) own_overrides_collection_selector: bool,
+    /// Whether the class defines `species` or a class-side `withAll:` outside
+    /// the stdlib (BT-3951). Baked into `__beamtalk_meta/0` as
+    /// `overrides_species_construction`.
+    pub(in crate::core_erlang) own_overrides_species_construction: bool,
     /// REPL-specific codegen state. `Some` when in REPL mode.
     pub(in crate::core_erlang) repl_context: Option<ReplContext>,
     /// Class/actor-specific codegen state. `Some` when compiling a class.
@@ -476,6 +480,7 @@ impl CoreErlangGenerator {
             own_direct_class_methods: Vec::new(),
             own_stdlib_trait_methods: Vec::new(),
             own_overrides_collection_selector: false,
+            own_overrides_species_construction: false,
             repl_context: Some(ReplContext::new()),
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),

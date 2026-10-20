@@ -141,7 +141,7 @@ pub(crate) fn walk_expr<'ast, V: Visitor<'ast>>(v: &mut V, expr: &'ast Expressio
                 v.visit_expr(t);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 v.visit_expr(elem);
             }

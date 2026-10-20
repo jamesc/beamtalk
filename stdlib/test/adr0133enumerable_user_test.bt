@@ -21,7 +21,7 @@
 // Erlang FFI is outside this decision, BT-3917.)
 //
 // Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any,
-// object_own_any,actor_own_any,own_each,own_inject,own_select,stdlib,stdlib_actor,stdlib_own_any,user}.bt. `Ets` is the stdlib's own
+// object_own_any,actor_own_any,own_each,own_inject,own_select,ext_inject,ext_plain,ext_with_all,own_species,own_with_all,stdlib_with_all,stdlib,stdlib_actor,stdlib_own_any,user}.bt. `Ets` is the stdlib's own
 // `uses: Enumerable(V)` class; `Adr0133EnumerableStdlib` is a user class that
 // `uses:` the same stdlib `Enumerable` (BT-3915), whose provisions forward to
 // `elements` rather than walking with `self do:`.
@@ -229,6 +229,73 @@ TestCase subclass: Adr0133EnumerableUserTest
     ] raise: #stateful_block_dispatch
     self assert: (Adr0133EnumerableUser doWrite: c) equals: 6
 
+  // --- BT-3951: a runtime extension, or `species`, the pure send runs through ---
+  // The compile-time flag cannot see an extension registered at run time, so the
+  // guard also asks the extension registry for every class on the chain.
+  testExtensionInjectRefusesCollectWrite =>
+    c := Adr0133EnumerableExtInject new: #{#items => #(1, 2, 3)}
+    self should: [
+      Adr0133EnumerableUser collectWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser selectWrite: c
+    ] raise: #stateful_block_dispatch
+    self assert: (Adr0133EnumerableUser doWrite: c) equals: 6
+
+  // An extension that is not a collection message changes nothing.
+  testNonCollectionExtensionStillFolds =>
+    c := Adr0133EnumerableExtPlain new: #{#items => #(1, 2, 3)}
+    self assert: c bt3951Harmless equals: #harmless
+    self assert: (Adr0133EnumerableUser collectWrite: c) equals: #[#(10, 20, 30), 3]
+    self assert: (Adr0133EnumerableUser selectWrite: c) equals: #[#(2, 3), 3]
+
+  // `species` defaults to `self class`, so a collection usually overrides the
+  // class-side `withAll:` the stdlib's `collect:`/`select:` end in.
+  testOwnClassSideWithAllRefusesCollectWrite =>
+    c := Adr0133EnumerableOwnWithAll new: #{#items => #(1, 2, 3)}
+    self should: [
+      Adr0133EnumerableUser collectWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser selectWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser rejectWrite: c
+    ] raise: #stateful_block_dispatch
+    // Only `collect:`/`select:`/`reject:` end in `species withAll:`; the rest
+    // of the collection messages still fold.
+    self assert: (Adr0133EnumerableUser doWrite: c) equals: 6
+    self assert: (Adr0133EnumerableUser injectWrite: c) equals: #[6, 3]
+    self assert: (Adr0133EnumerableUser detectWrite: c) equals: #[2, 2]
+    self assert: (Adr0133EnumerableUser anySatisfyWrite: c) equals: #[true, 3]
+    self assert: (Adr0133EnumerableUser countWrite: c) equals: #[2, 3]
+
+  // The same constructor and a `species` on a class whose provisions come from
+  // `Enumerable` (which forwards to `self elements`) refuse nothing.
+  testEnumerableWithAllAndSpeciesFoldsEverything =>
+    c := Adr0133EnumerableStdlibWithAll new: #{#items => #(1, 2, 3)}
+    self assert: (Adr0133EnumerableUser doWrite: c) equals: 6
+    self assert: (Adr0133EnumerableUser injectWrite: c) equals: #[6, 3]
+    self assert: (Adr0133EnumerableUser collectWrite: c) equals: #[#(10, 20, 30), 3]
+    self assert: (Adr0133EnumerableUser selectWrite: c) equals: #[#(2, 3), 3]
+    self assert: (Adr0133EnumerableUser detectWrite: c) equals: #[2, 2]
+    self assert: (Adr0133EnumerableUser anySatisfyWrite: c) equals: #[true, 3]
+
+  testExtensionClassSideWithAllRefusesCollectWrite =>
+    c := Adr0133EnumerableExtWithAll new: #{#items => #(1, 2, 3)}
+    self should: [
+      Adr0133EnumerableUser collectWrite: c
+    ] raise: #stateful_block_dispatch
+
+  testOwnSpeciesRefusesCollectWrite =>
+    c := Adr0133EnumerableOwnSpecies new: #{#items => #(1, 2, 3)}
+    self should: [
+      Adr0133EnumerableUser collectWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser selectWrite: c
+    ] raise: #stateful_block_dispatch
+
   // --- The stdlib's own `uses: Enumerable(V)` (`Ets`) ---
   testEtsWrite =>
     self
@@ -312,3 +379,10 @@ TestCase subclass: Adr0133EnumerableUserTest
       ] raise: #stateful_block_dispatch
       self assert: (Adr0133EnumerableUser doWrite: a) equals: 6
     ] ensure: [a stop]
+
+Adr0133EnumerableExtInject >> inject: initial :: Object into: _block :: Block(Object, Object, Object) -> Object =>
+  initial
+
+Adr0133EnumerableExtPlain >> bt3951Harmless => #harmless
+
+Adr0133EnumerableExtWithAll class >> withAll: list :: List -> List => list

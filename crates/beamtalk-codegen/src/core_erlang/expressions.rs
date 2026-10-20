@@ -507,6 +507,22 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&preamble, literal_doc, "ArrLit"))
     }
 
+    /// Generates code for a tuple literal: `{a, b}` → `{A, B}` (ADR 0136).
+    ///
+    /// A direct Core Erlang tuple — no `Tuple withAll:` send, no list
+    /// allocation. Elements are threaded as one ordered sequence (like
+    /// `generate_list_literal`) so evaluation stays left-to-right when a
+    /// sub-expression opens a scope (ADR 0118).
+    pub(super) fn generate_tuple_literal(
+        &mut self,
+        elements: &[Expression],
+    ) -> Result<Document<'static>> {
+        let exprs: Vec<&Expression> = elements.iter().collect();
+        let (preamble, docs) = self.thread_subexprs(&exprs, "TupLit")?;
+        let literal_doc = docvec!["{", Self::join_docs_with_commas(docs), "}"];
+        Ok(self.close_prelude(&preamble, literal_doc, "TupLit"))
+    }
+
     /// ADR 0124 §3/B3: `true` when `field_name` is declared `late` on
     /// `class_name` or an ancestor, per the flattened `ClassHierarchy`
     /// metadata `state_field_kind` (BT-3547 B5a). Missing hierarchy metadata

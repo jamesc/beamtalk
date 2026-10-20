@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3971: see fixtures/bt3971actor.bt.
+
+TestCase subclass: Bt3971Test
+
+  testAssignedBlockValueAnswersTheValue =>
+    self assert: Bt3971Actor spawn assigned equals: #(3)
+
+  testBlockValueNotLastIsDiscarded =>
+    self assert: Bt3971Actor spawn notLast equals: #(7)
+
+  testPureBlockValueAnswersTheValue =>
+    self assert: Bt3971Actor spawn pureValue equals: #(3)
+
+  testBlockValueInConditionalArmAnswersTheValue =>
+    self assert: Bt3971Actor spawn inArm equals: #(3)

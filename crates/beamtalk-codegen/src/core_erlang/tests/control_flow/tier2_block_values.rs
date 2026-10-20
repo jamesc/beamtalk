@@ -657,7 +657,7 @@ fn test_bt2813_bare_tier2_value_call_inside_do_loop_body_unpacks_tuple() {
     // a bare Tier2ValueCall — falling through to `lower_non_assign_expr`
     // would emit a plain (Tier-1-only) apply and crash with badarity for
     // a genuinely Tier 2 (2-arity) field-stored block. Structural check only
-    // (see stdlib/test/tier2stored_block_matrix_test.bt for the runtime
+    // (see the former stdlib/test/tier2stored_block_matrix_test.bt, removed by BT-3922 for the runtime
     // end-to-end check).
     let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickEach: items =>\n    items do: [:x | self.onTick value: x]\n    self.total\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -712,7 +712,7 @@ fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() 
     // arithmetic — `10 + {Result, NewState}` crashes with badarith at
     // runtime. `close_tier2_value_subexpr_doc` now unpacks element(1) so the
     // arithmetic sees a plain value. Structural check only (see
-    // stdlib/test/tier2stored_block_matrix_test.bt for the runtime
+    // the former stdlib/test/tier2stored_block_matrix_test.bt, removed by BT-3922 for the runtime
     // end-to-end check).
     let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run: x =>\n    r := 0\n    blk := [:n | r := r + n]\n    10 + (blk value: x)\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
@@ -786,7 +786,7 @@ fn test_bt2815_named_local_var_captured_mutation_rebinds_after_call() {
     // the caller's own `outer` variable would silently keep its stale
     // pre-call value even though the call itself succeeded and internally
     // computed the right value. Structural
-    // check only (see stdlib/test/tier2stored_block_matrix_test.bt for the
+    // check only (see the former stdlib/test/tier2stored_block_matrix_test.bt, removed by BT-3922 for the
     // runtime end-to-end check).
     let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run =>\n    outer := 0\n    blk := [:n | outer := outer + n]\n    blk value: 5\n    outer\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);

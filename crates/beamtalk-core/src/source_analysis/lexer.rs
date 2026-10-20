@@ -617,9 +617,11 @@ impl<'src> Lexer<'src> {
             return Ok((pos, pos)); // empty range signals error token
         }
 
-        // Check for doubled opening brace `{{` — likely meant as a literal `{`.
-        // In Beamtalk, `{` is not a valid expression start (only used in tuple
-        // destructuring patterns), so `{{...}}` inside a string is always a mistake.
+        // Check for doubled opening brace `{{` — likely meant as a literal `{`
+        // (ADR 0023). `{` *is* a valid expression start since ADR 0136 (tuple
+        // literals), but `{{` is still rejected: the literal-brace mistake is
+        // far more common, and a tuple can be interpolated with a space,
+        // `{ {a, b} }`. Only an opening `{{` is special — a closing `}}` nests.
         if self.is_doubled_open_brace() {
             self.skip_doubled_braces();
             let pos = self.current_position();
@@ -745,7 +747,8 @@ impl<'src> Lexer<'src> {
                 let brace_text = self.text_for(Span::new(brace_start, interp.0));
                 let message = if brace_text.starts_with("{{") {
                     "doubled {{ }} in string literal is not interpolation — \
-                     use \\{ and \\} for literal braces"
+                     use \\{ and \\} for literal braces; \
+                     to interpolate a tuple literal write { {a, b} }"
                 } else {
                     "empty interpolation {} is not allowed, use \\{ for literal brace"
                 };
@@ -2376,6 +2379,37 @@ mod tests {
                 .any(|k| matches!(k, TokenKind::Error(msg) if msg.contains("doubled"))),
             "expected 'doubled' error, got: {kinds:?}"
         );
+    }
+
+    #[test]
+    fn lex_doubled_braces_error_mentions_tuple_interpolation() {
+        // ADR 0136: `{{` stays an error, but the message points at the
+        // spaced form for interpolating a tuple literal.
+        let tokens = lex(r#""{{a}}""#);
+        let kinds: Vec<_> = tokens.iter().map(|t| t.kind().clone()).collect();
+        assert!(
+            kinds
+                .iter()
+                .any(|k| matches!(k, TokenKind::Error(msg) if msg.contains("{ {a, b} }"))),
+            "expected tuple-interpolation hint, got: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn lex_spaced_tuple_interpolation_is_interpolation() {
+        // `"{ {a, b} }"` — an interpolated tuple literal, not a doubled brace.
+        let tokens = lex(r#""got { {a, b} }""#);
+        let kinds: Vec<_> = tokens.iter().map(|t| t.kind().clone()).collect();
+        assert!(
+            !kinds.iter().any(|k| matches!(k, TokenKind::Error(_))),
+            "unexpected error token: {kinds:?}"
+        );
+        assert!(
+            matches!(kinds.first(), Some(TokenKind::StringStart(s)) if s.as_str() == "got "),
+            "expected StringStart, got: {kinds:?}"
+        );
+        assert!(kinds.contains(&TokenKind::LeftBrace));
+        assert!(kinds.contains(&TokenKind::RightBrace));
     }
 
     // === Package qualifier `@` (ADR 0070) ===

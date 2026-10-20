@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3922: a `Dictionary` lookup handler that writes only a class variable
+// (no outer local), in a class method. lookup_field_write_test.bt asserts
+// whether the write survives.
+
+Object subclass: LookupFieldWriteClass
+  classState: misses = 0
+
+  class reset => self.misses := 0
+
+  class absent =>
+    self reset
+    #{#a => 1}
+      at: #zz
+      ifAbsent: [
+        self.misses := self.misses + 1
+        nil
+      ]
+    self.misses
+
+  class present =>
+    self reset
+    #{#a => 1}
+      at: #a
+      ifPresent: [:v |
+        self.misses := self.misses + v
+        v
+      ]
+    self.misses
+
+  class presentOrAbsent =>
+    self reset
+    #{#a => 1}
+      at: #a
+      ifPresent: [:v |
+        self.misses := self.misses + v
+        v
+      ]
+      ifAbsent: [nil]
+    self.misses

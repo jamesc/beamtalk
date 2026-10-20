@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3951 (ADR 0133): control. A Collection with only `do:` whose runtime
+// extension is not a collection message, so writing blocks still fold.
+// Driven by adr0133enumerable_user_test.bt.
+
+Collection subclass: Adr0133EnumerableExtPlain
+  field: items :: List = #()
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    self.items do: block
+    nil
+
+  printString -> String => "Adr0133EnumerableExtPlain"
