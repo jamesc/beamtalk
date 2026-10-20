@@ -2013,6 +2013,32 @@ impl Parser {
         self.tokens.get(self.current + offset)
     }
 
+    /// ADR 0136: at a leading `{`, decides between a tuple destructure
+    /// (`{a, b} := x`) and a tuple-literal expression (`{a, b} size`).
+    ///
+    /// Scans forward from the current `{` to its matching `}` — counting
+    /// `{`/`#{` against `}` — and returns `true` only when the token right
+    /// after that `}` is `:=`. An unbalanced `{` (no match before `Eof`)
+    /// returns `false`, so the expression path reports the missing `}`.
+    pub(super) fn leading_brace_is_destructure(&self) -> bool {
+        let mut depth: usize = 0;
+        let mut offset = 0;
+        loop {
+            match self.peek_at(offset) {
+                None | Some(TokenKind::Eof) => return false,
+                Some(TokenKind::LeftBrace | TokenKind::MapOpen) => depth += 1,
+                Some(TokenKind::RightBrace) => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return matches!(self.peek_at(offset + 1), Some(TokenKind::Assign));
+                    }
+                }
+                Some(_) => {}
+            }
+            offset += 1;
+        }
+    }
+
     /// Checks if the current token is a specific binary selector, and consumes it if so.
     pub(super) fn match_binary_selector(&mut self, expected: &str) -> bool {
         if let TokenKind::BinarySelector(s) = self.current_kind() {

@@ -223,7 +223,7 @@ Both hooks are optional — actors without them work normally.
 ```beamtalk
 Server subclass: Connection
   handleInfo: msg =>
-    msg == #tcp_closed ifTrue: [self stopWith: (Tuple withAll: #(#shutdown, #peer_closed))]
+    msg == #tcp_closed ifTrue: [self stopWith: {#shutdown, #peer_closed}]
 
   terminate: reason =>
     reason =:= #normal ifTrue: [^nil]
@@ -1284,6 +1284,41 @@ pair at: 2                  // inferred Integer
 A non-literal index (`pair at: i`) or an out-of-range literal falls back to
 `Dynamic` — no false-positive warning. An untyped `tuple()` spec (unknown
 arity) stays bare `Tuple`, so `at:` on it remains `Dynamic` as before.
+
+### Tuple Literals (ADR 0136)
+
+`{e1, e2, ...}` builds a raw Erlang tuple (class `Tuple`). It is the expression
+form of the `{a, b}` tuple pattern, and the value is exactly the Erlang term:
+symbols and `true`/`false`/`nil` are atoms, so `{#active, false}` is Erlang's
+`{active, false}`. This makes FFI option lists read like the Erlang docs:
+
+```beamtalk
+(Erlang gen_tcp) listen: port with: #(#binary, {#active, false}, {#reuseaddr, true}, {#backlog, 1024})
+
+pair := {#backlog, opts at: #backlog}   // elements are keyword-level expressions
+{#ok, 1} =:= (Tuple withAll: #(#ok, 1)) // => true
+{#a, 1} at: 2                           // => 1 (inferred Integer)
+single := {#ok}                          // 1-tuple
+empty := {}                              // 0-tuple
+opts := #({#local, path}, {#nodelay, true},)  // trailing comma is allowed
+```
+
+- Elements are separated by `,` — Smalltalk's `{a. b}` brace-array form is a
+  syntax error (`.` separates statements). A cascade or assignment inside an
+  element needs parentheses, as in a list.
+- At the start of a statement, `{a, b} := x` is still a destructuring
+  assignment; `{a, b} size` is an expression. `{a, b} := {b, a}` swaps.
+- A tuple literal infers the positional type `Tuple(T1, …, Tn)`, so `at:` with a
+  literal index is typed (see above). `{}` infers as bare `Tuple`.
+- **`{#ok, x}` is a `Tuple`, not a `Result`.** FFI `ok`/`error` conversion
+  (ADR 0076) applies only to values *returned* from Erlang; arguments pass
+  through unchanged. Use `Result ok:` / `Result error:` to build a `Result`.
+- To interpolate a tuple literal in a string, add a space: `"pair: { {a, b} }"`.
+  `"{{...}}"` is rejected as a mistaken literal-brace escape.
+- Tuple literals are not supported inside `when:` guards (nor are list literals).
+- Caveat: a tuple whose first element is a runtime tag atom (`#beamtalk_object`,
+  `#beamtalk_supervisor`) is misclassified by the runtime's class lookup. This
+  is not new — `Tuple withAll:` behaves the same.
 
 ### FFI Type Stub Files (ADR 0075 Phase 2)
 
@@ -4101,7 +4136,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Literal character | `$a` | Exact character match |
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
-| Tuple | `{a, b}` | Destructure tuple in assignment and match arms |
+| Tuple | `{a, b}` | Destructure tuple in assignment and match arms (`{a, b}` is also a tuple literal expression — see Tuple Literals) |
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
@@ -4223,7 +4258,7 @@ The `...identifier` syntax in array destructuring captures remaining elements:
 
 The rest element must be the last in the pattern. Rest patterns are supported in destructuring assignment only — they are not yet supported in `match:` arms.
 
-> **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. `collect:` with pattern blocks is not yet supported.
+> **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. A tuple pattern may end with a trailing comma (`{x, y,} := expr`), like the tuple literal it mirrors. `collect:` with pattern blocks is not yet supported.
 
 ### Value of a Destructuring Assignment (BT-3889)
 

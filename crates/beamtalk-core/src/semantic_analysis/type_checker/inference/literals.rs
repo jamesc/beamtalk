@@ -6,7 +6,7 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Covers `Expression::Literal`, `MapLiteral`, `ListLiteral`, `ArrayLiteral`,
-//! `StringInterpolation`, and the literal-index `Tuple at:` shortcut — the
+//! `TupleLiteral`, `StringInterpolation`, and the literal-index `Tuple at:` shortcut — the
 //! leaves of `infer_expr`'s dispatch that construct a type from a literal's
 //! own shape rather than from message-send/receiver lookup.
 
@@ -201,6 +201,32 @@ impl TypeChecker {
             .collect();
         let element_ty = Self::join_element_types(&element_types);
         InferredType::known_with_args("Array", vec![element_ty])
+    }
+
+    /// Infer a tuple literal `{e1, …, en}` as the positional
+    /// `Tuple(T1, …, Tn)` type (ADR 0075, ADR 0136) — the
+    /// `Expression::TupleLiteral` arm of `infer_expr`'s dispatch.
+    ///
+    /// Each element keeps its own inferred type (no join), so
+    /// `{#a, 1} at: 2` infers `Integer` via
+    /// [`Self::infer_literal_index_tuple_at`]. The empty tuple `{}` infers as
+    /// bare `Tuple`.
+    pub(in crate::semantic_analysis::type_checker) fn infer_tuple_literal(
+        &mut self,
+        elements: &[Expression],
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        let element_types: Vec<InferredType> = elements
+            .iter()
+            .map(|elem| self.infer_expr(elem, hierarchy, env, in_abstract_method))
+            .collect();
+        if element_types.is_empty() {
+            InferredType::known("Tuple")
+        } else {
+            InferredType::known_with_args("Tuple", element_types)
+        }
     }
 
     /// Infer a string interpolation expression as `String`, type-checking

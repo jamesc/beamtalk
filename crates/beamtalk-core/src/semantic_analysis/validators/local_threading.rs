@@ -1285,9 +1285,16 @@ fn nlr_dropped_local(protected: &Block, cleanup: &Block) -> Option<String> {
     if !has_nlr {
         return None;
     }
-    let written = analyze_block(protected).local_writes;
+    // The writes that reach the protected block's frame, nested loop, fold and
+    // conditional bodies included (ADR 0131 threads those back out, and the `^`
+    // drops them too): the one outer-local-writes recognizer, with the locals
+    // the cleanup reads as the bound-outside set.
     let read = analyze_block(cleanup).local_reads;
-    written.intersection(&read).min().cloned()
+    outer_local_writes(protected, &|n| read.contains(n))
+        .into_iter()
+        .filter(|w| w.kind == WriteKind::Local)
+        .map(|w| w.name.to_string())
+        .min()
 }
 
 /// BT-3823: whether `expr` is an evaluated block in the REPL sense
@@ -1961,7 +1968,8 @@ impl<'d> Walker<'d> {
                     self.operand(t, Position::LiteralElement);
                 }
             }
-            Expression::ArrayLiteral { elements, .. } => {
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
                 for e in elements {
                     self.operand(e, Position::LiteralElement);
                 }

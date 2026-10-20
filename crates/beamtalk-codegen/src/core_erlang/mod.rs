@@ -410,6 +410,7 @@ impl CoreErlangGenerator {
                 self.generate_list_literal(elements, tail.as_deref())
             }
             Expression::ArrayLiteral { elements, .. } => self.generate_array_literal(elements),
+            Expression::TupleLiteral { elements, .. } => self.generate_tuple_literal(elements),
             Expression::Cascade {
                 receiver, messages, ..
             } => self.generate_cascade(receiver, messages),

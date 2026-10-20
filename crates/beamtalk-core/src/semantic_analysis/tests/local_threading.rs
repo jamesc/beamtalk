@@ -3433,6 +3433,13 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
         "#(1, 2) do: [:k | [k > 1 ifTrue: [^t := k]] ensure: [t printString]]\nt",
         "[t := t + 1. ^t] ensure: [t printString]\nt",
         "[t := t + 1. #(1) do: [:e | ^t]] ensure: [t printString]\nt",
+        "[#(1, 2) do: [:k | t := t + k]. ^t] ensure: [t printString]\nt",
+        "[[t < 3] whileTrue: [t := t + 1]. ^t] ensure: [t printString]\nt",
+        "[#(1, 2) do: [:k | ^t := k]] ensure: [t printString]\nt",
+        "[#(1, 2) collect: [:k | t := t + k]. ^t] ensure: [t printString]\nt",
+        "[#(1, 2) inject: 0 into: [:a :k | t := t + k. a]. ^t] ensure: [t printString]\nt",
+        "[1 to: 2 do: [:k | t := t + k]. ^t] ensure: [t printString]\nt",
+        "[2 timesRepeat: [t := t + 1]. ^t] ensure: [t printString]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let errors = analysis_errors(&src, &[]);
@@ -3465,6 +3472,9 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
         "[t := t + 1. ^t] ensure: [0]\nt",
         "[^t := t + 1] ensure: [0]\nt",
         "[t := t + 1. ^t] on: Error do: [:e | t]\nt",
+        "#(1, 2) do: [:k | [t := t + k] ensure: [t printString]]\nt",
+        "#(1, 2) do: [:k | [t := t + k. ^t] ensure: [0]]\nt",
+        "[#(1, 2) do: [:k | z := k. z printString]. ^t] ensure: [t printString]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let errors = analysis_errors(&src, &[]);

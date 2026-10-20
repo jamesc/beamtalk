@@ -1376,6 +1376,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             unparse_list_literal(elements, tail.as_deref())
         }
         Expression::ArrayLiteral { elements, .. } => unparse_array_literal(elements),
+        Expression::TupleLiteral { elements, .. } => unparse_tuple_literal(elements),
         Expression::Primitive {
             name,
             is_quoted,
@@ -2029,6 +2030,39 @@ fn unparse_array_literal(elements: &[Expression]) -> Document<'static> {
     docvec!["#[", joined, "]"]
 }
 
+// --- Tuple literal unparsing ---
+
+/// `{e1, e2}` (ADR 0136). A trailing comma in the source is normalised away.
+fn unparse_tuple_literal(elements: &[Expression]) -> Document<'static> {
+    if elements.is_empty() {
+        return Document::Str("{}");
+    }
+    let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_expression).collect();
+    let joined = join_docs(elem_docs, ", ");
+    docvec!["{", joined, "}"]
+}
+
+/// Whether `expr` unparses to text that begins with a bare `{` — a tuple
+/// literal (or tuple destructure pattern) in leftmost position.
+///
+/// Inside a string interpolation such an expression must be padded
+/// (`"{ {a, b} }"`), because the lexer rejects an opening `"{{"` as a
+/// mistaken literal-brace escape (ADR 0023, ADR 0136).
+fn starts_with_open_brace(expr: &Expression) -> bool {
+    match expr {
+        Expression::TupleLiteral { .. } => true,
+        Expression::MessageSend { receiver, .. }
+        | Expression::Cascade { receiver, .. }
+        | Expression::FieldAccess { receiver, .. } => starts_with_open_brace(receiver),
+        Expression::Match { value, .. } => starts_with_open_brace(value),
+        Expression::Assignment { target, .. } => starts_with_open_brace(target),
+        Expression::DestructureAssignment { pattern, .. } => {
+            matches!(pattern, Pattern::Tuple { .. })
+        }
+        _ => false,
+    }
+}
+
 // --- String interpolation unparsing ---
 
 fn unparse_string_interpolation(segments: &[StringSegment]) -> Document<'static> {
@@ -2040,9 +2074,15 @@ fn unparse_string_interpolation(segments: &[StringSegment]) -> Document<'static>
                 inner.push(leaf::string_content(s));
             }
             StringSegment::Interpolation(expr) => {
-                inner.push(Document::Str("{"));
-                inner.push(unparse_expression(expr));
-                inner.push(Document::Str("}"));
+                if starts_with_open_brace(expr) {
+                    inner.push(Document::Str("{ "));
+                    inner.push(unparse_expression(expr));
+                    inner.push(Document::Str(" }"));
+                } else {
+                    inner.push(Document::Str("{"));
+                    inner.push(unparse_expression(expr));
+                    inner.push(Document::Str("}"));
+                }
             }
         }
     }

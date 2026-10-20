@@ -436,7 +436,8 @@ fn for_each_escape_operand(
                 visit(value.unwrap_parens(), shape);
             }
             Expression::ListLiteral { elements, .. }
-            | Expression::ArrayLiteral { elements, .. } => {
+            | Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
                 for element in elements {
                     visit(element.unwrap_parens(), EscapeShape::StoredInLiteral);
                 }
@@ -838,7 +839,7 @@ fn analyze_expression(
             }
         }
 
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 analyze_expression(elem, analysis, ctx);
             }
@@ -1434,7 +1435,8 @@ impl OuterWriteWalker<'_> {
                     self.expr(t);
                 }
             }
-            Expression::ArrayLiteral { elements, .. } => {
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
                 for e in elements {
                     self.expr(e);
                 }
@@ -2799,7 +2801,8 @@ fn operand_sites_of_statement(stmt: &Expression, construct_operands: bool) -> Ve
                     }
                 }
             }
-            Expression::ArrayLiteral { elements, .. } => {
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
                 for e in elements {
                     site(e, out);
                 }
@@ -3148,10 +3151,12 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
             }
             (unsafe_, safe)
         }
-        Expression::ArrayLiteral { elements, .. } => elements
-            .iter()
-            .map(|e| stored_block_var_uses(e, var_name))
-            .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            elements
+                .iter()
+                .map(|e| stored_block_var_uses(e, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2))
+        }
         Expression::StringInterpolation { segments, .. } => segments
             .iter()
             .map(|seg| match seg {

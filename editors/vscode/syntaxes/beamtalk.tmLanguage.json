@@ -63,11 +63,21 @@
                 "0": { "name": "punctuation.section.interpolation.end.beamtalk" }
               },
               "patterns": [
+                { "include": "#brace-group" },
                 { "include": "source.beamtalk" }
               ]
             }
           ]
         }
+      ]
+    },
+    "brace-group": {
+      "comment": "ADR 0136: a balanced `{...}` (tuple literal or map body) inside a string interpolation, so `\"x { {a, b} }\"` ends the interpolation at its own `}`, not the tuple's.",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [
+        { "include": "#brace-group" },
+        { "include": "source.beamtalk" }
       ]
     },
     "numbers": {

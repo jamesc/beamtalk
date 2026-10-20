@@ -308,7 +308,7 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
             }
         }
 
-        ArrayLiteral { elements, .. } => {
+        ArrayLiteral { elements, .. } | TupleLiteral { elements, .. } => {
             for elem in elements {
                 walk_expr(elem, scope, out);
             }

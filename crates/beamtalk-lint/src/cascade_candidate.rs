@@ -198,7 +198,7 @@ fn recurse(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             }
         }
 
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 recurse(elem, diagnostics);
             }

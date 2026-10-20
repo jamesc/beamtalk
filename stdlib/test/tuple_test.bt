@@ -63,3 +63,87 @@ TestCase subclass: TupleTest
     // {other, _} unwrapOrElse: [...] evaluates block
     otherTuple := Erlang erlang list_to_tuple: #(#other, #x)
     self assert: (otherTuple unwrapOrElse: [99]) equals: 99
+
+  // === BT-3969 / ADR 0136: tuple literal expressions ===
+  testTupleLiteralConstruction =>
+    t := {#active, false}
+    self assert: t class equals: Tuple
+    self assert: t size equals: 2
+    self assert: (t at: 1) equals: #active
+    self assert: (t at: 2) equals: false
+
+  testTupleLiteralEqualsWithAll =>
+    self assert: ({#ok, 1} =:= (Tuple withAll: #(#ok, 1))) equals: true
+    self assert: ({1, "two", 3} =:= (Tuple withAll: #(1, "two", 3))) equals: true
+
+  testTupleLiteralEmptyAndSingle =>
+    self assert: {} size equals: 0
+    self assert: ({} =:= Tuple new) equals: true
+    self assert: {#ok} size equals: 1
+    self assert: ({#ok} at: 1) equals: #ok
+
+  testTupleLiteralNested =>
+    t := {#outer, {#inner, 1}}
+    self assert: ((t at: 2) at: 2) equals: 1
+    self assert: (t at: 2) class equals: Tuple
+
+  testTupleLiteralKeywordElement =>
+    d := #{#backlog => 1024}
+    pair := {#backlog, d at: #backlog}
+    self assert: pair size equals: 2
+    self assert: (pair at: 2) equals: 1024
+
+  testTupleLiteralStatementStart =>
+    a := 1
+    b := 2
+    {a, b} size
+    self assert: {a, b} size equals: 2
+
+  testTupleLiteralSwap =>
+    a := 1
+    b := 2
+    {a, b} := {b, a}
+    self assert: a equals: 2
+    self assert: b equals: 1
+
+  testTupleLiteralDestructure =>
+    {k, v} := {#key, 42}
+    self assert: k equals: #key
+    self assert: v equals: 42
+
+  testTupleLiteralMatch =>
+    result := {#ok, 7} match: [
+      {#ok, v} -> v * 2;
+      _ -> 0
+    ]
+    self assert: result equals: 14
+
+  testTupleLiteralInMatchArmBody =>
+    result := 3 match: [n -> {#got, n}]
+    self assert: result equals: (Tuple withAll: #(#got, 3))
+
+  testTupleLiteralInList =>
+    opts := #({#active, false}, {#reuseaddr, true}, {#backlog, 1024})
+    self assert: opts size equals: 3
+    self assert: ((opts at: 1) at: 1) equals: #active
+
+  testTupleLiteralAsMapKey =>
+    m := #{{1, 2} => #pair}
+    self assert: (m at: {1, 2}) equals: #pair
+
+  testTupleLiteralFfiRoundTrip =>
+    self assert: (Erlang erlang tuple_to_list: {1, 2}) equals: #(1, 2)
+
+  testTupleLiteralIsNotResult =>
+    // {#ok, x} is a plain Tuple, not a Result
+    self assert: {#ok, 1} class equals: Tuple
+
+  testTupleLiteralBlockElement =>
+    n := 10
+    t := {#cb, [:x | x + n]}
+    self assert: ((t at: 2) value: 5) equals: 15
+
+  testTupleLiteralInterpolation =>
+    a := 1
+    b := 2
+    self assert: "got { {a, b} }" equals: "got " ++ {a, b} printString

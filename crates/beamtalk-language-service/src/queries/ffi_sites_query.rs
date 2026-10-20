@@ -273,7 +273,7 @@ fn collect_ffi_sites(expr: &Expression, target: &FfiTarget, source: &str, lines:
                 collect_ffi_sites(tail_expr, target, source, lines);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for element in elements {
                 collect_ffi_sites(element, target, source, lines);
             }
