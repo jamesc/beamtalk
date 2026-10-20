@@ -1278,7 +1278,13 @@ impl CoreErlangGenerator {
             _ => Vec::new(),
         };
         let capture_depth = self.nlr_capture.len();
+        let id_depth = self.nlr_ens_ids.len();
         self.nlr_capture.extend(captured.iter().cloned());
+        let own_id = self.nlr_ens_counter;
+        if !captured.is_empty() {
+            self.nlr_ens_counter += 1;
+            self.nlr_ens_ids.push(own_id);
+        }
         // Generate try body with state threading
         let try_arm = self.push_exception_arm(
             &mut docs,
@@ -1288,6 +1294,7 @@ impl CoreErlangGenerator {
             arm.as_ref(),
         );
         self.nlr_capture.truncate(capture_depth);
+        self.nlr_ens_ids.truncate(id_depth);
         let (try_result_var, try_final, try_slot) = try_arm?;
         // Return {Result, State[, Family]} from try body
         docs.push(self.close_exception_result_tuple(
@@ -1344,6 +1351,7 @@ impl CoreErlangGenerator {
                 outer_version,
                 arm.as_ref(),
                 entry_locals_for_nlr.clone(),
+                own_id,
             )?;
             self.set_self_version(outer_self);
         }
@@ -1420,27 +1428,13 @@ impl CoreErlangGenerator {
         outer_version: usize,
         arm: Option<&ArmFrame>,
         locals: Vec<String>,
+        own_id: usize,
     ) -> Result<()> {
         let tok_var = self.fresh_temp_var("EnsTok");
         let val_var = self.fresh_temp_var("EnsVal");
         let slot_var = self.fresh_temp_var("EnsSlot");
         let locals_var = self.fresh_temp_var("EnsLocals");
         let entry_var = self.fresh_temp_var("NlrEntry");
-        // A `^` thrown from a closure that another `ensure:` built carries that
-        // construct's locals: this catch takes it only when the map holds every
-        // local its own cleanup reads, and otherwise treats it as any other throw.
-        let mut ens_guard = Document::Str("'true'");
-        for name in locals.iter().rev() {
-            ens_guard = docvec![
-                "call 'erlang':'and'(call 'erlang':'is_map_key'(",
-                leaf::atom(Self::local_state_key(name)),
-                ", ",
-                leaf::var(locals_var.clone()),
-                "), ",
-                ens_guard,
-                ")"
-            ];
-        }
         docs.push(docvec![
             "case {",
             leaf::var(type_var.to_string()),
@@ -1451,12 +1445,12 @@ impl CoreErlangGenerator {
             ", ",
             leaf::var(val_var.clone()),
             ", {'$bt_ens', ",
+            leaf::int_lit(i64::try_from(own_id).unwrap_or(0)),
+            ", ",
             leaf::var(slot_var.clone()),
             ", ",
             leaf::var(locals_var.clone()),
-            "}}}> when ",
-            ens_guard,
-            " -> let ",
+            "}}}> when 'true' -> let ",
             leaf::var(entry_var.clone()),
             " = {",
             leaf::var(val_var.clone()),
@@ -1501,7 +1495,17 @@ impl CoreErlangGenerator {
         let rethrown = if self.nlr_capture.is_empty() {
             real_slot
         } else {
-            docvec!["{'$bt_ens', ", real_slot, ", ", final_acc, "}"]
+            docvec![
+                "{'$bt_ens', ",
+                leaf::int_lit(
+                    i64::try_from(self.nlr_ens_ids.last().copied().unwrap_or(0)).unwrap_or(0)
+                ),
+                ", ",
+                real_slot,
+                ", ",
+                final_acc,
+                "}"
+            ]
         };
         docs.push(docvec![
             " call 'erlang':'throw'({'$bt_nlr', ",

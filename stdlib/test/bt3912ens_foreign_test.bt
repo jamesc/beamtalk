@@ -1,10 +1,24 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3912 (BT-3947): see stdlib/test/fixtures/bt3912ens_foreign_value.bt.
+// BT-3912 (BT-3947): see stdlib/test/fixtures/bt3912ens_foreign_{value,actor}.bt.
 
 TestCase subclass: Bt3912EnsForeignTest
 
-  testForeignEnsureKeepsTheThrownValue =>
+  testValueDifferentNamesKeepsTheThrownValue =>
     sink := Bt3912EnsureSink spawn
     self assert: ((Bt3912EnsForeignValue new) escaped: sink) equals: 1
+
+  testActorDifferentNamesKeepsTheThrownValue =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsForeignActor spawn) escaped: sink) equals: 1
+
+  testValueSameNameDoesNotRunTheCleanupOverTheOtherConstructsLocals =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsForeignValue new) same: sink) equals: 1
+    self assert: sink items equals: #(1, 5)
+
+  testActorSameNameDoesNotRunTheCleanupOverTheOtherConstructsLocals =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsForeignActor spawn) same: sink) equals: 1
+    self assert: sink items equals: #(1, 5)

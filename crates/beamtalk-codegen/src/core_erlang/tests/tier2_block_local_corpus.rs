@@ -37,23 +37,13 @@ const POSITIONS: &[&str] = &[
 /// How the body binds `n` before the construct.
 const BINDINGS: &[&str] = &["n := 0. ", "{n, m} := #(0, 0). "];
 
-/// Block hosts: a block an actor self-send promotes, and a stored block that
-/// writes a captured local (Tier 2 without any promotion).
-fn hosts(body: &str) -> [String; 2] {
-    [
-        format!(
-            "Actor subclass: G
-  state: groups = #(#(1, 2), #(3))
-  state: hits = 0
-  sealed fwd: block => self.groups collect: block
-  promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
-  note: x => x
-  note: x with: z => x
-  go: flag => self fwd: [:xs | {body}]
-"
-        ),
-        format!(
-            "Actor subclass: G
+/// Block host: a stored block that writes a captured local (Tier 2 without
+/// any promotion). BT-3986: the other host, a block an actor self-send
+/// promotes, is gone (passing a writing block to a self-send is a compile
+/// error, ADR 0133 `Escape`, as is passing one to an FFI call).
+fn hosts(body: &str) -> [String; 1] {
+    [format!(
+        "Actor subclass: G
   state: hits = 0
   note: x => x
   note: x with: z => x
@@ -62,8 +52,7 @@ fn hosts(body: &str) -> [String; 2] {
     blk := [:xs | c := c + 1. {body}]
     blk value: #(1, 2)
 "
-        ),
-    ]
+    )]
 }
 
 #[test]
@@ -80,10 +69,7 @@ fn every_construct_at_every_position_that_rebinds_a_body_local_compiles() {
             }
         }
     }
-    assert_eq!(
-        checked,
-        BINDINGS.len() * POSITIONS.len() * CONSTRUCTS.len() * 2
-    );
+    assert_eq!(checked, BINDINGS.len() * POSITIONS.len() * CONSTRUCTS.len());
 }
 
 /// The binding is part of the same statement as the construct, before it runs:
@@ -118,10 +104,7 @@ fn a_local_bound_earlier_in_the_same_statement_compiles() {
             }
         }
     }
-    assert_eq!(
-        checked,
-        SAME_STATEMENT_POSITIONS.len() * CONSTRUCTS.len() * 2
-    );
+    assert_eq!(checked, SAME_STATEMENT_POSITIONS.len() * CONSTRUCTS.len());
 }
 
 /// The binding is made inside an INLINED block (a conditional arm, an
@@ -226,7 +209,7 @@ fn a_tier_2_body_ending_in_an_evaluated_block_that_assigns_compiles() {
             }
         }
     }
-    assert_eq!(checked, LAST_STATEMENT_BLOCK_VALUES.len() * 2 * 3);
+    assert_eq!(checked, LAST_STATEMENT_BLOCK_VALUES.len() * 2);
 }
 
 /// Shapes measured right on a BEAM (or that never reach the tuple): not this
@@ -247,9 +230,7 @@ const LAST_STATEMENT_OK: &[&str] = &[
 #[test]
 fn a_tier_2_body_whose_last_statement_is_not_an_assigning_block_value_compiles() {
     for body in LAST_STATEMENT_OK {
-        let mut srcs = hosts(body).to_vec();
-        srcs.push(ffi_host(body));
-        for src in srcs {
+        for src in hosts(body) {
             compile(&src).unwrap_or_else(|e| panic!("{e}\n{src}"));
         }
     }

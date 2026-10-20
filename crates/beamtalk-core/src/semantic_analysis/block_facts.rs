@@ -42,12 +42,6 @@ pub struct BlockMutationAnalysis {
     /// tracked by name so a caller can distinguish a self-send to a provably
     /// non-mutating class method from one that is (or might be) mutating.
     pub self_send_selectors: HashSet<String>,
-    /// Whether the block contains a `self.field value(:...)` send — invoking
-    /// a block stored in a field. The stored block's body isn't visible here (it may
-    /// be assigned anywhere), so this is conservative: any such call is treated as a
-    /// potential mutation source, since the field may hold a Tier 2 (state-mutating)
-    /// block that would otherwise silently skip state threading.
-    pub has_field_value_call: bool,
 }
 
 impl BlockMutationAnalysis {
@@ -62,10 +56,11 @@ impl BlockMutationAnalysis {
     }
 
     /// Returns true if the block has any state-affecting operations.
-    /// This includes field writes, self-sends and `self.field value(:...)`
-    /// calls (which may all mutate actor state).
+    /// This includes field writes and self-sends (which may mutate actor
+    /// state). A `self.field value(:...)` send is not one: a block stored in a
+    /// field cannot write a field or a captured local (ADR 0133, BT-3922).
     pub fn has_state_effects(&self) -> bool {
-        !self.field_writes.is_empty() || self.has_self_sends || self.has_field_value_call
+        !self.field_writes.is_empty() || self.has_self_sends
     }
 
     /// Whether a loop or fold over this block is lowered with mutation
@@ -746,12 +741,6 @@ fn analyze_expression(
             analysis
                 .field_writes
                 .extend(nested_analysis.field_writes.iter().cloned());
-            // Propagate `self.field value(:...)` calls the same way as
-            // field_writes — a nested block invoking a stored (possibly Tier 2) block
-            // is itself a potential mutation source visible to the outer analysis.
-            if nested_analysis.has_field_value_call {
-                analysis.has_field_value_call = true;
-            }
             // Propagate self-sends the same way — a self-send inside a
             // block passed to select:/collect:/do:/etc. (this is exactly that
             // shape: a `Block` argument that isn't an inline-conditional
@@ -834,10 +823,8 @@ fn analyze_expression(
 
 /// Records what sending `selector` to `receiver` may do to actor state: a
 /// self-send (which may mutate it; the selector is kept, see
-/// `self_send_selectors`), or a `self.field value(:...)` send invoking a block
-/// stored in a field, which may be a Tier 2 (state-mutating) block and is
-/// conservatively treated as a potential mutation source. Shared by an
-/// ordinary send and each later cascade message.
+/// `self_send_selectors`). Shared by an ordinary send and each later cascade
+/// message.
 fn record_send_target(
     receiver: &Expression,
     selector: &MessageSelector,
@@ -848,9 +835,6 @@ fn record_send_target(
         analysis
             .self_send_selectors
             .insert(selector.name().to_string());
-    }
-    if is_self_field_value_send(receiver, selector) {
-        analysis.has_field_value_call = true;
     }
 }
 
@@ -967,26 +951,6 @@ pub(crate) fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
 
 pub(crate) fn is_self_reference(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == "self")
-}
-
-/// Returns true if `receiver`/`selector` form a `self.field value(:...)`
-/// send — a `value`/`value:`/`value:value:`/`value:value:value:` message sent
-/// directly to a field access on `self`. Used to detect a stored (possibly Tier 2)
-/// block being invoked, which `analyze_block` otherwise has no visibility into.
-///
-/// Also recognizes `valueWithArguments:` —
-/// without this, a `self.field valueWithArguments: #(...)` send nested inside
-/// another block (e.g. a `do:` body) wouldn't mark the enclosing block as
-/// needing state threading, silently discarding the mutated state the Tier 2
-/// runtime discrimination at the call site itself still correctly computes.
-/// `valueWithArguments:` has no `WellKnownSelector` variant (see
-/// `gen_server/methods.rs`'s `is_tier2_value_call`); [`MessageSelector::is_block_invocation`]
-/// names it alongside the `value` family.
-fn is_self_field_value_send(receiver: &Expression, selector: &MessageSelector) -> bool {
-    matches!(
-        receiver,
-        Expression::FieldAccess { receiver: r, .. } if is_self_reference(r)
-    ) && selector.is_block_invocation()
 }
 
 /// Returns true if `selector_name` is `on:do:` or `ensure:` — exception
@@ -1129,9 +1093,6 @@ fn propagate_inline_block_writes(
     analysis
         .self_send_selectors
         .extend(nested.self_send_selectors.iter().cloned());
-    if nested.has_field_value_call {
-        analysis.has_field_value_call = true;
-    }
 }
 
 /// What an [`OuterLocalWrite`] writes.
@@ -2677,6 +2638,11 @@ pub fn match_producer_writes(
     // The subject is evaluated before the arms' scratch map is seeded, so a
     // subject that assigns a local would be lost to an arm that also writes it:
     // such a `match:` stays the loud `MatchArmWrite` error.
+    // Any assignment in the subject keeps the `match:` the loud error: codegen
+    // seeds the arms' scratch map before the subject is evaluated and, unlike a
+    // conditional's receiver, does not sequence the subject's writes first, so
+    // even an unrelated local assigned there is an unthreaded assignment (the
+    // verifier's `UnthreadedLocalAssignment`).
     if let Expression::Match { value, .. } = expr.unwrap_parens() {
         let mut assigns = false;
         crate::ast_walker::walk_expression(value, &mut |e| {
@@ -4331,40 +4297,6 @@ mod tests {
         assert!(!analysis.field_reads.contains("value"));
     }
 
-    #[test]
-    fn test_analyze_self_field_value_call() {
-        // [self.onTick value: x] — invoking a block stored in a field must
-        // be flagged as a potential mutation source, even with no literal field write.
-        let block = Block::new(
-            vec![],
-            vec![bare(Expression::MessageSend {
-                receiver: Box::new(Expression::FieldAccess {
-                    receiver: Box::new(make_expr_id("self")),
-                    field: make_id("onTick"),
-                    span: Span::new(0, 14),
-                }),
-                selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
-                    "value:",
-                    Span::new(15, 21),
-                )]),
-                arguments: vec![make_expr_id("x")],
-                is_cast: false,
-                span: Span::new(0, 23),
-            })],
-            Span::new(0, 25),
-        );
-        let analysis = analyze_block(&block);
-        assert!(
-            analysis.has_field_value_call,
-            "self.field value: should set has_field_value_call"
-        );
-        assert!(analysis.field_writes.is_empty());
-        assert!(
-            analysis.has_state_effects(),
-            "has_field_value_call should make has_state_effects true"
-        );
-    }
-
     /// Parses `src` (a single block-literal expression) into its `Block`.
     fn parse_block(src: &str) -> Block {
         let tokens = crate::source_analysis::lex_with_eof(src);
@@ -4452,66 +4384,6 @@ mod tests {
         assert_eq!(
             analysis.self_send_selectors,
             ["log".to_string(), "bump:".to_string()].into()
-        );
-    }
-
-    #[test]
-    fn test_analyze_self_field_read_is_not_value_call() {
-        // Sanity check: a plain field read (no `value` send) must NOT set
-        // has_field_value_call.
-        let block = Block::new(
-            vec![],
-            vec![bare(Expression::FieldAccess {
-                receiver: Box::new(make_expr_id("self")),
-                field: make_id("onTick"),
-                span: Span::new(0, 14),
-            })],
-            Span::new(0, 16),
-        );
-        let analysis = analyze_block(&block);
-        assert!(!analysis.has_field_value_call);
-    }
-
-    #[test]
-    fn test_analyze_self_field_value_call_as_non_first_cascade_message() {
-        // [self.onTick displayString; value: x] —
-        // the parser folds the cascade's FIRST message ("displayString") into
-        // Cascade.receiver as a whole MessageSend, so the true underlying
-        // receiver ("self.onTick") is one level deeper than Cascade.receiver
-        // itself. A self.field value(:...) send appearing as the SECOND (or
-        // later) cascaded message must still be detected, not just a first-message
-        // self.field value(:...) send.
-        let block = Block::new(
-            vec![],
-            vec![bare(Expression::Cascade {
-                receiver: Box::new(Expression::MessageSend {
-                    receiver: Box::new(Expression::FieldAccess {
-                        receiver: Box::new(make_expr_id("self")),
-                        field: make_id("onTick"),
-                        span: Span::new(0, 14),
-                    }),
-                    selector: MessageSelector::Unary("displayString".into()),
-                    arguments: vec![],
-                    is_cast: false,
-                    span: Span::new(0, 28),
-                }),
-                messages: vec![crate::ast::CascadeMessage::new(
-                    MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
-                        "value:",
-                        Span::new(30, 36),
-                    )]),
-                    vec![make_expr_id("x")],
-                    Span::new(30, 38),
-                )],
-                span: Span::new(0, 38),
-            })],
-            Span::new(0, 40),
-        );
-        let analysis = analyze_block(&block);
-        assert!(
-            analysis.has_field_value_call,
-            "a self.field value(:...) send as the second cascade message must \
-             still set has_field_value_call"
         );
     }
 

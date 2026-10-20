@@ -158,6 +158,14 @@ pub struct CoreErlangGenerator {
     /// Empty outside a protected block, and inside a closure (which may run
     /// after the `ensure:` has finished).
     pub(in crate::core_erlang) nlr_capture: Vec<String>,
+    /// BT-3947: the id of each `ensure:` producer whose protected block is being
+    /// lowered and that captures locals, innermost last. A `^`'s wrapper carries
+    /// the innermost id, and an `ensure:`'s catch takes only a wrapper that
+    /// carries its own: a `^` from a closure another `ensure:` built holds that
+    /// construct's locals, not this one's.
+    pub(in crate::core_erlang) nlr_ens_ids: Vec<usize>,
+    /// The next `ensure:` wrapper id (unique across the module, never parked).
+    pub(in crate::core_erlang) nlr_ens_counter: usize,
     /// BT-3947: whether [`Self::nlr_throw_slot`] wrapped a slot in the body being
     /// lowered, so its NLR boundary unwraps one ([`NlrCatchVars::ens_unwrap`]).
     /// Taken (and cleared) when the boundary's catch variables are allocated,
@@ -490,6 +498,8 @@ impl CoreErlangGenerator {
             active_branch_frame: 0,
             closure_frame: None,
             nlr_capture: Vec::new(),
+            nlr_ens_ids: Vec::new(),
+            nlr_ens_counter: 0,
             nlr_ens_wrapped: std::cell::Cell::new(false),
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility

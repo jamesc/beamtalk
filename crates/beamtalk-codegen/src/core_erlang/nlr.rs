@@ -105,7 +105,7 @@ impl NlrCatchVars {
         docvec![
             "case ",
             state,
-            " of <{'$bt_ens', ",
+            " of <{'$bt_ens', _, ",
             leaf::var(slot.clone()),
             ", _}> when 'true' -> ",
             leaf::var(slot.clone()),
@@ -311,7 +311,16 @@ impl CoreErlangGenerator {
             ]);
         }
         self.nlr_ens_wrapped.set(true);
-        docvec!["{'$bt_ens', ", slot, ", ~{", Document::Vec(entries), "}~}"]
+        let id = self.nlr_ens_ids.last().copied().unwrap_or(0);
+        docvec![
+            "{'$bt_ens', ",
+            leaf::int_lit(i64::try_from(id).unwrap_or(0)),
+            ", ",
+            slot,
+            ", ~{",
+            Document::Vec(entries),
+            "}~}"
+        ]
     }
 
     /// Returns the current NLR token variable name, if any.

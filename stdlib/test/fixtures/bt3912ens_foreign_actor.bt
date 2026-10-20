@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947): the actor column of bt3912ens_foreign_value.bt. In an actor
+// method the thrown slot is the real `State`; a catch that took another
+// construct's wrapper would assemble it from that construct's locals.
+
+Actor subclass: Bt3912EnsForeignActor
+  state: n = 0
+
+  escaped: sink =>
+    t := 0
+    blk := [0]
+    [
+      t := 1
+      blk := [^t]
+    ] ensure: [sink record: t]
+    u := 0
+    [
+      u := 1
+      blk value
+      ^u
+    ] ensure: [sink record: u]
+
+  same: sink =>
+    t := 0
+    blk := [0]
+    [
+      t := 1
+      blk := [^t]
+    ] ensure: [sink record: t]
+    t := 5
+    [
+      t := 2
+      blk value
+    ] ensure: [sink record: t]

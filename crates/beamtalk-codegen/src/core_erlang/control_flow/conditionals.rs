@@ -131,16 +131,9 @@ impl FieldWriteSite {
 /// for the caller's own continuation glue (`Open` —
 /// `generate_field_assignment_open`'s historical shape: the `Document` ends
 /// with `"in "`, no trailing value). Orthogonal to [`FieldWriteSite`] — every
-/// site supports both — except that it also selects which RHS compile a
-/// `FieldWriteSite::Actor`/`ValueType` write uses, matching the two
-/// historical shapes' pre-existing, deliberately different choice there:
-/// `Open` reuses [`CoreErlangGenerator::generate_field_assignment_value_doc`]'s
-/// Tier-2 stateful-block RHS special case (every pre-existing "open"/
-/// threaded call site already did); `Closed` always compiles the RHS via
-/// plain `expression_doc` (a method's own last-statement field write never
-/// got that optimization). Changing this split is out of scope here (the
-/// acceptance criteria: byte-identical output for every
-/// currently-passing program).
+/// site supports both. Both compile the RHS the same way, via plain
+/// `expression_doc` (BT-3986 removed `Open`'s Tier-2 stateful-block RHS
+/// special case: a block that writes a field cannot be stored in a field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum Closure {
     /// Caller supplies the continuation; the returned `Document` ends with
@@ -201,10 +194,7 @@ impl CoreErlangGenerator {
             FieldWriteSite::ValueType => self.self_version(),
             FieldWriteSite::Actor => self.state_version(),
         };
-        let value_doc = match closure {
-            Closure::Open => self.generate_field_assignment_value_doc(value)?,
-            Closure::Closed => self.expression_doc(value)?,
-        };
+        let value_doc = self.expression_doc(value)?;
         let target_version = match site {
             FieldWriteSite::ValueType => {
                 self.next_self_var();
@@ -3223,38 +3213,6 @@ mod tests {
                 threaded_ir::VerifyError::UnboundVersion { var, .. } if var.version == 5
             )),
             "expected UnboundVersion for the phantom State(5) source, got: {errors:?}"
-        );
-    }
-
-    #[test]
-    fn test_bt2797_bare_tier2_value_call_in_conditional_branch_unpacks_tuple() {
-        // PR #2899 review fix: a bare (non-assigned) `self.field
-        // value:` statement inside an `ifTrue:` branch that *also* contains an
-        // explicit field assignment (so `block_analysis` detects the branch
-        // needs state threading and routes it through
-        // `generate_conditional_branch_inline`). Before the fix, the
-        // catch-all `_ =>` arm called `expression_doc` directly on the
-        // Tier2ValueCall statement, discarding the `{Result, NewState}`
-        // tuple's second element — silently dropping the field mutation
-        // performed inside the stored block. Structural check only (see
-        // stdlib/test/tier2subexpr_and_conditional_block_test.bt for the
-        // runtime end-to-end check).
-        let src = "Actor subclass: Ctr\n  state: total = 0\n  state: calls = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickIfPositive: x =>\n    x > 0 ifTrue: [self.calls := self.calls + 1. self.onTick value: x].\n    self.total\n";
-        let code = codegen(src);
-        assert!(
-            regex::Regex::new(r"let _T2Tuple\w* = .*is_function.*in let _BranchResult\w* = call 'erlang':'element'\(1, _T2Tuple")
-                .unwrap()
-                .is_match(&code),
-            "the bare Tier2ValueCall statement inside the ifTrue: branch must \
-             unpack the returned {{Result, NewState}} tuple via element/1 and \
-             thread element/2 forward as the branch's new state. Got: {code}"
-        );
-        assert!(
-            regex::Regex::new(r"let StateAcc\w* = call 'erlang':'element'\(2, _T2Tuple")
-                .unwrap()
-                .is_match(&code),
-            "the branch's new state must be threaded forward from the \
-             Tier2ValueCall's tuple. Got: {code}"
         );
     }
 

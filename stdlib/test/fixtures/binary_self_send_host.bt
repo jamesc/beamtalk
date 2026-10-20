@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3985: a binary selector sent to `self` from an actor method and from a
+// class method; see binary_self_send_test.bt.
+
+Actor subclass: BinarySelfSendHost
+  state: total = 0
+
+  class + x => x + 100
+
+  class run => self + 4
+
+  class runIn => #(1, 2) collect: [:x | self + x]
+
+  + x => self.total := self.total + x
+
+  run =>
+    self + 5
+    self.total

@@ -3,8 +3,11 @@
 
 // BT-3912 (BT-3947): a `^` thrown from a closure that one `ensure:` built and a
 // different `ensure:` later runs carries the first construct's locals, not the
-// second's. The second catch must not take the throw as its own (it used to
-// crash reading a local the map does not hold): the `^` still answers its value.
+// second's. Each `ensure:` takes only the wrapper it built (a per-construct id),
+// so the second catch never runs its cleanup over the first's locals, even when
+// both use the same local name (`same:`), and a different name no longer crashes
+// (`escaped:`). The `^` still answers its value. The second cleanup sees its
+// entry locals (the known limitation of a throw it did not build).
 
 Value subclass: Bt3912EnsForeignValue
 
@@ -21,3 +24,16 @@ Value subclass: Bt3912EnsForeignValue
       blk value
       ^u
     ] ensure: [sink record: u]
+
+  same: sink =>
+    t := 0
+    blk := [0]
+    [
+      t := 1
+      blk := [^t]
+    ] ensure: [sink record: t]
+    t := 5
+    [
+      t := 2
+      blk value
+    ] ensure: [sink record: t]
