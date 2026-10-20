@@ -553,6 +553,148 @@ by_id_stale_handle_test() ->
         ]
     ).
 
+%% BT-3984: a handle to a supervisor on a node this VM cannot reach. Every
+%% handle call returns `node_down` (not `stale_handle`, and not a raw
+%% `{nodedown, _}` exit into the caller) through `with_live_supervisor/3`;
+%% `args` (an `erpc` read of the supervisor's dictionary) too.
+unreachable_node_handle_calls_are_node_down_test() ->
+    Pid = unreachable_remote_pid(),
+    Self = make_supervisor_tuple('BT3984RemoteSup', bt3984_remote_mod, Pid),
+    ClassArg = {beamtalk_object, 'X class', x_mod, self()},
+    Child = {beamtalk_object, 'X', x_mod, self()},
+    Calls = [
+        {children, fun() -> beamtalk_supervisor:whichChildren(Self) end},
+        {whichChildren, fun() -> beamtalk_supervisor:childInfos(Self) end},
+        {'childWithId:', fun() -> beamtalk_supervisor:childWithId(Self, a1) end},
+        {'terminateChild:', fun() -> beamtalk_supervisor:terminateChildId(Self, a1) end},
+        {'restartChild:', fun() -> beamtalk_supervisor:restartChild(Self, a1) end},
+        {'deleteChild:', fun() -> beamtalk_supervisor:deleteChild(Self, a1) end},
+        {children, fun() -> beamtalk_supervisor:dynamicChildren(Self) end},
+        {'which:', fun() -> beamtalk_supervisor:whichChild(Self, ClassArg) end},
+        {'terminateChild:', fun() -> beamtalk_supervisor:terminateChild(Self, ClassArg) end},
+        {'terminateChild:', fun() -> beamtalk_supervisor:terminateChild(Self, Child) end},
+        {startChild, fun() -> beamtalk_supervisor:startChild(Self) end},
+        {'startChild:', fun() -> beamtalk_supervisor:startChild(Self, #{}) end},
+        {'startChild:name:', fun() -> beamtalk_supervisor:startChild(Self, #{}, bt3984_n) end},
+        {count, fun() -> beamtalk_supervisor:countChildren(Self) end},
+        {stop, fun() -> beamtalk_supervisor:stop(Self) end},
+        {args, fun() -> beamtalk_supervisor:args(Self) end}
+    ],
+    lists:foreach(
+        fun({Selector, Call}) ->
+            Result = Call(),
+            ?assertMatch(
+                {error, #beamtalk_error{
+                    kind = node_down,
+                    class = 'BT3984RemoteSup',
+                    selector = Selector,
+                    details = #{node := 'bt3984_ghost@nohost', reason := _}
+                }},
+                Result,
+                Selector
+            )
+        end,
+        Calls
+    ).
+
+unreachable_node_is_alive_is_optimistic_test() ->
+    %% As for a remote actor (`beamtalk_pid:is_alive/1`): no network round
+    %% trip, and no `badarg` from `erlang:is_process_alive/1` on a remote pid.
+    Self = make_supervisor_tuple('BT3984RemoteSup', bt3984_remote_mod, unreachable_remote_pid()),
+    ?assert(beamtalk_supervisor:isAlive(Self)).
+
+classify_call_failure_test() ->
+    %% The exit/error shapes a supervisor call can fail with. A timeout (an
+    %% `erpc` read of a slow node's supervisor) is unreachable, never `dead`.
+    MFA = {gen_server, call, [self(), which_children, infinity]},
+    lists:foreach(
+        fun({Class, Reason, Expected}) ->
+            ?assertEqual(
+                Expected, beamtalk_supervisor:classify_call_failure(Class, Reason), Reason
+            )
+        end,
+        [
+            {exit, noproc, dead},
+            {exit, {noproc, MFA}, dead},
+            {exit, {{nodedown, n@h}, MFA}, {unreachable, nodedown}},
+            {exit, {nodedown, n@h}, {unreachable, nodedown}},
+            {exit, noconnection, {unreachable, noconnection}},
+            {exit, {noconnection, MFA}, {unreachable, noconnection}},
+            {exit, timeout, {unreachable, timeout}},
+            {exit, {timeout, MFA}, {unreachable, timeout}},
+            {error, {erpc, noconnection}, {unreachable, noconnection}},
+            {error, {erpc, timeout}, {unreachable, timeout}},
+            {error, badarg, other},
+            {exit, {shutdown, MFA}, other},
+            {throw, noproc, other}
+        ]
+    ).
+
+local_supervisor_timeout_is_not_node_down_test() ->
+    %% A timeout under a local supervisor's handle came from some other call
+    %% (the supervisor's node is this one), so it propagates unmapped.
+    Self = make_supervisor_tuple('BT3984LocalSup', bt3984_local_mod, self()),
+    Timeout = {timeout, {gen_server, call, [self(), class_name]}},
+    ?assertExit(
+        Timeout,
+        beamtalk_supervisor:with_live_supervisor(Self, count, fun() -> exit(Timeout) end)
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = stale_handle}},
+        beamtalk_supervisor:with_live_supervisor(Self, count, fun() ->
+            exit({noproc, {gen_server, call, []}})
+        end)
+    ).
+
+remote_supervisor_failure_of_another_call_propagates_test() ->
+    %% Under a remote handle, a failure whose OTP call names another process
+    %% (a class process lookup, say) is not blamed on the supervisor.
+    Self = make_supervisor_tuple('BT3984RemoteSup', bt3984_remote_mod, unreachable_remote_pid()),
+    lists:foreach(
+        fun(Reason) ->
+            ?assertExit(
+                Reason,
+                beamtalk_supervisor:with_live_supervisor(Self, count, fun() -> exit(Reason) end)
+            )
+        end,
+        [
+            {timeout, {gen_server, call, [self(), class_name]}},
+            {noproc, {gen_server, call, [self(), class_name]}}
+        ]
+    ),
+    %% The same shape naming the supervisor is mapped.
+    SupTimeout = {timeout, {gen_server, call, [element(4, Self), which_children]}},
+    ?assertMatch(
+        {error, #beamtalk_error{kind = node_down, details = #{reason := timeout}}},
+        beamtalk_supervisor:with_live_supervisor(Self, count, fun() -> exit(SupTimeout) end)
+    ).
+
+args_remote_erpc_timeout_is_node_down_test() ->
+    %% The reported bug: an `erpc` timeout reading a slow remote supervisor's
+    %% args was `stale_handle`.
+    meck:new(erpc, [unstick, passthrough]),
+    try
+        meck:expect(erpc, call, fun(_Node, erlang, process_info, _Args, _Timeout) ->
+            error({erpc, timeout})
+        end),
+        Self = make_supervisor_tuple(
+            'BT3984RemoteSup', bt3984_remote_mod, unreachable_remote_pid()
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{
+                kind = node_down, selector = args, details = #{reason := timeout}
+            }},
+            beamtalk_supervisor:args(Self)
+        )
+    after
+        meck:unload(erpc)
+    end.
+
+%% A pid on a node this VM is not connected to (`NEW_PID_EXT`).
+unreachable_remote_pid() ->
+    NodeBin = atom_to_binary('bt3984_ghost@nohost', utf8),
+    binary_to_term(<<131, 88, 118, (byte_size(NodeBin)):16, NodeBin/binary, 1:32, 0:32, 0:32>>).
+
 which_and_terminate_by_class_ambiguous_test() ->
     %% Several children share the class's module: which:/terminate: refuse.
     {SupPid, _} = start_anon_supervisor_with_specs([

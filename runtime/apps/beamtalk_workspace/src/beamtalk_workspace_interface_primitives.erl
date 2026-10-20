@@ -1491,6 +1491,9 @@ do_stop_supervisor(ClassName) ->
                     try
                         gen_server:stop(Pid)
                     catch
+                        %% gen_server:stop/1 exits with bare `noproc` for a
+                        %% dead root (BT-3984); already stopped is the goal.
+                        exit:noproc -> ok;
                         exit:{noproc, _} -> ok
                     end,
                     beamtalk_supervisor:clear_root(),

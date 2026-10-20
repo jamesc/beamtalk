@@ -3902,6 +3902,9 @@ This matters in practice: you can call `WebApp supervise` at every entry point o
 - `#child_start_failed` — child's `init/1` raised, or the supervisor rejected the spec.
 - `#terminate_failed` — `supervisor:terminate_child/2` returned a reason other than `not_found` (supervisor crash, timeout).
 - `#stale_handle` — the supervisor process itself is dead.
+- `#node_down` — the handle names a supervisor on another node that cannot be reached (down, partitioned, or too slow to answer). The supervisor may still be running, so this is not a stale handle; `details` carries `node` and `reason` (`#nodedown`, `#noconnection` or `#timeout`). Every supervisor handle call (`args`, `count`, `stop`, the child calls above) reports it the same way, where a local handle would report `#stale_handle`.
+
+`isAlive` and `stop` are sealed on `Supervisor` and `DynamicSupervisor`: the runtime answers them on a handle without a method lookup, so overriding either is a compile error. `isAlive` on a remote supervisor answers `true` without a network round trip, as it does for an actor.
 
 ### Call-site patterns
 

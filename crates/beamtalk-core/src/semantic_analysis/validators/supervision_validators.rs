@@ -722,6 +722,31 @@ mod tests {
         );
     }
 
+    /// `isAlive` and `stop` are sealed on `Supervisor` and `DynamicSupervisor`
+    /// (BT-3984): the runtime answers them on a supervisor handle without a
+    /// method lookup, so an override would never run and is rejected instead.
+    #[test]
+    fn supervisor_is_alive_and_stop_overrides_are_errors() {
+        for superclass in ["Supervisor", "DynamicSupervisor"] {
+            for selector in ["isAlive", "stop"] {
+                let src = format!("{superclass} subclass: MySup\n  {selector} => nil");
+                let tokens = lex_with_eof(&src);
+                let (module, parse_diags) = parse(tokens);
+                assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+                let (_, diagnostics) = ClassHierarchy::build(&module);
+                assert_eq!(diagnostics.len(), 1, "{src}: {diagnostics:?}");
+                let diag = &diagnostics[0];
+                assert_eq!(diag.severity, Severity::Error, "{src}");
+                assert_eq!(diag.category, Some(DiagnosticCategory::Inheritance));
+                assert_eq!(
+                    diag.message,
+                    format!("Cannot override sealed method `{selector}` from class `{superclass}`"),
+                    "{src}"
+                );
+            }
+        }
+    }
+
     /// Instance-side configuration, `supervisionPolicy`, other class methods,
     /// and the same class-side selectors on non-supervisor classes are fine.
     #[test]
