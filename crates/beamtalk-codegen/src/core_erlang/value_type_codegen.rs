@@ -3402,9 +3402,19 @@ impl CoreErlangGenerator {
         // whose only mutation is `self.field := ...` still needs this inline-`case`
         // (the generic Tier 1 closure path rejects a field write outright).
         let all_mutations = self.vt_conditional_outer_mutations(arguments);
-        let threads_self = arguments.iter().any(
-            |arg| matches!(arg, Expression::Block(block) if self.block_writes_vt_self_field(block)),
-        );
+        // (BT-3912: the recursive detector `is_conditional_with_vt_self_field_threading`
+        // reads, so an arm whose only write is a field-writing fold's body counts.)
+        let branch_blocks: Vec<&Block> = arguments
+            .iter()
+            .filter_map(|arg| match arg {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        let threads_self = !self
+            .exception_construct_families(&branch_blocks)
+            .as_slice()
+            .is_empty();
         // BT-3522: `threads_self` covers a write that is a BARE TOP-LEVEL STATEMENT of a
         // branch block. A write nested deeper mints a `Self{N}` that dies with its own
         // nested scope, so no branch tuple can name it: it was a SILENT DROP (the early
@@ -3524,13 +3534,23 @@ impl CoreErlangGenerator {
     /// first-seen order.
     fn vt_conditional_outer_mutations(&self, arguments: &[Expression]) -> Vec<String> {
         let mut all_mutations: Vec<String> = Vec::new();
+        let mut blocks: Vec<&Block> = Vec::new();
         for arg in arguments {
             if let Expression::Block(block) = arg {
+                blocks.push(block);
                 for var in self.outer_scope_mutations_in_block(block) {
                     if !all_mutations.contains(&var) {
                         all_mutations.push(var);
                     }
                 }
+            }
+        }
+        // BT-3912 (BT-3854): and the outer locals a loop or fold nested in an arm
+        // threads (`outer_scope_mutations_in_block` reads the arm's own
+        // statements only): the arm is a frame whose producers rebind them.
+        for var in self.branch_threaded_locals(&blocks) {
+            if !all_mutations.contains(&var) {
+                all_mutations.push(var);
             }
         }
         all_mutations
@@ -3621,10 +3641,7 @@ impl CoreErlangGenerator {
                 continue;
             };
             for stmt in super::util::collect_body_exprs(&block.body) {
-                self.reject_unthreadable_value_self_field_write(
-                    stmt,
-                    self.is_field_assignment(stmt),
-                )?;
+                self.reject_unthreadable_value_self_field_write_in_arm(stmt)?;
             }
         }
         Ok(())
@@ -3908,12 +3925,18 @@ impl CoreErlangGenerator {
         // post-`case` family merge (`vt_conditional_family_binds`) is what
         // legitimately advances the outer version, exactly once.
         self.set_self_version(self_before);
-        let result = self.build_vt_conditional_branch_pieces_inner(
-            block,
-            all_mutations,
-            baseline,
-            capture_value,
-        );
+        // BT-3912 (BT-3854): a loop or fold at a producer site of an arm
+        // statement is a producer: its prelude (the construct tuple, the `Self`
+        // merge, the local rebinds) is spliced into the arm's own statements.
+        let body = super::util::collect_body_exprs(&block.body);
+        let result = self.with_body_producer_sites(&body, false, false, |this| {
+            this.build_vt_conditional_branch_pieces_inner(
+                block,
+                all_mutations,
+                baseline,
+                capture_value,
+            )
+        });
         self.set_self_version(self_before);
         self.pop_scope();
         result

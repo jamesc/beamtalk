@@ -19,16 +19,13 @@
 //!    debug verifier on, through `erlc`, and each probe is *run*; its observed `(m, n, t, value)`
 //!    must equal what a Rust interpreter computes. A write the lowering drops, or applies in the
 //!    wrong order, fails here although it compiles.
-//! 3. **Conditional arms stay a structured rejection (BT-3844).** The same generated fold
-//!    bodies, placed in a conditional arm — plain or local-threading, `ifTrue:` / `ifFalse:` /
-//!    `ifTrue:ifFalse:` (either or both arms), as an arm statement, an arm assignment or the
-//!    arm's value, with the conditional as a statement, the method's last statement or an
-//!    assigned value ([`arm_programs`]). None can run against the oracle: every one is refused
-//!    up front (`reject_nested_vt_conditional_self_field_writes` treats the fold's body write as
-//!    a write below the arm's top level), so the arm never reaches a lowering that reads the
-//!    fold's `Self` slot. The test pins that refusal for the whole corpus; lifting it (BT-3854)
-//!    means giving these programs an oracle (taken arm: the fold's state; other arm /
-//!    passthrough: `START`) and running them like [`oracle_programs`].
+//! 3. **Conditional arms carry the fold's `Self` out (BT-3844, BT-3854, BT-3912).** The same
+//!    generated fold bodies, placed in a conditional arm — plain or local-threading,
+//!    `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` (either or both arms), as an arm statement, an
+//!    arm assignment or the arm's value, with the conditional as a statement, the method's last
+//!    statement or an assigned value ([`arm_programs`]). The arm is a frame whose fold is a
+//!    producer, so every program compiles with a silent verifier and, run on a BEAM, agrees with
+//!    an oracle (taken arm: the fold's state; other arm / passthrough: `START`).
 
 use super::field_assignment_value_position::{
     VT_FOLD_REJECTING_SHAPES, VT_HEADER, VT_POSITIONS, VT_SHAPES, is_fold_writing_position,
@@ -491,42 +488,172 @@ fn arm_programs() -> Vec<(String, String)> {
     out
 }
 
+/// Runs one conditional arm `form` of [`ARM_FORMS`] (the fold `kind` over `body`) against
+/// `state` and the outer local `x`, answering the arm's value. The arm runs at most once, from
+/// [`START`]: the receiver `c` is read before it and nothing else writes first.
+fn run_arm(kind: Kind, body: &[Stmt], form: usize, x: &mut String, state: &mut State) -> String {
+    let (value, end) = kind.oracle(body);
+    match form {
+        // the fold alone, as the arm's value
+        0 => {
+            *state = end;
+            value
+        }
+        // `x := 1. FOLD. x := x + 1`
+        1 => {
+            *state = end;
+            *x = "2".to_string();
+            "2".to_string()
+        }
+        // `x := FOLD. x`
+        2 => {
+            *state = end;
+            *x = value.clone();
+            value
+        }
+        // `x := 1. FOLD`
+        _ => {
+            *state = end;
+            *x = "1".to_string();
+            value
+        }
+    }
+}
+
+/// `(probe name, method source, expected observation)` for every generated conditional-arm
+/// program (the same loops as [`arm_programs`]): the taken arm's effects are the fold's final
+/// state and `x`; the other arm and a passthrough leave [`START`] and answer `nil`.
+fn arm_oracle_programs() -> Vec<(String, String, String)> {
+    let programs = arm_programs();
+    let mut out = Vec::with_capacity(programs.len());
+    let mut index = 0;
+    for kind in [Kind::Do, Kind::Collect, Kind::Inject] {
+        for body in bodies() {
+            for form in 0..ARM_FORMS.len() {
+                for selector in 0..ARM_SELECTORS.len() {
+                    for position in 0..ARM_POSITIONS.len() {
+                        let (name, method) = &programs[index];
+                        index += 1;
+                        let mut state = START;
+                        let mut x = "0".to_string();
+                        // `c := self.n > 10` is read before any arm runs.
+                        let c = state.n > 10;
+                        let mut arm = |x: &mut String, state: &mut State| {
+                            run_arm(kind, &body, form, x, state)
+                        };
+                        let value = match selector {
+                            // c ifTrue: [ARM]
+                            0 => {
+                                if c {
+                                    arm(&mut x, &mut state)
+                                } else {
+                                    "nil".to_string()
+                                }
+                            }
+                            // c ifFalse: [ARM]
+                            1 => {
+                                if c {
+                                    "nil".to_string()
+                                } else {
+                                    arm(&mut x, &mut state)
+                                }
+                            }
+                            // c ifTrue: [ARM] ifFalse: [x := 5]
+                            2 => {
+                                if c {
+                                    arm(&mut x, &mut state)
+                                } else {
+                                    x = "5".to_string();
+                                    "5".to_string()
+                                }
+                            }
+                            // c ifTrue: [x := 5] ifFalse: [ARM]
+                            3 => {
+                                if c {
+                                    x = "5".to_string();
+                                    "5".to_string()
+                                } else {
+                                    arm(&mut x, &mut state)
+                                }
+                            }
+                            // c ifTrue: [ARM] ifFalse: [ARM]
+                            _ => arm(&mut x, &mut state),
+                        };
+                        let expected = match position {
+                            0 => format!("[{},{},{},{}]", state.m, state.n, state.t, x),
+                            1 => value,
+                            _ => format!("[{},{},{},{},{}]", state.m, state.n, state.t, x, value),
+                        };
+                        out.push((name.clone(), method.clone(), expected));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(index, programs.len());
+    out
+}
+
 #[test]
-fn generated_field_writing_folds_in_conditional_arms_stay_a_structured_rejection() {
+fn generated_field_writing_folds_in_conditional_arms_compile_with_a_silent_verifier() {
     let programs = arm_programs();
     assert!(
         programs.len() >= 1000,
         "only {} generated conditional-arm programs: the corpus has thinned out",
         programs.len()
     );
-    // Exactly the up-front arm rejection ADR 0122's conditional-arm row documents
-    // (`reject_nested_vt_conditional_self_field_writes` -> `FieldAssignmentInUnsupportedBlock`),
-    // not just any structured value-type error: a different one would mean the arm got past that
-    // pre-pass into a lowering this corpus has never run.
-    let not_rejected: Vec<String> = programs
+    let failures: Vec<String> = programs
         .iter()
         .filter_map(|(name, method)| {
             let src = format!("{VT_HEADER}\n{method}");
             let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
             let (module, _) = beamtalk_core::source_analysis::parse(tokens);
             match generate_module_surfacing_verifier(&module, CodegenOptions::new("test")) {
-                Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. }) => None,
-                Ok(_) => Some(format!(
-                    "{name}: compiled, but nothing proves the fold's write reaches the code after \
-                     the arm; give it an oracle run first\n{method}"
-                )),
-                Err(other) => Some(format!(
-                    "{name}: expected the arm pre-pass rejection \
-                     (FieldAssignmentInUnsupportedBlock), got {other:?}\n{method}"
-                )),
+                Ok(_) => None,
+                Err(error) => Some(format!("{name}: {error:?}\n{method}")),
             }
         })
         .collect();
     assert!(
-        not_rejected.is_empty(),
-        "{} of {} conditional-arm fold programs are not a structured rejection:\n\n{}",
-        not_rejected.len(),
+        failures.is_empty(),
+        "{} of {} conditional-arm fold programs do not compile:\n\n{}",
+        failures.len(),
         programs.len(),
-        not_rejected.join("\n")
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn generated_field_writing_folds_in_conditional_arms_agree_with_the_oracle_when_run() {
+    let programs = arm_oracle_programs();
+    let methods: Vec<&str> = programs.iter().map(|(_, m, _)| m.as_str()).collect();
+    let src = format!("{VT_HEADER}\n{}", methods.join("\n"));
+    // Debug codegen: the `ThreadedIr` verifier is on and panics on any finding.
+    let core = codegen(&src);
+    let names: Vec<String> = programs.iter().map(|(n, _, _)| n.clone()).collect();
+    let Some(observed) = run_probes(&core, &names) else {
+        println!("skipping the oracle run: erlc/erl not available");
+        return;
+    };
+    let mut mismatches = Vec::new();
+    for (name, method, expected) in &programs {
+        match observed.get(name) {
+            Some(got) if got == expected => {}
+            other => mismatches.push(format!(
+                "{name}: expected {expected}, ran to {other:?}\n{method}"
+            )),
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "{} of {} conditional-arm fold programs disagree with the oracle:\n\n{}",
+        mismatches.len(),
+        programs.len(),
+        mismatches
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n\n")
     );
 }
