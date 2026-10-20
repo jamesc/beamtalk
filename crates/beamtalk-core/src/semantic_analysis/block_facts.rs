@@ -2674,6 +2674,18 @@ pub fn match_producer_writes(
     kind: RootMethodKind,
 ) -> Option<Vec<OuterLocalWrite>> {
     let arms = match_arms(expr)?;
+    // The subject is evaluated before the arms' scratch map is seeded, so a
+    // subject that assigns a local would be lost to an arm that also writes it:
+    // such a `match:` stays the loud `MatchArmWrite` error.
+    if let Expression::Match { value, .. } = expr.unwrap_parens() {
+        let mut assigns = false;
+        crate::ast_walker::walk_expression(value, &mut |e| {
+            assigns |= matches!(e, Expression::Assignment { .. });
+        });
+        if assigns {
+            return None;
+        }
+    }
     if !match_guard_writes(arms, bound_outside).is_empty()
         || !match_arms_lower_as_producer(arms, kind, bound_outside)
     {

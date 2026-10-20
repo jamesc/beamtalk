@@ -3145,6 +3145,9 @@ fn match_arm_write_that_is_not_a_producer_stays_a_structured_error() {
     for body in [
         "#a match: [x when: [(t := t + 1) > 0] -> 1; _ -> 0]\nt",
         "(#a match: [#a -> (t := t + 1); _ -> 0]) match: [_ -> 1]\nt",
+        // The subject assigns the local an arm also writes: evaluated before the
+        // arms' scratch map is seeded, so the assignment would be lost.
+        "(t := 5) match: [1 -> (t := 100); _ -> 0]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);

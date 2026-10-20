@@ -1426,6 +1426,21 @@ impl CoreErlangGenerator {
         let slot_var = self.fresh_temp_var("EnsSlot");
         let locals_var = self.fresh_temp_var("EnsLocals");
         let entry_var = self.fresh_temp_var("NlrEntry");
+        // A `^` thrown from a closure that another `ensure:` built carries that
+        // construct's locals: this catch takes it only when the map holds every
+        // local its own cleanup reads, and otherwise treats it as any other throw.
+        let mut ens_guard = Document::Str("'true'");
+        for name in locals.iter().rev() {
+            ens_guard = docvec![
+                "call 'erlang':'and'(call 'erlang':'is_map_key'(",
+                leaf::atom(Self::local_state_key(name)),
+                ", ",
+                leaf::var(locals_var.clone()),
+                "), ",
+                ens_guard,
+                ")"
+            ];
+        }
         docs.push(docvec![
             "case {",
             leaf::var(type_var.to_string()),
@@ -1439,7 +1454,9 @@ impl CoreErlangGenerator {
             leaf::var(slot_var.clone()),
             ", ",
             leaf::var(locals_var.clone()),
-            "}}}> when 'true' -> let ",
+            "}}}> when ",
+            ens_guard,
+            " -> let ",
             leaf::var(entry_var.clone()),
             " = {",
             leaf::var(val_var.clone()),

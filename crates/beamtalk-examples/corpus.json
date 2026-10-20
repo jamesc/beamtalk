@@ -17927,6 +17927,32 @@
       "explanation": "BT-3911 (ADR 0133 Phase 3): arm-bearing constructs as frames. Fixtures: fixtures/bt3911arm_frames_{class,value,actor}.bt."
     },
     {
+      "id": "stdlib-test-bt3912ens-foreign-test",
+      "title": "Bt3912EnsForeignTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "Bt3912EnsForeignTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "bt3912ens_foreign_test",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testForeignEnsureKeepsTheThrownValue"
+      ],
+      "source": "// BT-3912 (BT-3947): see stdlib/test/fixtures/bt3912ens_foreign_value.bt.\n\nTestCase subclass: Bt3912EnsForeignTest\n\n  testForeignEnsureKeepsTheThrownValue =>\n    sink := Bt3912EnsureSink spawn\n    self assert: ((Bt3912EnsForeignValue new) escaped: sink) equals: 1",
+      "explanation": "BT-3912 (BT-3947): see stdlib/test/fixtures/bt3912ens_foreign_value.bt."
+    },
+    {
       "id": "stdlib-test-bt3912ensure-test",
       "title": "Bt3912EnsureTest",
       "category": "stdlib-tests",
@@ -31753,6 +31779,29 @@
       ],
       "source": "// BT-3911 (ADR 0133 Phase 3): arm-bearing constructs as frames, in a\n// value-type method. See stdlib/test/bt3911arm_frames_test.bt and its class\n// and actor siblings.\n\nValue subclass: Bt3911ArmFramesValue\n\n  condAnd: m :: Integer =>\n    i := 0\n    [\n      i < m\n        and: [\n          x := i\n          x < 5\n        ]\n    ] whileTrue: [i := i + 1]\n    i\n\n  condIfTrue: m :: Integer =>\n    i := 0\n    [\n      i < m\n        ifTrue: [\n          x := i\n          x\n        ]\n      i < 4\n    ] whileTrue: [i := i + 1]\n    i\n\n  condIfNil: m :: Integer =>\n    i := 0\n    [\n      nil\n        ifNil: [\n          x := i\n          x + 1\n        ]\n      i < m\n    ] whileTrue: [i := i + 1]\n    i\n\n  condOrWhileFalse: m :: Integer =>\n    i := 0\n    [\n      i >= m\n        or: [\n          x := i\n          x < 0\n        ]\n    ] whileFalse: [i := i + 1]\n    i\n\n  condNested: m :: Integer =>\n    i := 0\n    [\n      i < m\n        and: [\n          x := i\n          x < 5\n            and: [\n              y := x + 1\n              y < 4\n            ]\n        ]\n    ] whileTrue: [i := i + 1]\n    i\n\n  // Nestings of the arm in the condition: through a `do:` body, through a\n  // closure, and writing a local the condition itself bound first.\n  condDoBody: m :: Integer =>\n    i := 0\n    [\n      #(1)\n        do: [:e |\n          e > 0\n            ifTrue: [\n              x := e\n              x\n            ]\n        ]\n      i < m\n    ] whileTrue: [i := i + 1]\n    i\n\n  condClosure: m :: Integer =>\n    i := 0\n    [\n      [:z |\n        z > 0\n          ifTrue: [\n            x := z\n            x\n          ]\n      ] value: 1\n      i < m\n    ] whileTrue: [i := i + 1]\n    i\n\n  condBoundBefore: m :: Integer =>\n    i := 0\n    [\n      x := 0\n      m > 0 ifTrue: [x := 1]\n      i < (m + x) - 1\n    ] whileTrue: [i := i + 1]\n    i",
       "explanation": "BT-3911 (ADR 0133 Phase 3): arm-bearing constructs as frames, in a value-type method. See stdlib/test/bt3911arm_frames_test.bt and its class and actor siblings."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3912ens-foreign-value",
+      "title": "Bt3912EnsForeignValue",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt3912EnsForeignValue",
+        "Value",
+        "assign",
+        "assignment",
+        "bt3912ens_foreign_value",
+        "escaped:",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "set",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3912 (BT-3947): a `^` thrown from a closure that one `ensure:` built and a\n// different `ensure:` later runs carries the first construct's locals, not the\n// second's. The second catch must not take the throw as its own (it used to\n// crash reading a local the map does not hold): the `^` still answers its value.\n\nValue subclass: Bt3912EnsForeignValue\n\n  escaped: sink =>\n    t := 0\n    blk := [0]\n    [\n      t := 1\n      blk := [^t]\n    ] ensure: [sink record: t]\n    u := 0\n    [\n      u := 1\n      blk value\n      ^u\n    ] ensure: [sink record: u]",
+      "explanation": "BT-3912 (BT-3947): a `^` thrown from a closure that one `ensure:` built and a different `ensure:` later runs carries the first construct's locals, not the second's. The second catch must not take the throw as its own (it used to crash reading a local the map does not hold): the `^` still answers its value."
     },
     {
       "id": "stdlib-test-fixtures-bt3912ensure-actor",

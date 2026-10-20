@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947): a `^` thrown from a closure that one `ensure:` built and a
+// different `ensure:` later runs carries the first construct's locals, not the
+// second's. The second catch must not take the throw as its own (it used to
+// crash reading a local the map does not hold): the `^` still answers its value.
+
+Value subclass: Bt3912EnsForeignValue
+
+  escaped: sink =>
+    t := 0
+    blk := [0]
+    [
+      t := 1
+      blk := [^t]
+    ] ensure: [sink record: t]
+    u := 0
+    [
+      u := 1
+      blk value
+      ^u
+    ] ensure: [sink record: u]

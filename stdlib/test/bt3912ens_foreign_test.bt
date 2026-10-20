@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947): see stdlib/test/fixtures/bt3912ens_foreign_value.bt.
+
+TestCase subclass: Bt3912EnsForeignTest
+
+  testForeignEnsureKeepsTheThrownValue =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsForeignValue new) escaped: sink) equals: 1
