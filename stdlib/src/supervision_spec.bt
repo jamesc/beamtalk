@@ -3,7 +3,7 @@
 
 /// How long a supervisor waits for a child to stop before killing it.
 ///
-/// - an Integer — milliseconds the child has, after it is sent
+/// - an Integer (0 to 4294967295) — milliseconds the child has, after it is sent
 ///   `exit(Pid, shutdown)`, to finish; an overrunning child is killed
 ///   (exit reason `#killed`)
 /// - `#infinity` — wait as long as it takes (the default for supervisor children)
@@ -65,13 +65,14 @@ typed Value subclass: SupervisionSpec
   field: args :: Object | Nil = nil
   /// Custom shutdown timeout, or nil to use the computed default.
   ///
-  /// An Integer (milliseconds, non-negative), `#infinity` or `#brutalKill`
+  /// An Integer (milliseconds, 0 to 4294967295), `#infinity` or `#brutalKill`
   /// (see `ShutdownTimeout`). When nil, workers use 5000ms and supervisors
   /// use `#infinity`. Set via `withShutdown:` to give a child time to drain
   /// connections or flush state when its supervisor shuts it down: on
   /// shutdown the child is sent `exit(Pid, shutdown)` and is killed (exit
   /// reason `#killed`) if it has not exited within the timeout. Any other
-  /// value makes the supervisor's start fail with a `#type_error`.
+  /// value makes the supervisor's start fail (`supervise` returns
+  /// `Result error:` with kind `#supervisor_start_failed`).
   ///
   /// ## Examples
   /// ```beamtalk

@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3965 fixture: static supervisor whose child has an invalid
+// `withShutdown:` value, which must make `supervise` fail cleanly. See
+// stdlib/test/supervision_shutdown_test.bt.
+
+Supervisor subclass: Bt3965BadShutdownSup
+
+  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  class children -> List =>
+    spec := Bt3965SlowStopper supervisionSpec withShutdown: #soon
+    #(spec)

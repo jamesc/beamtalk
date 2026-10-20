@@ -90,6 +90,12 @@ functions that call OTP APIs from the caller's process context.
 %% the `maxChildren` limit read by `dynamic_init/2`.
 -define(MAX_CHILDREN_KEY, '$beamtalk_max_children').
 
+%% BT-3965: largest Integer shutdown timeout. OTP's own child-spec check has
+%% no upper bound, but a static supervisor waits with `receive ... after`,
+%% whose timeout is limited to 16#FFFFFFFF ms; a larger value would crash the
+%% supervisor mid-shutdown. `#infinity` covers anything longer.
+-define(MAX_SHUTDOWN_MS, 16#FFFFFFFF).
+
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
@@ -154,7 +160,7 @@ startLink(Self) ->
 -spec start_link_supervisor(atom(), module()) ->
     {ok, tuple()} | {error, #beamtalk_error{}}.
 start_link_supervisor(ClassName, Module) ->
-    case Module:start_link() of
+    case start_link_trapping_exits(Module) of
         {ok, Pid} ->
             ?LOG_INFO("Supervisor started", #{
                 supervisor => ClassName, module => Module, pid => Pid, domain => [beamtalk, runtime]
@@ -186,6 +192,28 @@ start_link_supervisor(ClassName, Module) ->
                 iolist_to_binary(io_lib:format("supervisor start_link failed: ~p", [Reason]))
             ),
             {error, Error}
+    end.
+
+-doc """
+Call `Module:start_link()` with exits trapped, so a supervisor whose `init/1`
+fails returns `{error, Reason}` instead of killing the caller (BT-3965).
+
+A failing `init/1` (a raise, or OTP rejecting a child spec) acks the caller
+with `{error, Reason}` and then exits with `Reason` through the link; a caller
+that does not trap exits can be killed by that signal before
+`proc_lib:start_link` unlinks it — and the caller of `supervise` is usually
+the class's own gen_server. While trapping, the signal becomes an `'EXIT'`
+message that `proc_lib` flushes when it unlinks. The previous flag is
+restored afterwards; a new supervisor stays linked to the caller exactly as
+before.
+""".
+-spec start_link_trapping_exits(module()) -> {ok, pid()} | ignore | {error, term()}.
+start_link_trapping_exits(Module) ->
+    Trapping = process_flag(trap_exit, true),
+    try
+        Module:start_link()
+    after
+        process_flag(trap_exit, Trapping)
     end.
 
 -doc """
@@ -1762,9 +1790,9 @@ validate_max_children(ClassName, Value) ->
 Translate a Beamtalk shutdown value into the OTP child-spec `shutdown` term
 (BT-3965).
 
-Accepts a non-negative Integer (milliseconds), `infinity` (Beamtalk
-`#infinity`) or `brutalKill` (Beamtalk `#brutalKill`, emitted as OTP
-`brutal_kill`); anything else raises a `type_error` attributed to
+Accepts an Integer from 0 to `?MAX_SHUTDOWN_MS` (milliseconds), `infinity`
+(Beamtalk `#infinity`) or `brutalKill` (Beamtalk `#brutalKill`, emitted as
+OTP `brutal_kill`); anything else raises a `type_error` attributed to
 `Class`/`Selector`, with the offending value in `details`. The single place
 the `ShutdownTimeout` rule is checked: both `SupervisionSpec childSpec`
 (via `spec_to_otp/2`) and `DynamicSupervisor class childShutdown` go
@@ -1783,7 +1811,7 @@ check_shutdown(_Class, _Selector, infinity) ->
     {ok, infinity};
 check_shutdown(_Class, _Selector, brutalKill) ->
     {ok, brutal_kill};
-check_shutdown(_Class, _Selector, Ms) when is_integer(Ms), Ms >= 0 ->
+check_shutdown(_Class, _Selector, Ms) when is_integer(Ms), Ms >= 0, Ms =< ?MAX_SHUTDOWN_MS ->
     {ok, Ms};
 check_shutdown(Class, Selector, Other) ->
     Error0 = beamtalk_error:new(
@@ -1792,8 +1820,8 @@ check_shutdown(Class, Selector, Other) ->
         Selector,
         iolist_to_binary(
             io_lib:format(
-                "~s must be a non-negative Integer (ms), #infinity or #brutalKill, got ~p",
-                [Selector, Other]
+                "~s must be an Integer from 0 to ~b (ms), #infinity or #brutalKill, got ~p",
+                [Selector, ?MAX_SHUTDOWN_MS, Other]
             )
         )
     ),
@@ -1826,6 +1854,18 @@ validate_child_shutdown(ClassName, Value) ->
 -spec apply_child_shutdown(map(), nil | brutal_kill | infinity | non_neg_integer()) -> map().
 apply_child_shutdown(Spec, nil) ->
     Spec;
+apply_child_shutdown(#{type := supervisor, id := Id} = Spec, Shutdown) when
+    Shutdown =/= infinity
+->
+    %% OTP allows it, but a supervisor child with a finite shutdown can be
+    %% killed while it is still stopping its own children, which then exit
+    %% with `killed` instead of their own shutdown. Applied as configured.
+    ?LOG_WARNING("DynamicSupervisor childShutdown is not #infinity for a supervisor child", #{
+        child => Id,
+        child_shutdown => Shutdown,
+        domain => [beamtalk, runtime]
+    }),
+    Spec#{shutdown => Shutdown};
 apply_child_shutdown(Spec, Shutdown) ->
     Spec#{shutdown => Shutdown}.
 
@@ -1833,9 +1873,10 @@ apply_child_shutdown(Spec, Shutdown) ->
 Validate a DynamicSupervisor's class-side configuration (`class maxChildren`,
 BT-3964; `class childShutdown`, BT-3965) in the caller before `start_link`.
 
-A raise inside the supervisor's `init/1` takes down the linked caller rather
-than returning `{error, _}`, so `startLink/1` checks the values first and turns
-a bad one into `supervisor_start_failed`. It reads each value through
+Checking before `start_link` turns a bad value into `supervisor_start_failed`
+carrying the validation message as its hint, rather than an opaque
+`init/1` crash reason (`start_link_trapping_exits/1` keeps such a crash from
+killing the caller). It reads each value through
 `read_dynamic_config/3`, the same resolver `dynamic_init/2` uses, so the value
 validated here is the value the supervisor applies. Only DynamicSupervisor
 subclasses have the settings, and an already-running supervisor is skipped so

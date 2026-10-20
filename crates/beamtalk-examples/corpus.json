@@ -30672,6 +30672,55 @@
       "explanation": "BT-3965 fixture: DynamicSupervisor with an invalid `childShutdown`, which must make `supervise` fail cleanly. See stdlib/test/supervision_shutdown_test.bt."
     },
     {
+      "id": "stdlib-test-fixtures-bt3965bad-shutdown-sup",
+      "title": "Bt3965BadShutdownSup",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt3965BadShutdownSup",
+        "Supervisor",
+        "assign",
+        "assignment",
+        "bt3965bad_shutdown_sup",
+        "children",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "restart",
+        "set",
+        "strategy",
+        "subclassing",
+        "supervision"
+      ],
+      "source": "// BT-3965 fixture: static supervisor whose child has an invalid\n// `withShutdown:` value, which must make `supervise` fail cleanly. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nSupervisor subclass: Bt3965BadShutdownSup\n\n  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne\n\n  class children -> List =>\n    spec := Bt3965SlowStopper supervisionSpec withShutdown: #soon\n    #(spec)",
+      "explanation": "BT-3965 fixture: static supervisor whose child has an invalid `withShutdown:` value, which must make `supervise` fail cleanly. See stdlib/test/supervision_shutdown_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3965brutal-pool",
+      "title": "Bt3965BrutalPool",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt3965BrutalPool",
+        "DynamicSupervisor",
+        "bt3965brutal_pool",
+        "childClass",
+        "childShutdown",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "object",
+        "restart",
+        "subclassing",
+        "supervision"
+      ],
+      "source": "// BT-3965 fixture: DynamicSupervisor whose children are killed at once on\n// shutdown. See stdlib/test/supervision_shutdown_test.bt.\n\nDynamicSupervisor(Bt3965SlowStopper) subclass: Bt3965BrutalPool\n\n  class childClass => Bt3965SlowStopper\n\n  class childShutdown -> Symbol => #brutalKill",
+      "explanation": "BT-3965 fixture: DynamicSupervisor whose children are killed at once on shutdown. See stdlib/test/supervision_shutdown_test.bt."
+    },
+    {
       "id": "stdlib-test-fixtures-bt3965brutal-sup",
       "title": "Bt3965BrutalSup",
       "category": "stdlib-fixtures",
@@ -30695,8 +30744,55 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// BT-3965 fixture: static supervisor whose child is `withShutdown:\n// #brutalKill` — killed at once, terminate: never runs. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nSupervisor subclass: Bt3965BrutalSup\n\n  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne\n\n  class children -> List =>\n    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{#tableName => #bt3965Brutal})\n      withShutdown: #brutalKill\n    #(spec)",
+      "source": "// BT-3965 fixture: static supervisor whose child is `withShutdown:\n// #brutalKill` — killed at once, terminate: never runs. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nSupervisor subclass: Bt3965BrutalSup\n\n  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne\n\n  class children -> List =>\n    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{\n      #tableName => #bt3965Shutdown\n    }) withShutdown: #brutalKill\n    #(spec)",
       "explanation": "BT-3965 fixture: static supervisor whose child is `withShutdown: #brutalKill` — killed at once, terminate: never runs. See stdlib/test/supervision_shutdown_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3965capped-stopper",
+      "title": "Bt3965CappedStopper",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt3965CappedStopper",
+        "Bt3965SlowStopper",
+        "async",
+        "bt3965capped_stopper",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "object",
+        "process",
+        "subclassing",
+        "supervisionSpec"
+      ],
+      "source": "// BT-3965 fixture: a Bt3965SlowStopper whose own `class supervisionSpec`\n// gives it only 50 ms to stop — used to check that a pool's\n// `childShutdown` of nil keeps this value, and that a set `childShutdown`\n// overrides it. See stdlib/test/supervision_shutdown_test.bt.\n\nBt3965SlowStopper subclass: Bt3965CappedStopper\n\n  class supervisionSpec -> SupervisionSpec =>\n    ((SupervisionSpec new withActorClass: self) withRestart: self supervisionPolicy) withShutdown: 50",
+      "explanation": "BT-3965 fixture: a Bt3965SlowStopper whose own `class supervisionSpec` gives it only 50 ms to stop — used to check that a pool's `childShutdown` of nil keeps this value, and that a set `childShutdown` overrides it. See stdlib/test/supervision_shutdown_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3965default-pool",
+      "title": "Bt3965DefaultPool",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt3965DefaultPool",
+        "DynamicSupervisor",
+        "bt3965default_pool",
+        "childClass",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "object",
+        "restart",
+        "subclassing",
+        "supervision"
+      ],
+      "source": "// BT-3965 fixture: DynamicSupervisor with the default `childShutdown` (nil),\n// so its children keep Bt3965CappedStopper's own 50 ms. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nDynamicSupervisor(Bt3965CappedStopper) subclass: Bt3965DefaultPool\n\n  class childClass => Bt3965CappedStopper",
+      "explanation": "BT-3965 fixture: DynamicSupervisor with the default `childShutdown` (nil), so its children keep Bt3965CappedStopper's own 50 ms. See stdlib/test/supervision_shutdown_test.bt."
     },
     {
       "id": "stdlib-test-fixtures-bt3965impatient-pool",
@@ -30744,8 +30840,30 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// BT-3965 fixture: static supervisor whose slow-stopping child gets less\n// shutdown time than its terminate: needs, so it is killed. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nSupervisor subclass: Bt3965ImpatientSup\n\n  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne\n\n  class children -> List =>\n    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{#tableName => #bt3965Impatient})\n      withShutdown: 50\n    #(spec)",
+      "source": "// BT-3965 fixture: static supervisor whose slow-stopping child gets less\n// shutdown time than its terminate: needs, so it is killed. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nSupervisor subclass: Bt3965ImpatientSup\n\n  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne\n\n  class children -> List =>\n    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{\n      #tableName => #bt3965Shutdown\n    }) withShutdown: 50\n    #(spec)",
       "explanation": "BT-3965 fixture: static supervisor whose slow-stopping child gets less shutdown time than its terminate: needs, so it is killed. See stdlib/test/supervision_shutdown_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt3965override-pool",
+      "title": "Bt3965OverridePool",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt3965OverridePool",
+        "DynamicSupervisor",
+        "bt3965override_pool",
+        "childClass",
+        "childShutdown",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "object",
+        "restart",
+        "subclassing",
+        "supervision"
+      ],
+      "source": "// BT-3965 fixture: DynamicSupervisor whose `childShutdown` overrides\n// Bt3965CappedStopper's own 50 ms with 10 s. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nDynamicSupervisor(Bt3965CappedStopper) subclass: Bt3965OverridePool\n\n  class childClass => Bt3965CappedStopper\n\n  class childShutdown -> Integer => 10000",
+      "explanation": "BT-3965 fixture: DynamicSupervisor whose `childShutdown` overrides Bt3965CappedStopper's own 50 ms with 10 s. See stdlib/test/supervision_shutdown_test.bt."
     },
     {
       "id": "stdlib-test-fixtures-bt3965patient-pool",
@@ -30766,8 +30884,8 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// BT-3965 fixture: DynamicSupervisor whose children get 1000 ms to stop —\n// enough for Bt3965SlowStopper's terminate:. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nDynamicSupervisor(Bt3965SlowStopper) subclass: Bt3965PatientPool\n\n  class childClass => Bt3965SlowStopper\n\n  class childShutdown -> Integer => 1000",
-      "explanation": "BT-3965 fixture: DynamicSupervisor whose children get 1000 ms to stop — enough for Bt3965SlowStopper's terminate:. See stdlib/test/supervision_shutdown_test.bt."
+      "source": "// BT-3965 fixture: DynamicSupervisor whose children get 10 s to stop —\n// enough for Bt3965SlowStopper's terminate:. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nDynamicSupervisor(Bt3965SlowStopper) subclass: Bt3965PatientPool\n\n  class childClass => Bt3965SlowStopper\n\n  class childShutdown -> Integer => 10000",
+      "explanation": "BT-3965 fixture: DynamicSupervisor whose children get 10 s to stop — enough for Bt3965SlowStopper's terminate:. See stdlib/test/supervision_shutdown_test.bt."
     },
     {
       "id": "stdlib-test-fixtures-bt3965patient-sup",
@@ -30793,7 +30911,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// BT-3965 fixture: static supervisor whose slow-stopping child gets more\n// shutdown time than its terminate: needs. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nSupervisor subclass: Bt3965PatientSup\n\n  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne\n\n  class children -> List =>\n    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{#tableName => #bt3965Patient})\n      withShutdown: 1000\n    #(spec)",
+      "source": "// BT-3965 fixture: static supervisor whose slow-stopping child gets more\n// shutdown time than its terminate: needs. See\n// stdlib/test/supervision_shutdown_test.bt.\n\nSupervisor subclass: Bt3965PatientSup\n\n  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne\n\n  class children -> List =>\n    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{\n      #tableName => #bt3965Shutdown\n    }) withShutdown: 10000\n    #(spec)",
       "explanation": "BT-3965 fixture: static supervisor whose slow-stopping child gets more shutdown time than its terminate: needs. See stdlib/test/supervision_shutdown_test.bt."
     },
     {
@@ -30826,7 +30944,7 @@
         "terminate:",
         "unless"
       ],
-      "source": "// BT-3965 fixture: an actor whose terminate: takes ~200 ms, so a supervisor\n// shutdown timeout either lets it finish (exit reason #shutdown) or kills it\n// first (exit reason #killed). Overriding terminate: makes it trap exits\n// (BT-3596), which is what gives it the shutdown window at all.\n// See stdlib/test/supervision_shutdown_test.bt.\n\nActor subclass: Bt3965SlowStopper\n  state: tableName = nil\n\n  terminate: reason =>\n    Timer sleep: 200\n    self.tableName isNil\n      ifFalse: [(Ets named: self.tableName) at: #terminated put: reason]",
+      "source": "// BT-3965 fixture: an actor whose terminate: takes ~200 ms, so a supervisor\n// shutdown timeout either lets it finish (exit reason #shutdown) or kills it\n// first (exit reason #killed). Overriding terminate: makes it trap exits\n// (BT-3596), which is what gives it the shutdown window at all.\n// See stdlib/test/supervision_shutdown_test.bt.\n\nActor subclass: Bt3965SlowStopper\n  state: tableName = nil\n\n  terminate: reason =>\n    Timer sleep: 200\n    self.tableName isNil ifFalse: [\n      (Ets named: self.tableName) at: #terminated put: reason\n    ]",
       "explanation": "BT-3965 fixture: an actor whose terminate: takes ~200 ms, so a supervisor shutdown timeout either lets it finish (exit reason #shutdown) or kills it first (exit reason #killed). Overriding terminate: makes it trap exits (BT-3596), which is what gives it the shutdown window at all. See stdlib/test/supervision_shutdown_test.bt."
     },
     {
@@ -48114,35 +48232,52 @@
         "conditional",
         "constructor",
         "create",
-        "exitReasonOf:stoppingWith:in:",
+        "exitReasonOf:stoppingWith:",
         "extends",
         "fault tolerance",
+        "for each",
+        "for-each",
+        "forEach",
         "if",
+        "if not",
         "inherit",
         "inheritance",
         "instantiate",
+        "iterate",
+        "iteration",
+        "loop",
         "mutate",
         "mutation",
+        "negation",
         "object",
         "restart",
         "serial",
         "set",
+        "setUp",
+        "startIn:",
         "subclassing",
         "supervision",
         "supervision_shutdown_test",
+        "table",
+        "tearDown",
         "testBrutalKillSkipsTerminate",
         "testChildOverrunningShutdownTimeoutIsKilled",
         "testChildShutdownDefaultsToNil",
+        "testChildShutdownOverridesChildClassSpec",
         "testChildWithinShutdownTimeoutExitsCleanly",
+        "testDynamicBrutalKillSkipsTerminate",
         "testDynamicChildOverrunningChildShutdownIsKilled",
         "testDynamicChildWithinChildShutdownExitsCleanly",
         "testInvalidChildShutdownFailsSupervise",
+        "testInvalidWithShutdownFailsSupervise",
+        "testNilChildShutdownKeepsChildClassSpec",
         "testSubclassOverridesChildShutdown",
         "testWithShutdownChainsWithOtherOverrides",
-        "testWithShutdownEmitsSymbolsInChildSpec"
+        "testWithShutdownEmitsSymbolsInChildSpec",
+        "unless"
       ],
-      "source": "// BT-3965: per-child shutdown timeouts — `SupervisionSpec withShutdown:`\n// (Integer ms, #infinity, #brutalKill) and `DynamicSupervisor class\n// childShutdown`.\n//\n// Every fixture child is a Bt3965SlowStopper, whose terminate: sleeps 200 ms\n// and then records its reason in the Ets table named by its `tableName`. Each\n// test also records the exit reason `onExit:` observes, so it can tell a\n// clean stop (#shutdown) from a kill (#killed).\n//\n// Fixtures: stdlib/test/fixtures/bt3965*.bt\n\nTestCase subclass: SupervisionShutdownTest\n\n  // The fixtures are name-registered supervisors and named Ets tables.\n  class serial -> Boolean => true\n\n  // Watch `child` and wait (up to ~2 s) for its exit reason.\n  exitReasonOf: child stoppingWith: stopBlock in: table =>\n    child onExit: [:reason | table at: #exitReason put: reason]\n    stopBlock value\n    100 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 20]]\n    table at: #exitReason\n\n  // === SupervisionSpec withShutdown: ===\n\n  testChildWithinShutdownTimeoutExitsCleanly =>\n    table := Ets new: #bt3965Patient type: #set\n    sup := (Bt3965PatientSup supervise) unwrap\n    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap\n    reason := self exitReasonOf: child stoppingWith: [sup stop] in: table\n    self assert: reason equals: #shutdown\n    // terminate: ran to completion inside the 1000 ms window.\n    self assert: (table at: #terminated) equals: #shutdown\n    table delete\n\n  testChildOverrunningShutdownTimeoutIsKilled =>\n    table := Ets new: #bt3965Impatient type: #set\n    sup := (Bt3965ImpatientSup supervise) unwrap\n    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap\n    reason := self exitReasonOf: child stoppingWith: [sup stop] in: table\n    self assert: reason equals: #killed\n    // Killed 50 ms in, before its 200 ms terminate: could finish.\n    self assert: (table at: #terminated) equals: nil\n    table delete\n\n  testBrutalKillSkipsTerminate =>\n    table := Ets new: #bt3965Brutal type: #set\n    sup := (Bt3965BrutalSup supervise) unwrap\n    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap\n    reason := self exitReasonOf: child stoppingWith: [sup stop] in: table\n    self assert: reason equals: #killed\n    self assert: (table at: #terminated) equals: nil\n    table delete\n\n  testWithShutdownEmitsSymbolsInChildSpec =>\n    infinite := (Bt3965SlowStopper supervisionSpec withShutdown: #infinity) childSpec\n    self assert: (infinite at: #shutdown) equals: #infinity\n    brutal := (Bt3965SlowStopper supervisionSpec withShutdown: #brutalKill) childSpec\n    self assert: (brutal at: #shutdown) equals: #brutalKill\n\n  testWithShutdownChainsWithOtherOverrides =>\n    spec := (Bt3965SlowStopper supervisionSpec withId: #slow withRestart: #permanent)\n      withShutdown: 15000\n    self assert: spec id equals: #slow\n    self assert: spec restart equals: #permanent\n    self assert: (spec childSpec at: #shutdown) equals: 15000\n\n  // === DynamicSupervisor class childShutdown ===\n\n  testChildShutdownDefaultsToNil =>\n    self assert: DynamicSupervisor childShutdown equals: nil\n\n  testSubclassOverridesChildShutdown =>\n    self assert: Bt3965ImpatientPool childShutdown equals: 50\n\n  testDynamicChildWithinChildShutdownExitsCleanly =>\n    table := Ets new: #bt3965PatientPool type: #set\n    pool := (Bt3965PatientPool supervise) unwrap\n    child := (pool startChild: #{#tableName => #bt3965PatientPool}) unwrap\n    reason := self exitReasonOf: child stoppingWith: [pool stop] in: table\n    self assert: reason equals: #shutdown\n    self assert: (table at: #terminated) equals: #shutdown\n    table delete\n\n  testDynamicChildOverrunningChildShutdownIsKilled =>\n    table := Ets new: #bt3965ImpatientPool type: #set\n    pool := (Bt3965ImpatientPool supervise) unwrap\n    child := (pool startChild: #{#tableName => #bt3965ImpatientPool}) unwrap\n    reason := self exitReasonOf: child stoppingWith: [pool stop] in: table\n    self assert: reason equals: #killed\n    self assert: (table at: #terminated) equals: nil\n    table delete\n\n  testInvalidChildShutdownFailsSupervise =>\n    result := Bt3965BadShutdownPool supervise\n    self assert: result isError equals: true\n    self assert: result error kind equals: #supervisor_start_failed\n    self assert: (result error hint includesSubstring: \"childShutdown\") equals: true\n    self assert: Bt3965BadShutdownPool current equals: nil",
-      "explanation": "BT-3965: per-child shutdown timeouts — `SupervisionSpec withShutdown:` (Integer ms, #infinity, #brutalKill) and `DynamicSupervisor class childShutdown`.  Every fixture child is a Bt3965SlowStopper, whose terminate: sleeps 200 ms and then records its reason in the Ets table named by its `tableName`. Each test also records the exit reason `onExit:` observes, so it can tell a clean stop (#shutdown) from a kill (#killed).  Fixtures: stdlib/test/fixtures/bt3965*.bt"
+      "source": "// BT-3965: per-child shutdown timeouts — `SupervisionSpec withShutdown:`\n// (Integer ms, #infinity, #brutalKill) and `DynamicSupervisor class\n// childShutdown`.\n//\n// Every fixture child is a Bt3965SlowStopper (or its subclass\n// Bt3965CappedStopper), whose terminate: sleeps 200 ms and then records its\n// reason in the Ets table #bt3965Shutdown. Each test also records the exit\n// reason `onExit:` observes, so it can tell a clean stop (#shutdown) from a\n// kill (#killed). \"Patient\" fixtures allow 10 s, far more than the 200 ms the\n// child needs, so a slow CI machine cannot turn a clean stop into a kill.\n//\n// Fixtures: stdlib/test/fixtures/bt3965*.bt\n\nTestCase subclass: SupervisionShutdownTest\n\n  // The fixtures are name-registered supervisors sharing one named Ets table.\n  class serial -> Boolean => true\n\n  setUp =>\n    (Ets exists: #bt3965Shutdown) ifTrue: [(Ets named: #bt3965Shutdown) delete]\n    Ets new: #bt3965Shutdown type: #set\n\n  // Stop anything a failed test left running, so the next test starts clean.\n  tearDown =>\n    #(Bt3965PatientSup, Bt3965ImpatientSup, Bt3965BrutalSup, Bt3965PatientPool, Bt3965ImpatientPool, Bt3965BrutalPool, Bt3965DefaultPool, Bt3965OverridePool)\n      do: [:cls |\n        sup := cls current\n        sup isNil ifFalse: [[sup stop] on: Error do: [:_e | nil]]\n      ]\n    (Ets exists: #bt3965Shutdown) ifTrue: [(Ets named: #bt3965Shutdown) delete]\n\n  table => Ets named: #bt3965Shutdown\n\n  // Watch `child`, run `stopBlock`, and wait (up to ~2 s) for the child's\n  // exit reason.\n  exitReasonOf: child stoppingWith: stopBlock =>\n    t := self table\n    child onExit: [:reason | t at: #exitReason put: reason]\n    stopBlock value\n    100 timesRepeat: [(t at: #exitReason) isNil ifTrue: [Timer sleep: 20]]\n    t at: #exitReason\n\n  // Start a pool child that records into the shared table.\n  startIn: pool => (pool startChild: #{#tableName => #bt3965Shutdown}) unwrap\n\n  // === SupervisionSpec withShutdown: ===\n  testChildWithinShutdownTimeoutExitsCleanly =>\n    sup := (Bt3965PatientSup supervise) unwrap\n    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap\n    self assert: (self exitReasonOf: child stoppingWith: [\n      sup stop\n    ]) equals: #shutdown\n    // terminate: ran to completion inside the shutdown window.\n    self assert: (self table at: #terminated) equals: #shutdown\n\n  testChildOverrunningShutdownTimeoutIsKilled =>\n    sup := (Bt3965ImpatientSup supervise) unwrap\n    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap\n    self assert: (self exitReasonOf: child stoppingWith: [\n      sup stop\n    ]) equals: #killed\n    // Killed 50 ms in, before its 200 ms terminate: could finish.\n    self assert: (self table at: #terminated) equals: nil\n\n  testBrutalKillSkipsTerminate =>\n    sup := (Bt3965BrutalSup supervise) unwrap\n    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap\n    self assert: (self exitReasonOf: child stoppingWith: [\n      sup stop\n    ]) equals: #killed\n    self assert: (self table at: #terminated) equals: nil\n\n  testInvalidWithShutdownFailsSupervise =>\n    result := Bt3965BadShutdownSup supervise\n    self assert: result isError equals: true\n    self assert: result error kind equals: #supervisor_start_failed\n    self assert: Bt3965BadShutdownSup current equals: nil\n\n  testWithShutdownEmitsSymbolsInChildSpec =>\n    infinite := (Bt3965SlowStopper supervisionSpec withShutdown: #infinity) childSpec\n    self assert: (infinite at: #shutdown) equals: #infinity\n    brutal := (Bt3965SlowStopper supervisionSpec withShutdown: #brutalKill) childSpec\n    self assert: (brutal at: #shutdown) equals: #brutalKill\n\n  testWithShutdownChainsWithOtherOverrides =>\n    spec := (Bt3965SlowStopper supervisionSpec withId: #slow withRestart: #permanent) withShutdown: 15000\n    self assert: spec id equals: #slow\n    self assert: spec restart equals: #permanent\n    self assert: (spec childSpec at: #shutdown) equals: 15000\n\n  // === DynamicSupervisor class childShutdown ===\n  testChildShutdownDefaultsToNil =>\n    self assert: DynamicSupervisor childShutdown equals: nil\n\n  testSubclassOverridesChildShutdown =>\n    self assert: Bt3965ImpatientPool childShutdown equals: 50\n\n  testDynamicChildWithinChildShutdownExitsCleanly =>\n    pool := (Bt3965PatientPool supervise) unwrap\n    child := self startIn: pool\n    self assert: (self exitReasonOf: child stoppingWith: [\n      pool stop\n    ]) equals: #shutdown\n    self assert: (self table at: #terminated) equals: #shutdown\n\n  testDynamicChildOverrunningChildShutdownIsKilled =>\n    pool := (Bt3965ImpatientPool supervise) unwrap\n    child := self startIn: pool\n    self assert: (self exitReasonOf: child stoppingWith: [\n      pool stop\n    ]) equals: #killed\n    self assert: (self table at: #terminated) equals: nil\n\n  testDynamicBrutalKillSkipsTerminate =>\n    pool := (Bt3965BrutalPool supervise) unwrap\n    child := self startIn: pool\n    self assert: (self exitReasonOf: child stoppingWith: [\n      pool stop\n    ]) equals: #killed\n    self assert: (self table at: #terminated) equals: nil\n\n  testNilChildShutdownKeepsChildClassSpec =>\n    // Bt3965CappedStopper's own supervisionSpec allows 50 ms.\n    pool := (Bt3965DefaultPool supervise) unwrap\n    child := self startIn: pool\n    self assert: (self exitReasonOf: child stoppingWith: [\n      pool stop\n    ]) equals: #killed\n\n  testChildShutdownOverridesChildClassSpec =>\n    // The pool's 10 s replaces Bt3965CappedStopper's own 50 ms.\n    pool := (Bt3965OverridePool supervise) unwrap\n    child := self startIn: pool\n    self assert: (self exitReasonOf: child stoppingWith: [\n      pool stop\n    ]) equals: #shutdown\n    self assert: (self table at: #terminated) equals: #shutdown\n\n  testInvalidChildShutdownFailsSupervise =>\n    result := Bt3965BadShutdownPool supervise\n    self assert: result isError equals: true\n    self assert: result error kind equals: #supervisor_start_failed\n    self assert: (result error hint includesSubstring: \"childShutdown\") equals: true\n    self assert: Bt3965BadShutdownPool current equals: nil",
+      "explanation": "BT-3965: per-child shutdown timeouts — `SupervisionSpec withShutdown:` (Integer ms, #infinity, #brutalKill) and `DynamicSupervisor class childShutdown`.  Every fixture child is a Bt3965SlowStopper (or its subclass Bt3965CappedStopper), whose terminate: sleeps 200 ms and then records its reason in the Ets table #bt3965Shutdown. Each test also records the exit reason `onExit:` observes, so it can tell a clean stop (#shutdown) from a kill (#killed). \"Patient\" fixtures allow 10 s, far more than the 200 ms the child needs, so a slow CI machine cannot turn a clean stop into a kill.  Fixtures: stdlib/test/fixtures/bt3965*.bt"
     },
     {
       "id": "stdlib-test-supervision-spec-test",

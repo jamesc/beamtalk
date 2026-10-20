@@ -10,6 +10,7 @@ Supervisor subclass: Bt3965BrutalSup
   class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
 
   class children -> List =>
-    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{#tableName => #bt3965Brutal})
-      withShutdown: #brutalKill
+    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{
+      #tableName => #bt3965Shutdown
+    }) withShutdown: #brutalKill
     #(spec)

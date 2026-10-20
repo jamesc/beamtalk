@@ -2323,6 +2323,17 @@ to_otp_shutdown_test() ->
     ?assertEqual(brutal_kill, beamtalk_supervisor:to_otp_shutdown('X', shutdown, brutalKill)),
     ?assertEqual(0, beamtalk_supervisor:to_otp_shutdown('X', shutdown, 0)),
     ?assertEqual(1500, beamtalk_supervisor:to_otp_shutdown('X', shutdown, 1500)),
+    ?assertEqual(
+        16#FFFFFFFF, beamtalk_supervisor:to_otp_shutdown('X', shutdown, 16#FFFFFFFF)
+    ),
+    %% Above the `receive ... after` limit a static supervisor would crash
+    %% while shutting its children down.
+    ?assertMatch(
+        #beamtalk_error{kind = type_error},
+        raised_beamtalk_error(fun() ->
+            beamtalk_supervisor:to_otp_shutdown('X', shutdown, 16#100000000)
+        end)
+    ),
     E1 = raised_beamtalk_error(fun() ->
         beamtalk_supervisor:to_otp_shutdown('X', childShutdown, -1)
     end),

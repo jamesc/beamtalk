@@ -12,5 +12,6 @@ Actor subclass: Bt3965SlowStopper
 
   terminate: reason =>
     Timer sleep: 200
-    self.tableName isNil
-      ifFalse: [(Ets named: self.tableName) at: #terminated put: reason]
+    self.tableName isNil ifFalse: [
+      (Ets named: self.tableName) at: #terminated put: reason
+    ]
