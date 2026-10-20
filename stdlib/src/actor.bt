@@ -721,8 +721,8 @@ Object subclass: Actor
   ///
   /// ## Examples
   /// ```beamtalk
-  /// worker stopWith: #normal                                   // => #ok
-  /// self stopWith: (Tuple withAll: #(#shutdown, #peer_closed)) // => #ok
+  /// worker stopWith: #normal                  // => #ok
+  /// self stopWith: {#shutdown, #peer_closed}  // => #ok
   /// ```
   sealed stopWith: reason :: Object -> Symbol => @intrinsic "actorStopWith"
 
