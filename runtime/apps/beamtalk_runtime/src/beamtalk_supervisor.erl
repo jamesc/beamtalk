@@ -1587,13 +1587,8 @@ supervisor_child_entry({Id, PidOrStatus, Type, Mods}, ModClasses) ->
 %% `{ClassName | nil, Module | nil}` for one child's modules: the single-child
 %% counterpart of `module_classes/1` + `entry_class/2`.
 -spec class_for_modules([module()] | dynamic) -> {atom() | nil, module() | nil}.
-class_for_modules([Module | _]) when is_atom(Module) ->
-    case beamtalk_class_registry:class_name_for_module(Module) of
-        {ok, ClassName} -> {ClassName, Module};
-        not_found -> {nil, Module}
-    end;
-class_for_modules(_Mods) ->
-    {nil, nil}.
+class_for_modules(Mods) ->
+    entry_class(Mods, beamtalk_class_registry:module_to_class_map()).
 
 %% Module -> Beamtalk class name map for resolving many entries' modules: one
 %% read of the class metadata table (`module_to_class_map/0`), not one per
