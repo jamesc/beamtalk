@@ -1,0 +1,175 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135 §1, §3): several instances of one Supervisor or
+// DynamicSupervisor class (`spawn`, `spawnWith:`, `spawnAs:`,
+// `spawnWith:as:`, `named:`), nesting through `supervisionSpec` with integer
+// ids, and DynamicSupervisors of supervisors.
+//
+// Not serial: every test uses anonymous instances or names no other test
+// uses, and stops what it starts.
+//
+// Fixtures: stdlib/test/fixtures/bt3962*.bt
+
+TestCase subclass: SupervisorInstancesTest
+
+  // === spawn / spawnWith: ===
+  testSpawnStartsANewInstancePerCall =>
+    a := Bt3962Leaf spawn
+    b := Bt3962Leaf spawn
+    self deny: a == b
+    self assert: a count equals: 1
+    self assert: b count equals: 1
+    self assert: Bt3962Leaf current equals: nil
+    a stop
+    self assert: b count equals: 1
+    b stop
+
+  testSpawnWithPassesStartArgs =>
+    a := Bt3962Leaf spawnWith: #{#n => 1}
+    b := Bt3962Leaf spawnWith: #{#n => 2}
+    self assert: (a args at: #n) equals: 1
+    self assert: (b args at: #n) equals: 2
+    self assert: Bt3962Leaf spawn args equals: nil
+    a stop
+    b stop
+
+  testSpawnOnDynamicSupervisorGivesIndependentPools =>
+    a := Bt3962InitFarm spawn
+    b := Bt3962InitFarm spawn
+    self deny: a == b
+    // `initialize` ran once per spawned instance, in the caller.
+    self assert: a count equals: 1
+    self assert: b count equals: 1
+    a startChild unwrap
+    self assert: a count equals: 2
+    self assert: b count equals: 1
+    a stop
+    b stop
+
+  testFailingSpawnRaisesSupervisorStartFailed =>
+    e := [Bt3962BadSpec spawn] on: Error do: [:ex | ex]
+    self assert: e kind equals: #supervisor_start_failed
+
+  testSpawnOnAbstractSupervisorRaises =>
+    // A dynamic send: the compiler already rejects a literal one.
+    cls := Supervisor
+    e := [cls spawn] on: Error do: [:ex | ex]
+    self assert: e kind equals: #instantiation_error
+
+  // === runs in the caller, not the class process ===
+
+  // `childSpecs` sends to its own class while the tree starts. That send is
+  // served by the class process, which would be busy (and the start would
+  // hang) if the start still ran there.
+  testConfigCanSendToItsOwnClassDuringStart =>
+    a := Bt3962ClassCallSup spawn
+    self assert: a count equals: 1
+    a stop
+
+  testSuperviseCanSendToItsOwnClassDuringStart =>
+    a := Bt3962ClassCallSup supervise unwrap
+    self assert: (Bt3962ClassCallSup supervise unwrap) == a
+    self assert: Bt3962ClassCallSup current equals: a
+    a stop
+
+  testClassMethodCanSpawnSelf =>
+    a := Bt3962Factory make: 3
+    self assert: (a args at: #n) equals: 3
+    self assert: a count equals: 1
+    a stop
+
+  testDynamicSendsOfTheSpawnFamily =>
+    cls := Bt3962Leaf
+    a := cls spawnWith: #{#n => 5}
+    self assert: (a args at: #n) equals: 5
+    b := Bt3962Leaf perform: #spawn
+    self assert: b count equals: 1
+    a stop
+    b stop
+
+  // === named instances ===
+  testSpawnAsRegistersAndNamedFindsIt =>
+    a := (Bt3962Leaf spawnAs: #bt3962_named_leaf) unwrap
+    self assert: (Bt3962Leaf named: #bt3962_named_leaf) unwrap == a
+    again := Bt3962Leaf spawnAs: #bt3962_named_leaf
+    self assert: again error kind equals: #name_registered
+    a stop
+    self assert: (Bt3962Leaf named: #bt3962_named_leaf) error kind equals: #name_not_registered
+
+  testSpawnWithAsPassesArgs =>
+    a := (Bt3962Leaf spawnWith: #{#n => 7} as: #bt3962_named_leaf_args) unwrap
+    self assert: (a args at: #n) equals: 7
+    a stop
+
+  testNamedErrors =>
+    self assert: (Bt3962Leaf named: #bt3962_no_such_sup) error kind equals: #name_not_registered
+    w := (Bt3962Worker spawnAs: #bt3962_actor_name) unwrap
+    self assert: (Bt3962Leaf named: #bt3962_actor_name) error kind equals: #wrong_class
+    w stop
+    p := (Bt3962Pair spawnAs: #bt3962_named_pair) unwrap
+    self assert: (Bt3962Leaf named: #bt3962_named_pair) error kind equals: #wrong_class
+    p stop
+
+  // === nesting via supervisionSpec ===
+  testSupervisionSpecDefaults =>
+    spec := Bt3962Leaf supervisionSpec
+    self assert: spec actorClass equals: Bt3962Leaf
+    self assert: spec restart equals: #permanent
+    self assert: (spec childSpec at: #type) equals: #supervisor
+    self assert: (spec childSpec at: #shutdown) equals: #infinity
+    self assert: (Bt3962Farm supervisionSpec childSpec at: #type) equals: #supervisor
+
+  testTwoChildrenOfOneSupervisorClassWithIntegerIds =>
+    p := Bt3962Pair spawn
+    self assert: p count equals: 2
+    self assert: p children asSet equals: #(1, 2) asSet
+    p stop
+
+  testBareNestedSupervisorIsAnonymous =>
+    a := Bt3962Nest spawn
+    b := Bt3962Nest spawn
+    self assert: a count equals: 1
+    self assert: b count equals: 1
+    self assert: Bt3962Leaf current equals: nil
+    leaf :: Bt3962Leaf := (a which: Bt3962Leaf) unwrap
+    self assert: leaf count equals: 1
+    a stop
+    b stop
+
+  testWithNameRegistersNestedSupervisor =>
+    p := Bt3962NamedChildSup spawn
+    leaf := (Bt3962Leaf named: #bt3962_named_leaf_child) unwrap
+    self assert: leaf count equals: 1
+    p stop
+
+  testUnsupportedSpecFieldsFailTheParentStart =>
+    e := [Bt3962BadSpec spawn] on: Error do: [:ex | ex]
+    self assert: e kind equals: #supervisor_start_failed
+    self assert: (e hint includesSubstring: "withClassMethod:") equals: true
+    g := [Bt3962GlobalSpec spawn] on: Error do: [:ex | ex]
+    self assert: g kind equals: #supervisor_start_failed
+    self assert: (g hint includesSubstring: "scope: #global") equals: true
+
+  // === DynamicSupervisor of supervisors ===
+  testPoolOfSupervisorsStartsANewChildPerStartChild =>
+    farm := Bt3962Farm spawn
+    a := farm startChild unwrap
+    b := farm startChild unwrap
+    self deny: a == b
+    self assert: farm count equals: 2
+    c := (farm startChild: #{#n => 3}) unwrap
+    self assert: (c args at: #n) equals: 3
+    d := (farm startChild: #{#n => 4} name: #bt3962_farm_child) unwrap
+    self assert: (Bt3962Leaf named: #bt3962_farm_child) unwrap == d
+    dup := farm startChild: #{#n => 5} name: #bt3962_farm_child
+    self assert: dup error kind equals: #name_registered
+    self assert: farm count equals: 4
+    farm stop
+
+  // === discovery ===
+  testNodeSupervisorsListsSpawnedInstanceWhileItRuns =>
+    a := Bt3962Leaf spawn
+    self assert: (Node current supervisors unwrap includes: a) equals: true
+    a stop
+    self assert: (Node current supervisors unwrap includes: a) equals: false
