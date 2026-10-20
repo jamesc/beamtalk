@@ -143,6 +143,7 @@ fn generate_repl_expressions_impl(
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
+        generator.set_supervisor_classes_from_hierarchy(hierarchy);
     }
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_repl_module_multi(expressions)?;
@@ -295,6 +296,7 @@ fn generate_repl_expressions_traced_impl(
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
+        generator.set_supervisor_classes_from_hierarchy(hierarchy);
     }
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_repl_module_multi_traced(expressions, &source_texts)?;

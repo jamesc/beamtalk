@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135 §1): a class method that starts instances of its own
+// class with `self spawnWith:` (lowered to the supervisor start helper, not
+// the actor spawn intrinsic).
+
+Supervisor subclass: Bt3962Factory
+
+  class make: n => self spawnWith: #{#n => n}
+
+  childSpecs => #(Bt3962Worker)

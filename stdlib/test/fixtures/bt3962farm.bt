@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135 §3): a DynamicSupervisor whose child class is itself a
+// supervisor. Every `startChild` starts a new anonymous Bt3962Leaf.
+
+DynamicSupervisor(Bt3962Leaf) subclass: Bt3962Farm
+
+  childClass => Bt3962Leaf

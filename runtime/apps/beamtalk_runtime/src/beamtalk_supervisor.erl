@@ -36,6 +36,21 @@ functions that call OTP APIs from the caller's process context.
 
 -export([
     startLink/1,
+    class_start/4,
+    supervise/2,
+    doSpawn/1,
+    doSpawnWith/2,
+    doSpawnWith/3,
+    doSpawnAs/2,
+    named/2,
+    classObject/1,
+    start_supervisor_child/2,
+    start_supervisor_child/3,
+    start_dynamic_supervisor_child/2,
+    start_dynamic_supervisor_child/3,
+    start_dynamic_supervisor_child/4,
+    instance_pids/0,
+    instances/0,
     current/1,
     static_init/2,
     static_init/3,
@@ -103,6 +118,15 @@ functions that call OTP APIs from the caller's process context.
 -define(SUP_ARGS_KEY, '$beamtalk_sup_args').
 -define(CHILD_CLASS_KEY, '$beamtalk_child_class').
 -define(SUP_FLAGS_KEY, '$beamtalk_sup_flags').
+%% ADR 0135 §1: `{ClassName, Module}` of the supervisor, set by `begin_init/3`
+%% (read by `named/2` to check the class of a registered supervisor).
+-define(SUP_CLASS_KEY, '$beamtalk_sup_class').
+
+%% ADR 0135 §1: the init arg of a top-level spawn-family start is wrapped in
+%% `{?TOP_LEVEL_TAG, Args}`; `begin_init/3` unwraps it and joins the instance
+%% to `?INSTANCES_GROUP` so `Node current supervisors` finds it.
+-define(TOP_LEVEL_TAG, '$beamtalk_top_level').
+-define(INSTANCES_GROUP, beamtalk_supervisor_instances).
 
 %% ADR 0135 §2: hint for a configuration method that messaged its own
 %% supervisor (OTP `calling_self`) while it was still in `init/1`.
@@ -122,67 +146,146 @@ functions that call OTP APIs from the caller's process context.
 %%% ============================================================================
 
 -doc """
-Start (or return) the running supervisor for the given class.
+FFI shim for `class supervise` on Supervisor and DynamicSupervisor (ADR 0135 §1).
 
-Called from `class supervise` on Supervisor and DynamicSupervisor subclasses.
-Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
+`Self` is the class object `{beamtalk_object, 'ClassName class', Module,
+ClassPid}`. Delegates to `supervise/2`, which starts the class-named
+singleton in the calling process (or answers the running one) and runs its
+instance-side `initialize`.
 
-## Return shape (ADR 0080 Phase 0a — Option 2 probe)
-
-Returns `{ok, {beamtalk_supervisor_new, ClassName, Module, Pid}}` on a
-fresh start, `{ok, {beamtalk_supervisor, ClassName, Module, Pid}}` on
-the idempotent `{already_started, Pid}` branch, and
-`{error, #beamtalk_error{}}` on start failure. FFI coercion in
-`beamtalk_erlang_proxy:coerce_ffi_result/2` wraps this into a Beamtalk
-`Result` tagged map for the class method body's return.
-
-The `beamtalk_supervisor_new` inner tag signals a fresh start to the
-post-dispatch hook in `beamtalk_class_dispatch:class_send_dispatch/3`.
-The hook matches two shapes:
-
-  * the bare `{beamtalk_supervisor_new, ...}` tuple, seen when the
-    stdlib `supervise` method calls `.unwrap` on the FFI-coerced
-    Result (the current Phase 0a shim), and
-  * a Result tagged map wrapping `{beamtalk_supervisor_new, ...}`,
-    seen after the Phase 1 stdlib migration when callers handle the
-    Result themselves.
-
-In both cases the hook rewrites the inner tag to
-`{beamtalk_supervisor, ...}`, runs instance-side `initialize` in the caller's
-process (preserving the ADR 0059 guarantee), and returns the
-rewritten shape (bare tuple or re-wrapped Result) to the caller.
+An ordinary `X supervise` send never reaches this body: the runtime routes
+it straight to `class_start/4` in the caller (`beamtalk_class_dispatch`), so
+the start does not run in the class gen_server. This shim serves the
+remaining paths: a `self supervise` (or `super supervise`) inside one of the
+class's own class methods, which runs in that class's process like the rest
+of the method body, so configuration started from there must not send to the
+same class.
 """.
 -spec startLink(beamtalk_object()) ->
-    {ok, {beamtalk_supervisor_new | beamtalk_supervisor, atom(), module(), pid()}}
-    | {error, #beamtalk_error{}}.
+    {ok, {beamtalk_supervisor, atom(), module(), pid()}} | {error, #beamtalk_error{}}.
 startLink(Self) ->
-    ClassPid = element(4, Self),
-    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
-    Module = beamtalk_object_class:module_name_safe(ClassPid),
-    start_link_supervisor(ClassName, Module).
+    {ClassName, Module} = class_identity(Self),
+    supervise(ClassName, Module).
 
--spec start_link_supervisor(atom(), module()) ->
-    {ok, tuple()} | {error, #beamtalk_error{}}.
-start_link_supervisor(ClassName, Module) ->
-    case start_link_trapping_exits(Module) of
+-doc """
+Start a supervisor class from a class-side spawn-family message or
+`supervise`, in the calling process (ADR 0135 §1).
+
+The single runtime entry for `supervise`, `spawn`, `spawnWith:`, `spawnAs:`
+and `spawnWith:as:` on a Supervisor or DynamicSupervisor class. Codegen calls
+it directly for `ClassRef spawn…` and `self spawn…` sends on supervisor
+classes, and `beamtalk_class_dispatch:class_send/3` calls it for every other
+send of those selectors to a supervisor class, so the tree start never runs
+in the class gen_server (where it would serialise every other class send
+behind the start and deadlock any child that messages the class).
+
+Returns what the corresponding stdlib method answers: a supervisor handle
+for `spawn`/`spawnWith:` (raising `#supervisor_start_failed` on failure), and
+a `Result` for `supervise`, `spawnAs:` and `spawnWith:as:`. An abstract
+receiver (`Supervisor spawn`) raises `#instantiation_error`.
+""".
+-spec class_start(atom(), module(), atom(), list()) -> term().
+class_start(ClassName, Module, Selector, Args) ->
+    case beamtalk_class_metadata:lookup_is_abstract(ClassName) of
+        {ok, true} ->
+            beamtalk_error:raise(
+                beamtalk_class_instantiation:abstract_class_error(ClassName, Selector)
+            );
+        _ ->
+            class_start_concrete(ClassName, Module, Selector, Args)
+    end.
+
+-spec class_start_concrete(atom(), module(), atom(), list()) -> term().
+class_start_concrete(ClassName, Module, supervise, []) ->
+    beamtalk_result:from_tagged_tuple(supervise(ClassName, Module));
+class_start_concrete(ClassName, Module, spawn, []) ->
+    spawn_instance(ClassName, Module, nil, spawn);
+class_start_concrete(ClassName, Module, 'spawnWith:', [Args]) ->
+    spawn_instance(ClassName, Module, Args, 'spawnWith:');
+class_start_concrete(ClassName, Module, 'spawnAs:', [Name]) ->
+    beamtalk_result:from_tagged_tuple(
+        spawn_named_instance(ClassName, Module, nil, Name, 'spawnAs:')
+    );
+class_start_concrete(ClassName, Module, 'spawnWith:as:', [Args, Name]) ->
+    beamtalk_result:from_tagged_tuple(
+        spawn_named_instance(ClassName, Module, Args, Name, 'spawnWith:as:')
+    );
+class_start_concrete(ClassName, _Module, Selector, Args) ->
+    %% A dynamic send with the wrong argument count (`perform:withArguments:`).
+    beamtalk_error:raise(
+        beamtalk_error:new(
+            arity_mismatch,
+            ClassName,
+            Selector,
+            iolist_to_binary(
+                io_lib:format("~ts takes a different number of arguments, got ~b", [
+                    Selector, length(Args)
+                ])
+            )
+        )
+    ).
+
+-doc """
+`supervise`: ensure the class-named singleton is running (ADR 0135 §1).
+
+Starts `Module:start_link/0` (registered as `{local, Module}`, start args
+`nil`) in the calling process, then unlinks it, so the tree is tied to
+neither the caller nor the class process (the exdura failure: a restart
+intensity exit used to take the class process down). A fresh start runs the
+instance-side `initialize` here, in the caller; an already-running instance
+is answered as is, after any concurrent caller's `initialize` has finished
+(BT-3759).
+
+Concurrent `supervise` calls on one class are serialised around the start
+and the arming of the `initializing` gate (a node-local `global` lock keyed
+by module): that is what the class gen_server used to provide, so a second
+caller that gets `already_started` always finds the gate armed.
+""".
+-spec supervise(atom(), module()) ->
+    {ok, {beamtalk_supervisor, atom(), module(), pid()}} | {error, #beamtalk_error{}}.
+supervise(ClassName, Module) ->
+    %% No `whereis` fast path before the lock: the name is registered before
+    %% `init/1` runs, so a running-looking singleton may still be inside its
+    %% start with no gate armed yet. The lock makes such a caller wait until the
+    %% gate is armed.
+    Started = global:trans(
+        {{beamtalk_supervise, Module}, self()},
+        fun() ->
+            %% Arm the gate before unlinking: if this caller dies after the
+            %% unlink but before `run_initialize/1` claims the gate, the next
+            %% `supervise` waits on it and reclaims the orphan at the deadline
+            %% instead of answering an uninitialised singleton.
+            start_unlinked(fun() ->
+                case Module:start_link() of
+                    {ok, Pid} = Ok ->
+                        arm_init_gate(Pid),
+                        Ok;
+                    Other ->
+                        Other
+                end
+            end)
+        end,
+        [node()],
+        infinity
+    ),
+    case Started of
         {ok, Pid} ->
             ?LOG_INFO("Supervisor started", #{
                 supervisor => ClassName, module => Module, pid => Pid, domain => [beamtalk, runtime]
             }),
-            %% ADR 0080 Phase 0a, option 2: use the
-            %% beamtalk_supervisor_new tag to signal to the post-dispatch
-            %% hook in beamtalk_class_dispatch that this is a fresh start.
-            %% The hook unpacks the Result tagged map produced by FFI
-            %% coercion, rewrites the inner tag to beamtalk_supervisor,
-            %% runs initialize in the caller's process, and rewraps.
-            arm_init_gate(Pid),
-            {ok, {beamtalk_supervisor_new, ClassName, Module, Pid}};
+            SupTuple = {beamtalk_supervisor, ClassName, Module, Pid},
+            run_initialize(SupTuple),
+            {ok, SupTuple};
         {error, {already_started, Pid}} ->
-            %% Idempotent branch: no initialize re-run. The dispatch hook
-            %% calls await_initialized/1 so a concurrent first caller's hook
-            %% has finished before this caller sees the pid (BT-3759).
-            {ok, {beamtalk_supervisor, ClassName, Module, Pid}};
-        {error, Reason} ->
+            SupTuple = {beamtalk_supervisor, ClassName, Module, Pid},
+            await_initialized(SupTuple),
+            {ok, SupTuple};
+        Failure ->
+            Reason =
+                case Failure of
+                    {error, R} -> R;
+                    Other -> Other
+                end,
             ?LOG_ERROR("Supervisor start failed", #{
                 supervisor => ClassName,
                 module => Module,
@@ -191,6 +294,371 @@ start_link_supervisor(ClassName, Module) ->
             }),
             {error, start_failed_error(supervisor_start_failed, ClassName, supervise, Reason)}
     end.
+
+-doc "FFI shim for `class spawn` (ADR 0135 §1); see `class_start/4`.".
+-spec doSpawn(beamtalk_object()) -> term().
+doSpawn(Self) ->
+    {ClassName, Module} = class_identity(Self),
+    class_start(ClassName, Module, spawn, []).
+
+-doc "FFI shim for `class spawnWith:` (ADR 0135 §1); see `class_start/4`.".
+-spec doSpawnWith(beamtalk_object(), term()) -> term().
+doSpawnWith(Self, Args) ->
+    {ClassName, Module} = class_identity(Self),
+    class_start(ClassName, Module, 'spawnWith:', [Args]).
+
+-doc "FFI shim for `class spawnWith:as:` (ADR 0135 §1).".
+-spec doSpawnWith(beamtalk_object(), term(), term()) ->
+    {ok, tuple()} | {error, #beamtalk_error{}}.
+doSpawnWith(Self, Args, Name) ->
+    {ClassName, Module} = class_identity(Self),
+    spawn_named_instance(ClassName, Module, Args, Name, 'spawnWith:as:').
+
+-doc "FFI shim for `class spawnAs:` (ADR 0135 §1).".
+-spec doSpawnAs(beamtalk_object(), term()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
+doSpawnAs(Self, Name) ->
+    {ClassName, Module} = class_identity(Self),
+    spawn_named_instance(ClassName, Module, nil, Name, 'spawnAs:').
+
+-doc """
+FFI shim for `class named: name` on supervisor classes (ADR 0135 §1).
+
+`whereis(Name)` plus a class check, with `Actor named:`'s error kinds:
+`#name_not_registered` for an unknown name, `#wrong_class` for a process that
+is not a Beamtalk supervisor of the receiver class or a subclass (an actor,
+say), and `#type_error` for a non-Symbol name.
+""".
+-spec named(beamtalk_object(), term()) -> {ok, tuple()} | {error, #beamtalk_error{}}.
+named(Self, Name) when is_atom(Name) ->
+    {ClassName, _Module} = class_identity(Self),
+    case erlang:whereis(Name) of
+        undefined ->
+            {error,
+                beamtalk_error:new(
+                    name_not_registered,
+                    ClassName,
+                    'named:',
+                    iolist_to_binary(
+                        io_lib:format("No supervisor is registered under name '~ts'", [Name])
+                    )
+                )};
+        Pid ->
+            case sup_dictionary_value(Pid, ?SUP_CLASS_KEY) of
+                {ok, {Actual, ActualModule}} ->
+                    case beamtalk_class_registry:inherits_from(Actual, ClassName) of
+                        true -> {ok, {beamtalk_supervisor, Actual, ActualModule, Pid}};
+                        false -> wrong_class_error(ClassName, Name, Actual)
+                    end;
+                _ ->
+                    wrong_class_error(ClassName, Name, not_a_supervisor)
+            end
+    end;
+named(Self, Name) ->
+    {ClassName, _Module} = class_identity(Self),
+    {error,
+        beamtalk_error:new(
+            type_error,
+            ClassName,
+            'named:',
+            iolist_to_binary(io_lib:format("named: expects a Symbol, got ~tp", [Name]))
+        )}.
+
+-spec wrong_class_error(atom(), atom(), atom()) -> {error, #beamtalk_error{}}.
+wrong_class_error(ClassName, Name, not_a_supervisor) ->
+    {error,
+        beamtalk_error:new(
+            wrong_class,
+            ClassName,
+            'named:',
+            iolist_to_binary(
+                io_lib:format("Name '~ts' is not registered to a Beamtalk supervisor", [Name])
+            )
+        )};
+wrong_class_error(ClassName, Name, Actual) ->
+    {error,
+        beamtalk_error:new(
+            wrong_class,
+            ClassName,
+            'named:',
+            iolist_to_binary(
+                io_lib:format(
+                    "Name '~ts' is registered to a ~ts, not a ~ts", [Name, Actual, ClassName]
+                )
+            )
+        )}.
+
+-doc """
+FFI shim behind `class supervisionSpec` on Supervisor and DynamicSupervisor
+(ADR 0135 §3): the receiver as its canonical class object.
+
+An inherited class method's `self` carries the *defining* class's module
+(`beamtalk_class_dispatch:apply_class_method_in_context/6`), so the stdlib
+`supervisionSpec` would otherwise record `bt@stdlib@supervisor` as the
+child's module and the spec's `actorClass` would not equal the class.
+""".
+-spec classObject(beamtalk_object()) -> beamtalk_object().
+classObject(Self) ->
+    beamtalk_class_registry:class_object_from_pid(element(4, Self)).
+
+%% `{ClassName, Module}` of a class object passed to an FFI shim.
+-spec class_identity(beamtalk_object()) -> {atom(), module()}.
+class_identity(Self) ->
+    ClassPid = element(4, Self),
+    {
+        beamtalk_object_class:class_name_safe(ClassPid),
+        beamtalk_object_class:module_name_safe(ClassPid)
+    }.
+
+%% `spawn` / `spawnWith:`: start an anonymous, unlinked top-level instance and
+%% run its `initialize` in the caller. Raises `#supervisor_start_failed`.
+-spec spawn_instance(atom(), module(), term(), atom()) -> tuple().
+spawn_instance(ClassName, Module, Args, Selector) ->
+    StartFun = fun() -> supervisor:start_link(Module, {?TOP_LEVEL_TAG, Args}) end,
+    case start_top_level(ClassName, Module, StartFun) of
+        {ok, SupTuple} ->
+            SupTuple;
+        {error, Reason} ->
+            beamtalk_error:raise(
+                start_failed_error(supervisor_start_failed, ClassName, Selector, Reason)
+            )
+    end.
+
+%% `spawnAs:` / `spawnWith:as:`: start a top-level instance registered as
+%% `{local, Name}` (unlinked). A taken name is `#name_registered`, a reserved
+%% one `#reserved_name`, a non-Symbol `#type_error`, as for `Actor spawnAs:`.
+-spec spawn_named_instance(atom(), module(), term(), term(), atom()) ->
+    {ok, tuple()} | {error, #beamtalk_error{}}.
+spawn_named_instance(ClassName, _Module, _Args, Name, Selector) when not is_atom(Name) ->
+    {error,
+        beamtalk_error:new(
+            type_error,
+            ClassName,
+            Selector,
+            iolist_to_binary(io_lib:format("~ts expects a Symbol name, got ~tp", [Selector, Name]))
+        )};
+spawn_named_instance(ClassName, Module, Args, Name, Selector) ->
+    case beamtalk_actor:reserved_name(Name) of
+        true ->
+            {error,
+                beamtalk_error:new(
+                    reserved_name,
+                    ClassName,
+                    Selector,
+                    iolist_to_binary(
+                        io_lib:format("Cannot start a supervisor under reserved name '~ts'", [Name])
+                    )
+                )};
+        false ->
+            StartFun = fun() ->
+                supervisor:start_link({local, Name}, Module, {?TOP_LEVEL_TAG, Args})
+            end,
+            case start_top_level(ClassName, Module, StartFun) of
+                {ok, _} = Ok ->
+                    Ok;
+                {error, {already_started, _}} ->
+                    {error,
+                        beamtalk_error:new(
+                            name_registered,
+                            ClassName,
+                            Selector,
+                            iolist_to_binary(
+                                io_lib:format("Name '~ts' is already registered", [Name])
+                            )
+                        )};
+                {error, Reason} ->
+                    {error,
+                        start_failed_error(supervisor_start_failed, ClassName, Selector, Reason)}
+            end
+    end.
+
+%% Shared tail of the spawn family: start (unlinked), then run `initialize`
+%% in the caller. `initialize` raising stops the instance and re-raises.
+-spec start_top_level(atom(), module(), fun(() -> term())) ->
+    {ok, tuple()} | {error, term()}.
+start_top_level(ClassName, Module, StartFun) ->
+    case start_unlinked(StartFun) of
+        {ok, Pid} ->
+            ?LOG_INFO("Supervisor instance started", #{
+                supervisor => ClassName, module => Module, pid => Pid, domain => [beamtalk, runtime]
+            }),
+            SupTuple = {beamtalk_supervisor, ClassName, Module, Pid},
+            run_initialize(SupTuple),
+            {ok, SupTuple};
+        ignore ->
+            {error, ignore};
+        {error, _} = Error ->
+            Error
+    end.
+
+-doc """
+Run a supervisor `start_link` with exits trapped, then unlink the new
+supervisor from the caller (ADR 0135 §1: top-level supervisors are unlinked,
+like `Actor spawn`).
+
+A failing `init/1` acks the caller with `{error, Reason}` and then exits
+with `Reason` through the link; while trapping, that signal becomes an
+`'EXIT'` message (`proc_lib` flushes it) instead of killing the caller
+(BT-3965). After a successful start the link is removed, and an `'EXIT'`
+from a supervisor that died in between is flushed. The previous
+`trap_exit` flag is restored.
+""".
+-spec start_unlinked(fun(() -> term())) -> {ok, pid()} | ignore | {error, term()}.
+start_unlinked(StartFun) ->
+    {links, LinkedBefore} = erlang:process_info(self(), links),
+    Trapping = process_flag(trap_exit, true),
+    try StartFun() of
+        {ok, Pid} = Ok when is_pid(Pid) ->
+            unlink(Pid),
+            receive
+                {'EXIT', Pid, _} -> ok
+            after 0 -> ok
+            end,
+            Ok;
+        Other ->
+            Other
+    after
+        process_flag(trap_exit, Trapping),
+        _ = Trapping orelse propagate_trapped_exits(LinkedBefore)
+    end.
+
+%% The caller did not trap exits, so an exit signal that reached it through a
+%% link it already had while `start_unlinked/1` was trapping would have killed
+%% it. Honour that now instead of leaving the signal as an ignored message.
+%% Only links that existed before the start are considered: the supervisor
+%% being started (and anything `proc_lib` links during the start) are not.
+-spec propagate_trapped_exits([pid() | port()]) -> true.
+propagate_trapped_exits(LinkedBefore) ->
+    receive
+        {'EXIT', From, Reason} when Reason =/= normal ->
+            case lists:member(From, LinkedBefore) of
+                true -> exit(Reason);
+                false -> propagate_trapped_exits(LinkedBefore)
+            end
+    after 0 ->
+        true
+    end.
+
+-doc """
+Start a nested supervisor child (ADR 0135 §3): the start MFA `spec_to_otp/2`
+puts in a static parent's child spec for a supervisor child,
+`{beamtalk_supervisor, start_supervisor_child, [Module, Args]}`.
+
+Calls the child module's anonymous `start_link/1` with the spec's args
+(`nil` without `withArgs:`), so a parent can hold any number of children of
+one supervisor class. A module compiled before ADR 0135 exports only
+`start_link/0`; it is started that way (registered under its module and
+ignoring the args, as before) rather than failing with `undef` (ADR 0125).
+The new child stays linked to the calling supervisor.
+""".
+-spec start_supervisor_child(module(), term()) -> {ok, pid()} | ignore | {error, term()}.
+start_supervisor_child(Module, Args) ->
+    case exports(Module, start_link, 1) of
+        true -> Module:start_link(Args);
+        false -> Module:start_link()
+    end.
+
+-doc """
+`start_supervisor_child/2` for a `withName:` child: `start_link/2` registers
+the child as `{local, Name}`; a module without it (compiled before ADR 0135)
+falls back to `start_link/0`.
+""".
+-spec start_supervisor_child(module(), term(), atom()) -> {ok, pid()} | ignore | {error, term()}.
+start_supervisor_child(Module, Args, Name) ->
+    case beamtalk_actor:reserved_name(Name) of
+        true ->
+            %% Same reserved-name policy as `spawnAs:` (ADR 0079).
+            {error,
+                beamtalk_error:new(
+                    reserved_name,
+                    'Supervisor',
+                    'withName:',
+                    iolist_to_binary(
+                        io_lib:format("Cannot start a supervisor under reserved name '~ts'", [Name])
+                    )
+                )};
+        false ->
+            case exports(Module, start_link, 2) of
+                true ->
+                    Module:start_link(Name, Args);
+                false ->
+                    ?LOG_WARNING(
+                        "Supervisor child compiled before ADR 0135: withName: and args ignored",
+                        #{module => Module, name => Name, domain => [beamtalk, runtime]}
+                    ),
+                    Module:start_link()
+            end
+    end.
+
+-doc """
+`simple_one_for_one` template entry for a DynamicSupervisor whose child class
+is a supervisor (ADR 0135 §3): `{beamtalk_supervisor,
+start_dynamic_supervisor_child, [Module, DefaultArgs]}`. OTP appends the
+`startChild` arguments, so arity 2 is `startChild`, 3 `startChild: args` and
+4 `startChild: args name: aName`, mirroring `start_dynamic_child/2,3,4` for
+actor children. Each call starts a new anonymous child (`startChild:name:`
+registers it) through `start_supervisor_child/2,3`.
+""".
+-spec start_dynamic_supervisor_child(module(), term()) -> {ok, pid()} | ignore | {error, term()}.
+start_dynamic_supervisor_child(Module, DefaultArgs) ->
+    start_supervisor_child(Module, DefaultArgs).
+
+-doc "`startChild: args` on a pool of supervisors; see `start_dynamic_supervisor_child/2`.".
+-spec start_dynamic_supervisor_child(module(), term(), term()) ->
+    {ok, pid()} | ignore | {error, term()}.
+start_dynamic_supervisor_child(Module, _DefaultArgs, Args) ->
+    start_supervisor_child(Module, Args).
+
+-doc """
+`startChild: args name: aName` on a pool of supervisors; see
+`start_dynamic_supervisor_child/2`. A taken name surfaces as OTP's
+`{already_started, Pid}`, which `startChild/3` reports as `#name_registered`.
+""".
+-spec start_dynamic_supervisor_child(module(), term(), term(), term()) ->
+    {ok, pid()} | ignore | {error, term()}.
+start_dynamic_supervisor_child(Module, _DefaultArgs, Args, Name) when is_atom(Name) ->
+    start_supervisor_child(Module, Args, Name);
+start_dynamic_supervisor_child(_Module, _DefaultArgs, _Args, Name) ->
+    {error,
+        beamtalk_error:new(
+            type_error,
+            'DynamicSupervisor',
+            'startChild:name:',
+            iolist_to_binary(io_lib:format("name must be a Symbol, got ~tp", [Name]))
+        )}.
+
+-spec exports(module(), atom(), arity()) -> boolean().
+exports(Module, Fun, Arity) ->
+    _ = code:ensure_loaded(Module),
+    erlang:function_exported(Module, Fun, Arity).
+
+-doc """
+Pids of the running top-level spawn-family supervisor instances on this node:
+the local members of the `pg` group (default scope) each joins from its own
+`init/1` (ADR 0135 §1). `pg` drops a member when it exits, so a stopped
+instance is not listed. Used by process navigation and `Node current
+supervisors` to find anonymous instances.
+""".
+-spec instance_pids() -> [pid()].
+instance_pids() ->
+    try
+        pg:get_local_members(?INSTANCES_GROUP)
+    catch
+        error:badarg -> [];
+        exit:{noproc, _} -> []
+    end.
+
+-doc "`instance_pids/0` as supervisor handles (`{beamtalk_supervisor, Class, Module, Pid}`).".
+-spec instances() -> [tuple()].
+instances() ->
+    lists:filtermap(
+        fun(Pid) ->
+            case sup_dictionary_value(Pid, ?SUP_CLASS_KEY) of
+                {ok, {ClassName, Module}} -> {true, {beamtalk_supervisor, ClassName, Module, Pid}};
+                _ -> false
+            end
+        end,
+        instance_pids()
+    ).
 
 -doc """
 Build the `Kind` error (`supervisor_start_failed` for `supervise`,
@@ -255,28 +723,6 @@ cause_hint(#beamtalk_error{kind = Kind}) ->
     atom_to_binary(Kind, utf8).
 
 -doc """
-Call `Module:start_link()` with exits trapped, so a supervisor whose `init/1`
-fails returns `{error, Reason}` instead of killing the caller (BT-3965).
-
-A failing `init/1` (a raise, or OTP rejecting a child spec) acks the caller
-with `{error, Reason}` and then exits with `Reason` through the link; a caller
-that does not trap exits can be killed by that signal before
-`proc_lib:start_link` unlinks it — and the caller of `supervise` is usually
-the class's own gen_server. While trapping, the signal becomes an `'EXIT'`
-message that `proc_lib` flushes when it unlinks. The previous flag is
-restored afterwards; a new supervisor stays linked to the caller exactly as
-before.
-""".
--spec start_link_trapping_exits(module()) -> {ok, pid()} | ignore | {error, term()}.
-start_link_trapping_exits(Module) ->
-    Trapping = process_flag(trap_exit, true),
-    try
-        Module:start_link()
-    after
-        process_flag(trap_exit, Trapping)
-    end.
-
--doc """
 `static_init/3` with `nil` start args.
 
 Kept for supervisor modules compiled before ADR 0135, whose generated
@@ -300,9 +746,9 @@ configuration setting (`childSpecs`, `strategy`, `maxRestarts`,
 `restartWindow`) by **instance dispatch** on that handle, so user overrides,
 inherited defaults and runtime overrides resolve as for any instance method.
 
-The class gen_server is never involved: it may be blocked inside
-`startLink/1` waiting for `supervisor:start_link` to return, so a
-`class_send` from here would deadlock. A configuration method that messages
+The configuration is read by instance dispatch, never through the class
+gen_server, which may be blocked (a start made from one of its own class methods),
+so a `class_send` from here could deadlock. A configuration method that messages
 `self` makes OTP exit with `calling_self`; that, and any other failure, ends
 `init/1` with a `#beamtalk_error{}` that the caller reports as
 `supervisor_start_failed` (see `config_step/3`).
@@ -459,11 +905,36 @@ check_strategy(ClassName, Value) ->
     end.
 
 %% Shared prologue of `static_init/3` / `dynamic_init/3`: record the start
-%% args for `self args` and return this supervisor's own handle.
+%% args for `self args` and the class for `named:`, and return this
+%% supervisor's own handle. A top-level spawn-family start wraps its args in
+%% `{?TOP_LEVEL_TAG, Args}` (ADR 0135 §1): unwrap them and join
+%% `?INSTANCES_GROUP` before `start_link` returns, so the instance is listed by
+%% process navigation for as long as it runs (`pg` drops it on exit).
 -spec begin_init(module(), atom(), term()) -> tuple().
+begin_init(Module, ClassName, {?TOP_LEVEL_TAG, Args}) ->
+    ok = join_instances_group(),
+    begin_init(Module, ClassName, Args);
 begin_init(Module, ClassName, Args) ->
     put(?SUP_ARGS_KEY, Args),
+    put(?SUP_CLASS_KEY, {ClassName, Module}),
     {beamtalk_supervisor, ClassName, Module, self()}.
+
+%% Join the default-scope `pg` group of top-level instances. `pg` is started
+%% by `beamtalk_bootstrap`; without it (a bare test node) the instance is
+%% simply not listed.
+-spec join_instances_group() -> ok.
+join_instances_group() ->
+    %% `init/1` can run again in the same process (a supervisor's
+    %% `code_change` re-runs it with the stored args): join only once.
+    try
+        case lists:member(self(), pg:get_local_members(?INSTANCES_GROUP)) of
+            true -> ok;
+            false -> pg:join(?INSTANCES_GROUP, self())
+        end
+    catch
+        error:badarg -> ok;
+        exit:{noproc, _} -> ok
+    end.
 
 -doc """
 Read one configuration setting by sending `Selector` to the supervisor being
@@ -488,7 +959,7 @@ read_config(Self, ClassName, Selector) ->
 Run one step of supervisor configuration inside `init/1`; on failure, exit
 `init/1` with a `#beamtalk_error{}` (ADR 0135 §2).
 
-`start_link_supervisor/2` reports such an exit as `supervisor_start_failed`
+`supervise/2` and the spawn family report such an exit as `supervisor_start_failed`
 carrying the error's hint (a parent reports a nested failure as its own
 start failure). A configuration method that sent a message to its own
 supervisor (OTP `calling_self`, raw or wrapped by dispatch) gets the
@@ -681,12 +1152,13 @@ current(Self) ->
 Return the child ids of currently-running children.
 
 Called from `children` on Supervisor instances.
-Returns `{ok, [Id]}` with a list of child id atoms (class name atoms by
-default, or custom ids when `withId:` was used in `SupervisionSpec`).
-Dead or restarting children are excluded. Returns `{error, BtError}` with
-`kind = stale_handle` when the supervisor process is dead.
+Returns `{ok, [Id]}` with a list of child ids: class name atoms by default,
+or the custom id (a Symbol or, ADR 0135 §3, an Integer) set with `withId:` in
+`SupervisionSpec`. Dead or restarting children are excluded. Returns
+`{error, BtError}` with `kind = stale_handle` when the supervisor process is
+dead.
 """.
--spec whichChildren(term()) -> {ok, [atom()]} | {error, #beamtalk_error{}}.
+-spec whichChildren(term()) -> {ok, [atom() | integer()]} | {error, #beamtalk_error{}}.
 whichChildren(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
@@ -1008,6 +1480,20 @@ startChild(Self, Args, Name) ->
                     }),
                     announce_child_crashed(SupClass, ChildClass, Err),
                     {error, Err#beamtalk_error{class = SupClass, selector = 'startChild:name:'}};
+                {error, {already_started, _}} ->
+                    %% A supervisor child class (ADR 0135 §3) registers
+                    %% through `supervisor:start_link({local, Name}, ...)`,
+                    %% which reports a taken name this way.
+                    announce_child_crashed(SupClass, ChildClass, name_registered),
+                    {error,
+                        beamtalk_error:new(
+                            name_registered,
+                            SupClass,
+                            'startChild:name:',
+                            iolist_to_binary(
+                                io_lib:format("Name '~ts' is already registered", [Name])
+                            )
+                        )};
                 {error, Reason} ->
                     ?LOG_ERROR("DynamicSupervisor named child start failed", #{
                         supervisor => SupClass,
@@ -1155,44 +1641,38 @@ clear_root() ->
 Run the instance-side `initialize` lifecycle hook on a freshly started
 supervisor (ADR 0135 §1).
 
-Called from `beamtalk_class_dispatch:class_send_dispatch/3` AFTER `class_send`
-returns the supervisor tuple from a `supervise` call. This ensures `initialize`
-runs in the caller's process — where the class gen_server is free to answer
-`has_method`, `superclass`, and other hierarchy lookups that Beamtalk
-dispatch requires, and where messages to the supervisor itself work (it is
-past `init/1`). `initialize` is sent to the new supervisor by ordinary
+Called by `supervise/2` and the spawn family (`start_top_level/3`) right after
+the start, in the caller's process — never the class gen_server — so messages
+to the supervisor itself work (it is past `init/1`) and `initialize` may send
+to its own class. `initialize` is sent to the new supervisor by ordinary
 instance dispatch (`beamtalk_message_dispatch:send/3`), so inside it `self`
 is the supervisor.
 
 ## Concurrent `supervise` callers (BT-3759)
 
-The hook cannot run inside the serialised class call (it needs the class
-gen_server free, so that would deadlock), so start -> initialize -> publish is
-made atomic for callers with an `initializing` gate instead:
+Start -> initialize -> publish is made atomic for `supervise` callers with an
+`initializing` gate:
 
-  * `startLink/1` (in the class process) arms a gate for a freshly started
-    supervisor pid before the class gen_server is released.
+  * `supervise/2` arms a gate for a freshly started supervisor pid while it
+    still holds the per-class start lock, so no other `supervise` caller can
+    see the pid before the gate exists.
   * This function claims the gate (records the caller as owner) and releases it
     once the hook has finished or failed; on failure the supervisor is stopped
     BEFORE the gate is released.
-  * A second `supervise` caller gets `{already_started, Pid}`; the dispatch hook
-    then calls `await_initialized/1`, which blocks the caller (never the class
-    process) until the gate is released. It then sees either the initialised
-    supervisor or a structured `supervisor_start_failed` error, never an
-    uninitialised supervisor or a dead pid.
+  * A second `supervise` caller gets `{already_started, Pid}` and calls
+    `await_initialized/1`, which blocks it until the gate is released. It then
+    sees either the initialised supervisor or a structured
+    `supervisor_start_failed` error, never an uninitialised supervisor or a
+    dead pid.
 
-The wait applies only to the `supervise` selector (the dispatch hook), so other
-class methods returning the supervisor tuple never block on the gate. A gate
-that is armed but never claimed (the first caller never reached this function)
-is reclaimed by the first waiter to hit the deadline: the orphan supervisor is
-stopped and the gate released so the next `supervise` starts afresh.
+Only `supervise` waits on the gate; the spawn family starts a new instance
+that no other caller can see yet. A gate that is armed but never claimed (the
+first caller died before reaching this function) is reclaimed by the first
+waiter to hit the deadline: the orphan supervisor is stopped and the gate
+released so the next `supervise` starts afresh.
 
-Known limits: only `supervise` waits (`current` called while a hook is still
-running can return the supervisor before it is initialised); the wait blocks the
-calling process, so a class gen_server whose method calls `Y supervise` stalls
-for the duration; and a user `class supervise` override that does not return the
-supervisor to the dispatch hook leaves its gate unclaimed until a later waiter
-reclaims it at the deadline.
+Known limit: `current` called while a hook is still running can return the
+supervisor before it is initialised.
 
 Re-entrancy: a hook that itself calls `supervise` on the same class runs in the
 gate owner, which `await_initialized/1` lets straight through. A different
@@ -1202,7 +1682,7 @@ gate until `?INIT_WAIT_TIMEOUT` and then get the structured error.
 -spec run_initialize(term()) -> ok.
 run_initialize({beamtalk_supervisor, _ClassName, _Module, Pid} = SupTuple) ->
     claim_init_gate(Pid),
-    %% The supervisor is already started and linked by the time the hook runs.
+    %% The supervisor is already started (and unlinked from the caller) by the time the hook runs.
     %% If the hook raises, the caller never receives the supervisor, so stop
     %% it before re-raising: no half-started supervisor, registered name or
     %% orphaned children are left behind (BT-3720). The gate is released only
@@ -1506,27 +1986,12 @@ build_child_spec(ClassObj, Mode) when
 ->
     case beamtalk_class_registry:is_class_object(ClassObj) of
         true ->
+            %% A bare class, actor or supervisor alike (ADR 0135 §3): its
+            %% `supervisionSpec`, then `childSpec`. A bare nested supervisor
+            %% is therefore an anonymous child, like any other.
             ChildClassPid = element(4, ClassObj),
-            ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
-            ChildModule = element(3, ClassObj),
-            case is_supervisor(ChildClass) of
-                true ->
-                    %% Nested supervisor child — build OTP spec directly.
-                    %% Supervisor subclasses don't have supervisionSpec (that is on Actor).
-                    %% OTP requires supervisor children to use start_link/0.
-                    #{
-                        id => ChildClass,
-                        start => {ChildModule, start_link, []},
-                        restart => permanent,
-                        shutdown => infinity,
-                        type => supervisor,
-                        modules => [ChildModule]
-                    };
-                false ->
-                    %% Worker child: call supervisionSpec then childSpec.
-                    BtSpec = beamtalk_object_class:class_send(ChildClassPid, 'supervisionSpec', []),
-                    spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []), Mode)
-            end;
+            BtSpec = beamtalk_object_class:class_send(ChildClassPid, 'supervisionSpec', []),
+            spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []), Mode);
         false ->
             %% Actor instance passed as spec — treat as SupervisionSpec-like value
             spec_to_otp(beamtalk_message_dispatch:send(ClassObj, 'childSpec', []), Mode)
@@ -1736,8 +2201,9 @@ The `start` value is a Beamtalk Array [ClassObj, #spawn, #()] that must be
 converted to the OTP MFA tuple {Module, Function, Args}.
 
 For nested supervisor children (Supervisor/DynamicSupervisor subclasses), the
-Beamtalk IR uses #spawn as the start function, but OTP requires start_link/0
-so the supervisor process is linked into the tree. This is translated here.
+start goes through the `start_supervisor_child` trampoline (ADR 0135 §3; see
+`supervisor_child_start/4`), so the child is anonymous, gets the spec's args
+and stays linked into the tree.
 
 For worker children, Beamtalk's spawn/0 returns {beamtalk_object,...} which
 OTP supervisor does not accept (it expects {ok, Pid}). The generated
@@ -1766,8 +2232,7 @@ spec_to_otp(BtSpec, Mode) ->
     OtpStart =
         case is_supervisor(ChildClass) of
             true ->
-                %% Nested supervisor: OTP expects start_link/0 to link the child supervisor.
-                {ChildModule, start_link, []};
+                supervisor_child_start(ChildClass, ChildModule, StartElems, Mode);
             false ->
                 %% Worker: use start_link/1 (returns {ok, Pid}) for OTP compatibility.
                 %% spawn/0 wraps the pid in {beamtalk_object,...} which OTP rejects.
@@ -1896,6 +2361,68 @@ spec_to_otp(BtSpec, Mode) ->
         type => maps:get(type, BtSpec),
         modules => [ChildModule]
     }.
+
+-doc """
+The start MFA for a nested supervisor child (ADR 0135 §3), from the
+`#[Class, StartFn, StartArgs]` that `SupervisionSpec childSpec` built.
+
+A static parent's child starts through `start_supervisor_child/2,3` with the
+spec's args (`nil` without `withArgs:`) and, for `withName:`, its name. A
+DynamicSupervisor's `simple_one_for_one` template is
+`start_dynamic_supervisor_child` with the spec's args as the default, so
+`startChild` / `startChild:` / `startChild:name:` each start a new child.
+`withClassMethod:` (a class-method factory would run the start in the class
+process and link the child there) and `scope: #global` are not supported for
+supervisor children: they raise a structured `type_error`, which fails the
+parent's start.
+""".
+-spec supervisor_child_start(atom(), module(), [term()], static | dynamic) ->
+    {module(), atom(), [term()]}.
+supervisor_child_start(ChildClass, ChildModule, StartElems, Mode) ->
+    StartFn = lists:nth(2, StartElems),
+    StartArgs = lists:nth(3, StartElems),
+    {Args, Name} =
+        case {StartFn, StartArgs} of
+            {spawn, []} -> {nil, none};
+            {'spawnWith:', [A]} -> {A, none};
+            {'spawnAs:', [N]} -> {nil, N};
+            {'spawnWith:as:', [A, N]} -> {A, N};
+            _ -> unsupported_supervisor_child(ChildClass, StartFn)
+        end,
+    case {Mode, Name} of
+        {static, none} ->
+            {beamtalk_supervisor, start_supervisor_child, [ChildModule, Args]};
+        {static, _} ->
+            {beamtalk_supervisor, start_supervisor_child, [ChildModule, Args, Name]};
+        {dynamic, none} ->
+            {beamtalk_supervisor, start_dynamic_supervisor_child, [ChildModule, Args]};
+        {dynamic, _} ->
+            %% A pool's single template cannot carry one name for every
+            %% child; `startChild:name:` names each child instead.
+            unsupported_supervisor_child(ChildClass, StartFn)
+    end.
+
+-spec unsupported_supervisor_child(atom(), term()) -> no_return().
+unsupported_supervisor_child(ChildClass, StartFn) ->
+    Hint = iolist_to_binary(
+        io_lib:format(
+            "~ts is a supervisor: its supervisionSpec supports withId:, withArgs:, "
+            "withRestart:, withShutdown: and withName: (a static child), not ~ts",
+            [ChildClass, unsupported_field(StartFn)]
+        )
+    ),
+    Error0 = beamtalk_error:new(type_error, ChildClass, supervisionSpec, Hint),
+    beamtalk_exception_handler:reraise(
+        beamtalk_error:with_details(Error0, #{start => StartFn})
+    ).
+
+-spec unsupported_field(term()) -> string().
+unsupported_field(classMethod) -> "withClassMethod:";
+unsupported_field('spawnAs:scope:') -> "scope: #global";
+unsupported_field('spawnWith:as:scope:') -> "scope: #global";
+unsupported_field('spawnAs:') -> "withName: on a DynamicSupervisor's child class";
+unsupported_field('spawnWith:as:') -> "withName: on a DynamicSupervisor's child class";
+unsupported_field(Other) -> io_lib:format("~p", [Other]).
 
 -doc """
 Wrap a child pid with the correct Beamtalk tuple tag.
