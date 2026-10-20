@@ -366,7 +366,9 @@ impl CoreErlangGenerator {
         if let MessageSelector::Binary(op) = selector {
             // Method lookup via `>>` operator (e.g., Counter >> #increment)
             // Support `>>` on any expression, not just class literals
-            if op.as_str() == ">>" {
+            if super::operators::structural_binary(op)
+                == Some(super::operators::StructuralBinary::MethodLookup)
+            {
                 if let Expression::ClassReference { name, .. } = receiver {
                     return self.generate_method_lookup(&name.name, arguments);
                 }
@@ -1837,7 +1839,13 @@ impl CoreErlangGenerator {
     /// condition [`Self::closure_self_dispatch_state_guard`] applies under,
     /// shared with `generate_super_send` so both decide it identically.
     fn in_state_dropping_closure(&self) -> bool {
-        self.block_depth > 0 && self.closure_drops_state && self.context == CodeGenContext::Actor
+        // A class method of an actor class has `context == Actor` but no
+        // instance `State` to compare against (the `is_actor_self_send` rule,
+        // BT-3581): its closures never carry the guard.
+        self.block_depth > 0
+            && self.closure_drops_state
+            && self.context == CodeGenContext::Actor
+            && !self.in_class_method()
     }
 
     /// BT-3936 (ADR 0133 § Error examples): the reply body of a self-send
