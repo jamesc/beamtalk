@@ -3544,10 +3544,11 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
 /// evaluated as `[t := 1. b value] ensure: [sink record: t]`, a parameter
 /// evaluated the same way, and either passed on to a method that evaluates it,
 /// all record the old `t` (0), silently. They are rejected like the literal
-/// `^`. Conservative where the static view ends: a block reached through a call
-/// result, a collection element, or a parameter that is only forwarded is not
-/// seen. BT-3947 lowers the protected block and flips these to acceptance
-/// tests.
+/// `^`. Fully conservative where the static view cannot tell which value is a
+/// block: any `value`-family send to a non-literal receiver (a call result, a
+/// collection element, an `at:` result), and any local, parameter or field
+/// passed as a keyword-send argument, is a possible non-local return. BT-3947
+/// lowers the protected block and flips these to acceptance tests.
 #[test]
 fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
     let rejected = [
@@ -3556,6 +3557,14 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
         "t := 0\nb := [^0]\n[t := 1. b value: 3] ensure: [t printString]\n9",
         // Forwarded to a method that evaluates it.
         "t := 0\nb := [^0]\n[t := 1. CvA ap: b] ensure: [t printString]\n9",
+        // The shapes the static view cannot follow: a block from a call
+        // result, a collection element, an `at:` result, and a local that is
+        // not a block literal passed on.
+        "t := 0\n[t := 1. (CvA ap: [3]) value] ensure: [t printString]\n9",
+        "t := 0\nbs := #(1)\n[t := 1. (bs at: 1) value] ensure: [t printString]\n9",
+        "t := 0\nd := #{#k => 1}\n[t := 1. (d at: #k) value] ensure: [t printString]\n9",
+        "t := 0\nb := [3]\n[t := 1. b value] ensure: [t printString]\n9",
+        "t := 0\nb := CvA ap: [3]\n[t := 1. CvA ap: b] ensure: [t printString]\n9",
     ];
     for body in rejected {
         for src in [in_class(body), in_value(body), in_actor(body)] {
@@ -3567,7 +3576,7 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
                 errors[0].message
             );
             assert!(
-                errors[0].message.contains("may return non-locally"),
+                errors[0].message.contains("possible non-local return"),
                 "{}",
                 errors[0].message
             );
@@ -3577,20 +3586,27 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
         "Object subclass: CvA\n  class doThen: blk =>\n    t := 0\n    [t := 1. blk value] ensure: [t printString]\n    5\n",
         "Value subclass: Vt\n  doThen: blk =>\n    t := 0\n    [t := 1. blk value] ensure: [t printString]\n    5\n",
         "Actor subclass: Ac\n  state: n = 0\n\n  doThen: blk =>\n    t := 0\n    [t := 1. blk value] ensure: [t printString]\n    5\n",
+        // A parameter that is only forwarded, never evaluated here.
+        "Object subclass: CvA\n  class ap: b => b value\n\n  class fwd: blk =>\n    t := 0\n    [t := 1. CvA ap: blk] ensure: [t printString]\n    5\n",
+        "Value subclass: Vt\n  ap: b => b value\n\n  fwd: blk =>\n    t := 0\n    [t := 1. self ap: blk] ensure: [t printString]\n    5\n",
         "Actor subclass: Ac\n  state: blk = nil\n\n  doThen =>\n    t := 0\n    [t := 1. self.blk value] ensure: [t printString]\n    5\n",
     ] {
         let errors = analysis_errors(src, &[]);
         assert_eq!(errors.len(), 1, "{src}: {errors:?}");
         assert!(
-            errors[0].message.contains("may return non-locally"),
+            errors[0].message.contains("possible non-local return"),
             "{}",
             errors[0].message
         );
     }
-    // Accepted: a block without a `^`, a cleanup that does not read the write,
-    // a protected block that writes nothing the cleanup reads, `on:do:`.
+    // Accepted: a cleanup that does not read the write, a protected block that
+    // writes nothing the cleanup reads, `on:do:`, a constant passed on, a pure
+    // protected block, and an `ensure:` in a loop.
     for body in [
-        "t := 0\nb := [3]\n[t := 1. b value] ensure: [t printString]\n9",
+        "t := 0\nk := 3\n[t := 1. CvA ap: k] ensure: [0]\n9",
+        "t := 0\nk := 3\n[t := t + k] ensure: [t printString]\n9",
+        "t := 0\n[t := t + 1] ensure: [t printString]\n9",
+        "t := 0\n#(1, 2) do: [:e | [t := t + 1] ensure: [t printString]]\n9",
         "t := 0\nb := [^0]\n[t := 1. b value] ensure: [0]\n9",
         "t := 0\nb := [^0]\n[b value] ensure: [t printString]\n9",
         "t := 0\nb := [^0]\n[t := 1. b value] on: Error do: [:e | t]\n9",

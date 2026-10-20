@@ -1272,13 +1272,13 @@ fn check_body(
 ///
 /// BT-3993: the throw can also come from a block value created elsewhere
 /// (measured on a BEAM in a class, a value type and an actor: all read the old
-/// `t`). So the protected block also "may return non-locally" when it evaluates
-/// a block that is not a literal analysed in place ([`nlr_cause`]): a
-/// `value`-family send to a method parameter the method evaluates, to a field,
-/// or to a local bound to a block literal holding a `^`, or such a local passed
-/// as an argument. Conservative where the static view ends: a block reached
-/// through a call result, a collection element or a parameter that is only
-/// forwarded is not seen.
+/// `t`). The static view cannot tell which value is a block, so it is fully
+/// conservative ([`nlr_cause`]): any `value`-family send to a receiver that is
+/// not a block literal analysed in place (a call result and a collection
+/// element included), and any local, parameter or field passed as an argument
+/// of a keyword send, counts as a possible non-local return. Such a protected
+/// block is rejected when its cleanup reads a write of it, even if no block
+/// returns.
 ///
 /// Only a cleanup read of a local bound in the scope enclosing the `ensure:`
 /// counts: a cleanup that binds its own `x` (`[x := 5. ^x] ensure: [x := 0. x]`)
@@ -1292,40 +1292,32 @@ fn report_nlr_out_of_ensure(
     body: &[ExpressionStatement],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // The block-valued names visible to the whole method: locals bound to a
-    // block literal holding a `^`, and the parameters the method evaluates.
-    let mut nlr_blocks: BTreeSet<EcoString> = BTreeSet::new();
-    let mut evaluated_params: BTreeSet<EcoString> = BTreeSet::new();
     // Every local assignment (name, start of the assignment), to tell which
-    // locals are bound before an `ensure:`.
+    // locals are bound before an `ensure:`; and which locals only ever hold a
+    // literal (never a block).
     let mut assigned: Vec<(EcoString, u32)> = Vec::new();
+    let mut literal_bound: BTreeSet<EcoString> = BTreeSet::new();
+    let mut other_bound: BTreeSet<EcoString> = BTreeSet::new();
     for stmt in body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
-            Expression::Assignment { target, value, .. } => {
-                if let Expression::Identifier(id) = target.as_ref() {
-                    assigned.push((id.name.clone(), e.span().start()));
-                    if let Expression::Block(b) = value.as_ref()
-                        && block_holds_return(b)
-                    {
-                        nlr_blocks.insert(id.name.clone());
-                    }
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::Assignment { target, value, .. } = e
+                && let Expression::Identifier(id) = target.as_ref()
+            {
+                assigned.push((id.name.clone(), e.span().start()));
+                if matches!(value.as_ref(), Expression::Literal(..)) {
+                    literal_bound.insert(id.name.clone());
+                } else {
+                    other_bound.insert(id.name.clone());
                 }
             }
-            Expression::MessageSend {
-                receiver, selector, ..
-            } if selector.is_block_invocation() => {
-                if let Expression::Identifier(id) = receiver.as_ref()
-                    && params.contains(&id.name)
-                {
-                    evaluated_params.insert(id.name.clone());
-                }
-            }
-            _ => {}
         });
     }
     let sources = NlrSources {
-        nlr_blocks,
-        evaluated_params,
+        constant_locals: literal_bound
+            .difference(&other_bound)
+            .filter(|n| !params.contains(n))
+            .cloned()
+            .collect(),
     };
     for stmt in body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
@@ -1368,12 +1360,12 @@ fn report_nlr_out_of_ensure(
     }
 }
 
-/// The block-valued names of one method (see [`report_nlr_out_of_ensure`]).
+/// What the conservative reading of "may return non-locally" needs to know
+/// about one method (see [`report_nlr_out_of_ensure`]).
 struct NlrSources {
-    /// Locals assigned a block literal that holds a `^`.
-    nlr_blocks: BTreeSet<EcoString>,
-    /// Parameters the method sends a `value`-family message to.
-    evaluated_params: BTreeSet<EcoString>,
+    /// Locals that only ever hold a literal: never a block, so passing one on
+    /// cannot hand a block over.
+    constant_locals: BTreeSet<EcoString>,
 }
 
 fn block_holds_return(block: &Block) -> bool {
@@ -1387,8 +1379,14 @@ fn block_holds_return(block: &Block) -> bool {
 }
 
 /// What in `protected` may throw a non-local return: a `^` written in it (or in
-/// a block literal nested in it), or the evaluation of a block value created
-/// elsewhere. `None` when nothing does.
+/// a block literal nested in it), or, since the static view cannot tell which
+/// block a value is, any evaluation of a block that is not a literal analysed
+/// in place: a `value`-family send to anything but a block literal (a local, a
+/// parameter, a field, a call result, a collection element, ...), or a
+/// non-literal value (a local that is not a constant, a parameter, a field)
+/// passed as an argument of a keyword send, which may hand a block over to be
+/// evaluated. Binary operands are not block hand-overs. `None` when nothing
+/// does.
 fn nlr_cause(protected: &Block, sources: &NlrSources) -> Option<String> {
     if block_holds_return(protected) {
         return Some("a non-local return (`^`)".to_string());
@@ -1409,33 +1407,32 @@ fn nlr_cause(protected: &Block, sources: &NlrSources) -> Option<String> {
                 return;
             }
             if selector.is_block_invocation() {
-                match receiver.as_ref() {
-                    Expression::Identifier(id)
-                        if sources.nlr_blocks.contains(&id.name)
-                            || sources.evaluated_params.contains(&id.name) =>
-                    {
-                        cause = Some(format!(
-                            "evaluating `{}`, a block that may return non-locally,",
-                            id.name
-                        ));
-                    }
-                    Expression::FieldAccess { field, .. } => {
-                        cause = Some(format!(
-                            "evaluating the block in field `{}`, which may return non-locally,",
-                            field.name
-                        ));
-                    }
-                    _ => {}
+                if !matches!(receiver.as_ref(), Expression::Block(_)) {
+                    cause = Some(
+                        "a possible non-local return (a block evaluated with `value`)".to_string(),
+                    );
                 }
                 return;
             }
+            if !matches!(selector, MessageSelector::Keyword(_)) {
+                return;
+            }
             for arg in arguments {
-                if let Expression::Identifier(id) = arg
-                    && sources.nlr_blocks.contains(&id.name)
-                {
+                let name = match arg {
+                    Expression::Identifier(id)
+                        if !matches!(
+                            id.name.as_str(),
+                            "self" | "super" | "nil" | "true" | "false"
+                        ) && !sources.constant_locals.contains(&id.name) =>
+                    {
+                        Some(id.name.as_str())
+                    }
+                    Expression::FieldAccess { field, .. } => Some(field.name.as_str()),
+                    _ => None,
+                };
+                if let Some(name) = name {
                     cause = Some(format!(
-                        "passing `{}`, a block that may return non-locally, on",
-                        id.name
+                        "a possible non-local return (through the argument `{name}`)"
                     ));
                 }
             }

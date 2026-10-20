@@ -400,11 +400,14 @@ the one recognizer in `validators/local_threading.rs`
 block; `dead_returned_assignment` asks the compiler and stays silent inside
 that error's span. The throw can also come from a block value created elsewhere
 (BT-3993; measured stale in a class, a value type and an actor): the protected
-block is treated as holding a `^` when it sends a `value`-family message to a
-local bound to a block literal holding a `^`, to a field, or to a parameter the
-method evaluates, or passes such a local on as an argument. It is conservative
-only in one direction: a block reached through a call result, a collection
-element or a parameter that is merely forwarded is not seen. An `on:do:`
+block is treated as possibly holding a `^` when it sends a `value`-family
+message to anything but a block literal (a local, parameter, field, call result
+or collection element), or passes a local that is not a constant, a parameter
+or a field as an argument of a keyword send. The static view cannot tell which
+value is a block, so the rule is fully conservative: it over-rejects (for
+example `assoc value`, or an ordinary argument) rather than read a stale
+local silently. Binary operands and literal or constant arguments do not
+count. An `on:do:`
 protected body has no such position: a `^` passes through its catch untouched,
 no handler runs, and nothing reads `t` afterwards. Everywhere else the write is
 dead, and the `beamtalk-lint` rule `dead_returned_assignment` warns and
