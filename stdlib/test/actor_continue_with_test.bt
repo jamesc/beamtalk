@@ -115,21 +115,35 @@ TestCase subclass: ActorContinueWithTest
     self assert: server log equals: #()
     server stop
 
-  testPerformMessageOfContinueWithDeliveredToActorRaises =>
-    // A perform: request delivered to the actor as a message (bypassing the
-    // caller-side rewrite) re-dispatches inside the actor's own process, so
-    // the self check cannot see it: it is rejected there, nothing runs.
+  testContinuationRequestDeliveredThroughMailboxRaises =>
+    // A continuation request delivered to the actor as a raw message
+    // (bypassing the caller-side checks) would dispatch inside the actor's
+    // own process, where the self check cannot see it: the mailbox boundary
+    // rejects it, directly or via perform:, and nothing runs.
     server := ContinueWithServer spawn
-    r1 := Tuple withAll: #(#perform:withArguments:, #(#continueWith:, #(#afterOne)))
-    r2 := Tuple withAll: #(#perform:withArguments:, #(#continueWith:withArguments:, #(#afterOne, #())))
-    r3 := Tuple withAll: #(#perform:withArguments:timeout:, #(#continueWith:, #(#afterOne), 1000))
-    #(r1, r2, r3)
+    r1 := Tuple withAll: #(#continueWith:, #(#afterOne))
+    r2 := Tuple withAll: #(#continueWith:withArguments:, #(#afterOne, #()))
+    r3 := Tuple withAll: #(#perform:withArguments:, #(#continueWith:, #(#afterOne)))
+    r4 := Tuple withAll: #(#perform:withArguments:, #(#continueWith:withArguments:, #(#afterOne, #())))
+    r5 := Tuple withAll: #(#perform:withArguments:timeout:, #(#continueWith:, #(#afterOne), 1000))
+    #(r1, r2, r3, r4, r5)
       do: [:request |
         reply := Erlang gen_server call: server pid request: request
         self assert: reply isError
-        self assert: (reply printString includesSubstring: "invalid_continuation")
+        self assert: (reply printString includesSubstring: "can only be sent to self")
       ]
+    // A raw cast is dropped the same way.
+    cast := Tuple withAll: #(#cast, #continueWith:, #(#afterOne))
+    Erlang gen_server cast: server pid request: cast
     self assert: server log equals: #()
+    server stop
+
+  testActorsOwnPerformOfContinueWithSchedulesContinuation =>
+    // An actor's own perform: of continueWith: (with or without a timeout)
+    // is an in-process send, not a mailbox message, so it is honoured.
+    server := ContinueWithServer spawn
+    self assert: server performContinueLater equals: #requested
+    self assert: server log equals: #(#continuation, #continuation)
     server stop
 
   // === Errors in a continuation take the cast path ===

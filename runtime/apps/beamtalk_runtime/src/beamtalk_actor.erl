@@ -224,6 +224,12 @@ handle_getValue([], State) ->
 %% BT-3968: the `handle_continue/2` term carrying the continuation queue.
 -define(BT_CONTINUE_TAG, '$bt_continue').
 
+%% BT-3968: the continuation-request selectors (`Actor>>continueWith:` /
+%% `continueWith:withArguments:`).
+-define(IS_CONTINUATION_SELECTOR(S),
+    (S =:= 'continueWith:' orelse S =:= 'continueWith:withArguments:')
+).
+
 %% ADR 0126 §3: timeout for the `erpc:call/5` a remote spawn/lookup/list
 %% makes to the target node — matches `gen_server:call/2`'s own 5000ms
 %% default so a stuck remote op fails on the same order of magnitude as a
@@ -293,10 +299,10 @@ handle_getValue([], State) ->
     discard_pending_continuations/0
 ]).
 
-%% BT-3968: `perform:` must not become a back door for another process to
-%% schedule a continuation (see ?IS_CONTINUATION_SELECTOR in beamtalk.hrl);
-%% shared with beamtalk_dispatch:perform_lookup/5.
--export([performed_continuation_error/1]).
+%% BT-3968: the mailbox-boundary guard against another process scheduling a
+%% continuation — called by this module's own handle_call/handle_cast and by
+%% every compiled actor's generated ones (see mailbox_continuation_check/2).
+-export([mailbox_continuation_check/2]).
 
 %% exported so generated self-dispatch error breadcrumbs
 %% (dispatch_codegen.rs's generate_self_dispatch_error_clause) can resolve
@@ -2236,14 +2242,36 @@ validate_continuation(RequestSelector, ContSelector, ArgSpec) ->
     end.
 
 -doc """
-BT-3968: the `invalid_continuation` error for a `perform:` of
-`continueWith:` / `continueWith:withArguments:` dispatched inside an actor,
-which can only have been sent from another process (see
-`?IS_CONTINUATION_SELECTOR` in beamtalk.hrl).
+BT-3968: the mailbox-boundary guard. `self continueWith:` is a direct,
+in-process send and never arrives through the mailbox, so a call or cast
+*message* that requests a continuation — `continueWith:` /
+`continueWith:withArguments:` itself, or a `perform:` /
+`perform:withArguments:` / `perform:withArguments:timeout:` naming one —
+was sent by another process. Once dispatched it would run inside the actor,
+where request_continuation/4's `Pid =:= self()` check cannot tell, so the
+handle_call/handle_cast entry rejects it here instead. Returns `ok`, or
+`{error, #beamtalk_error{kind = invalid_continuation}}` (also logged, since
+a rejected cast has no caller to tell).
 """.
--spec performed_continuation_error(atom()) -> #beamtalk_error{}.
-performed_continuation_error(Target) ->
-    invalid_continuation_error(external, Target).
+-spec mailbox_continuation_check(atom(), term()) -> ok | {error, #beamtalk_error{}}.
+mailbox_continuation_check(Selector, _Args) when ?IS_CONTINUATION_SELECTOR(Selector) ->
+    rejected_mailbox_continuation(Selector);
+mailbox_continuation_check(Selector, [Target | _]) when
+    (Selector =:= 'perform:' orelse Selector =:= 'perform:withArguments:' orelse
+        Selector =:= 'perform:withArguments:timeout:'),
+    ?IS_CONTINUATION_SELECTOR(Target)
+->
+    rejected_mailbox_continuation(Target);
+mailbox_continuation_check(_Selector, _Args) ->
+    ok.
+
+-spec rejected_mailbox_continuation(atom()) -> {error, #beamtalk_error{}}.
+rejected_mailbox_continuation(Selector) ->
+    Error = invalid_continuation_error(external, Selector),
+    ?LOG_WARNING("Rejected continuation request from another process", #{
+        selector => Selector, domain => [beamtalk, runtime]
+    }),
+    {error, Error}.
 
 -spec invalid_continuation_error(term(), atom()) -> #beamtalk_error{}.
 invalid_continuation_error(Pid, RequestSelector) ->
@@ -2764,7 +2792,7 @@ Compiled actors generate their own `handle_continue/2` with the same shape.
 handle_continue({?BT_CONTINUE_TAG, [{Selector, Args} | Rest]}, State) ->
     ok = clear_pending_actions(),
     ok = seed_pending_continuations(Rest),
-    apply_pending_actions(do_handle_cast({cast, Selector, Args}, State));
+    apply_pending_actions(dispatch_cast(Selector, Args, State));
 handle_continue(_Continue, State) ->
     {noreply, State}.
 
@@ -2804,6 +2832,30 @@ do_handle_cast({cast, Selector, Args, PropCtx}, State) when
     restore_propagated_ctx(PropCtx),
     do_handle_cast({cast, Selector, Args}, State);
 do_handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args) ->
+    case mailbox_continuation_check(Selector, Args) of
+        ok -> dispatch_cast(Selector, Args, State);
+        {error, _} -> {noreply, State}
+    end;
+%% Async send with propagated context (ADR 0069 Phase 2b)
+do_handle_cast({Selector, Args, FuturePid, PropCtx}, State) when is_map(PropCtx) ->
+    restore_propagated_ctx(PropCtx),
+    do_handle_cast({Selector, Args, FuturePid}, State);
+do_handle_cast({Selector, Args, FuturePid}, State) ->
+    case mailbox_continuation_check(Selector, Args) of
+        ok ->
+            dispatch_async(Selector, Args, FuturePid, State);
+        {error, Error} ->
+            maybe_reject_future(FuturePid, Error),
+            {noreply, State}
+    end;
+do_handle_cast(Msg, State) ->
+    %% Unknown cast message format - log and ignore
+    ?LOG_WARNING("Unknown cast message", #{message => Msg, domain => [beamtalk, runtime]}),
+    {noreply, State}.
+
+%% Fire-and-forget dispatch for do_handle_cast/2's `{cast, ...}` clause.
+-spec dispatch_cast(atom(), list(), map()) -> {noreply, map()}.
+dispatch_cast(Selector, Args, State) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (cast fire-and-forget)", #{
         class => beamtalk_tagged_map:class_of(State, unknown),
@@ -2839,12 +2891,11 @@ do_handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Ar
         end
     after
         restore_dispatch_pdict(OldState)
-    end;
-%% Async send with propagated context (ADR 0069 Phase 2b)
-do_handle_cast({Selector, Args, FuturePid, PropCtx}, State) when is_map(PropCtx) ->
-    restore_propagated_ctx(PropCtx),
-    do_handle_cast({Selector, Args, FuturePid}, State);
-do_handle_cast({Selector, Args, FuturePid}, State) ->
+    end.
+
+%% Async-with-future dispatch for do_handle_cast/2's `{Selector, Args, FuturePid}` clause.
+-spec dispatch_async(atom(), list(), pid(), map()) -> {noreply, map()}.
+dispatch_async(Selector, Args, FuturePid, State) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (async)", #{
         class => beamtalk_tagged_map:class_of(State, unknown),
@@ -2879,11 +2930,7 @@ do_handle_cast({Selector, Args, FuturePid}, State) ->
         end
     after
         restore_dispatch_pdict(OldState)
-    end;
-do_handle_cast(Msg, State) ->
-    %% Unknown cast message format - log and ignore
-    ?LOG_WARNING("Unknown cast message", #{message => Msg, domain => [beamtalk, runtime]}),
-    {noreply, State}.
+    end.
 
 -doc """
 Handle synchronous messages (call).
@@ -2927,6 +2974,21 @@ do_handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     restore_propagated_ctx(PropCtx),
     do_handle_call({Selector, Args}, From, State);
 do_handle_call({Selector, Args}, From, State) ->
+    case mailbox_continuation_check(Selector, Args) of
+        ok -> dispatch_call(Selector, Args, From, State);
+        {error, Error} -> {reply, encode_reply_for(From, Selector, {error, Error}), State}
+    end;
+do_handle_call(Msg, _From, State) ->
+    %% Unknown call message format
+    ClassName = beamtalk_tagged_map:class_of(State, unknown),
+    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+    Error1 = beamtalk_error:with_details(Error0, #{raw_message => Msg}),
+    Error = beamtalk_error:with_hint(Error1, <<"Expected {Selector, Args} tuple">>),
+    {reply, {error, Error}, State}.
+
+%% Sync dispatch for do_handle_call/3's `{Selector, Args}` clause.
+-spec dispatch_call(atom(), list(), term(), map()) -> {reply, term(), map()}.
+dispatch_call(Selector, Args, From, State) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (sync)", #{
         class => beamtalk_tagged_map:class_of(State, unknown),
@@ -2958,14 +3020,7 @@ do_handle_call({Selector, Args}, From, State) ->
         end
     after
         restore_dispatch_pdict(OldState)
-    end;
-do_handle_call(Msg, _From, State) ->
-    %% Unknown call message format
-    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-    Error0 = beamtalk_error:new(does_not_understand, ClassName),
-    Error1 = beamtalk_error:with_details(Error0, #{raw_message => Msg}),
-    Error = beamtalk_error:with_hint(Error1, <<"Expected {Selector, Args} tuple">>),
-    {reply, {error, Error}, State}.
+    end.
 
 -doc """
 Wire-encode a sync reply payload (`Result`, `nil`, or `{error, Reason}`) when
@@ -3483,14 +3538,6 @@ dispatch(Selector, Args, Self, State) ->
     %% All other Object methods (describe, inspect, fieldNames, hash, etc.)
     %% are discovered via hierarchy walk to Object.
     case Selector of
-        _ when
-            (Selector =:= 'perform:' orelse Selector =:= 'perform:withArguments:' orelse
-                Selector =:= 'perform:withArguments:timeout:'),
-            Args =/= [],
-            ?IS_CONTINUATION_SELECTOR(hd(Args))
-        ->
-            %% BT-3968: another process's `perform: #continueWith: ...`.
-            {error, performed_continuation_error(hd(Args)), State};
         isAlive when Args =:= [] ->
             %% Actor is alive if it's processing this message
             {reply, true, State};

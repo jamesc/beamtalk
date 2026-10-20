@@ -150,3 +150,55 @@ fn test_dispatch_error_arms_discard_continuations() {
         assert!(body.contains(DISCARD_CONTINUATIONS), "Got:\n{body}");
     }
 }
+
+/// BT-3968: `handle_call`/`handle_cast` reject a mailbox message requesting
+/// a continuation (`beamtalk_actor:mailbox_continuation_check/2`) before
+/// dispatching it; `handle_continue`'s own step is not guarded.
+#[test]
+fn test_mailbox_entries_guard_continuation_requests() {
+    let code = generate(
+        concat!(
+            "Actor subclass: Guarded\n",
+            "  state: value = 0\n\n",
+            "  poke => self continueWith: #bump\n\n",
+            "  bump => self.value := self.value + 1\n",
+        ),
+        "guarded",
+    );
+    let call = extract_core_fn(&code, "'handle_call'/3 = fun").expect("handle_call/3");
+    assert_eq!(
+        call.matches("call 'beamtalk_actor':'mailbox_continuation_check'(Selector, Args)")
+            .count(),
+        2,
+        "both handle_call dispatch clauses are guarded. Got:\n{call}"
+    );
+    let cast = extract_core_fn(&code, "'handle_cast'/2 = fun").expect("handle_cast/2");
+    assert_eq!(
+        cast.matches("call 'beamtalk_actor':'mailbox_continuation_check'(CastSelector, CastArgs)")
+            .count(),
+        2,
+        "both handle_cast dispatch clauses are guarded. Got:\n{cast}"
+    );
+    let cont = extract_core_fn(&code, "'handle_continue'/2 = fun").expect("handle_continue/2");
+    assert!(!cont.contains("mailbox_continuation_check"), "Got:\n{cont}");
+}
+
+/// BT-3968: an actor's own `self perform:withArguments:timeout:` lowers to
+/// `beamtalk_message_dispatch:send/4` like the other `perform:` forms,
+/// instead of self-dispatching into `ProtoObject`'s method body.
+#[test]
+fn test_self_perform_with_timeout_lowers_to_send4() {
+    let code = generate(
+        concat!(
+            "Actor subclass: Performer\n\n",
+            "  later => self perform: #continueWith: withArguments: #(#bump) timeout: 1000\n\n",
+            "  bump => nil\n",
+        ),
+        "performer",
+    );
+    assert!(
+        code.contains("call 'beamtalk_message_dispatch':'send'(")
+            && !code.contains("'safe_dispatch'('perform:withArguments:timeout:'"),
+        "Got:\n{code}"
+    );
+}

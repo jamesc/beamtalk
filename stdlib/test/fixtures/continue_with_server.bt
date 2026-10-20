@@ -57,6 +57,15 @@ Server subclass: ContinueWithServer
 
   requestAfterOne => self continueWith: #afterOne
 
+  // The actor's own perform: of continueWith: is an in-process send.
+  performContinueLater =>
+    self perform: #continueWith: withArguments: #(#afterOne)
+    self
+      perform: #continueWith:
+      withArguments: #(#afterOne)
+      timeout: 1000
+    #requested
+
   // === Sync reply comes first ===
   bumpLater =>
     self continueWith: #bump

@@ -1283,6 +1283,66 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-3968: `handle_call/3`'s dispatch behind the mailbox-boundary guard
+    /// (`beamtalk_actor:mailbox_continuation_check/2`). `self continueWith:`
+    /// is a direct in-process send and never arrives through the mailbox, so
+    /// a call message requesting a continuation — directly or via a
+    /// `perform:` — came from another process and is answered with
+    /// `invalid_continuation` instead of being dispatched inside the actor,
+    /// where the runtime's `self()` check could not tell.
+    fn mailbox_call_guard(module_name: &ecow::EcoString) -> Document<'static> {
+        Self::mailbox_guard(
+            "Selector",
+            "Args",
+            "ContErr",
+            Self::handle_call_dispatch_case(module_name),
+            docvec!["{'reply', {'error', ContErr}, State}"],
+        )
+    }
+
+    /// BT-3968: `handle_cast/2`'s fire-and-forget dispatch behind the same
+    /// guard as [`Self::mailbox_call_guard`]; a rejected cast (logged by the
+    /// runtime check) is dropped.
+    fn mailbox_cast_guard(module_name: &ecow::EcoString) -> Document<'static> {
+        Self::mailbox_guard(
+            "CastSelector",
+            "CastArgs",
+            "_ContErr",
+            Self::cast_dispatch_case(module_name),
+            docvec!["{'noreply', State}"],
+        )
+    }
+
+    fn mailbox_guard(
+        selector_var: &'static str,
+        args_var: &'static str,
+        error_var: &'static str,
+        accepted: Document<'static>,
+        rejected: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            line(),
+            "case call 'beamtalk_actor':'mailbox_continuation_check'(",
+            leaf::var(selector_var),
+            ", ",
+            leaf::var(args_var),
+            ") of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'ok'> when 'true' ->",
+                    nest(INDENT, accepted),
+                    line(),
+                    docvec!["<{'error', ", leaf::var(error_var), "}> when 'true' ->"],
+                    nest(INDENT, docvec![line(), rejected]),
+                ]
+            ),
+            line(),
+            "end",
+        ]
+    }
+
     /// BT-3968: the `let` binding that drops the continuation queue in a
     /// dispatch-error arm — the follow-up steps a failed dispatch requested
     /// are void. Steps committed by an earlier dispatch (the base seeded by
@@ -1467,13 +1527,13 @@ impl CoreErlangGenerator {
                                     docvec![
                                         line(),
                                         "let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in",
-                                        Self::cast_dispatch_case(&module_name),
+                                        Self::mailbox_cast_guard(&module_name),
                                     ]
                                 ),
                                 // Fire-and-forget cast without context (backward compat)
                                 line(),
                                 "<{'cast', CastSelector, CastArgs}> when 'true' ->",
-                                nest(INDENT, Self::cast_dispatch_case(&module_name)),
+                                nest(INDENT, Self::mailbox_cast_guard(&module_name)),
                                 line(),
                                 "<_> when 'true' -> {'noreply', State}",
                             ]
@@ -1512,7 +1572,7 @@ impl CoreErlangGenerator {
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_handle_call(&mut self) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
-        let dispatch_case = Self::handle_call_dispatch_case(&module_name);
+        let dispatch_case = Self::mailbox_call_guard(&module_name);
         let doc = docvec![
             "'handle_call'/3 = fun (Msg, From, State) ->",
             nest(

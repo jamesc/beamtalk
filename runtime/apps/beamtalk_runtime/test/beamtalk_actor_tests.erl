@@ -4604,3 +4604,40 @@ bt3968_perform_of_continue_with_from_another_process_raises_test() ->
     %% Nothing was scheduled.
     ?assertEqual(0, beamtalk_actor:sync_send(Counter, getValue, [])),
     gen_server:stop(Counter).
+
+bt3968_raw_continue_with_message_is_rejected_at_mailbox_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    %% A raw call bypasses the caller-side send-site check.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = invalid_continuation}},
+        gen_server:call(Counter, {'continueWith:', [increment]})
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = invalid_continuation}},
+        gen_server:call(Counter, {'continueWith:withArguments:', [increment, []]})
+    ),
+    ok = gen_server:cast(Counter, {cast, 'continueWith:', [increment]}),
+    Future = beamtalk_future:new(),
+    ok = gen_server:cast(Counter, {'continueWith:', [increment], Future}),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = invalid_continuation}},
+        beamtalk_future:await(Future, 1000)
+    ),
+    ?assertEqual(0, beamtalk_actor:sync_send(Counter, getValue, [])),
+    gen_server:stop(Counter).
+
+bt3968_mailbox_continuation_check_test() ->
+    ?assertEqual(ok, beamtalk_actor:mailbox_continuation_check(increment, [])),
+    ?assertEqual(
+        ok, beamtalk_actor:mailbox_continuation_check('perform:withArguments:', [increment, []])
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = invalid_continuation}},
+        beamtalk_actor:mailbox_continuation_check('continueWith:', [x])
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = invalid_continuation}},
+        beamtalk_actor:mailbox_continuation_check(
+            'perform:withArguments:timeout:', ['continueWith:withArguments:', [x, []], 1000]
+        )
+    ).

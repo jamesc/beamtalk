@@ -61,7 +61,6 @@ super(Selector, Args, Self, State, CurrentClass)
 
 -export([
     lookup/5,
-    perform_lookup/5,
     super/5,
     super_value/4,
     responds_to/2,
@@ -88,22 +87,6 @@ super(Selector, Args, Self, State, CurrentClass)
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
-
--doc """
-lookup/5 for a dispatched `perform:` / `perform:withArguments:` (the
-compiled `Object` dispatch/4 arms and beamtalk_object_ops). BT-3968: on an
-actor, a `perform:` of `continueWith:` / `continueWith:withArguments:` that
-reaches dispatch was sent from another process (see
-`?IS_CONTINUATION_SELECTOR` in beamtalk.hrl), so it is rejected with
-`invalid_continuation` rather than recorded as the actor's own request.
-""".
--spec perform_lookup(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
-perform_lookup(Selector, _Args, #beamtalk_object{}, _State, _CurrentClass) when
-    ?IS_CONTINUATION_SELECTOR(Selector)
-->
-    {error, beamtalk_actor:performed_continuation_error(Selector)};
-perform_lookup(Selector, Args, Self, State, CurrentClass) ->
-    lookup(Selector, Args, Self, State, CurrentClass).
 
 -doc """
 Core dispatch entry point - walks hierarchy from CurrentClass upward.
