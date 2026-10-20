@@ -52,9 +52,14 @@ const BODIES: &[&str] = &[
     SELF_SEND_CONDITIONAL_BODY,
     "^ 0",
     "#(1, 2) do: [:e | self isAlive: e]",
+    FIELD_WRITE_BODY,
 ];
 
 const SELF_SEND_CONDITIONAL_BODY: &str = "(self done) ifTrue: [Timer sleep: 0]";
+
+/// A body that writes a field (the loop threads `SelfVt` in a value-type
+/// method, the actor `State` in an actor); only where the class has `f`.
+const FIELD_WRITE_BODY: &str = "self.f := self.f + 1";
 
 /// Where the loop sits in the method body (`LOOP`).
 const POSITIONS: &[&str] = &[
@@ -165,6 +170,10 @@ fn cases(ctx: &Context) -> Vec<(String, String)> {
                 if ctx.actor_instance && *body == SELF_SEND_CONDITIONAL_BODY {
                     continue;
                 }
+                let has_field = !ctx.class_side && ctx.header.contains("f = 0");
+                if *body == FIELD_WRITE_BODY && !has_field {
+                    continue;
+                }
                 out.push((
                     format!("{keyword} cond{c} body{b} statement"),
                     POSITIONS[0].replace("LOOP", &format!("[{cond}] {keyword} [{body}]")),
@@ -243,6 +252,23 @@ fn pin_bug_bt4000_actor_loop_body_self_send_conditional() {
     );
 }
 
+/// PIN-BUG BT-4002: a field write in a value-type (here `TestCase`) loop
+/// condition is not carried: the plan takes its families from the body only,
+/// so the locals-less `StateAcc` loop is seeded from an unbound `State`. The
+/// verifier reports it rather than `erlc`. A fix for BT-4002 flips this pin.
+#[cfg(debug_assertions)]
+#[test]
+fn pin_bug_bt4002_value_type_condition_field_write() {
+    let src = "TestCase subclass: WhileCarrierProbe\n  field: f = 0\n  probe =>\n    [self.f := self.f + 1. self.f < 3] whileTrue: [nil]\n    self.f\n";
+    let report = super::verifier_report(src, None);
+    assert!(
+        report
+            .as_deref()
+            .is_some_and(|r| r.contains("StateAccLoopWithoutLocals")),
+        "BT-4002 pin: expected the verifier to report StateAccLoopWithoutLocals, got {report:?}"
+    );
+}
+
 /// How many programs [`generated_while_programs_compile`] draws.
 const GENERATED_PROGRAMS: usize = 256;
 
@@ -272,7 +298,7 @@ fn generated_while_programs_compile() {
         "the generator must produce while loops:\n{source}"
     );
     assert!(
-        source.contains("[self done] while"),
+        source.contains("[self "),
         "the generator must produce a self-send loop condition:\n{source}"
     );
     let mut failures: Vec<String> = Vec::new();

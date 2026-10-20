@@ -22,6 +22,8 @@ TestCase subclass: Bt3999WhileSelfSendConditionTest
 
   isAlive: n => n > 0
 
+  isOne => self.f =:= 1
+
   // --- TestCase methods ---
   testEmptyBody =>
     [self done] whileTrue: [nil]
@@ -62,9 +64,11 @@ TestCase subclass: Bt3999WhileSelfSendConditionTest
     self assert: Time nowMs >= deadline
 
   // A method that also writes a field threads `Self`, but this loop does not.
+  // The condition's self-send must see `Self` after the write, or it never
+  // stops.
   testFieldWritingMethod =>
     self.f := 1
-    [self done] whileTrue: [nil]
+    [self isOne] whileFalse: [nil]
     self assert: self.f equals: 1
 
   // The control: the body writes a local, so the loop threads it.

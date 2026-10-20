@@ -678,19 +678,22 @@ fn collect_producer_consumer_counts(
 /// A `Letrec` loop that threads a family passes it as a trailing loop
 /// parameter: a `produces` entry other than the `StateAcc` map's own `State`
 /// (`ThreadingPlan::capture_loop_family_params`, a `Gensym` seed). A fold
-/// carries it through its accumulator instead, and its body binds the
-/// family's versions (`carry_fold_families`): a `SelfVt` `Bind` anywhere in
-/// the body's frame nodes.
+/// carries it through its accumulator instead (`carry_fold_families`): its
+/// body binds the family's versions (a `SelfVt` `Bind`) or ends in the
+/// `Return` that hands the family out (a `SelfVt` version, or the `Gensym`
+/// seed when the body never rebinds it). A nested loop or fold is its own node,
+/// checked on its own, so the walk stops there: an inner loop's family does
+/// not vouch for an outer loop's seed.
 fn carries_family(produces: &[VersionedVar], body: &[ThreadedStmt]) -> bool {
     fn binds_self_vt(stmts: &[ThreadedStmt]) -> bool {
         stmts.iter().any(|stmt| match stmt {
             ThreadedStmt::Bind { target, .. } => target.prefix == VersionPrefix::SelfVt,
-            ThreadedStmt::Threaded { body, .. }
-            | ThreadedStmt::MethodBody { body, .. }
-            | ThreadedStmt::BranchArm { body, .. } => binds_self_vt(body),
-            ThreadedStmt::ConditionalLoop {
-                condition, body, ..
-            } => binds_self_vt(condition) || binds_self_vt(body),
+            ThreadedStmt::Return(_, var, _) => {
+                matches!(var.prefix, VersionPrefix::SelfVt | VersionPrefix::Gensym(_))
+            }
+            ThreadedStmt::MethodBody { body, .. } | ThreadedStmt::BranchArm { body, .. } => {
+                binds_self_vt(body)
+            }
             _ => false,
         })
     }

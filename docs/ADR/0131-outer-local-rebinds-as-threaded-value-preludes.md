@@ -630,8 +630,12 @@ The invariant, per scope kind, for the versioned variable after the loop:
 - *REPL input:* unchanged. The bindings map is the carrier.
 - *Value-type or `TestCase` method:* a condition self-send rebinds nothing
   (`Self` is immutable to it). With no local and no `SelfVt` the loop is a plain
-  loop and `Self` after it is `Self` before it; with either, the loop's
-  `StateAcc` is seeded from `maps:new()` and carries them, as before.
+  loop and `Self` after it is `Self` before it; with a threaded local, or a body
+  that writes a field (`SelfVt`), the loop's `StateAcc` is seeded from
+  `maps:new()` and carries them, as before. A field write in the *condition* is
+  not carried: the plan takes its families from the body only, so such a loop
+  still fails the verifier (no local) or drops the write (a local), as it did
+  before this fix (BT-4002, `PIN-BUG` in the corpus).
 - *Class method:* unchanged. No condition effect counts (ADR 0130 §3).
 
 It holds wherever the loop sits (a method body, a conditional arm, an
@@ -641,7 +645,8 @@ statement classifier (`control_flow_has_mutations`) reads the same predicate
 with the loop's body, so the lowering and the caller that unpacks it agree. The
 verifier check is `ActorStateInClassMethod { StateAccLoopWithoutLocals }`,
 extended to `ScopeKind::ValueType` for a locals-less `StateAcc` loop or fold
-that carries no family; it fails on the repro before the fix. The proof is
+that carries no family (a trailing family loop parameter, or a fold body that
+binds or returns `SelfVt`); it fails on the repro before the fix. The proof is
 `while_condition_carrier_corpus.rs`: condition x body x position x loop x
 method context (1,600 cases failed before the fix), and programs drawn from
 `arb_program`, which now generates `whileTrue:`/`whileFalse:` loops with
