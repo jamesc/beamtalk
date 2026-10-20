@@ -3781,3 +3781,60 @@ fn residual_repl_match_arm_write_is_the_match_arm_error() {
         "{messages:?}"
     );
 }
+
+/// PIN-BUG BT-3947 (closes BT-3948): in an actor method, a literal block
+/// applied in place (`[:z | ...] value: i`) that assigns a local of its own,
+/// inside a `to:do:`/`whileTrue:`/`timesRepeat:` body that rebinds an outer
+/// local and touches no state, emitted an unbound `StateAcc` (`erlc` rejected
+/// the module). BT-3948 makes it a compile error; BT-3947 gives closure bodies
+/// a frame of their own, deletes the `InlineBlockLocalInDirectLoop` row and
+/// flips these to accepted (the repro then answers 6). Class and value-type
+/// methods, `do:`/`collect:` bodies, stateful loops and blocks that assign no
+/// local were always right and stay accepted.
+#[test]
+fn residual_inline_block_local_in_direct_loop_is_an_error_in_actors() {
+    // The BT-3948 repro, in the language's newline syntax.
+    let body = "1 to: 3 do: [:i |\n  t := t + ([:z |\n    w := 0\n    z > 0 ifTrue: [w := z]\n    w] value: i)]\nt";
+    let messages = residual_messages(&in_actor(body), None);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("assigns its local `w`")
+            && messages[0].contains("BT-3948, until BT-3947"),
+        "{messages:?}"
+    );
+    // The siblings measured failing on a BEAM: no conditional, a parameter
+    // rebind, no parameter, two arguments, statement and assignment
+    // positions, and the other counted and condition loops.
+    for body in [
+        "1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z | z := z + 1. z] value: i)]\nt",
+        "1 to: 3 do: [:i | t := t + ([v := 1. v] value)]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z :y | v := z + y. v] value: i value: 1)]\nt",
+        "1 to: 3 do: [:i |\n  t := t + 1\n  [:z | w := z. w] value: i]\nt",
+        "1 to: 3 do: [:i |\n  t := t + 1\n  r := [:z | w := z. w] value: i\n  r]\nt",
+        "[t < 3] whileTrue: [t := t + ([:z | w := z. w] value: 1)]\nt",
+        "3 timesRepeat: [t := t + ([:z | w := z. w] value: 1)]\nt",
+    ] {
+        let messages = residual_messages(&in_actor(body), None);
+        assert_eq!(messages.len(), 1, "{body}: {messages:?}");
+        assert!(messages[0].contains("BT-3948"), "{body}: {messages:?}");
+    }
+    // The shapes that compile and answer right stay accepted: other
+    // contexts, other bodies, a loop that rebinds nothing or touches state,
+    // a block that assigns no local, and a nested loop.
+    for src in [
+        in_class("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_value("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_actor("#(1, 2, 3) do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_actor("1 to: 3 do: [:i | [:z | w := z. w] value: i]\nt"),
+        in_actor("1 to: 3 do: [:i | r := [:z | w := z. w] value: i. r]\nt"),
+        in_actor("1 to: 3 do: [:i | t := t + ([:z | z + 1] value: i)]\nt"),
+        in_actor(
+            "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
+        ),
+        in_actor("1 to: 2 do: [:j | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt"),
+        in_actor("t := t + ([:z | w := z. w] value: 2)\nt"),
+    ] {
+        assert!(residual_messages(&src, None).is_empty(), "{src}");
+    }
+}

@@ -961,6 +961,16 @@ pub(crate) enum Residual {
     /// answered the stale value until BT-3864 rejected the arm's assignment
     /// as a value-position assignment, and draws this error since BT-3909.
     MatchArmWrite,
+    /// BT-3948: an actor `[:z | ...] value: x` (a literal block applied in
+    /// place) whose body assigns a local of its own, as an operand of a
+    /// statement of a `to:do:`/`whileTrue:`/`timesRepeat:` body that rebinds
+    /// an outer local (a "direct" frame) and touches no state. The loop frame
+    /// carries its locals as parameters and has no `StateAcc`, but the block
+    /// body is lowered as a state-threading scope that puts its local into
+    /// one, so `erlc` rejects the module (unbound `StateAcc`). Class and
+    /// value-type methods, `do:`/`collect:` bodies and loops that touch state
+    /// lower it right.
+    InlineBlockLocalInDirectLoop,
 }
 
 /// One [`RESIDUAL_DENY_SET`] row: `shape` is an error in `contexts`.
@@ -981,7 +991,8 @@ struct ResidualDenied {
 /// the REPL `match` line; the `residual_*` tests in
 /// `semantic_analysis/tests/local_threading.rs` pin each repro. BT-3911
 /// deletes the `LoopConditionArmWrite` and `MatchArmWrite` rows, BT-3912 the
-/// `GroupByValue` row.
+/// `GroupByValue` row, BT-3947 the `MatchArmWrite` and
+/// `InlineBlockLocalInDirectLoop` rows.
 const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
     ResidualDenied {
         shape: Residual::GroupByValue,
@@ -996,6 +1007,13 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         shape: Residual::MatchArmWrite,
         contexts: &[Class, ValueType, Actor, Repl],
         issue: "BT-3875",
+        fixed_by: "BT-3947",
+    },
+    // Closure bodies need a frame identity of their own (BT-3947 item 2).
+    ResidualDenied {
+        shape: Residual::InlineBlockLocalInDirectLoop,
+        contexts: &[Actor],
+        issue: "BT-3948",
         fixed_by: "BT-3947",
     },
 ];
@@ -2582,6 +2600,73 @@ impl<'d> Walker<'d> {
         {
             self.check_group_by_value(expr, block, position);
         }
+        self.check_inline_block_local_in_direct_loop(expr);
+    }
+
+    /// [`Residual::InlineBlockLocalInDirectLoop`] (BT-3948): see the shape's
+    /// documentation. The block writes no outer local (the Phase 0 check's
+    /// business); it assigns a local of its own or one of its parameters,
+    /// anywhere in its body.
+    fn check_inline_block_local_in_direct_loop(&mut self, expr: &Expression) {
+        let Some(row) = residual_denied(Residual::InlineBlockLocalInDirectLoop, self.context)
+        else {
+            return;
+        };
+        let in_direct_loop = matches!(
+            self.containers.as_slice(),
+            [Container::LoopBody | Container::CountedLoopBody]
+        ) && self.direct_blocks.as_slice() == [true]
+            && !self.outer_stateful;
+        if !in_direct_loop {
+            return;
+        }
+        let Some(construct) = local_threading_construct(expr)
+            .filter(|c| c.family == LocalThreadingFamily::BlockValue)
+        else {
+            return;
+        };
+        let Some(block) = construct.blocks.first().copied() else {
+            return;
+        };
+        if !self.writes_of(block).is_empty() {
+            return;
+        }
+        let params: HashSet<&str> = block.parameters.iter().map(|p| p.name.as_str()).collect();
+        let mut local: Option<(EcoString, Span)> = None;
+        for stmt in &block.body {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                if let Expression::Assignment { target, .. } = e {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        if local.is_none()
+                            && (params.contains(id.name.as_str()) || !self.is_bound(&id.name))
+                        {
+                            local = Some((id.name.clone(), e.span()));
+                        }
+                    }
+                }
+            });
+        }
+        let Some((name, span)) = local else {
+            return;
+        };
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "a block evaluated in place assigns its local `{name}` inside a loop body \
+                     that rebinds an outer local, which an actor method does not lower yet \
+                     ({issue}, until {fixed_by})",
+                    issue = row.issue,
+                    fixed_by = row.fixed_by,
+                ),
+                expr.span(),
+            )
+            .with_hint(
+                "move the block's work into a method, or compute the value without \
+                 assigning a local inside the block",
+            )
+            .with_note(format!("`{name}` is assigned here"), Some(span))
+            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+        );
     }
 
     /// [`Residual::GroupByValue`] (BT-3897): an actor or REPL `groupBy:` whose
