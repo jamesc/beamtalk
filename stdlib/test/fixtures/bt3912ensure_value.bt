@@ -11,7 +11,10 @@ Value subclass: Bt3912EnsureValue
 
   direct: sink =>
     t := 0
-    [t := t + 1. ^t] ensure: [sink record: t]
+    [
+      t := t + 1
+      ^t
+    ] ensure: [sink record: t]
 
   returnedAssign: sink =>
     t := 0
@@ -19,37 +22,89 @@ Value subclass: Bt3912EnsureValue
 
   inArm: sink x: x =>
     t := 0
-    [x ifTrue: [t := 5. ^t]. t := 9] ensure: [sink record: t]
+    [
+      x
+        ifTrue: [
+          t := 5
+          ^t
+        ]
+      t := 9
+    ] ensure: [sink record: t]
     t
 
   inCollect: sink =>
     t := 0
-    [#(1, 2) collect: [:k | t := t + k. ^t]. 0] ensure: [sink record: t]
+    [
+      #(1, 2)
+        collect: [:k |
+          t := t + k
+          ^t
+        ]
+      0
+    ] ensure: [sink record: t]
 
   inCounted: sink =>
     t := 0
-    [1 to: 5 do: [:k | t := t + k. k =:= 3 ifTrue: [^t]]. 0] ensure: [sink record: t]
+    [
+      1
+        to: 5
+        do: [:k |
+          t := t + k
+          k =:= 3 ifTrue: [^t]
+        ]
+      0
+    ] ensure: [sink record: t]
 
   inWhile: sink =>
     t := 0
-    [[true] whileTrue: [t := t + 1. t =:= 4 ifTrue: [^t]]. 0] ensure: [sink record: t]
+    [
+      [true]
+        whileTrue: [
+          t := t + 1
+          t =:= 4 ifTrue: [^t]
+        ]
+      0
+    ] ensure: [sink record: t]
 
   twoLocals: sink =>
     t := 0
     u := 0
-    [t := 1. u := 2. ^t + u] ensure: [sink record: t + u]
+    [
+      t := 1
+      u := 2
+      ^t + u
+    ] ensure: [sink record: t + u]
 
   nested: sink =>
     t := 0
-    [[t := 1. ^t] ensure: [sink record: t]] ensure: [sink record: t + 10]
+    [
+      [
+        t := 1
+        ^t
+      ] ensure: [sink record: t]
+    ] ensure: [sink record: t + 10]
 
   cleanupWrites: sink =>
     t := 0
-    [t := 1. ^t] ensure: [t := t + 100. sink record: t]
+    [
+      t := 1
+      ^t
+    ]
+      ensure: [
+        t := t + 100
+        sink record: t
+      ]
 
   ensureInLoop: sink =>
     t := 0
-    #(1, 2) do: [:k | [t := t + k. ^t] ensure: [sink record: t]]. 0
+    #(1, 2)
+      do: [:k |
+        [
+          t := t + k
+          ^t
+        ] ensure: [sink record: t]
+      ]
+    0
 
   unwritten: sink =>
     t := 4
@@ -57,4 +112,7 @@ Value subclass: Bt3912EnsureValue
 
   afterLoop: sink =>
     t := 0
-    [#(1, 2) do: [:k | t := t + k]. ^t] ensure: [sink record: t]
+    [
+      #(1, 2) do: [:k | t := t + k]
+      ^t
+    ] ensure: [sink record: t]

@@ -69,4 +69,3 @@ TestCase subclass: Bt3912EnsureTest
     sinks := #[Bt3912EnsureSink spawn, Bt3912EnsureSink spawn, Bt3912EnsureSink spawn]
     self assert: #[(Bt3912EnsureClass afterLoop: (sinks at: 1)), ((Bt3912EnsureValue new) afterLoop: (sinks at: 2)), ((Bt3912EnsureActor spawn) afterLoop: (sinks at: 3))] equals: #[3, 3, 3]
     self assert: #[(sinks at: 1) items, (sinks at: 2) items, (sinks at: 3) items] equals: #[#(3), #(3), #(3)]
-

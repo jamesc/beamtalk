@@ -32,7 +32,7 @@ use super::field_assignment_value_position::{
 };
 use super::{codegen, verifier_report};
 use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
-use crate::core_erlang::{CodeGenError, CodegenOptions, generate_module_surfacing_verifier};
+use crate::core_erlang::{CodegenOptions, generate_module_surfacing_verifier};
 
 /// `(case name, program)` for every statement-level shape x every fold-writing position.
 fn verifier_programs() -> Vec<(String, String)> {
@@ -538,7 +538,7 @@ fn arm_oracle_programs() -> Vec<(String, String, String)> {
                         let mut x = "0".to_string();
                         // `c := self.n > 10` is read before any arm runs.
                         let c = state.n > 10;
-                        let mut arm = |x: &mut String, state: &mut State| {
+                        let arm = |x: &mut String, state: &mut State| {
                             run_arm(kind, &body, form, x, state)
                         };
                         let value = match selector {

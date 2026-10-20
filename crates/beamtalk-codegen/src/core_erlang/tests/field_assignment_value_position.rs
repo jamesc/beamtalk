@@ -622,7 +622,10 @@ fn fold_writing_position_must_be_rejected(
     // `Self`, proven on a BEAM against an oracle over every generated fold in
     // every arm form, selector and position
     // (`generated_field_writing_folds_in_conditional_arms_agree_with_the_oracle_when_run`).
-    let arm_proven = matches!(shape_name, "conditional_arm" | "local_threading_conditional_arm");
+    let arm_proven = matches!(
+        shape_name,
+        "conditional_arm" | "local_threading_conditional_arm"
+    );
     shape_may_reject && !arm_proven && is_fold_writing_position(position)
 }
 
@@ -818,7 +821,11 @@ fn value_type_field_assignment_value_position_corpus(
             }
             match vt_outcome(&src) {
                 VtOutcome::Compiles(_)
-                    if fold_writing_position_must_be_rejected(shape_name, *shape_may_reject, position) =>
+                    if fold_writing_position_must_be_rejected(
+                        shape_name,
+                        *shape_may_reject,
+                        position,
+                    ) =>
                 {
                     failing.push(name.clone());
                     details.push(format!(

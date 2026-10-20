@@ -2942,7 +2942,7 @@ impl CoreErlangGenerator {
     /// general-purpose "does any of these blocks mutate an eligible family"
     /// detector `on:do:`/`ensure:` already shares with
     /// `Self::exception_construct_threaded_families` — rather than this
-    /// predicate's own `block_writes_vt_self_field` walk. The
+    /// predicate's own the former top-level-only write predicate walk. The
     /// `!self.in_class_method()` guard above fixes
     /// [`Self::eligible_families`] at `[SelfVt]` for every input this
     /// function can still reach (a class method threads no family), so that
@@ -2983,40 +2983,6 @@ impl CoreErlangGenerator {
             .exception_construct_families(&blocks)
             .as_slice()
             .is_empty()
-    }
-
-    /// `true` if any TOP-LEVEL statement of `block` is a value-type
-    /// `self.field := ...` write.
-    ///
-    /// Top-level-only for the same reason
-    /// [`CoreErlangGenerator::loop_body_threads_value_self`] is (and the same
-    /// reason): only a bare statement
-    /// lowers through [`Self::build_vt_conditional_branch_pieces_inner`]'s
-    /// own open-chain field-write arm, so only a bare statement produces a
-    /// `Self{N}` binding this arm's return tuple can actually name. A write
-    /// buried in a sub-expression keeps its own nested-`let` scoping,
-    /// untouched by this issue.
-    ///
-    /// **BT-3506 / BT-3522 update:** `on:do:`/`ensure:`'s own equivalent
-    /// check (`exception_handling.rs`'s `exception_construct_families`) does
-    /// not call this — it goes through ADR 0122's shared
-    /// [`CoreErlangGenerator::body_threaded_families`], whose walk is
-    /// RECURSIVE rather than top-level-only. The two therefore answer
-    /// differently for a write nested below a block's top level, and
-    /// deliberately so: this predicate answers "can this construct's branch
-    /// tuple NAME the write's `Self{N}`" (only a bare statement's can),
-    /// while the detector answers "is there a mutation here at all". What
-    /// they DO share is the one shape rule underneath —
-    /// [`CoreErlangGenerator::is_family_mutation`] (Decision 4), which
-    /// `is_vt_self_field_assignment` above delegates to — so "what counts as
-    /// a `SelfVt` write" can never drift between them.
-    pub(in crate::core_erlang) fn block_writes_vt_self_field(
-        &self,
-        block: &beamtalk_core::ast::Block,
-    ) -> bool {
-        super::util::collect_body_exprs(&block.body)
-            .into_iter()
-            .any(|e| self.is_vt_self_field_assignment(e))
     }
 
     /// Returns the list of local variables written in `block` that are already

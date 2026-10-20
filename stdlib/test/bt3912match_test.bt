@@ -106,4 +106,3 @@ TestCase subclass: Bt3912MatchTest
 
   testReadWrite1 =>
     self assert: #[(Bt3912MatchClass readWrite: 2), ((Bt3912MatchValue new) readWrite: 2), ((Bt3912MatchActor spawn) readWrite: 2)] equals: #[11, 11, 11]
-

@@ -9,14 +9,11 @@
 
 TestCase subclass: Bt3912GroupByTest
 
-  testReceiver =>
-    self assert: (Bt3912GroupBy spawn receiver) equals: #(3)
+  testReceiver => self assert: (Bt3912GroupBy spawn receiver) equals: #(3)
 
-  testFieldBlock =>
-    self assert: (Bt3912GroupBy spawn fieldBlock) equals: #(3)
+  testFieldBlock => self assert: (Bt3912GroupBy spawn fieldBlock) equals: #(3)
 
-  testCollectBody =>
-    self assert: (Bt3912GroupBy spawn collectBody) equals: #(3)
+  testCollectBody => self assert: (Bt3912GroupBy spawn collectBody) equals: #(3)
 
   testReturnedInDo =>
     self assert: (Bt3912GroupBy spawn returnedInDo) equals: #(3)
@@ -24,11 +21,9 @@ TestCase subclass: Bt3912GroupByTest
   testReturnedMap =>
     self assert: ((Bt3912GroupBy spawn returnedMap) at: true) equals: #(3)
 
-  testWhileAssign =>
-    self assert: (Bt3912GroupBy spawn whileAssign) equals: #(3)
+  testWhileAssign => self assert: (Bt3912GroupBy spawn whileAssign) equals: #(3)
 
-  testToDoAssign =>
-    self assert: (Bt3912GroupBy spawn toDoAssign) equals: #(3)
+  testToDoAssign => self assert: (Bt3912GroupBy spawn toDoAssign) equals: #(3)
 
   testTimesRepeatAssign =>
     self assert: (Bt3912GroupBy spawn timesRepeatAssign) equals: #(3)
@@ -45,23 +40,19 @@ TestCase subclass: Bt3912GroupByTest
   testSelectAssign =>
     self assert: (Bt3912GroupBy spawn selectAssign) equals: #(3)
 
-  testIfNilAssign =>
-    self assert: (Bt3912GroupBy spawn ifNilAssign) equals: #(3)
+  testIfNilAssign => self assert: (Bt3912GroupBy spawn ifNilAssign) equals: #(3)
 
   testIfTrueFalseAssign =>
     self assert: (Bt3912GroupBy spawn ifTrueFalseAssign) equals: #(3)
 
-  testAndAssign =>
-    self assert: (Bt3912GroupBy spawn andAssign) equals: #(3)
+  testAndAssign => self assert: (Bt3912GroupBy spawn andAssign) equals: #(3)
 
-  testOrAssign =>
-    self assert: (Bt3912GroupBy spawn orAssign) equals: #(3)
+  testOrAssign => self assert: (Bt3912GroupBy spawn orAssign) equals: #(3)
 
   testAtIfAbsentAssign =>
     self assert: (Bt3912GroupBy spawn atIfAbsentAssign) equals: #(3)
 
-  testTryDoAssign =>
-    self assert: (Bt3912GroupBy spawn tryDoAssign) equals: #(3)
+  testTryDoAssign => self assert: (Bt3912GroupBy spawn tryDoAssign) equals: #(3)
 
   testOnDoHandlerAssign =>
     self assert: (Bt3912GroupBy spawn onDoHandlerAssign) equals: #(3)
@@ -78,8 +69,7 @@ TestCase subclass: Bt3912GroupByTest
   testNestedArmInDo =>
     self assert: (Bt3912GroupBy spawn nestedArmInDo) equals: #(3)
 
-  testArmInLoop =>
-    self assert: (Bt3912GroupBy spawn armInLoop) equals: #(3)
+  testArmInLoop => self assert: (Bt3912GroupBy spawn armInLoop) equals: #(3)
 
   testRebindsOuter =>
     self assert: (Bt3912GroupBy spawn rebindsOuter) equals: #[#(3), 4]
@@ -96,9 +86,7 @@ TestCase subclass: Bt3912GroupByTest
   testValueAssignedRebinds =>
     self assert: (Bt3912GroupByValue new) assignedRebinds equals: #[#(3), 4]
 
-  testClassOwnLocal =>
-    self assert: Bt3912GroupByClass ownLocal equals: #(3)
+  testClassOwnLocal => self assert: Bt3912GroupByClass ownLocal equals: #(3)
 
   testValueOwnLocal =>
     self assert: (Bt3912GroupByValue new) ownLocal equals: #(3)
-
