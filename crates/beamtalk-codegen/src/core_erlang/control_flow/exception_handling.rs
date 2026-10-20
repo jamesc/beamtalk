@@ -1277,14 +1277,7 @@ impl CoreErlangGenerator {
             Some(arm) if !self.is_repl_mode() => arm.threads.clone(),
             _ => Vec::new(),
         };
-        let capture_depth = self.nlr_capture.len();
-        let id_depth = self.nlr_ens_ids.len();
-        self.nlr_capture.extend(captured.iter().cloned());
-        let own_id = self.nlr_ens_counter;
-        if !captured.is_empty() {
-            self.nlr_ens_counter += 1;
-            self.nlr_ens_ids.push(own_id);
-        }
+        let (capture_depth, id_depth, own_id) = self.enter_ensure_capture(&captured);
         // Generate try body with state threading
         let try_arm = self.push_exception_arm(
             &mut docs,
@@ -1293,8 +1286,7 @@ impl CoreErlangGenerator {
             outer_version,
             arm.as_ref(),
         );
-        self.nlr_capture.truncate(capture_depth);
-        self.nlr_ens_ids.truncate(id_depth);
+        self.leave_ensure_capture(capture_depth, id_depth);
         let (try_result_var, try_final, try_slot) = try_arm?;
         // Return {Result, State[, Family]} from try body
         docs.push(self.close_exception_result_tuple(
@@ -1390,6 +1382,25 @@ impl CoreErlangGenerator {
         self.set_self_version(outer_self);
 
         Ok(Document::Vec(docs))
+    }
+
+    /// BT-3947: starts capturing `captured` for the `^`s of an `ensure:`'s protected
+    /// block, answering the stack depths to restore ([`Self::leave_ensure_capture`])
+    /// and the construct's wrapper id (its catch takes only a wrapper that carries it).
+    fn enter_ensure_capture(&mut self, captured: &[String]) -> (usize, usize, usize) {
+        let depths = (self.nlr_capture.len(), self.nlr_ens_ids.len());
+        self.nlr_capture.extend(captured.iter().cloned());
+        let own_id = self.nlr_ens_counter;
+        if !captured.is_empty() {
+            self.nlr_ens_counter += 1;
+            self.nlr_ens_ids.push(own_id);
+        }
+        (depths.0, depths.1, own_id)
+    }
+
+    fn leave_ensure_capture(&mut self, capture_depth: usize, id_depth: usize) {
+        self.nlr_capture.truncate(capture_depth);
+        self.nlr_ens_ids.truncate(id_depth);
     }
 
     /// BT-3947: the `ensure:` catch's arm for a `^` thrown from the protected

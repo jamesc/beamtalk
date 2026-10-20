@@ -105,9 +105,9 @@ impl NlrCatchVars {
         docvec![
             "case ",
             state,
-            " of <{'$bt_ens', _, ",
+            " of <{'$bt_ens', _EnsIdIgn, ",
             leaf::var(slot.clone()),
-            ", _}> when 'true' -> ",
+            ", _EnsLocalsIgn}> when 'true' -> ",
             leaf::var(slot.clone()),
             " <",
             leaf::var(other.clone()),

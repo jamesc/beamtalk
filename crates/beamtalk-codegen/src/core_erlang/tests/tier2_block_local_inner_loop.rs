@@ -18,13 +18,24 @@
 use super::{codegen, verifier_report};
 use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
 
-const REPRO: &str = "Actor subclass: P
-  state: groups = #(#(1, 2), #(3))
+/// An actor whose method `name` stores a Tier 2 block (a stored block that
+/// writes the captured local `c`, so it is called with the `StateAcc` protocol)
+/// with `body` as its statements after the capture write, then applies it.
+fn host(name: &str, body: &str) -> String {
+    format!(
+        "Actor subclass: P
   state: hits = 0
-  sealed fwd: block => self.groups collect: block
-  promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
-  sums => self fwd: [:xs | n := 0. xs do: [:y | n := n + y]. n]
-";
+  {name} =>
+    c := 0
+    blk := [:xs | c := c + 1. {body}]
+    blk value: #(1, 2)
+"
+    )
+}
+
+fn repro() -> String {
+    host("sums", "n := 0. xs do: [:y | n := n + y]. n")
+}
 
 /// The method `go`'s Core Erlang, from its dispatch clause to the next one.
 fn go_clause(code: &str) -> &str {
@@ -38,7 +49,7 @@ fn go_clause(code: &str) -> &str {
 
 #[test]
 fn the_repro_threads_the_post_loop_local_and_state_out_of_the_block() {
-    let code = codegen(REPRO);
+    let code = codegen(&repro());
     let sums = {
         let start = code.find("<'sums'> when 'true' ->").expect("sums clause");
         let rest = &code[start..];
@@ -52,11 +63,11 @@ fn the_repro_threads_the_post_loop_local_and_state_out_of_the_block() {
         "the loop should be lowered as a producer:\n{sums}"
     );
     assert!(
-        sums.contains("= call 'maps':'get'('__local__n', StateAcc2) in"),
+        sums.contains("= call 'maps':'get'('__local__n', StateAcc3) in"),
         "the post-loop local should be read from the post-loop state:\n{sums}"
     );
     assert!(
-        sums.contains("{_T2Res") && sums.contains(", StateAcc2}"),
+        sums.contains("{_T2Res") && sums.contains(", StateAcc3}"),
         "the block should return the post-loop state:\n{sums}"
     );
     assert!(
@@ -67,12 +78,12 @@ fn the_repro_threads_the_post_loop_local_and_state_out_of_the_block() {
 
 #[test]
 fn the_unbroken_repro_passes_the_verifier() {
-    assert_eq!(verifier_report(REPRO, None), None);
+    assert_eq!(verifier_report(&repro(), None), None);
 }
 
 #[test]
 fn withholding_the_producer_sites_is_producer_site_not_threaded() {
-    let report = verifier_report(REPRO, Some(LocalRebindFault::Tier2OpaqueProducers))
+    let report = verifier_report(&repro(), Some(LocalRebindFault::Tier2OpaqueProducers))
         .expect("the opaque lowering is a verifier finding");
     assert!(
         report.contains("ProducerSiteNotThreaded"),
@@ -84,12 +95,11 @@ fn withholding_the_producer_sites_is_producer_site_not_threaded() {
 /// are carried out of the block.
 #[test]
 fn a_loop_writing_a_field_and_a_local_carries_both() {
-    let src = "Actor subclass: Q
-  state: groups = #(#(1, 2), #(3))
-  state: hits = 0
-  sealed fwd: block => self.groups collect: block
-  go => self fwd: [:xs | n := 0. xs do: [:y | n := n + y. self.hits := self.hits + y]. n]
-";
+    let src = host(
+        "go",
+        "n := 0. xs do: [:y | n := n + y. self.hits := self.hits + y]. n",
+    );
+    let src = src.as_str();
     assert_eq!(verifier_report(src, None), None);
     let code = codegen(src);
     let go = go_clause(&code);
@@ -122,15 +132,7 @@ const POSITIONS: &[&str] = &[
 /// by `construct`, after binding the block-locals the constructs write.
 fn program(construct: &str, position: &str) -> String {
     let body = position.replace("{c}", construct);
-    format!(
-        "Actor subclass: Corpus
-  state: groups = #(#(1, 2), #(3))
-  state: hits = 0
-  sealed fwd: block => self.groups collect: block
-  promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
-  go => self fwd: [:xs | t := 0. u := 0. s := 0. {body}]
-"
-    )
+    host("go", &format!("t := 0. u := 0. s := 0. {body}"))
 }
 
 fn programs() -> Vec<String> {

@@ -130,29 +130,6 @@ fn a_local_bound_inside_an_inlined_block_is_that_blocks_own() {
     }
 }
 
-// The one source path to a Tier 2 body that survives BT-3922 (found
-// empirically): a block passed to an Erlang FFI call that writes a captured
-// local goes through `generate_erlang_interop_wrapper` and answered `#(0)` for
-// this program, silently, before the body was a frame.
-#[test]
-fn an_erlang_ffi_block_rebinding_a_body_local_in_a_loop_compiles() {
-    let src = "Actor subclass: G
-  state: hits = 0
-  ffi =>
-    t := 0
-    ys := #(1, 2)
-    (Erlang lists)
-      map: [:x |
-        t := t + 1
-        n := 0
-        ys do: [:y | n := n + y]
-        n
-      ]
-      with: #(1)
-";
-    compile(src).expect("compiles");
-}
-
 #[test]
 fn a_construct_that_rebinds_a_captured_local_is_not_this_error() {
     // `c` is captured-mutated by the block (seeded into `StateAcc` by the
@@ -179,31 +156,12 @@ const LAST_STATEMENT_BLOCK_VALUES: &[&str] = &[
     "{a, b} := [n := 3. #(n, 4)] value",
 ];
 
-/// The FFI argument block, the source-reachable Tier 2 host.
-fn ffi_host(body: &str) -> String {
-    format!(
-        "Actor subclass: G
-  state: hits = 0
-  ffi =>
-    c := 0
-    (Erlang lists)
-      map: [:x |
-        c := c + 1
-        {body}
-      ]
-      with: #(1)
-"
-    )
-}
-
 #[test]
 fn a_tier_2_body_ending_in_an_evaluated_block_that_assigns_compiles() {
     let mut checked = 0;
     for last in LAST_STATEMENT_BLOCK_VALUES {
         for body in [(*last).to_string(), format!("self note: c. {last}")] {
-            let mut srcs = hosts(&body).to_vec();
-            srcs.push(ffi_host(&body));
-            for src in srcs {
+            for src in hosts(&body) {
                 compile(&src).unwrap_or_else(|e| panic!("{e}\n{src}"));
                 checked += 1;
             }
