@@ -2944,12 +2944,48 @@ impl Parser {
 
     /// Whether the current token, at the tuple's own nesting level, belongs
     /// outside the tuple: an enclosing construct's `]`/`)`, or a token on a
-    /// new line (the next statement or method definition).
+    /// new line that starts the next method definition, or that no closing
+    /// `}` follows (so the tuple was left unclosed). A newline inside a
+    /// tuple that *is* closed later — a missing comma in a multi-line
+    /// literal — is not a boundary, so recovery still reaches that `}`.
     fn at_tuple_recovery_boundary(&self) -> bool {
-        matches!(
+        if matches!(
             self.current_kind(),
             TokenKind::RightBracket | TokenKind::RightParen
-        ) || self.current_token().has_leading_newline()
+        ) {
+            return true;
+        }
+        self.current_token().has_leading_newline()
+            && (self.is_at_method_definition() || !self.tuple_close_brace_ahead())
+    }
+
+    /// Whether a `}` closes the current nesting level before an enclosing
+    /// `]`/`)` or `Eof` (error-recovery lookahead only).
+    fn tuple_close_brace_ahead(&self) -> bool {
+        let mut depth: usize = 0;
+        let mut offset = 0;
+        loop {
+            match self.peek_at(offset) {
+                None | Some(TokenKind::Eof) => return false,
+                Some(
+                    TokenKind::LeftBrace
+                    | TokenKind::MapOpen
+                    | TokenKind::LeftBracket
+                    | TokenKind::ArrayOpen
+                    | TokenKind::LeftParen
+                    | TokenKind::ListOpen,
+                ) => depth += 1,
+                Some(TokenKind::RightBrace) if depth == 0 => return true,
+                Some(TokenKind::RightBracket | TokenKind::RightParen) if depth == 0 => {
+                    return false;
+                }
+                Some(TokenKind::RightBrace | TokenKind::RightBracket | TokenKind::RightParen) => {
+                    depth -= 1;
+                }
+                Some(_) => {}
+            }
+            offset += 1;
+        }
     }
 
     /// Error recovery inside a tuple literal: skip tokens up to (not

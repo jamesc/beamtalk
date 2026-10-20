@@ -1364,6 +1364,28 @@ fn parse_multi_line_tuple_literal() {
 }
 
 #[test]
+fn parse_multi_line_tuple_missing_comma_points_at_comma() {
+    // A missing comma in a closed multi-line tuple reports the comma, and
+    // recovery reaches the tuple's own `}` (one diagnostic).
+    let diagnostics = parse_err("x := {\n  #active\n  false\n}\ny := 1");
+    assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("Expected ',' or '}' in tuple literal, found false"),
+        "got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_unclosed_tuple_at_top_level_keeps_next_statement() {
+    let tokens = lex_with_eof("x := {1, 2\ny := 3");
+    let (module, diagnostics) = parse(tokens);
+    assert_eq!(module.expressions.len(), 2, "got: {diagnostics:?}");
+    assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+}
+
+#[test]
 fn parse_unclosed_tuple_does_not_eat_enclosing_bracket() {
     let tokens = lex_with_eof("y := [ {1, 2 ] value\nz := 3");
     let (module, diagnostics) = parse(tokens);
