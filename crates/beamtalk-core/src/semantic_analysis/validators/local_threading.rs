@@ -965,7 +965,8 @@ pub(crate) enum Residual {
     /// place) whose body assigns a local of its own, with a loop among the
     /// enclosing blocks. The loop frame carries its locals as parameters (no
     /// `StateAcc`) while the block body is lowered as a state-threading
-    /// scope. Measured on a BEAM, these fail `erlc` (unbound `StateAcc`),
+    /// scope. Measured on a BEAM (the rows marked conservative below were
+    /// not measured failing; BT-3947 flips them with the rest), these fail `erlc` (unbound `StateAcc`),
     /// raise, or answer a `{Value, Locals}` carrier instead of the value:
     /// the send in a `whileTrue:`/`whileFalse:` condition (also with a
     /// state-touching body, and as a statement of the condition unless the
@@ -981,6 +982,13 @@ pub(crate) enum Residual {
     /// answer right. A `to:do:` directly in a non-rebinding `to:do:` also
     /// answered right, but `timesRepeat:` outside it and a third level did
     /// not, and the block roles do not tell them apart, so it is rejected.
+    ///
+    /// Conservative rejections (no BEAM measurement of a failure; the
+    /// anchor on the innermost loop rejects them and BT-3947 flips them): a
+    /// loop inside a closure stored by `add:` or inside a non-arm block, a
+    /// loop in a method-level arm whose block is statement-only, and a
+    /// `to:do:` in a non-rebinding `to:do:` (measured right). Every other
+    /// denied shape in the pin test was measured failing or answering wrong.
     InlineBlockLocalInLoop,
 }
 
@@ -1549,6 +1557,9 @@ struct Walker<'d> {
     /// Whether the local being assigned by the assignment whose value is
     /// being walked was not bound before it ([`Residual::InlineBlockLocalInLoop`]).
     assign_target_fresh: bool,
+    /// The in-place block sends already reported as
+    /// [`Residual::InlineBlockLocalInLoop`].
+    inline_local_reported: Vec<Span>,
     /// Set by a send's walk just before it descends into a block operand that
     /// is a threaded frame body; consumed by [`Walker::block`].
     pending_frame_body: Option<FrameBody>,
@@ -1594,6 +1605,7 @@ impl<'d> Walker<'d> {
             group_by_assign_blocks: Vec::new(),
             pending_group_by_assign_block: false,
             assign_target_fresh: false,
+            inline_local_reported: Vec::new(),
             last_statements: Vec::new(),
             outer_stateful: false,
             direct_blocks: Vec::new(),
@@ -2625,6 +2637,7 @@ impl<'d> Walker<'d> {
     /// (the Phase 0 check's business); it assigns a local of its own or one
     /// of its parameters, anywhere in its body. The shape is anchored on the
     /// innermost enclosing loop block.
+    #[allow(clippy::too_many_lines)] // one measured rule per loop position, each documented
     fn check_inline_block_local_in_loop(&mut self, expr: &Expression, position: Position) {
         let Some(row) = residual_denied(Residual::InlineBlockLocalInLoop, self.context) else {
             return;
@@ -2650,9 +2663,22 @@ impl<'d> Walker<'d> {
         let params: HashSet<&str> = block.parameters.iter().map(|p| p.name.as_str()).collect();
         let mut nested_blocks: Vec<Span> = Vec::new();
         for stmt in &block.body {
+            // Only the literal blocks of conditional sends are arms: an
+            // assignment in a nested `do:` body or closure is unmeasured.
             crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-                if let Expression::Block(b) = e {
-                    nested_blocks.push(b.span);
+                if let Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } = e
+                {
+                    if Container::of(&selector.name(), false) == Container::Arm {
+                        for arg in arguments {
+                            if let Expression::Block(b) = arg {
+                                nested_blocks.push(b.span);
+                            }
+                        }
+                    }
                 }
             });
         }
@@ -2686,6 +2712,14 @@ impl<'d> Walker<'d> {
         let Some((name, span)) = local else {
             return;
         };
+        // A nested in-place block inside one already reported adds nothing.
+        if self
+            .inline_local_reported
+            .iter()
+            .any(|r| r.start() <= expr.span().start() && expr.span().end() <= r.end())
+        {
+            return;
+        }
         let below = &self.containers[l + 1..];
         // A loop condition is not a frame body (`frame_sites` is `None`).
         let in_condition = self.frame_sites.get(l).is_some_and(Option::is_none);
@@ -2713,6 +2747,7 @@ impl<'d> Walker<'d> {
         if !denied {
             return;
         }
+        self.inline_local_reported.push(expr.span());
         self.diagnostics.push(
             Diagnostic::error(
                 format!(

@@ -3838,6 +3838,14 @@ fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
         "1 to: 2 do: [:j | 1 to: 2 do: [:k | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
         "q := 0\n1 to: 2 do: [:j | q := q + 1\n  1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
         "1 to: 3 do: [:i | #(1, 2) do: [:e | t := t + ([:z | w := z. w] value: e)]]\nt",
+        // Conservative rejections (not measured failing; BT-3947 flips
+        // them): a loop in a closure stored by `add:`, and one in a
+        // method-level arm with the block as a bare statement.
+        "fs := OrderedCollection new\n1 to: 3 do: [:i | fs add: [:x | [:z | w := z. w] value: x]]\nt",
+        "c := true\nc ifTrue: [1 to: 3 do: [:i | [:z | w := z. w] value: i]]\nt",
+        // An assignment in a nested `do:` body or closure of a condition
+        // statement is not the BT-3911 cell.
+        "[[:z | #(1) do: [:e | w := e]. z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
         // A state-touching body: the arm operand and `and:` shapes.
         "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
         "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c and: [([:z | w := z. w] value: i) > 0]]\nt",
