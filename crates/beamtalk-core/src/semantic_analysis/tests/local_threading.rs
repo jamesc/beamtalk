@@ -3799,3 +3799,149 @@ fn residual_repl_match_arm_write_is_the_match_arm_error() {
         "{messages:?}"
     );
 }
+
+/// PIN-BUG BT-3947 (closes BT-3948): in an actor method, a literal block
+/// applied in place (`[:z | ...] value: i`) that assigns a local of its own,
+/// in a `to:do:`/`whileTrue:`/`timesRepeat:` body that rebinds an outer
+/// local, below a conditional arm of such a body, in a loop condition, or
+/// with the loop inside another block, emitted an unbound `StateAcc`
+/// (`erlc` rejected the module), raised, or answered a `{Value, Locals}`
+/// carrier (every row below was measured on a BEAM). BT-3948 makes it a compile error; BT-3947 gives
+/// closure bodies a frame of their own, deletes the `InlineBlockLocalInLoop`
+/// row and flips these to accepted (the repro then answers 6). Class and
+/// value-type methods, `do:`/`collect:` bodies, stateful loops, blocks that
+/// assign no local and `r := [..] value: i` of a fresh local inside an arm
+/// were measured right and stay accepted.
+#[test]
+fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
+    // The BT-3948 repro, in the language's newline syntax.
+    let body = "1 to: 3 do: [:i |\n  t := t + ([:z |\n    w := 0\n    z > 0 ifTrue: [w := z]\n    w] value: i)]\nt";
+    let messages = residual_messages(&in_actor(body), None);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("assigns its local `w`")
+            && messages[0].contains("BT-3948, until BT-3947"),
+        "{messages:?}"
+    );
+    // The siblings measured failing on a BEAM: no conditional, a parameter
+    // rebind, no parameter, two arguments, statement and assignment
+    // positions, and the other counted and condition loops.
+    for body in [
+        "1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z | z := z + 1. z] value: i)]\nt",
+        "1 to: 3 do: [:i | t := t + ([v := 1. v] value)]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z :y | v := z + y. v] value: i value: 1)]\nt",
+        "1 to: 3 do: [:i |\n  t := t + 1\n  [:z | w := z. w] value: i]\nt",
+        "1 to: 3 do: [:i |\n  t := t + 1\n  r := [:z | w := z. w] value: i\n  r]\nt",
+        "[t < 3] whileTrue: [t := t + ([:z | w := z. w] value: 1)]\nt",
+        "3 timesRepeat: [t := t + ([:z | w := z. w] value: 1)]\nt",
+        // Below a conditional arm (BEAM-measured wrong or erlc failure).
+        "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i | c and: [([:z | w := z. w] value: i) > 0]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "c := true\n[t < 3] whileTrue: [t := t + 1\n  c and: [([:z | w := z. w] value: 1) > 0]]\nt",
+        // Measured: a loop inside a method-level arm, `on:do:`, `ensure:`,
+        // `value`, a `do:` body or another loop answered a carrier or
+        // raised; a `do:`, `collect:` or `inject:` body below the loop too.
+        "c := true\nc ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] on: Error do: [:e | 0]\nt",
+        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] ensure: [0]\nt",
+        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] value\nt",
+        "#(1) do: [:e | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\nc ifTrue: [c ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "2 timesRepeat: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "1 to: 2 do: [:j | 1 to: 2 do: [:k | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "q := 0\n1 to: 2 do: [:j | q := q + 1\n  1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "1 to: 3 do: [:i | #(1, 2) do: [:e | t := t + ([:z | w := z. w] value: e)]]\nt",
+        // Conservative rejections (not measured failing; BT-3947 flips
+        // them): a loop in a closure stored by `add:`, and one in a
+        // method-level arm with the block as a bare statement.
+        "fs := OrderedCollection new\n1 to: 3 do: [:i | fs add: [:x | [:z | w := z. w] value: x]]\nt",
+        "c := true\nc ifTrue: [1 to: 3 do: [:i | [:z | w := z. w] value: i]]\nt",
+        // An assignment in a nested `do:` body or closure of a condition
+        // statement is not the BT-3911 cell.
+        "[[:z | #(1) do: [:e | w := e]. z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        // An arm inside a `do:` body or closure is not a bare arm.
+        "[[:z | #(1) do: [:e | e > 0 ifTrue: [w := e]]] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | [:y | y > 0 ifTrue: [w := y]] value: z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        // A state-touching body: the arm operand and `and:` shapes.
+        "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c and: [([:z | w := z. w] value: i) > 0]]\nt",
+        // In a loop condition, whatever the body does.
+        "[([:z | w := z. w] value: t) < 3] whileTrue: [self.n := self.n + 1\n  t := t + 1]\nt",
+        "[([:z | z > 5 ifTrue: [z := 0]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
+        "[([:z | z > 0 ifTrue: [w := z]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | w := z. w] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | z > 0 ifTrue: [w := z]\n  z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) > 5] whileFalse: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := 5]\nt",
+        "[t < 3 and: [([:z | w := z. w] value: t) > 0]] whileTrue: [t := t + 1]\nt",
+        "[t < 3 ifTrue: [([:z | w := z. w] value: t) > 0] ifFalse: [false]] whileTrue: [t := t + 1]\nt",
+    ] {
+        let messages = residual_messages(&in_actor(body), None);
+        assert_eq!(messages.len(), 1, "{body}: {messages:?}");
+        assert!(messages[0].contains("BT-3948"), "{body}: {messages:?}");
+    }
+    // The shapes that compile and answer right stay accepted: other
+    // contexts, other bodies, a loop that rebinds nothing or touches state,
+    // a block that assigns no local, and a nested loop.
+    for src in [
+        in_class("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_value("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_actor("#(1, 2, 3) do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_actor("1 to: 3 do: [:i | [:z | w := z. w] value: i]\nt"),
+        in_actor("1 to: 3 do: [:i | r := [:z | w := z. w] value: i. r]\nt"),
+        in_actor("1 to: 3 do: [:i | t := t + ([:z | z + 1] value: i)]\nt"),
+        in_actor(
+            "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
+        ),
+        in_actor("t := t + ([:z | w := z. w] value: 2)\nt"),
+        // `r := [..] value: i` of a fresh local in an arm answers right in
+        // every arm family and loop kind (BEAM-measured).
+        in_actor(
+            "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [r := [:z | w := z. w] value: i\n    t := t + r]]\nt",
+        ),
+        in_actor(
+            "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [r := [:z | w := z. w] value: i\n  t := t + r]]]\nt",
+        ),
+        in_actor(
+            "c := true\n3 timesRepeat: [c and: [r := [:z | w := z. w] value: 2\n  t := t + r\n  true]]\nt",
+        ),
+        in_actor(
+            "c := true\n[t < 9] whileTrue: [c ifNotNil: [:u | r := [:z | w := z. w] value: 2\n  t := t + r + 1]]\nt",
+        ),
+        // A state-touching body answers right directly and for a statement
+        // of an arm (BEAM-measured).
+        in_actor(
+            "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
+        ),
+        in_actor(
+            "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
+        ),
+        // The BT-3911 cell: one arm-only statement in a condition.
+        in_actor("[[:k | true ifTrue: [x := k]] value: 1\n  t < 3] whileTrue: [t := t + 1]\nt"),
+    ] {
+        assert!(residual_messages(&src, None).is_empty(), "{src}");
+    }
+}
+
+/// BT-3948: an in-place block that assigns its own local AND writes an outer
+/// local inside a loop is left to the Phase 0 position check, which rejects it
+/// (measured with the CLI, 2026-10-20), so neither form slips past both checks.
+#[test]
+fn inline_block_local_that_also_writes_an_outer_local_in_a_loop_is_rejected_by_phase_0() {
+    for body in [
+        "1 to: 3 do: [:i | [:z | w := z. t := t + w] value: i]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z | w := z. t := t + w. w] value: i)]\nt",
+    ] {
+        let diags = adr0131_diagnostics(&in_actor(body));
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error)
+                && diags.iter().all(|d| !d.message.contains("BT-3948")),
+            "{body}: {diags:?}"
+        );
+    }
+}
