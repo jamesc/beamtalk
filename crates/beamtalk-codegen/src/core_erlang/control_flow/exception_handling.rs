@@ -1668,8 +1668,10 @@ impl CoreErlangGenerator {
             // BT-3823: in the REPL the block is inlined over the bindings map,
             // and a producer at one of its statements' sites adopts it
             // (`with_repl_arm_producer_sites`).
-            this.with_repl_arm_producer_sites(&statements, |this| {
-                this.generate_exception_body_with_threading_inner(body, families, None, entry)
+            this.with_repl_arm_rebind_frame(|this| {
+                this.with_repl_arm_producer_sites(&statements, |this| {
+                    this.generate_exception_body_with_threading_inner(body, families, None, entry)
+                })
             })
         })
     }

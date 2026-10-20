@@ -657,10 +657,17 @@ impl ThreadingPlan {
     /// the loop's own `StateAcc` frame: the loop's mode, threading nothing
     /// (the closure is called once per iteration and hands back only its
     /// boolean, so no outer local leaves it).
-    pub(in crate::core_erlang) fn condition_rebind_frame(&self, frame: FrameId) -> RebindFrame {
+    ///
+    /// The frame is a `DirectParams` one whatever the loop's own mode: with
+    /// nothing threaded every write is a plain `Let` rebind that dies with the
+    /// closure. A `StateAcc` frame would not do — in a REPL input a `StateAcc`
+    /// frame runs over the bindings map, so [`RebindFrame::with_repl_binding`]
+    /// makes every binding a member and a write `Put`s into a map the closure
+    /// never hands back (a step no document can carry, and the write is lost).
+    pub(in crate::core_erlang) fn condition_rebind_frame(frame: FrameId) -> RebindFrame {
         RebindFrame {
             frame,
-            kind: RebindFrameKind::Loop(self.threading_mode()),
+            kind: RebindFrameKind::Loop(ThreadingMode::DirectParams),
             threads: Vec::new(),
         }
     }

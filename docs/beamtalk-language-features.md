@@ -3024,24 +3024,13 @@ error: `detect:ifNone:` writes outer local `t`, but as a statement inside a cond
 
 These combinations are measured and listed in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`; they are mostly `detect:ifNone:` in an actor method at nested positions, an `ifNil:`/`and:` family member or an actor loop in an arm, and, in the REPL, a construct inside a REPL loop or fold body (`#(1, 2) do: [:x | [t := t + x] on: Error do: [:e | 0]]`, BT-3876). The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. Also still compile errors: an assignment inside a conditional arm in a `whileTrue:`/`whileFalse:` condition block in a method (`[i < n and: [x := i. x < 5]] whileTrue: [...]`, BT-3891; assign in the condition block or the loop body instead), a `^` whose value is a local-threading construct inside a plain closure in an actor method (`^xs do: [...]` inside a `detect:ifNone:` handler or sort block; class and value-type methods accept this shape), a cascade, and a conditional's receiver. This error goes away construct by construct as the remaining shapes become producers; it is a known limitation, not a language rule.
 
-**Assignments used as values.** A local assignment whose value is used by the expression around it, rather than standing as its own statement, does not rebind the local yet ([BT-3860](https://linear.app/beamtalk/issue/BT-3860)), so it is a compile error (`ValuePositionLocalAssignment`) in class, value-type and actor methods and in the REPL. That covers an operand (`x := (t := t + 1) + 1`), a collection-literal or interpolated element (`#[t, (t := 7), t]`), the value of another assignment or of `^` (`x := t := 7`, `^t := 7`), a message receiver, including a conditional's or a cascade's (`(t := t + 1) > 0 ifTrue: [...]`), and a `match:` arm, inside loop and fold bodies as well:
-
-```text
-error: assignment to local `t` is used as a value in a class method, but it would not rebind `t` (BT-3860)
-  hint: move the assignment into its own statement before this one, then use `t` here
-```
-
-The rewrite is to hoist the assignment into its own statement and use the local:
+**Assignments used as values.** A local assignment whose value is used by the expression around it, rather than standing as its own statement, rebinds the local like any other assignment ([BT-3910](https://linear.app/beamtalk/issue/BT-3910), ADR 0131 §1). That covers an operand (`x := (t := t + 1) + 1`), a collection-literal or interpolated element (`#[t, (t := 7), t]`), the value of another assignment or of `^` (`x := t := 7`, `^t := 7`), and a message receiver, including a conditional's or a cascade's (`(t := t + 1) > 0 ifTrue: [...]`), in methods, in loop and fold bodies and in the REPL alike. The value of the assignment is the assigned value, and a sibling that is read before it sees the old value:
 
 ```beamtalk
-// Rejected:  #(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]
-#(1, 2) do: [:x |
-  t := t + 1
-  t > 1 ifTrue: [u := 9]
-]
+#[t, (t := 7), t]    // with t = 0: #[0, 7, 7]
 ```
 
-A statement-position assignment (`t := t + 1`, also inside any block), a field assignment in any position (`r := (self.n := 5) + 1`) and an assignment inside a block literal that is itself a value (`x := [:k | t := k] value: 1`) are not affected. A parenthesised assignment statement (`(t := t + 1)`) counts as a statement only where it is followed by another statement in a value-type or actor method body, a conditional arm or a `[...] value` body; elsewhere drop the parentheses. Like the position errors above, this is a known limitation that BT-3860 removes, not a language rule.
+`^t := e` returns `e` after rebinding `t`. Nothing runs after the return that could read `t`, so the write is dead and `beamtalk lint` warns (`dead_returned_assignment`) and suggests `^e`. A `^` out of the protected block of an `ensure:` (`[^t := t + 1] ensure: [t printString]`, and equally `[t := t + 1. ^t] ensure: [t printString]`, or a `^` in a block nested in the protected block) is a compile error for now ([BT-3947](https://linear.app/beamtalk/issue/BT-3947)) when the cleanup reads a local the protected block writes: the throw skips the rebind, so the cleanup would read the old `t`. Assigning before the `ensure:` does not help if the `^` stays inside the protected block; keep the `^` out of it (assign inside, return after the `ensure:`).
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 

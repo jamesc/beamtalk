@@ -6,14 +6,13 @@
 // at the method root and in loop and fold bodies. Its write must be visible to
 // everything after it. The receivers (class, value type, actor) must agree.
 //
-// Inert: every method is a `ValuePositionLocalAssignment` compile error until
-// BT-3860 (the BT-3864 stopgap; pinned by `adr0131_nested_assign_pins` in
-// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs). The
-// expected answers are in stdlib/test/adr0131nested_assign_pending_test.bt.pending;
-// BT-3860 drops the `.pending` suffixes. The hoisted forms that compile today
-// are in adr0131nested_assign_{class,value,actor}.bt.
+// A value-position local assignment is a producer (BT-3910, ADR 0131 §1): a
+// `LocalRebind` of the enclosing frame. The expected answers are in
+// stdlib/test/adr0131nested_assign_value_position_test.bt; the hoisted forms
+// (each assignment its own statement) are in
+// adr0131nested_assign_{class,value,actor}.bt.
 
-Actor subclass: Adr0131NestedAssignPendingActor
+Actor subclass: Adr0131NestedAssignValuePosActor
   state: n = 0
 
   rootPlain =>
@@ -112,3 +111,12 @@ Actor subclass: Adr0131NestedAssignPendingActor
         a + x
       ]
     #[t, u, r]
+
+  returnedRoot =>
+    t := 0
+    ^t := t + 7
+
+  returnedInLoop =>
+    t := 0
+    #(1, 2, 3) do: [:k | k > 1 ifTrue: [^t := k * 10]]
+    t

@@ -1,20 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0131 stopgap (BT-3864): a recorder of the local assignments codegen
+//! BT-3910 (ADR 0131 §1, §4): a recorder of the local assignments codegen
 //! drops, and the corpus the agreement tests run it over.
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! `generate_expression`'s `Expression::Assignment` arm emits only the value of
 //! a local (identifier-target) assignment: it never rebinds the local, so an
-//! assignment that reaches that arm loses its write (BT-3860). The Phase 0
-//! check rejects exactly those shapes (`beamtalk-core`'s
-//! `value_position_local_assignments`). The agreement tests (this crate's
+//! assignment that reaches that arm loses its write (BT-3860). A value-position
+//! local assignment is a producer (`threaded_expression`), so none should reach
+//! it, and the arm reports one that does as
+//! `VerifyError::UnthreadedLocalAssignment`. The agreement tests (this crate's
 //! `tests/value_position_assignment_agreement.rs` for class, value-type and
 //! actor methods, and `beamtalk-repl/tests/value_position_assignment_agreement.rs`
 //! for REPL inputs) record the arm's hits while compiling [`corpus`] and prove
-//! both sets are the same.
+//! there are none.
 //!
 //! Test-only: compiled for this crate's tests and for dependents that enable
 //! the `test` feature.
@@ -95,6 +96,11 @@ const BODIES: &[&str] = &[
     "1 to: 2 do: [:k | @S]",
     "2 timesRepeat: [@S]",
     "[s < 2] whileTrue: [s := s + 1. @S]",
+    // BT-3910: a `whileTrue:`/`whileFalse:` condition block, as a statement of
+    // the condition and as its value.
+    "[@S. s < 2] whileTrue: [s := s + 1]",
+    "[s := s + 1. @S. s < 2] whileTrue: [nil]",
+    "[@S. s >= 2] whileFalse: [s := s + 1]",
     "x := #(1, 2) collect: [:k | @S. k]",
     "x := #(1, 2) inject: 0 into: [:a :k | @S. a + k]",
     "s > 0 ifFalse: [@S]",
@@ -116,6 +122,17 @@ const BODIES: &[&str] = &[
     "b := [@S]\nb value",
     "b := [@S. 1]\nb value",
 ];
+
+/// Whether `why` (a compile failure rendered with `{:?}`) is the exact
+/// `UnsupportedFeature` rejection of a Tier 2 block that assigns a local and
+/// rebinds it inside a loop (PIN-BUG BT-3947, BT-3939): loud, not dropped. Any
+/// other failure, a verifier panic included, is not it.
+#[must_use]
+pub fn is_tier2_loop_rebind_pin(why: &str) -> bool {
+    why.starts_with("UnsupportedFeature")
+        && why.contains("a Tier 2 block assigns local")
+        && why.contains(super::blocks::TIER2_LOOP_REBIND_PIN)
+}
 
 /// The locals every corpus body reads, bound ahead of it.
 pub const PRELUDE: &str = "t := 0\nu := 0\ns := 0\nw := 0\nx := 0";

@@ -332,6 +332,10 @@ impl CoreErlangGenerator {
     /// [`CoreErlangGenerator::current_frame`] unless the call site already
     /// has its own branch frame in hand (a conditional/exception arm, which
     /// minted it via `current_branch_frame()` on entry).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the one ordered list of producers, each branch mirrored by `subexpr_needs_prelude`"
+    )]
     pub(super) fn threaded_expression(
         &mut self,
         expr: &Expression,
@@ -349,6 +353,20 @@ impl CoreErlangGenerator {
                 prelude: Vec::new(),
                 value: ValueRef::Doc(doc),
             });
+        }
+
+        // BT-3910 (ADR 0131 §1): a local assignment in value position is a
+        // producer: one `LocalRebind` of the enclosing frame, answering the
+        // assigned value.
+        if self.is_local_assignment_producer(inner) {
+            return self.lower_local_assignment_producer(inner, frame);
+        }
+
+        // BT-3910: a conditional whose receiver holds a value-position local
+        // assignment (`((t := t + 1) > 0) and: [...]`) sequences the receiver
+        // ahead, so the assignment's `LocalRebind` lands in the caller's frame.
+        if let Some(tv) = self.conditional_receiver_assignment_operand(expr, frame)? {
+            return Ok(tv);
         }
 
         // ADR 0131 §1 (Phase 2): a loop or fold at a sequenced operand site
@@ -532,6 +550,38 @@ impl CoreErlangGenerator {
         let mut prelude = Vec::new();
         let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
         Ok(ThreadedValue { prelude, value })
+    }
+
+    /// BT-3910 (ADR 0131 §1): a conditional (producer or not) whose receiver
+    /// holds a value-position local assignment (`((t := t + 1) > 0) and: [...]`)
+    /// sequences the receiver ahead, so the assignment's `LocalRebind` lands in
+    /// the caller's frame instead of a closed document, and then lowers the
+    /// conditional over the sequenced receiver (already registered, so every
+    /// lowering reads its value back).
+    fn conditional_receiver_assignment_operand(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<Option<ThreadedValue>> {
+        let inner = expr.unwrap_parens();
+        let Some(receiver) = Self::conditional_send_receiver(inner)
+            .filter(|r| !self.contained_local_assignment_targets(r).is_empty())
+        else {
+            return Ok(None);
+        };
+        let (mut prelude, scope) = self.sequence_children(&[receiver], frame)?;
+        let over_receiver = match self.local_threading_producer(inner, frame)? {
+            Some(tv) => Some(tv),
+            None => self.inline_control_flow_producer(inner)?,
+        };
+        let value = if let Some(tv) = over_receiver {
+            prelude.extend(tv.prelude);
+            tv.value
+        } else {
+            self.generate_expression_as_value(expr, inner.span(), &mut prelude)?
+        };
+        self.finish_precompiled_scope(scope)?;
+        Ok(Some(ThreadedValue { prelude, value }))
     }
 
     /// The value-type conditional cases of [`Self::threaded_expression`]
@@ -985,6 +1035,19 @@ impl CoreErlangGenerator {
         // BT-3816: the value-type body lowering asks only about field writes;
         // every other producer below has its own value-type path.
         let all_producers = probe != PreludeProbe::FieldWrites;
+        // BT-3910: mirrors `threaded_expression`'s value-position local
+        // assignment producer, for every probe: its `LocalRebind` belongs to
+        // the consumer's statement sequence whatever it is sequencing.
+        if self.is_local_assignment_producer(inner) {
+            return true;
+        }
+        // BT-3910: and a conditional whose receiver holds one
+        // (`conditional_receiver_assignment_operand`).
+        if Self::conditional_send_receiver(inner)
+            .is_some_and(|r| !self.contained_local_assignment_targets(r).is_empty())
+        {
+            return true;
+        }
         // ADR 0131 Phase 2: mirrors `threaded_expression`'s
         // `local_threading_producer` branch.
         if all_producers && self.local_producer_locals(inner).is_some() {
