@@ -3,17 +3,11 @@
 ## Status
 Proposed (2026-10-20)
 
-Asks one question at the model level: during an actor's callback, should the
-actor's state live in one place, a process-local cell owned by the dispatch
-wrapper, instead of being threaded as a `State` value through the compiled
-method and captured as a snapshot by every closure? If accepted, this ADR
-**amends ADR 0133** (an escaping block may assign `self.field`; the write takes
-effect at home and raises away), **amends ADR 0041** (an actor's Tier 1 and
-Tier 2 blocks no longer carry the actor's fields), **amends ADR 0118** (an
-actor self-send has no state effect to sequence), and removes the `State`
-family from ADR 0111's `ThreadedIr`. ADR 0130 (class variables) is the
-precedent and is unchanged. ADR 0131 (outer-local rebinds) is unchanged:
-locals are not actor state.
+Amends ADR 0133 (an escaping block may assign `self.field`), ADR 0041 (actor
+blocks no longer carry the actor's fields) and ADR 0118 (an actor self-send
+has no state effect to sequence), and removes the `State` family from
+ADR 0111's `ThreadedIr`. ADR 0130 is the precedent and is unchanged, as are
+ADR 0131 and the locals half of ADR 0133.
 
 Tracking: BT-3996. Decision gate: BT-3950.
 
@@ -21,176 +15,119 @@ Tracking: BT-3996. Decision gate: BT-3950.
 
 ### Problem statement
 
-An actor method is compiled as a function of `State` that returns a new
-`State`. Inside the method body the compiler threads versions (`State`,
-`State1`, …) through every construct it lowers in place: loops, folds,
-conditionals, `on:do:`. A block that the compiler does not lower in place is
-a real closure (a Tier 1 `fun`, ADR 0041). It captures whichever `StateN` was
-current when it was created, and a `fun` answers one value, so it has no way
-to hand a new `State` back.
+An actor method compiles to a function of `State` that returns a new `State`.
+The compiler threads versions (`State`, `State1`, …) through every construct
+it lowers in place. A block it does not lower in place is a Tier 1 `fun`
+(ADR 0041). The `fun` captures whichever `StateN` was current when it was
+created and answers one value, so it cannot hand a new `State` back.
 
-ADR 0133 Phase 3 has been finding the consequences one shape at a time. Each
-fix is a compile-time rejection or a runtime guard, and each rejects some
-correct code:
+ADR 0133 Phase 3 has been meeting the consequences one shape at a time, each
+answered with a compile-time rejection or a runtime guard that also rejects
+some correct code:
 
 | Issue | Shape | Response |
 |---|---|---|
-| BT-3922 (#4426, merged) | A block that assigns `self.field` and escapes | Compile error, `Tier2BlockNoReturnChannel` (`WriteKind::ObjectState`) |
-| BT-3936 (#4450, merged) | A self-send in a closure changes state; the change is lost | Runtime `stateful_block_dispatch` (`closure_self_dispatch_state_guard`) |
-| BT-3948 (#4444, merged) | Inline-block local in a direct loop body in an actor; unbound `StateAcc` | `RESIDUAL_DENY_SET` row `InlineBlockLocalInLoop` (Actor only) |
-| BT-3971 (#4442, merged) | Tier 2 body ending in `[...] value` answers the raw `{Value, State}` | `CodeGenError::UnsupportedFeature` |
-| BT-3952 (#4452, open) | A block that reads `self.field` and is passed to a self-send or stored reads a stale value | Compile error (rejects every escaping read, right or wrong) |
-| BT-3981 (#4448, open) | An evaluated `[...] value` in an actor leaks `{Value, State}` | `RESIDUAL_DENY_SET` row `EvaluatedBlockValue` (Actor only) |
-| BT-3985 (#4455, open) | Binary-selector and `super` sends to `self` drop the callee's state change | Extends the BT-3936 guard |
-| BT-3988 | `on:do:` in a closure whose body self-sends answers `{Result, State}` | Open |
-| BT-3990 | A getter self-send in a block passed to a self-send reads the creation-time state | Open, three residual entries |
-| BT-3910, BT-3993 | `ensure:` cleanups see the entry state after a `^` | Compile errors (`report_nlr_out_of_ensure`) |
+| BT-3922 (#4426) | Block assigns `self.field` and escapes | Compile error (`WriteKind::ObjectState`) |
+| BT-3936 (#4450) | Self-send in a closure changes state, change lost | Runtime `stateful_block_dispatch` (`closure_self_dispatch_state_guard`) |
+| BT-3948 (#4444) | Inline-block local in an actor loop body, unbound `StateAcc` | `RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` |
+| BT-3971 (#4442) | Tier 2 body ending in `[...] value` answers `{Value, State}` | `CodeGenError::UnsupportedFeature` |
+| BT-3952 (#4452, open) | Block reads `self.field`, is stored or passed to a self-send, reads stale | Compile error for every such read |
+| BT-3981 (#4448, open) | Evaluated `[...] value` in an actor leaks `{Value, State}` | `RESIDUAL_DENY_SET` `EvaluatedBlockValue` |
+| BT-3985 (#4455, open) | Binary and `super` sends to `self` drop the callee's change | Extends the BT-3936 guard |
+| BT-3988 | `on:do:` in a self-sending closure answers `{Result, State}` | Open |
+| BT-3990 | Getter self-send in a block passed to a self-send reads creation-time state | Open |
+| BT-3910, BT-3993 | `ensure:` cleanup sees entry state after `^` | Compile error (`report_nlr_out_of_ensure`) |
 
-Most of these trace to the one fact above. Reads go stale (BT-3952, BT-3990).
-Writes and self-sends are lost (BT-3936, BT-3985, BT-3988). Results leak the
-`{Value, State}` carrier (BT-3971, BT-3981). The `ensure:` rules mix an
-actor-state half with a locals half.
+PR #4447 tried a narrow fix. It kept `State` threaded and published it to the
+process dictionary on every field write so that closures could read it. It was
+closed on 2026-10-20 because the publish had to stay complete forever, and
+`fieldAt:` was already a gap. Its review found the general problem: each
+lowering that discards a callee's `NewState` (a method-level self-cast, an
+aliased self-send, an error arm) left the published copy ahead of the real
+one. That is the two-copies problem ADR 0130 removed for class variables.
 
-PR #4447 tried a narrow fix: keep `State` threaded, and also publish it to the
-process dictionary on every field write so closures could read it live. The
-maintainer closed it on 2026-10-20 as "a publish on every actor field write
-that must stay complete forever (`fieldAt:` was already a gap)". Its review
-found the general failure: every lowering that *discards* a callee's
-`NewState` (a method-level self-cast, an aliased self-send, an error arm) left
-the published copy ahead of the real one. That is the two-representations
-problem ADR 0130 removed for class variables, rebuilt for actors.
+The maintainer's direction: "I'm all for simplicity of model — if it fits OTP
+usage, then let's go." OTP fit decides this ADR.
 
-The maintainer's direction for this ADR (2026-10-20): "I'm all for simplicity
-of model — if it fits OTP usage, then let's go." OTP fit is the deciding
-criterion.
+### Current state
 
-### Current state, measured
+A throwaway probe package, built with a debug build of `main` from
+2026-10-20 and run with `beamtalk test`, answers:
 
-A probe package compiled with a debug build of `main` from 2026-10-20
-(`LiveProbe`, six BUnit tests, run with `beamtalk test`; throwaway, not
-committed) gives:
-
-| Method | Correct answer | `main` answers |
+| Method body | Expected | `main` |
 |---|---|---|
-| `self.x := 5. other := self. other x` | 5 | **0** (silent) |
-| `other := self. other setX: 7. self.x` | 7 | **0** (silent; the write is lost when the method returns) |
-| `self bump!. self.x`, then `p x` from outside | 1 | **0** forever (silent; `generate_self_cast_send` runs `bump` in-process and discards its state) |
-| `b := [self.x]. self.x := 9. b value` | 9 | **0** (silent; BT-3952, #4452 makes it a compile error) |
-| `self.x := 3. self apply: [self x]` | 3 | 3 |
-| `self apply: [self bump]. self.x` | 1 | raises `stateful_block_dispatch` (BT-3936) |
+| `self.x := 5. other := self. other x` | 5 | 0 |
+| `other := self. other setX: 7. self.x` | 7 | 0 |
+| `self bump!. self.x`, then `p x` from outside | 1 | 0 |
+| `b := [self.x]. self.x := 9. b value` | 9 | 0 |
+| `self apply: [self bump]. self.x` | 1 | `stateful_block_dispatch` |
 
-The first three rows are not on any list above. They come from the same
-root: there is already a second copy of the state. Every generated callback
-stashes the entry `State` in `'$bt_actor_state'` (`pdict_stash_preamble` in
-`gen_server/callbacks.rs`; `dispatch_call/4` and friends in
-`beamtalk_actor.erl`) so that an aliased self-send (`sync_send/3`'s Layer 1
-fast path, `self_dispatch/2`) does not deadlock. That copy is never updated by
-the method's own writes, and what `self_dispatch/2` writes into it is never
-read back by the method. So today there are two representations of actor
-state during a callback, the lexical `StateN` and the stash, and neither is
-complete.
+The first three are silent and are on no issue. They have the same cause.
+Every generated callback stashes the entry `State` in `'$bt_actor_state'`
+(`pdict_stash_preamble` in `gen_server/callbacks.rs`, `dispatch_call/4` in
+`beamtalk_actor.erl`) so that an aliased self-send can take `sync_send/3`'s
+Layer 1 path through `self_dispatch/2` instead of deadlocking. The method's own
+writes never reach that stash, and what `self_dispatch/2` writes into it is
+never read back. A method-level `self foo!` (`generate_self_cast_send`) runs
+`foo` in-process through `safe_dispatch/3` and drops its state.
 
-### How actor state flows today
-
-- `handle_call`/`handle_cast`/`handle_info`/`handle_continue`/`init`, generated
-  per actor in `gen_server/callbacks.rs` and shared in `beamtalk_actor.erl`,
-  stash `State` in `'$bt_actor_state'`, call `safe_dispatch/3`, strip the
-  codegen-internal `__local__<name>` keys (`strip_local_temps/1`) from the
-  returned `NewState`, restore the stash in an `after`, and return
-  `{reply, R, NewState}`.
-- `safe_dispatch/4` catches every error and returns the **pre-call** `State`,
-  so an escaping error discards the invocation's writes.
-- A compiled method is `dispatch(Selector, Args, Self, State)` answering
-  `{reply, Result, NewState}`. A self-send calls it and rebinds `StateN+1`
-  from the reply; ADR 0118's preludes exist to sequence that rebind inside
-  expressions.
-- Actor-method locals threaded through constructs ride in the same map as
-  `__local__<name>` keys, which is why the boundary strips them and why the
-  BT-3936 guard compares twice.
-- An actor's `on:do:` continues with the `State` from before the protected
-  block when its handler runs.
-- Nothing hibernates (`hibernate` and `format_status` occur nowhere in
-  `runtime/` or `crates/beamtalk-codegen/`). `code_change/3` delegates to
-  `beamtalk_hot_reload:code_change/3`.
-
-### Constraints
-
-- **OTP fit.** Between callbacks the `gen_server` state is the actor's state,
-  and the only one. `sys:get_state/1`, `sys:replace_state/2`, `code_change/3`,
-  crash and restart, and supervisor semantics must be exactly what an Erlang
-  programmer expects.
-- No silent wrong answer (ADR 0132's first goal, inherited by ADR 0133):
-  every shape is correct, a compile error, or a structured runtime error.
-- An identifier means the same thing in every boot context (principles §4).
-  A block's behaviour may depend on *which actor's invocation* it runs in, the
-  way a class variable's does under ADR 0130, but not on REPL versus release.
-- `ThreadedIr` and its verifier stay the home of state invariants; no new
-  ad-hoc checks at call sites (CLAUDE.md).
-- Hot upgrade (ADR 0125) must not silently mix calling conventions.
+The callbacks call `safe_dispatch/3`, strip the `__local__<name>` keys that
+actor-method locals ride in (`strip_local_temps/1`), restore the stash in an
+`after`, and return `{reply, R, NewState}`. On an error `safe_dispatch/4`
+returns the pre-call `State`. An actor's `on:do:` continues with the `State`
+from before the protected block. Nothing hibernates, and nothing implements
+`format_status/1`.
 
 ## Decision
 
-### 1. One home for actor state during a callback
+### 1. One home during a callback
 
-During any callback of a compiled actor (`init`, `handle_call`, `handle_cast`,
-`handle_info`, `handle_continue`, `terminate`), the actor's state lives in
-exactly one place: the process-dictionary cell `'$bt_actor_state'`, the slot
-every callback already installs. There is no lexical `StateN`, no published
-copy, and no `State` in a block's environment.
-
-The callback wrapper installs the cell from the `gen_server` state on entry,
-runs the method, and **reads the cell once on exit and returns it** as the new
-`gen_server` state:
+During a callback the actor's state lives only in the cell
+`'$bt_actor_state'`, the slot every callback already installs. Compiled
+methods take no `State` and return none. The wrapper installs the cell from
+the `gen_server` state, runs the method, and returns the cell as the new
+state:
 
 ```erlang
 dispatch_call(Selector, Args, From, State) ->
-    Old = beamtalk_actor_state:install(State),       %% put, returning the previous value
-    try Module:dispatch(Selector, Args, Self) of     %% methods take no State, return no State
+    Old = beamtalk_actor_state:install(State),
+    try Module:dispatch(Selector, Args, Self) of
         Result -> {reply, encode(From, Result), beamtalk_actor_state:take()}
     catch
-        Class:Reason:ST -> {reply, encode(From, {error, ...}), State}  %% escaping error: pre-call state
+        Class:Reason:ST -> {reply, encode(From, {error, ...}), State}
     after
-        beamtalk_actor_state:uninstall(Old)          %% restore or erase, as restore_dispatch_pdict/1 does today
+        beamtalk_actor_state:uninstall(Old)
     end.
 ```
 
-That is the whole OTP story. The cell is a register that exists only while a
-callback runs. The value the callback returns is the state, as in any
-`gen_server`, and nothing outside the callback can observe the cell.
+Between callbacks the `gen_server` state is the only copy. The cell does not
+exist outside a callback.
 
-### 2. Access goes through one runtime module
+### 2. Access
 
-A new runtime module, `beamtalk_actor_state`, owns the key and every access,
-as `beamtalk_class_vars` does for class variables. Codegen never builds the
-key.
+A new module, `beamtalk_actor_state`, owns the key, as `beamtalk_class_vars`
+does for class variables.
 
-| Beamtalk (actor instance method) | Emitted |
+| Beamtalk | Emitted |
 |---|---|
 | `self.x` | `beamtalk_actor_state:get(Self, 'x')` |
 | `self.x := v` | `beamtalk_actor_state:put(Self, 'x', V)` |
-| `self fieldAt: #x`, `fieldAt:put:`, `clearField:`, `hasField:` | the same helpers |
-| `self foo: a` (any form: unary, keyword, binary, `super`, sealed, aliased) | `Module:dispatch('foo:', [A], Self)`, answering a bare value |
+| `fieldAt:`, `fieldAt:put:`, `clearField:`, `hasField:` | the same helpers |
+| any self-send (unary, keyword, binary, `super`, sealed, aliased) | `Module:dispatch(Sel, Args, Self)`, a bare value |
 
-The reflective selectors use the same cell, so the `fieldAt:` gap that sank
-#4447 cannot exist: there is no second copy for it to miss. Phase 0 decides
-whether hot paths open-code the helpers as `erlang:get/1` plus `maps:get/2`.
-In the spike below, a local helper function and a remote helper cost the
-same.
+The reflective selectors read the same cell, so the `fieldAt:` gap in #4447
+has nothing to miss. Phase 0 decides whether to open-code the helpers.
 
 ### 3. At home and away
 
-**The rule, stated once.** Where a block's field access goes is decided each
-time the block **runs**, not when it was created. When it runs, the block is
-*at home* if a callback of its own actor is running in the current process,
-whichever callback that is. The test is `Self#beamtalk_object.pid =:= self()`
-with the cell present. At home, `self.x` reads and writes the live cell. Away,
-`self.x` reads the value captured when the block was created, and a write
-raises. (ADR 0130 rejected pid equality for classes, because a class process
-is restarted under the same identity. An actor restarted by its supervisor is
-a new process with a new pid and a fresh state, so a block from the old
-incarnation is rightly not at home in the new one.)
-
-Three cases, for one block stored in a field:
+Where a block's field access goes is decided when the block runs. It is at
+home when a callback of its own actor is running in the current process,
+tested as `Self#beamtalk_object.pid =:= self()` with the cell present. At
+home, `self.x` reads and writes the cell. Away, it reads the value captured
+when the block was created, and a write raises. An actor restarted by its
+supervisor is a new process with a new pid, so a block from the old process is
+not at home in the new one; ADR 0130 could not use pid equality for classes
+because a class keeps its identity across restarts.
 
 ```beamtalk
 Actor subclass: Probe
@@ -198,55 +135,30 @@ Actor subclass: Probe
   state: saved = nil
 
   remember =>
-    self.saved := [self.x]       // created in this callback; captures x = 0
+    self.saved := [self.x]
     self.x := 1
-    self.saved value             // (a) same callback, at home: live, answers 1
+    self.saved value          // same callback: 1
 
   bumpThenAsk =>
     self.x := 2
-    self.saved value             // (b) a LATER callback, at home: live, answers 2
+    self.saved value          // later callback: 2
 
   handOff: other =>
-    other run: self.saved        // (c) runs in `other`'s process, away: answers 0,
-                                 //     the value captured when `remember` made it
+    other run: self.saved     // runs in other's process: 0, from creation
 ```
 
-Case (b) is the one that departs from an Erlang `fun`. An Erlang `fun`
-captures *values*, so a `fun` that closed over `State` in one callback keeps
-seeing that `State` forever. A Beamtalk block captures the *actor* (`self`)
-and, as a fallback, a snapshot of its fields. At home it reads through the
-actor, as a Pharo block reads instance variables through its receiver. That is
-intended for three reasons:
+The later-callback case differs from an Erlang `fun`, which keeps the values
+it closed over. A Beamtalk block reads fields through its actor at home, as a
+Pharo block reads instance variables through its receiver. Between callbacks
+the actor has one state, and a stored sort block or event handler that read a
+state from an earlier message, and could not write, would put us back to
+rejecting shapes. ADR 0130 §5 does the same for a class-side block run from a
+later invocation of its class. The capture is only a fallback for running
+away: creating a block literal that reads a field binds
+`beamtalk_actor_state:capture(Self, Outer)` (one `get`), and the capture is
+consulted only away from home.
 
-- **It is the only consistent answer in the actor's own process.** Between
-  callbacks the actor has exactly one state, the `gen_server` state. A stored
-  callback (a sort block, a formatter, an `onEvent:` handler run by a later
-  message) that read a snapshot from an earlier message would show state the
-  actor no longer has. Worse, a snapshot cannot be written: a later callback
-  could not let such a block write at all, and we would be back to a list of
-  rejections.
-- **It matches ADR 0130 §5 exactly.** A stored class-side block invoked from a
-  later invocation of its class reads and writes live. Two models of mutable
-  state, one per kind of object, would be harder to teach than one.
-- **The snapshot is only a fallback.** It exists so that a block that leaves
-  the process still has something to read, which is all an Erlang `fun` could
-  offer there. It is consulted only away from home, so it never competes with
-  the cell.
-
-What follows from the rule:
-
-- **At home, a closure reads and writes the live state.** That covers blocks
-  passed to the actor's own methods, stored closures run later in the same
-  callback or in any later callback, blocks passed to direct-called stdlib
-  code, sort blocks, `ensure:` cleanups and `on:do:` handlers. A self-send
-  inside such a block is a plain in-process dispatch on the cell, so its
-  writes stay.
-- **Away, a closure reads its capture and cannot write.** Away means a block
-  carried to another actor, a `Future`, a `Timer` or another node, or run in a
-  process where none of its actor's callbacks is running. ADR 0130 §5 has the
-  same rule for class variables. Creating a block literal that reads a field
-  binds `beamtalk_actor_state:capture(Self, Outer)` (one `get`). A field write
-  away raises:
+A write away raises:
 
 ```erlang
 #beamtalk_error{kind = actor_state_unreachable, class = 'Counter', selector = 'bump',
@@ -255,96 +167,79 @@ What follows from the rule:
                          "method returned). Send Counter a message instead: `counter bump!`.">>}
 ```
 
-- **Away, a self-send is an ordinary message send** to the actor's pid, which
-  is what `self` is to every other process. If the actor is blocked in a
-  synchronous call that carried the block away, the cycle is the existing
-  A→B→A case, reported by `check_call_stack/2` (`deadlock_detected`) or by the
-  call timeout. Today such a send instead runs the actor's method in the
-  foreign process against the captured snapshot and drops its writes.
+A self-send away is an ordinary message to the actor's pid, which is what
+`self` means to every other process. If the actor is blocked in the call that
+carried the block away, `check_call_stack/2` raises `deadlock_detected` or the
+call times out, as for any A→B→A cycle. Today the send runs the actor's method
+in the foreign process against the snapshot and drops its writes.
 
-A compiler lint, `actor-state-abroad`, mirrors `class-state-abroad`: a block
-literal that writes a field and is passed to a send whose receiver is
-statically not `self`, or to `Timer`/`Future` constructors, gets a warning at
-the block. It is a lint, not a guarantee; the runtime error is the guarantee.
+An `actor-state-abroad` lint, modelled on `class-state-abroad`, warns at a
+block literal that writes a field and is passed to a send whose receiver is
+statically not `self`, or to `Timer` or `Future`:
 
-### 4. Rollback: boundaries discard, nothing else does
+```beamtalk
+Actor subclass: Counter
+  state: n = 0
+  bump => self.n := self.n + 1
+  startLate => Timer after: 100 do: [self.n := self.n + 1]   // warning; raises in the Timer
+  startWell => Timer after: 100 do: [self bump!]
+```
 
-This keeps today's observable semantics and states them as one rule, the same
-rule as ADR 0130 §4:
+Today `startLate` is a compile error (BT-3922).
 
-- **The invocation boundary.** An error that escapes the callback discards
-  every write it made: the wrapper returns the pre-call `State` (unchanged from
-  `safe_dispatch/4` today).
-- **The catch boundary.** `on:do:` and every runtime catcher that runs a
-  Beamtalk block (`Result tryDo:`, `protect/1`) snapshot the cell on entry and
-  restore it when an error crosses the catch, before the handler runs. So a
-  failed try body's writes do not persist, as today. The `OnDoCatch` node
-  already emits ADR 0130's class-variable snapshot and restore; it gains the
-  actor half in the same node, and the verifier's
-  `CatchWithoutClassVarRestore` becomes `CatchWithoutStateRestore`, covering
-  both. A `$bt_nlr` throw is not an error and restores nothing.
-- **`ensure:` is not a boundary.** The cleanup sees the live state, including
-  writes the protected block made before a `^` or an error. That is the actor
-  half of BT-3910/BT-3993, fixed by construction. The locals half is
-  unaffected.
-- **A non-local return** keeps the writes made before it. The actor-shaped NLR
-  4-tuple `{'$bt_nlr', Tok, Val, State}` loses its `State` slot.
-- **A raising self-send** does not restore on its own. Today a self-send that
-  raises returns its pre-call `State`, but that is only observable when the
-  error is caught, and every catch already restores to the start of its
-  protected region, which is earlier. ADR 0130 rejected per-send rollback
-  (its Alternative C) for the same reason.
+### 4. Rollback
 
-**Per callback.** Each `gen_server` callback has its own contract for what it
-returns and what an exception does. The cell follows that contract. It never
-outlives a callback, and the only state that leaves one is the value the
-callback returns.
+The rule is ADR 0130 §4's. An error that escapes a callback discards its
+writes: the wrapper returns the pre-call state, as `safe_dispatch/4` does
+today. `on:do:` and the runtime catchers that run blocks (`Result tryDo:`,
+`protect/1`) snapshot the cell on entry and restore it when an error crosses
+the catch, so a failed try body's writes are dropped, as today. The
+`OnDoCatch` node already emits the class-variable snapshot; it takes the actor
+cell too, and the verifier's `CatchWithoutClassVarRestore` becomes
+`CatchWithoutStateRestore`. A `$bt_nlr` throw restores nothing, and the actor
+NLR 4-tuple `{'$bt_nlr', Tok, Val, State}` loses its `State` slot. `ensure:`
+is not a boundary: its cleanup sees the writes the protected block made before
+a `^` or an error, which fixes the actor half of BT-3910 and BT-3993. A
+self-send that raises does not restore on its own; any catch restores to the
+start of its region, which is earlier (ADR 0130 rejected per-send rollback as
+its Alternative C).
 
-| Callback | Runs user code? | Cell installed | Normal exit returns | Exception |
+Each `gen_server` callback keeps its own contract. A callback returns the cell
+only when it exits normally; on an exception it returns, or stops with, the
+state it was called with.
+
+| Callback | User code | Cell | Normal exit | Exception |
 |---|---|---|---|---|
-| `init/1` | No. It builds the field defaults; `initialize` is deferred to `handle_continue` (ADR 0078, BT-1417). | No | `{ok, State, {continue, initialize}}` as today | As today (no user code) |
-| `handle_continue(initialize, State)` | Yes, the `initialize` chain, parent first | Once, around the whole chain, so each ancestor's `initialize` sees the previous one's writes in the cell | `{noreply, take()}` after the post-initialize field check | `{stop, Reason, S}` where `S` is the state from before the failing step, as today (`safe_dispatch/3` returns each step's pre-call state). The wrapper snapshots the cell before each ancestor's step to keep that. The actor never finished initialising, so it stops; `terminate:` then sees `S`, and the supervisor decides what happens next |
-| `handle_continue` (BT-3968 continuations), `handle_call`, `handle_cast`, `handle_info` | Yes, one method | Around the dispatch | `{reply, R, take()}` or `{noreply, take()}` | The **pre-call** state, as `safe_dispatch/4` returns today. `handle_call` replies with the error; `handle_cast` and `handle_info` follow ADR 0134 (an error in a no-reply handler crashes the actor) |
-| `terminate/2` | Yes, `terminate:` if defined | Around the dispatch, newly (today `terminate/2` does not stash `'$bt_actor_state'`, so a self-send in `terminate:` does not take the Layer 1 path) | `ok`. The state is discarded by OTP after `terminate/2` anyway, so the cell is erased, not returned | Caught and ignored, as today, so shutdown is never blocked. The cell is erased in `after` |
-| `code_change/3` | No user method today; `beamtalk_hot_reload:code_change/3` migrates the map | No | `{ok, NewState}` as today | As today |
-| `format_status/1` | Not implemented | No | n/a. If added, it formats the `gen_server` state, which is complete between callbacks | n/a |
+| `init/1` | none; `initialize` runs in `handle_continue` (ADR 0078) | not installed | `{ok, State, {continue, initialize}}` | unchanged |
+| `handle_continue(initialize, _)` | the `initialize` chain, parent first | installed around the chain, snapshotted before each step | `{noreply, take()}` after the field check | `{stop, Reason, S}` with `S` the state before the failing step, as today; `terminate:` sees `S` |
+| `handle_call`, `handle_cast`, `handle_info`, BT-3968 continuations | one method | around the dispatch | `{reply, R, take()}` / `{noreply, take()}` | pre-call state; `handle_call` replies with the error, no-reply handlers follow ADR 0134 |
+| `terminate/2` | `terminate:` if defined | around the dispatch (new; today it does not stash) | `ok`, cell erased | caught and ignored, as today; cell erased |
+| `code_change/3` | none; `beamtalk_hot_reload:code_change/3` | not installed | `{ok, NewState}` | unchanged |
+| `format_status/1` | not implemented | not installed | would format the `gen_server` state | n/a |
 
-The rule behind the table: **a callback returns the cell only when it exits
-normally and OTP keeps the state; on any exception it returns, or stops with,
-the state it was called with.** That is the `gen_server` contract with the
-cell inside it.
+#4447 needed an un-publish wherever a state change was discarded, and that set
+was open-ended. Here nothing is published. A discard happens only at the
+invocation boundary and the catch boundary, each owned by one wrapper or one
+`ThreadedIr` node.
 
-The difference from #4447 is structural. #4447 needed a matching "un-publish"
-at every place that discards a state change, and the places were open-ended.
-Here nothing is published. A discard happens only at the two boundary kinds,
-each owned by one node or wrapper, and the verifier checks the catch boundary.
+### 5. Self-sends and self-casts
 
-### 5. Re-entrant and self-cast sends
+Direct and aliased self-sends dispatch in-process on the cell, so the aliased
+form starts from the live state and its writes persist. A method-level
+`self foo!` becomes `gen_server:cast` to the actor's own pid and runs after
+the current message, which is what `!` means elsewhere (principles §7) and
+already means inside a block.
 
-- **Direct and aliased self-sends** (`self foo`, `other := self. other foo`)
-  both dispatch in-process on the cell. The aliased form starts from the live
-  state, not the callback's entry state, and its writes persist. Probe rows 1
-  and 2 flip to 5 and 7.
-- **`self foo!` at method level becomes a real cast to the actor's own
-  mailbox**, handled after the current message, as `!` means everywhere else
-  (principles §7) and as it already means inside a block. Today it runs `foo`
-  synchronously and throws its state change away (probe row 3). Keeping
-  "run now, discard" would need a snapshot and restore around every self-cast
-  for a behaviour nobody wants.
+### 6. Unchanged
 
-### 6. What is not changed
+Class variables, value-type `Self` threading (ADR 0120) and local-variable
+threading stay as they are. Actor-method locals stop riding in the actor map
+as `__local__` keys and thread as they do in class methods, so actor methods
+lose their own frame mode. ADR 0133's rule for captured locals stays; only its
+field half is amended. The wire protocol, `sync_send`/`cast_send`,
+supervision and `stopWith:`/`continueWith:` are unchanged.
 
-- Class variables (ADR 0130), value-type `Self` threading (ADR 0120) and
-  local-variable threading (ADR 0131, ADR 0133) are unchanged. Locals in actor
-  methods stop riding in the actor map as `__local__` keys and thread as they
-  do in class methods, so actor methods lose their own frame mode.
-- ADR 0133's rule for **captured locals** is unchanged. Only the field half is
-  amended: an escaping block may assign `self.field`, effective at home and
-  raising away.
-- The `gen_server` wire protocol, `sync_send`/`cast_send`, supervision,
-  `stopWith:`/`continueWith:` and observability events are unchanged.
-
-### REPL session
+### Example
 
 ```beamtalk
 Actor subclass: Tally
@@ -368,504 +263,253 @@ beamtalk> Tally spawn run
 11
 ```
 
-On `main` today `self twice: [self add: 5]` raises `stateful_block_dispatch`
-(BT-3936), and with that line removed `reader value` answers 0 (BT-3952).
+On `main`, `self twice: [self add: 5]` raises `stateful_block_dispatch`
+(BT-3936), and without that line `reader value` answers 0 (BT-3952).
 
-### Error example
+## OTP Fit
 
-```beamtalk
-Actor subclass: Counter
-  state: n = 0
-  bump => self.n := self.n + 1
-  startLate => Timer after: 100 do: [self.n := self.n + 1]   // runs in the Timer's process
-  startWell => Timer after: 100 do: [self bump!]              // a message: runs in Counter
-```
+A throwaway `gen_server` (OTP 28) that installs the cell on entry, mutates it
+through closures and returns it on exit was used to check the following.
 
-`startLate` compiles with an `actor-state-abroad` warning at the block. When
-the timer fires, the write raises in the timer's process:
+System messages are handled only between callbacks, so `sys:get_state/1` and
+`sys:replace_state/2` see the returned state. A `get_state` sent during a
+200 ms callback waited for it and got the committed value. `code_change/3`
+runs while the process is suspended between callbacks; there was no cell and
+it received the `gen_server` state. A callback that crashed the process took
+the cell with it, and the restarted process had `init`'s state and no cell. A
+callback whose error is caught leaves no cell because `after` erases it. A
+`{reply, R, S, hibernate}` happens after the cell is erased; the hibernated
+process (`gen_server:loop_hibernate/4`) woke with its state and no cell.
+Supervisors see processes and exit reasons, not state. A block sent to another
+node is away. Nested callbacks save and restore the cell through
+`restore_dispatch_pdict/1`, as they do today.
 
-```text
-actor_state_unreachable: Counter's state cannot be written from this process
-  hint: A block that writes Counter's state ran outside Counter's own process (it was sent
-        to another actor, a Timer or a Future, or run after the method returned). Send
-        Counter a message instead: `counter bump!`.
-```
-
-Today the same block is a compile error (BT-3922, "`self.n` is object state").
-
-## OTP fit
-
-This section takes each piece of OTP machinery in turn. The claims marked
-*spike* were checked with a throwaway `gen_server` (`bt3996_otp.erl`, OTP 28,
-not committed) that installs the cell on entry, mutates it through closures,
-and returns it on exit.
-
-| Concern | Behaviour | Evidence |
-|---|---|---|
-| Source of truth | The value the callback returns. The cell is read once at exit and returned; it is erased or restored in `after`. | By construction |
-| `sys:get_state/1`, `sys:replace_state/2` | System messages are handled only between callbacks, so they always see the returned state, never the cell. A `get_state` sent during a 200 ms callback waited for it and saw the committed value. | *spike* |
-| `format_status/1` | Not implemented today. Formats the `gen_server` state, which is complete between callbacks. A crash report produced inside a callback already shows the pre-call state. | By construction |
-| `code_change/3` | Runs while the process is suspended between callbacks, so no cell exists; it receives the `gen_server` state as today. | *spike* (`sys:suspend`, `change_code`, `resume`) |
-| Crash | The cell dies with the process. A supervisor restart is a new process with `init`'s state and no cell. A callback that crashes without killing the process (the normal `safe_dispatch` path) leaves no cell, because `after` erases it. | *spike* |
-| `hibernate` | Unused today. A `{reply, R, S, hibernate}` happens after the callback has returned and erased the cell; the hibernated process (`gen_server:loop_hibernate/4` on OTP 28) kept its state and had no cell on waking. `erlang:hibernate/3` keeps the process dictionary in any case. | *spike* |
-| Supervisors | No change: they see processes and exit reasons, not state. | |
-| Distribution (ADR 0126) | A block sent to another node is away by definition: reads are the capture, writes raise. | §3 |
-| Re-entrancy | Already the case today for aliased self-sends; the cell is saved and restored around nested callbacks (`restore_dispatch_pdict/1`), unchanged. | Existing |
-| Observability | Mid-callback, `process_info(Pid, dictionary)` shows the live state; today it shows the stale entry state. | |
-
-Is it idiomatic? Erlang style discourages the process dictionary for data that
-should be passed as arguments, and this ADR does put state there. Two things
-make it acceptable. The cell is callback-scoped working storage, not hidden
-state: outside a callback it does not exist, and the `gen_server` contract
-(state in, state out) holds exactly. OTP itself keeps process-scoped context
-there (`'$ancestors'`, `'$initial_call'`, logger metadata, the `rand` seed),
-and Beamtalk already does (`'$bt_actor_state'`, `'$bt_call_stack'`, ADR 0130's
-class-variable key). What an Erlang reader loses is the lexical `StateN` chain
-in generated Core Erlang. A method becomes "read the field, write the field",
-which is what the Beamtalk source says.
+Erlang style discourages the process dictionary for data that should be
+passed as arguments. The cell is working storage scoped to one callback, and
+the `gen_server` contract of state in, state out holds exactly. OTP keeps
+process-scoped context there (`'$ancestors'`, `'$initial_call'`, logger
+metadata), and so does Beamtalk (`'$bt_call_stack'`, ADR 0130's class
+variables). The generated Core Erlang loses its `StateN` chain;
+`process_info(Pid, dictionary)` shows the live state mid-callback instead of
+today's stale stash.
 
 ## Cost
 
-### Spike numbers
+Two throwaway spikes on OTP 28 compare threaded `State` with the cell, in
+process (one body of ten field reads and three writes) and end to end (one
+`gen_server:call` whose callback runs the body `Reps` times). The figures are
+medians over 101 batches; they were taken on a shared 18-core machine at load
+average 10 to 18, so the ratios repeat to about ±0.3x across runs and the
+nanoseconds swing by up to 1.7x.
 
-Two throwaway Erlang spikes (OTP 28, an 18-core Mac, not committed) compare
-today's threaded `State` with the cell. Both cell variants are measured: the
-helpers inlined as `erlang:get/1` plus `maps:get/2`, and a call to a helper in
-another module. Each figure is the median and 90th percentile over 101 batches.
-
-**How much to trust them.** The machine is shared with other agent sessions.
-The first run (`bt3996_bench.erl`) ran at load average 67 to 88 on 18 cores
-and is not reported here. The re-run (`bt3996_bench2.erl`, 2026-10-20) started
-at load average 10 to 18, roughly the core count, with one-minute load
-falling. Three runs used `erl +S 1` (one scheduler, to cut cross-core noise);
-one used all 18 schedulers. The ratios repeat across runs to within about
-±0.3x. The absolute nanoseconds swing by up to 1.7x between runs, and one
-`+S 1` run's single-body round trip had an outlying p90. Use these numbers to
-pick a direction and set gates. They are not a substitute for the Phase 0
-measurement on an idle machine.
-
-*In process: one method body of ten field reads and three writes,
-ns per body.*
-
-| Run | Threaded `State` | Cell, inline | Cell, helper | Ratio |
+| Measure | Schedulers | Threaded | Cell | Ratio |
 |---|---|---|---|---|
-| `+S 1` #1 | 37 (p90 82) | 141 (p90 156) | 140 (p90 167) | 3.8x |
-| `+S 1` #2 | 34 (p90 37) | 140 (p90 167) | 139 (p90 156) | 4.1x |
-| `+S 1` #3 | 30 (p90 32) | 200 (p90 226) | 204 (p90 222) | 6.7x |
-| 18 schedulers | 25 (p90 27) | 97 (p90 105) | 96 (p90 105) | 3.8x |
+| One body, in process | `+S 1` (3 runs) | 30–37 ns | 140–200 ns | 3.8x–6.7x |
+| One body, in process | 18 | 25 ns | 97 ns | 3.8x |
+| Call, `Reps = 1` (13 accesses) | `+S 1` (2 clean runs) | 1.88–1.94 µs | 1.92–1.99 µs | 1.02x |
+| Call, `Reps = 1` | 18 | 0.69 µs | 0.73 µs | 1.06x |
+| Call, `Reps = 10` (130 accesses) | `+S 1` (3 runs) | 2.12–2.28 µs | 2.78–3.10 µs | 1.23x–1.46x |
+| Call, `Reps = 10` | 18 | 0.89 µs | 1.68 µs | 1.88x |
 
-*End to end: one `gen_server:call` round trip whose callback stashes the state
-(as every callback already does) and runs the method body `Reps` times. ns per
-call.*
+Each access costs 6 to 13 ns more through the cell, because the threaded
+form keeps the map in a register. ADR 0130 measured the same for class
+variables. A local helper function and a remote helper cost the same, so
+Phase 0 has to try open-coded `get`/`put` before counting on inlining. The
+per-callback install is already paid today; the new cost is one `get` at exit.
+Not credited above: self-sends lose the `{reply, R, NewState}` tuple and the
+BT-3936 guard, and callbacks lose `strip_local_temps/1`.
 
-| Run | `Reps` | Threaded | Cell, inline | Cell, helper | Ratio (inline / helper) |
-|---|---|---|---|---|---|
-| `+S 1` #1 | 1 | 1,941 | 1,985 | 2,011 | 1.02x / 1.04x |
-| `+S 1` #2 | 1 | 1,876 | 1,919 | 1,926 | 1.02x / 1.03x |
-| `+S 1` #3 | 1 | 3,355 | 3,629 (p90 11,953) | 2,365 | 1.08x / 0.71x (noise) |
-| 18 schedulers | 1 | 688 | 727 | 744 | 1.06x / 1.08x |
-| `+S 1` #1 | 10 | 2,285 | 2,909 | 3,259 | 1.27x / 1.43x |
-| `+S 1` #2 | 10 | 2,125 | 3,103 | 3,027 | 1.46x / 1.42x |
-| `+S 1` #3 | 10 | 2,264 | 2,784 | 2,867 | 1.23x / 1.27x |
-| 18 schedulers | 10 | 891 | 1,677 | 1,635 | 1.88x / 1.83x |
+Phase 0 gates, measured with `runtime/perf/self_send_bench` and
+`runtime/perf/bench_method_threading.erl` as described in
+`docs/development/benchmarks.md` (at least 7 interleaved rounds on an idle
+machine):
 
-`Reps = 1` is a realistic field-heavy method: ten reads and three writes.
-`Reps = 10` is a method that loops over fields: 130 accesses in one call.
+1. A method looping over ten field reads and three writes, through
+   `gen_server:call`: at most 2x today. The spike measured 1.2x to 1.9x.
+2. Open and sealed actor self-sends, top level and in a `do:` arm: no
+   regression beyond noise.
+3. A call to a method with one write: at most 1.05x. The spike measured
+   1.02x to 1.08x for thirteen accesses, so this is narrow and needs enough
+   rounds to resolve 5%.
+4. Creating a field-reading block in a loop: recorded, not gated.
 
-What the numbers say:
+## What It Deletes
 
-- **Per access, the cell costs about 6 to 13 ns more than the threaded map.**
-  The threaded form keeps the map in a register, so ten reads and three writes
-  take 25 to 37 ns in total; through the cell they take 96 to 204 ns. In
-  isolation, a field-heavy body is about **4x slower** (3.8x to 6.7x). ADR 0130
-  measured the same shape for class variables (5 to 7x per write in isolation).
-- **Inlining does not help as written.** The inline and helper variants are
-  within noise of each other, because a local Erlang function is still a call.
-  Phase 0 should measure truly open-coded `get`/`put` in the generated Core
-  Erlang before relying on inlining as a fallback.
-- **End to end, a realistic method costs 2% to 8% more.** One `gen_server:call`
-  round trip is 0.7 µs (18 schedulers) to 1.9 µs (`+S 1`), and that dominates.
-- **A field loop of 130 accesses costs 1.23x to 1.88x end to end**, under the
-  2x gate but close to it with all schedulers on. Gate 1 (below) is likely to
-  pass for the gate's ten-reads-three-writes loop. A method that does nothing
-  but hammer fields in a tight loop could exceed 2x.
-- **The per-callback cost is already paid.** Every callback installs and
-  restores `'$bt_actor_state'` today, and the spike's threaded server pays
-  that too. The only new cost per callback is one `get` at exit.
-- **Some costs go away and are not credited above.** These are the
-  `{reply, R, NewState}` tuple and its `case` on every self-send, the BT-3936
-  guard's `=:=` (and its second `strip_local_temps/1` compare when the first
-  fails), `strip_local_temps/1` at every callback exit, the `__local__` keys in
-  the actor map, and `on:do:`'s state threading. In the first spike an
-  `on:do:` around one write was cheaper with a snapshot than with threading.
-  The spikes have no self-sends, so Phase 0 gate 2 is where self-sends get
-  measured.
+Classified against `main` at `1df39217f` and the open PRs on 2026-10-20.
 
-### Measurement plan (Phase 0 gates)
-
-Use `runtime/perf/self_send_bench` and `runtime/perf/bench_method_threading.erl`
-with the method in `docs/development/benchmarks.md`: at least 7 interleaved
-rounds per side on an idle machine, medians with min and max.
-
-1. **Field loop.** An actor method looping over ten field reads and three
-   writes per iteration, end to end through a `gen_server:call`:
-   `median_after <= 2 * median_today`. If it fails, inline the helpers and
-   measure again; if that fails, record the number and decide at the gate.
-2. **Self-send.** Open and sealed actor self-sends, at top level and inside a
-   `do:` arm: no regression beyond noise. Expected to improve.
-3. **Round trip.** A `gen_server:call` to a method with one write:
-   `median_after <= 1.05 * median_today`. The spike measured 1.02x to 1.08x
-   for a method of ten reads and three writes, so a method with one write
-   should pass, but only narrowly. Measure it with enough rounds to resolve
-   5%.
-4. **Block creation.** A loop that creates a field-reading block per iteration
-   (the capture `get`): recorded, not gated.
-
-## What it deletes and what stays
-
-Classified from `main` at `1df39217f` and the open PRs as of 2026-10-20.
-"Deleted" means the shape is wrong only because a closure's `State` is a stale
-snapshot, or the code exists only to carry `State`. "Verify" means the trigger
-mixes actor state and locals; Phase 0 runs the 733-shape oracle (BT-3950) with
-the cell to settle it.
-
-### Deleted
-
-| Item | Where |
+| Deleted | Where |
 |---|---|
-| BT-3936 closure self-send guard: `closure_self_dispatch_state_guard`, `CLOSURE_SELF_SEND_STATE_CHANGE_HINT`, the `closure_drops_state` flag | `dispatch_codegen.rs`; `generator/mod.rs`, `body_state.rs` |
-| BT-3985's extension of it (`in_state_dropping_closure` on the `super` path) and the binary-selector state drop | #4455 (open); `generate_super_send` |
-| BT-3922 field half: `WriteKind::ObjectState`, `outer_state_writes`, `OuterWriteWalker::state_write` / `is_captured_self_field_write`, the field half of `Walker::escape_write_of` and the object-state hint in `report_escape` | `semantic_analysis/block_facts.rs`, `validators/local_threading.rs` |
-| BT-3952's stale-read rejection: `outer_state_reads`, `outer_self_send`, `may_change_actor_state`, `block_may_change_actor_state`, `Walker::report_stale_read`, `report_stale_self_send`, `Escape::{LaterUse, ActorSelfCall, SelfCascade, CollectionResult}` | #4452 (open) |
-| "cannot assign to field '{name}' inside a stored closure" | `semantic_analysis/block_analyzer.rs` |
-| Actor-state `stateful_block_dispatch` for a non-literal callable forwarded to a list op ("block changed actor state") | `control_flow/list_ops/mod.rs` |
-| Unreachable Tier 2 promotion left by BT-3922: `detect_tier2_self_send`, `scan_class_for_tier2_blocks`, `tier2_method_info`, `tier2_block_params` | codegen |
-| The `State` family: `VersionPrefix::State`, its `StateAcc` rendering in actor frames, the actor frame mode, `ActorStateInClassMethod`, the `State` rows of `ConstructFamilyDropped`, `FoldFamilyNotCarried` and `StateEffectEscapesExpression` | `threaded_ir/`, `generator/version.rs` |
-| ADR 0118's actor self-send preludes and the discarding self-dispatch fallback (`generate_discarding_self_dispatch`) | `dispatch_codegen.rs`, `threaded_expr.rs` |
-| `{reply, R, NewState}` from compiled methods; `unwrap_dispatch_result/1`'s state arms; the actor NLR 4-tuple's `State` slot and its arms in `safe_dispatch/4` and `on_do_catch_preamble` | runtime and codegen |
-| `strip_local_temps/1`, `is_local_temp_key/1` and the `__local__` keys in actor state | `beamtalk_actor.erl`, `callbacks.rs` |
-| The method-level self-cast that discards state (`generate_self_cast_send`) | `dispatch_codegen.rs` |
-| PIN-BUG `testPureIfNoneAfterFoldPinBug` (BT-3952) flips to 4; `testSelfSendStateChangeThrough*Raises` (BT-3936) flip to the correct values | `stdlib/test/actor_self_send_hom_test.bt` |
-| BT-3988 and BT-3990 close as fixed by construction | Linear |
+| `closure_self_dispatch_state_guard`, `CLOSURE_SELF_SEND_STATE_CHANGE_HINT`, `closure_drops_state` (BT-3936) | `dispatch_codegen.rs`, `generator/mod.rs`, `body_state.rs` |
+| `in_state_dropping_closure` on the `super` path, and the binary-selector state drop (BT-3985) | #4455, `generate_super_send` |
+| `WriteKind::ObjectState`, `outer_state_writes`, `OuterWriteWalker::state_write`, `is_captured_self_field_write`, the field half of `Walker::escape_write_of` (BT-3922) | `block_facts.rs`, `local_threading.rs` |
+| `outer_state_reads`, `outer_self_send`, `may_change_actor_state`, `block_may_change_actor_state`, `report_stale_read`, `report_stale_self_send`, `Escape::{LaterUse, ActorSelfCall, SelfCascade, CollectionResult}` (BT-3952) | #4452 |
+| "cannot assign to field '{name}' inside a stored closure" | `block_analyzer.rs` |
+| The actor-state `stateful_block_dispatch` for a callable forwarded to a list op | `control_flow/list_ops/mod.rs` |
+| `detect_tier2_self_send`, `scan_class_for_tier2_blocks`, `tier2_method_info`, `tier2_block_params` (unreachable since BT-3922) | codegen |
+| `VersionPrefix::State`, the actor frame mode, `ActorStateInClassMethod`, the `State` rows of `ConstructFamilyDropped`, `FoldFamilyNotCarried`, `StateEffectEscapesExpression` | `threaded_ir/`, `generator/version.rs` |
+| ADR 0118's actor self-send preludes, `generate_discarding_self_dispatch` | `dispatch_codegen.rs`, `threaded_expr.rs` |
+| `{reply, R, NewState}` from methods, the state arms of `unwrap_dispatch_result/1`, the `State` slot of the actor NLR tuple | runtime, codegen |
+| `strip_local_temps/1`, `is_local_temp_key/1`, `__local__` keys in actor state | `beamtalk_actor.erl`, `callbacks.rs` |
+| `generate_self_cast_send` | `dispatch_codegen.rs` |
 
-`CodeGenContext::Actor` appears in 44 branches across 18 non-test codegen
-files. Phase 3 deletes or merges most of them into the class-method path; the
-exact line count is a Phase 0 deliverable rather than a guess here.
+`testPureIfNoneAfterFoldPinBug` (BT-3952) and the
+`testSelfSendStateChangeThrough*Raises` tests (BT-3936) in
+`stdlib/test/actor_self_send_hom_test.bt` flip to the correct answers.
+BT-3988 and BT-3990 close. `CodeGenContext::Actor` has 44 branches in 18
+non-test codegen files; Phase 0 reports how many go.
 
-### Verify in Phase 0 (expected to go)
+Phase 0 runs the 733-shape oracle (BT-3950) to settle these, which mix actor
+state with locals: `RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` (BT-3948) and
+`EvaluatedBlockValue` (BT-3981, with its PIN-BUGs in `bt3971test.bt` and
+`bt3939tier2inlined_test.bt`), `GroupByValue`, and the roughly 15 `DENY_SET`
+rows marked `stateful`, 11 of them for actors.
 
-| Item | Why it may go |
-|---|---|
-| `RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` (BT-3948, Actor only) | The failure is an actor loop frame with no `StateAcc`; actor frames go away |
-| `RESIDUAL_DENY_SET` `EvaluatedBlockValue` (BT-3981, #4448, Actor only) | Its field-write and self-send triggers go; its local-bind trigger depends on the locals lowering |
-| The `stateful: true` rows of `DENY_SET` (about 15 of 58, 11 of them Actor) | "A self-send or field write in the outermost block" changes how locals are lost only because of the shared map |
-| `RESIDUAL_DENY_SET` `GroupByValue` | Its triggers include field writes and self-sends; the leak is the `{Map, StateAcc}` carrier |
-| PIN-BUG BT-3981 in `stdlib/test/bt3971test.bt` and `bt3939tier2inlined_test.bt` | As for `EvaluatedBlockValue` |
-
-### Stays
-
-| Item | Why |
-|---|---|
-| ADR 0133's captured-local rule: `Tier2BlockNoReturnChannel` for `WriteKind::Local`, `Escape::Ffi` (BT-3917), `Passed`, `Cascade` | Locals are not actor state |
-| `ALLOW_SET`, `DENY_SET` (non-`stateful` rows), `RIGHT_STATEMENTS`, `RESIDUAL_DENY_SET` `MatchArmWrite` | Outer-local threading, retired by ADR 0133 Phase 3 on its own schedule |
-| `report_nlr_out_of_ensure`, `nlr_dropped_local` (BT-3910, BT-3993, #4454) | The locals half of the `ensure:` rule |
-| `reject_last_statement_block_value` (BT-3971), `reject_loop_rebind_of_body_local` (BT-3939) | Tier 2 local carrier |
-| Tier 2 `stateful_block_dispatch` sites in `intrinsics.rs`, `while_loops.rs`, `exception_handling.rs`; `beamtalk_collection:refuse_writing_fold/3` | Tier 2 locals protocol; the field-write half of `refuse_writing_fold` goes |
-| `ClassStateAbroad` | Class variables; gains the `actor-state-abroad` sibling |
-| BT-3956 value-type `do:` pins | Value types |
-| The `Local` and `SelfVt` families, `NlrThrowWithoutSlot`, `UnboundVersion`, `NonLinearVersion`, `HeldRebindNotIdentity` | Not actor state |
+These stay because they are about locals, Tier 2 or class variables: the
+`WriteKind::Local` half of `Tier2BlockNoReturnChannel` with `Escape::Ffi`
+(BT-3917), `Passed` and `Cascade`; `ALLOW_SET`, the other `DENY_SET` rows,
+`RIGHT_STATEMENTS` and `MatchArmWrite`; `report_nlr_out_of_ensure` and
+`nlr_dropped_local` (BT-3910, BT-3993); `reject_last_statement_block_value`
+(BT-3971) and `reject_loop_rebind_of_body_local` (BT-3939); the Tier 2
+`stateful_block_dispatch` sites in `intrinsics.rs`, `while_loops.rs` and
+`exception_handling.rs`; the locals half of
+`beamtalk_collection:refuse_writing_fold/3`; `ClassStateAbroad`; and the
+`Local` and `SelfVt` families.
 
 ## Prior Art
 
-**Beamtalk class variables (ADR 0130).** The same design, accepted and
-implemented two weeks ago: one home in the class process during an
-invocation, live reads and writes at home, a creation-time capture away,
-boundary rollback at the invocation and at `on:do:`. It deleted a threading
-family, the commit map and four diagnostics, and flipped 21 known-wrong pinned
-tests. The end-to-end cost was 1.6 to 1.75 times on a field-heavy loop.
+ADR 0130 made the same move for class variables two weeks ago: one home in
+the class process during an invocation, live at home, captured away, rollback
+at the invocation and at `on:do:`. It deleted a threading family and four
+diagnostics, flipped 21 pinned wrong answers, and cost 1.6x to 1.75x end to end
+on a field-heavy loop.
 
-**Erlang `gen_server`.** State in, state out per callback. This ADR keeps that
-contract exactly and changes only how a callback's body is compiled.
-Hand-written Erlang often uses a record in a local and a `#state{}` update per
-step; nothing outside the callback can tell the two apart.
-
-**Elixir `Agent` and `GenServer`.** Same contract. Elixir code that wants
-callback-scoped context uses `Process.put/2` (Ecto's repository context,
-Logger metadata), which is the pattern here.
-
-**Pharo and Squeak.** Instance variables live in the object; a block reads and
-writes them through its home receiver wherever it runs. This ADR gives that
-meaning at home, which is where nearly every block runs, and Erlang's meaning
-away.
-
-**Akka (classic actors).** Actor fields are plain mutable fields; closures that
-run on the actor's thread see them live, and the documentation warns that a
-closure run on another thread (a `Future` callback) must not touch them. Akka
-leaves the off-thread case undefined. Here it reads the capture and a write
-raises.
-
-**Pony.** Reference capabilities forbid sending a closure that can write actor
-state to another actor. Beamtalk enforces the same at run time, with a lint.
-
-## User Impact
-
-**Newcomer.** Blocks inside an actor behave like blocks: a field read sees the
-latest value, a write sticks, a self-send works. Most of the "this block cannot
-…" errors in actors go away. One error remains, for a block that writes a field
-from another process, and its hint names the fix (send a message).
-
-**Smalltalk developer.** Instance variables behave as in Pharo inside the
-actor, including through stored blocks and the template-method pattern
-through blocks. The remaining difference, writes from another process, is the
-actor model's, not the compiler's.
-
-**Erlang/BEAM developer.** Between callbacks nothing changes: the state is the
-`gen_server` state, inspectable with `sys:get_state/1`, migrated by
-`code_change/3`. Inside a callback the state is in the process dictionary,
-which they will not like on sight and will recognise from ADR 0130. Generated
-Core Erlang for an actor method gets shorter: no `StateN` chain, no
-`{reply, R, State}` per self-send. A hand-written native actor method keeps
-its `{reply, R, NewState}` shape through an adapter in the runtime (Phase 1).
-
-**Production operator.** Mid-callback, the process dictionary shows the live
-state rather than a stale copy. A typical method's call costs a few percent
-more; a call that loops over fields can take up to about 2x as long, gated in
-Phase 0. A self-send gets cheaper. Upgrading
-across the release that changes the calling convention needs a node restart,
-as ADR 0130's did.
-
-**Tooling developer.** The LSP loses a family of actor-specific diagnostics and
-gains one lint. Static analysis no longer needs to know whether a block is
-inlined to know whether a field read is current.
-
-## Steelman Analysis
-
-### A. Status quo: rejections plus residuals (rejected)
-
-- 🏭 **Operator**: "Every shape that would be wrong is now a compile error or a
-  structured runtime error. That is the safety property. Rejections are
-  cheap."
-- ⚙️ **BEAM veteran**: "Threaded `State` is pure, local, debuggable Core
-  Erlang. Don't trade that for the process dictionary."
-- 🎨 **Language designer**: "The rejected shapes are rare. #4447's closing note
-  says the BT-3952 shape has no occurrence in `stdlib/src` or the examples."
-
-The safety claim is not true today: the probe finds three silent wrong answers
-on `main` (aliased read, aliased write, method-level self-cast) that no
-rejection covers, and each new phase of ADR 0133 has found more. The list of
-rejections grows with the product of block shape, send kind and position, the
-same non-convergence ADR 0130 documented for class variables. Rarity of each
-shape is the argument for each rejection, not for the set.
-
-### B. Publish on write (#4447) (rejected)
-
-- 🧑‍💻 **Newcomer**: "It fixed the reads I hit, and it was small."
-- ⚙️ **BEAM veteran**: "The method body stays pure threading; only closures
-  pay."
-
-It keeps two representations and makes them agree by publishing at every
-write and un-publishing at every discard. The discards are open-ended (the
-review found the self-cast and the aliased self-send; `fieldAt:` was already
-missing), and each one is a per-call-site reconciliation, the pattern CLAUDE.md
-forbids for state-threading fixes. It also leaves writes and self-sends in
-closures broken.
-
-### C. Full threading through closures (rejected)
-
-- 🎩 **Smalltalk purist**: "Make every actor block a Tier 2 block that takes and
-  returns `State`; then nothing is a snapshot."
-- 🎨 **Language designer**: "One mechanism, already in the compiler, extended to
-  its limit."
-
-This is ADR 0132's design applied to `State`, which ADR 0133 superseded: a
-second entry per block-taking method, a runtime resolution walk, and no answer
-for blocks that run in another process or after the method returned. It costs
-more than the cell for every user higher-order method and fixes less.
-
-### D. The live cell (chosen)
-
-- 🧑‍💻 **Newcomer**: "Fields just work in blocks."
-- 🎩 **Smalltalk purist**: "Instance variables mean what they mean in Pharo,
-  inside the actor."
-- ⚙️ **BEAM veteran**: "Between callbacks it is a textbook `gen_server`. Inside,
-  it is the same trick the class process already uses."
-- 🏭 **Operator**: "One representation; the rollback points are the ones I
-  already know: escaping error and `on:do:`."
-- 🎨 **Language designer**: "Deletes a threading family and a list of
-  per-shape rules instead of adding to it."
-
-### E. Cell for closures only, threaded `State` in method bodies (rejected)
-
-A hybrid: method bodies keep the fast threaded form and sync into the cell
-before creating or calling a closure, reading back after. It is B with
-coarser publish points, and it has B's problem: every boundary between the two
-forms is a reconciliation site.
-
-### Tension points
-
-- BEAM veterans weigh the process dictionary heavily; operators and
-  newcomers weigh "no silent wrong answers, fewer errors". The OTP-fit table
-  above is the answer to the first group: the `gen_server` contract is intact.
-- Performance-minded users will see field-heavy method bodies run about 4x
-  slower in isolation. End to end that is 2% to 8% for a typical method and
-  up to about 1.9x for a tight field loop; the Phase 0 gate bounds it.
-- Language designers who count mechanisms prefer D; those who count
-  process-dictionary keys prefer A. ADR 0130 already chose D's side for class
-  variables, and two models of mutable state would be harder to teach than one.
+An Erlang `gen_server` takes state in and returns it; how the callback body
+computes it is invisible. Elixir code keeps callback-scoped context in
+`Process.put/2` (Logger metadata, Ecto's dynamic repo). In Pharo a block
+reads and writes instance variables through its receiver wherever it runs,
+which this ADR gives at home. Akka lets closures on the actor's thread see
+fields live and leaves a closure on another thread undefined; here it reads
+the capture and a write raises. Pony rejects, by type, a closure that could
+write actor state being sent to another actor.
 
 ## Alternatives Considered
 
-### A. Status quo with residuals
-Described above. Rejected: it does not converge and it has silent wrong
-answers today.
+**Status quo.** Keep the rejections and close BT-3988 and BT-3990 the same
+way. It leaves the three silent answers in the probe, and the list grows with
+block shape times send kind times position, which is how ADR 0130 described
+class variables before it.
 
-### B. Publish on write (#4447)
-Described above. Rejected: two representations kept in step by per-site
-publishing.
+**Publish on write (#4447).** Two copies, kept in step by publishing at each
+write and un-publishing at each discard. The discards are open-ended, and each
+one is a per-call-site reconciliation of the kind CLAUDE.md rules out for
+state threading. It also left writes and self-sends in closures broken.
 
-### C. Full threading through closures
-Described above. Rejected: superseded by ADR 0133 for the same reasons.
+**Thread `State` through closures.** Make every actor block a Tier 2 block
+that takes and returns `State`. This is ADR 0132 applied to fields, which
+ADR 0133 superseded: a second entry per block-taking method, a runtime
+resolution walk, and nothing for blocks that run in another process or after
+the method returns.
 
-### E. Hybrid cell
-Described above. Rejected: B with fewer sync points, same failure mode.
+**A cell for closures only.** Keep threaded `State` in method bodies and sync
+it to the cell around closures. This is #4447 with fewer sync points and the
+same failure.
 
-### F. Raise on any field access away from home
-Like ADR 0130's Alternative R: a block that reads a field away raises instead
-of reading the capture. Rejected for the same reason ADR 0130 gave: the
-common synchronous case (a block passed to another actor's method while this
-actor waits) would raise where the captured value is usually right, and
-Erlang's own rule for a `fun` is the capture.
+**Raise on any field access away.** ADR 0130 rejected this as its
+Alternative R. A block passed to another actor's method while this actor waits
+would raise where the capture is usually right.
 
-### G. Keep `self foo!` as "run now, discard"
-Rejected: it needs a snapshot and restore per self-cast to keep a behaviour
-that loses writes silently today. A real cast is what `!` means.
+**Keep `self foo!` as run-now-and-discard.** It needs a snapshot and restore
+per self-cast to keep a behaviour that loses writes today.
 
 ## Consequences
 
 ### Positive
-- One model of mutable state for actors and classes: live at home, captured
-  away, discarded at boundaries.
-- The actor-state family of rejections, guards and PIN-BUGs is deleted rather
-  than extended, and BT-3952, BT-3985, BT-3988 and BT-3990 close by
-  construction. The three silent wrong answers found by the probe are fixed.
-- `ThreadedIr` loses the `State` family; actor methods lower like class
-  methods for locals, so the per-context frame modes shrink by one.
-- Self-sends get cheaper: no state tuple, no guard.
-- The reflective selectors cannot fall out of step, because there is nothing to
-  keep in step.
+- Actors and classes share one model of mutable state.
+- The actor-state rejections, guards and pinned wrong answers are deleted;
+  BT-3952, BT-3985, BT-3988 and BT-3990 close; the probe's silent answers are
+  fixed.
+- `ThreadedIr` loses the `State` family, and actor methods lower locals as
+  class methods do.
+- Self-sends get cheaper.
 
 ### Negative
-- Field-heavy method bodies get slower: about 4x in isolation (3.8x to
-  6.7x), 2% to 8% end to end for a method of ten reads and three writes, and
-  1.2x to 1.9x for a call that makes 130 field accesses. Gated at 2x end to
-  end.
-- A calling-convention change across every compiled actor. Modules compiled
-  before it are refused at load with `abi_mismatch`; crossing the release
-  needs a node restart (ADR 0125).
-- Generated Core Erlang reads the process dictionary; reasoning about a method
-  body as a pure function of `State` is gone.
-- `self foo!` at method level changes from "run now, discard" to "run after
-  this message". Code that relied on the synchronous side effects of a
-  self-cast (other than state, which was discarded) sees them later.
-- Away-from-home field reads are still creation-time captures, so a `Timer` or
-  `Future` body reads old values. This is Erlang's rule and today's behaviour,
-  and the lint names it, but it is not "live everywhere".
-- It reverses part of four merged or in-flight ADR 0133 Phase 3 changes
-  (BT-3922, BT-3936, #4452, #4455).
+- Field-heavy bodies are about 4x slower in isolation. A typical call costs
+  2% to 8% more and a call making 130 field accesses up to 1.9x, gated at 2x.
+- Every compiled actor changes calling convention. Older modules are refused
+  with `abi_mismatch`, and crossing the release needs a node restart
+  (ADR 0125).
+- Generated Core Erlang reads the process dictionary.
+- A method-level `self foo!` now runs after the current message.
+- Away from home, a `Timer` or `Future` body still reads creation-time values.
+- It undoes parts of BT-3922, BT-3936, #4452 and #4455.
 
 ### Neutral
 - Locals, value types and class variables are unchanged.
-- The wire protocol, supervision and `stopWith:`/`continueWith:` are
-  unchanged.
-- Native (hand-written Erlang) actors keep their shape through an adapter.
+- Native Erlang actor methods keep `{reply, R, NewState}` through an adapter.
 
 ## Implementation
 
-**Phase 0: prove it (S).** Behind a codegen flag, lower actor field access and
+**Phase 0 (S).** Behind a codegen flag, lower actor field access and
 self-sends to the cell for the stdlib, BUnit and REPL corpora. Run the four
-cost gates above. Run the 733-shape oracle (BT-3950) with the flag on and
-report which rows in "Verify in Phase 0" go, and the line count the deletion
-would remove. Turn the OTP checks from the spike (sys, `code_change`, crash,
-hibernate, closures) into permanent EUnit tests. Gate: all four cost gates,
-and no shape that answers right today answers wrong with the flag on.
+gates and the 733-shape oracle, and report the line count the deletion
+removes. Turn the spike's OTP checks into EUnit tests. Proceed only if the
+gates pass and no shape that answers right today answers wrong with the flag
+on.
 
-**Phase 1: runtime (M).** `beamtalk_actor_state` (`install`, `take`,
-`uninstall`, `get`, `put`, `has`, `clear`, `capture`, `snapshot`, `restore`,
-`protect`, and the home test), used by every callback wrapper in
-`beamtalk_actor.erl` and by `self_dispatch/2`. `protect/1` joins ADR 0130's
-for runtime catchers. An adapter keeps native actor methods and instance-side
-extension funs (ADR 0066) that answer `{reply, R, NewState}` working by writing
-`NewState` into the cell. New error kind `actor_state_unreachable` in
-`beamtalk_error`.
+**Phase 1 (M).** `beamtalk_actor_state` (`install`, `take`, `uninstall`,
+`get`, `put`, `has`, `clear`, `capture`, `snapshot`, `restore`, `protect`),
+used by every callback wrapper in `beamtalk_actor.erl` and by
+`self_dispatch/2`. An adapter for native methods and ADR 0066 instance-side
+extension funs that return `{reply, R, NewState}`. The `actor_state_unreachable`
+error kind.
 
-**Phase 2: codegen (L).** Methods become `dispatch(Selector, Args, Self)`
-returning a bare value; field reads and writes and the reflective selectors call
-the helpers; every self-send form calls `dispatch/3` directly; generated
-callbacks read the cell on exit; field-reading block literals bind the
-capture; `OnDoCatch` snapshots and restores both kinds of state, checked by
-`CatchWithoutStateRestore`; `self foo!` lowers to a real cast. Bump the module
-ABI marker so mixed modules are refused. Snapshot tests are regenerated.
+**Phase 2 (L).** Methods become `dispatch(Selector, Args, Self)`. Field
+access, the reflective selectors and every self-send form go through the cell;
+generated callbacks return it; field-reading block literals bind the capture;
+`OnDoCatch` covers both kinds of state under `CatchWithoutStateRestore`;
+`self foo!` lowers to a cast. Bump the module ABI marker.
 
-**Phase 3: delete (L).** Everything in the "Deleted" table and whatever Phase 0
-confirmed in "Verify". PIN-BUGs flip. `docs/beamtalk-language-features.md`
-loses the "field mutations require control-flow context" limits (lines near
-828 and 2802 today) and gains the at-home/away rule.
+**Phase 3 (L).** Delete the table above and whatever Phase 0 confirmed. Update
+the "field mutations require control-flow context" text in
+`docs/beamtalk-language-features.md`.
 
-**Phase 4: lint and docs (S).** The `actor-state-abroad` lint with
-`@expect actor_state_abroad`; amendments recorded in ADR 0133, ADR 0041 and
-ADR 0118; `docs/agents/expanded.md` § State-Threading Codegen updated to three
-families (`Local`, `SelfVt`, and the in-place catch boundary).
+**Phase 4 (S).** The `actor-state-abroad` lint with
+`@expect actor_state_abroad`, the amendment notes in ADR 0133, 0041 and 0118,
+and `docs/agents/expanded.md` § State-Threading Codegen.
 
-**Sequencing with ADR 0133 Phase 3.** While this ADR is Proposed, the open
-actor-state PRs (#4452 BT-3952, #4455 BT-3985) can land as stopgaps, since
-each removes a silent wrong answer, but no new actor-state rejection should be
-added. If this ADR is accepted, BT-3988 and BT-3990 are closed as superseded
-and BT-3947's actor-only residual work is re-scoped after Phase 0.
-
-Affected components: runtime (`beamtalk_actor`, new `beamtalk_actor_state`,
-`beamtalk_error`, `beamtalk_hot_reload` ABI check), codegen (`gen_server/`,
-`dispatch_codegen.rs`, `expressions.rs`, `threaded_ir/`, `control_flow/`),
-semantic analysis (`block_facts.rs`, `local_threading.rs`,
-`block_analyzer.rs`), lint, docs. Parser and REPL protocol are unchanged.
+While this ADR is Proposed, #4452 and #4455 can land as stopgaps because each
+removes a silent wrong answer, but no new actor-state rejection should be
+added.
 
 ## Migration Path
 
-- **Compiled code.** One ABI break for compiled actors; modules from before it
-  are refused at load. Recompile and restart the node.
-- **Source code.** Nothing that compiles today stops compiling. Shapes that are
-  rejected today start compiling and answer the Pharo answer. Shapes that
-  answer silently wrong today (the probe's rows 1 to 4) start answering right.
-  A block that writes a field from another process raises instead of being
-  rejected at compile time or dropping the write.
-- **Self-casts.** A method that relied on `self foo!` running before the next
-  statement gets the cast semantics. The fix is `self foo`.
+Compiled actors need recompiling and a node restart across the ABI change.
+Source that compiles today keeps compiling. Shapes rejected today compile,
+and the probe's silent answers become correct. A block that writes a field
+from another process raises at run time. Code that relied on `self foo!`
+running before the next statement should use `self foo`.
 
 ## Open Questions
 
-1. Does Phase 0 show the inline lowering is needed, or is the helper call fast
-   enough? The spike says reads are equal either way and writes are close.
-2. Away from home, should a self-send raise `actor_state_unreachable` instead of
-   becoming a message send? The message send is the Erlang meaning; raising is
-   stricter and avoids the synchronous-carry deadlock reaching the timeout.
-3. Should ADR 0133's rule for escaping blocks that assign **class variables**
-   get the same amendment? ADR 0130 already makes such writes live at home and
-   raising away at run time; BT-3922 rejects them at compile time.
+1. Is a helper call fast enough, or does codegen need to open-code the cell
+   access?
+2. Should a self-send away raise `actor_state_unreachable` instead of sending
+   a message? A message is the Erlang meaning; raising avoids waiting for the
+   call timeout when the carry was synchronous.
+3. Should ADR 0133's rule for escaping blocks that assign class variables get
+   the same amendment? ADR 0130 already makes those writes live at home and
+   raising away; BT-3922 rejects them at compile time.
 
 ## References
 
-- Related issues: BT-3996 (this ADR), BT-3950 (gate), BT-3901 (ADR 0133 Epic),
-  BT-3922, BT-3936, BT-3948, BT-3952, BT-3971, BT-3981, BT-3985, BT-3988,
-  BT-3990, BT-3910, BT-3993, BT-3947, BT-3913
-- Related PRs: #4447 (closed, publish on write), #4452, #4448, #4454, #4455
-- Related ADRs: ADR 0130 (precedent), ADR 0133 (amended), ADR 0041 (amended),
-  ADR 0118 (amended), ADR 0111, ADR 0131, ADR 0120, ADR 0125, ADR 0126,
-  ADR 0129
-- Documentation: `docs/beamtalk-principles.md` §4, §7, §9;
-  `docs/development/benchmarks.md`; `docs/agents/expanded.md` § State-Threading
-  Codegen
-- Code: `runtime/apps/beamtalk_runtime/src/beamtalk_actor.erl`
-  (`self_dispatch/2`, `restore_dispatch_pdict/1`, `strip_local_temps/1`,
-  `dispatch_call/4`), `crates/beamtalk-codegen/src/core_erlang/gen_server/`,
+- Related issues: BT-3996, BT-3950, BT-3901, BT-3922, BT-3936, BT-3948,
+  BT-3952, BT-3971, BT-3981, BT-3985, BT-3988, BT-3990, BT-3910, BT-3993,
+  BT-3947, BT-3913
+- Related PRs: #4447 (closed), #4448, #4452, #4454, #4455
+- Related ADRs: 0130, 0133, 0041, 0118, 0111, 0131, 0120, 0125, 0126, 0129
+- Code: `runtime/apps/beamtalk_runtime/src/beamtalk_actor.erl`,
+  `runtime/apps/beamtalk_runtime/src/beamtalk_class_vars.erl`,
+  `crates/beamtalk-codegen/src/core_erlang/gen_server/`,
   `crates/beamtalk-codegen/src/core_erlang/dispatch_codegen.rs`
-  (`closure_self_dispatch_state_guard`, `generate_self_cast_send`),
-  `runtime/apps/beamtalk_runtime/src/beamtalk_class_vars.erl`
+- Documentation: `docs/beamtalk-principles.md` §4, §7, §9;
+  `docs/development/benchmarks.md`
