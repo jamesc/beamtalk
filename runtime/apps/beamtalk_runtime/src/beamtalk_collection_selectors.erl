@@ -18,7 +18,7 @@ enforced, not trusted: the Rust test
 list between the markers differs from the compiler's.
 """.
 
--export([overridable/0, extended_on/1]).
+-export([overridable/0, overridable_class_side/0, extended_on/1]).
 
 -doc "The overridable collection selectors, in the compiler's order.".
 -spec overridable() -> [atom()].
@@ -49,19 +49,38 @@ overridable() ->
 %% END SELECTORS
 
 -doc """
+The class-side overridable selectors: what the stdlib's `collect:`/`select:`
+reach through `self species withAll:`.
+""".
+-spec overridable_class_side() -> [atom()].
+overridable_class_side() ->
+    %% BEGIN CLASS SELECTORS
+    [
+        'withAll:'
+    ].
+%% END CLASS SELECTORS
+
+-doc """
 Whether a runtime extension method registered on `Class` has one of the
-overridable selectors.
+overridable selectors, instance-side (keyed under the class name) or
+class-side (keyed under the class-object tag).
+
+One O(1) `beamtalk_extensions:lookup/2` per selector rather than a table scan
+per class. `beamtalk_class_shadow_flags` is not usable here: it records
+extensions on class-object tags only, never the instance-side ones.
 """.
 -spec extended_on(atom()) -> boolean().
 extended_on(Class) ->
-    Overridable = overridable(),
-    try beamtalk_extensions:list(Class) of
-        Extensions ->
-            lists:any(
-                fun({Selector, _Owner}) -> lists:member(Selector, Overridable) end,
-                Extensions
-            )
+    try
+        has_any(Class, overridable()) orelse
+            has_any(beamtalk_class_registry:class_object_tag(Class), overridable_class_side())
     catch
         %% Registry table not initialised yet (early bootstrap): nothing is extended.
         error:badarg -> false
     end.
+
+-spec has_any(atom(), [atom()]) -> boolean().
+has_any(Key, Selectors) ->
+    lists:any(
+        fun(Selector) -> beamtalk_extensions:lookup(Key, Selector) =/= not_found end, Selectors
+    ).

@@ -615,6 +615,34 @@ fn defining_any_overridable_collection_selector_sets_the_override_flag() {
     assert!(checked >= 15, "only {checked} selectors checked");
 }
 
+/// BT-3951: a class-side `withAll:` (reached through `self species withAll:`)
+/// sets the flag too, over the class-side list.
+#[test]
+fn defining_a_class_side_with_all_sets_the_override_flag() {
+    for selector in
+        beamtalk_core::state_threading_selectors::overridable_collection_class_selectors()
+    {
+        let src = format!(
+            "Value subclass: Bag\n  field: n :: Integer = 0\n  class {selector} arg0 => nil\n"
+        );
+        let mut module = parse_fixture(&src);
+        let analysis = analyse_full(&module, AnalysisContext::default());
+        lower_analysed_module_for_codegen(&mut module, &analysis);
+        let code = generate_module(
+            &module,
+            CodegenOptions::new("bag")
+                .with_source(&src)
+                .with_source_path_opt(Some("bag.bt"))
+                .with_analysis(analysis),
+        )
+        .expect("codegen should succeed");
+        assert!(
+            code.contains("'overrides_collection_selector' => 'true'"),
+            "a class-side {selector} must set the flag, got:\n{code}"
+        );
+    }
+}
+
 /// BT-3916: `do:`, ordinary methods and the provisions of a stdlib protocol do
 /// not set the flag, so a `uses: Enumerable` class with no override of its own
 /// keeps folding.

@@ -116,6 +116,23 @@ pub fn overridable_collection_selectors() -> impl Iterator<Item = &'static str> 
 /// own `species` changes the pure answer and the in-place fold would skip it.
 const COLLECTION_SELF_SENDS: &[&str] = &["species"];
 
+/// Class-side messages the stdlib's collection methods reach through `species`
+/// (BT-3951): `collect:`/`select:` answer `self species withAll: result`, and
+/// `species` defaults to `self class`, so a user collection usually overrides
+/// class-side `withAll:` rather than `species`. `Collection`'s provisions send
+/// no other class-side message to `species`. A class defining one of these
+/// outside the stdlib makes the pure answer differ from the in-place fold's.
+const COLLECTION_CLASS_SIDE_SELF_SENDS: &[&str] = &["withAll:"];
+
+/// The class-side counterpart of [`overridable_collection_selectors`]: the
+/// class-side messages a class can define that change the answer of the
+/// stdlib's own `collect:`/`select:`. Codegen sets the same
+/// `overrides_collection_selector` flag from it, and the runtime checks the
+/// class-side extension registry for them.
+pub fn overridable_collection_class_selectors() -> impl Iterator<Item = &'static str> {
+    COLLECTION_CLASS_SIDE_SELF_SENDS.iter().copied()
+}
+
 /// Returns `true` if `sel` is a state-threading keyword selector.
 ///
 /// These selectors receive block arguments that are analysed for field mutations
@@ -601,15 +618,23 @@ mod tests {
             .nth(1)
             .and_then(|rest| rest.split("%% END SELECTORS").next())
             .expect("selector markers");
-        let runtime: Vec<&str> = body
-            .lines()
-            .filter_map(|line| {
-                let line = line.trim().trim_end_matches([',', ']']);
-                line.strip_prefix('\'')?.strip_suffix('\'')
-            })
-            .collect();
+        let atoms = |body: &str| -> Vec<String> {
+            body.lines()
+                .filter_map(|line| {
+                    let line = line.trim().trim_end_matches([',', ']']);
+                    Some(line.strip_prefix('\'')?.strip_suffix('\'')?.to_string())
+                })
+                .collect()
+        };
         let compiler: Vec<&str> = overridable_collection_selectors().collect();
-        assert_eq!(runtime, compiler);
+        assert_eq!(atoms(body), compiler);
+        let class_body = src
+            .split("%% BEGIN CLASS SELECTORS")
+            .nth(1)
+            .and_then(|rest| rest.split("%% END CLASS SELECTORS").next())
+            .expect("class selector markers");
+        let class_compiler: Vec<&str> = overridable_collection_class_selectors().collect();
+        assert_eq!(atoms(class_body), class_compiler);
     }
 
     fn parse_expr(src: &str) -> Expression {

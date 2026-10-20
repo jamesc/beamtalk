@@ -269,6 +269,17 @@ to_list_for_threading_extension_test() ->
     after
         beamtalk_extensions:unregister('Interval', 'bt3951Harmless')
     end,
+    %% A class-side `withAll:` (reached through `species`) poisons it too.
+    Tag = beamtalk_class_registry:class_object_tag('Interval'),
+    ok = beamtalk_extensions:register(Tag, 'withAll:', fun(_Args, _Self) -> nil end, bt3951_test),
+    try
+        ?assertError(
+            #{error := #beamtalk_error{kind = stateful_block_dispatch}},
+            beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'collect:')
+        )
+    after
+        beamtalk_extensions:unregister('Interval', 'withAll:', true)
+    end,
     %% One on a different overridable selector poisons the fold.
     ok = beamtalk_extensions:register('Interval', 'inject:into:', Fun, bt3951_test),
     try

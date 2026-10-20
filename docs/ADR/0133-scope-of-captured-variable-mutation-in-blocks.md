@@ -498,8 +498,10 @@ code.
   > message (BT-3951), found by the guard in the extension registry for each
   > class on the chain, and a `species` override, which the list includes
   > because the stdlib's `collect:` and `select:` self-send it, refuse the same
-  > way. The runtime copy of the list (`beamtalk_collection_selectors`) is
-  > checked against the compiler's by a Rust test.
+  > way, as does a class-side `withAll:` (own or extension), the only
+  > class-side message `Collection`'s provisions reach through `species`. The
+  > runtime copy of both lists (`beamtalk_collection_selectors`) is checked
+  > against the compiler's by a Rust test.
 
 ### Neutral
 - Reading captured variables in escaping blocks is unchanged.

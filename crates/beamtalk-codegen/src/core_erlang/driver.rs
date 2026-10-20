@@ -443,15 +443,20 @@ impl CoreErlangGenerator {
         let Some(info) = hierarchy.get_class(class.name.name.as_str()) else {
             return false;
         };
-        info.methods.iter().any(|m| {
-            let stdlib_provision = m.origin.as_ref().is_some_and(|origin| {
-                self.stdlib_protocol_uses
-                    .contains(&(class.name.name.clone(), origin.clone()))
-            });
-            !stdlib_provision
-                && beamtalk_core::state_threading_selectors::overridable_collection_selectors()
-                    .any(|sel| sel == m.selector.as_str())
-        })
+        let defines_class_side = info.class_methods.iter().any(|m| {
+            beamtalk_core::state_threading_selectors::overridable_collection_class_selectors()
+                .any(|sel| sel == m.selector.as_str())
+        });
+        defines_class_side
+            || info.methods.iter().any(|m| {
+                let stdlib_provision = m.origin.as_ref().is_some_and(|origin| {
+                    self.stdlib_protocol_uses
+                        .contains(&(class.name.name.clone(), origin.clone()))
+                });
+                !stdlib_provision
+                    && beamtalk_core::state_threading_selectors::overridable_collection_selectors()
+                        .any(|sel| sel == m.selector.as_str())
+            })
     }
 
     /// A class's direct-call-eligible class methods as sorted
