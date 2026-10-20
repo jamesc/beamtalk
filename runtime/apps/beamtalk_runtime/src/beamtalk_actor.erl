@@ -588,7 +588,14 @@ process always reports the true exit reason.
 """.
 -spec await_initialize(pid(), reference()) -> ok | {error, term()}.
 await_initialize(Pid, MonRef) ->
-    try sys:get_state(Pid, ?BT_INITIALIZE_TIMEOUT) of
+    await_initialize_sys(Pid, MonRef, fun(P) -> sys:get_state(P, ?BT_INITIALIZE_TIMEOUT) end).
+
+%% The sys-based wait behind await_initialize/2: `SysCall` is a `sys` call
+%% (handled only between callbacks) whose exit shapes are sys:get_state/2's.
+-spec await_initialize_sys(pid(), reference(), fun((pid()) -> term())) ->
+    ok | {error, term()}.
+await_initialize_sys(Pid, MonRef, SysCall) ->
+    try SysCall(Pid) of
         _State ->
             erlang:demonitor(MonRef, [flush]),
             ok
@@ -627,9 +634,9 @@ actor's `init/1` (take_init_ack/2) has then already sent, before
   succeeded and passed the post-initialize uninitialized-state check) or
   the `'DOWN'` for `MonRef` (`{error, Reason}`), at most 5 s
   (`{error, timeout}`; the caller kills the actor).
-- neither — the process never saw the ack target (a hand-written
-  gen_server that builds its own state): fall back to the sys-based
-  await_initialize/2.
+- neither — the process never consumed the ack target (a hand-written
+  gen_server, or an actor module compiled before BT-3992): fall back to the
+  sys-based wait, which also strips the target from a map state.
 
 `MonRef` is consumed (demonitored or received) by this function. A late
 `{AckRef, _}` left after a timeout is the caller's to flush
@@ -655,8 +662,20 @@ await_initialize(Pid, MonRef, AckRef) ->
                 {error, timeout}
             end
     after 0 ->
-        await_initialize(Pid, MonRef)
+        %% The actor never consumed the target: a hand-written gen_server, or
+        %% an actor module compiled before BT-3992 whose init/1 merges its
+        %% start args into its state. Wait the sys way, and strip the target
+        %% from a map state so it does not stay there for good.
+        await_initialize_sys(Pid, MonRef, fun(P) ->
+            sys:replace_state(P, fun strip_init_ack_key/1, ?BT_INITIALIZE_TIMEOUT)
+        end)
     end.
+
+-spec strip_init_ack_key(term()) -> term().
+strip_init_ack_key(State) when is_map(State) ->
+    maps:remove(?BT_INIT_ACK_KEY, State);
+strip_init_ack_key(State) ->
+    State.
 
 -doc """
 BT-3992: add the initialize-ack target `{self(), AckRef}` to a spawn's start

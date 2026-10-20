@@ -2182,6 +2182,17 @@ safe_spawn_failing_initialize_with_ack_reports_real_reason_test_() ->
         end
     end}.
 
+safe_spawn_fallback_strips_ack_target_from_merged_state_test() ->
+    %% An init/1 that merges its start args into its state without
+    %% consuming the ack target (an actor module compiled before BT-3992)
+    %% still starts, and the target does not stay in its state.
+    {ok, Pid} = beamtalk_actor:safe_spawn(test_merging_init_actor, #{value => 7}),
+    State = sys:get_state(Pid),
+    ?assertEqual(7, maps:get(value, State)),
+    ?assertNot(maps:is_key('$bt_init_ack', State)),
+    ?assertEqual(no_stray_ack, stray_ack()),
+    gen_server:stop(Pid).
+
 safe_spawn_without_ack_target_falls_back_to_sys_test() ->
     %% A hand-written gen_server that never sees the ack target (it builds
     %% its own state) is awaited through the sys-based fallback.
