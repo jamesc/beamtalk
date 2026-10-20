@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3951 (ADR 0133): a Collection with only `do:`. The test file extends it
+// with a runtime `inject:into:` that the stdlib's `collect:` runs through.
+// Driven by adr0133enumerable_user_test.bt.
+
+Collection subclass: Adr0133EnumerableExtInject
+  field: items :: List = #()
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    self.items do: block
+    nil
+
+  printString -> String => "Adr0133EnumerableExtInject"

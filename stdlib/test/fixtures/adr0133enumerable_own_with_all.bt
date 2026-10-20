@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3951 (ADR 0133): a Collection with `do:` and its own class-side
+// `withAll:`. `species` defaults to `self class`, so the stdlib's `collect:`
+// and `select:` answer `self species withAll: result`, an instance of this
+// class; a writing block folded over `do:` would answer a plain List. Driven by
+// adr0133enumerable_user_test.bt.
+
+Collection subclass: Adr0133EnumerableOwnWithAll
+  field: items :: List = #()
+
+  class withAll: list :: List -> Adr0133EnumerableOwnWithAll =>
+    self new: #{#items => list}
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    self.items do: block
+    nil
+
+  printString -> String => "Adr0133EnumerableOwnWithAll"

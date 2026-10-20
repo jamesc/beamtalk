@@ -494,9 +494,20 @@ code.
   > when it is a faithful fold over `do:`; a class that wants the write to
   > thread `uses:` the stdlib `Enumerable`, or computes the value without
   > assigning from the block. `testOwnAnySatisfyWritePin` flipped to
-  > `testOwnAnySatisfyWriteRaises`. Known gap: an extension method (registered
-  > at run time) that overrides a collection message other than the one sent is
-  > not seen by the per-class flag.
+  > `testOwnAnySatisfyWriteRaises`. A runtime extension method on a collection
+  > message (BT-3951), found by the guard in the extension registry for each
+  > class on the chain, refuse the same way. So does a `species` override or a
+  > class-side `withAll:` (own or extension), the only class-side message
+  > `Collection`'s provisions reach through `species`, but only for the
+  > selectors whose `Collection` provision ends in `self species withAll:`
+  > (`collect:`, `select:`, and `reject:` through `select:`), and only when the
+  > receiver gets them from `Collection`: `Enumerable`'s provisions forward to
+  > `self elements`, so a `uses: Enumerable` class with the usual `withAll:`
+  > constructor still folds every writing send, and a `Collection` subclass's
+  > `inject:into:`, `detect:` and `anySatisfy:` still fold. Codegen records this
+  > apart, as `overrides_species_construction`. The runtime copies of the lists
+  > (`beamtalk_collection_selectors`) are checked against the compiler's by a
+  > Rust test.
 
 ### Neutral
 - Reading captured variables in escaping blocks is unchanged.

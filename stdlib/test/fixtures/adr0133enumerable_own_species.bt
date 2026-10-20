@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3951 (ADR 0133): a Collection with `do:` and its own `species`. The
+// stdlib's `collect:` and `select:` build their answer with `self species
+// withAll:`, so a writing block folded over `do:` would skip it. Driven by
+// adr0133enumerable_user_test.bt.
+
+Collection subclass: Adr0133EnumerableOwnSpecies
+  field: items :: List = #()
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    self.items do: block
+    nil
+
+  species -> Self class => List
+
+  printString -> String => "Adr0133EnumerableOwnSpecies"

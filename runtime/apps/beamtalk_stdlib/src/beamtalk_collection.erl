@@ -297,8 +297,12 @@ defines, outside the stdlib, any other collection message (`overrides_collection
 in its class meta, set by codegen from the compiler's one list of them): the
 stdlib's `collect:`, `select:`, `count:`, `eachWithIndex:` and `do:separatedBy:`
 are `self inject:into:`, and `reject:` is `self select:`, so an override of
-those is reached by the pure send and skipped by the fold. Both raise
-`stateful_block_dispatch`. A receiver that does not respond to `Selector`
+those is reached by the pure send and skipped by the fold. Likewise for the
+species-dependent messages (`collect:`, `select:`, `reject:`) when `Collection`'s
+provision answers them: they end in `self species withAll:`, so a class with
+its own `species` or class-side `withAll:` (`overrides_species_construction`,
+or a runtime extension of either) would build a different result than the
+fold (BT-3951). All of these raise `stateful_block_dispatch`. A receiver that does not respond to `Selector`
 raises `does_not_understand`, as the pure path does. Codegen never emits this
 for `do:`, the fold's own source.
 """.
@@ -310,8 +314,6 @@ to_list_for_threading(Recv, Selector) ->
     case Provider of
         stdlib ->
             case beamtalk_behaviour_intrinsics:overridesCollectionSelectorFromName(Class) of
-                false ->
-                    to_list(Recv);
                 true ->
                     refuse_writing_fold(
                         Class,
@@ -324,7 +326,29 @@ to_list_for_threading(Recv, Selector) ->
                             atom_to_binary(Selector, utf8),
                             <<"' may run through; the in-place fold would skip it">>
                         ]
-                    )
+                    );
+                false ->
+                    case
+                        beamtalk_behaviour_intrinsics:speciesConstructionOverriddenFromName(
+                            Class, Selector
+                        )
+                    of
+                        false ->
+                            to_list(Recv);
+                        true ->
+                            refuse_writing_fold(
+                                Class,
+                                Selector,
+                                [
+                                    <<
+                                        " defines 'species' or a class-side 'withAll:' that the "
+                                        "stdlib's '"
+                                    >>,
+                                    atom_to_binary(Selector, utf8),
+                                    <<"' builds its answer with; the in-place fold would skip it">>
+                                ]
+                            )
+                    end
             end;
         none ->
             beamtalk_error:raise(beamtalk_error:new(does_not_understand, Class, Selector));
