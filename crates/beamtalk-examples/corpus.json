@@ -50014,6 +50014,36 @@
       "explanation": "Fixture that triggers a compile error: an actor method passes a block that assigns a captured local to a `sealed` method of its own class (ADR 0133, BT-3902; ADR 0131 §6 exempted this shape until then, BT-3755). Used by tests/repl-protocol/cases/adr0133_escaping_block.btscript via `// @load-error`."
     },
     {
+      "id": "tests-repl-protocol-fixtures-adr0133-testcase-field-write-error",
+      "title": "Adr0133TestcaseFieldWriteError",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Adr0133TestcaseFieldWriteError",
+        "TestCase",
+        "adr0133_testcase_field_write_error",
+        "assign",
+        "assignment",
+        "exception",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "makeBumper",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "raise",
+        "set",
+        "subclassing",
+        "throw"
+      ],
+      "source": "// Fixture that triggers a compile error: a TestCase method returns a block\n// that assigns `self.field` (ADR 0133, BT-3922). \"Cannot assign to slot\" does\n// not fire for a TestCase subclass, so without this error the write would be\n// dropped silently. Used by\n// tests/repl-protocol/cases/adr0133_escaping_block.btscript via\n// `// @load-error`.\n\nTestCase subclass: Adr0133TestcaseFieldWriteError\n  field: n = 0\n\n  makeBumper => [self.n := self.n + 1]",
+      "explanation": "Fixture that triggers a compile error: a TestCase method returns a block that assigns `self.field` (ADR 0133, BT-3922). \"Cannot assign to slot\" does not fire for a TestCase subclass, so without this error the write would be dropped silently. Used by tests/repl-protocol/cases/adr0133_escaping_block.btscript via `// @load-error`."
+    },
+    {
       "id": "tests-repl-protocol-fixtures-announce-emitter",
       "title": "AnnounceEmitter",
       "category": "repl-protocol-fixtures",

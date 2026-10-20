@@ -1630,10 +1630,17 @@ impl<'d> Walker<'d> {
             if self.context == Repl {
                 return None;
             }
-            // A value-type method cannot assign a slot at all: the "Cannot
-            // assign to slot" error (`class_validators.rs`) already covers the
-            // write, with the right fix.
-            if self.context == ValueType {
+            // Where "Cannot assign to slot" fires (a `Value` subclass, not a
+            // `TestCase`; `rejects_slot_assignment`, the validator's own
+            // predicate) that error already covers the write, with the right
+            // fix. A `TestCase` or plain `Object` subclass has no such error,
+            // so the write would be dropped silently.
+            if self.context == ValueType
+                && self
+                    .receivers
+                    .as_ref()
+                    .is_some_and(|r| r.hierarchy.rejects_slot_assignment(&r.class_name))
+            {
                 return None;
             }
             outer_state_writes(block).into_iter().next()

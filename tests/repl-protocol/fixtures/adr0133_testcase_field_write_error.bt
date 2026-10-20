@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture that triggers a compile error: a TestCase method returns a block
+// that assigns `self.field` (ADR 0133, BT-3922). "Cannot assign to slot" does
+// not fire for a TestCase subclass, so without this error the write would be
+// dropped silently. Used by
+// tests/repl-protocol/cases/adr0133_escaping_block.btscript via
+// `// @load-error`.
+
+TestCase subclass: Adr0133TestcaseFieldWriteError
+  field: n = 0
+
+  makeBumper => [self.n := self.n + 1]

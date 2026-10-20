@@ -53,6 +53,23 @@ fn in_value(body: &str) -> String {
     )
 }
 
+/// An instance method of a `TestCase` subclass: a value-type context where
+/// "Cannot assign to slot" does not fire (BT-3922).
+fn in_testcase(body: &str) -> String {
+    format!(
+        "Object subclass: CvA\n  class ap: b => b value\n\nTestCase subclass: Tc\n  ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
+        indent(body)
+    )
+}
+
+/// An instance method of a plain `Object` subclass: likewise no slot error.
+fn in_object(body: &str) -> String {
+    format!(
+        "Object subclass: CvA\n  class ap: b => b value\n\nObject subclass: Ob\n  ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
+        indent(body)
+    )
+}
+
 fn in_actor(body: &str) -> String {
     format!(
         "Object subclass: CvA\n  class ap: b => b value\n\nActor subclass: Ac\n  state: n = 0\n\n  sealed ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
@@ -2646,6 +2663,29 @@ fn section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape() {
             "{src}: {:?}",
             adr0131_diagnostics(&src)
         );
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+    }
+}
+
+/// BT-3922: where "Cannot assign to slot" does not fire (a `TestCase` subclass
+/// and a plain `Object` subclass), an escaping block that writes a field is
+/// reported by §6, or the write would be dropped silently. A true `Value`
+/// subclass gets only the slot error.
+#[test]
+fn section6_field_write_in_testcase_and_object_methods_is_an_error() {
+    for body in [
+        "self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]\nnil",
+        "^[self.n := self.n + 1]",
+        "b := [self.n := self.n + 1]\n^b",
+    ] {
+        for src in [in_testcase(body), in_object(body)] {
+            assert_eq!(
+                section6_errors(&src),
+                1,
+                "{src}: {:?}",
+                adr0131_diagnostics(&src)
+            );
+        }
         assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
     }
 }
