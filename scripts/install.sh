@@ -8,14 +8,17 @@
 #   curl -fsSL https://jamesc.github.io/beamtalk/install.sh | sh
 #   curl ... | sh -s -- --version v0.1.0         # specific version
 #   curl ... | sh -s -- --nightly                # latest nightly build
+#   curl ... | sh -s -- --edge                   # latest main (linux-x86_64 only)
 #   curl ... | sh -s -- --prefix /usr/local       # custom install location
 #
 # Environment variables:
 #   BEAMTALK_VERSION   - version to install (default: latest)
 #   BEAMTALK_NIGHTLY   - set to 1 for nightly build
+#   BEAMTALK_EDGE      - set to 1 for the edge build
 #   BEAMTALK_PREFIX    - install prefix (default: ~/.beamtalk)
 #   GITHUB_TOKEN       - optional; authenticates the "latest release" lookup
-#                        (GH_TOKEN also works). Nightly needs no API call.
+#                        (GH_TOKEN also works). Nightly and edge need no
+#                        API call.
 
 set -eu
 
@@ -28,6 +31,7 @@ GITHUB_RELEASES="https://github.com/${REPO}/releases"
 
 VERSION="${BEAMTALK_VERSION:-}"
 NIGHTLY="${BEAMTALK_NIGHTLY:-}"
+EDGE="${BEAMTALK_EDGE:-}"
 PREFIX="${BEAMTALK_PREFIX:-${DEFAULT_PREFIX}}"
 
 while [ $# -gt 0 ]; do
@@ -37,20 +41,25 @@ while [ $# -gt 0 ]; do
             VERSION="$2"; shift 2 ;;
         --nightly)
             NIGHTLY=1; shift ;;
+        --edge)
+            EDGE=1; shift ;;
         --prefix)
             if [ $# -lt 2 ]; then echo "Error: --prefix requires a value"; exit 1; fi
             PREFIX="$2"; shift 2 ;;
         --help)
-            echo "Usage: install.sh [--version VERSION] [--nightly] [--prefix PATH]"
+            echo "Usage: install.sh [--version VERSION] [--nightly | --edge] [--prefix PATH]"
             echo ""
             echo "Options:"
             echo "  --version VERSION   Install a specific version (e.g., v0.1.0)"
             echo "  --nightly           Install the latest nightly build"
+            echo "  --edge              Install the build of the latest main commit"
+            echo "                      (linux-x86_64 only; for CI of downstream packages)"
             echo "  --prefix PATH       Install to PATH (default: ~/.beamtalk)"
             echo ""
             echo "Environment variables:"
             echo "  BEAMTALK_VERSION    Same as --version"
             echo "  BEAMTALK_NIGHTLY    Set to 1 for nightly build"
+            echo "  BEAMTALK_EDGE       Set to 1 for edge build"
             echo "  BEAMTALK_PREFIX     Same as --prefix"
             echo "  GITHUB_TOKEN        Optional; authenticates the latest-release lookup"
             exit 0
@@ -95,6 +104,10 @@ resolve_version() {
         echo "Error: --version and --nightly cannot be used together"
         exit 1
     fi
+    if [ "${EDGE}" = "1" ] && { [ -n "${VERSION}" ] || [ "${NIGHTLY}" = "1" ]; }; then
+        echo "Error: --edge cannot be used with --version or --nightly"
+        exit 1
+    fi
 
     if [ -n "${VERSION}" ]; then
         # Strip leading 'v' if present for consistency, then add it back
@@ -112,6 +125,20 @@ resolve_version() {
         # "no nightly release" error.
         TAG="nightly"
         VERSION="nightly"
+        return
+    fi
+
+    if [ "${EDGE}" = "1" ]; then
+        # The rolling edge release (edge.yml) is rebuilt on every merge to
+        # main, with the same versionless asset naming as nightly. It is only
+        # built for linux-x86_64.
+        if [ "${PLATFORM}" != "linux-x86_64" ]; then
+            echo "Error: --edge is only built for linux-x86_64 (this is ${PLATFORM})."
+            echo "  Use --nightly, or build from source with 'just dist'."
+            exit 1
+        fi
+        TAG="edge"
+        VERSION="edge"
         return
     fi
 
@@ -298,6 +325,8 @@ main() {
     echo "  Prefix:   ${PREFIX}"
     if [ "${NIGHTLY}" = "1" ]; then
         echo "  Channel:  nightly (pre-release)"
+    elif [ "${EDGE}" = "1" ]; then
+        echo "  Channel:  edge (latest main, pre-release)"
     fi
     echo ""
 
