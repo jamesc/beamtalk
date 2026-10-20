@@ -2770,6 +2770,16 @@ fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
         "b := [self.n]\nself foo: b\nnil",
         "b := [self.n]\nself.h := b\nnil",
         "b := [self.n]\n#[b]",
+        // The reflective read is a field read too.
+        "self foo: [self fieldAt: #n]\nnil",
+        "super foo: [super fieldAt: #n]\nnil",
+        "^[self fieldAt: #n]",
+        "self.h := [self fieldAt: #n]\nnil",
+        "#[[self fieldAt: #n]]",
+        "self foo: [:k | self fieldAt: k]\nnil",
+        "b := [self fieldAt: #n]\n^b",
+        "b := [self fieldAt: #n]\nself foo: b\nnil",
+        "b := [self fieldAt: #n]\nself.n := 5\nb value",
         // Called after something that may change the state (measured: a field
         // write or a self-send between the binding and the call reads stale).
         "b := [self.n]\nself.n := 5\nb value",
@@ -2792,7 +2802,9 @@ fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
             "{d:?}"
         );
         assert!(
-            src[d.span.start() as usize..].starts_with("self."),
+            ["self.", "self fieldAt:", "super fieldAt:"]
+                .iter()
+                .any(|at| src[d.span.start() as usize..].starts_with(at)),
             "reported at the read: {src}"
         );
     }
@@ -2823,6 +2835,10 @@ fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
         "b := [self.n]\nb value",
         "b := [self.n]\nself.items do: [:x | b value]\nnil",
         "b := [self.n]\nb value\nself.n := 1\nnil",
+        // Read directly in the method body, not in a block.
+        "self foo: (self fieldAt: #n)\nnil",
+        "x := self fieldAt: #n\n^x",
+        "b := [self fieldAt: #n]\nb value",
         "b := [self.n]\nself.items do: [:x | b value. x]\nnil",
         // The local is rebound to a block that reads no field.
         "b := [self.n]\nb := [1]\n^b",

@@ -2894,7 +2894,11 @@ impl<'d> Walker<'d> {
         if !self.reported_blocks.insert(block.span) {
             return;
         }
-        let name = format!("self.{}", read.name);
+        let name = if read.name == crate::semantic_analysis::block_facts::REFLECTIVE_FIELD_READ {
+            "self fieldAt:".to_string()
+        } else {
+            format!("self.{}", read.name)
+        };
         let diagnostic = Diagnostic::error(
             format!(
                 "`{name}` is read in a block that runs later; it would see the value from when \

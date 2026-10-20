@@ -1206,7 +1206,11 @@ pub fn outer_state_writes(block: &Block) -> Vec<OuterLocalWrite> {
     walker.state_writes
 }
 
-/// ADR 0133 (BT-3952): the `self.field` reads `block` makes anywhere in its
+/// The name [`outer_state_reads`] gives the reflective read `self fieldAt: k`.
+pub const REFLECTIVE_FIELD_READ: &str = "fieldAt:";
+
+/// ADR 0133 (BT-3952): the `self.field` reads (and `self fieldAt: k` reads,
+/// [`REFLECTIVE_FIELD_READ`]) `block` makes anywhere in its
 /// body, nested blocks included, first read of each field. An assignment's
 /// target is a write, not a read (`outer_state_writes`); a `self.x` inside the
 /// assigned value is a read. The read-side twin of [`outer_state_writes`].
@@ -1235,6 +1239,31 @@ pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
     }
     for stmt in &block.body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            // The reflective read `self fieldAt: k` (or `super fieldAt: k`)
+            // reads the same captured `State` as `self.k`.
+            if let Expression::MessageSend {
+                receiver,
+                selector,
+                span,
+                ..
+            } = e
+            {
+                if selector.name() == REFLECTIVE_FIELD_READ
+                    && (is_self_reference(receiver.unwrap_parens())
+                        || matches!(receiver.unwrap_parens(), Expression::Super(_)))
+                    && !rebound
+                        .iter()
+                        .any(|b| b.start() <= span.start() && span.end() <= b.end())
+                    && !reads.iter().any(|r| r.name == REFLECTIVE_FIELD_READ)
+                {
+                    reads.push(OuterLocalWrite {
+                        kind: WriteKind::ObjectState,
+                        name: REFLECTIVE_FIELD_READ.into(),
+                        span: *span,
+                    });
+                }
+                return;
+            }
             let Expression::FieldAccess {
                 receiver,
                 field,
