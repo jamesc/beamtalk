@@ -514,10 +514,11 @@ do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Select
             %% process (per CLAUDE.md's "Blocks into class methods" rule) —
             %% not a supervisor, so the link must not survive: a later kill
             %% of the actor must not take the class process down with it.
-            %% Sever it immediately; by the time `'spawnAs'/3` returns
-            %% `{ok, Pid}` its own await_initialize has already confirmed
-            %% the actor started and initialized, so no risk window remains
-            %% to protect against.
+            %% BT-3992: the link is severed inside the start, before this
+            %% process stops trapping exits — `spawnAs` returns once
+            %% `initialize` has returned, so continuations it requested run
+            %% concurrently with us, and one that stops the actor right after
+            %% the start must not take the class process down.
             %%
             %% The exception is a
             %% `SupervisionSpec withClassMethod:` child whose
@@ -528,14 +529,10 @@ do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Select
             %% the supervisor's restart mechanism exactly like it would for
             %% plain `self spawn`/`self spawnWith:` (see
             %% `beamtalk_actor:safe_spawn/2`'s doc). That function marks the
-            %% context via `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY`; only unlink
-            %% when it is absent.
-            case beamtalk_actor:'spawnAs'(Name, Module, InitArgs) of
+            %% context via `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY`;
+            %% `spawn_named_for_caller/4` stays linked only when it is set.
+            case beamtalk_actor:spawn_named_for_caller(local, Name, Module, InitArgs) of
                 {ok, Pid} ->
-                    case get(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY) of
-                        true -> ok;
-                        _ -> unlink(Pid)
-                    end,
                     beamtalk_result:from_tagged_tuple(
                         {ok, #beamtalk_object{
                             class = ClassName,

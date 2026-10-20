@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3992 fixture: a `withName:` child whose first continuation calls this
+// supervisor. See stdlib/test/actor_continue_with_test.bt.
+
+Supervisor subclass: Bt3992NamedCallerSup
+
+  childSpecs =>
+    #((Bt3992ParentCaller supervisionSpec withName: #bt3992_named_caller withArgs: #{
+      #parent => self
+    }))

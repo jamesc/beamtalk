@@ -62,7 +62,8 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
         <'false'> when 'true' ->
             let _TelPid = call 'erlang':'self'() in
             let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'Shape'}~) in
-            {'ok', FinalState}
+            let AckState = call 'beamtalk_actor':'take_init_ack'(FinalState, 'initialized') in
+            {'ok', AckState}
     end
 
 

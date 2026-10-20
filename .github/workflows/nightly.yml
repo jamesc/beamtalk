@@ -71,7 +71,9 @@ jobs:
     needs: check-activity
     if: needs.check-activity.outputs.has_commits == 'true'
     runs-on: macos-latest
-    timeout-minutes: 45
+    # Full test suite + dist build. Observed ~52-55min (tests alone reach
+    # ~40min since the bench smoke step, BT-3886); 75 leaves ~20min headroom.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -160,9 +162,9 @@ jobs:
     if: needs.check-activity.outputs.has_commits == 'true'
     # Pin to 2022: erlef/setup-beam@v1 doesn't support windows-2025 yet
     runs-on: windows-2022
-    # Observed runtime is consistently 42-45min against a full suite run,
-    # leaving no margin under a 45min budget — bumped to give headroom.
-    timeout-minutes: 60
+    # Full test suite + release build. Observed ~56min since the bench
+    # smoke step (BT-3886); 80 leaves ~25min headroom.
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -251,9 +253,9 @@ jobs:
     needs: check-activity
     if: needs.check-activity.outputs.has_commits == 'true'
     runs-on: macos-15-intel
-    # Observed runtime is consistently 28-33min (dist build + smoke test on
-    # the slower Intel runner) against a 30min budget — bumped to give margin.
-    timeout-minutes: 45
+    # Dist build + smoke test on the slower Intel runner. Observed 36-46min;
+    # 65 leaves ~20-30min headroom.
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -314,7 +316,8 @@ jobs:
     needs: check-activity
     if: needs.check-activity.outputs.has_commits == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Dist build + smoke test. Observed ~17min; 35 leaves ~18min headroom.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
