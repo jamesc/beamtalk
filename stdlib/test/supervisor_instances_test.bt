@@ -51,6 +51,18 @@ TestCase subclass: SupervisorInstancesTest
     e := [Bt3962BadSpec spawn] on: Error do: [:ex | ex]
     self assert: e kind equals: #supervisor_start_failed
 
+  // BT-3994: a raising `initialize` stops the instance. The `Result` forms
+  // answer `Result error:` (`#supervisor_start_failed`, as `Actor spawnAs:`
+  // answers a failed initialize); `spawn` re-raises the original error.
+  testRaisingInitializeIsAResultErrorForResultForms =>
+    self assert: Bt3994FailingInitSup supervise error kind equals: #supervisor_start_failed
+    self assert: Bt3994FailingInitSup current equals: nil
+    named := Bt3994FailingInitSup spawnAs: #bt3994_failing_init
+    self assert: named error kind equals: #supervisor_start_failed
+    self assert: (Bt3994FailingInitSup named: #bt3994_failing_init) error kind equals: #name_not_registered
+    msg := [Bt3994FailingInitSup spawn] on: Exception do: [:ex | ex message]
+    self assert: msg equals: "bt3994 initialize failed"
+
   testSpawnOnAbstractSupervisorRaises =>
     // A dynamic send: the compiler already rejects a literal one.
     cls := Supervisor

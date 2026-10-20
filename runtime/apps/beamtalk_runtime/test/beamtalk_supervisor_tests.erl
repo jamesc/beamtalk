@@ -1145,6 +1145,7 @@ ensure_root_table_idempotent_test() ->
 %% the fixture as its module, answering the instance methods in `Config`.
 with_bt3963_class(ClassName, Config, Fun) ->
     beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_supervisor_test_helper:ensure_lock_table(),
     beamtalk_class_metadata:new(),
     ok = beamtalk_bt3963_sup_fixture:configure(Config),
     {ok, ClassPid} = beamtalk_object_class:start_link(ClassName, #{
@@ -2228,6 +2229,106 @@ spawn_start_failure_raises_supervisor_start_failed_test() ->
             beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, [])
         )
     end).
+
+%% BT-3994: a raising `initialize` stops the instance; the `Result` forms
+%% (`supervise`, `spawnAs:`, `spawnWith:as:`) answer `Result error:`
+%% `#supervisor_start_failed` carrying the error (as `Actor spawnAs:` does),
+%% while `spawn` re-raises it.
+initialize_raise_answers_result_error_for_result_forms_test() ->
+    Name = bt3994_init_raise_sup,
+    Config = bt3963_static_config(#{
+        initialize => fun(_Self) ->
+            beamtalk_error:raise(beamtalk_error:new(bt3994_init_failed, 'BT3963Sup'))
+        end
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        ResultError = fun(Selector, Args) ->
+            R = beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, Selector, Args),
+            ?assertMatch(#{isOk := false, errReason := #{error := #beamtalk_error{}}}, R),
+            #{errReason := #{error := E}} = R,
+            E
+        end,
+        lists:foreach(
+            fun({Selector, Args}) ->
+                E = ResultError(Selector, Args),
+                ?assertMatch(
+                    #beamtalk_error{
+                        kind = supervisor_start_failed,
+                        class = 'BT3963Sup',
+                        selector = Selector,
+                        details = #{cause := #beamtalk_error{kind = bt3994_init_failed}}
+                    },
+                    E
+                )
+            end,
+            [{supervise, []}, {'spawnAs:', [Name]}, {'spawnWith:as:', [#{n => 1}, Name]}]
+        ),
+        %% Each failed instance was stopped: no registration is left behind.
+        ?assertEqual(undefined, whereis(?BT3963_MOD)),
+        ?assertEqual(undefined, whereis(Name)),
+        ?assertError(
+            #{error := #beamtalk_error{kind = bt3994_init_failed}},
+            beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, [])
+        )
+    end).
+
+%% BT-3994: `supervise` serialises racing starts with a node-local FIFO lock
+%% and a bounded wait. A caller stuck behind a start that does not finish gets
+%% `#supervisor_start_failed` after `init_wait_timeout_ms`, instead of waiting
+%% for good; once the start finishes, the next caller is served at once.
+supervise_waiter_behind_hung_start_gets_bounded_error_test() ->
+    Test = self(),
+    Config = bt3963_static_config(#{
+        childSpecs => fun(_) ->
+            Test ! {in_start, self()},
+            receive
+                go -> []
+            after 10000 -> []
+            end
+        end
+    }),
+    application:set_env(beamtalk_runtime, init_wait_timeout_ms, 300),
+    try
+        with_bt3963_class('BT3963Sup', Config, fun() ->
+            spawn(fun() ->
+                Test ! {first, beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)}
+            end),
+            SupPid =
+                receive
+                    {in_start, P} -> P
+                after 5000 -> error(not_started)
+                end,
+            try
+                T0 = erlang:monotonic_time(millisecond),
+                ?assertMatch(
+                    {error, #beamtalk_error{
+                        kind = supervisor_start_failed, class = 'BT3963Sup', selector = supervise
+                    }},
+                    beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)
+                ),
+                Waited = erlang:monotonic_time(millisecond) - T0,
+                ?assert(Waited >= 300),
+                ?assert(Waited < 3000),
+                %% The hung start is still the only one in progress.
+                ?assertEqual(SupPid, whereis(?BT3963_MOD)),
+                SupPid ! go,
+                receive
+                    {first, First} ->
+                        ?assertEqual({ok, bt3963_sup('BT3963Sup', SupPid)}, First)
+                after 5000 -> error(first_caller_timeout)
+                end,
+                %% No lock left held: the next caller answers immediately.
+                ?assertEqual(
+                    {ok, bt3963_sup('BT3963Sup', SupPid)},
+                    beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)
+                )
+            after
+                catch gen_server:stop(SupPid)
+            end
+        end)
+    after
+        application:unset_env(beamtalk_runtime, init_wait_timeout_ms)
+    end.
 
 spawn_as_registers_and_named_finds_it_test() ->
     Name = bt3962_named_sup,
@@ -3955,6 +4056,7 @@ concurrent_supervise(HookOutcome) ->
     Tab = beamtalk_supervisor_test_helper_tab,
     SupName = bt3759_named_sup,
     beamtalk_supervisor_test_helper:reset(),
+    beamtalk_supervisor_test_helper:ensure_lock_table(),
     beamtalk_supervisor_test_helper:set_mode(named, SupName),
     ets:insert(Tab, {coordinator, self()}),
     ClassInfo = #{
@@ -4012,12 +4114,22 @@ concurrent_supervise(HookOutcome) ->
             end,
         case HookOutcome of
             fail ->
-                ?assertMatch({raised, _, _}, First),
+                %% BT-3994: `supervise` answers a failed initialize in its
+                %% `Result` (both callers), instead of raising.
+                {returned, FirstResult} = First,
+                ?assertMatch(
+                    #{
+                        isOk := false,
+                        errReason := #{error := #beamtalk_error{kind = supervisor_start_failed}}
+                    },
+                    FirstResult
+                ),
                 receive
                     {'DOWN', SupRef, process, SupPid, _} -> ok
                 after 2000 -> error(supervisor_not_stopped)
                 end,
-                {raised, _, SecondReason} = Second,
+                {returned, SecondResult} = Second,
+                #{isOk := false, errReason := SecondReason} = SecondResult,
                 ?assertMatch(
                     #beamtalk_error{kind = supervisor_start_failed},
                     unwrap_raised(SecondReason)

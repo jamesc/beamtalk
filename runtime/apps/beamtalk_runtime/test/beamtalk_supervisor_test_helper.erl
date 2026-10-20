@@ -19,6 +19,8 @@ Used only by beamtalk_supervisor_tests.erl.
 %% BT-3759: the instance-side `initialize` hook
 %% (ADR 0135 §1) for the concurrent-supervise tests.
 -export([dispatch/4, has_method/1, has_method_local/1]).
+%% BT-3994: a long-lived owner for the `supervise` start-lock table.
+-export([ensure_lock_table/0]).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -define(TAB, beamtalk_supervisor_test_helper_tab).
@@ -114,6 +116,32 @@ initialize_hook() ->
 %%====================================================================
 %% Internal
 %%====================================================================
+
+-doc """
+Make sure `beamtalk_fifo_lock`'s table exists and is owned by a process that
+outlives the test (BT-3994). Without the runtime app nothing creates it at
+start, so the first `with_lock/3` caller would own it and take it down when it
+exits, under any caller still waiting.
+""".
+-spec ensure_lock_table() -> ok.
+ensure_lock_table() ->
+    case ets:whereis(beamtalk_fifo_locks) of
+        undefined ->
+            Parent = self(),
+            Owner = spawn(fun() ->
+                beamtalk_fifo_lock:ensure_table(),
+                Parent ! {lock_table_ready, self()},
+                receive
+                    stop -> ok
+                end
+            end),
+            receive
+                {lock_table_ready, Owner} -> ok
+            after 5000 -> error(lock_table_not_created)
+            end;
+        _ ->
+            ok
+    end.
 
 ensure_table() ->
     case ets:info(?TAB, id) of

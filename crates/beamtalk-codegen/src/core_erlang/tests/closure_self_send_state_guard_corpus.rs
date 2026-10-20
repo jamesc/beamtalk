@@ -10,6 +10,9 @@
 //! inside a closure: none missing (a silent drop), none extra (a spurious
 //! raise on a send that threads State normally).
 //!
+//! `super` sends (BT-3985) are checked the same way by
+//! `every_super_send_in_a_closure_is_guarded_and_no_other_is`.
+//!
 //! The behavioural side (state-changing sends raise, read-only ones answer) is
 //! `stdlib/test/closure_self_send_matrix_test.bt`.
 
@@ -22,6 +25,8 @@ const KINDS: &[(&str, &str)] = &[
     ("unary", "self peek"),
     ("keyword", "self peek: x"),
     ("keyword2", "self peek: x with: 1"),
+    // BT-3985: a binary selector sent to `self` is a self-dispatch too.
+    ("binary", "self + x"),
 ];
 
 /// Hosts that make the block a real closure: (label, template with `{B}`).
@@ -53,6 +58,7 @@ fn actor(header: &str, body: &str) -> String {
   peek => self.total
   peek: x => self.total + x
   peek: x with: y => self.total + x + y
+  + x => self.total + x
   run => {body}
 "
     )
@@ -104,7 +110,67 @@ fn every_self_send_in_a_closure_is_guarded_and_no_other_is() {
             }
         }
     }
-    assert_eq!(checked, 2 * 3 * 9);
+    assert_eq!(checked, 2 * 4 * 9);
+}
+
+/// `super` send kinds: (label, expression using `x`).
+const SUPER_KINDS: &[(&str, &str)] = &[
+    ("unary", "super peek"),
+    ("keyword", "super peek: x"),
+    ("binary", "super + x"),
+];
+
+fn super_actor(header: &str, body: &str) -> String {
+    format!(
+        "Actor subclass: Base
+  state: total = 0
+  peek => self.total
+  peek: x => self.total := self.total + x
+  + x => self.total := self.total + x
+
+{header} P
+  state: items = #(1, 2)
+  each: blk => self.items collect: blk
+  run => {body}
+"
+    )
+}
+
+#[test]
+fn every_super_send_in_a_closure_is_guarded_and_no_other_is() {
+    // The instance `super` path (`beamtalk_dispatch:super/5`) dispatches
+    // against the current State like a self-send, so inside a Tier 1 closure
+    // it carries the same guard. A method-level `super` send threads State
+    // (no guard); a `super` in a Value or class method has no State at all.
+    let mut checked = 0;
+    for header in ["Base subclass:", "sealed Base subclass:"] {
+        let baseline = guards(&super_actor(header, "1"));
+        let per_send = guards(&super_actor(header, "self each: [:x | super peek: x]")) - baseline;
+        assert!(
+            per_send >= 1,
+            "{header}: a closure super-send must be guarded"
+        );
+        for (kind, expr) in SUPER_KINDS {
+            for (host, template) in CLOSURE_HOSTS {
+                let body = template.replace("{B}", expr);
+                let n = guards(&super_actor(header, &body)) - baseline;
+                assert_eq!(
+                    n,
+                    sends(template) * per_send,
+                    "{header} {kind} in {host}: one guard per super-send inside a closure\n{body}"
+                );
+                checked += 1;
+            }
+            let body = expr.to_string();
+            let n = guards(&super_actor(header, &body)) - baseline;
+            assert_eq!(
+                n, 0,
+                "{header} {kind}: a method-level super-send threads State, no guard\n{body}"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 2 * 3 * 7);
 }
 
 #[test]
@@ -128,25 +194,36 @@ fn value_types_and_class_methods_have_no_guard() {
         guards(class_side),
         guards("Actor subclass: C\n  state: total = 0\n")
     );
+    // The same holds for a class-side `super` send in a closure: the class
+    // method's own `context` is still `Actor`, but it has no instance `State`
+    // (class-side `super` itself is unsupported on a BEAM today: BT-4001).
+    let class_super = "Actor subclass: C
+  state: more = 0
+  class run => #(1, 2) collect: [:x | super peek: x]
+";
+    assert_eq!(
+        guards(class_super),
+        guards("Actor subclass: C\n  state: more = 0\n")
+    );
 }
 
 #[test]
 fn a_tier2_closure_carries_state_back_so_its_self_sends_are_not_guarded() {
-    // `fwd:`'s block parameter is a promoted Tier 2 position (`promote` passes
-    // it a field-writing block), so the block `sums` passes is a Tier 2 `fun`
-    // (`StateAcc` in, `{Result, StateAccN}` out): the self-send's new `State` is
-    // returned to the caller, so the guard (which exists for closures that
-    // cannot hand it back) must not fire. A consumer that cannot take the state
-    // back raises `stateful_block_dispatch` itself.
+    // A block stored in a local that writes a captured local is a Tier 2 `fun`
+    // (`StateAcc` in, `{Result, StateAccN}` out): the self-send's new `State`
+    // is returned to the caller, so the guard (which exists for closures that
+    // cannot hand it back) must not fire. (BT-3986: the host was a block an
+    // actor self-send promoted; passing a writing block to a self-send is now
+    // a compile error, so the stored-local host is used.)
     let tier2 = |body: &str| {
         format!(
             "Actor subclass: P
-  state: groups = #(#(1, 2), #(3))
   state: hits = 0
-  sealed fwd: block => self.groups collect: block
   peek: x => self.hits + x
-  promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
-  sums => self fwd: [:xs | {body}]
+  sums =>
+    c := 0
+    blk := [:xs | c := c + 1. {body}]
+    blk value: #(1, 2)
 "
         )
     };

@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3985: a binary selector sent to `self` is a real self-send. An actor
+// threads the callee's State (a field write is kept), a class method calls the
+// class-side method directly, a value type answers the new value.
+
+TestCase subclass: BinarySelfSendTest
+
+  testActorAndClassSideBinarySelfSendsAnswerRight =>
+    self assert: BinarySelfSendHost run equals: 104
+    self assert: BinarySelfSendHost runIn equals: #(101, 102)
+    self assert: BinarySelfSendHost spawn run equals: 5
+
+  testValueTypeBinarySelfSendAnswers =>
+    self assert: BinarySelfSendValue new run equals: 6
+    self assert: BinarySelfSendValue new runIn equals: #(2, 3)

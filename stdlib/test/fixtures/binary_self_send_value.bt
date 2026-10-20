@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3985: a binary selector sent to `self` in a value type; see
+// binary_self_send_test.bt.
+
+Value subclass: BinarySelfSendValue
+  field: n = 1
+
+  + x => BinarySelfSendValue new: #{#n => self.n + x}
+
+  run => (self + 5) n
+
+  runIn => #(1, 2) collect: [:x | (self + x) n]

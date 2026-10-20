@@ -392,12 +392,30 @@ new value to that cleanup: the `^` is a throw, and the cleanup runs from the
 body's writes. The same holds for the statement form `t := t + 1. ^t`
 (measured on a BEAM in class, value-type and actor methods: the cleanup
 reads the old `t`, silently). So a `^` out of the protected block of an
-`ensure:` (at any depth) whose cleanup reads a local that block writes stays a
+`ensure:` (written in that block or in a block literal nested in it) whose
+cleanup reads a local, bound outside the `ensure:`, that block writes stays a
 compile error (`UnmigratedLocalThreading`, BT-3947 lowers it), reported by
 the one recognizer in `validators/local_threading.rs`
 (`report_nlr_out_of_ensure`) with the hint to keep the `^` out of the protected
 block; `dead_returned_assignment` asks the compiler and stays silent inside
-that error's span. An `on:do:`
+that error's span. The throw can also come from a block value created elsewhere
+(BT-3993; measured stale in a class, a value type and an actor): the protected
+block is treated as possibly holding a `^` when it sends a `value`-family
+message to anything but a block literal (a local, parameter, field, call result
+or collection element), or when a local that is not a constant, a parameter or a
+field (parentheses unwrapped, cascades included) is the receiver or an argument
+of any non-binary send (`b on: Error do: [...]`, `b ensure: [...]`,
+`b whileFalse`, `h run`, `self run: b`). A cleanup read counts only for a local
+bound outside the `ensure:`, the parameters of enclosing blocks included. The
+static view cannot tell which value is a block, so the rule is fully
+conservative: it over-rejects (for example `assoc value`, `conn close`, or an
+ordinary argument) rather than read a stale local silently. Binary operands and
+literal or constant arguments do not count. Two routes stay open (residuals
+for BT-3950): a call result or collection element passed as an argument or sent
+a non-`value` message (`CvA ap: (bs at: 1)`, `(holder blk) run`), and a self-send whose method evaluates a stored `^` block, as in
+`[t := 1. self run] ensure: [t printString]` with `run => self.blk value`. The
+protected block holds no block value and no `^`, and rejecting every self-send
+would be too broad, so the rule does not see it. An `on:do:`
 protected body has no such position: a `^` passes through its catch untouched,
 no handler runs, and nothing reads `t` afterwards. Everywhere else the write is
 dead, and the `beamtalk-lint` rule `dead_returned_assignment` warns and

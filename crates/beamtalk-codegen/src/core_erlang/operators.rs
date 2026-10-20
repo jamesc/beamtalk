@@ -65,6 +65,46 @@ impl OperatorGuard {
     }
 }
 
+/// How the compiler lowers a binary selector structurally, i.e. without
+/// dispatching it as a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum StructuralBinary {
+    /// `>>`: method lookup (`generate_message_send`).
+    MethodLookup,
+    /// `**`: `math:pow` (`generate_power_op`).
+    Power,
+    /// `++`: list/string concatenation (`generate_concat_op`).
+    Concat,
+    /// Remainder and the equality/identity operators (ADR 0002): a bare Erlang BIF.
+    Bif(&'static str),
+}
+
+/// The one table of structurally lowered binary selectors. Both lowering sites
+/// (`generate_message_send` for `>>`, `generate_binary_op` for the rest) and
+/// [`is_structurally_lowered_binary`] key off it.
+pub(in crate::core_erlang) fn structural_binary(op: &str) -> Option<StructuralBinary> {
+    match op {
+        ">>" => Some(StructuralBinary::MethodLookup),
+        "**" => Some(StructuralBinary::Power),
+        "++" => Some(StructuralBinary::Concat),
+        "%" => Some(StructuralBinary::Bif("rem")),
+        "==" => Some(StructuralBinary::Bif("==")),
+        "=:=" => Some(StructuralBinary::Bif("=:=")), // Strict equality (ADR 0002)
+        "/=" => Some(StructuralBinary::Bif("/=")),   // Loose inequality (ADR 0002)
+        "=/=" => Some(StructuralBinary::Bif("=/=")), // Strict inequality (ADR 0002)
+        _ => None,
+    }
+}
+
+/// Whether the binary selector `op` is lowered structurally by the compiler
+/// ([`structural_binary`]) rather than dispatched as a message. Every other
+/// binary selector (arithmetic, comparison, user-defined) dispatches.
+/// BT-3985: the one predicate behind `binary_self_send_dispatches` (a binary
+/// selector sent to `self`).
+pub(in crate::core_erlang) fn is_structurally_lowered_binary(op: &str) -> bool {
+    structural_binary(op).is_some()
+}
+
 impl CoreErlangGenerator {
     /// Generates code for binary operators.
     ///
@@ -94,30 +134,36 @@ impl CoreErlangGenerator {
             ));
         }
 
-        // Special case: ** uses math:pow (no direct Erlang operator)
-        if op == "**" {
-            return self.generate_power_op(left, &arguments[0]);
+        // The structurally lowered operators (`structural_binary`, the one table).
+        let structural = structural_binary(op);
+        match structural {
+            // `**` uses math:pow (no direct Erlang operator)
+            Some(StructuralBinary::Power) => {
+                return self.generate_power_op(left, &arguments[0]);
+            }
+            // `++` works on both lists and strings
+            Some(StructuralBinary::Concat) => {
+                return self.generate_concat_op(left, &arguments[0]);
+            }
+            // `>>` is lowered by `generate_message_send` before it gets here.
+            Some(StructuralBinary::MethodLookup) => {
+                return Err(CodeGenError::Internal(
+                    "`>>` is lowered by generate_message_send, not generate_binary_op".to_string(),
+                ));
+            }
+            Some(StructuralBinary::Bif(_)) | None => {}
         }
 
-        // Special case: ++ works on both lists and strings
-        if op == "++" {
-            return self.generate_concat_op(left, &arguments[0]);
-        }
-
-        let erlang_op = match op {
-            "+" => "+",
-            "-" => "-",
-            "*" => "*",
-            "/" => "/",
-            "%" => "rem",
-            "==" => "==",
-            "=:=" => "=:=", // Strict equality (ADR 0002)
-            "/=" => "/=",   // Loose inequality (ADR 0002)
-            "=/=" => "=/=", // Strict inequality (ADR 0002)
-            "<" => "<",
-            ">" => ">",
-            "<=" => "=<",
-            ">=" => ">=",
+        let erlang_op = match (structural, op) {
+            (Some(StructuralBinary::Bif(bif)), _) => bif,
+            (_, "+") => "+",
+            (_, "-") => "-",
+            (_, "*") => "*",
+            (_, "/") => "/",
+            (_, "<") => "<",
+            (_, ">") => ">",
+            (_, "<=") => "=<",
+            (_, ">=") => ">=",
             _ => {
                 let right = &arguments[0];
                 return Err(CodeGenError::UnsupportedFeature {

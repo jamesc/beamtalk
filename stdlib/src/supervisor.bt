@@ -108,14 +108,18 @@ abstract Object subclass: Supervisor
   /// `MySupervisor`, not the abstract `Supervisor` base). Use `unwrap` for
   /// boot-style "crash on failure" call sites, or `ifOk:ifError:` /
   /// `andThen:` for recoverable starts. Failures surface as
-  /// `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
+  /// `Result error: #beamtalk_error{kind = supervisor_start_failed}`,
+  /// including an `initialize` that raises and a call that waited too long
+  /// behind a concurrent `supervise` of the same class (concurrent calls are
+  /// served in arrival order).
   class sealed supervise -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) startLink: self
 
   /// Start a new, anonymous instance of this supervisor with `nil` args.
   ///
   /// Each call starts a separate tree. Raises `#supervisor_start_failed`
-  /// when the start fails. Not `current`: look an anonymous instance up by
+  /// when the start fails; an error raised by `initialize` propagates as
+  /// is. Not `current`: look an anonymous instance up by
   /// the handle you hold, or `Node current supervisors`.
   ///
   /// ## Examples
@@ -145,7 +149,9 @@ abstract Object subclass: Supervisor
   ///
   /// `name` must come from a bounded, statically known set (ADR 0079): it is
   /// an atom. A taken name gives `Result error:` with kind
-  /// `#name_registered`; any other failure `#supervisor_start_failed`.
+  /// `#name_registered`; any other failure, including an `initialize` that
+  /// raises, `#supervisor_start_failed` (as `Actor spawnAs:` answers a
+  /// failed `initialize` in its `Result`).
   class sealed spawnAs: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) doSpawnAs: self withName: name
 
@@ -227,7 +233,9 @@ abstract Object subclass: Supervisor
   /// Runs in the caller's process after the supervisor has finished
   /// starting, so `which:` and other messages to `self` work here (unlike
   /// in the configuration methods). If it raises, the supervisor is stopped
-  /// and the start fails.
+  /// and the start fails: `spawn` and `spawnWith:` re-raise the error,
+  /// while `supervise`, `spawnAs:` and `spawnWith:as:` answer `Result error:`
+  /// with kind `#supervisor_start_failed` (the original error is its cause).
   ///
   /// Fires exactly once per top-level start — the `supervise` call that
   /// started the instance, or each `spawn`/`spawnWith:`/`spawnAs:` — not for

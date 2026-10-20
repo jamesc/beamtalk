@@ -166,21 +166,6 @@ pub(super) fn local_assign_field_write(rhs: &Expression) -> Option<&Expression> 
     is_field_assignment(inner).then_some(inner)
 }
 
-/// Checks if an expression is a self-field access (`self.field`).
-///
-/// Used to scope the runtime Tier 1/Tier 2 discrimination for block value
-/// calls (`self.field value: ...`) to exactly the shape that needs it — a
-/// block stored in an instance field, whose Tier-ness can't be known
-/// statically since it may have been assigned from a different method.
-pub(super) fn is_self_field_access(expr: &Expression) -> bool {
-    if let Expression::FieldAccess { receiver, .. } = expr {
-        if let Expression::Identifier(recv_id) = receiver.as_ref() {
-            return recv_id.name == "self";
-        }
-    }
-    false
-}
-
 /// The syntactic shape `self.classVar := value` in a class method.
 fn class_var_assignment_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if !ctx.in_class_method {
@@ -297,7 +282,10 @@ pub(super) fn is_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool 
 ///
 /// Excludes self-sends with selectors that are intercepted by handlers before
 /// `try_handle_self_dispatch` in `generate_message_send`:
-/// - Binary operators (`+`, `-`, `*`, etc.)
+/// - Structurally lowered binary operators (`>>`, `**`, `++`, `%`, `==`, `=:=`,
+///   `/=`, `=/=`); every other binary selector sent to `self` (`+`, `-`, `<`,
+///   user-defined ones) IS a dispatching self-send (BT-3985,
+///   [`binary_self_send_dispatches`])
 /// - `asType:` (compile-time erasure)
 /// - `ProtoObject` messages (`class`, `perform:`, `perform:withArguments:`)
 /// - Object reflection (`fieldAt:`, `fieldAt:put:`, `fieldNames`, `respondsTo:`)
@@ -310,9 +298,25 @@ pub(super) fn is_dispatching_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expressi
         return false;
     }
     if let Expression::MessageSend { selector, .. } = expr {
+        // BT-3985: a user-defined binary selector sent to `self` is a real
+        // self-dispatch (its callee may write fields), not an Erlang operator.
+        if let MessageSelector::Binary(op) = selector {
+            return binary_self_send_dispatches(op);
+        }
         return selector_dispatches_via_self(selector);
     }
     true
+}
+
+/// BT-3985: whether a binary selector sent to `self` in an actor instance
+/// method is a user-defined message dispatched through the actor's own
+/// self-dispatch (`safe_dispatch` + State bind), rather than an operator the
+/// compiler lowers structurally (`operators::is_structurally_lowered_binary`,
+/// the one list). An actor's `self` is never a number, so the
+/// arithmetic/comparison operators always dispatch. The single predicate shared
+/// by `is_dispatching_actor_self_send` and `generate_message_send`.
+pub(super) fn binary_self_send_dispatches(op: &str) -> bool {
+    !super::operators::is_structurally_lowered_binary(op)
 }
 
 /// The selector half of [`is_dispatching_actor_self_send`]'s check —
@@ -554,11 +558,6 @@ impl CoreErlangGenerator {
             return None;
         }
         local_assign_field_write(rhs)
-    }
-
-    /// See [`is_self_field_access`].
-    pub(super) fn is_self_field_access(expr: &Expression) -> bool {
-        is_self_field_access(expr)
     }
 
     /// See [`is_local_var_assignment`].
