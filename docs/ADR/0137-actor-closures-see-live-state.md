@@ -173,31 +173,80 @@ key.
 
 The reflective selectors use the same cell, so the `fieldAt:` gap that sank
 #4447 cannot exist: there is no second copy for it to miss. Phase 0 decides
-whether hot paths inline the helpers as `erlang:get/1` plus `maps:get/2` (the
-spike below says reads cost about the same either way).
+whether hot paths open-code the helpers as `erlang:get/1` plus `maps:get/2`.
+In the spike below, a local helper function and a remote helper cost the
+same.
 
 ### 3. At home and away
 
-**At home** means: the block's `Self` is the actor whose callback is running
-in this process. The test is `Self#beamtalk_object.pid =:= self()` with the
-cell present. ADR 0130 rejected pid equality for classes because a class
-process is restarted under the same identity; an actor restarted by its
-supervisor is a new process with a new pid and a fresh state, so a closure
-from the old incarnation is rightly not at home in the new one.
+**The rule, stated once.** Where a block's field access goes is decided each
+time the block **runs**, not when it was created. When it runs, the block is
+*at home* if a callback of its own actor is running in the current process,
+whichever callback that is. The test is `Self#beamtalk_object.pid =:= self()`
+with the cell present. At home, `self.x` reads and writes the live cell. Away,
+`self.x` reads the value captured when the block was created, and a write
+raises. (ADR 0130 rejected pid equality for classes, because a class process
+is restarted under the same identity. An actor restarted by its supervisor is
+a new process with a new pid and a fresh state, so a block from the old
+incarnation is rightly not at home in the new one.)
 
-- **At home, a closure reads and writes the live state.** This covers every
-  block the actor creates and runs in its own process: blocks passed to its own
-  methods, stored closures invoked later in the same callback or in a later
-  callback, blocks passed to direct-called stdlib code, sort blocks, `ensure:`
-  cleanups and `on:do:` handlers. A self-send inside such a block is a plain
-  in-process dispatch on the cell, so its writes stay.
-- **Away, a closure reads the state it captured at creation and cannot write.**
-  A block carried to another actor, a `Future`, a `Timer`, another node, or run
-  after the callback ended outside any callback of its actor, sees the field
-  values from when it was created, which is Erlang's rule for a `fun` and
-  ADR 0130 §5's rule for class variables. Creation of a block literal that
-  reads a field binds `beamtalk_actor_state:capture(Self, Outer)` (one `get`),
-  consulted only away from home. A field write away raises:
+Three cases, for one block stored in a field:
+
+```beamtalk
+Actor subclass: Probe
+  state: x = 0
+  state: saved = nil
+
+  remember =>
+    self.saved := [self.x]       // created in this callback; captures x = 0
+    self.x := 1
+    self.saved value             // (a) same callback, at home: live, answers 1
+
+  bumpThenAsk =>
+    self.x := 2
+    self.saved value             // (b) a LATER callback, at home: live, answers 2
+
+  handOff: other =>
+    other run: self.saved        // (c) runs in `other`'s process, away: answers 0,
+                                 //     the value captured when `remember` made it
+```
+
+Case (b) is the one that departs from an Erlang `fun`. An Erlang `fun`
+captures *values*, so a `fun` that closed over `State` in one callback keeps
+seeing that `State` forever. A Beamtalk block captures the *actor* (`self`)
+and, as a fallback, a snapshot of its fields. At home it reads through the
+actor, as a Pharo block reads instance variables through its receiver. That is
+intended for three reasons:
+
+- **It is the only consistent answer in the actor's own process.** Between
+  callbacks the actor has exactly one state, the `gen_server` state. A stored
+  callback (a sort block, a formatter, an `onEvent:` handler run by a later
+  message) that read a snapshot from an earlier message would show state the
+  actor no longer has. Worse, a snapshot cannot be written: a later callback
+  could not let such a block write at all, and we would be back to a list of
+  rejections.
+- **It matches ADR 0130 §5 exactly.** A stored class-side block invoked from a
+  later invocation of its class reads and writes live. Two models of mutable
+  state, one per kind of object, would be harder to teach than one.
+- **The snapshot is only a fallback.** It exists so that a block that leaves
+  the process still has something to read, which is all an Erlang `fun` could
+  offer there. It is consulted only away from home, so it never competes with
+  the cell.
+
+What follows from the rule:
+
+- **At home, a closure reads and writes the live state.** That covers blocks
+  passed to the actor's own methods, stored closures run later in the same
+  callback or in any later callback, blocks passed to direct-called stdlib
+  code, sort blocks, `ensure:` cleanups and `on:do:` handlers. A self-send
+  inside such a block is a plain in-process dispatch on the cell, so its
+  writes stay.
+- **Away, a closure reads its capture and cannot write.** Away means a block
+  carried to another actor, a `Future`, a `Timer` or another node, or run in a
+  process where none of its actor's callbacks is running. ADR 0130 §5 has the
+  same rule for class variables. Creating a block literal that reads a field
+  binds `beamtalk_actor_state:capture(Self, Outer)` (one `get`). A field write
+  away raises:
 
 ```erlang
 #beamtalk_error{kind = actor_state_unreachable, class = 'Counter', selector = 'bump',
@@ -245,6 +294,25 @@ rule as ADR 0130 §4:
   error is caught, and every catch already restores to the start of its
   protected region, which is earlier. ADR 0130 rejected per-send rollback
   (its Alternative C) for the same reason.
+
+**Per callback.** Each `gen_server` callback has its own contract for what it
+returns and what an exception does. The cell follows that contract. It never
+outlives a callback, and the only state that leaves one is the value the
+callback returns.
+
+| Callback | Runs user code? | Cell installed | Normal exit returns | Exception |
+|---|---|---|---|---|
+| `init/1` | No. It builds the field defaults; `initialize` is deferred to `handle_continue` (ADR 0078, BT-1417). | No | `{ok, State, {continue, initialize}}` as today | As today (no user code) |
+| `handle_continue(initialize, State)` | Yes, the `initialize` chain, parent first | Once, around the whole chain, so each ancestor's `initialize` sees the previous one's writes in the cell | `{noreply, take()}` after the post-initialize field check | `{stop, Reason, S}` where `S` is the state from before the failing step, as today (`safe_dispatch/3` returns each step's pre-call state). The wrapper snapshots the cell before each ancestor's step to keep that. The actor never finished initialising, so it stops; `terminate:` then sees `S`, and the supervisor decides what happens next |
+| `handle_continue` (BT-3968 continuations), `handle_call`, `handle_cast`, `handle_info` | Yes, one method | Around the dispatch | `{reply, R, take()}` or `{noreply, take()}` | The **pre-call** state, as `safe_dispatch/4` returns today. `handle_call` replies with the error; `handle_cast` and `handle_info` follow ADR 0134 (an error in a no-reply handler crashes the actor) |
+| `terminate/2` | Yes, `terminate:` if defined | Around the dispatch, newly (today `terminate/2` does not stash `'$bt_actor_state'`, so a self-send in `terminate:` does not take the Layer 1 path) | `ok`. The state is discarded by OTP after `terminate/2` anyway, so the cell is erased, not returned | Caught and ignored, as today, so shutdown is never blocked. The cell is erased in `after` |
+| `code_change/3` | No user method today; `beamtalk_hot_reload:code_change/3` migrates the map | No | `{ok, NewState}` as today | As today |
+| `format_status/1` | Not implemented | No | n/a. If added, it formats the `gen_server` state, which is complete between callbacks | n/a |
+
+The rule behind the table: **a callback returns the cell only when it exits
+normally and OTP keeps the state; on any exception it returns, or stops with,
+the state it was called with.** That is the `gen_server` contract with the
+cell inside it.
 
 The difference from #4447 is structural. #4447 needed a matching "un-publish"
 at every place that discards a state change, and the places were open-ended.
@@ -360,38 +428,78 @@ which is what the Beamtalk source says.
 
 ### Spike numbers
 
-`bt3996_bench.erl` (throwaway, not committed) compares a tail-recursive loop
-over a threaded map with the same loop over the cell, 2 million iterations,
-11 rounds, OTP 28 on an 18-core Mac. **The machine was heavily loaded** (load
-average 67 to 88 from other sessions), so treat these as order of magnitude.
-Medians in ns per iteration, with the spread across two 8-field runs and one
-40-field run:
+Two throwaway Erlang spikes (OTP 28, an 18-core Mac, not committed) compare
+today's threaded `State` with the cell. Both cell variants are measured: the
+helpers inlined as `erlang:get/1` plus `maps:get/2`, and a call to a helper in
+another module. Each figure is the median and 90th percentile over 101 batches.
 
-| Operation | Threaded `State` | Cell, inline `get` | Cell, remote helper |
-|---|---|---|---|
-| One field read | 3.4 to 3.5 | 4.5 to 5.3 | 5.5 to 6.6 |
-| `self.f := self.f + 1` | 45 to 69 | 20 to 42 | 41 to 54 |
-| Ten reads and three writes (ADR 0130's gate-3 body) | 21 to 75 | 104 to 278 | 119 to 318 |
-| `on:do:` around one write, no raise | 45 to 89 | 20 to 41 (snapshot) | |
-| Per-callback install/try/after vs plain reply | 5 to 11 | 30 to 37 | |
-| Reference: one `gen_server:call` round trip | | | 695 to 727 |
+**How much to trust them.** The machine is shared with other agent sessions.
+The first run (`bt3996_bench.erl`) ran at load average 67 to 88 on 18 cores
+and is not reported here. The re-run (`bt3996_bench2.erl`, 2026-10-20) started
+at load average 10 to 18, roughly the core count, with one-minute load
+falling. Three runs used `erl +S 1` (one scheduler, to cut cross-core noise);
+one used all 18 schedulers. The ratios repeat across runs to within about
+±0.3x. The absolute nanoseconds swing by up to 1.7x between runs, and one
+`+S 1` run's single-body round trip had an outlying p90. Use these numbers to
+pick a direction and set gates. They are not a substitute for the Phase 0
+measurement on an idle machine.
 
-Reading this honestly:
+*In process: one method body of ten field reads and three writes,
+ns per body.*
 
-- A read costs one to two nanoseconds more.
-- A single write in a loop is no slower. Both forms allocate a new map per
-  write, and that dominates.
-- A field-heavy straight-line body is **2 to 5 times slower**, because the
-  threaded form keeps the map in a register and the cell form goes to the
-  process dictionary for every access. This is the same shape ADR 0130
-  measured for class variables (5 to 7 times per write in isolation, 1.6 to
-  1.75 times end to end, inside its 2x gate).
-- The per-callback cost is already paid. Every callback installs and restores
-  `'$bt_actor_state'` today; the only addition is one `get` at exit.
-- Some costs go away: the `{reply, R, NewState}` tuple and its `case` on every
-  self-send, the BT-3936 guard's `=:=` (and second `strip_local_temps/1`
-  compare when it fails), `strip_local_temps/1` at every callback exit, the
-  `__local__` keys in the actor map, and `on:do:`'s state threading.
+| Run | Threaded `State` | Cell, inline | Cell, helper | Ratio |
+|---|---|---|---|---|
+| `+S 1` #1 | 37 (p90 82) | 141 (p90 156) | 140 (p90 167) | 3.8x |
+| `+S 1` #2 | 34 (p90 37) | 140 (p90 167) | 139 (p90 156) | 4.1x |
+| `+S 1` #3 | 30 (p90 32) | 200 (p90 226) | 204 (p90 222) | 6.7x |
+| 18 schedulers | 25 (p90 27) | 97 (p90 105) | 96 (p90 105) | 3.8x |
+
+*End to end: one `gen_server:call` round trip whose callback stashes the state
+(as every callback already does) and runs the method body `Reps` times. ns per
+call.*
+
+| Run | `Reps` | Threaded | Cell, inline | Cell, helper | Ratio (inline / helper) |
+|---|---|---|---|---|---|
+| `+S 1` #1 | 1 | 1,941 | 1,985 | 2,011 | 1.02x / 1.04x |
+| `+S 1` #2 | 1 | 1,876 | 1,919 | 1,926 | 1.02x / 1.03x |
+| `+S 1` #3 | 1 | 3,355 | 3,629 (p90 11,953) | 2,365 | 1.08x / 0.71x (noise) |
+| 18 schedulers | 1 | 688 | 727 | 744 | 1.06x / 1.08x |
+| `+S 1` #1 | 10 | 2,285 | 2,909 | 3,259 | 1.27x / 1.43x |
+| `+S 1` #2 | 10 | 2,125 | 3,103 | 3,027 | 1.46x / 1.42x |
+| `+S 1` #3 | 10 | 2,264 | 2,784 | 2,867 | 1.23x / 1.27x |
+| 18 schedulers | 10 | 891 | 1,677 | 1,635 | 1.88x / 1.83x |
+
+`Reps = 1` is a realistic field-heavy method: ten reads and three writes.
+`Reps = 10` is a method that loops over fields: 130 accesses in one call.
+
+What the numbers say:
+
+- **Per access, the cell costs about 6 to 13 ns more than the threaded map.**
+  The threaded form keeps the map in a register, so ten reads and three writes
+  take 25 to 37 ns in total; through the cell they take 96 to 204 ns. In
+  isolation, a field-heavy body is about **4x slower** (3.8x to 6.7x). ADR 0130
+  measured the same shape for class variables (5 to 7x per write in isolation).
+- **Inlining does not help as written.** The inline and helper variants are
+  within noise of each other, because a local Erlang function is still a call.
+  Phase 0 should measure truly open-coded `get`/`put` in the generated Core
+  Erlang before relying on inlining as a fallback.
+- **End to end, a realistic method costs 2% to 8% more.** One `gen_server:call`
+  round trip is 0.7 µs (18 schedulers) to 1.9 µs (`+S 1`), and that dominates.
+- **A field loop of 130 accesses costs 1.23x to 1.88x end to end**, under the
+  2x gate but close to it with all schedulers on. Gate 1 (below) is likely to
+  pass for the gate's ten-reads-three-writes loop. A method that does nothing
+  but hammer fields in a tight loop could exceed 2x.
+- **The per-callback cost is already paid.** Every callback installs and
+  restores `'$bt_actor_state'` today, and the spike's threaded server pays
+  that too. The only new cost per callback is one `get` at exit.
+- **Some costs go away and are not credited above.** These are the
+  `{reply, R, NewState}` tuple and its `case` on every self-send, the BT-3936
+  guard's `=:=` (and its second `strip_local_temps/1` compare when the first
+  fails), `strip_local_temps/1` at every callback exit, the `__local__` keys in
+  the actor map, and `on:do:`'s state threading. In the first spike an
+  `on:do:` around one write was cheaper with a snapshot than with threading.
+  The spikes have no self-sends, so Phase 0 gate 2 is where self-sends get
+  measured.
 
 ### Measurement plan (Phase 0 gates)
 
@@ -406,7 +514,10 @@ rounds per side on an idle machine, medians with min and max.
 2. **Self-send.** Open and sealed actor self-sends, at top level and inside a
    `do:` arm: no regression beyond noise. Expected to improve.
 3. **Round trip.** A `gen_server:call` to a method with one write:
-   `median_after <= 1.05 * median_today`.
+   `median_after <= 1.05 * median_today`. The spike measured 1.02x to 1.08x
+   for a method of ten reads and three writes, so a method with one write
+   should pass, but only narrowly. Measure it with enough rounds to resolve
+   5%.
 4. **Block creation.** A loop that creates a field-reading block per iteration
    (the capture `get`): recorded, not gated.
 
@@ -517,8 +628,9 @@ Core Erlang for an actor method gets shorter: no `StateN` chain, no
 its `{reply, R, NewState}` shape through an adapter in the runtime (Phase 1).
 
 **Production operator.** Mid-callback, the process dictionary shows the live
-state rather than a stale copy. A field-heavy actor method may run up to 2x
-slower in its body, gated in Phase 0; a self-send gets cheaper. Upgrading
+state rather than a stale copy. A typical method's call costs a few percent
+more; a call that loops over fields can take up to about 2x as long, gated in
+Phase 0. A self-send gets cheaper. Upgrading
 across the release that changes the calling convention needs a node restart,
 as ADR 0130's did.
 
@@ -594,8 +706,9 @@ forms is a reconciliation site.
 - BEAM veterans weigh the process dictionary heavily; operators and
   newcomers weigh "no silent wrong answers, fewer errors". The OTP-fit table
   above is the answer to the first group: the `gen_server` contract is intact.
-- Performance-minded users will see a 2 to 5x slowdown on field-heavy
-  straight-line bodies in isolation. The Phase 0 gate bounds it end to end.
+- Performance-minded users will see field-heavy method bodies run about 4x
+  slower in isolation. End to end that is 2% to 8% for a typical method and
+  up to about 1.9x for a tight field loop; the Phase 0 gate bounds it.
 - Language designers who count mechanisms prefer D; those who count
   process-dictionary keys prefer A. ADR 0130 already chose D's side for class
   variables, and two models of mutable state would be harder to teach than one.
@@ -642,8 +755,10 @@ that loses writes silently today. A real cast is what `!` means.
   keep in step.
 
 ### Negative
-- Field-heavy straight-line method bodies get slower, 2 to 5x in isolation on
-  a loaded machine; gated at 2x end to end.
+- Field-heavy method bodies get slower: about 4x in isolation (3.8x to
+  6.7x), 2% to 8% end to end for a method of ten reads and three writes, and
+  1.2x to 1.9x for a call that makes 130 field accesses. Gated at 2x end to
+  end.
 - A calling-convention change across every compiled actor. Modules compiled
   before it are refused at load with `abi_mismatch`; crossing the release
   needs a node restart (ADR 0125).
