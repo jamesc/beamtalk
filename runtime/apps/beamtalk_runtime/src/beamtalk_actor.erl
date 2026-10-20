@@ -176,6 +176,9 @@ handle_call(Msg, From, State) ->
 handle_info(Msg, State) ->
     beamtalk_actor:handle_info(Msg, State).
 
+handle_continue(Continue, State) ->
+    beamtalk_actor:handle_continue(Continue, State).
+
 code_change(OldVsn, State, Extra) ->
     beamtalk_actor:code_change(OldVsn, State, Extra).
 
@@ -211,6 +214,12 @@ handle_getValue([], State) ->
 %% `{Selector, Args}`, consumed by apply_pending_actions/1 once the current
 %% gen_server callback returns — it becomes OTP's `{continue, _}` action.
 -define(PENDING_CONTINUE_KEY, '$bt_pending_continue').
+
+%% BT-3968: the part of the continuation queue that was already committed
+%% before the current `handle_continue/2` step ran (seeded by
+%% seed_pending_continuations/1). A failing step drops only the requests it
+%% made itself — discard_pending_continuations/0 restores this base.
+-define(PENDING_CONTINUE_BASE_KEY, '$bt_pending_continue_base').
 
 %% BT-3968: the `handle_continue/2` term carrying the continuation queue.
 -define(BT_CONTINUE_TAG, '$bt_continue').
@@ -276,7 +285,7 @@ handle_getValue([], State) ->
 %% never leak in from anywhere else. seed_pending_continuations/1 (from
 %% handle_continue) keeps an already-queued chain ahead of new requests, and
 %% discard_pending_continuations/0 (from the dispatch-error arms) drops the
-%% queue when the dispatch's state rolls back.
+%% continuations a failed dispatch requested.
 -export([
     clear_pending_actions/0,
     apply_pending_actions/1,
@@ -2037,6 +2046,7 @@ some unwrapped path earlier.
 clear_pending_actions() ->
     _ = erase(?PENDING_STOP_KEY),
     _ = erase(?PENDING_CONTINUE_KEY),
+    _ = erase(?PENDING_CONTINUE_BASE_KEY),
     ok.
 
 -doc """
@@ -2068,6 +2078,7 @@ when
 apply_pending_actions(Result) ->
     Stop = erase(?PENDING_STOP_KEY),
     Continuations = erase(?PENDING_CONTINUE_KEY),
+    _ = erase(?PENDING_CONTINUE_BASE_KEY),
     case {Stop, Continuations} of
         {{stop, Reason}, _} -> pending_stop_result(Result, Reason);
         {undefined, [_ | _] = RevQueue} -> add_continue(Result, lists:reverse(RevQueue));
@@ -2093,23 +2104,32 @@ add_continue(Result, _Queue) ->
 BT-3968: seed the continuation queue at the start of a `handle_continue/2`
 step with the continuations still waiting behind the one about to run, so
 any request the running continuation makes is appended *after* them (FIFO).
-Runs after clear_pending_actions/0 inside the wrapped callback.
+The seeded part is also remembered as the committed base, which survives a
+failing step (see discard_pending_continuations/0). Runs after
+clear_pending_actions/0 inside the wrapped callback.
 """.
 -spec seed_pending_continuations([{atom(), list()}]) -> ok.
 seed_pending_continuations([]) ->
     ok;
 seed_pending_continuations(Rest) when is_list(Rest) ->
-    put(?PENDING_CONTINUE_KEY, lists:reverse(Rest)),
+    RevRest = lists:reverse(Rest),
+    put(?PENDING_CONTINUE_KEY, RevRest),
+    put(?PENDING_CONTINUE_BASE_KEY, RevRest),
     ok.
 
 -doc """
-BT-3968: drop the continuation queue. Called from the dispatch-error arms:
-the dispatch's state rolls back, so follow-up steps it requested against
-that state are void. A pending stop is left alone and still honoured.
+BT-3968: drop the continuations requested by a dispatch that failed. Called
+from the dispatch-error arms: the failed method's follow-up steps are void.
+Continuations committed by an earlier, successful dispatch (the base seeded
+by seed_pending_continuations/1) are kept and still run — like casts queued
+behind a failing cast. A pending stop is left alone and still honoured.
 """.
 -spec discard_pending_continuations() -> ok.
 discard_pending_continuations() ->
-    _ = erase(?PENDING_CONTINUE_KEY),
+    case get(?PENDING_CONTINUE_BASE_KEY) of
+        undefined -> _ = erase(?PENDING_CONTINUE_KEY);
+        Base -> put(?PENDING_CONTINUE_KEY, Base)
+    end,
     ok.
 
 -doc """

@@ -754,7 +754,8 @@ Object subclass: Actor
   /// A pending `stopWith:` in the same method wins: the actor stops and no
   /// queued continuation runs. If the method fails with an error, its
   /// continuations are dropped. Continuations requested by `initialize` run
-  /// before `spawn` returns. A continuation that keeps re-requesting itself
+  /// before `spawn` returns and count against its 5-second initialization
+  /// timeout. A continuation that keeps re-requesting itself
   /// starves the mailbox, as in OTP. Sent from another process, raises
   /// `invalid_continuation`.
   ///

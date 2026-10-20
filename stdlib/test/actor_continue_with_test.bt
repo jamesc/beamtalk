@@ -107,6 +107,13 @@ TestCase subclass: ActorContinueWithTest
     self assert: server isAlive
     server stop
 
+  testFailingContinuationKeepsStepsQueuedBehindIt =>
+    server := ContinueWithServer spawn
+    self assert: server failThenContinue equals: #requested
+    self assert: server log equals: #(#continuation)
+    self assert: server counter equals: 0
+    server stop
+
   // === Stop interaction ===
   testStopThenContinueStopsWithoutRunningContinuation =>
     table := Ets new: #continueStopFirst type: #set

@@ -4438,6 +4438,29 @@ bt3968_result_with_action_conflicts_loudly_test() ->
         )
     end).
 
+bt3968_discard_keeps_continuations_committed_before_the_step_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        %% handle_continue running a step with [b] still queued; the step
+        %% requests c, then fails: only c is dropped.
+        ok = beamtalk_actor:clear_pending_actions(),
+        ok = beamtalk_actor:seed_pending_continuations([{b, []}]),
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [c]),
+        ok = beamtalk_actor:discard_pending_continuations(),
+        ?assertEqual(
+            {noreply, State, {continue, {'$bt_continue', [{b, []}]}}},
+            beamtalk_actor:apply_pending_actions({noreply, State})
+        )
+    end).
+
+bt3968_runtime_path_actor_runs_continuation_after_reply_test() ->
+    {ok, Counter} = test_counter:start_link(5),
+    %% The caller gets the pre-continuation value; the continuation has run
+    %% before the next message is handled.
+    ?assertEqual(5, beamtalk_actor:sync_send(Counter, incrementLater, [])),
+    ?assertEqual(6, beamtalk_actor:sync_send(Counter, getValue, [])),
+    gen_server:stop(Counter).
+
 bt3968_discard_drops_continuations_but_keeps_stop_test() ->
     in_dispatch(fun() ->
         State = #{value => 0},

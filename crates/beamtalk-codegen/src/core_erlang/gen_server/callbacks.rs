@@ -1284,8 +1284,9 @@ impl CoreErlangGenerator {
     }
 
     /// BT-3968: the `let` binding that drops the continuation queue in a
-    /// dispatch-error arm — the failed dispatch's state rolls back, so the
-    /// follow-up steps it requested against that state are void.
+    /// dispatch-error arm — the follow-up steps a failed dispatch requested
+    /// are void. Steps committed by an earlier dispatch (the base seeded by
+    /// `handle_continue/2`) are kept.
     fn discard_continuations_binding() -> Document<'static> {
         docvec![
             "let _ContDiscarded = call ",

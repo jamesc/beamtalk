@@ -87,6 +87,12 @@ Server subclass: ContinueWithServer
     self continueWith: #explode
     #requested
 
+  // A failing step does not drop the steps queued behind it.
+  failThenContinue =>
+    self continueWith: #explode
+    self continueWith: #afterOne
+    #requested
+
   explode =>
     self.counter := 99
     self error: "boom in continuation"

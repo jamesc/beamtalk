@@ -3458,8 +3458,8 @@ Both methods are defined on `Actor` and answer `#ok`.
 - **Sync methods:** the caller gets its reply first, then the continuation runs. Its state changes are visible to the next message.
 - **Arguments:** `continueWith:` takes a unary selector. `continueWith:withArguments:` takes a `List` whose size must match the selector's arity. A non-Symbol selector raises `type_error` at the call site, and a wrong argument count raises `arity_mismatch`. Whether the actor understands the selector is checked only when the step runs.
 - **Stop wins:** if the same message also calls `self stopWith:` (in either order), the actor stops and no queued continuation runs. A continuation that itself calls `self stopWith:` stops the actor after that step, and the rest of the queue is dropped.
-- **Errors:** if the method that requested the continuations fails with an error, they are dropped, because its state rolls back. An error inside a continuation is handled exactly like an error in a `!` cast (see ADR 0134).
-- **`initialize`:** continuations requested there run before any message, and `spawn` does not return until they have finished.
+- **Errors:** if the method that requested the continuations fails with an error, the continuations it requested are dropped. An error inside a continuation is handled exactly like an error in a `!` cast (see ADR 0134): its own requests are dropped, but steps queued behind it by earlier messages still run.
+- **`initialize`:** continuations requested there run before any message, and `spawn` does not return until they have finished. They count against `spawn`'s 5-second initialization timeout: if `initialize` plus its continuation chain takes longer, `spawn` fails with a timeout and the actor is killed. Move slow setup into a message the actor sends itself instead.
 - **Starvation:** the continue chain runs before every other message, including system messages such as supervisor shutdown. A continuation that re-requests itself forever starves the mailbox, as in OTP.
 - **Only on `self`:** `actor continueWith: #x` sent from another process (sync, async or `!`) raises `invalid_continuation` in the caller.
 
