@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135 §1): the tree start runs in the caller, not in the class
+// process, so a configuration method can send to its own class
+// (`Bt3962ClassCallSup childCount`, served by the class process) while the
+// tree is starting.
+
+Supervisor subclass: Bt3962ClassCallSup
+  classState: workers = 1
+
+  class childCount => self.workers
+
+  childSpecs =>
+    ((1 to: Bt3962ClassCallSup childCount) collect: [:i |
+      Bt3962Worker supervisionSpec withId: i
+    ]) asList

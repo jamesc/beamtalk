@@ -683,13 +683,15 @@ is_infra(_) ->
 The `default`-scope root pids: the supervision-tree roots reachable in the
 workspace.
 
-Three sources, in walk order:
+Four sources, in walk order:
   1. the OTP application root supervisor (`beamtalk_supervisor:get_root/0`),
   2. the supervisors attached to the workspace via `Workspace startSupervisor:`
      (the `{user_supervisor, _}` children of `beamtalk_workspace_sup`),
-  3. any standalone Beamtalk supervisor started via `SupClass supervise`, found
-     by scanning `erlang:registered/0` (Beamtalk supervisors register under
-     `{local, ?MODULE}`).
+  3. any standalone Beamtalk supervisor started via `SupClass supervise` (or
+     a named spawn), found by scanning `erlang:registered/0` (Beamtalk
+     supervisors register under `{local, ?MODULE}`),
+  4. every anonymous top-level instance from the spawn family (ADR 0135 §1),
+     from the `pg` group `beamtalk_supervisor:instance_pids/0` reads.
 
 Order matters: (1) and (2) are walked first, so a *nested* supervisor — which is
 both reachable as a child and registered under its module — is captured under
@@ -708,7 +710,8 @@ default_root_pids() ->
             _ ->
                 []
         end,
-    RootSup ++ workspace_user_supervisor_pids() ++ registered_beamtalk_supervisor_pids().
+    RootSup ++ workspace_user_supervisor_pids() ++ registered_beamtalk_supervisor_pids() ++
+        beamtalk_supervisor:instance_pids().
 
 %% Pids of standalone Beamtalk supervisors found in the global name registry —
 %% those started via `SupClass supervise` (registered under `{local, ?MODULE}`).
@@ -930,12 +933,14 @@ is_supervisor_kind(_) -> false.
 %%
 %% `Id` and `Type` are the `which_children` hints for a child (the child id and
 %% the OTP child type), or `undefined` for a root pid with no parent context.
-%% A Beamtalk actor is identified by the `'$beamtalk_actor'` process-dictionary
+%% A child id may be any term: a class atom, a `withId:` Symbol, or an Integer
+%% (ADR 0135 §3), so a non-class id falls back to the supervisor's callback
+%% module. A Beamtalk actor is identified by the `'$beamtalk_actor'` process-dictionary
 %% marker (its value IS the behaviour class). A Beamtalk supervisor is an OTP
 %% supervisor whose child id is a registered Beamtalk Supervisor/DynamicSupervisor
 %% subclass. Everything else is foreign — minimally tagged here in Phase 1
 %% (`otpSupervisor`/`otpProcess`); behaviour-based foreign detection is future work.
--spec classify(pid(), atom() | undefined, atom() | undefined) ->
+-spec classify(pid(), term(), atom() | undefined) ->
     {atom(), beamtalk_object() | nil}.
 classify(Pid, Id, Type) ->
     case beamtalk_actor:is_beamtalk_actor(Pid) of
@@ -945,7 +950,7 @@ classify(Pid, Id, Type) ->
             classify_non_actor(Pid, Id, Type)
     end.
 
--spec classify_non_actor(pid(), atom() | undefined, atom() | undefined) ->
+-spec classify_non_actor(pid(), term(), atom() | undefined) ->
     {atom(), beamtalk_object() | nil}.
 classify_non_actor(Pid, Id, Type) ->
     case is_supervisor_pid(Pid, Type) of
@@ -964,7 +969,7 @@ classify_non_actor(Pid, Id, Type) ->
 %% hint, maps the supervisor's callback module (from its `'$initial_call'`) to
 %% the class via the live class registry — a reliable lookup, not a lossy
 %% snake_case→CamelCase name heuristic (which mangles e.g. `E2EAppSupervisor`).
--spec beamtalk_supervisor_class(pid(), atom() | undefined) -> {ok, atom()} | error.
+-spec beamtalk_supervisor_class(pid(), term()) -> {ok, atom()} | error.
 beamtalk_supervisor_class(Pid, Id) ->
     case is_atom(Id) andalso Id =/= undefined andalso beamtalk_supervisor:is_supervisor(Id) of
         true ->
@@ -1209,6 +1214,9 @@ restarting_class_name(_) ->
 -spec restarting_label(atom() | term()) -> binary().
 restarting_label(Id) when is_atom(Id) ->
     atom_to_binary(Id, utf8);
+restarting_label(Id) when is_integer(Id) ->
+    %% ADR 0135 §3: integer child ids (`withId: 3`).
+    integer_to_binary(Id);
 restarting_label(_) ->
     <<"restarting">>.
 
