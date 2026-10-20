@@ -6,4 +6,4 @@
 
 Supervisor subclass: E2EInitializeSupervisor
 
-  class children -> List => #(InitCounter)
+  childSpecs -> List => #(InitCounter)

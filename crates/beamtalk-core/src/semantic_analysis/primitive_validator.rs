@@ -212,7 +212,7 @@ fn validate_expr(
             }
         }
 
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 validate_expr(elem, is_stdlib, options, diagnostics);
             }

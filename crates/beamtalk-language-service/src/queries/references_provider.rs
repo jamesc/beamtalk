@@ -404,6 +404,11 @@ fn collect_class_refs(
                 collect_class_refs(tail_expr, class_name, file_path, results);
             }
         }
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            for element in elements {
+                collect_class_refs(element, class_name, file_path, results);
+            }
+        }
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
                 collect_class_refs(&pair.key, class_name, file_path, results);
@@ -747,6 +752,11 @@ fn collect_selector_refs(
                 collect_selector_refs(tail_expr, selector_name, file_path, results);
             }
         }
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            for element in elements {
+                collect_selector_refs(element, selector_name, file_path, results);
+            }
+        }
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
                 collect_selector_refs(&pair.key, selector_name, file_path, results);
@@ -783,6 +793,17 @@ mod tests {
         let refs = find_class_references("Foo", [(&file, &module)]);
         assert_eq!(refs.len(), 2);
         assert!(refs.iter().all(|r| r.file == file));
+    }
+
+    #[test]
+    fn find_references_inside_tuple_literal() {
+        // ADR 0136: references descend into tuple-literal elements.
+        let file = Utf8PathBuf::from("test.bt");
+        let module = parse_source("x := {Foo new, Foo bar: 1}");
+        let refs = find_class_references("Foo", [(&file, &module)]);
+        assert_eq!(refs.len(), 2);
+        let refs = find_selector_references("bar:", [(&file, &module)]);
+        assert_eq!(refs.len(), 1);
     }
 
     #[test]

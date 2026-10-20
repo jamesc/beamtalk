@@ -7,8 +7,8 @@
 
 Supervisor subclass: Bt3965BadShutdownSup
 
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
 
-  class children -> List =>
+  childSpecs -> List =>
     spec := Bt3965SlowStopper supervisionSpec withShutdown: #soon
     #(spec)

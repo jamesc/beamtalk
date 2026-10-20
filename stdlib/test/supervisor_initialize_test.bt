@@ -1,21 +1,38 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-1542: Tests for Supervisor initialize: class-side default.
+// BT-1542: Tests for the Supervisor `initialize` hook (instance-side since
+// ADR 0135 §1; it was `class initialize: sup`).
 //
-// Lifecycle tests (supervise → initialize: → which:) are in
-// tests/repl-protocol/cases/supervisor_initialize.btscript because they
-// require live OTP processes.
+// Lifecycle tests (supervise → initialize → which:) are also in
+// tests/repl-protocol/cases/supervisor_initialize.btscript.
 
 TestCase subclass: SupervisorInitializeTest
 
-  // initialize: default is nil (no-op)
+  class serial -> Boolean => true
+
+  tearDown =>
+    sup := SupWithInitialize current
+    sup isNil ifFalse: [[sup stop] on: Error do: [:e | nil]]
+
+  // The hook runs once, in the caller, after the children started; `self` is
+  // the new supervisor, so `self which:` reaches a sibling.
+  testInitializeWiresChildren =>
+    sup := SupWithInitialize supervise unwrap
+    childA :: SupInitChildA := (sup which: SupInitChildA) unwrap
+    self assert: childA getValue equals: 42
+
+  // initialize default is nil (no-op): a supervisor that does not override it
+  // starts normally.
   testSupervisorInitializeDefaultIsNil =>
-    self assert: (Supervisor initialize: nil) equals: nil
+    sup := Bt3963PlainSup supervise unwrap
+    self assert: sup initialize equals: nil
+    sup stop
 
   // SupWithInitialize inherits strategy from Supervisor
   testSupWithInitializeStrategyDefault =>
-    self assert: SupWithInitialize strategy equals: #oneForOne
+    sup := SupWithInitialize supervise unwrap
+    self assert: sup strategy equals: #oneForOne
 
   // SupWithInitialize responds to isSupervisor
   testSupWithInitializeIsSupervisor =>

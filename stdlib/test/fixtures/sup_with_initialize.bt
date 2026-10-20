@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-1542: Supervisor with initialize: hook that wires children together.
-// initialize: calls which: on a sibling — this would deadlock without the
+// initialize calls which: on a sibling — this would deadlock without the
 // caller-side dispatch fix.
 
 Supervisor subclass: SupWithInitialize
 
-  class children => #(SupInitChildA, SupInitChildB)
+  childSpecs => #(SupInitChildA, SupInitChildB)
 
-  class initialize: sup =>
-    childA := (sup which: SupInitChildA) unwrap
+  initialize =>
+    childA :: SupInitChildA := (self which: SupInitChildA) unwrap
     childA setValue: 42

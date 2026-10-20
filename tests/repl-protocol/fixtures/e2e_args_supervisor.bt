@@ -6,6 +6,6 @@
 
 Supervisor subclass: E2EArgsSupervisor
 
-  class children -> List =>
+  childSpecs -> List =>
     spec := Counter supervisionSpec withArgs: #{#value => 42}
     #(spec)

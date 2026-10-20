@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3963 (ADR 0135 §2): a DynamicSupervisor whose child class, limit and
+// child shutdown all come from its start args, so each instance differs.
+// Started with args as a child of Bt3963PoolOfPools (`startChild: args`).
+
+DynamicSupervisor(Bt3963Worker) subclass: Bt3963ConnPool
+
+  childClass => self args at: #handler
+
+  maxChildren => self args at: #max
+
+  childShutdown => self args at: #shutdown

@@ -233,7 +233,7 @@ fn collect_announce_sites(expr: &Expression, source: &str, hits: &mut Vec<Announ
                 collect_announce_sites(tail_expr, source, hits);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for element in elements {
                 collect_announce_sites(element, source, hits);
             }

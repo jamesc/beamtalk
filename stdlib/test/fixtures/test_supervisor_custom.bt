@@ -5,10 +5,10 @@
 
 Supervisor subclass: TestSupervisorCustom
 
-  class children => #()
+  childSpecs => #()
 
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForAll
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForAll
 
-  class maxRestarts -> Integer => 3
+  maxRestarts -> Integer => 3
 
-  class restartWindow -> Integer => 30
+  restartWindow -> Integer => 30

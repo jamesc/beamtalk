@@ -6,6 +6,6 @@
 
 DynamicSupervisor(Counter) subclass: TestDynamicSupervisorBadCap
 
-  class childClass => Counter
+  childClass => Counter
 
-  class maxChildren -> Integer | Symbol => #lots
+  maxChildren -> Integer | Symbol => #lots

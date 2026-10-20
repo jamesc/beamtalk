@@ -1529,6 +1529,10 @@ impl SimpleLanguageService {
                     None
                 }
             }),
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => elements
+                .iter()
+                .find_map(|e| Self::find_identifier_in_expr(e, offset)),
             _ => None,
         }
     }
@@ -1634,6 +1638,12 @@ impl SimpleLanguageService {
             }
             Expression::Return { value, .. } => {
                 Self::collect_identifiers(value, name, results);
+            }
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
+                for e in elements {
+                    Self::collect_identifiers(e, name, results);
+                }
             }
             Expression::Parenthesized { expression, .. } => {
                 Self::collect_identifiers(expression, name, results);

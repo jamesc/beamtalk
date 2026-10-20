@@ -726,12 +726,67 @@ fn section6_class_side_self_send_has_no_return_channel() {
     );
 }
 
+/// BT-3917: the escaping-block errors of `src`, by message.
+fn ffi_escape_messages(src: &str) -> Vec<String> {
+    adr0131_diagnostics(src)
+        .iter()
+        .filter(|d| d.message.contains("passed to Erlang"))
+        .map(|d| d.message.to_string())
+        .collect()
+}
+
 #[test]
-fn section6_erlang_ffi_argument_is_exempt() {
-    // s6: lossy by design (ADR 0041 §Erlang Interop Boundary).
+fn erlang_ffi_argument_writing_block_is_an_escaping_block() {
+    // ADR 0133 / BT-3917: a block literal that assigns a captured local, in
+    // any argument position of an FFI send, escapes (Erlang calls it as a
+    // plain fun and the write is dropped).
     for src in [
         in_class("r := (Erlang lists) map: [:x | t := t + 1. x] with: #(1)\n#[r, t]"),
         in_value("r := Erlang lists map: [:x | t := t + 1. x] with: #(1)\n#[r, t]"),
+        // keyword argument in the trailing position
+        in_value("r := Erlang lists foreach: [:x | t := t + x] with: #(1)\nt"),
+        // the repro: the block is the init argument of a nested FFI send
+        in_value(
+            "b := Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: [:x | t := t + x])\nt",
+        ),
+        // parenthesized block literal
+        in_value("r := Erlang lists map: ([:x | t := t + 1. x]) with: #(1)\n#[r, t]"),
+    ] {
+        let msgs = ffi_escape_messages(&src);
+        assert_eq!(msgs.len(), 1, "{src}: {msgs:?}");
+        assert!(
+            msgs[0].starts_with("`t` is assigned in a block passed to Erlang `"),
+            "{msgs:?}"
+        );
+        let diags = adr0131_diagnostics(&src);
+        let hint = diags[0].hint.as_deref().unwrap_or_default();
+        assert!(
+            hint.contains("inject: t into:") && hint.contains("use the Erlang call's result"),
+            "{hint}"
+        );
+    }
+}
+
+#[test]
+fn erlang_ffi_argument_writing_block_nested_in_literal_is_rejected() {
+    // A writing block inside a collection literal passed to FFI is an
+    // escaping block too (placed in a collection literal).
+    let src = in_value("r := Erlang erlang list_to_tuple: #([:x | t := t + x])\nt");
+    let diags = adr0131_diagnostics(&src);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert!(
+        diags[0].message.contains("`t` is assigned in a block"),
+        "{diags:?}"
+    );
+}
+
+#[test]
+fn erlang_ffi_argument_non_writing_block_is_accepted() {
+    for src in [
+        in_class("r := (Erlang lists) map: [:x | x + t] with: #(1)\nr"),
+        in_value("r := Erlang lists map: [:x | x + t] with: #(1)\nr"),
+        // a block-local variable is not a captured write
+        in_value("r := Erlang lists map: [:x | y := x + 1. y] with: #(1)\nr"),
     ] {
         assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
     }

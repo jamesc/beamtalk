@@ -576,8 +576,8 @@ is surface-specific.
   `class_state_read_only` and `abi_mismatch` (ADR 0130), are ordinary
   `#beamtalk_error{}` values and reach every surface through its existing
   error path; none is surface-specific. A
-  class-variable write from a supervisor factory, a `class initialize:` hook
-  or `performLocally:` raises `class_state_read_only` on every surface.
+  class-variable write from a supervisor factory or `performLocally:` raises
+  `class_state_read_only` on every surface.
 
 ### Outer-local threading errors (ADR 0131 §6 and Phase 0, BT-3745)
 

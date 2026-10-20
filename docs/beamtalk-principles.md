@@ -181,7 +181,7 @@ Embrace BEAM's "let it crash" philosophy — actors crash independently, the sup
 - Actors are automatically supervised by OTP on spawn
 - No defensive programming — let the runtime handle failures
 - Declarative supervision trees: `Supervisor subclass:` and `DynamicSupervisor subclass:` ([ADR 0059](ADR/0059-supervision-tree-syntax.md))
-- `class children`, `class strategy`, `class supervisionPolicy` configure restart behaviour
+- `childSpecs`, `strategy` (instance-side, read from the supervisor being started) and `class supervisionPolicy` configure restart behaviour
 - Nested supervisors compose into full OTP supervision hierarchies
 
 **Implication:** Fault isolation is guaranteed. Supervision is native Beamtalk syntax — no Erlang FFI needed.

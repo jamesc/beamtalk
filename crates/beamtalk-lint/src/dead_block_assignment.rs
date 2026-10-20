@@ -29,11 +29,10 @@
 //!
 //! What is left for the lint (pinned by `lint_and_section6_agree` below):
 //!
-//! - an Erlang FFI block argument, which the escaping-block error exempts for
-//!   good (ADR 0041 §Erlang Interop Boundary: lossy by design). A block stored
-//!   in a local, returned, stored in a field or class variable, or placed in a
-//!   collection literal is the ADR 0133 escaping-block compile error (BT-3902;
-//!   a block stored in a local was the lint's until then);
+//! - (the Erlang FFI block argument is not here: it is the ADR 0133
+//!   escaping-block compile error, BT-3917, as a block stored in a local,
+//!   returned, stored in a field or class variable, or placed in a collection
+//!   literal is, BT-3902);
 //! - a block literal assigned straight to an instance field, which the block
 //!   analyzer's BT-2809 error reports outside these categories;
 //! - a block statement whose value is discarded (an arm statement that is not
@@ -50,8 +49,8 @@
 //! count := 0
 //! #(1, 2, 3) do: [:item | count := count + 1]
 //!
-//! // Warned — the Erlang function runs the block, and the write is lost
-//! (Erlang lists) map: [:e | count := count + 1. e] with: #(1, 2)
+//! // Warned — the block statement's value is discarded, so it never runs
+//! flag ifTrue: [[count := count + 1]. 0] ifFalse: [nil]
 //! count
 //! ```
 //!
@@ -309,7 +308,7 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
             }
         }
 
-        ArrayLiteral { elements, .. } => {
+        ArrayLiteral { elements, .. } | TupleLiteral { elements, .. } => {
             for elem in elements {
                 walk_expr(elem, scope, out);
             }
@@ -417,19 +416,21 @@ mod tests {
         diags
     }
 
-    // ── Basic detection (an Erlang FFI block argument) ──────────────────────
+    // ── Basic detection (a discarded block statement) ───────────────────────
     //
     // A block stored in a local was the lint's main shape until ADR 0133
     // (BT-3902) made a stored block that assigns a captured variable a
-    // compile error, which owns the report. What is left to the lint is
-    // chiefly an Erlang FFI block argument, which the compile error exempts
-    // for good (lossy by design), so the detection tests use that shape.
+    // compile error, and an Erlang FFI block argument joined it (BT-3917).
+    // What is left to the lint is a block statement whose value is discarded
+    // (an arm statement that is not the arm's value), a block assigned straight
+    // to an instance field, and the unthreaded construct positions, so the
+    // detection tests use the discarded block.
 
-    /// Assignment inside a block passed to an Erlang function: the write is
-    /// lost at the interop boundary.
+    /// Assignment inside a block statement whose value is discarded: the
+    /// block never runs, so the write is dead.
     #[test]
-    fn assignment_in_ffi_block_warns() {
-        let diags = lint("x := 1.\n(Erlang lists) map: [:e | x := 2. e] with: #(1)");
+    fn assignment_in_discarded_block_warns() {
+        let diags = lint("x := 1.\ntrue ifTrue: [[x := 2]. 0] ifFalse: [nil]");
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert_eq!(diags[0].severity, Severity::Lint);
         assert!(
@@ -442,8 +443,7 @@ mod tests {
     /// Multiple dead assignments in the same block.
     #[test]
     fn multiple_dead_assignments_warn() {
-        let diags =
-            lint("x := 0.\ny := 0.\n(Erlang lists) map: [:e | x := 1. y := 2. e] with: #(1)");
+        let diags = lint("x := 0.\ny := 0.\ntrue ifTrue: [[x := 1. y := 2]. 0] ifFalse: [nil]");
         assert_eq!(diags.len(), 2, "Expected 2 lints, got: {diags:?}");
     }
 
@@ -506,8 +506,8 @@ BaseActor subclass: Counter
         );
     }
 
-    /// Object subclass — an FFI block's mutation is still flagged, since the
-    /// class kind doesn't change whether it is threaded back (only its
+    /// Object subclass — a discarded block's mutation is still flagged, since
+    /// the class kind doesn't change whether it is threaded back (only its
     /// selector/position does).
     #[test]
     fn object_class_warns() {
@@ -515,7 +515,7 @@ BaseActor subclass: Counter
 Object subclass: Foo
   bar =>
     x := 0
-    (Erlang lists) map: [:e | x := 1. e] with: #(1)
+    true ifTrue: [[x := 1]. 0] ifFalse: [nil]
     x";
         let diags = lint(src);
         assert_eq!(
@@ -525,7 +525,7 @@ Object subclass: Foo
         );
     }
 
-    /// Value subclass — an FFI block's mutation is still flagged.
+    /// Value subclass — a discarded block's mutation is still flagged.
     #[test]
     fn value_class_warns() {
         let src = "\
@@ -534,7 +534,7 @@ Value subclass: Point
   state: y = 0
   broken =>
     z := 0
-    (Erlang lists) map: [:e | z := 1. e] with: #(1)
+    true ifTrue: [[z := 1]. 0] ifFalse: [nil]
     z";
         let diags = lint(src);
         assert_eq!(
@@ -557,11 +557,11 @@ Object subclass: Foo
 
     // ── Nested blocks ─────────────────────────────────────────────────────────
 
-    /// Dead assignment in a nested FFI block.
+    /// Dead assignment in a nested discarded block.
     #[test]
     fn nested_block_dead_assignment_warns() {
         let diags = lint(
-            "x := 0.\n(Erlang lists) map: [:e | (Erlang lists) map: [:f | x := 1. f] with: #(1)] with: #(1)",
+            "x := 0.\ntrue ifTrue: [true ifTrue: [[x := 1]. 0] ifFalse: [nil]. 0] ifFalse: [nil]",
         );
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`x`"));
@@ -572,7 +572,7 @@ Object subclass: Foo
     /// Lint diagnostic includes a hint suggesting alternatives.
     #[test]
     fn lint_includes_hint() {
-        let diags = lint("x := 1.\n(Erlang lists) map: [:e | x := 2. e] with: #(1)");
+        let diags = lint("x := 1.\ntrue ifTrue: [[x := 2]. 0] ifFalse: [nil]");
         assert!(
             diags[0].hint.is_some(),
             "Expected a hint on lint diagnostic"
@@ -614,19 +614,19 @@ Object subclass: Foo
   value => 1
 Foo >> bar =>
   x := 0
-  (Erlang lists) map: [:e | x := 1. e] with: #(1)
+  true ifTrue: [[x := 1]. 0] ifFalse: [nil]
   x";
         let diags = lint(src);
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
     }
 
-    /// Method parameter captured in an FFI block — should warn.
+    /// Method parameter captured in a discarded block — should warn.
     #[test]
     fn method_param_captured_in_block_warns() {
         let src = "\
 Object subclass: Foo
   withX: x =>
-    (Erlang lists) map: [:e | x := 99. e] with: #(1)
+    true ifTrue: [[x := 99]. 0] ifFalse: [nil]
     x";
         let diags = lint(src);
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
@@ -679,12 +679,11 @@ Object subclass: Foo
         );
     }
 
-    /// Destructure assignment rebinding an outer variable inside an FFI
+    /// Destructure assignment rebinding an outer variable inside a discarded
     /// block — should warn.
     #[test]
     fn destructure_rebinds_outer_var_warns() {
-        let diags =
-            lint("x := 0.\ny := 0.\n(Erlang lists) map: [:e | {x, y} := {1, 2}. e] with: #(1)");
+        let diags = lint("x := 0.\ny := 0.\ntrue ifTrue: [[{x, y} := {1, 2}]. 0] ifFalse: [nil]");
         assert_eq!(
             diags.len(),
             2,
@@ -843,10 +842,9 @@ sealed typed Value subclass: Foo
             );
         }
         // Nested: the compile error rejects the inner block's write to `y`;
-        // the outer FFI block's own write to `x` is still the lint's.
-        let diags = lint(
-            "x := 0.\ny := 0.\n(Erlang lists) map: [:e | x := 1. foo run: [y := 2]. e] with: #(1)",
-        );
+        // the outer discarded block's own write to `x` is still the lint's.
+        let diags =
+            lint("x := 0.\ny := 0.\ntrue ifTrue: [[x := 1. foo run: [y := 2]]. 0] ifFalse: [nil]");
         assert_eq!(diags.len(), 1, "Expected only `x` to warn, got: {diags:?}");
         assert!(diags[0].message.contains("`x`"));
     }
@@ -874,13 +872,14 @@ sealed typed Value subclass: Foo
         }
     }
 
-    /// A threaded construct nested inside an FFI block does not hide the
-    /// FFI block's own loss: the write is lost at the interop boundary,
-    /// whatever runs it inline inside the block.
+    /// A threaded construct nested inside a discarded block does not hide the
+    /// block's own loss: the write is dead, whatever runs it inline inside
+    /// the block.
     #[test]
-    fn threaded_construct_inside_ffi_block_warns() {
-        let diags =
-            lint("x := 0.\n(Erlang lists) map: [:f | #(1, 2) do: [:e | x := x + e]. f] with: #(1)");
+    fn threaded_construct_inside_discarded_block_warns() {
+        let diags = lint(
+            "x := 0.\ny := 0.\ntrue ifTrue: [[#(1, 2) do: [:e | y := y + e]. x := 0]. 0] ifFalse: [nil]",
+        );
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`x`"));
     }
@@ -921,8 +920,7 @@ sealed typed Value subclass: Foo
     /// `@expect dead_assignment` suppresses the dead block assignment lint.
     #[test]
     fn expect_dead_assignment_suppresses_lint() {
-        let src =
-            "x := 1.\n@expect dead_assignment\n(Erlang lists) map: [:e | x := 2. e] with: #(1)";
+        let src = "x := 1.\n@expect dead_assignment\ntrue ifTrue: [[x := 2]. 0] ifFalse: [nil]";
         let tokens = lex_with_eof(src);
         let (module, _) = parse(tokens);
         let mut diags = Vec::new();
@@ -944,7 +942,7 @@ sealed typed Value subclass: Foo
     /// Lint has `DeadAssignment` category for `@expect` matching.
     #[test]
     fn lint_has_dead_assignment_category() {
-        let diags = lint("x := 1.\n(Erlang lists) map: [:e | x := 2. e] with: #(1)");
+        let diags = lint("x := 1.\ntrue ifTrue: [[x := 2]. 0] ifFalse: [nil]");
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].category,
@@ -962,8 +960,8 @@ sealed typed Value subclass: Foo
         Neither,
         /// An ADR 0131 compile error (§6 or the Phase 0 allow-set); no lint.
         CompileError,
-        /// The lint alone: an Erlang FFI block argument, a block stored
-        /// straight into an instance field, or a discarded block statement.
+        /// The lint alone: a block stored straight into an instance field, or
+        /// a discarded block statement.
         Lint,
         /// Wrong at runtime today but accepted by §6: exactly one of the two,
         /// whichever owns it at the moment (the Phase 0 allow-set is being
@@ -1044,9 +1042,15 @@ sealed typed Value subclass: Foo
             // 0133 made storing it the escaping-block error.
             ("blk := [x := 2]", CompileError),
             ("blk := [#(1, 2) do: [:e | x := x + e]]", CompileError),
-            // An Erlang FFI argument: lossy by design (ADR 0041 §Erlang
-            // Interop Boundary), so §6 exempts it for good.
-            ("(Erlang lists) map: [:e | x := x + 1. e] with: #(1)", Lint),
+            // An Erlang FFI argument: an escaping block (ADR 0133, BT-3917).
+            (
+                "(Erlang lists) map: [:e | x := x + 1. e] with: #(1)",
+                CompileError,
+            ),
+            (
+                "Erlang lists foreach: [:e | x := x + e] with: #(1)",
+                CompileError,
+            ),
             // A `whileTrue:`/`whileFalse:` condition's plain outer-local write
             // crashed at runtime; §6 rejects it (BT-3782).
             ("[i := i + 1. i < 3] whileTrue: [nil]", CompileError),

@@ -16,8 +16,9 @@ Used only by beamtalk_supervisor_tests.erl.
 """.
 
 -export([start_link/0, init/1, set_mode/2, reset/0]).
-%% BT-3759: class-side methods for the concurrent-supervise tests.
--export([class_supervise/1, 'class_initialize:'/2]).
+%% BT-3759: `supervise` (class side) and the instance-side `initialize` hook
+%% (ADR 0135 §1) for the concurrent-supervise tests.
+-export([class_supervise/1, dispatch/4, has_method/1, has_method_local/1]).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -define(TAB, beamtalk_supervisor_test_helper_tab).
@@ -76,7 +77,7 @@ init([]) ->
     {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, []}}.
 
 %%====================================================================
-%% Class-side methods (BT-3759): `X supervise` + `initialize:` stand-ins
+%% BT-3759: `X supervise` + instance-side `initialize` stand-ins
 %%====================================================================
 
 -doc "Stand-in for `supervise`: startLink/1 wrapped as the FFI Result map.".
@@ -85,12 +86,24 @@ class_supervise(ClassSelf) ->
     beamtalk_result:from_tagged_tuple(beamtalk_supervisor:startLink(ClassSelf)).
 
 -doc """
-Stand-in for the class-side `initialize:` hook. Tells the coordinator (the pid
-in the `coordinator` ETS row) it has been entered, blocks until released, then
-either raises (`{hook, fail}`) or marks the supervisor initialised.
+Instance-side dispatch for the supervisor handle: answers `initialize` only
+(`beamtalk_supervisor:run_initialize/1` sends it to the new supervisor).
 """.
--spec 'class_initialize:'(term(), term()) -> nil.
-'class_initialize:'(_ClassSelf, _SupTuple) ->
+dispatch(initialize, [], _Self, State) ->
+    {reply, initialize_hook(), State}.
+
+has_method(Selector) -> has_method_local(Selector).
+
+has_method_local(initialize) -> true;
+has_method_local(_) -> false.
+
+-doc """
+Stand-in for the instance-side `initialize` hook. Tells the coordinator (the
+pid in the `coordinator` ETS row) it has been entered, blocks until released,
+then either raises (`{hook, fail}`) or marks the supervisor initialised.
+""".
+-spec initialize_hook() -> nil.
+initialize_hook() ->
     [{coordinator, Coord}] = ets:lookup(?TAB, coordinator),
     Coord ! {init_entered, self()},
     receive
@@ -99,7 +112,7 @@ either raises (`{hook, fail}`) or marks the supervisor initialised.
             nil;
         {hook, fail} ->
             beamtalk_error:raise(
-                beamtalk_error:new(type_error, 'BT3759Class', 'initialize:', <<"hook failed">>)
+                beamtalk_error:new(type_error, 'BT3759Class', initialize, <<"hook failed">>)
             )
     end.
 

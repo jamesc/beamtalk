@@ -149,7 +149,7 @@ fn collect_send_lines(expr: &Expression, selector_name: &str, source: &str, line
                 collect_send_lines(tail_expr, selector_name, source, lines);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for element in elements {
                 collect_send_lines(element, selector_name, source, lines);
             }

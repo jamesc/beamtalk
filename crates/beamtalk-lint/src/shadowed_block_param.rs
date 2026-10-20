@@ -254,7 +254,7 @@ fn check_expr(expr: &Expression, scope: &mut LintScope, diagnostics: &mut Vec<Di
             }
         }
 
-        ArrayLiteral { elements, .. } => {
+        ArrayLiteral { elements, .. } | TupleLiteral { elements, .. } => {
             for elem in elements {
                 check_expr(elem, scope, diagnostics);
             }

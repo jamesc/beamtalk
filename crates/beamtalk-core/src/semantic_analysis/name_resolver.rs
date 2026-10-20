@@ -330,7 +330,7 @@ impl NameResolver {
                 }
             }
 
-            ArrayLiteral { elements, .. } => {
+            ArrayLiteral { elements, .. } | TupleLiteral { elements, .. } => {
                 for elem in elements {
                     self.resolve_expression(elem);
                 }

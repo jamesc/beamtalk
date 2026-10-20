@@ -206,7 +206,7 @@ fn check_expression_packages(
             }
         }
 
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 check_expression_packages(elem, known_packages, diagnostics);
             }

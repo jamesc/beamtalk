@@ -6,6 +6,11 @@
 /// Tuples exist primarily for interoperability with Erlang/OTP code.
 /// They map directly to Erlang tuples on the BEAM.
 ///
+/// **Tuple literals (ADR 0136):** `{a, b}` builds a tuple directly —
+/// `{#active, false}` is exactly Erlang's `{active, false}`. `{}` and `{x}`
+/// are valid too. A tuple literal is a `Tuple`, never a `Result`: `{#ok, 42}`
+/// stays a tuple until converted with `Result fromTuple:`.
+///
 /// **FFI Result conversion (ADR 0076):** Erlang functions that return
 /// `{ok, Value}` or `{error, Reason}` tuples are automatically converted
 /// to `Result` objects at the FFI boundary. This means most Erlang calls
@@ -16,7 +21,7 @@
 /// messages), use `Result fromTuple:` to explicitly convert:
 ///
 /// ```beamtalk
-/// Result fromTuple: (Tuple withAll: #(#ok, 42))   // => Result ok: 42
+/// Result fromTuple: {#ok, 42}   // => Result ok: 42
 /// ```
 ///
 /// The Tuple methods `isOk`, `isError`, `unwrap`, and `unwrapOr:` remain
@@ -30,12 +35,13 @@
 /// ## Examples
 /// ```beamtalk
 /// // Constructing tuples
-/// t := Tuple withAll: #(1, 2, 3)
+/// t := {1, 2, 3}
 /// t at: 1   // => 1
 /// t size    // => 3
+/// t =:= (Tuple withAll: #(1, 2, 3))   // => true
 ///
 /// // Working with ok/error tuples from non-FFI sources
-/// result := Tuple withAll: #(#ok, 42)
+/// result := {#ok, 42}
 /// result isOk ifTrue: [result unwrap]   // => 42
 /// result unwrapOr: 0                    // => 42
 /// ```
