@@ -610,6 +610,7 @@ fn run_alone(case: &Case) -> (Package, Run) {
 }
 
 /// Runs `cases` and returns every failure, bisecting broken batches.
+#[allow(clippy::too_many_lines)] // one bisecting driver; splitting it would scatter the batch protocol
 fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
     if cases.is_empty() {
         return;
