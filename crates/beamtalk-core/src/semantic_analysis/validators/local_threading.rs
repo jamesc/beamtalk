@@ -962,19 +962,25 @@ pub(crate) enum Residual {
     /// as a value-position assignment, and draws this error since BT-3909.
     MatchArmWrite,
     /// BT-3948: an actor `[:z | ...] value: x` (a literal block applied in
-    /// place) whose body assigns a local of its own, in a loop whose frame
-    /// carries its locals as parameters (no `StateAcc`) while the block body
-    /// is lowered as a state-threading scope. Measured on a BEAM, every one
-    /// of these either fails `erlc` (unbound `StateAcc`) or answers a
-    /// `{Value, Locals}` carrier instead of the value: the send in a
-    /// `whileTrue:`/`whileFalse:` condition (any arm below it included); in
-    /// a `to:do:`/`timesRepeat:`/`whileTrue:` body that rebinds an outer
-    /// local, directly in the body; and, in any such body, below one or more
-    /// conditional arms unless it is the whole value of an assignment to a
-    /// local first bound there (`r := [..] value: i` inside the arm, which
-    /// answers right in every arm family and loop kind). A loop body that
-    /// touches state, `do:`/`collect:` bodies, and class and value-type
-    /// methods answer right.
+    /// place) whose body assigns a local of its own, with a loop among the
+    /// enclosing blocks. The loop frame carries its locals as parameters (no
+    /// `StateAcc`) while the block body is lowered as a state-threading
+    /// scope. Measured on a BEAM, these fail `erlc` (unbound `StateAcc`),
+    /// raise, or answer a `{Value, Locals}` carrier instead of the value:
+    /// the send in a `whileTrue:`/`whileFalse:` condition (also with a
+    /// state-touching body, and as a statement of the condition unless the
+    /// block is one statement with every assignment in an arm); in the
+    /// loop's own body when it rebinds an outer local and touches no state;
+    /// below conditional arms of the body (`ifTrue:`, `and:`, `ifNil:`...)
+    /// unless it is `r := [..] value: i` of a fresh local, or a statement of
+    /// an arm in a state-touching body; and whenever the innermost loop sits
+    /// inside another block (a method-level arm, `on:do:`, `ensure:`,
+    /// `value`, a `do:` body or another loop) or has a `do:`/`collect:`/
+    /// `inject:` body below it. A loop body that touches state, `do:`/
+    /// `collect:` bodies outside a loop, and class and value-type methods
+    /// answer right. A `to:do:` directly in a non-rebinding `to:do:` also
+    /// answered right, but `timesRepeat:` outside it and a third level did
+    /// not, and the block roles do not tell them apart, so it is rejected.
     InlineBlockLocalInLoop,
 }
 
@@ -2615,34 +2621,21 @@ impl<'d> Walker<'d> {
     }
 
     /// [`Residual::InlineBlockLocalInLoop`] (BT-3948): see the shape's
-    /// documentation. The block writes no outer local (the Phase 0 check's
-    /// business); it assigns a local of its own or one of its parameters,
-    /// anywhere in its body. The enclosing blocks are a loop body or
-    /// condition, then only conditional arms (nested loops and `do:` bodies
-    /// were measured right and stay accepted).
+    /// documentation for what was measured. The block writes no outer local
+    /// (the Phase 0 check's business); it assigns a local of its own or one
+    /// of its parameters, anywhere in its body. The shape is anchored on the
+    /// innermost enclosing loop block.
     fn check_inline_block_local_in_loop(&mut self, expr: &Expression, position: Position) {
         let Some(row) = residual_denied(Residual::InlineBlockLocalInLoop, self.context) else {
             return;
         };
-        let Some((first, arms)) = self.containers.split_first() else {
+        let Some(l) = self
+            .containers
+            .iter()
+            .rposition(|c| matches!(c, Container::LoopBody | Container::CountedLoopBody))
+        else {
             return;
         };
-        let in_loop = matches!(first, Container::LoopBody | Container::CountedLoopBody)
-            && arms.iter().all(|c| *c == Container::Arm)
-            && !self.outer_stateful;
-        // A loop condition is not a frame body (`frame_sites` is `None`).
-        let in_condition = self.frame_sites.first().is_some_and(Option::is_none);
-        let denied = in_loop
-            && if in_condition {
-                true
-            } else if arms.is_empty() {
-                self.direct_blocks.first() == Some(&true)
-            } else {
-                !(matches!(position, Position::AssignValue { .. }) && self.assign_target_fresh)
-            };
-        if !denied {
-            return;
-        }
         let Some(construct) = local_threading_construct(expr)
             .filter(|c| c.family == LocalThreadingFamily::BlockValue)
         else {
@@ -2655,29 +2648,71 @@ impl<'d> Walker<'d> {
             return;
         }
         let params: HashSet<&str> = block.parameters.iter().map(|p| p.name.as_str()).collect();
-        let mut local: Option<(EcoString, Span)> = None;
+        let mut nested_blocks: Vec<Span> = Vec::new();
         for stmt in &block.body {
             crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-                // A condition frame handles a local first bound in an arm of
-                // the block (BT-3911, `condIfTrue`...): only an assignment
-                // that is a statement of the block itself fails there.
-                if in_condition && !std::ptr::eq(e, &raw const stmt.expression) {
+                if let Expression::Block(b) = e {
+                    nested_blocks.push(b.span);
+                }
+            });
+        }
+        let mut local: Option<(EcoString, Span)> = None;
+        // Whether some assignment to a local sits outside every nested block
+        // literal (a statement of the block, or an operand in one).
+        let mut outside_arms = false;
+        for stmt in &block.body {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                let Expression::Assignment { target, .. } = e else {
+                    return;
+                };
+                let Expression::Identifier(id) = target.as_ref() else {
+                    return;
+                };
+                if !params.contains(id.name.as_str()) && self.is_bound(&id.name) {
                     return;
                 }
-                if let Expression::Assignment { target, .. } = e {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        if local.is_none()
-                            && (params.contains(id.name.as_str()) || !self.is_bound(&id.name))
-                        {
-                            local = Some((id.name.clone(), e.span()));
-                        }
-                    }
+                let span = e.span();
+                if !nested_blocks
+                    .iter()
+                    .any(|b| b.start() <= span.start() && span.end() <= b.end())
+                {
+                    outside_arms = true;
+                }
+                if local.is_none() {
+                    local = Some((id.name.clone(), span));
                 }
             });
         }
         let Some((name, span)) = local else {
             return;
         };
+        let below = &self.containers[l + 1..];
+        // A loop condition is not a frame body (`frame_sites` is `None`).
+        let in_condition = self.frame_sites.get(l).is_some_and(Option::is_none);
+        let denied = if in_condition {
+            // Right only for the BT-3911 cell: a statement of the condition
+            // whose block is one statement with every assignment in an arm.
+            !(l == 0
+                && below.is_empty()
+                && position == Position::Statement
+                && block.body.len() == 1
+                && !outside_arms)
+        } else if l > 0 || !below.iter().all(|c| *c == Container::Arm) {
+            // Inside another block, or a `do:`/`collect:`/`inject:` body
+            // below the loop.
+            true
+        } else if below.is_empty() {
+            self.direct_blocks.first() == Some(&true) && !self.outer_stateful
+        } else {
+            // Below arms of the body: right for `r := [..] value: i` of a
+            // fresh local, and for a statement of an arm when the body
+            // touches state.
+            !((matches!(position, Position::AssignValue { .. }) && self.assign_target_fresh)
+                || (self.outer_stateful && position == Position::Statement))
+        };
+        if !denied {
+            return;
+        }
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
