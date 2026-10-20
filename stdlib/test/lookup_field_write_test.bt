@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3922: a `Dictionary` lookup handler that writes only object state
+// (`self.field :=`, no outer local): does the write survive? In a class
+// method it writes a class variable in place (ADR 0130), so the ADR 0133
+// escaping-block rule accepts it (semantic_analysis/tests/local_threading.rs,
+// `section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape`). The other method kinds
+// have no column here because the same handler does not compile there: an
+// actor method reports "Cannot mutate Actor state inside a closure" and a
+// value-type method "Cannot assign to slot ... on value type".
+
+TestCase subclass: LookupFieldWriteTest
+
+  testClassAbsent => self assert: LookupFieldWriteClass absent equals: 1
+
+  testClassPresent => self assert: LookupFieldWriteClass present equals: 1
+
+  testClassPresentOrAbsent =>
+    self assert: LookupFieldWriteClass presentOrAbsent equals: 1

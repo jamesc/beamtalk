@@ -128,9 +128,9 @@ The Catalina tree:
 ```beamtalk
 Supervisor subclass: AcceptorPoolSupervisor
   childSpecs =>
-    ((1 to: self args config numAcceptors) collect: [:i |
+    ((1 to: (self args at: #config) numAcceptors) collect: [:i |
       AcceptorSupervisor supervisionSpec withId: i
-        withArgs: #{#id => i, #server => self args server, #config => self args config}]) asList
+        withArgs: #{#id => i, #server => (self args at: #server), #config => (self args at: #config)}]) asList
 
 Supervisor subclass: AcceptorSupervisor
   strategy => #restForOne
@@ -206,7 +206,7 @@ Broken spawn
 // => raises #supervisor_start_failed: configuration methods run inside the supervisor's
 //    init; use `self args` and return specs, do not send messages to `self` (calling_self).
 
-pool := AcceptorPoolSupervisor spawnWith: #{}        // childSpecs reads self args config
+pool := AcceptorPoolSupervisor spawnWith: #{}        // childSpecs: self args at: #config is missing
 // => raises with kind #supervisor_start_failed, wrapping the error from inside init —
 //    same as a failing `class children` today.
 

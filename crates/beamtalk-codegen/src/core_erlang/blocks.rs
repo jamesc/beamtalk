@@ -547,6 +547,49 @@ impl CoreErlangGenerator {
         Ok((wrapper_doc, true))
     }
 
+    /// BT-3971 (PIN-BUG BT-3947): a Tier 2 block body whose last statement
+    /// *is* an evaluated block literal that assigns a local (`[n := 3. n] value`,
+    /// `^[...] value`, `{a, b} := [...] value`, or one nested in another
+    /// evaluated block) answers the raw `{Value, State}` tuple of the inlined
+    /// block, not its value: measured on a BEAM in an Erlang FFI argument block
+    /// as `#({3, State})` for `#(3)`. A plain assignment `r := [...] value` and a
+    /// block that writes no local answer correctly, and are not rejected. The
+    /// correct lowering is parked with BT-3947's frame work, so until then the
+    /// shape is a compile error. The rule is `repl_producer_writes`', the one
+    /// recognizer of an evaluated block literal that writes a local (every
+    /// name written counts: nothing is "outside" the block here).
+    fn reject_last_statement_block_value(stmt: &Expression) -> Result<()> {
+        use beamtalk_core::semantic_analysis::block_facts::{
+            repl_evaluated_block, repl_producer_writes,
+        };
+        let result = match stmt {
+            Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
+                value.as_ref()
+            }
+            Expression::Assignment { .. } => return Ok(()),
+            other => other,
+        };
+        // Only the block-value family: a conditional or loop whose arm holds
+        // the evaluated block is lowered by its own frame and answers right.
+        if repl_evaluated_block(result.unwrap_parens()).is_none() {
+            return Ok(());
+        }
+        let Some(writes) = repl_producer_writes(result, &|_| true) else {
+            return Ok(());
+        };
+        let names: Vec<String> = writes.iter().map(|w| format!("`{}`", w.name)).collect();
+        Err(CodeGenError::UnsupportedFeature {
+            feature: format!(
+                "a Tier 2 block ends in an evaluated block (`[...] value`) that assigns {}; \
+                 the block would answer the raw {{Value, State}} tuple instead of the value \
+                 (BT-3971, until BT-3947). Assign the block's value to a local and answer \
+                 that, or compute it in a method of its own",
+                names.join(", ")
+            ),
+            span: Some(result.span()),
+        })
+    }
+
     /// BT-3939 (PIN-BUG, fixed by BT-3947's frame work): a Tier 2 block body
     /// lowers a loop or fold inside an opaque `let _ = ( ... )`, so the loop's
     /// rebind of a local the body bound (`n := 0. xs do: [:y | n := n + y]. n`)
@@ -570,7 +613,11 @@ impl CoreErlangGenerator {
         block: &Block,
         captured_vars: &[String],
         scope_depth: usize,
+        is_last: bool,
     ) -> Result<()> {
+        if is_last {
+            Self::reject_last_statement_block_value(stmt)?;
+        }
         // An assignment's, destructuring's or `^`'s own write is not a
         // construct's: look at the value it holds.
         let subject = match stmt {
@@ -646,7 +693,13 @@ impl CoreErlangGenerator {
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
-            self.reject_loop_rebind_of_body_local(expr, block, captured_vars, scope_depth)?;
+            self.reject_loop_rebind_of_body_local(
+                expr,
+                block,
+                captured_vars,
+                scope_depth,
+                is_last,
+            )?;
 
             if self.is_field_assignment(expr) {
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;

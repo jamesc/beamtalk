@@ -45,18 +45,13 @@ Actor subclass: SelfSendHomPool
   // block escapes (`adr0133_actor_self_send_of_a_collection_message_is_an_escaping_block`).
 
   // A block that mutates ONLY `self.field`, passed through a self-send to
-  // `do:`: it raises `stateful_block_dispatch` since BT-3908 (pinned in
-  // actor_self_send_hom_test.bt; BT-3922 makes it a compile error).
-  accumulateTotal =>
-    self.total := 0
-    self do: [:each | self.total := self.total + each]
-    self.total
+  // `do:`, is an ADR 0133 compile error since BT-3922 (it raised
+  // `stateful_block_dispatch` before). That shape was also the only way to make
+  // `do:`'s parameter a promoted Tier 2 position, so `recordAll` below, which
+  // BT-3936's case B pinned as a raise, is now the same plain-closure case A as
+  // `SelfSendHomPlainPool`.
 
   // A block that assigns nothing but sends `record:`, which changes a field.
-  // `accumulateTotal` makes `do:`'s parameter a Tier 2 position, so this
-  // block is promoted too and its self-send's state change rides the
-  // returned `StateAcc` (case B of BT-3936, pinned in
-  // actor_self_send_hom_test.bt; `SelfSendHomPlainPool` is case A).
   record: each => self.total := self.total + each
 
   recordAll =>

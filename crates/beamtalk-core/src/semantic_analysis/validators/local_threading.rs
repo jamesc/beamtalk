@@ -47,12 +47,12 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, analyze_block, block_literal_of_other_arity, conditional_arm_blocks,
+    RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity, conditional_arm_blocks,
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
     exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
     local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
-    operand_producer_writes, outer_local_writes, producer_body_block,
+    operand_producer_writes, outer_local_writes, outer_state_writes, producer_body_block,
     receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
     repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
     value_blocks,
@@ -1636,6 +1636,34 @@ impl<'d> Walker<'d> {
         outer_local_writes(block, &|name| self.is_bound(name))
     }
 
+    /// The first write of `block` that makes it a state-carrying block when it
+    /// escapes (ADR 0133): a captured local, else a `self.field` assignment
+    /// (an instance field, or a class variable in a class method, BT-3922),
+    /// named `self.field`.
+    fn escape_write_of(&self, block: &Block) -> Option<OuterLocalWrite> {
+        self.writes_of(block).into_iter().next().or_else(|| {
+            // A module-level expression has no `self`: "self can only be used
+            // inside a method body" is already the error there.
+            if self.context == Repl {
+                return None;
+            }
+            // Where "Cannot assign to slot" fires (a `Value` subclass, not a
+            // `TestCase`; `rejects_slot_assignment`, the validator's own
+            // predicate) that error already covers the write, with the right
+            // fix. A `TestCase` or plain `Object` subclass has no such error,
+            // so the write would be dropped silently.
+            if self.context == ValueType
+                && self
+                    .receivers
+                    .as_ref()
+                    .is_some_and(|r| r.hierarchy.rejects_slot_assignment(&r.class_name))
+            {
+                return None;
+            }
+            outer_state_writes(block).into_iter().next()
+        })
+    }
+
     fn body(&mut self, body: &[ExpressionStatement]) {
         self.last_statements.push(false);
         for (i, stmt) in body.iter().enumerate() {
@@ -1686,7 +1714,7 @@ impl<'d> Walker<'d> {
             self.report_escaping_literal(block, shape);
         }
         if self.value_operands.contains(&block.span) {
-            if let Some(write) = self.writes_of(block).into_iter().next() {
+            if let Some(write) = self.escape_write_of(block) {
                 self.value_block_writes.insert(block.span, write);
             }
         }
@@ -1971,7 +1999,7 @@ impl<'d> Walker<'d> {
                 .value_block_writes
                 .get(&block.span)
                 .cloned()
-                .or_else(|| self.writes_of(block).into_iter().next());
+                .or_else(|| self.escape_write_of(block));
             if let Some(write) = write {
                 self.report_escape(block, &write, &Escape::Stored(name.clone()), None);
             }
@@ -2090,6 +2118,19 @@ impl<'d> Walker<'d> {
         };
         let is_lookup = construct.family == LocalThreadingFamily::Lookup;
         let writes = construct_outer_local_writes(&construct, &|name| self.is_bound(name));
+        // BT-3922: in a class method, a lookup handler that writes object
+        // state (a class variable) and no outer local writes it in place
+        // (ADR 0130), so the §6 check must not take it for an escaping block
+        // (`lookup_field_write_test.bt` proves the write survives). In an
+        // actor or value-type method codegen runs the handler as a closure and
+        // the field write is dropped, so it stays an escape.
+        let state_only_lookup = is_lookup
+            && self.context == Class
+            && writes.is_empty()
+            && construct
+                .blocks
+                .iter()
+                .any(|block| !outer_state_writes(block).is_empty());
         let selector = construct.selector;
         // BT-3841: a keyed iteration on a statically non-`Dictionary` receiver
         // keeps the permanent §6 error whether its block writes an outer local
@@ -2119,6 +2160,9 @@ impl<'d> Walker<'d> {
             return;
         }
         let Some(first) = writes.first().cloned() else {
+            if state_only_lookup && !self.receiver_is_not_dictionary(expr) {
+                self.lookup_producers.insert(expr.unwrap_parens().span());
+            }
             return;
         };
         // ADR 0131 Phase 2d (BT-3798 review): a lookup whose receiver is
@@ -2705,7 +2749,7 @@ impl<'d> Walker<'d> {
 
     /// Reports `block` as escaping (`escape`) if it assigns a captured local.
     fn report_literal(&mut self, block: &Block, escape: &Escape) {
-        let Some(write) = self.writes_of(block).into_iter().next() else {
+        let Some(write) = self.escape_write_of(block) else {
             return;
         };
         self.report_escape(block, &write, escape, None);
@@ -2725,7 +2769,23 @@ impl<'d> Walker<'d> {
         if !self.reported_blocks.insert(block.span) {
             return;
         }
-        let name = &write.name;
+        // A `self.field` write (BT-3922) is named as written and has its own
+        // fix: the field is object state, which a block that has left this
+        // scope cannot hand back.
+        let name: &EcoString = &match write.kind {
+            WriteKind::Local => write.name.clone(),
+            WriteKind::ObjectState => format!("self.{}", write.name).into(),
+        };
+        let hint = hint.or_else(|| {
+            (write.kind == WriteKind::ObjectState).then(|| {
+                format!(
+                    "`{name}` is object state: once the block has left this scope no later call \
+                     of it can hand the write back. Return the new value from the block and \
+                     assign it where the block is called (`{name} := f value`), or move the \
+                     write into a method that runs it directly"
+                )
+            })
+        });
         let diagnostic = Diagnostic::error(
             format!(
                 "`{name}` is assigned in a block {}",
@@ -2796,7 +2856,14 @@ impl<'d> Walker<'d> {
         }
         let escape = match shape {
             EscapeShape::StoredLocal => return,
-            EscapeShape::StoredClassVar if self.context != Class => return,
+            // A literal that assigns a captured local is the block analyzer's
+            // (BT-2809); one that only assigns `self.field` (BT-3922) is
+            // reported here.
+            EscapeShape::StoredClassVar
+                if self.context != Class && !self.writes_of(block).is_empty() =>
+            {
+                return;
+            }
             EscapeShape::StoredClassVar => Escape::StoredState,
             EscapeShape::Returned => Escape::Returned,
             EscapeShape::StoredInLiteral => Escape::InLiteral,
