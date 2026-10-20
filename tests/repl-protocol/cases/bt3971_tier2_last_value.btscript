@@ -1,0 +1,15 @@
+// BT-3971: a Tier 2 block body ending in `[...] value` that assigns a local
+// answered the raw `{Value, State}` tuple in an Erlang FFI argument block
+// (a compile error now, BT-3947 parks the right answer). This pins the REPL
+// host: the root evaluated block answers 3, the FFI block is the same
+// compile error as in a method (the assigned form is already a loud
+// BT-3743 error there).
+
+t := 0
+// => 0
+
+[n := 3. n] value
+// => 3
+
+(Erlang lists) map: [:x | t := t + 1. [n := 3. n] value] with: #(1)
+// => ERROR: BT-3971

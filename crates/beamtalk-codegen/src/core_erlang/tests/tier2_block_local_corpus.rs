@@ -189,3 +189,81 @@ fn a_construct_that_rebinds_a_captured_local_is_not_this_error() {
 ";
     compile(src).expect("a captured-mutated local rebound in a loop compiles");
 }
+
+/// BT-3971: last statements that are an evaluated block literal assigning a
+/// local, in every form that answered the raw `{Value, State}` tuple on a BEAM.
+const LAST_STATEMENT_BLOCK_VALUES: &[&str] = &[
+    "[n := 3. n] value",
+    "^[n := 3. n] value",
+    "([n := 3. n] value)",
+    "[:k | n := k. n] value: 5",
+    "[[n := 3. n] value] value",
+    "[c := c + 1] value",
+    "{a, b} := [n := 3. #(n, 4)] value",
+];
+
+/// The FFI argument block, the source-reachable Tier 2 host.
+fn ffi_host(body: &str) -> String {
+    format!(
+        "Actor subclass: G
+  state: hits = 0
+  ffi =>
+    c := 0
+    (Erlang lists)
+      map: [:x |
+        c := c + 1
+        {body}
+      ]
+      with: #(1)
+"
+    )
+}
+
+// PIN-BUG BT-3947: the correct answer (`#(3)`) is parked with BT-3947's frame
+// work; until then these are compile errors, not `#({3, State})`.
+#[test]
+fn a_tier_2_body_ending_in_an_evaluated_block_that_assigns_is_an_error() {
+    let mut checked = 0;
+    for last in LAST_STATEMENT_BLOCK_VALUES {
+        for body in [(*last).to_string(), format!("self note: c. {last}")] {
+            let mut srcs = hosts(&body).to_vec();
+            srcs.push(ffi_host(&body));
+            for src in srcs {
+                match compile(&src) {
+                    Ok(_) => panic!("answers the raw {{Value, State}} tuple silently:\n{src}"),
+                    Err(e) => {
+                        assert!(e.contains("BT-3971"), "{e}\n{src}");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(checked, LAST_STATEMENT_BLOCK_VALUES.len() * 2 * 3);
+}
+
+/// Shapes measured right on a BEAM (or that never reach the tuple): not this
+/// error.
+const LAST_STATEMENT_OK: &[&str] = &[
+    // A plain assignment of the value answers it.
+    "r := [n := 3. n] value",
+    "[3] value",
+    "[c] value",
+    "[:k | k] value: 5",
+    // Not the last statement.
+    "[n := 3. n] value. 7",
+    "r := [n := 3. n] value. r",
+    // An arm of the last statement is its own frame.
+    "flag ifTrue: [[n := 3. n] value] ifFalse: [0]",
+];
+
+#[test]
+fn a_tier_2_body_whose_last_statement_is_not_an_assigning_block_value_compiles() {
+    for body in LAST_STATEMENT_OK {
+        let mut srcs = hosts(body).to_vec();
+        srcs.push(ffi_host(body));
+        for src in srcs {
+            compile(&src).unwrap_or_else(|e| panic!("{e}\n{src}"));
+        }
+    }
+}
