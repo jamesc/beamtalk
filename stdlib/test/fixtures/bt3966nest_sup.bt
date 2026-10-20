@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3966: one actor child declared `withId:` (so `terminate:` must resolve
+// its id by class) and a nested DynamicSupervisor child.
+
+Supervisor subclass: Bt3966NestSup
+
+  childSpecs =>
+    #((Bt3966Worker supervisionSpec withId: #solo withRestart: #permanent), (Bt3966WorkerPool supervisionSpec withId: #pool))

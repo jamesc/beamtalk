@@ -11,7 +11,10 @@ Unit tests for beamtalk_supervisor runtime helper.
 Tests cover:
 - is_supervisor/1 ancestry check via ETS hierarchy
 - current/1 — running and not-running supervisor lookup
-- whichChildren/1 child id extraction, multiple children
+- whichChildren/1 live child objects in declaration order (BT-3966)
+- childInfos/1, childWithId/2, terminateChildId/2, restartChild/2,
+  deleteChild/2, dynamicChildren/1, SupervisorChild mapping, ambiguous
+  which:/terminate: (BT-3966)
 - whichChild/2 — found and not-found child lookup
 - countChildren/1 active count, multiple children, dynamic supervisor
 - stop/1 returns nil, kills supervisor process
@@ -199,6 +202,38 @@ start_anon_supervisor_with_workers(ChildIds) ->
     ),
     Pid.
 
+%% BT-3966: an anonymous supervisor whose workers are declared as
+%% `{Id, Restart, Modules}`. Returns `{SupPid, WorkerPids}`, the worker pids
+%% in declaration order.
+start_anon_supervisor_with_specs(Specs) ->
+    Self = self(),
+    ChildSpecs = [
+        #{
+            id => Id,
+            start => {?MODULE, start_worker, [Self]},
+            restart => Restart,
+            shutdown => brutal_kill,
+            type => worker,
+            modules => Mods
+        }
+     || {Id, Restart, Mods} <- Specs
+    ],
+    SupFlags = #{strategy => one_for_one, intensity => 5, period => 5},
+    {ok, Pid} = supervisor:start_link(?MODULE, {SupFlags, ChildSpecs}),
+    %% Drain the readiness messages; their arrival order is NOT start order
+    %% (each comes from a different worker process), so the pids are looked
+    %% up by id.
+    [
+        receive
+            {worker_ready, _} -> ok
+        after 1000 -> error(worker_not_ready)
+        end
+     || _ <- Specs
+    ],
+    Children = supervisor:which_children(Pid),
+    Workers = [element(2, lists:keyfind(Id, 1, Children)) || {Id, _, _} <- Specs],
+    {Pid, Workers}.
+
 %% Start a named OTP supervisor (registers under the given atom).
 start_named_supervisor(Name) ->
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
@@ -345,26 +380,278 @@ which_children_empty_test() ->
     end.
 
 which_children_running_child_test() ->
-    %% whichChildren/1 returns {ok, [Id]} on single running child.
-    SupPid = start_anon_supervisor_with_worker(worker_id),
+    %% BT-3966: whichChildren/1 returns the live children, not their ids. A
+    %% child whose module is not a Beamtalk class comes back as its pid.
+    {SupPid, [W]} = start_anon_supervisor_with_specs([{worker_id, temporary, []}]),
     try
         Self = make_supervisor_tuple('TestSup2', test_module2, SupPid),
-        Result = beamtalk_supervisor:whichChildren(Self),
-        ?assertEqual({ok, [worker_id]}, Result)
+        ?assertEqual({ok, [W]}, beamtalk_supervisor:whichChildren(Self))
     after
         gen_server:stop(SupPid)
     end.
 
 which_children_multiple_children_test() ->
-    %% whichChildren returns {ok, [Id]} with all child ids.
-    SupPid = start_anon_supervisor_with_workers([child_a, child_b, child_c]),
+    %% BT-3966: declaration order (OTP lists children newest first), and a
+    %% terminated child is left out.
+    {SupPid, [A, _B, C]} = start_anon_supervisor_with_specs([
+        {child_a, permanent, []}, {child_b, permanent, []}, {child_c, permanent, []}
+    ]),
     try
         Self = make_supervisor_tuple('TestSupMulti', test_mod_multi, SupPid),
-        {ok, Ids} = beamtalk_supervisor:whichChildren(Self),
-        ?assertEqual(3, length(Ids)),
-        ?assert(lists:member(child_a, Ids)),
-        ?assert(lists:member(child_b, Ids)),
-        ?assert(lists:member(child_c, Ids))
+        {ok, [A, B, C]} = beamtalk_supervisor:whichChildren(Self),
+        ?assert(is_pid(B)),
+        ok = supervisor:terminate_child(SupPid, child_b),
+        ?assertEqual({ok, [A, C]}, beamtalk_supervisor:whichChildren(Self))
+    after
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% Tests: BT-3966 child introspection and control by id
+%%====================================================================
+
+supervisor_child_entry_running_test() ->
+    Pid = self(),
+    ?assertEqual(
+        #{
+            '$beamtalk_class' => 'SupervisorChild',
+            id => a1,
+            child => Pid,
+            status => running,
+            type => worker,
+            childClass => nil
+        },
+        beamtalk_supervisor:supervisor_child_entry({a1, Pid, worker, [no_such_mod]}, #{})
+    ).
+
+supervisor_child_entry_restarting_test() ->
+    %% ADR 0092 §3 precedent: a child mid-restart never raises; child is nil.
+    ?assertMatch(
+        #{id := a2, child := nil, status := restarting, type := supervisor},
+        beamtalk_supervisor:supervisor_child_entry({a2, restarting, supervisor, [m]}, #{})
+    ).
+
+supervisor_child_entry_undefined_is_stopped_test() ->
+    ?assertMatch(
+        #{id := 3, child := nil, status := stopped, childClass := nil},
+        beamtalk_supervisor:supervisor_child_entry({3, undefined, worker, []}, #{})
+    ).
+
+supervisor_child_entries_reverses_to_declaration_order_test() ->
+    Entries = beamtalk_supervisor:supervisor_child_entries([
+        {c, undefined, worker, []}, {b, restarting, worker, []}, {a, undefined, worker, []}
+    ]),
+    ?assertEqual([a, b, c], [Id || #{id := Id} <- Entries]).
+
+child_infos_lists_every_spec_test() ->
+    {SupPid, [A, _B]} = start_anon_supervisor_with_specs([
+        {a1, permanent, []}, {a2, permanent, []}
+    ]),
+    try
+        Self = make_supervisor_tuple('BT3966Infos', bt3966_infos_mod, SupPid),
+        ok = supervisor:terminate_child(SupPid, a2),
+        {ok, [I1, I2]} = beamtalk_supervisor:childInfos(Self),
+        ?assertMatch(#{id := a1, status := running}, I1),
+        ?assertEqual(A, maps:get(child, I1)),
+        ?assertMatch(#{id := a2, status := stopped, child := nil}, I2)
+    after
+        gen_server:stop(SupPid)
+    end.
+
+child_with_id_test() ->
+    {SupPid, [A, _B]} = start_anon_supervisor_with_specs([
+        {a1, permanent, []}, {a2, permanent, []}
+    ]),
+    try
+        Self = make_supervisor_tuple('BT3966WithId', bt3966_with_id_mod, SupPid),
+        ?assertEqual({ok, A}, beamtalk_supervisor:childWithId(Self, a1)),
+        ok = supervisor:terminate_child(SupPid, a2),
+        ?assertEqual({ok, nil}, beamtalk_supervisor:childWithId(Self, a2)),
+        {error, E} = beamtalk_supervisor:childWithId(Self, nope),
+        ?assertEqual(child_not_found, E#beamtalk_error.kind),
+        ?assertEqual('childWithId:', E#beamtalk_error.selector),
+        ?assertEqual(#{id => nope}, E#beamtalk_error.details)
+    after
+        gen_server:stop(SupPid)
+    end.
+
+child_id_type_error_test() ->
+    SupPid = start_anon_supervisor(),
+    try
+        Self = make_supervisor_tuple('BT3966TypeErr', bt3966_type_err_mod, SupPid),
+        lists:foreach(
+            fun(F) ->
+                ?assertMatch({error, #beamtalk_error{kind = type_error}}, F(<<"a1">>))
+            end,
+            [
+                fun(Id) -> beamtalk_supervisor:childWithId(Self, Id) end,
+                fun(Id) -> beamtalk_supervisor:terminateChildId(Self, Id) end,
+                fun(Id) -> beamtalk_supervisor:restartChild(Self, Id) end,
+                fun(Id) -> beamtalk_supervisor:deleteChild(Self, Id) end
+            ]
+        )
+    after
+        gen_server:stop(SupPid)
+    end.
+
+terminate_restart_delete_by_id_test() ->
+    {SupPid, [_A, B]} = start_anon_supervisor_with_specs([
+        {a1, permanent, []}, {a2, permanent, []}
+    ]),
+    try
+        Self = make_supervisor_tuple('BT3966Ctl', bt3966_ctl_mod, SupPid),
+        %% running -> child_running for restart and delete
+        {error, R0} = beamtalk_supervisor:restartChild(Self, a2),
+        ?assertEqual(child_running, R0#beamtalk_error.kind),
+        ?assertEqual(#{id => a2, status => running}, R0#beamtalk_error.details),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = child_running}},
+            beamtalk_supervisor:deleteChild(Self, a2)
+        ),
+        %% terminate, idempotently
+        ?assertEqual({ok, nil}, beamtalk_supervisor:terminateChildId(Self, a2)),
+        ?assertEqual(false, is_process_alive(B)),
+        ?assertEqual({ok, nil}, beamtalk_supervisor:terminateChildId(Self, a2)),
+        ?assertEqual({ok, nil}, beamtalk_supervisor:terminateChildId(Self, nope)),
+        %% restart gives a new child
+        {ok, B2} = beamtalk_supervisor:restartChild(Self, a2),
+        ?assert(is_pid(B2)),
+        ?assertNotEqual(B, B2),
+        receive
+            {worker_ready, B2} -> ok
+        after 1000 -> error(worker_not_ready)
+        end,
+        %% delete after terminate
+        {ok, nil} = beamtalk_supervisor:terminateChildId(Self, a2),
+        ?assertEqual({ok, nil}, beamtalk_supervisor:deleteChild(Self, a2)),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = child_not_found, details = #{id := a2}}},
+            beamtalk_supervisor:restartChild(Self, a2)
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = child_not_found}},
+            beamtalk_supervisor:deleteChild(Self, a2)
+        )
+    after
+        gen_server:stop(SupPid)
+    end.
+
+by_id_stale_handle_test() ->
+    SupPid = start_anon_supervisor(),
+    gen_server:stop(SupPid),
+    Self = make_supervisor_tuple('BT3966Stale', bt3966_stale_mod, SupPid),
+    lists:foreach(
+        fun(R) -> ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, R) end,
+        [
+            beamtalk_supervisor:childInfos(Self),
+            beamtalk_supervisor:whichChildren(Self),
+            beamtalk_supervisor:childWithId(Self, a1),
+            beamtalk_supervisor:terminateChildId(Self, a1),
+            beamtalk_supervisor:restartChild(Self, a1),
+            beamtalk_supervisor:deleteChild(Self, a1),
+            beamtalk_supervisor:dynamicChildren(Self)
+        ]
+    ).
+
+which_and_terminate_by_class_ambiguous_test() ->
+    %% Several children share the class's module: which:/terminate: refuse.
+    {SupPid, _} = start_anon_supervisor_with_specs([
+        {a1, permanent, [bt3966_amb_mod]}, {a2, permanent, [bt3966_amb_mod]}
+    ]),
+    try
+        Self = make_supervisor_tuple('BT3966Amb', bt3966_amb_sup_mod, SupPid),
+        ClassArg = {beamtalk_object, 'Amb class', bt3966_amb_mod, self()},
+        {error, E} = beamtalk_supervisor:whichChild(Self, ClassArg),
+        ?assertEqual(ambiguous_child, E#beamtalk_error.kind),
+        ?assertEqual(#{ids => [a1, a2]}, E#beamtalk_error.details),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = ambiguous_child, selector = 'terminate:'}},
+            beamtalk_supervisor:terminateChild(Self, ClassArg)
+        ),
+        ?assertEqual({ok, 2}, beamtalk_supervisor:countChildren(Self))
+    after
+        gen_server:stop(SupPid)
+    end.
+
+declaration_order_survives_one_for_all_restart_test() ->
+    %% The reversal in supervisor_child_entries/1 relies on OTP keeping its
+    %% newest-first child list; a one_for_all / rest_for_one restart rebuilds
+    %% that list, so pin that the order still comes out as declared.
+    Self = self(),
+    lists:foreach(
+        fun(Strategy) ->
+            ChildSpecs = [
+                #{
+                    id => Id,
+                    start => {?MODULE, start_worker, [Self]},
+                    restart => permanent,
+                    shutdown => brutal_kill,
+                    type => worker,
+                    modules => []
+                }
+             || Id <- [o1, o2, o3]
+            ],
+            SupFlags = #{strategy => Strategy, intensity => 5, period => 5},
+            {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, ChildSpecs}),
+            [
+                receive
+                    {worker_ready, _} -> ok
+                after 1000 -> error(worker_not_ready)
+                end
+             || _ <- ChildSpecs
+            ],
+            {o2, W2, _, _} = lists:keyfind(o2, 1, supervisor:which_children(SupPid)),
+            try
+                Sup = make_supervisor_tuple('BT3966Order', bt3966_order_mod, SupPid),
+                exit(W2, kill),
+                %% one_for_all restarts all three, rest_for_one o2 and o3.
+                NRestarted =
+                    case Strategy of
+                        one_for_all -> 3;
+                        rest_for_one -> 2
+                    end,
+                [
+                    receive
+                        {worker_ready, _} -> ok
+                    after 1000 -> error(worker_not_restarted)
+                    end
+                 || _ <- lists:seq(1, NRestarted)
+                ],
+                {ok, Infos} = beamtalk_supervisor:childInfos(Sup),
+                ?assertEqual([o1, o2, o3], [Id || #{id := Id} <- Infos]),
+                {ok, Kids} = beamtalk_supervisor:whichChildren(Sup),
+                ?assertEqual(
+                    [P || {_, P, _, _} <- lists:reverse(supervisor:which_children(SupPid))],
+                    Kids
+                )
+            after
+                unlink(SupPid),
+                gen_server:stop(SupPid)
+            end
+        end,
+        [one_for_all, rest_for_one]
+    ).
+
+dynamic_terminate_child_non_child_arg_is_type_error_test() ->
+    %% A Symbol sent to DynamicSupervisor>>terminateChild: used to crash with
+    %% badarg in element/2; it is a type_error Result now.
+    SupPid = start_dynamic_supervisor(),
+    try
+        Self = make_supervisor_tuple('BT3966DynTerm', bt3966_dyn_term_mod, SupPid),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = type_error}},
+            beamtalk_supervisor:terminateChild(Self, a1)
+        )
+    after
+        gen_server:stop(SupPid)
+    end.
+
+dynamic_children_empty_test() ->
+    SupPid = start_dynamic_supervisor(),
+    try
+        Self = make_supervisor_tuple('BT3966Dyn', bt3966_dyn_mod, SupPid),
+        %% Empty: no child class lookup needed.
+        ?assertEqual({ok, []}, beamtalk_supervisor:dynamicChildren(Self))
     after
         gen_server:stop(SupPid)
     end.
@@ -2037,9 +2324,12 @@ nested_supervisor_children_with_integer_ids_restart_independently_test() ->
 %%====================================================================
 
 terminate_child_by_class_test() ->
-    %% terminateChild with a class object arg terminates
-    %% by child id and returns {ok, nil} on success (static path).
-    SupPid = start_anon_supervisor_with_worker(bt1980_class_child),
+    %% terminateChild with a class object arg resolves the child id by module
+    %% (BT-3966), so a child whose id is not the class name (`withId:`) is
+    %% terminated too, and returns {ok, nil} on success (static path).
+    {SupPid, [W]} = start_anon_supervisor_with_specs([
+        {custom_id, temporary, [bt1980_class_child_mod]}
+    ]),
     Self = make_supervisor_tuple('BT1980TermClass', bt1980_term_mod, SupPid),
     %% Build a class object arg whose class_name/1 returns the child id atom.
     FakeClassPid = spawn(fun() ->
@@ -2057,7 +2347,9 @@ terminate_child_by_class_test() ->
         ClassArg =
             {beamtalk_object, 'BT1980ClassChild class', bt1980_class_child_mod, FakeClassPid},
         Result = beamtalk_supervisor:terminateChild(Self, ClassArg),
-        ?assertEqual({ok, nil}, Result)
+        ?assertEqual({ok, nil}, Result),
+        ?assertEqual(false, is_process_alive(W)),
+        ?assertEqual({ok, 0}, beamtalk_supervisor:countChildren(Self))
     after
         FakeClassPid ! stop,
         (try
@@ -2560,36 +2852,40 @@ terminate_child_static_idempotent_double_call_test() ->
     end.
 
 terminate_child_static_terminate_failed_test() ->
-    %% A non-`not_found` error from supervisor:terminate_child/2
-    %% on the static path maps to {error, #beamtalk_error{kind =
-    %% terminate_failed}}.
+    %% A non-`not_found` error from supervisor:terminate_child/2 maps to
+    %% {error, #beamtalk_error{kind = terminate_failed}}.
     %%
-    %% Trigger: call the static path (class object arg) against a
-    %% simple_one_for_one supervisor. OTP returns {error, simple_one_for_one}
-    %% which is a genuine non-not_found failure.
-    SupPid = start_dynamic_supervisor(),
+    %% Trigger: terminate by id on a simple_one_for_one supervisor, whose
+    %% children have no ids: OTP returns {error, simple_one_for_one}. The
+    %% class path no longer reaches this (BT-3966: `undefined` ids never
+    %% match a class), so it finds nothing and leaves the child running.
+    {ok, SupPid} = supervisor:start_link(
+        ?MODULE,
+        {simple_one_for_one, #{
+            id => dynamic_worker,
+            start => {?MODULE, start_worker, []},
+            restart => temporary,
+            shutdown => brutal_kill,
+            type => worker,
+            modules => [bt1998_fail_child_mod]
+        }}
+    ),
+    {ok, Child} = supervisor:start_child(SupPid, [self()]),
+    receive
+        {worker_ready, _} -> ok
+    after 1000 -> error(worker_not_ready)
+    end,
     Self = make_supervisor_tuple('BT1998StaticFail', bt1998_static_fail_mod, SupPid),
-    FakeClassPid = spawn(fun() ->
-        (fun Loop() ->
-            receive
-                {'$gen_call', From, class_name} ->
-                    gen_server:reply(From, some_class_name),
-                    Loop();
-                stop ->
-                    ok
-            end
-        end)()
-    end),
     try
-        ClassArg =
-            {beamtalk_object, 'BT1998StaticFailChild class', bt1998_fail_child_mod, FakeClassPid},
-        Result = beamtalk_supervisor:terminateChild(Self, ClassArg),
+        Result = beamtalk_supervisor:terminateChildId(Self, some_id),
         ?assertMatch({error, #beamtalk_error{kind = terminate_failed}}, Result),
         {error, BtError} = Result,
         ?assertEqual('BT1998StaticFail', BtError#beamtalk_error.class),
-        ?assertEqual('terminateChild:', BtError#beamtalk_error.selector)
+        ?assertEqual('terminateChild:', BtError#beamtalk_error.selector),
+        ClassArg = {beamtalk_object, 'BT1998StaticFailChild class', bt1998_fail_child_mod, self()},
+        ?assertEqual({ok, nil}, beamtalk_supervisor:terminateChild(Self, ClassArg)),
+        ?assert(is_process_alive(Child))
     after
-        FakeClassPid ! stop,
         gen_server:stop(SupPid)
     end.
 
