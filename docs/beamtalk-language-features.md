@@ -3538,10 +3538,11 @@ Supervisor subclass: WebApp
       (MetricsCollector supervisionSpec withId: #metrics withArgs: #{#port => 9090}))
 ```
 
-Use `withShutdown:` to set a graceful shutdown timeout (in milliseconds) for children that need time to drain connections or flush state. The default is 5000ms for workers and `infinity` for nested supervisors.
+Use `withShutdown:` to set how long a child gets to stop when its supervisor shuts it down — for children that need time to drain connections or flush state. The value is a `ShutdownTimeout`: an Integer (milliseconds, at most 4294967295), `#infinity` (wait as long as it takes) or `#brutalKill` (kill at once; `terminate:` does not run). The default is 5000ms for workers and `#infinity` for nested supervisors. On shutdown the supervisor sends the child `exit(Pid, shutdown)`; a child that has not exited within the timeout is killed, and `onExit:` observers see the reason `#killed`. Only an actor that overrides `terminate:` traps exits, so only such an actor uses the time — any other actor exits as soon as it is told to. `stop` waits for the shutdown to finish, so a long timeout (or `#infinity`) can block the caller of `stop` that long. Any other value makes `supervise` return `Result error:` with kind `#supervisor_start_failed`.
 
 ```beamtalk
-HttpServer supervisionSpec withShutdown: 30000   // 30s graceful shutdown
+HttpServer supervisionSpec withShutdown: 30000        // 30s graceful shutdown
+SessionCache supervisionSpec withShutdown: #brutalKill // no cleanup needed
 ```
 
 Use `withName:` (and the `withName:withRestart:` / `withName:withArgs:` / `withName:withRestart:withArgs:` combinators) to have the supervisor register the child atomically under a Symbol name on each restart. Named specs emit a `#spawnAs:` / `#spawnWith:as:` startFn so re-registration happens in the same OTP call that starts the process — held `Actor named:` references survive restarts (see [ADR 0079](ADR/0079-named-actor-registration.md) and the Actor Named Registration section below). `name` and `classMethod` cannot be combined on the same spec.
@@ -3606,6 +3607,14 @@ pool startChild isOk               // => true
 ```
 
 The limit is checked by the calling process just before the start, so it is exact when a single process starts children (e.g. one acceptor per pool) — concurrent starters racing past the check can briefly overshoot it by up to the number of racers.
+
+**Graceful child shutdown with `childShutdown`.** Override `class childShutdown` to set how long each child gets to stop when the pool is stopped (by `stop`, or by a parent supervisor) — a pool-wide analogue of the `shutdown:` option Elixir `DynamicSupervisor` takes per child. It takes the same `ShutdownTimeout` values as `SupervisionSpec withShutdown:` (an Integer in milliseconds, `#infinity` or `#brutalKill`). The default, `nil`, keeps the child class's own `supervisionSpec` value: 5000ms (the OTP default) for an actor, or `#infinity` for a supervisor. A child that overrides `terminate:` gets the full time to finish; one that overruns is killed (`onExit:` reason `#killed`). All children are told to stop at once and share one deadline. Keep `#infinity` for a supervisor child class: a finite value can kill it while it is still stopping its own children (the runtime logs a warning). The value applies to every child of the pool — OTP's `simple_one_for_one` keeps a single child spec for all dynamic children, so there is no per-`startChild:` override; use a separate pool class for children that need a different timeout. An invalid value makes `supervise` return `Result error:` with kind `#supervisor_start_failed`.
+
+```beamtalk
+DynamicSupervisor(Connection) subclass: ConnectionPool
+  class childClass => Connection
+  class childShutdown -> Integer => 15000   // let in-flight requests finish
+```
 
 **Automatic restart replays per-child args.** OTP tracks the exact args each dynamically-started child was started with. A child started via `startChild: args` that later crashes under a `#permanent` or `#transient` restart policy comes back with those same args, not blank defaults. A child started via the no-arg `startChild` restarts the same way. Restart re-runs `init/1` from scratch — it does not resume the child's prior runtime state.
 
@@ -3733,7 +3742,8 @@ See [ADR 0080](ADR/0080-supervisor-lifecycle-result.md) §Migration Path for the
 | `count` | `supervisor:count_children/1` (active count) |
 | `children` | `supervisor:which_children/1` (running child ids) |
 | `which: Class` | find child by module in `which_children` result |
-| `withShutdown:` | `shutdown` field in child spec (default 5000ms workers, infinity supervisors) |
+| `withShutdown:` | `shutdown` field in child spec (default 5000ms workers, infinity supervisors; `#brutalKill` → `brutal_kill`) |
+| `class childShutdown` | `shutdown` field of the `simple_one_for_one` child spec |
 | `stop` | `gen_server:stop/1` |
 
 ### Actor Named Registration (ADR 0079)
