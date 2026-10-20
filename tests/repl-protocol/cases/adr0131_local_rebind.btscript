@@ -276,12 +276,13 @@ r := 4 =:= 5 ifTrue: [2] ifFalse: [t := t + 1. 1]
 t
 // => 1
 
-// s6: an Erlang FFI argument: lossy by design (ADR 0041 §Erlang Interop
-// Boundary), so the write is dropped and `t` stays 0.
+// s6: an Erlang FFI argument: a block that assigns a captured local is a
+// compile error (ADR 0133, BT-3917); a block that only reads `t` is fine and
+// `t` stays 0.
 t := 0
 // => 0
 
-r := (Erlang lists) map: [:x | t := t + 1. x] with: #(1)
+r := (Erlang lists) map: [:x | x + t] with: #(1)
 // => [1]
 
 t
