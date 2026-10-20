@@ -1299,7 +1299,7 @@ impl CoreErlangGenerator {
         later.iter().any(|sibling| {
             self.subexpr_needs_prelude(sibling)
                 && self
-                    .reachable_threaded_locals(sibling)
+                    .reachable_threaded_locals(sibling, &[])
                     .iter()
                     .any(|n| *n == id.name.as_str())
         })

@@ -257,10 +257,10 @@ Actor subclass: SelfSendHomFoldPool
         7
       ]
 
-  // A promoted block that rebinds a block-local inside an inner loop
-  // (BT-3939): `tallyGroups` promotes `fwdGroupsCollect:`'s position.
-  weight: y => y * 10
-
+  // `tallyGroups` promotes `fwdGroupsCollect:`'s position. A promoted block
+  // that rebinds a block-local inside an inner loop is a compile error
+  // (BT-3939, PIN-BUG BT-3947: correct answer #(30, 30)); its repro lives in
+  // the codegen tests (`tier2_block_local_inner_loop.rs`).
   sealed fwdGroupsCollect: block => self.groups collect: block
 
   tallyGroups =>
@@ -268,14 +268,6 @@ Actor subclass: SelfSendHomFoldPool
       fwdGroupsCollect: [:xs |
         self.total := self.total + 1
         xs
-      ]
-
-  groupWeights =>
-    self
-      fwdGroupsCollect: [:xs |
-        n := 0
-        xs do: [:y | n := n + (self weight: y)]
-        n
       ]
 
   // A Tier 1 block of one argument too many for its position (an `ifNone:`

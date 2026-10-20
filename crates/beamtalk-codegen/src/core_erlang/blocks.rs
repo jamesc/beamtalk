@@ -339,7 +339,7 @@ impl CoreErlangGenerator {
             }
 
             // Generate body expressions with state threading
-            this.generate_block_stateful_body(block, frame, &mut stmts)?;
+            this.generate_block_stateful_body(block, frame, captured_vars, &mut stmts)?;
             let branch_final = this.state_version();
             Ok::<_, crate::core_erlang::CodeGenError>(this.verify_and_render_branch_arm(
                 stmts,
@@ -529,6 +529,73 @@ impl CoreErlangGenerator {
         Ok((wrapper_doc, true))
     }
 
+    /// BT-3939 (PIN-BUG, fixed by BT-3947's frame work): a Tier 2 block body
+    /// lowers a loop or fold inside an opaque `let _ = ( ... )`, so the loop's
+    /// rebind of a local the body bound (`n := 0. xs do: [:y | n := n + y]. n`)
+    /// is scoped inside that statement: the block would answer the value, and
+    /// the state, from before the loop, silently. Until the body is a frame
+    /// that lowers the loop as a producer, that shape is a compile error.
+    ///
+    /// The rule is semantic, not syntactic: any name a construct reachable from
+    /// `stmt` without crossing a closure (`reachable_threaded_locals`, the
+    /// recognizer `threaded_locals_of` and the Phase 0 check share, so a loop
+    /// nested in an operand, a conditional arm or a `[...] value` block is
+    /// seen) threads, that this body itself bound (`bound_since`: assigned,
+    /// destructured, however first bound) and that is neither a block parameter
+    /// nor a captured-mutated variable the caller seeds into `StateAcc`. A name
+    /// assigned elsewhere in the same statement, even after the construct, also
+    /// counts (conservative: see `names_assigned_outside_nested_blocks`).
+    /// `scope_depth` is the variable-scope depth at the body's entry.
+    fn reject_loop_rebind_of_body_local(
+        &self,
+        stmt: &Expression,
+        block: &Block,
+        captured_vars: &[String],
+        scope_depth: usize,
+    ) -> Result<()> {
+        // An assignment's, destructuring's or `^`'s own write is not a
+        // construct's: look at the value it holds.
+        let subject = match stmt {
+            Expression::Assignment { value, .. }
+            | Expression::DestructureAssignment { value, .. }
+            | Expression::Return { value, .. } => value.as_ref(),
+            other => other,
+        };
+        let is_param = |n: &str| block.parameters.iter().any(|p| p.name == n);
+        // A local assigned by this same statement before the construct runs
+        // (`r := (n := 0) + (xs inject: 0 into: [... n := n + y ...])`, an
+        // earlier keyword argument or cascade message) is not in scope yet
+        // when the statement is lowered, so the scope sees neither the local
+        // nor the construct's write to it. Conservatively, every name assigned
+        // anywhere in the statement outside a closure counts as bound by the
+        // body (an assignment *after* the construct too).
+        let assigned: Vec<String> =
+            beamtalk_core::semantic_analysis::block_facts::names_assigned_outside_nested_blocks(
+                subject,
+            )
+            .into_iter()
+            .map(|n| n.to_string())
+            .collect();
+        let names = self.reachable_threaded_locals(subject, &assigned);
+        let Some(local) = names.into_iter().find(|n| {
+            (self.bound_since(n, scope_depth) || assigned.contains(n))
+                && !is_param(n)
+                && !captured_vars.iter().any(|c| c == n)
+        }) else {
+            return Ok(());
+        };
+        Err(CodeGenError::UnsupportedFeature {
+            feature: format!(
+                "a Tier 2 block assigns local `{local}` and rebinds it inside a loop, fold or \
+                 other construct; the block would answer the value, and the state, from \
+                 before it (BT-3939, until BT-3947). An assignment to it elsewhere in the same \
+                 statement counts too. Compute it in a method of its own and call that \
+                 from the block"
+            ),
+            span: Some(subject.span()),
+        })
+    }
+
     /// Generates the body of a Tier 2 stateful block with state threading.
     ///
     /// ADR 0111 close-out (the last real production
@@ -552,13 +619,16 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
         frame: threaded_ir::FrameId,
+        captured_vars: &[String],
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
         let filtered_body = super::util::collect_body_exprs(&block.body);
+        let scope_depth = self.scope_depth();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
+            self.reject_loop_rebind_of_body_local(expr, block, captured_vars, scope_depth)?;
 
             if self.is_field_assignment(expr) {
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
