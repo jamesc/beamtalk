@@ -241,17 +241,9 @@ impl CoreErlangGenerator {
         // When the body is a literal block, mutation analysis is possible
         // (`block_needs_mutation_threading`, checked by the caller before
         // falling through here) — for the pure/no-mutation case handled in
-        // THIS function, wrap it so Erlang receives a plain fun(Args) ->
-        // Result without the StateAcc protocol.
+        // THIS function, generate it as the plain Tier 1 fun(Args) -> Result.
         let body_code = if let Some(block) = Self::extract_block_literal(body) {
-            let (wrapped_doc, is_stateful) = self.generate_erlang_interop_wrapper(block)?;
-            if is_stateful {
-                self.warn_stateful_block_at_erlang_boundary(
-                    &format!("'lists':'{operation}'"),
-                    block.span,
-                );
-            }
-            wrapped_doc
+            self.generate_erlang_interop_block(block)?
         } else {
             // Non-literal (opaque) callable: the shared lowering
             // (`non_literal_callable_doc`), in every context.
@@ -340,9 +332,9 @@ impl CoreErlangGenerator {
     /// is no `State`: its seed is a fresh empty map and the returned map is
     /// dropped. In an actor instance method a Tier 2 block here is one
     /// `detect_tier2_self_send` promoted for a self-send to the current
-    /// method: because it writes a field (BT-1140, which BT-3922 makes a
-    /// compile error) or as a passthrough at a position another call site
-    /// promoted (BT-3936). Its seed is the live `State`, so it reads fields
+    /// method: as a passthrough at a position another call site promoted
+    /// (BT-3936). (A block that writes a field is no longer promoted:
+    /// BT-3922 makes passing one to a self-send a compile error.) Its seed is the live `State`, so it reads fields
     /// and may `^`; a block whose run changed actor state (a field write, or
     /// a self-send that changed state) returns a different map, and with the
     /// fold gone that change has no way back, so it raises
