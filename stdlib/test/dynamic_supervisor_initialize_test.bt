@@ -1,17 +1,28 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-1542: Tests for DynamicSupervisor initialize: class-side default.
+// BT-1542: Tests for the DynamicSupervisor `initialize` hook (instance-side
+// since ADR 0135 §1; it was `class initialize: sup`).
 //
-// Lifecycle tests (supervise → initialize: → startChild) are in
-// tests/repl-protocol/cases/supervisor_initialize.btscript because they
-// require live OTP processes.
+// Lifecycle tests (supervise → initialize → startChild) are also in
+// tests/repl-protocol/cases/supervisor_initialize.btscript.
 
 TestCase subclass: DynamicSupervisorInitializeTest
 
-  // initialize: default is nil (no-op)
-  testDynamicSupervisorInitializeDefaultIsNil =>
-    self assert: (DynamicSupervisor initialize: nil) equals: nil
+  class serial -> Boolean => true
+
+  tearDown =>
+    pool := DynSupWithInitialize current
+    pool isNil ifFalse: [[pool stop] on: Error do: [:e | nil]]
+
+  // The hook runs once per top-level start, with `self` the new pool, and can
+  // message it (`self startChild`).
+  testInitializePrepopulatesChildren =>
+    pool := DynSupWithInitialize supervise unwrap
+    self assert: pool count equals: 2
+    // `supervise` again answers the running pool without re-running the hook
+    again := DynSupWithInitialize supervise unwrap
+    self assert: again count equals: 2
 
   // DynSupWithInitialize inherits isSupervisor from DynamicSupervisor
   testDynSupWithInitializeIsSupervisor =>

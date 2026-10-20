@@ -502,7 +502,7 @@ define_supervisor_class(Tmp, Unique) ->
         iolist_to_binary([
             <<"Supervisor subclass: ">>,
             SupName,
-            <<"\n  class children -> List => #(">>,
+            <<"\n  childSpecs -> List => #(">>,
             CounterName,
             <<")\n">>
         ])

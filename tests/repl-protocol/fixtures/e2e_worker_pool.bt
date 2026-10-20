@@ -6,4 +6,4 @@
 
 DynamicSupervisor(Counter) subclass: E2EWorkerPool
 
-  class childClass -> Class => Counter
+  childClass -> Class => Counter

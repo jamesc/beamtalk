@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3963 (ADR 0135 §2): a DynamicSupervisor of Bt3963ConnPool supervisors.
+// `startChild: args` starts an anonymous Bt3963ConnPool with those start args.
+
+DynamicSupervisor(Bt3963ConnPool) subclass: Bt3963PoolOfPools
+
+  childClass => Bt3963ConnPool

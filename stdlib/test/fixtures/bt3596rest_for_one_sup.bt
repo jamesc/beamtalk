@@ -8,9 +8,9 @@
 
 Supervisor subclass: Bt3596RestForOneSup
 
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #restForOne
+  strategy -> #oneForOne | #oneForAll | #restForOne => #restForOne
 
-  class children -> List =>
+  childSpecs -> List =>
     triggerSpec := Bt3596CascadeTrigger supervisionSpec withRestart: #permanent
     victimSpec := Bt3596CascadeVictim supervisionSpec withRestart: #permanent
     victimSpec := victimSpec withArgs: #{#tableName => #bt3596RestForOne}

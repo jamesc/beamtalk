@@ -81,8 +81,10 @@ pub(crate) use structural_validators::{
 // `beamtalk-language-service` crate, so `pub(crate)` visibility is not
 // reachable.
 pub use structural_validators::{erlang_arity, erlang_function_name};
+pub use supervision_validators::removed_supervisor_config_erlang_header;
 pub(crate) use supervision_validators::{
-    check_children_supervision_policy, check_supervision_policy_override,
+    check_children_supervision_policy, check_class_side_supervisor_config,
+    check_supervision_policy_override,
 };
 pub(crate) use unguarded_late_read_validators::check_unguarded_late_reads_in_lifecycle_hooks;
 pub(crate) use visibility_validators::{

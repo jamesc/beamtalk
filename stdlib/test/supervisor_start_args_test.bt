@@ -1,0 +1,96 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3963 (ADR 0135 §2): supervisor configuration is instance-side and is read
+// from the supervisor being started, inside its own `init`; `self args` is its
+// start args.
+//
+// Fixtures: stdlib/test/fixtures/bt3963*.bt
+
+TestCase subclass: SupervisorStartArgsTest
+
+  // `supervise` registers one node-wide process per class.
+  class serial -> Boolean => true
+
+  tearDown =>
+    #(Bt3963ArgsSup, Bt3963CallsSelfSup, Bt3963PoolOfPools)
+      do: [:cls |
+        sup := cls current
+        sup isNil ifFalse: [[sup stop] on: Error do: [:e | nil]]
+      ]
+
+  // `supervise` starts with nil args: `childSpecs` saw nil (one worker), and
+  // `args` reads nil from outside too.
+  testSuperviseStartsWithNilArgs =>
+    sup := Bt3963ArgsSup supervise unwrap
+    self assert: sup args equals: nil
+    self assert: sup count equals: 1
+    w :: Bt3963Worker := (sup which: Bt3963Worker) unwrap
+    self assert: w ping equals: #pong
+
+  // `args` on a stopped supervisor is a stale handle.
+  testArgsOnStoppedSupervisorRaisesStaleHandle =>
+    sup := Bt3963ArgsSup supervise unwrap
+    sup stop
+    e := [sup args] on: Error do: [:ex | ex]
+    self assert: e kind equals: #stale_handle
+
+  // A configuration method that messages `self` fails the start with the hint.
+  testConfigMessagingSelfFailsStart =>
+    r := Bt3963CallsSelfSup supervise
+    self assert: r isError equals: true
+    self assert: r error kind equals: #supervisor_start_failed
+    self assert: (r error hint includesSubstring: "do not send messages to `self`") equals: true
+    self assert: Bt3963CallsSelfSup current equals: nil
+
+  // Two instances of one DynamicSupervisor class, each configured from its
+  // own start args: child class, maxChildren and childShutdown per instance.
+  testPerInstanceDynamicConfigFromArgs =>
+    outer := Bt3963PoolOfPools supervise unwrap
+    self assert: outer args equals: nil
+    p1 := (outer startChild: #{
+      #handler => Bt3963Worker,
+      #max => 1,
+      #shutdown => 100
+    }) unwrap
+    p2 := (outer startChild: #{
+      #handler => Bt3963Worker,
+      #max => 2,
+      #shutdown => #brutalKill
+    }) unwrap
+    self assert: (p1 args at: #max) equals: 1
+    self assert: p1 maxChildren equals: 1
+    self assert: p2 maxChildren equals: 2
+    self assert: p1 childClass equals: Bt3963Worker
+    self assert: p2 childShutdown equals: #brutalKill
+    w := p1 startChild unwrap
+    self assert: w ping equals: #pong
+    full := p1 startChild
+    self assert: full isError equals: true
+    self assert: full error kind equals: #max_children
+    p2 startChild unwrap
+    self assert: p2 startChild isOk equals: true
+    self assert: p2 count equals: 2
+
+  // Instance-side configuration is inherited through a user supervisor class
+  // and `super` reaches the stdlib default; display keeps the supervisor label.
+  testConfigInheritedThroughUserSupervisorClass =>
+    sup := Bt3963LeafSup supervise unwrap
+    self assert: sup strategy equals: #oneForAll
+    self assert: sup maxRestarts equals: 11
+    self assert: (sup printString startsWith: "Supervisor(Bt3963LeafSup") equals: true
+    sup stop
+
+  // An invalid per-instance value fails that instance's start, once, with
+  // the validator's message.
+  testInvalidPerInstanceValueFailsStart =>
+    outer := Bt3963PoolOfPools supervise unwrap
+    bad := outer startChild: #{
+      #handler => Bt3963Worker,
+      #max => -1,
+      #shutdown => nil
+    }
+    self assert: bad isError equals: true
+    self assert: bad error kind equals: #child_start_failed
+    self assert: (bad error hint includesSubstring: "maxChildren must be a non-negative Integer") equals: true
+    self assert: outer count equals: 0

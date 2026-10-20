@@ -13,6 +13,6 @@
 
 Supervisor subclass: AppSupervisor
 
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
 
-  class children => #(EventLogger, WorkerPool)
+  childSpecs => #(EventLogger, WorkerPool)

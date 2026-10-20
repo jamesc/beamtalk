@@ -1,14 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3407: Test fixtures for classState visibility across class-method
-// calls, specifically under a Supervisor's `class children` (invoked via
-// `beamtalk_supervisor:static_init/2`, which bypasses the class gen_server
-// to avoid the deadlock documented on that function). Before the fix,
-// `static_init` read a hardcoded empty ClassVars map, so a value set via an
-// ordinary class-method call (`configure:`) before `supervise` was invisible
-// inside `class children` — crashing with `{badkey, ...}` even though
-// `classState: cfg = nil` declares a default.
+// BT-3407: Test fixtures for classState visibility during supervisor
+// configuration: a value set via an ordinary class-method call (`configure:`)
+// before the supervisor starts must be visible to its configuration.
+//
+// Since ADR 0135 the configuration is instance-side (`childSpecs`), running
+// inside the supervisor's own `init`, and reads the class variable through a
+// class-side message (`ClassStateSupApp cfg`). That message is served by the
+// class process, which is busy while `ClassStateSupApp supervise` itself runs
+// (until BT-3962 moves `supervise` out of the class process), so the test
+// starts this supervisor nested under ClassStateSupRoot.
 //
 // The worker actor (`ClassStateSupWorker`) lives in its own file,
 // class_state_sup_worker.bt, since a .bt file may only declare one
@@ -17,14 +19,16 @@
 Supervisor subclass: ClassStateSupApp
   classState: cfg = nil
 
-  class strategy -> Symbol => #oneForOne
-
   class configure: aDict =>
     self.cfg := aDict
     nil
 
-  class children -> List =>
-    self.cfg
+  class cfg => self.cfg
+
+  strategy -> Symbol => #oneForOne
+
+  childSpecs -> List =>
+    ClassStateSupApp cfg
       ifNil: [#()]
       ifNotNil: [:c |
         lbl := c at: #label ifAbsent: ["default"]

@@ -8,6 +8,6 @@
 
 Supervisor subclass: E2ENamedSupervisor
 
-  class children -> List =>
+  childSpecs -> List =>
     spec := Counter supervisionSpec withName: #bt1991SupCounter withRestart: #permanent
     #(spec)

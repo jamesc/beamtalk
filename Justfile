@@ -669,6 +669,7 @@ check-generated-builtins: build
         crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs \
         runtime/apps/beamtalk_runtime/include/beamtalk_generated_builtins.hrl \
         runtime/apps/beamtalk_runtime/include/beamtalk_class_vars_keys.hrl \
+        runtime/apps/beamtalk_runtime/include/beamtalk_supervisor_config.hrl \
         > /dev/null 2>&1; then
         echo "❌ generated builtin-class / class-var-key artifacts are out of date — run 'just build-stdlib' and commit"
         exit 1

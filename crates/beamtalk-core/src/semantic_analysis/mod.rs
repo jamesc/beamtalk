@@ -1133,6 +1133,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // ADR 0135 §2: class-side supervisor configuration is a compile error
+    validators::check_class_side_supervisor_config(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
 
     // Native actor validation (ADR 0056)
     validators::check_native_state_fields(module, &result.class_hierarchy, &mut result.diagnostics);

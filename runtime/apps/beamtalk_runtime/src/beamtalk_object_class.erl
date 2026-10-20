@@ -940,6 +940,7 @@ put_class_method(ClassPid, Selector, Fun) ->
 -spec put_class_method(pid(), selector(), fun(), binary()) -> ok.
 put_class_method(ClassPid, Selector, Fun, Source) ->
     ok = validate_class_method_fun_arity(ClassPid, Selector, Fun),
+    ok = beamtalk_supervisor:warn_removed_class_side_config(ClassPid, Selector),
     gen_server:call(ClassPid, {put_class_method, Selector, Fun, Source}).
 
 -doc """

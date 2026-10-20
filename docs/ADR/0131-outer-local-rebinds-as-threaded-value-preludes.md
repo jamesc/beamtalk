@@ -126,7 +126,7 @@ is incomplete even there:
 | s1 | `r := d at: #k ifAbsent: [t := t + 1. 0]` | `#[0, 1]` | `function_clause` crash | crash | crash |
 | s2 | `r := #(1, 2) detect: [:x \| x > 5] ifNone: [t := t + 1. 0]` | `#[0, 1]` | **verifier panic** (`verify.rs`) | unbound `State` | **`#[0, 0]`** |
 | s4 | `b := [t := t + 1]. b value. t` (stored closure) | `1` | `value` via `perform:` raises | raises | pass |
-| s6 | `(Erlang lists) map: [:x \| t := t + 1. x] with: #(1)` | lossy by design | pass (write dropped, ADR 0041 warning) | pass | pass |
+| s6 | `(Erlang lists) map: [:x \| t := t + 1. x] with: #(1)` | lossy by design | pass (write dropped, ADR 0041 warning) | pass | pass (compile error since BT-3917, ADR 0133) |
 | s7 | `r := nil ifNil: [t := t + 1. 1]` | `#[1, 1]` | arity crash | arity crash | pass |
 | s9 | `r := (#(1, 2) reject: [:x \| t := t + 1. false]) size` | `#[2, 2]` | **`#[2, 0]`** | **`#[2, 0]`** | **`#[2, 0]`** |
 | s3/s5/s8 | `inject:into:` RHS, `ifTrue:ifFalse:` RHS, statement `do:` | | pass | pass | pass |
@@ -859,10 +859,11 @@ Phase 0's position allow-set does not cover this shape (it accepts any
 statement position), so this is a §6 rule, not an allow-set row; Phase 5
 removes it together with the lowering.
 
-**Exempt:** an Erlang FFI argument (`(Erlang lists) map: [:x | t := t + 1.
-x] with: …`, s6). ADR 0041 §Erlang Interop Boundary defines that as lossy
-by design, with a warning, and `generate_erlang_interop_wrapper` already
-implements it; this ADR keeps it.
+**Not exempt (BT-3917):** an Erlang FFI argument (`(Erlang lists) map: [:x |
+t := t + 1. x] with: …`, s6) was first exempt as lossy by design (ADR 0041
+§Erlang Interop Boundary). ADR 0133 now reports a block literal that assigns a
+captured local, passed as an FFI argument, as an escaping block; a block that
+only reads captured locals still compiles.
 
 **What it costs.** A Tier 2 block value that is stored but never invoked
 through a channel-less send (`d at: #k put: [t := t + 1]`, a block only
