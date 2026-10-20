@@ -2804,6 +2804,8 @@ fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
         // A block that does not read a field of `self`.
         "self foo: [other.n]\nnil",
         "^[:x | x + 1]",
+        // A class-builder method body rebinds `self` to its parameter.
+        "^#{#get => [:self | self.n]}",
     ] {
         let src = in_actor(body);
         assert_eq!(

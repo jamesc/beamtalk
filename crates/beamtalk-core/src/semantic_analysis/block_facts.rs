@@ -1212,12 +1212,23 @@ pub fn outer_state_writes(block: &Block) -> Vec<OuterLocalWrite> {
 /// assigned value is a read. The read-side twin of [`outer_state_writes`].
 pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
     let mut targets: HashSet<Span> = HashSet::new();
+    // A block with a `self` parameter (a class-builder method body) rebinds
+    // `self`: a `self.x` inside it is not the enclosing object's field.
+    let mut rebound: Vec<Span> = Vec::new();
     let mut reads: Vec<OuterLocalWrite> = Vec::new();
+    if block.parameters.iter().any(|p| p.name == "self") {
+        return reads;
+    }
     for stmt in &block.body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
             if let Expression::Assignment { target, .. } = e {
                 if let Expression::FieldAccess { span, .. } = target.as_ref() {
                     targets.insert(*span);
+                }
+            }
+            if let Expression::Block(inner) = e {
+                if inner.parameters.iter().any(|p| p.name == "self") {
+                    rebound.push(inner.span);
                 }
             }
         });
@@ -1234,6 +1245,9 @@ pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
             };
             if is_self_reference(receiver.unwrap_parens())
                 && !targets.contains(span)
+                && !rebound
+                    .iter()
+                    .any(|b| b.start() <= span.start() && span.end() <= b.end())
                 && !reads.iter().any(|r| r.name == field.name)
             {
                 reads.push(OuterLocalWrite {
