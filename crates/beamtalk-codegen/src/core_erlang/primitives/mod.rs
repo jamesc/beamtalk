@@ -2205,7 +2205,9 @@ mod tests {
         ));
         assert_eq!(
             timeout,
-            Some("call 'beamtalk_message_dispatch':'send'(Self, Sel, Args, Ms)".to_string())
+            Some(
+                "call 'beamtalk_message_dispatch':'perform_send'(Self, Sel, Args, Ms)".to_string()
+            )
         );
         let local = doc_to_string(generate_primitive_bif(
             "ProtoObject",

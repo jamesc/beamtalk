@@ -4580,3 +4580,27 @@ bt3968_intrinsic_dispatch_routes_continue_with_test() ->
 
 bt3968_runtime_handle_continue_ignores_unknown_term_test() ->
     ?assertEqual({noreply, #{}}, beamtalk_actor:handle_continue(something_else, #{})).
+
+bt3968_perform_of_continue_with_from_another_process_raises_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    ?assertEqual(
+        invalid_continuation,
+        continuation_error_kind(fun() ->
+            beamtalk_actor:sync_send(
+                Counter, 'perform:withArguments:', ['continueWith:', [increment]]
+            )
+        end)
+    ),
+    ?assertEqual(
+        invalid_continuation,
+        continuation_error_kind(fun() ->
+            beamtalk_actor:sync_send(
+                Counter,
+                'perform:withArguments:',
+                ['continueWith:withArguments:', [increment, []]]
+            )
+        end)
+    ),
+    %% Nothing was scheduled.
+    ?assertEqual(0, beamtalk_actor:sync_send(Counter, getValue, [])),
+    gen_server:stop(Counter).

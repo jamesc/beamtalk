@@ -204,6 +204,18 @@
         element(1, T) =:= '$bt_nlr')
 ).
 
+%% BT-3968: the continuation-request selectors (`Actor>>continueWith:` /
+%% `continueWith:withArguments:`). A `perform:` *message* naming one of them
+%% that is dispatched inside an actor was sent from another process — a
+%% caller's own `perform:` is rewritten at the call site into a direct send
+%% of the target selector, which beamtalk_actor's send-site clauses check —
+%% so every perform: dispatch path rejects it (beamtalk_dispatch:perform_lookup/5,
+%% beamtalk_actor:dispatch/4) instead of re-dispatching it inside the actor,
+%% where request_continuation's `Pid =:= self()` check cannot tell.
+-define(IS_CONTINUATION_SELECTOR(S),
+    (S =:= 'continueWith:' orelse S =:= 'continueWith:withArguments:')
+).
+
 %% @doc CompiledMethod value object type.
 %%
 %% DDD Context: Object System

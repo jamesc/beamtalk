@@ -94,6 +94,44 @@ TestCase subclass: ActorContinueWithTest
     self assert: server log equals: #()
     server stop
 
+  testContinueWithViaPerformFromAnotherProcessRaises =>
+    // perform: re-dispatches inside the actor, so it must not become a
+    // back door for another process to schedule a continuation.
+    server := ContinueWithServer spawn
+    self should: [
+      server perform: #continueWith: withArguments: #(#afterOne)
+    ] raise: #invalid_continuation
+    self should: [
+      server perform: #continueWith:withArguments: withArguments: #(#afterOne, #())
+    ] raise: #invalid_continuation
+    self
+      should: [
+        server
+          perform: #continueWith:
+          withArguments: #(#afterOne)
+          timeout: 1000
+      ]
+      raise: #invalid_continuation
+    self assert: server log equals: #()
+    server stop
+
+  testPerformMessageOfContinueWithDeliveredToActorRaises =>
+    // A perform: request delivered to the actor as a message (bypassing the
+    // caller-side rewrite) re-dispatches inside the actor's own process, so
+    // the self check cannot see it: it is rejected there, nothing runs.
+    server := ContinueWithServer spawn
+    r1 := Tuple withAll: #(#perform:withArguments:, #(#continueWith:, #(#afterOne)))
+    r2 := Tuple withAll: #(#perform:withArguments:, #(#continueWith:withArguments:, #(#afterOne, #())))
+    r3 := Tuple withAll: #(#perform:withArguments:timeout:, #(#continueWith:, #(#afterOne), 1000))
+    #(r1, r2, r3)
+      do: [:request |
+        reply := Erlang gen_server call: server pid request: request
+        self assert: reply isError
+        self assert: (reply printString includesSubstring: "invalid_continuation")
+      ]
+    self assert: server log equals: #()
+    server stop
+
   // === Errors in a continuation take the cast path ===
   testRaisingContinuationBehavesLikeRaisingCast =>
     // Before BT-3958 (ADR 0134) a no-reply error is logged and the actor

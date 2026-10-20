@@ -58,7 +58,7 @@ call 'beamtalk_message_dispatch':'send_number_coercion'(
 
 See: ADR 0006 (Unified Method Dispatch), ADR 0043 (Sync-by-Default Actor Messaging)
 """.
--export([send/3, send/4, cast/3, send_number_coercion/4]).
+-export([send/3, send/4, perform_send/4, cast/3, send_number_coercion/4]).
 
 %% Compiled stdlib modules are generated from Core Erlang.
 %% Dialyzer can't resolve them if stdlib hasn't been built yet.
@@ -146,6 +146,23 @@ send(Receiver, Selector, Args) ->
         {dead, ClassName} ->
             reraise_actor_dead(ClassName, Selector)
     end.
+
+-doc """
+The body of a *dispatched* `ProtoObject>>perform:withArguments:timeout:`
+(reached via hierarchy walk, not the call-site interception in send/3):
+send/4, except that on an actor a `continueWith:` / `continueWith:withArguments:`
+target raises `invalid_continuation`. BT-3968: such a dispatch runs inside
+the actor but was requested by another process (see
+`?IS_CONTINUATION_SELECTOR` in beamtalk.hrl), so it must not be recorded as
+the actor's own continuation request.
+""".
+-spec perform_send(term(), atom(), list(), timeout()) -> term().
+perform_send(#beamtalk_object{}, Selector, _Args, _Timeout) when
+    ?IS_CONTINUATION_SELECTOR(Selector)
+->
+    beamtalk_exception_handler:reraise(beamtalk_actor:performed_continuation_error(Selector));
+perform_send(Receiver, Selector, Args, Timeout) ->
+    send(Receiver, Selector, Args, Timeout).
 
 -doc """
 Send a message with explicit timeout.

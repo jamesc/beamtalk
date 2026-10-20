@@ -293,6 +293,11 @@ handle_getValue([], State) ->
     discard_pending_continuations/0
 ]).
 
+%% BT-3968: `perform:` must not become a back door for another process to
+%% schedule a continuation (see ?IS_CONTINUATION_SELECTOR in beamtalk.hrl);
+%% shared with beamtalk_dispatch:perform_lookup/5.
+-export([performed_continuation_error/1]).
+
 %% exported so generated self-dispatch error breadcrumbs
 %% (dispatch_codegen.rs's generate_self_dispatch_error_clause) can resolve
 %% the actor's actual runtime class at the error-wrap boundary, matching
@@ -2230,6 +2235,16 @@ validate_continuation(RequestSelector, ContSelector, ArgSpec) ->
                 )}
     end.
 
+-doc """
+BT-3968: the `invalid_continuation` error for a `perform:` of
+`continueWith:` / `continueWith:withArguments:` dispatched inside an actor,
+which can only have been sent from another process (see
+`?IS_CONTINUATION_SELECTOR` in beamtalk.hrl).
+""".
+-spec performed_continuation_error(atom()) -> #beamtalk_error{}.
+performed_continuation_error(Target) ->
+    invalid_continuation_error(external, Target).
+
 -spec invalid_continuation_error(term(), atom()) -> #beamtalk_error{}.
 invalid_continuation_error(Pid, RequestSelector) ->
     Message =
@@ -3468,6 +3483,14 @@ dispatch(Selector, Args, Self, State) ->
     %% All other Object methods (describe, inspect, fieldNames, hash, etc.)
     %% are discovered via hierarchy walk to Object.
     case Selector of
+        _ when
+            (Selector =:= 'perform:' orelse Selector =:= 'perform:withArguments:' orelse
+                Selector =:= 'perform:withArguments:timeout:'),
+            Args =/= [],
+            ?IS_CONTINUATION_SELECTOR(hd(Args))
+        ->
+            %% BT-3968: another process's `perform: #continueWith: ...`.
+            {error, performed_continuation_error(hd(Args)), State};
         isAlive when Args =:= [] ->
             %% Actor is alive if it's processing this message
             {reply, true, State};

@@ -165,7 +165,7 @@ dispatch('perform:', [TargetSelector], Self, State) when is_atom(TargetSelector)
     %% Dynamic message send with no arguments
     %% obj perform: #increment  => obj increment
     ClassName = class_name(Self, State),
-    Result = beamtalk_dispatch:lookup(TargetSelector, [], Self, State, ClassName),
+    Result = beamtalk_dispatch:perform_lookup(TargetSelector, [], Self, State, ClassName),
     normalize_dispatch_result(Result, State);
 dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State) when
     is_atom(TargetSelector), is_list(ArgList)
@@ -173,7 +173,7 @@ dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State) when
     %% Dynamic message send with argument list
     %% obj perform: #'at:put:' withArguments: #(1, 'x')
     ClassName = class_name(Self, State),
-    Result = beamtalk_dispatch:lookup(TargetSelector, ArgList, Self, State, ClassName),
+    Result = beamtalk_dispatch:perform_lookup(TargetSelector, ArgList, Self, State, ClassName),
     normalize_dispatch_result(Result, State);
 dispatch('perform:withArguments:', [_TargetSelector, _ArgList], Self, State) ->
     ClassName = class_name(Self, State, 'Object'),
@@ -193,7 +193,7 @@ dispatch('perform:withArguments:timeout:', [TargetSelector, ArgList, Timeout], S
     (is_integer(Timeout) andalso Timeout >= 0 orelse Timeout =:= infinity)
 ->
     ClassName = class_name(Self, State),
-    Result = beamtalk_dispatch:lookup(TargetSelector, ArgList, Self, State, ClassName),
+    Result = beamtalk_dispatch:perform_lookup(TargetSelector, ArgList, Self, State, ClassName),
     normalize_dispatch_result(Result, State);
 dispatch('perform:withArguments:timeout:', [_TargetSelector, _ArgList, _Timeout], Self, State) ->
     ClassName = class_name(Self, State, 'Object'),

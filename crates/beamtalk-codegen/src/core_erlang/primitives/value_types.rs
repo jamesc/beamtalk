@@ -96,14 +96,16 @@ pub(crate) fn generate_proto_object_bif(
         "/=" => super::binary_bif("/=", params),
         "=:=" => super::binary_bif("=:=", params),
         "=/=" => super::binary_bif("=/=", params),
-        // The same entry point as the call-site interception: honours the
-        // timeout for actors, ignores it for value types.
+        // send/4 — the call-site interception's entry point — behind the
+        // BT-3968 guard that rejects a dispatched perform of `continueWith:`
+        // on an actor: honours the timeout for actors, ignores it for value
+        // types.
         "perform:withArguments:timeout:" => {
             let sel = param(params, 0, "_Selector");
             let args = param(params, 1, "_Args");
             let timeout = param(params, 2, "_Timeout");
             Some(docvec![
-                "call 'beamtalk_message_dispatch':'send'(Self, ",
+                "call 'beamtalk_message_dispatch':'perform_send'(Self, ",
                 leaf::var(sel.to_string()),
                 ", ",
                 leaf::var(args.to_string()),
