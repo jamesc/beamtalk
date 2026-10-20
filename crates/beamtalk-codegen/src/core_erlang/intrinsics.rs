@@ -37,6 +37,11 @@ use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 /// variant — see `generate_stateful_block_guard`).
 pub(in crate::core_erlang) const STATEFUL_BLOCK_DISPATCH_HINT: &str = "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:";
 
+/// BT-3968: the `ProtoObject` selector intercepted by name in
+/// `try_generate_protoobject_message` (and so excluded from actor
+/// self-dispatch by `expr_shape::selector_dispatches_via_self`).
+pub(in crate::core_erlang) const PERFORM_WITH_ARGS_TIMEOUT: &str = "perform:withArguments:timeout:";
+
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
 fn block_arity(expr: &Expression) -> Option<usize> {
     match expr {
@@ -1790,6 +1795,37 @@ impl CoreErlangGenerator {
                 ")",
             ];
             return Ok(Some(seq.close(self, call_doc, "ClassRes")));
+        }
+
+        // BT-3968: `perform:withArguments:timeout:` lowers like
+        // `perform:withArguments:` below, straight to the call-site entry
+        // point `send/4` (which applies the timeout to an actor's
+        // gen_server:call and ignores it for value types) — the same thing
+        // `send/3` already does when it intercepts the selector at runtime.
+        // Without this an actor's own `self perform:withArguments:timeout:`
+        // self-dispatched into `ProtoObject`'s method body instead. Matched
+        // by name, like `asType:`: it is not a `WellKnownSelector`.
+        if selector.name() == PERFORM_WITH_ARGS_TIMEOUT && arguments.len() == 3 {
+            let mut seq = self.sequence_call(
+                &[receiver, &arguments[0], &arguments[1], &arguments[2]],
+                "PerfTo",
+            )?;
+            let recv_doc = seq.next();
+            let sel_doc = seq.next();
+            let args_doc = seq.next();
+            let timeout_doc = seq.next();
+            let call_doc = docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                recv_doc,
+                ", ",
+                sel_doc,
+                ", ",
+                args_doc,
+                ", ",
+                timeout_doc,
+                ")",
+            ];
+            return Ok(Some(seq.close(self, call_doc, "PerfToRes")));
         }
 
         // `perform:` family routes through the `WellKnownSelector` enum;
