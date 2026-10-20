@@ -1,0 +1,94 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3958 (ADR 0134): an error raised by a method sent as a `!` cast has no
+// caller to go to, so it crashes the actor; `onExit:` sees the error and a
+// supervisor restarts the actor. A sync call to the same method still
+// returns the error to its caller and the actor carries on.
+//
+// Fixtures: stdlib/test/fixtures/failing_cast_actor.bt
+//           stdlib/test/fixtures/failing_cast_sup.bt
+
+TestCase subclass: ActorCastErrorTest
+
+  testRaisingCastCrashesActor =>
+    table := Ets new: #castErrorCrash type: #set
+    actor := FailingCastActor spawn
+    actor onExit: [:reason | table at: #exitReason put: reason]
+    actor explode!
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    // gen_server exits with {Error, Stacktrace}; the error is the one raised.
+    exitReason := table at: #exitReason
+    self assert: (exitReason at: 1) message equals: "deliberate cast error"
+    table delete
+
+  // A raw Erlang error or throw reaches onExit: as the same kind of reason
+  // as a Beamtalk signal: a wrapped Exception carrying the raw term.
+  testRawErlangErrorInCastCrashesWithWrappedException =>
+    table := Ets new: #castRawError type: #set
+    actor := FailingCastActor spawn
+    actor onExit: [:reason | table at: #exitReason put: reason]
+    actor rawError!
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    self assert: ((table at: #exitReason) at: 1) reason equals: #raw_boom
+    table delete
+
+  testRawErlangThrowInCastCrashesWithWrappedException =>
+    // gen_server would take a throw escaping the callback as its return
+    // value; it is raised as an error instead, so the actor crashes.
+    table := Ets new: #castRawThrow type: #set
+    actor := FailingCastActor spawn
+    actor onExit: [:reason | table at: #exitReason put: reason]
+    actor rawThrow!
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    exception := (table at: #exitReason) at: 1
+    self assert: (exception isKindOf: ThrowError)
+    self assert: exception reason equals: #raw_oops
+    table delete
+
+  testErrorAfterStopRequestWinsInCast =>
+    table := Ets new: #castStopThenRaise type: #set
+    actor := FailingCastActor spawn
+    actor onExit: [:reason | table at: #exitReason put: reason]
+    actor stopThenExplode!
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    exitReason := table at: #exitReason
+    self assert: (exitReason at: 1) message equals: "deliberate cast error after stop"
+    table delete
+
+  testSupervisedActorRestartsAfterRaisingCast =>
+    sup := (FailingCastSup supervise) unwrap
+    actor :: FailingCastActor := (sup which: FailingCastActor) unwrap
+    actor bump
+    actor explode!
+    50 timesRepeat: [actor isAlive ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    restarted := (sup which: FailingCastActor) unwrap
+    50
+      timesRepeat: [
+        (restarted isNil or: [restarted =:= actor])
+          ifTrue: [
+            Timer sleep: 10
+            restarted := (sup which: FailingCastActor) unwrap
+          ]
+      ]
+    fresh :: FailingCastActor := (sup which: FailingCastActor) unwrap
+    self deny: fresh =:= actor
+    self assert: fresh isAlive
+    // A fresh instance: the state from before the crash is gone.
+    self assert: fresh count equals: 0
+    sup stop
+
+  // === Sync calls are unchanged ===
+  testRaisingSyncCallReturnsErrorAndActorContinues =>
+    actor := FailingCastActor spawn
+    actor bump
+    self should: [actor explode] raise: #user_error
+    self assert: actor isAlive
+    // The failed call's state change was rolled back.
+    self assert: actor count equals: 1
+    actor stop

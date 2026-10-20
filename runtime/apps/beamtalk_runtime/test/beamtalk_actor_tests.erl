@@ -1866,14 +1866,28 @@ handle_cast_backward_compat_with_future_test() ->
     ?assertEqual(1, gen_server:call(Counter, {getValue, []})),
     gen_server:stop(Counter).
 
-handle_cast_fire_and_forget_unknown_selector_logs_and_continues_test() ->
-    %% Unknown selector in fire-and-forget: logs warning, actor continues
-    {ok, Counter} = test_counter:start_link(7),
+handle_cast_fire_and_forget_unknown_selector_crashes_actor_test() ->
+    %% BT-3958 (ADR 0134): an unknown selector in fire-and-forget is a
+    %% doesNotUnderstand with no caller to report to, so the actor crashes
+    %% with it — the bare #beamtalk_error{} wrapped as an Exception object.
+    {ok, Counter} = test_counter:start(7),
+    Ref = erlang:monitor(process, Counter),
     gen_server:cast(Counter, {cast, unknownMethod, []}),
-    timer:sleep(20),
-    %% Actor still alive and state unchanged
-    ?assertEqual(7, gen_server:call(Counter, {getValue, []})),
-    gen_server:stop(Counter).
+    Reason =
+        receive
+            {'DOWN', Ref, process, Counter, R} -> R
+        after 2000 -> error(actor_did_not_crash)
+        end,
+    ?assertMatch(
+        {
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = does_not_understand, selector = unknownMethod}
+            },
+            _Stack
+        },
+        Reason
+    ).
 
 %%% Regression tests for kill semantics (race-condition fix)
 %%% These guard against the bug where exit(Pid, kill) + immediate ok
@@ -2007,12 +2021,15 @@ await_initialize_preserves_full_stop_reason_test() ->
     %% When handle_continue returns {stop, {error, function_clause}, State},
     %% await_initialize must return {error, {error, function_clause}} — not
     %% {error, error} (the bug before the pattern-match fix).
-    %% Use gen_server:start (not start_link) to avoid EXIT signal killing the test.
+    %% Use gen_server:start_monitor (not start_link) to avoid EXIT signal
+    %% killing the test; the monitor is created with the process, so an actor
+    %% that has already stopped by the time we wait still reports its real
+    %% reason rather than `noproc` (the BT-3677 race await_initialize/1 has).
     %% Suppress the expected gen_server crash report to avoid EUnit cancellation.
     logger:set_primary_config(level, none),
     try
-        {ok, Pid} = gen_server:start(test_crashing_init_actor, #{}, []),
-        Result = beamtalk_actor:await_initialize(Pid),
+        {ok, {Pid, MonRef}} = gen_server:start_monitor(test_crashing_init_actor, #{}, []),
+        Result = beamtalk_actor:await_initialize(Pid, MonRef),
         ?assertMatch({error, {error, function_clause}}, Result)
     after
         logger:set_primary_config(level, all)
@@ -2619,17 +2636,23 @@ dispatch_perform_with_timeout_invalid_args_test() ->
 %%% handle_cast fire-and-forget error path
 %%% ============================================================================
 
-handle_cast_fire_and_forget_error_does_not_crash_actor_test() ->
-    %% fire-and-forget cast with a throwing method logs error, actor continues
+handle_cast_fire_and_forget_error_crashes_actor_test() ->
+    %% BT-3958 (ADR 0134): a fire-and-forget cast whose method raises has no
+    %% caller to report to, so it crashes the actor with that error as the
+    %% exit reason — the same as a compiled actor's generated handle_cast/2.
     {ok, Actor} = test_throwing_actor:start_link(),
+    unlink(Actor),
+    Ref = erlang:monitor(process, Actor),
     gen_server:cast(Actor, {cast, throwError, []}),
-    timer:sleep(30),
-    %% Actor should still be alive
-    ?assert(is_process_alive(Actor)),
-    %% And still responsive
-    NormalResult = gen_server:call(Actor, {normalMethod, []}),
-    ?assertEqual(ok, NormalResult),
-    gen_server:stop(Actor).
+    Reason =
+        receive
+            {'DOWN', Ref, process, Actor, R} -> R
+        after 2000 -> error(actor_did_not_crash)
+        end,
+    ?assertMatch(
+        {#{'$beamtalk_class' := _, error := #beamtalk_error{selector = throwError}}, _Stack},
+        Reason
+    ).
 
 %%% ============================================================================
 %%% handle_call/handle_cast with propagated context wire format
@@ -4643,20 +4666,34 @@ bt3968_result_with_action_conflicts_loudly_test() ->
         )
     end).
 
-bt3968_discard_keeps_continuations_committed_before_the_step_test() ->
+bt3968_discard_drops_the_whole_queue_test() ->
+    %% BT-3958 (ADR 0134): a failing continuation step crashes the actor, so
+    %% discard (called only by the replying error arms, never inside a
+    %% handle_continue step) has no committed part of the queue to keep.
     in_dispatch(fun() ->
         State = #{value => 0},
-        %% handle_continue running a step with [b] still queued; the step
-        %% requests c, then fails: only c is dropped.
         ok = beamtalk_actor:clear_pending_actions(),
         ok = beamtalk_actor:seed_pending_continuations([{b, []}]),
         ok = beamtalk_actor:sync_send(self(), 'continueWith:', [c]),
         ok = beamtalk_actor:discard_pending_continuations(),
-        ?assertEqual(
-            {noreply, State, {continue, {'$bt_continue', [{b, []}]}}},
-            beamtalk_actor:apply_pending_actions({noreply, State})
-        )
+        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_actions({noreply, State}))
     end).
+
+bt3958_raising_runtime_continuation_step_raises_test() ->
+    %% BT-3958 (ADR 0134): a runtime-path actor's continuation step is
+    %% dispatched like a cast, so a raising step raises out of
+    %% handle_continue/2 (crashing the gen_server) with the error as a
+    %% wrapped Exception object; the step queued behind it never runs.
+    {ok, Actor} = test_throwing_actor:start_link(),
+    unlink(Actor),
+    State = sys:get_state(Actor),
+    gen_server:stop(Actor),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{selector = throwError}},
+        beamtalk_actor:handle_continue(
+            {'$bt_continue', [{throwError, []}, {normalMethod, []}]}, State
+        )
+    ).
 
 bt3968_runtime_path_actor_runs_continuation_after_reply_test() ->
     {ok, Counter} = test_counter:start_link(5),

@@ -293,6 +293,15 @@ impl CoreErlangGenerator {
     /// the callee actor's own `gen_server` loop, and throwing here would
     /// crash that actor instead of relaying to the caller.
     ///
+    /// Invariant (BT-3958): the third element of the
+    /// `{'error', {Type, Error, Stacktrace}, State}` triple is the *raw*
+    /// trace the `catch` clause binds, and this is the only producer of an
+    /// error value of that shape. The no-reply error arms
+    /// (`noreply_error_arms` in `callbacks.rs`) rely on it: they pass it to
+    /// `primop 'build_stacktrace'` and `primop 'raw_raise'`, which accept
+    /// only a raw trace. A `dispatch/4` path must never return a
+    /// `{Type, Error, ListStacktrace}` error value of its own.
+    ///
     /// # Generated Code
     ///
     /// ```erlang

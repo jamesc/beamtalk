@@ -749,13 +749,15 @@ Object subclass: Actor
   /// method returns — a sync caller gets its reply first — and before the
   /// next message in the mailbox. Several requests run in request order; a
   /// continuation that requests more queues them after the ones already
-  /// waiting. Errors in a continuation are handled like errors in a `!` cast.
+  /// waiting. An error in a continuation crashes the actor, like an error in
+  /// a `!` cast (ADR 0134): `terminate:` and `onExit:` see it.
   ///
   /// A pending `stopWith:` in the same method wins: the actor stops and no
-  /// queued continuation runs. If the method fails with an error, its
+  /// queued continuation runs. If a sync method fails with an error, its
   /// continuations are dropped. Continuations requested by `initialize` run
-  /// before `spawn` returns and count against its 5-second initialization
-  /// timeout. A continuation that keeps re-requesting itself
+  /// after `spawn` returns and do not count against its 5-second
+  /// initialization timeout; an error in one crashes the running actor
+  /// rather than failing the spawn. A continuation that keeps re-requesting itself
   /// starves the mailbox, as in OTP. Sent from another process, raises
   /// `invalid_continuation`.
   ///

@@ -1565,10 +1565,11 @@ landing without a version bump.
 of a `late` slot inside `terminate:` or `handleInfo:` (or one level of
 self-send from either) that isn't guarded by `(self hasField: #slot)
 ifTrue: [...]` produces a compile-time warning (`unguarded-late-read`
-diagnostic category). Both lifecycle hooks swallow raised errors —
-`terminate/2`'s dispatch is `try`-wrapped, and `handleInfo:` logs and
-continues — so an `UninitializedStateError` from an unguarded read there
-never surfaces as a crash; the operation is silently skipped instead. The
+diagnostic category). In `terminate:` a raised error is swallowed
+(`terminate/2`'s dispatch is `try`-wrapped), so an `UninitializedStateError`
+from an unguarded read there never surfaces and the cleanup is silently
+skipped. In `handleInfo:` the error crashes the server (ADR 0134), so an
+unguarded read turns an ordinary message into a crash and restart. The
 fix is the `hasField:` guard shown above, not a suppression — like
 `definite-assignment`, there is no site-level `@expect` category for this
 diagnostic. Per-project severity is configurable via the `[diagnostics]`
@@ -3143,6 +3144,13 @@ return, or argument is a parse error (`cast_in_expression_error`).
 
 Use `!` when you intentionally don't need the result and don't want to block.
 
+An error raised by a method sent with `!` has no caller to go to, so it
+crashes the actor, as in OTP (ADR 0134): `terminate:` runs with the error as
+its reason, `onExit:` observers receive it, and a supervisor restarts the
+actor according to its policy. If a failure is expected and should not stop
+the actor, handle it inside the method with `on:do:`. A sync send (`.`) is
+unaffected: its error is returned to the caller and the actor carries on.
+
 ### Deadlock Prevention
 
 Because `.` sends block the caller (gen_server:call), two actors calling each other creates a deadlock. The default timeout is **5000ms**, after which a `#timeout` error is raised:
@@ -3419,7 +3427,7 @@ Server subclass: PeriodicWorker
 ### handleInfo: Semantics
 
 - Defined on `Server` with a **default no-op** implementation — messages are ignored unless you override it.
-- **Error handling:** errors in `handleInfo:` are logged and the server continues (log-and-continue). A bad message does not crash the server.
+- **Error handling:** an error raised in `handleInfo:` crashes the server, as in OTP (ADR 0134): `terminate:` runs with the error as its reason, `onExit:` observers receive it, a crash report is logged, and a supervisor applies its restart policy. Unmatched messages are still harmless: the default `handleInfo:` ignores everything, and a `match:` over the message should end with a `_ -> nil` arm so an unexpected message does not raise `#pattern_mismatch`.
 - Sending `handleInfo:` to a plain `Actor` raises `doesNotUnderstand` — only Server subclasses have this method.
 
 ### Migration: Actor to Server
@@ -3485,8 +3493,8 @@ Both methods are defined on `Actor` and answer `#ok`.
 - **Sync methods:** the caller gets its reply first, then the continuation runs. Its state changes are visible to the next message.
 - **Arguments:** `continueWith:` takes a unary selector. `continueWith:withArguments:` takes a `List` whose size must match the selector's arity. A non-Symbol selector raises `type_error` at the call site, and a wrong argument count raises `arity_mismatch`. Whether the actor understands the selector is checked only when the step runs.
 - **Stop wins:** if the same message also calls `self stopWith:` (in either order), the actor stops and no queued continuation runs. A continuation that itself calls `self stopWith:` stops the actor after that step, and the rest of the queue is dropped.
-- **Errors:** if the method that requested the continuations fails with an error, the continuations it requested are dropped. An error inside a continuation is handled exactly like an error in a `!` cast (see ADR 0134): its own requests are dropped, but steps queued behind it by earlier messages still run.
-- **`initialize`:** a continuation requested in `initialize` runs after `spawn` returns, before any later message (OTP `{continue, _}` after `init/1`). Startup ends when `initialize` returns: `spawn`, `spawnWith:` and supervisor child starts do not wait for the continuation chain, and only `initialize` itself counts against the 5-second initialization timeout. An error in such a continuation does not fail the spawn; it is handled like any other continuation error. This is where slow setup, or a supervised child's first call to its parent, belongs.
+- **Errors:** if a sync method that requested continuations fails with an error, the caller gets the error and the continuations it requested are dropped. An error inside a continuation is handled exactly like an error in a `!` cast or `handleInfo:` (ADR 0134): it crashes the actor, so no later step runs; `terminate:` and `onExit:` see the error.
+- **`initialize`:** a continuation requested in `initialize` runs after `spawn` returns, before any later message (OTP `{continue, _}` after `init/1`). Startup ends when `initialize` returns: `spawn`, `spawnWith:` and supervisor child starts do not wait for the continuation chain, and only `initialize` itself counts against the 5-second initialization timeout. An error in such a continuation is not a spawn failure — `spawn` has already returned — but it crashes the running actor like any other continuation error. This is where slow setup, or a supervised child's first call to its parent, belongs.
 - **Starvation:** the continue chain runs before every other message, including system messages such as supervisor shutdown. A continuation that re-requests itself forever starves the mailbox, as in OTP.
 - **Only on `self`:** `actor continueWith: #x` sent from another process (sync, async or `!`) raises `invalid_continuation` in the caller.
 

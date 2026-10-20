@@ -28,8 +28,11 @@ abstract Actor subclass: Server
   ///
   /// Override in subclasses to process raw messages (timer events, DOWN
   /// tuples). The return value is always discarded.
-  /// If this method raises an error, the server logs a warning and
-  /// continues with its pre-call state (does not crash).
+  /// If this method raises an error, the server crashes, as in OTP
+  /// (ADR 0134): `terminate:` runs with the error as its reason, `onExit:`
+  /// observers receive it, and a supervisor restarts it according to its
+  /// policy. End a `match:` with `_ -> nil` so an unexpected message is
+  /// ignored rather than raising.
   ///
   /// ## Examples
   /// ```beamtalk

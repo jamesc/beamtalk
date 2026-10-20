@@ -96,10 +96,11 @@ Server subclass: ContinueWithServer
     self continueWith: #explode
     #requested
 
-  // A failing step does not drop the steps queued behind it.
-  failThenContinue =>
+  // A failing step crashes the actor (ADR 0134), so the step queued behind
+  // it never runs; `markX` would record it in the Ets table if it did.
+  failThenMark =>
     self continueWith: #explode
-    self continueWith: #afterOne
+    self continueWith: #markX
     #requested
 
   explode =>

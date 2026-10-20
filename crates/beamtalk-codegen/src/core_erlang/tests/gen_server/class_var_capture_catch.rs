@@ -218,13 +218,19 @@ fn inlined_scopes_inside_a_block_use_the_blocks_capture() {
 }
 
 /// Asserts the §4 order inside every compiled `on:do:` catch of `text` (each
-/// is anchored by its `build_stacktrace` wrap, which only `on:do:` emits):
-/// a snapshot immediately before each `try`, then, within the catch, the
-/// 4-tuple NLR arm, the 3-tuple NLR arm, the restore, the wrap, the filter.
+/// is anchored by its `build_stacktrace` wrap; the only other emitter, the
+/// `gen_server` no-reply error arms (`CastBuiltStack` / `InfoBuiltStack`,
+/// BT-3958), is skipped): a snapshot immediately before each `try`, then,
+/// within the catch, the 4-tuple NLR arm, the 3-tuple NLR arm, the restore,
+/// the wrap, the filter.
 fn assert_catch_boundary_order(text: &str, expected_catches: usize) {
     let anchors: Vec<usize> = text
         .match_indices("primop 'build_stacktrace'(")
         .map(|(i, _)| i)
+        .filter(|&i| {
+            let before = &text[..i];
+            !before.ends_with("CastBuiltStack = ") && !before.ends_with("InfoBuiltStack = ")
+        })
         .collect();
     assert_eq!(anchors.len(), expected_catches, "{text}");
     assert_eq!(
