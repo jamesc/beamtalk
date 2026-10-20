@@ -883,6 +883,19 @@ start_failed_error_uses_cause_hint_message_or_kind_test() ->
     ?assertEqual(
         <<"the hint">>, Hint({shutdown, {failed_to_start_child, 'Inner', WithHint}})
     ),
+    %% ... at any depth (Root -> MidSup -> Pool).
+    ?assertEqual(
+        <<"the hint">>,
+        Hint(
+            {shutdown,
+                {failed_to_start_child, 'Mid',
+                    {shutdown, {failed_to_start_child, 'Pool', WithHint}}}}
+        )
+    ),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(Hint({shutdown, {failed_to_start_child, 'Mid', boom}}), <<"boom">>)
+    ),
     ?assertMatch(
         #beamtalk_error{details = #{cause := WithHint}},
         beamtalk_supervisor:start_failed_error(supervisor_start_failed, 'Sup', supervise, WithHint)

@@ -211,10 +211,27 @@ start_failed_error(Kind, ClassName, Selector, #beamtalk_error{} = Cause) ->
     Error0 = beamtalk_error:new(Kind, ClassName, Selector, cause_hint(Cause)),
     beamtalk_error:with_details(Error0, #{cause => Cause});
 start_failed_error(
-    Kind, ClassName, Selector, {shutdown, {failed_to_start_child, _Id, #beamtalk_error{} = Cause}}
+    Kind, ClassName, Selector, {shutdown, {failed_to_start_child, _Id, _Inner}} = Reason
 ) ->
-    start_failed_error(Kind, ClassName, Selector, Cause);
+    case nested_start_cause(Reason) of
+        {ok, Cause} -> start_failed_error(Kind, ClassName, Selector, Cause);
+        none -> format_start_failed_error(Kind, ClassName, Selector, Reason)
+    end;
 start_failed_error(Kind, ClassName, Selector, Reason) ->
+    format_start_failed_error(Kind, ClassName, Selector, Reason).
+
+%% The `#beamtalk_error{}` at the bottom of any depth of nested
+%% `failed_to_start_child` wrappers (Root -> MidSup -> Pool), if there is one.
+-spec nested_start_cause(term()) -> {ok, #beamtalk_error{}} | none.
+nested_start_cause(#beamtalk_error{} = Cause) ->
+    {ok, Cause};
+nested_start_cause({shutdown, {failed_to_start_child, _Id, Inner}}) ->
+    nested_start_cause(Inner);
+nested_start_cause(_) ->
+    none.
+
+-spec format_start_failed_error(atom(), atom(), atom(), term()) -> #beamtalk_error{}.
+format_start_failed_error(Kind, ClassName, Selector, Reason) ->
     Verb =
         case Kind of
             child_start_failed -> "start_child";
