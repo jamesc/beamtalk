@@ -213,28 +213,28 @@ TestCase subclass: ResultTest
   // fromTuple:
   // =========================================================================
   testFromTupleOk =>
-    r := Result fromTuple: (Tuple withAll: #(#ok, 42))
+    r := Result fromTuple: {#ok, 42}
     self assert: r ok
     self assert: r value equals: 42
 
   testFromTupleError =>
-    r := Result fromTuple: (Tuple withAll: #(#error, #not_found))
+    r := Result fromTuple: {#error, #not_found}
     self assert: r isError
 
   testFromTupleErrorReason =>
     // fromTuple: delegates to from_tagged_tuple which wraps the error reason
     // via ensure_wrapped — so the error is an Exception object, not a bare symbol.
     // Verify we can access it without crashing.
-    r := Result fromTuple: (Tuple withAll: #(#error, #oops))
+    r := Result fromTuple: {#error, #oops}
     self deny: r error isNil
 
   testFromTupleOkWithString =>
-    r := Result fromTuple: (Tuple withAll: #(#ok, "hello"))
+    r := Result fromTuple: {#ok, "hello"}
     self assert: r value equals: "hello"
 
   testFromTupleInvalidTupleRaises =>
     self should: [
-      Result fromTuple: (Tuple withAll: #(1, 2, 3))
+      Result fromTuple: {1, 2, 3}
     ] raise: #type_error
 
   // =========================================================================
