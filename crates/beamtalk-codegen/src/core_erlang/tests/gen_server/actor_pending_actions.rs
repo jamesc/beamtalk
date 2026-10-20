@@ -145,11 +145,16 @@ fn test_initialize_step_acks_starter_after_pending_actions() {
         "Got:\n{init}"
     );
     let cont = extract_core_fn(&code, "'handle_continue'/2 = fun").expect("handle_continue/2");
-    let apply = cont.find(APPLY_PENDING_ACTIONS).expect("apply_pending_actions");
+    let apply = cont
+        .find(APPLY_PENDING_ACTIONS)
+        .expect("apply_pending_actions");
     let ack = cont
         .find("call 'beamtalk_actor':'ack_initialized'(Continue, _ContinueResult)")
         .unwrap_or_else(|| panic!("handle_continue must ack initialize. Got:\n{cont}"));
-    assert!(apply < ack, "the ack must see the applied result. Got:\n{cont}");
+    assert!(
+        apply < ack,
+        "the ack must see the applied result. Got:\n{cont}"
+    );
 }
 
 /// BT-3968: every dispatch-error arm drops the continuation queue — the

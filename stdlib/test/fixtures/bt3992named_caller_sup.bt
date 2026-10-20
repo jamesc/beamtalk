@@ -7,4 +7,6 @@
 Supervisor subclass: Bt3992NamedCallerSup
 
   childSpecs =>
-    #((Bt3992ParentCaller supervisionSpec withName: #bt3992_named_caller withArgs: #{#parent => self}))
+    #((Bt3992ParentCaller supervisionSpec withName: #bt3992_named_caller withArgs: #{
+      #parent => self
+    }))

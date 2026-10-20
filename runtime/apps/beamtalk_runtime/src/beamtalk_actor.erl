@@ -869,9 +869,7 @@ safe_spawn_named(local, Name, Module, InitArgs) ->
         fun(Args) -> gen_server:start_link({local, Name}, Module, Args, []) end, InitArgs
     );
 safe_spawn_named(global, Name, Module, InitArgs) ->
-    case
-        start_link_and_await(fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs)
-    of
+    case start_link_and_await(fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs) of
         {ok, Pid} ->
             case global:register_name(Name, Pid, fun ?MODULE:resolve_global_conflict/3) of
                 yes ->

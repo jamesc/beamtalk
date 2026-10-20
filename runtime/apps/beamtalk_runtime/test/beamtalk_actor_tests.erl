@@ -2147,11 +2147,23 @@ take_init_ack_test() ->
     Args = #{'$bt_init_ack' => {self(), Ref}, value => 1},
     %% `initialized`: stripped and acked at once, nothing kept.
     ?assertEqual(#{value => 1}, beamtalk_actor:take_init_ack(Args, initialized)),
-    ?assertEqual(ok, receive {Ref, initialized} -> ok after 0 -> missing end),
+    ?assertEqual(
+        ok,
+        receive
+            {Ref, initialized} -> ok
+        after 0 -> missing
+        end
+    ),
     ?assertEqual(undefined, get('$bt_init_ack')),
     %% `initializing`: stripped, announced, and kept for ack_initialized/2.
     ?assertEqual(#{value => 1}, beamtalk_actor:take_init_ack(Args, initializing)),
-    ?assertEqual(ok, receive {Ref, initializing} -> ok after 0 -> missing end),
+    ?assertEqual(
+        ok,
+        receive
+            {Ref, initializing} -> ok
+        after 0 -> missing
+        end
+    ),
     ?assertEqual({self(), Ref}, get('$bt_init_ack')),
     %% A failed initialize step erases the target without acking.
     Stop = {stop, boom, #{}},
@@ -2160,10 +2172,22 @@ take_init_ack_test() ->
     ?assertEqual(no_stray_ack, stray_ack()),
     %% A successful one acks once; later steps are no-ops.
     _ = beamtalk_actor:take_init_ack(Args, initializing),
-    ?assertEqual(ok, receive {Ref, initializing} -> ok after 0 -> missing end),
+    ?assertEqual(
+        ok,
+        receive
+            {Ref, initializing} -> ok
+        after 0 -> missing
+        end
+    ),
     Ok = {noreply, #{}, {continue, x}},
     ?assertEqual(Ok, beamtalk_actor:ack_initialized(initialize, Ok)),
-    ?assertEqual(ok, receive {Ref, initialized} -> ok after 0 -> missing end),
+    ?assertEqual(
+        ok,
+        receive
+            {Ref, initialized} -> ok
+        after 0 -> missing
+        end
+    ),
     ?assertEqual(Ok, beamtalk_actor:ack_initialized(x, Ok)),
     ?assertEqual(no_stray_ack, stray_ack()),
     %% No ack target: state unchanged, nothing sent.

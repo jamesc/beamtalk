@@ -46,7 +46,10 @@ TestCase subclass: ActorContinueWithTest
     self assert: elapsed < 2000000000
     self assert: actor isAlive
     actor mark!
-    log := actor perform: #log withArguments: #() timeout: 15000
+    log := actor
+      perform: #log
+      withArguments: #()
+      timeout: 15000
     self assert: log equals: #(#initialize, #slowStep, #mark)
     actor stop
 
