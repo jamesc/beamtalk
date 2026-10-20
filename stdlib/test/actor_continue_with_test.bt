@@ -126,7 +126,9 @@ TestCase subclass: ActorContinueWithTest
     r3 := Tuple withAll: #(#perform:withArguments:, #(#continueWith:, #(#afterOne)))
     r4 := Tuple withAll: #(#perform:withArguments:, #(#continueWith:withArguments:, #(#afterOne, #())))
     r5 := Tuple withAll: #(#perform:withArguments:timeout:, #(#continueWith:, #(#afterOne), 1000))
-    #(r1, r2, r3, r4, r5)
+    // A doubly nested perform: is unwrapped too.
+    r6 := Tuple withAll: #(#perform:withArguments:, #(#perform:withArguments:, #(#continueWith:, #(#afterOne))))
+    #(r1, r2, r3, r4, r5, r6)
       do: [:request |
         reply := Erlang gen_server call: server pid request: request
         self assert: reply isError

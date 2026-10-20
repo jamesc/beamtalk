@@ -2246,24 +2246,39 @@ BT-3968: the mailbox-boundary guard. `self continueWith:` is a direct,
 in-process send and never arrives through the mailbox, so a call or cast
 *message* that requests a continuation — `continueWith:` /
 `continueWith:withArguments:` itself, or a `perform:` /
-`perform:withArguments:` / `perform:withArguments:timeout:` naming one —
-was sent by another process. Once dispatched it would run inside the actor,
+`perform:withArguments:` / `perform:withArguments:timeout:` naming one,
+however deeply nested — was sent by another process. Once dispatched it would run inside the actor,
 where request_continuation/4's `Pid =:= self()` check cannot tell, so the
 handle_call/handle_cast entry rejects it here instead. Returns `ok`, or
 `{error, #beamtalk_error{kind = invalid_continuation}}` (also logged, since
 a rejected cast has no caller to tell).
 """.
 -spec mailbox_continuation_check(atom(), term()) -> ok | {error, #beamtalk_error{}}.
-mailbox_continuation_check(Selector, _Args) when ?IS_CONTINUATION_SELECTOR(Selector) ->
-    rejected_mailbox_continuation(Selector);
-mailbox_continuation_check(Selector, [Target | _]) when
-    (Selector =:= 'perform:' orelse Selector =:= 'perform:withArguments:' orelse
-        Selector =:= 'perform:withArguments:timeout:'),
-    ?IS_CONTINUATION_SELECTOR(Target)
+mailbox_continuation_check(Selector, Args) ->
+    case continuation_target(Selector, Args) of
+        none -> ok;
+        Target -> rejected_mailbox_continuation(Target)
+    end.
+
+%% The continuation selector a message requests, unwrapping nested `perform:`
+%% forms (`perform: #perform:withArguments: withArguments: #(#continueWith:, ...)`),
+%% or `none`.
+-spec continuation_target(term(), term()) -> atom() | none.
+continuation_target(Selector, _Args) when ?IS_CONTINUATION_SELECTOR(Selector) ->
+    Selector;
+continuation_target(Selector, [Target | Rest]) when
+    Selector =:= 'perform:';
+    Selector =:= 'perform:withArguments:';
+    Selector =:= 'perform:withArguments:timeout:'
 ->
-    rejected_mailbox_continuation(Target);
-mailbox_continuation_check(_Selector, _Args) ->
-    ok.
+    InnerArgs =
+        case Rest of
+            [ArgList | _] when is_list(ArgList) -> ArgList;
+            _ -> []
+        end,
+    continuation_target(Target, InnerArgs);
+continuation_target(_Selector, _Args) ->
+    none.
 
 -spec rejected_mailbox_continuation(atom()) -> {error, #beamtalk_error{}}.
 rejected_mailbox_continuation(Selector) ->

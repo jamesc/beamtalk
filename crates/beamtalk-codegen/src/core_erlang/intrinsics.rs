@@ -35,12 +35,12 @@ use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 /// loop/exception-handling fallbacks (`while_loops.rs`, `exception_handling.rs`),
 /// and the List/Collection guard (which uses its own, differently-worded
 /// variant — see `generate_stateful_block_guard`).
+pub(in crate::core_erlang) const STATEFUL_BLOCK_DISPATCH_HINT: &str = "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:";
+
 /// BT-3968: the `ProtoObject` selector intercepted by name in
 /// `try_generate_protoobject_message` (and so excluded from actor
 /// self-dispatch by `expr_shape::selector_dispatches_via_self`).
 pub(in crate::core_erlang) const PERFORM_WITH_ARGS_TIMEOUT: &str = "perform:withArguments:timeout:";
-
-pub(in crate::core_erlang) const STATEFUL_BLOCK_DISPATCH_HINT: &str = "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:";
 
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
 fn block_arity(expr: &Expression) -> Option<usize> {

@@ -4640,4 +4640,18 @@ bt3968_mailbox_continuation_check_test() ->
         beamtalk_actor:mailbox_continuation_check(
             'perform:withArguments:timeout:', ['continueWith:withArguments:', [x, []], 1000]
         )
+    ),
+    %% Nested perform: forms are unwrapped.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = invalid_continuation}},
+        beamtalk_actor:mailbox_continuation_check(
+            'perform:withArguments:',
+            ['perform:withArguments:', ['continueWith:', [x]]]
+        )
+    ),
+    ?assertEqual(
+        ok,
+        beamtalk_actor:mailbox_continuation_check(
+            'perform:withArguments:', ['perform:withArguments:', [increment, []]]
+        )
     ).
