@@ -325,14 +325,13 @@ pub(super) fn is_dispatching_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expressi
 
 /// BT-3985: whether a binary selector sent to `self` in an actor instance
 /// method is a user-defined message dispatched through the actor's own
-/// self-dispatch (`safe_dispatch` + State bind), rather than an operator
-/// `generate_binary_op` lowers structurally (`>>` method lookup, `**`, `++`,
-/// `%`, and the identity/equality operators, none of which an actor overloads
-/// via `generate_binary_op`). An actor's `self` is never a number, so the
+/// self-dispatch (`safe_dispatch` + State bind), rather than an operator the
+/// compiler lowers structurally (`operators::is_structurally_lowered_binary`,
+/// the one list). An actor's `self` is never a number, so the
 /// arithmetic/comparison operators always dispatch. The single predicate shared
 /// by `is_dispatching_actor_self_send` and `generate_message_send`.
 pub(super) fn binary_self_send_dispatches(op: &str) -> bool {
-    !matches!(op, ">>" | "**" | "++" | "%" | "==" | "=:=" | "/=" | "=/=")
+    !super::operators::is_structurally_lowered_binary(op)
 }
 
 /// The selector half of [`is_dispatching_actor_self_send`]'s check —

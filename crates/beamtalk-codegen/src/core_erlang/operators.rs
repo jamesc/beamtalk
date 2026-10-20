@@ -65,6 +65,31 @@ impl OperatorGuard {
     }
 }
 
+/// The Erlang BIF of a binary operator that is never message-dispatched:
+/// remainder and the equality/identity operators (ADR 0002). The single table
+/// behind both [`generate_binary_op`](CoreErlangGenerator::generate_binary_op)'s
+/// lowering and [`is_structurally_lowered_binary`].
+fn structural_erlang_op(op: &str) -> Option<&'static str> {
+    match op {
+        "%" => Some("rem"),
+        "==" => Some("=="),
+        "=:=" => Some("=:="), // Strict equality (ADR 0002)
+        "/=" => Some("/="),   // Loose inequality (ADR 0002)
+        "=/=" => Some("=/="), // Strict inequality (ADR 0002)
+        _ => None,
+    }
+}
+
+/// Whether the binary selector `op` is lowered structurally by the compiler
+/// (`>>` method lookup in `generate_message_send`, `**`/`++` and the
+/// [`structural_erlang_op`] operators in `generate_binary_op`) rather than
+/// dispatched as a message. Every other binary selector (arithmetic,
+/// comparison, user-defined) dispatches. BT-3985: the one predicate behind
+/// `binary_self_send_dispatches` (a binary selector sent to `self`).
+pub(in crate::core_erlang) fn is_structurally_lowered_binary(op: &str) -> bool {
+    matches!(op, ">>" | "**" | "++") || structural_erlang_op(op).is_some()
+}
+
 impl CoreErlangGenerator {
     /// Generates code for binary operators.
     ///
@@ -109,15 +134,13 @@ impl CoreErlangGenerator {
             "-" => "-",
             "*" => "*",
             "/" => "/",
-            "%" => "rem",
-            "==" => "==",
-            "=:=" => "=:=", // Strict equality (ADR 0002)
-            "/=" => "/=",   // Loose inequality (ADR 0002)
-            "=/=" => "=/=", // Strict inequality (ADR 0002)
             "<" => "<",
             ">" => ">",
             "<=" => "=<",
             ">=" => ">=",
+            _ if structural_erlang_op(op).is_some() => {
+                structural_erlang_op(op).expect("checked by the guard")
+            }
             _ => {
                 let right = &arguments[0];
                 return Err(CodeGenError::UnsupportedFeature {

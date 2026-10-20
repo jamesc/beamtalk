@@ -273,8 +273,9 @@ method level and meets this check in a closure; in a class method it is a
 direct class-side send. A `super` send inside a closure (the
 `beamtalk_dispatch:super/5` instance path) runs the same comparison on its
 reply. A `super` send inside a literal block the compiler would otherwise
-inline (`self.items do: [:x | super bump: x]`) is not a State-threading
-position, so a callee that changes state raises here instead of threading;
+inline (a `do:` loop, a conditional branch, or a list-op host such as
+`self.items collect: [:x | super bump: x]`; also `select:`, `inject:into:`,
+`detect:`) is not a State-threading position, so a callee that changes state raises here instead of threading;
 threading it is a separate piece of work (BT-3995).
 
 ## Prior Art
