@@ -1,22 +1,28 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Supervisor class-side configuration tests.
+// Supervisor configuration tests.
 //
-// Supervisor lifecycle (supervise/startChild/stop) requires a live OTP
-// application and cannot run in the compiled BUnit context — see the REPL
-// walkthrough in README.md for that.
+// Configuration (`strategy`, `maxRestarts`, `restartWindow`, `childSpecs`) is
+// instance-side (ADR 0135): it is read from the running supervisor, so these
+// tests start AppSupervisor. See the REPL walkthrough in README.md for the
+// rest of the lifecycle.
 
 TestCase subclass: SupervisorConfigTest
 
-  testAppSupervisorStrategy =>
-    self assert: AppSupervisor strategy equals: #oneForOne
+  // `supervise` starts the one registered AppSupervisor.
+  class serial -> Boolean => true
 
-  testAppSupervisorMaxRestarts =>
-    self assert: AppSupervisor maxRestarts equals: 10
+  tearDown =>
+    sup := AppSupervisor current
+    sup isNil ifFalse: [[sup stop] on: Error do: [:e | nil]]
 
-  testAppSupervisorRestartWindow =>
-    self assert: AppSupervisor restartWindow equals: 60
+  testAppSupervisorConfiguration =>
+    sup := AppSupervisor supervise unwrap
+    self assert: sup strategy equals: #oneForOne
+    self assert: sup maxRestarts equals: 10
+    self assert: sup restartWindow equals: 60
+    self assert: sup count equals: 2
 
   testAppSupervisorIsSupervisor =>
     self assert: AppSupervisor isSupervisor equals: true

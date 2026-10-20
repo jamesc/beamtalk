@@ -7,4 +7,4 @@
 
 Supervisor subclass: E2EInnerSupervisor
 
-  class children -> List => #(Counter)
+  childSpecs -> List => #(Counter)

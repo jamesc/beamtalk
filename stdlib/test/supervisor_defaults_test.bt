@@ -1,34 +1,42 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-1222: Tests for Supervisor class-side defaults and subclass override.
+// BT-1222: Tests for Supervisor configuration defaults and subclass override.
+// Since ADR 0135 §2 the configuration is instance-side, so it is read from a
+// running supervisor.
 //
-// Fixtures: stdlib/test/fixtures/test_supervisor_custom.bt
+// Fixtures: stdlib/test/fixtures/test_supervisor_custom.bt,
+//           stdlib/test/fixtures/bt3963plain_sup.bt
 
 TestCase subclass: SupervisorDefaultsTest
 
-  // === Supervisor class-side defaults ===
-  testSupervisorStrategyDefault =>
-    self assert: Supervisor strategy equals: #oneForOne
+  // Each fixture's supervise registers one node-wide, name-registered process.
+  class serial -> Boolean => true
 
-  testSupervisorMaxRestartsDefault =>
-    self assert: Supervisor maxRestarts equals: 10
+  tearDown =>
+    #(Bt3963PlainSup, TestSupervisorCustom)
+      do: [:cls |
+        sup := cls current
+        sup isNil ifFalse: [[sup stop] on: Error do: [:e | nil]]
+      ]
 
-  testSupervisorRestartWindowDefault =>
-    self assert: Supervisor restartWindow equals: 60
+  // === Supervisor instance-side defaults ===
+  testSupervisorDefaults =>
+    sup := Bt3963PlainSup supervise unwrap
+    self assert: sup strategy equals: #oneForOne
+    self assert: sup maxRestarts equals: 10
+    self assert: sup restartWindow equals: 60
+    self assert: sup childSpecs equals: #()
 
   testSupervisorIsSupervisorTrue =>
     self assert: Supervisor isSupervisor equals: true
 
   // === Supervisor subclass can override defaults ===
-  testSupervisorSubclassOverridesStrategy =>
-    self assert: TestSupervisorCustom strategy equals: #oneForAll
-
-  testSupervisorSubclassOverridesMaxRestarts =>
-    self assert: TestSupervisorCustom maxRestarts equals: 3
-
-  testSupervisorSubclassOverridesRestartWindow =>
-    self assert: TestSupervisorCustom restartWindow equals: 30
+  testSupervisorSubclassOverridesDefaults =>
+    sup := TestSupervisorCustom supervise unwrap
+    self assert: sup strategy equals: #oneForAll
+    self assert: sup maxRestarts equals: 3
+    self assert: sup restartWindow equals: 30
 
   testSupervisorSubclassIsSupervisorTrue =>
     self assert: TestSupervisorCustom isSupervisor equals: true

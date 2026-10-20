@@ -10,4 +10,4 @@
 
 Supervisor subclass: TypePatternSupervisorFixture
 
-  class children => #()
+  childSpecs => #()

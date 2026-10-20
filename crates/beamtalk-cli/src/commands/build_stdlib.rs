@@ -233,7 +233,8 @@ fn write_stdlib_generated_outputs(
     // Generate the Erlang-side twin of the same builtin-class list,
     // replacing the hand-typed `beamtalk_class_metadata:all_builtins/0` table.
     generate_erlang_builtins_hrl(class_metadata)?;
-    generate_class_vars_keys_hrl()
+    generate_class_vars_keys_hrl()?;
+    generate_supervisor_config_hrl()
 }
 
 /// Compiles every stdlib source file to Core Erlang, collecting class
@@ -1575,6 +1576,10 @@ const GENERATED_BUILTINS_HRL_PATH: &str =
 const GENERATED_CLASS_VARS_KEYS_HRL_PATH: &str =
     "runtime/apps/beamtalk_runtime/include/beamtalk_class_vars_keys.hrl";
 
+/// Default path for the generated removed-supervisor-config header (ADR 0135).
+const GENERATED_SUPERVISOR_CONFIG_HRL_PATH: &str =
+    "runtime/apps/beamtalk_runtime/include/beamtalk_supervisor_config.hrl";
+
 /// Write generated `content` to `dest`, but only if it differs from what's
 /// already there — skips touching the file (and downstream recompilation)
 /// when a stdlib build produces byte-identical output.
@@ -1798,6 +1803,17 @@ fn generate_class_vars_keys_hrl() -> Result<()> {
     write_generated_file_if_changed(
         &dest,
         &beamtalk_codegen::core_erlang::class_var_keys::erlang_header(),
+    )
+}
+
+/// Generate `beamtalk_supervisor_config.hrl` from the compiler's list of
+/// removed class-side supervisor configuration selectors (ADR 0135 §2), so the
+/// runtime's override warning and the compile error share one source.
+fn generate_supervisor_config_hrl() -> Result<()> {
+    let dest = Utf8PathBuf::from(GENERATED_SUPERVISOR_CONFIG_HRL_PATH);
+    write_generated_file_if_changed(
+        &dest,
+        &beamtalk_core::semantic_analysis::validators::removed_supervisor_config_erlang_header(),
     )
 }
 

@@ -91,12 +91,11 @@ TestCase subclass: SupervisionShutdownTest
     self assert: spec restart equals: #permanent
     self assert: (spec childSpec at: #shutdown) equals: 15000
 
-  // === DynamicSupervisor class childShutdown ===
-  testChildShutdownDefaultsToNil =>
-    self assert: DynamicSupervisor childShutdown equals: nil
-
+  // === DynamicSupervisor childShutdown (instance-side since ADR 0135) ===
   testSubclassOverridesChildShutdown =>
-    self assert: Bt3965ImpatientPool childShutdown equals: 50
+    pool := Bt3965ImpatientPool supervise unwrap
+    self assert: pool childShutdown equals: 50
+    pool stop
 
   testDynamicChildWithinChildShutdownExitsCleanly =>
     pool := (Bt3965PatientPool supervise) unwrap
