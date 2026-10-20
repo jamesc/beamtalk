@@ -1279,12 +1279,14 @@ fn check_body(
 /// unwrapped, cascades included) used as the receiver or an argument of a
 /// non-binary send, counts as a possible non-local return. Such a protected
 /// block is rejected when its cleanup reads a write of it, even if no block
-/// returns. Residual (BT-3950): a self-send whose method evaluates a stored
-/// `^` block is not seen.
+/// returns. Residuals (BT-3950): a self-send whose method evaluates a stored
+/// `^` block, and a block reached as a call result or collection element that
+/// is passed as an argument or sent a non-`value` message, are not seen.
 ///
-/// Only a cleanup read of a local bound in the scope enclosing the `ensure:`
-/// counts: a cleanup that binds its own `x` (`[x := 5. ^x] ensure: [x := 0. x]`)
-/// reads that, not the protected block's.
+/// Every local the cleanup reads counts, except one the cleanup binds itself
+/// before reading it (its own first assignment): a cleanup that binds its own
+/// `x` (`[x := 5. ^x] ensure: [x := 0. x]`) reads that, not the protected
+/// block's.
 ///
 /// The one recognizer of this rule: `beamtalk lint`'s `dead_returned_assignment`
 /// skips a `^t := e` inside the span of this error rather than re-deriving it.
@@ -1294,31 +1296,44 @@ fn report_nlr_out_of_ensure(
     body: &[ExpressionStatement],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Every local assignment (name, start of the assignment), to tell which
-    // locals are bound before an `ensure:`; and which locals only ever hold a
-    // literal (never a block).
-    let mut assigned: Vec<(EcoString, u32)> = Vec::new();
+    // Which locals only ever hold a literal (never a block): every other
+    // binding site (a computed assignment, a block parameter, a destructuring
+    // or `match:` pattern variable) makes a name "other".
     let mut literal_bound: BTreeSet<EcoString> = BTreeSet::new();
     let mut other_bound: BTreeSet<EcoString> = BTreeSet::new();
     for stmt in body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            // A block's parameters are bound inside it: an `ensure:` within
-            // the block sees them as locals of an enclosing scope.
-            if let Expression::Block(b) = e {
-                for p in &b.parameters {
-                    assigned.push((p.name.clone(), b.span.start()));
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+            Expression::Block(b) => {
+                other_bound.extend(b.parameters.iter().map(|p| p.name.clone()));
+            }
+            Expression::Assignment { target, value, .. } => {
+                if let Expression::Identifier(id) = target.as_ref() {
+                    if matches!(value.as_ref(), Expression::Literal(..)) {
+                        literal_bound.insert(id.name.clone());
+                    } else {
+                        other_bound.insert(id.name.clone());
+                    }
                 }
             }
-            if let Expression::Assignment { target, value, .. } = e
-                && let Expression::Identifier(id) = target.as_ref()
-            {
-                assigned.push((id.name.clone(), e.span().start()));
-                if matches!(value.as_ref(), Expression::Literal(..)) {
-                    literal_bound.insert(id.name.clone());
-                } else {
-                    other_bound.insert(id.name.clone());
+            Expression::DestructureAssignment { pattern, .. } => {
+                other_bound.extend(
+                    crate::semantic_analysis::extract_pattern_bindings(pattern)
+                        .0
+                        .into_iter()
+                        .map(|i| i.name),
+                );
+            }
+            Expression::Match { arms, .. } => {
+                for arm in arms {
+                    other_bound.extend(
+                        crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern)
+                            .0
+                            .into_iter()
+                            .map(|i| i.name),
+                    );
                 }
             }
+            _ => {}
         });
     }
     let sources = NlrSources {
@@ -1341,13 +1356,7 @@ fn report_nlr_out_of_ensure(
                 && let Expression::Block(protected) = receiver.as_ref()
                 && let [Expression::Block(cleanup)] = arguments.as_slice()
             {
-                let at = e.span().start();
-                let bound_outside = |n: &str| {
-                    params.iter().any(|p| p == n) || assigned.iter().any(|(a, s)| a == n && *s < at)
-                };
-                if let Some((name, cause)) =
-                    nlr_dropped_local(protected, cleanup, &sources, &bound_outside)
-                {
+                if let Some((name, cause)) = nlr_dropped_local(protected, cleanup, &sources) {
                     diagnostics.push(
                         Diagnostic::error(
                             format!(
@@ -1463,14 +1472,48 @@ fn nlr_cause(protected: &Block, sources: &NlrSources) -> Option<String> {
     cause
 }
 
-/// The local `protected` writes and `cleanup` reads (among those bound outside
-/// the `ensure:`), with what may throw the non-local return, when there is one
+/// The names `cleanup` binds itself before it reads them: its parameters, and a
+/// name whose first occurrence in the cleanup is the target of an assignment
+/// whose value does not mention it.
+fn names_bound_by_cleanup_first(cleanup: &Block) -> BTreeSet<EcoString> {
+    let mut first: std::collections::BTreeMap<EcoString, (u32, bool)> = Default::default();
+    let mut note = |name: &EcoString, at: u32, binds: bool| {
+        let slot = first.entry(name.clone()).or_insert((at, binds));
+        if at < slot.0 {
+            *slot = (at, binds);
+        }
+    };
+    for stmt in &cleanup.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+            Expression::Identifier(id) => note(&id.name, id.span.start(), false),
+            Expression::Assignment { target, value, .. } => {
+                if let Expression::Identifier(id) = target.as_ref() {
+                    let mut mentioned = false;
+                    crate::ast_walker::walk_expression(value, &mut |v| {
+                        mentioned |= matches!(v, Expression::Identifier(i) if i.name == id.name);
+                    });
+                    note(&id.name, id.span.start(), !mentioned);
+                }
+            }
+            _ => {}
+        });
+    }
+    let mut own: BTreeSet<EcoString> = first
+        .into_iter()
+        .filter(|(_, (_, binds))| *binds)
+        .map(|(n, _)| n)
+        .collect();
+    own.extend(cleanup.parameters.iter().map(|p| p.name.clone()));
+    own
+}
+
+/// The local `protected` writes and `cleanup` reads (but does not bind itself
+/// first), with what may throw the non-local return, when there is one
 /// (see [`report_nlr_out_of_ensure`]), in name order.
 fn nlr_dropped_local(
     protected: &Block,
     cleanup: &Block,
     sources: &NlrSources,
-    bound_outside: &dyn Fn(&str) -> bool,
 ) -> Option<(String, String)> {
     let cause = nlr_cause(protected, sources)?;
     // The writes that reach the protected block's frame, nested loop, fold and
@@ -1478,7 +1521,8 @@ fn nlr_dropped_local(
     // drops them too): the one outer-local-writes recognizer, with the locals
     // the cleanup reads, and the enclosing scope binds, as the bound-outside set.
     let read = analyze_block(cleanup).local_reads;
-    outer_local_writes(protected, &|n| read.contains(n) && bound_outside(n))
+    let own = names_bound_by_cleanup_first(cleanup);
+    outer_local_writes(protected, &|n| read.contains(n) && !own.contains(n))
         .into_iter()
         .map(|w| w.name.to_string())
         .min()

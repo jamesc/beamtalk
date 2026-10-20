@@ -410,8 +410,9 @@ bound outside the `ensure:`, the parameters of enclosing blocks included. The
 static view cannot tell which value is a block, so the rule is fully
 conservative: it over-rejects (for example `assoc value`, `conn close`, or an
 ordinary argument) rather than read a stale local silently. Binary operands and
-literal or constant arguments do not count. One route stays open (a residual
-for BT-3950): a self-send whose method evaluates a stored `^` block, as in
+literal or constant arguments do not count. Two routes stay open (residuals
+for BT-3950): a call result or collection element passed as an argument or sent
+a non-`value` message (`CvA ap: (bs at: 1)`, `(holder blk) run`), and a self-send whose method evaluates a stored `^` block, as in
 `[t := 1. self run] ensure: [t printString]` with `run => self.blk value`. The
 protected block holds no block value and no `^`, and rejecting every self-send
 would be too broad, so the rule does not see it. An `on:do:`

@@ -3576,6 +3576,12 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
         "t := 0\nh := [^0]\n[t := 1. CvA ap: (h)] ensure: [t printString]\n9",
         "t := 0\nb := [^0]\n[t := 1. b yourself; value] ensure: [t printString]\n9",
         "t := 0\nb := [^0]\n[t := 1. CvA ap: 1; ap: b] ensure: [t printString]\n9",
+        // Locals bound by destructuring or a `match:` pattern are locals of the
+        // enclosing scope too.
+        "{u, w} := {0, 0}\n[u := 5. ^u] ensure: [u printString]\n9",
+        "arr := #[1, 2]\n#[u, w] := arr\n[u := 5. ^u] ensure: [u printString]\n9",
+        // A block parameter shadowing a literal-only name is not a constant.
+        "k := 3\n#(1) do: [:k | [t := 1. CvA ap: k] ensure: [t printString]]\n9",
         // A parameter of an enclosing block is bound in the enclosing scope.
         "#(1, 2) do: [:x | [x := 5. ^x] ensure: [x printString]]\n9",
         "[:x | [x := 5. ^x] ensure: [x printString]] value: 1\n9",
@@ -3633,8 +3639,22 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
     }
 }
 
-/// BT-3993: a cleanup read counts only when the local is bound in the scope
-/// enclosing the `ensure:`; a cleanup that binds its own `x` reads that.
+/// BT-3993: a `match:` pattern variable is a local of the enclosing scope for
+/// the stale-cleanup rule (the arm itself also draws the BT-3743 error).
+#[test]
+fn an_ensure_in_a_match_arm_reading_a_pattern_variable_is_rejected() {
+    let body = "3 match: [k -> [k := 5. ^k] ensure: [k printString]]\n9";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        let errors = analysis_errors(&src, &[]);
+        assert!(
+            errors.iter().any(|e| e.message.contains("BT-3947")),
+            "{src}: {errors:?}"
+        );
+    }
+}
+
+/// BT-3993: every cleanup read counts, except a local the cleanup binds itself
+/// first: a cleanup that binds its own `x` reads that.
 #[test]
 fn an_ensure_cleanup_that_binds_its_own_local_is_not_a_stale_read() {
     for body in [
