@@ -226,6 +226,8 @@ mod sibling_snapshot;
 mod supervisor;
 mod threaded_locals;
 mod threaded_locals_agreement;
+mod tier2_block_local_corpus;
+mod tier2_block_local_inner_loop;
 mod trait_flattening;
 mod value_position_assignment_agreement;
 mod value_type_conditional_family_verifier_corpus;

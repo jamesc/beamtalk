@@ -193,15 +193,6 @@ TestCase subclass: ActorSelfSendHomTest
     selector := [pool tallyCount] on: Error do: [:e | e selector]
     self assert: selector equals: #fwdCount:
 
-  // PIN-BUG (BT-3939): a promoted block that rebinds a block-local inside
-  // an inner loop returns the pre-loop value with a `__local__` key leaked
-  // into its state, so the wrapper's state guard raises. On main (and
-  // without the guard) it answers #(0, 0) silently; the fix for BT-3939
-  // flips this to `equals: #(30, 30)`.
-  testPromotedBlockWithInnerLoopLocalPinBug =>
-    pool := SelfSendHomFoldPool spawn
-    self should: [pool groupWeights] raise: #stateful_block_dispatch
-
   // A Tier 1 block of the wrong arity is not misread as a Tier 2 block: its
   // reply is not `{Result, Map}`, so it raises the structured error.
   testWrongArityCallableRaisesStructuredError =>

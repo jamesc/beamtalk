@@ -32,6 +32,7 @@ impl CoreErlangGenerator {
             direct_class_methods: &self.own_direct_class_methods,
             stdlib_trait_methods: &self.own_stdlib_trait_methods,
             overrides_collection_selector: self.own_overrides_collection_selector,
+            overrides_species_construction: self.own_overrides_species_construction,
         }
     }
 
@@ -525,6 +526,17 @@ impl CoreErlangGenerator {
     /// Looks up a variable binding in the current scope stack.
     pub(in crate::core_erlang) fn lookup_var(&self, name: &str) -> Option<&String> {
         self.var_context.lookup(name)
+    }
+
+    /// The current variable-scope depth ([`Self::bound_since`]'s baseline).
+    pub(in crate::core_erlang) fn scope_depth(&self) -> usize {
+        self.var_context.depth()
+    }
+
+    /// Whether `name` is bound by the scope that was innermost at `depth` or a
+    /// scope pushed since, rather than by an enclosing one.
+    pub(in crate::core_erlang) fn bound_since(&self, name: &str, depth: usize) -> bool {
+        self.var_context.is_bound_since(name, depth)
     }
 
     /// Binds an identifier to a Core Erlang variable name in the current scope.

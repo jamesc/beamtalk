@@ -1183,7 +1183,8 @@ pub fn outer_local_writes(
 /// A name assigned inside a `match:` arm body is not counted either: the
 /// walker gives each arm its own frame and pops it after the arm, matching
 /// the name resolver's per-arm scope.
-pub(crate) fn names_assigned_outside_nested_blocks(stmt: &Expression) -> HashSet<ecow::EcoString> {
+#[must_use]
+pub fn names_assigned_outside_nested_blocks(stmt: &Expression) -> HashSet<ecow::EcoString> {
     let mut walker = OuterWriteWalker {
         bound_outside: &|_| false,
         frames: vec![HashSet::new()],

@@ -85,7 +85,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Accepted (partial) | 2026-03-07 |
 | [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Implemented | 2026-03-07 |
 | [0058](0058-platform-security-model.md) | Platform Security Model | Accepted (policy) | 2026-03-07 |
-| [0059](0059-supervision-tree-syntax.md) | Supervision Tree Syntax | Implemented | 2026-03-07 |
+| [0059](0059-supervision-tree-syntax.md) | Supervision Tree Syntax | Implemented (extended and amended by 0135) | 2026-03-07 |
 | [0060](0060-result-type-hybrid-error-handling.md) | Result Type — Hybrid Error Handling for Expected Failures | Implemented | 2026-03-08 |
 | [0061](0061-program-entry-points-and-run-lifecycle.md) | Program Entry Points and Run Lifecycle | Implemented | 2026-03-10 |
 | [0062](0062-bundled-example-corpus-mcp-search-tool.md) | Bundled Example Corpus and Search Tool for MCP Server | Implemented | 2026-03-15 |
@@ -161,6 +161,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0132](0132-callee-side-threaded-entry-points-for-higher-order-methods.md) | Callee-Side Threaded Entry Points for Higher-Order Methods | Superseded by 0133 | 2026-10-17 |
 | [0133](0133-scope-of-captured-variable-mutation-in-blocks.md) | Scope of Captured-Variable Mutation in Blocks | Accepted | 2026-10-18 |
 | [0134](0134-errors-in-no-reply-handlers-crash-the-actor.md) | Errors in No-Reply Handlers Crash the Actor | Accepted | 2026-10-19 |
+| [0135](0135-supervisor-instances-and-start-arguments.md) | Supervisor Instances and Start Arguments | Accepted | 2026-10-20 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

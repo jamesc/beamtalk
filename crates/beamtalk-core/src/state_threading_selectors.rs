@@ -110,6 +110,46 @@ pub fn overridable_collection_selectors() -> impl Iterator<Item = &'static str> 
         .filter(|sel| *sel != "do:")
 }
 
+/// The collection messages whose stdlib provision in `Collection` ends in
+/// `self species withAll: result` (BT-3951): `collect:` and `select:`, and
+/// `reject:` through `self select:`. `Enumerable`'s provisions of the same names
+/// forward to `self elements` and never reach `species`, and the other
+/// collection messages (`inject:into:`, `detect:`, `anySatisfy:`, ...) build no
+/// collection of the receiver's species. Every one is also in
+/// [`overridable_collection_selectors`].
+const SPECIES_DEPENDENT_SELECTORS: &[&str] = &["collect:", "select:", "reject:"];
+
+/// Instance-side messages a class can define that change what
+/// [`species_dependent_collection_selectors`] answer (BT-3951): `species`.
+const SPECIES_CONSTRUCTION_SELECTORS: &[&str] = &["species"];
+
+/// Class-side counterpart: `species` defaults to `self class`, so a user
+/// collection usually overrides class-side `withAll:` rather than `species`.
+/// `Collection`'s provisions send no other class-side message to `species`.
+const SPECIES_CONSTRUCTION_CLASS_SELECTORS: &[&str] = &["withAll:"];
+
+/// The messages whose stdlib `Collection` provision builds its answer with
+/// `self species withAll:`. A class that defines a species-construction
+/// message outside the stdlib poisons exactly these, not the rest of the
+/// collection messages, and only when the receiver gets them from the
+/// `Collection` provision rather than a trait such as `Enumerable`.
+pub fn species_dependent_collection_selectors() -> impl Iterator<Item = &'static str> {
+    SPECIES_DEPENDENT_SELECTORS.iter().copied()
+}
+
+/// The instance-side species-construction trigger selectors (`species`).
+/// Codegen records the answer per class (`overrides_species_construction` in
+/// `__beamtalk_meta/0`) from this list and
+/// [`species_construction_class_selectors`].
+pub fn species_construction_selectors() -> impl Iterator<Item = &'static str> {
+    SPECIES_CONSTRUCTION_SELECTORS.iter().copied()
+}
+
+/// The class-side species-construction trigger selectors (`withAll:`).
+pub fn species_construction_class_selectors() -> impl Iterator<Item = &'static str> {
+    SPECIES_CONSTRUCTION_CLASS_SELECTORS.iter().copied()
+}
+
 /// Returns `true` if `sel` is a state-threading keyword selector.
 ///
 /// These selectors receive block arguments that are analysed for field mutations
@@ -578,6 +618,58 @@ pub fn is_try_do_selector(sel: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BT-3951: the runtime's list of overridable collection selectors
+    /// (`beamtalk_collection_selectors.erl`, read when a runtime extension is
+    /// checked) is the compiler's one list, in the same order. Edit the Erlang
+    /// module when this fails.
+    #[test]
+    fn runtime_overridable_selector_list_matches_the_compiler_list() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../runtime/apps/beamtalk_runtime/src/beamtalk_collection_selectors.erl"
+        );
+        let src = std::fs::read_to_string(path).expect("read beamtalk_collection_selectors.erl");
+        let atoms = |name: &str| -> Vec<String> {
+            let body = src
+                .split(&format!("%% BEGIN {name}"))
+                .nth(1)
+                .and_then(|rest| rest.split(&format!("%% END {name}")).next())
+                .unwrap_or_else(|| panic!("markers for {name}"));
+            body.lines()
+                .filter_map(|line| {
+                    let line = line.trim().trim_end_matches([',', ']']);
+                    Some(line.strip_prefix('\'')?.strip_suffix('\'')?.to_string())
+                })
+                .collect()
+        };
+        let strs = |it: &mut dyn Iterator<Item = &'static str>| -> Vec<String> {
+            it.map(str::to_string).collect()
+        };
+        assert_eq!(
+            atoms("SELECTORS"),
+            strs(&mut overridable_collection_selectors())
+        );
+        assert_eq!(
+            atoms("SPECIES DEPENDENT"),
+            strs(&mut species_dependent_collection_selectors())
+        );
+        assert_eq!(
+            atoms("SPECIES INSTANCE"),
+            strs(&mut species_construction_selectors())
+        );
+        assert_eq!(
+            atoms("SPECIES CLASS"),
+            strs(&mut species_construction_class_selectors())
+        );
+        // Every species-dependent selector is also an overridable one.
+        for sel in species_dependent_collection_selectors() {
+            assert!(
+                overridable_collection_selectors().any(|s| s == sel),
+                "{sel}"
+            );
+        }
+    }
 
     fn parse_expr(src: &str) -> Expression {
         let tokens = crate::source_analysis::lex_with_eof(src);
