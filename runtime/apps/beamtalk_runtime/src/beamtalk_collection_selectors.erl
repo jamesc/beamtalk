@@ -115,6 +115,8 @@ species_construction_extended_on(Class) ->
 %% Registry table not initialised yet (early bootstrap): nothing is extended.
 -spec guarded(fun(() -> boolean())) -> boolean().
 guarded(Check) ->
+    %% bt-catcher-audit: not-applicable-no-block - Check is always a local closure
+    %% over beamtalk_extensions:lookup/2 (ETS), never a Beamtalk block.
     try
         Check()
     catch
