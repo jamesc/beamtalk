@@ -636,11 +636,10 @@ reports the same message at the same span. No operation is surface-specific.
   rule is one predicate, `value_position_local_assignments` in
   `beamtalk-core`'s `block_facts`, proved by the `value_position_assignment_agreement`
   tests in `beamtalk-codegen` (methods) and `beamtalk-repl` (eval and trace):
-  codegen drops no such assignment. `^t := e` is legal on every surface except
-  inside the protected block of an `ensure:`, where it is an
-  `UnmigratedLocalThreading` error until BT-3947 (the cleanup would read the old
-  `t`); elsewhere the `dead_returned_assignment` lint (`beamtalk lint`) warns
-  that the write is dead.
+  codegen drops no such assignment. `^t := e` is legal on every surface; inside
+  the protected block of an `ensure:` whose cleanup reads `t` the throw hands the
+  cleanup the written value (BT-3947, BT-3912), and elsewhere the
+  `dead_returned_assignment` lint (`beamtalk lint`) warns that the write is dead.
 - **Narrowing (BT-3841).** The statement-position half of the temporary
   check was measured on a BEAM (`just measure-adr0131-statements`, tables
   `adr0131_statement_measured.tsv` and `adr0131_operand_measured.tsv` in
@@ -827,11 +826,11 @@ reports the same message at the same span. No operation is surface-specific.
   only a top-level statement or assignment unpacks it); an assignment inside
   a conditional arm in a `whileTrue:`/`whileFalse:` condition block in a
   class, value-type or actor method (BT-3891: `erlc` failed with an unbound
-  `StateAcc`; the REPL answers right and is unchanged); and a REPL `match:`
-  arm that writes an outer local, which now draws the BT-3817 `match:` arm
-  error methods draw (maintainer-approved REPL output change; it was already
-  rejected). BT-3947
-  and BT-3912 lower the shapes and delete the rows (BT-3911 lowered the loop-condition one).
+  `StateAcc`; the REPL answers right and is unchanged). BT-3912 lowers the
+  `match:` arm that writes an outer local (BT-3947: each arm is a `BranchArm`
+  frame, in methods and at the REPL alike; what stays an error is a `match:`
+  that is not a producer where it sits) and the `groupBy:` row;
+  BT-3911 lowered the loop-condition one.
 - The REPL sees only the current input, but a block that assigns a captured
   binding is rejected where it is stored (ADR 0133, BT-3902), so no input can
   hand a later one a writing block to send `value`.

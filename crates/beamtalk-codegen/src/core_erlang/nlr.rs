@@ -37,6 +37,12 @@ pub(in crate::core_erlang) struct NlrCatchVars {
     /// State variable captured from the 4-tuple NLR throw.
     pub state_var: String,
     pub ot_pair_var: String,
+    /// BT-3947: the method wrapped a `^` slot for an `ensure:` cleanup
+    /// ([`CoreErlangGenerator::nlr_throw_slot`]) somewhere in its body, so the
+    /// boundary unwraps `{'$bt_ens', Slot, _}` (a closure that outlived its
+    /// `ensure:` throws one straight here) to `Slot`. The two pattern variables
+    /// of that unwrapping, minted only then so a method without it is unchanged.
+    pub ens_unwrap: Option<(String, String)>,
 }
 
 /// The per-context NLR boundary — the *only* thing that differs between the
@@ -70,27 +76,47 @@ pub(in crate::core_erlang) enum NlrBoundary {
 /// [`NlrCatchVars::format_catch_suffix`].
 ///
 /// Use Document/docvec! — never format!() for Core Erlang fragments.
-fn nlr_arm_result(val_var: &str, state_var: &str, boundary: NlrBoundary) -> Document<'static> {
+fn nlr_arm_result(
+    val_var: &str,
+    state: Document<'static>,
+    boundary: NlrBoundary,
+) -> Document<'static> {
     match boundary {
         NlrBoundary::ActorReply => docvec![
             "{'reply', ",
             leaf::var(val_var.to_string()),
             ", ",
-            leaf::var(state_var.to_string()),
+            state,
             "}",
         ],
         NlrBoundary::ClassMethod => leaf::var(val_var.to_string()),
-        NlrBoundary::ValueType => docvec![
-            "{",
-            leaf::var(val_var.to_string()),
-            ", ",
-            leaf::var(state_var.to_string()),
-            "}",
-        ],
+        NlrBoundary::ValueType => docvec!["{", leaf::var(val_var.to_string()), ", ", state, "}",],
     }
 }
 
 impl NlrCatchVars {
+    /// The state slot the matching catch arm hands its boundary: the thrown
+    /// slot, with an `ensure:` wrapper ([`Self::ens_unwrap`]) taken off.
+    fn state_doc(&self) -> Document<'static> {
+        let state = leaf::var(self.state_var.clone());
+        let Some((slot, other)) = &self.ens_unwrap else {
+            return state;
+        };
+        docvec![
+            "case ",
+            state,
+            " of <{'$bt_ens', ",
+            leaf::var(slot.clone()),
+            ", _}> when 'true' -> ",
+            leaf::var(slot.clone()),
+            " <",
+            leaf::var(other.clone()),
+            "> when 'true' -> ",
+            leaf::var(other.clone()),
+            " end"
+        ]
+    }
+
     /// Formats the try prefix for the NLR wrapper.
     ///
     /// Returns `Document` instead of `String` for composable codegen.
@@ -160,7 +186,7 @@ impl NlrCatchVars {
             ", ",
             leaf::var(self.token_var.clone()),
             ") -> ",
-            nlr_arm_result(&self.val_var, &self.state_var, boundary),
+            nlr_arm_result(&self.val_var, self.state_doc(), boundary),
             nest(INDENT + 4, line()),
             "<",
             leaf::var(self.ot_pair_var.clone()),
@@ -192,6 +218,12 @@ impl CoreErlangGenerator {
             val_var: self.fresh_temp_var("NlrVal"),
             state_var: self.fresh_temp_var("NlrState"),
             ot_pair_var: self.fresh_temp_var("OtherPair"),
+            ens_unwrap: self.nlr_ens_wrapped.replace(false).then(|| {
+                (
+                    self.fresh_temp_var("NlrEnsSlot"),
+                    self.fresh_temp_var("NlrEnsPlain"),
+                )
+            }),
         }
     }
 
@@ -244,6 +276,44 @@ impl CoreErlangGenerator {
         self.alloc_nlr_catch_vars(token_var)
     }
 
+    /// BT-3947 (closes the `ensure:` half of BT-3910's `^t := e` rule): the slot of
+    /// a `^` throw. `slot` is the real state slot of the method's NLR boundary
+    /// (the actor `State`, a value type's `Self`, a class method's `nil`);
+    /// inside the protected block of an `ensure:` producer it is wrapped as
+    /// `{'$bt_ens', Slot, Locals}`, where `Locals` is a map of the `__local__`
+    /// keys of [`Self::nlr_capture`] to their values *now*, read like any other
+    /// local read in the frame the `^` sits in (a loop parameter, the arm's
+    /// `StateAcc`, a plain `let`). The `ensure:`'s catch unwraps it, runs the
+    /// cleanup over those locals and rethrows with the real slot, so no
+    /// boundary ever sees the wrapper.
+    pub(in crate::core_erlang) fn nlr_throw_slot(
+        &self,
+        slot: Document<'static>,
+    ) -> Document<'static> {
+        if self.nlr_capture.is_empty() {
+            return slot;
+        }
+        let mut entries: Vec<Document<'static>> = Vec::new();
+        for (i, name) in self.nlr_capture.iter().enumerate() {
+            if self.nlr_capture[..i].contains(name) {
+                continue;
+            }
+            let value = self
+                .lookup_var(name)
+                .map_or_else(|| leaf::atom("nil"), |var| leaf::var(var.clone()));
+            if !entries.is_empty() {
+                entries.push(Document::Str(", "));
+            }
+            entries.push(docvec![
+                leaf::atom(Self::local_state_key(name)),
+                " => ",
+                value
+            ]);
+        }
+        self.nlr_ens_wrapped.set(true);
+        docvec!["{'$bt_ens', ", slot, ", ~{", Document::Vec(entries), "}~}"]
+    }
+
     /// Returns the current NLR token variable name, if any.
     pub(in crate::core_erlang) fn current_nlr_token(&self) -> Option<&String> {
         self.value_type_context
@@ -263,19 +333,19 @@ mod tests {
 
     #[test]
     fn nlr_arm_result_actor_reply_yields_reply_tuple() {
-        let doc = nlr_arm_result("Val", "St", NlrBoundary::ActorReply);
+        let doc = nlr_arm_result("Val", leaf::var("St".to_string()), NlrBoundary::ActorReply);
         assert_eq!(doc.to_pretty_string(), "{'reply', Val, St}");
     }
 
     #[test]
     fn nlr_arm_result_class_method_yields_bare_value() {
-        let doc = nlr_arm_result("V", "S", NlrBoundary::ClassMethod);
+        let doc = nlr_arm_result("V", leaf::var("S".to_string()), NlrBoundary::ClassMethod);
         assert_eq!(doc.to_pretty_string(), "V");
     }
 
     #[test]
     fn nlr_arm_result_value_type_yields_value_state_tuple() {
-        let doc = nlr_arm_result("V", "S", NlrBoundary::ValueType);
+        let doc = nlr_arm_result("V", leaf::var("S".to_string()), NlrBoundary::ValueType);
         assert_eq!(doc.to_pretty_string(), "{V, S}");
     }
 
@@ -290,6 +360,7 @@ mod tests {
             val_var: "Val0".to_string(),
             state_var: "St0".to_string(),
             ot_pair_var: "OtP0".to_string(),
+            ens_unwrap: None,
         }
     }
 

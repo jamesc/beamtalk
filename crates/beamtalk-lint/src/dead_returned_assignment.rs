@@ -17,18 +17,19 @@
 //!     ^count := count + 1
 //! ```
 //!
-//! A `^` out of the protected block of an `ensure:` whose cleanup reads a local
-//! the block writes is a compile error for now (BT-3947: the cleanup would read
-//! the old value). The lint asks the compiler ([`local_threading_diagnostics`])
-//! and stays silent inside the span of any error it reports, as
-//! `dead_block_assignment` does; the compile error owns it.
+//! A `^` out of the protected block of an `ensure:` whose cleanup reads the
+//! local is not dead: the throw hands the cleanup the value written (BT-3947),
+//! so the lint stays silent for it. It also asks the compiler
+//! ([`local_threading_diagnostics`]) and stays silent inside the span of any
+//! error it reports, as `dead_block_assignment` does; the compile error owns it.
 //!
 //! It is a warning, never a compile error.
 
 use crate::LintPass;
 use crate::hierarchy_for_lint;
-use beamtalk_core::ast::{Expression, Module};
+use beamtalk_core::ast::{Expression, MessageSelector, Module};
 use beamtalk_core::ast_walker::walk_expression;
+use beamtalk_core::semantic_analysis::block_facts::analyze_block;
 use beamtalk_core::semantic_analysis::local_threading_diagnostics;
 use beamtalk_core::source_analysis::{Diagnostic, Span};
 
@@ -44,8 +45,24 @@ impl LintPass for DeadReturnedAssignmentPass {
             .collect();
         for method in module.all_methods() {
             let mut returns: Vec<(String, Span)> = Vec::new();
+            // The protected blocks of the method's `ensure:`s, with the locals
+            // each cleanup reads.
+            let mut ensures: Vec<(Span, std::collections::HashSet<String>)> = Vec::new();
             for stmt in &method.body {
                 walk_expression(&stmt.expression, &mut |expr| {
+                    if let Expression::MessageSend {
+                        receiver,
+                        selector: MessageSelector::Keyword(parts),
+                        arguments,
+                        ..
+                    } = expr
+                        && parts.len() == 1
+                        && parts[0].keyword == "ensure:"
+                        && let Expression::Block(protected) = receiver.as_ref()
+                        && let [Expression::Block(cleanup)] = arguments.as_slice()
+                    {
+                        ensures.push((protected.span, analyze_block(cleanup).local_reads));
+                    }
                     if let Expression::Return { value, .. } = expr
                         && let assignment @ Expression::Assignment { target, .. } =
                             value.unwrap_parens()
@@ -59,7 +76,14 @@ impl LintPass for DeadReturnedAssignmentPass {
                 let owned_by_compile_error = rejected
                     .iter()
                     .any(|p| p.start() <= span.start() && span.end() <= p.end());
-                if !owned_by_compile_error {
+                // BT-3947: an `ensure:` whose cleanup reads `name` reads what
+                // the `^` wrote.
+                let read_by_cleanup = ensures.iter().any(|(protected, reads)| {
+                    protected.start() <= span.start()
+                        && span.end() <= protected.end()
+                        && reads.contains(&name)
+                });
+                if !owned_by_compile_error && !read_by_cleanup {
                     diagnostics.push(
                         Diagnostic::lint(
                             format!(
@@ -124,9 +148,19 @@ mod tests {
     }
 
     #[test]
-    fn inside_an_ensure_protected_block_the_compile_error_owns_it() {
+    fn inside_an_ensure_protected_block_whose_cleanup_reads_it_it_is_live() {
         let diags = lint(&in_method("[^t := t + 1] ensure: [t printString]"));
         assert!(diags.is_empty(), "{diags:?}");
+        let diags = lint(&in_method(
+            "[#(1) do: [:k | ^t := k]] ensure: [t printString]\n    0",
+        ));
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn inside_an_ensure_protected_block_whose_cleanup_does_not_read_it_it_is_dead() {
+        let diags = lint(&in_method("[^t := t + 1] ensure: [0]"));
+        assert_eq!(diags.len(), 1, "{diags:?}");
     }
 
     #[test]

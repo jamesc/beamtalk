@@ -46,6 +46,8 @@ pub(in crate::core_erlang) struct BodyState {
     in_loop_body: bool,
     active_branch_frame: u32,
     closure_frame: Option<FrameId>,
+    nlr_capture: Vec<String>,
+    nlr_ens_wrapped: bool,
     loop_mode: LoopMode,
     precompiled_subexprs: HashMap<Span, PrecompiledSubexpr>,
     local_producer_sites: HashSet<Span>,
@@ -75,6 +77,8 @@ impl CoreErlangGenerator {
             in_loop_body: std::mem::take(&mut self.in_loop_body),
             active_branch_frame: std::mem::take(&mut self.active_branch_frame),
             closure_frame: self.closure_frame.take(),
+            nlr_capture: std::mem::take(&mut self.nlr_capture),
+            nlr_ens_wrapped: self.nlr_ens_wrapped.replace(false),
             loop_mode: std::mem::take(&mut self.loop_mode),
             precompiled_subexprs: std::mem::take(&mut self.precompiled_subexprs),
             local_producer_sites: std::mem::take(&mut self.local_producer_sites),
@@ -100,6 +104,8 @@ impl CoreErlangGenerator {
             in_loop_body,
             active_branch_frame,
             closure_frame,
+            nlr_capture,
+            nlr_ens_wrapped,
             loop_mode,
             precompiled_subexprs,
             local_producer_sites,
@@ -115,6 +121,8 @@ impl CoreErlangGenerator {
         self.in_loop_body = in_loop_body;
         self.active_branch_frame = active_branch_frame;
         self.closure_frame = closure_frame;
+        self.nlr_capture = nlr_capture;
+        self.nlr_ens_wrapped.set(nlr_ens_wrapped);
         self.loop_mode = loop_mode;
         self.precompiled_subexprs = precompiled_subexprs;
         self.local_producer_sites = local_producer_sites;

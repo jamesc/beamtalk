@@ -392,12 +392,14 @@ new value to that cleanup: the `^` is a throw, and the cleanup runs from the
 body's writes. The same holds for the statement form `t := t + 1. ^t`
 (measured on a BEAM in class, value-type and actor methods: the cleanup
 reads the old `t`, silently). So a `^` out of the protected block of an
-`ensure:` (at any depth) whose cleanup reads a local that block writes stays a
-compile error (`UnmigratedLocalThreading`, BT-3947 lowers it), reported by
-the one recognizer in `validators/local_threading.rs`
-(`report_nlr_out_of_ensure`) with the hint to keep the `^` out of the protected
-block; `dead_returned_assignment` asks the compiler and stays silent inside
-that error's span. An `on:do:`
+`ensure:` (at any depth) whose cleanup reads a local that block writes has to
+hand the cleanup that value (BT-3947, lowered in BT-3912): inside a producer's
+protected block the throw's state slot is wrapped as `{'$bt_ens', Slot,
+Locals}`, `Locals` a map of the `ensure:`'s threaded locals read at the `^`
+(`nlr_throw_slot`); the `ensure:`'s catch unwraps it, runs the cleanup (a
+`BranchArm` frame entered through those locals) and rethrows with the real
+slot, so no NLR boundary ever sees the wrapper. `dead_returned_assignment` stays
+silent when an enclosing `ensure:` cleanup reads the local. An `on:do:`
 protected body has no such position: a `^` passes through its catch untouched,
 no handler runs, and nothing reads `t` afterwards. Everywhere else the write is
 dead, and the `beamtalk-lint` rule `dead_returned_assignment` warns and

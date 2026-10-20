@@ -3013,7 +3013,7 @@ t                                             // => 0, the write inside the rais
 
 This is a deliberate departure from Pharo, where temporaries are shared cells and a write made before the raise survives. On BEAM the protected region's locals are a value that is returned only when the block completes. A block that does not raise keeps all its writes.
 
-**`match:` arms.** A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in class, value-type and actor methods; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead. The REPL reports the same error. BT-3875 (lowered by BT-3947) makes `match:` arms producers everywhere.
+**`match:` arms.** A `match:` arm is an expression, not a block, but it is the same frame a conditional's block is ([BT-3947](https://linear.app/beamtalk/issue/BT-3947), closing [BT-3875](https://linear.app/beamtalk/issue/BT-3875)): a `match:` whose arm assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a local-threading producer wherever a conditional would be (a statement, an assignment's value, an operand, a loop body, a conditional or `match:` arm), in class, value-type and actor methods and in the REPL, and the write comes back. It stays a compile error where it is not a producer: a write in a guard (`x when: [(t := 1) > 0] -> ...`), or a `match:` that is the subject of another `match:`; bind the value there (`t := x match: [#a -> t + 1; _ -> t]`).
 
 **Position errors.** Some combinations of a construct, the position it sits in and the method kind are not yet lowered as producers and are rejected with a second, temporary error rather than being allowed to drop the write:
 
@@ -3030,7 +3030,7 @@ These combinations are measured and listed in `crates/beamtalk-core/src/semantic
 #[t, (t := 7), t]    // with t = 0: #[0, 7, 7]
 ```
 
-`^t := e` returns `e` after rebinding `t`. Nothing runs after the return that could read `t`, so the write is dead and `beamtalk lint` warns (`dead_returned_assignment`) and suggests `^e`. A `^` out of the protected block of an `ensure:` (`[^t := t + 1] ensure: [t printString]`, and equally `[t := t + 1. ^t] ensure: [t printString]`, or a `^` in a block nested in the protected block) is a compile error for now ([BT-3947](https://linear.app/beamtalk/issue/BT-3947)) when the cleanup reads a local the protected block writes: the throw skips the rebind, so the cleanup would read the old `t`. Assigning before the `ensure:` does not help if the `^` stays inside the protected block; keep the `^` out of it (assign inside, return after the `ensure:`).
+`^t := e` returns `e` after rebinding `t`. Nothing runs after the return that could read `t`, so the write is dead and `beamtalk lint` warns (`dead_returned_assignment`) and suggests `^e`. A `^` out of the protected block of an `ensure:` (`[^t := t + 1] ensure: [t printString]`, and equally `[t := t + 1. ^t] ensure: [t printString]`, or a `^` in a block nested in the protected block) hands the cleanup the locals the block wrote so far ([BT-3947](https://linear.app/beamtalk/issue/BT-3947)): the `^` is a throw, so it carries them, and the `ensure:` runs the cleanup over them before the return goes on. The `dead_returned_assignment` lint stays silent for a `^t := e` whose enclosing `ensure:` cleanup reads `t`.
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 

@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947): a `^` out of the protected block of an `ensure:` whose
+// cleanup reads a local that block writes. The throw carries the locals written
+// so far, so the cleanup sees the protected block's value, not the entry one.
+// The columns are bt3912ensure_{class,value,actor}.bt; the expected answers are
+// in stdlib/test/bt3912ensure_test.bt. `sink` records what the cleanup read.
+
+Actor subclass: Bt3912EnsureSink
+  state: items = #()
+
+  record: x => self.items := self.items add: x
+
+  items => self.items

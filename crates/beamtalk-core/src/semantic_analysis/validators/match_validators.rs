@@ -9,10 +9,10 @@
 
 use crate::ast::{Expression, ExpressionStatement, Identifier, MethodDefinition, Module, Pattern};
 use crate::ast_walker::{walk_expression, walk_module};
-use ecow::EcoString;
-use std::collections::HashSet;
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use ecow::EcoString;
+use std::collections::HashSet;
 
 // ── Match exhaustiveness for sealed types ─────────────────────────────────────
 

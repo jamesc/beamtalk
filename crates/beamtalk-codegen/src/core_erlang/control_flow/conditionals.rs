@@ -2346,7 +2346,9 @@ impl CoreErlangGenerator {
                                     .to_string(),
                             )
                         })?;
-                        let new_state = self.current_state_var();
+                        let new_state = self.current_field_read_state_var();
+                        // BT-3947: and the locals an enclosing `ensure:` cleanup reads.
+                        let new_state = self.nlr_throw_slot(leaf::var(new_state));
                         let throw_var = self.fresh_temp_var("NlrThrow");
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
@@ -2357,7 +2359,7 @@ impl CoreErlangGenerator {
                                 ", ",
                                 dispatch_value_doc,
                                 ", ",
-                                leaf::var(new_state),
+                                new_state,
                                 "}) in ",
                             ],
                             span,
@@ -2390,7 +2392,9 @@ impl CoreErlangGenerator {
                                     .to_string(),
                             )
                         })?;
-                        let new_state = self.current_state_var();
+                        let new_state = self.current_field_read_state_var();
+                        // BT-3947: and the locals an enclosing `ensure:` cleanup reads.
+                        let new_state = self.nlr_throw_slot(leaf::var(new_state));
                         let throw_var = self.fresh_temp_var("NlrThrow");
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
@@ -2401,7 +2405,7 @@ impl CoreErlangGenerator {
                                 ", ",
                                 leaf::var(field_val_var),
                                 ", ",
-                                leaf::var(new_state),
+                                new_state,
                                 "}) in ",
                             ],
                             span,

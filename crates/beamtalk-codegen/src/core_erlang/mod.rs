@@ -382,10 +382,16 @@ impl CoreErlangGenerator {
                     let state_doc = if self.in_class_method() {
                         leaf::atom("nil")
                     } else if self.context == CodeGenContext::Actor {
-                        leaf::var(self.current_state_var())
+                        // (`current_field_read_state_var`: in a direct-params or
+                        // tuple-acc loop or fold, whose `StateAcc` is the locals
+                        // tuple, the `State` is the loop's captured outer one.)
+                        leaf::var(self.current_field_read_state_var())
                     } else {
                         leaf::var(self.current_self_var())
                     };
+                    // BT-3947: inside an `ensure:` producer's protected block
+                    // the slot also hands the cleanup the locals written so far.
+                    let state_doc = self.nlr_throw_slot(state_doc);
                     let throw_doc = docvec![
                         "call 'erlang':'throw'({'$bt_nlr', ",
                         leaf::var(nlr_token),

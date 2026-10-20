@@ -1268,14 +1268,24 @@ impl CoreErlangGenerator {
             " in try ",
         ]];
 
+        // BT-3947: a `^` in the protected block hands the cleanup the locals the
+        // block wrote so far (`nlr_throw_slot`); the catch below unwraps them.
+        let captured: Vec<String> = match &arm {
+            Some(arm) if !self.is_repl_mode() => arm.threads.clone(),
+            _ => Vec::new(),
+        };
+        let capture_depth = self.nlr_capture.len();
+        self.nlr_capture.extend(captured.iter().cloned());
         // Generate try body with state threading
-        let (try_result_var, try_final, try_slot) = self.push_exception_arm(
+        let try_arm = self.push_exception_arm(
             &mut docs,
             receiver_block,
             &families,
             outer_version,
             arm.as_ref(),
-        )?;
+        );
+        self.nlr_capture.truncate(capture_depth);
+        let (try_result_var, try_final, try_slot) = try_arm?;
         // Return {Result, State[, Family]} from try body
         docs.push(self.close_exception_result_tuple(
             try_result_var,
@@ -1286,6 +1296,7 @@ impl CoreErlangGenerator {
 
         // Success: run cleanup starting from try body's state
         let entry_locals = self.branch_threaded_locals(&[receiver_block, cleanup_block]);
+        let entry_locals_for_nlr = entry_locals.clone();
         self.push_ensure_success_cleanup(
             &mut docs,
             state_after_try,
@@ -1311,6 +1322,28 @@ impl CoreErlangGenerator {
             leaf::var(stack_var.clone()),
             "> -> ",
         ]);
+
+        // BT-3947: a `^` thrown from the protected block (lexically, see
+        // `nlr_throw_slot`) arrives with the locals it wrote in the slot. The
+        // cleanup runs over them and the throw goes on with the real slot, so a
+        // cleanup that reads `t` sees the protected block's `t`, not the entry
+        // one. Any other exception takes the arm below, as before.
+        let nlr_path = !captured.is_empty();
+        let other_pair_var = self.fresh_temp_var("EnsOther");
+        if nlr_path {
+            self.push_ensure_nlr_cleanup(
+                &mut docs,
+                &type_var,
+                &error_var,
+                &other_pair_var,
+                cleanup_block,
+                &families,
+                outer_version,
+                arm.as_ref(),
+                entry_locals_for_nlr.clone(),
+            )?;
+            self.set_self_version(outer_self);
+        }
 
         // Cleanup body generates state mutations that are discarded (re-raise
         // follows) — including any extra-family version it mints: this path
@@ -1338,11 +1371,130 @@ impl CoreErlangGenerator {
             " ",
             Self::emit_raw_raise(type_var, error_var, stack_var),
         ]);
+        if nlr_path {
+            docs.push(Document::Str(" end"));
+        }
         // ADR 0122 / BT-3506: leave the method's live versions as found — see
         // the matching restore at the end of `generate_on_do_with_mutations`.
         self.set_self_version(outer_self);
 
         Ok(Document::Vec(docs))
+    }
+
+    /// BT-3947: the `ensure:` catch's arm for a `^` thrown from the protected
+    /// block, and the `case` it opens: pushes
+    ///
+    /// ```erlang
+    /// case {Type, Error} of
+    ///   <{'throw', {'$bt_nlr', Tok, Val, {'$bt_ens', Slot, Locals}}}> when 'true' ->
+    ///     let NlrEntry = {Val, Locals} in
+    ///     let StateAcc = <Slot merged with Locals (actor) | Locals> in
+    ///     <cleanup arm over those locals>
+    ///     call 'erlang':'throw'({'$bt_nlr', Tok, Val, <the real slot>})
+    ///   <Other> when 'true' ->
+    /// ```
+    ///
+    /// leaving the `<Other>` arm open for the caller's ordinary error path (the
+    /// cleanup from the entry `StateAcc`, then the re-raise) and the closing
+    /// `end` to it. The cleanup is the same `BranchArm` frame the success path
+    /// runs, entered through the locals the throw carried (`ArmEntry`).
+    ///
+    /// The rethrown slot is the real one the throw was built over: the cleanup's
+    /// final `StateAcc` in an actor (the `State`, cleanup's field writes
+    /// included), `Slot` in a value type (`Self`) and a class method (`nil`);
+    /// wrapped again when this `ensure:` itself sits in another one's protected
+    /// block ([`Self::nlr_capture`] is non-empty there), with the cleanup's final
+    /// `StateAcc` as the locals so the outer cleanup sees the inner one's writes.
+    #[allow(clippy::too_many_arguments)] // the pieces of one catch arm
+    fn push_ensure_nlr_cleanup(
+        &mut self,
+        docs: &mut Vec<Document<'static>>,
+        type_var: &str,
+        error_var: &str,
+        other_pair_var: &str,
+        cleanup_block: &Block,
+        families: &ThreadedFamilies,
+        outer_version: usize,
+        arm: Option<&ArmFrame>,
+        locals: Vec<String>,
+    ) -> Result<()> {
+        let tok_var = self.fresh_temp_var("EnsTok");
+        let val_var = self.fresh_temp_var("EnsVal");
+        let slot_var = self.fresh_temp_var("EnsSlot");
+        let locals_var = self.fresh_temp_var("EnsLocals");
+        let entry_var = self.fresh_temp_var("NlrEntry");
+        docs.push(docvec![
+            "case {",
+            leaf::var(type_var.to_string()),
+            ", ",
+            leaf::var(error_var.to_string()),
+            "} of <{'throw', {'$bt_nlr', ",
+            leaf::var(tok_var.clone()),
+            ", ",
+            leaf::var(val_var.clone()),
+            ", {'$bt_ens', ",
+            leaf::var(slot_var.clone()),
+            ", ",
+            leaf::var(locals_var.clone()),
+            "}}}> when 'true' -> let ",
+            leaf::var(entry_var.clone()),
+            " = {",
+            leaf::var(val_var.clone()),
+            ", ",
+            leaf::var(locals_var.clone()),
+            "} in let StateAcc = ",
+        ]);
+        // The cleanup's start: the actor `State` (the real slot) with the
+        // locals laid over it; anywhere else a private map of the locals.
+        if self.in_actor_instance_context() {
+            docs.push(docvec![
+                "call 'maps':'merge'(",
+                leaf::var(slot_var.clone()),
+                ", ",
+                leaf::var(locals_var.clone()),
+                ")"
+            ]);
+        } else {
+            docs.push(leaf::var(locals_var.clone()));
+        }
+        docs.push(Document::Str(" in "));
+        let entry = ArmEntry {
+            tuple_var: entry_var,
+            locals,
+        };
+        let seed = self.seed_exception_arm_family(families, outer_version);
+        let cleanup = self.generate_exception_body_with_threading(
+            cleanup_block,
+            families,
+            arm,
+            Some(&entry),
+        )?;
+        docs.push(seed);
+        let final_acc = Self::state_acc_var_doc(cleanup.state_version);
+        docs.push(cleanup.doc);
+        // The real slot of the rethrow.
+        let real_slot = if self.in_actor_instance_context() {
+            final_acc.clone()
+        } else {
+            leaf::var(slot_var)
+        };
+        let rethrown = if self.nlr_capture.is_empty() {
+            real_slot
+        } else {
+            docvec!["{'$bt_ens', ", real_slot, ", ", final_acc, "}"]
+        };
+        docs.push(docvec![
+            " call 'erlang':'throw'({'$bt_nlr', ",
+            leaf::var(tok_var),
+            ", ",
+            leaf::var(val_var),
+            ", ",
+            rethrown,
+            "}) <",
+            leaf::var(other_pair_var.to_string()),
+            "> when 'true' -> ",
+        ]);
+        Ok(())
     }
 
     /// Builds the Tier 1 (pure protected block) `try`/`catch` body for

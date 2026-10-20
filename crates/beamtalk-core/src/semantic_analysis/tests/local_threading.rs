@@ -3473,18 +3473,15 @@ fn a_match_arm_write_to_an_outer_local_is_reported_once() {
     assert_eq!(at_arm.len(), 1, "{at_arm:?}");
 }
 
-/// PIN-BUG BT-3947: a `^` out of the protected block of an `ensure:` whose
-/// cleanup reads a local the block writes is rejected: the cleanup would read
-/// the old `t`, silently (measured on a BEAM in a class, a value type and an
-/// actor: `t := 0. [t := t + 1. ^t] ensure: [sink record: t]` records 0; the
-/// correct answer is 1). It is the same whether the write is the returned
-/// value (`^t := t + 1`) or a statement before the `^`, and whether the `^` is
-/// in the protected block or a block nested in it. BT-3947 lowers it and flips
-/// this to an acceptance test. Without a `^` in the protected block, with a
-/// cleanup that does not read the written local, or for `on:do:` and the
-/// cleanup itself, it is accepted.
+/// BT-3947 (BT-3912): a `^` out of the protected block of an `ensure:` whose
+/// cleanup reads a local the block writes is accepted: the `^`'s throw carries
+/// the locals the block wrote so far, so the cleanup reads the new `t`, not the
+/// entry one (measured on a BEAM in a class, a value type and an actor in
+/// `stdlib/test/bt3912ensure_test.bt`). It is the same whether the write is the
+/// returned value (`^t := t + 1`) or a statement before the `^`, and whether the
+/// `^` is in the protected block or a block nested in it.
 #[test]
-fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
+fn a_returned_assignment_inside_an_ensure_protected_block_is_accepted() {
     for body in [
         "[^t := t + 1] ensure: [t printString]\nt",
         "[[^t := t + 1] on: Error do: [:e | 0]] ensure: [t printString]\nt",
@@ -3498,31 +3495,6 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
         "[#(1, 2) inject: 0 into: [:a :k | t := t + k. a]. ^t] ensure: [t printString]\nt",
         "[1 to: 2 do: [:k | t := t + k]. ^t] ensure: [t printString]\nt",
         "[2 timesRepeat: [t := t + 1]. ^t] ensure: [t printString]\nt",
-    ] {
-        for src in [in_class(body), in_value(body), in_actor(body)] {
-            let errors = analysis_errors(&src, &[]);
-            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
-            assert!(
-                errors[0].message.contains("BT-3947"),
-                "{}",
-                errors[0].message
-            );
-            assert!(
-                errors[0]
-                    .hint
-                    .as_deref()
-                    .is_some_and(|h| h.contains("after the `ensure:`")),
-                "{:?}",
-                errors[0].hint
-            );
-        }
-        let errors = analysis_errors(&format!("{body}\n"), &["t"]);
-        assert!(
-            errors.iter().any(|e| e.message.contains("BT-3947")),
-            "REPL {body}: {errors:?}"
-        );
-    }
-    for body in [
         "[0] ensure: [t printString]\n^t := t + 1",
         "[^t := t + 1] on: Error do: [:e | t]\nt",
         "[0] ensure: [^t := t + 1]\nt",

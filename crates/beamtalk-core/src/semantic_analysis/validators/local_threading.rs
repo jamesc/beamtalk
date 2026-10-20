@@ -47,7 +47,7 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity, conditional_arm_blocks,
+    RootMethodKind, WriteKind, block_literal_of_other_arity, conditional_arm_blocks,
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
     exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
@@ -1223,84 +1223,6 @@ fn check_body(
     walker.scope.push(params.into_iter().collect());
     walker.body(body);
     walker.finish();
-    report_nlr_out_of_ensure(context, body, diagnostics);
-}
-
-/// BT-3910 / BT-3947: a non-local return out of the protected block of an
-/// `ensure:` whose cleanup reads a local the protected block writes stays a
-/// compile error for now. The `^` is a throw; the cleanup runs from the `catch`
-/// arm over the entry `StateAcc`, with no `LocalRebind` of the protected body's
-/// writes, so the cleanup would read the old value (the correct answer is the
-/// new one). It makes no difference whether the write is the returned value
-/// (`^t := e`) or a statement before the `^` (`t := t + 1. ^t`), whether the
-/// `^` sits directly in the protected block or in a block nested in it, or
-/// whether the write is a statement or a value. Without a `^` in the protected
-/// block, or with a cleanup that does not read what it writes, the write is
-/// seen (ADR 0131 §1). An `on:do:` protected body has no such position: a `^`
-/// passes through its catch untouched and no handler runs.
-///
-/// The one recognizer of this rule: `beamtalk lint`'s `dead_returned_assignment`
-/// skips a `^t := e` inside the span of this error rather than re-deriving it.
-fn report_nlr_out_of_ensure(
-    context: MethodContext,
-    body: &[ExpressionStatement],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for stmt in body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            if let Expression::MessageSend {
-                receiver,
-                selector: MessageSelector::Keyword(parts),
-                arguments,
-                ..
-            } = e
-                && parts.len() == 1
-                && parts[0].keyword == "ensure:"
-                && let Expression::Block(protected) = receiver.as_ref()
-                && let [Expression::Block(cleanup)] = arguments.as_slice()
-                && let Some(name) = nlr_dropped_local(protected, cleanup)
-            {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "a non-local return (`^`) out of an `ensure:` protected block that \
-                             writes `{name}` is not supported yet in {context}: the cleanup \
-                             would not see the new `{name}` (BT-3947)"
-                        ),
-                        protected.span,
-                    )
-                    .with_hint(format!(
-                        "assign `{name}` and return after the `ensure:`, or keep the `^` out of \
-                         the protected block"
-                    ))
-                    .with_category(DiagnosticCategory::UnmigratedLocalThreading),
-                );
-            }
-        });
-    }
-}
-
-/// The local `protected` writes and `cleanup` reads, when `protected` holds a
-/// `^` (see [`report_nlr_out_of_ensure`]), in name order.
-fn nlr_dropped_local(protected: &Block, cleanup: &Block) -> Option<String> {
-    let mut has_nlr = false;
-    for stmt in &protected.body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            has_nlr |= matches!(e, Expression::Return { .. });
-        });
-    }
-    if !has_nlr {
-        return None;
-    }
-    // The writes that reach the protected block's frame, nested loop, fold and
-    // conditional bodies included (ADR 0131 threads those back out, and the `^`
-    // drops them too): the one outer-local-writes recognizer, with the locals
-    // the cleanup reads as the bound-outside set.
-    let read = analyze_block(cleanup).local_reads;
-    outer_local_writes(protected, &|n| read.contains(n))
-        .into_iter()
-        .map(|w| w.name.to_string())
-        .min()
 }
 
 /// BT-3823: whether `expr` is an evaluated block in the REPL sense

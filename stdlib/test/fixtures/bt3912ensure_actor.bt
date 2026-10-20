@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947): a `^` out of the protected block of an `ensure:` whose
+// cleanup reads a local that block writes. The throw carries the locals written
+// so far, so the cleanup sees the protected block's value, not the entry one.
+// The columns are bt3912ensure_{class,value,actor}.bt; the expected answers are
+// in stdlib/test/bt3912ensure_test.bt. `sink` records what the cleanup read.
+
+Actor subclass: Bt3912EnsureActor
+  state: n = 0
+
+  direct: sink =>
+    t := 0
+    [t := t + 1. ^t] ensure: [sink record: t]
+
+  returnedAssign: sink =>
+    t := 0
+    [^t := t + 1] ensure: [sink record: t]
+
+  inArm: sink x: x =>
+    t := 0
+    [x ifTrue: [t := 5. ^t]. t := 9] ensure: [sink record: t]
+    t
+
+  inCollect: sink =>
+    t := 0
+    [#(1, 2) collect: [:k | t := t + k. ^t]. 0] ensure: [sink record: t]
+
+  inCounted: sink =>
+    t := 0
+    [1 to: 5 do: [:k | t := t + k. k =:= 3 ifTrue: [^t]]. 0] ensure: [sink record: t]
+
+  inWhile: sink =>
+    t := 0
+    [[true] whileTrue: [t := t + 1. t =:= 4 ifTrue: [^t]]. 0] ensure: [sink record: t]
+
+  twoLocals: sink =>
+    t := 0
+    u := 0
+    [t := 1. u := 2. ^t + u] ensure: [sink record: t + u]
+
+  nested: sink =>
+    t := 0
+    [[t := 1. ^t] ensure: [sink record: t]] ensure: [sink record: t + 10]
+
+  cleanupWrites: sink =>
+    t := 0
+    [t := 1. ^t] ensure: [t := t + 100. sink record: t]
+
+  ensureInLoop: sink =>
+    t := 0
+    #(1, 2) do: [:k | [t := t + k. ^t] ensure: [sink record: t]]. 0
+
+  unwritten: sink =>
+    t := 4
+    [^7] ensure: [sink record: t]
+
+  afterLoop: sink =>
+    t := 0
+    [#(1, 2) do: [:k | t := t + k]. ^t] ensure: [sink record: t]
