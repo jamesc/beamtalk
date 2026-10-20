@@ -360,9 +360,15 @@ start_lock_timeout_error(ClassName) ->
 -spec initialize_result(atom(), atom(), tuple(), fun((tuple()) -> ok)) ->
     {ok, tuple()} | {error, #beamtalk_error{}}.
 initialize_result(ClassName, Selector, SupTuple, Step) ->
-    try Step(SupTuple) of
+    %% bt-catcher-audit: converted - `initialize` runs in this process (it may
+    %% be a class method's `self supervise`, inside the class's invocation), so
+    %% it runs under protect/1 and its class-variable writes are discarded
+    %% before the error is answered as a Result
+    try beamtalk_class_vars:protect(fun() -> Step(SupTuple) end) of
         ok -> {ok, SupTuple}
     catch
+        throw:Nlr:Stack when ?IS_NLR(Nlr) ->
+            erlang:raise(throw, Nlr, Stack);
         Class:Reason:Stack ->
             Cause = raised_error(Class, Reason, Stack),
             {error, start_failed_error(supervisor_start_failed, ClassName, Selector, Cause)}
