@@ -584,7 +584,13 @@ code.
   > run before it, so `self.n := b value + 1` is accepted. A rebinding
   > inside a nested block (`flag ifTrue: [b := [1]]`) may or may not run, so
   > the local is still treated as holding the old block. A parameter that
-  > shadows the local's name is another variable. `b := [self.n]. b value`
+  > shadows the local's name is another variable.
+  > After such a change any use of the local counts, handing it to another
+  > object included (that object may call the block; before any change it is
+  > accepted, as the literal is). A change written in the body of a stored
+  > block counts where the block is written, though it has not run (a
+  > conservative rejection). A loop's condition block counts as changing the
+  > state when its body does, since it re-runs after the body. `b := [self.n]. b value`
   > with nothing in between answers right and is accepted; with a write or
   > self-send between, it measured stale (3, not the 13 written) and is an
   > error.

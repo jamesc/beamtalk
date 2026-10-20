@@ -1637,6 +1637,10 @@ struct Walker<'d> {
     /// Per enclosing block (outermost first), whether it contains anything
     /// that may change the actor's state ([`block_may_change_actor_state`]).
     block_changes_state: Vec<bool>,
+    /// Set while the condition block of a `whileTrue:`/`whileFalse:` is about
+    /// to be walked, when its body may change the actor's state: the
+    /// condition re-runs after the body (BT-3952).
+    pending_loop_changes: Option<bool>,
     /// The escaping-block diagnostics, keyed by the assignment they report
     /// and the block that escapes, in walk order ([`Walker::report_escape`]).
     escaping_writes: Vec<(Span, Span, Diagnostic)>,
@@ -1713,6 +1717,7 @@ impl<'d> Walker<'d> {
             reported_blocks: HashSet::new(),
             field_reading_locals: HashMap::new(),
             block_changes_state: Vec::new(),
+            pending_loop_changes: None,
             escaping_writes: Vec::new(),
             method_selector: None,
             operand_sites: HashSet::new(),
@@ -1865,8 +1870,9 @@ impl<'d> Walker<'d> {
         self.direct_blocks.push(direct);
         self.block_frames.push(self.scope.len());
         self.containers.push(container);
+        let loop_changes = self.pending_loop_changes.take().unwrap_or(false);
         self.block_changes_state
-            .push(self.context == Actor && block_may_change_actor_state(block));
+            .push(self.context == Actor && (loop_changes || block_may_change_actor_state(block)));
         let listed = std::mem::take(&mut self.pending_group_by_assign_block);
         self.group_by_assign_blocks.push(listed);
         self.scope
@@ -2046,7 +2052,15 @@ impl<'d> Walker<'d> {
                     _ => None,
                 };
                 self.pending_group_by_assign_block = listed(receiver, None);
+                // A loop's condition re-runs after its body (BT-3952).
+                self.pending_loop_changes = Some(self.context == Actor
+                    && matches!(selector.name().as_str(), "whileTrue:" | "whileFalse:")
+                    && matches!(receiver.unwrap_parens(), Expression::Block(_))
+                    && arguments.iter().any(|a| {
+                        matches!(a, Expression::Block(body) if block_may_change_actor_state(body))
+                    }));
                 self.operand_in(receiver, Position::Receiver, receiver_role);
+                self.pending_loop_changes = None;
                 self.pending_frame_body = None;
                 self.pending_group_by_assign_block = false;
                 for (index, arg) in arguments.iter().enumerate() {
@@ -2184,6 +2198,11 @@ impl<'d> Walker<'d> {
                     && (!outer_state_reads(block).is_empty() || outer_self_send(block).is_some())
                 {
                     found.push(block.clone());
+                }
+                // A wrapper that captures a tracked local (`c := [b value]`)
+                // holds the blocks that local does.
+                if let Some((captured, _)) = self.captured_tracked(block) {
+                    found.extend(captured);
                 }
             }
             for id in value_locals(value) {

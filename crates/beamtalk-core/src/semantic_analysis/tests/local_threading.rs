@@ -2790,6 +2790,14 @@ fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
         "b := [self.n]\nself bump; yourself\nb value",
         // Followed through an alias, a capture, and a rebinding that may run.
         "b := [self.n]\nc := b\n^c",
+        // A wrapper that captures a tracked local holds its blocks.
+        "b := [self.n]\nc := [b value]\n^c",
+        "b := [self.n]\nc := [b value]\nself.n := 5\nc value",
+        // A loop condition re-runs after a body that changes the state.
+        "b := [self.n]\n[b value < 10] whileTrue: [self.n := self.n + 1]\nnil",
+        "b := [self.n]\n[b value < 10] whileFalse: [self bump]\nnil",
+        // Handed to another object after a write: it may call the block.
+        "b := [self.n]\nself.n := 1\nother foo: b\nnil",
         "b := [self.n]\n^[b value]",
         "b := [self.n]\nself.h := [b value]\nnil",
         "b := [self.n]\nself foo: [b value]\nnil",
@@ -2856,6 +2864,10 @@ fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
         "b := [self.n]\nself.items do: [:x | b value. x]\nnil",
         // The operands run before the write or the self-send itself.
         "b := [self.n]\nself.n := b value + 1\nnil",
+        // Handed to another object with nothing in between: like the literal.
+        "b := [self.n]\nother foo: b\nnil",
+        // A condition over a body that changes nothing.
+        "b := [self.n]\n[b value < 10] whileTrue: [self.items add: 1]\nnil",
         "b := [self.n]\nself foo: b value\nnil",
         // A parameter that shadows the local is another variable.
         "b := [self.n]\nself.items do: [:b | self record: b]\nnil",
