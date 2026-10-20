@@ -3766,6 +3766,145 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
     }
 }
 
+/// PIN-BUG BT-3947 (BT-3993): the throw out of an `ensure:` protected block can
+/// come from a block value created elsewhere, not only a `^` written in it.
+/// Measured on a BEAM in a class, a value type and an actor: `b := [^0]`
+/// evaluated as `[t := 1. b value] ensure: [sink record: t]`, a parameter
+/// evaluated the same way, and either passed on to a method that evaluates it,
+/// all record the old `t` (0), silently. They are rejected like the literal
+/// `^`. Fully conservative where the static view cannot tell which value is a
+/// block: any `value`-family send to a non-literal receiver (a call result, a
+/// collection element, an `at:` result), and any local, parameter or field
+/// passed as a keyword-send argument, is a possible non-local return. BT-3947
+/// lowers the protected block and flips these to acceptance tests.
+#[test]
+fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
+    let rejected = [
+        // A local bound to a block holding a `^`.
+        "t := 0\nb := [^0]\n[t := 1. b value] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b value: 3] ensure: [t printString]\n9",
+        // Forwarded to a method that evaluates it.
+        "t := 0\nb := [^0]\n[t := 1. CvA ap: b] ensure: [t printString]\n9",
+        // The shapes the static view cannot follow: a block from a call
+        // result, a collection element, an `at:` result, and a local that is
+        // not a block literal passed on.
+        "t := 0\n[t := 1. (CvA ap: [3]) value] ensure: [t printString]\n9",
+        "t := 0\nbs := #(1)\n[t := 1. (bs at: 1) value] ensure: [t printString]\n9",
+        "t := 0\nd := #{#k => 1}\n[t := 1. (d at: #k) value] ensure: [t printString]\n9",
+        "t := 0\nb := [3]\n[t := 1. b value] ensure: [t printString]\n9",
+        "t := 0\nb := CvA ap: [3]\n[t := 1. CvA ap: b] ensure: [t printString]\n9",
+        // A block local used as the receiver of any send, not only `value`:
+        // parenthesised, in a cascade, a unary or a keyword send.
+        "t := 0\nb := [^0]\n[t := 1. b on: Error do: [:e | 0]] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b ensure: [0]] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b whileFalse] ensure: [t printString]\n9",
+        "t := 0\nh := [^0]\n[t := 1. h run] ensure: [t printString]\n9",
+        "t := 0\nh := [^0]\n[t := 1. (h) run] ensure: [t printString]\n9",
+        "t := 0\nh := [^0]\n[t := 1. (h) run; yourself] ensure: [t printString]\n9",
+        "t := 0\nh := [^0]\n[t := 1. CvA ap: (h)] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b yourself; value] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. CvA ap: 1; ap: b] ensure: [t printString]\n9",
+        // Locals bound by destructuring or a `match:` pattern are locals of the
+        // enclosing scope too.
+        "{u, w} := {0, 0}\n[u := 5. ^u] ensure: [u printString]\n9",
+        "arr := #[1, 2]\n#[u, w] := arr\n[u := 5. ^u] ensure: [u printString]\n9",
+        // A block parameter shadowing a literal-only name is not a constant.
+        "k := 3\n#(1) do: [:k | [t := 1. CvA ap: k] ensure: [t printString]]\n9",
+        // An assignment the cleanup might not run does not bind.
+        "x := 1\n[x := 5. ^x] ensure: [false ifTrue: [x := 0]. x printString]\n9",
+        "x := 1\n[x := 5. ^x] ensure: [#() do: [:k | x := 0]. x printString]\n9",
+        // A parameter of an enclosing block is bound in the enclosing scope.
+        "#(1, 2) do: [:x | [x := 5. ^x] ensure: [x printString]]\n9",
+        "[:x | [x := 5. ^x] ensure: [x printString]] value: 1\n9",
+    ];
+    for body in rejected {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+            assert!(
+                errors[0].message.contains("BT-3947"),
+                "{}",
+                errors[0].message
+            );
+            assert!(
+                errors[0].message.contains("non-local"),
+                "{}",
+                errors[0].message
+            );
+        }
+    }
+    for src in [
+        "Object subclass: CvA\n  class doThen: blk =>\n    t := 0\n    [t := 1. blk value] ensure: [t printString]\n    5\n",
+        "Value subclass: Vt\n  doThen: blk =>\n    t := 0\n    [t := 1. blk value] ensure: [t printString]\n    5\n",
+        "Actor subclass: Ac\n  state: n = 0\n\n  doThen: blk =>\n    t := 0\n    [t := 1. blk value] ensure: [t printString]\n    5\n",
+        // A parameter that is only forwarded, never evaluated here.
+        "Object subclass: CvA\n  class ap: b => b value\n\n  class fwd: blk =>\n    t := 0\n    [t := 1. CvA ap: blk] ensure: [t printString]\n    5\n",
+        "Value subclass: Vt\n  ap: b => b value\n\n  fwd: blk =>\n    t := 0\n    [t := 1. self ap: blk] ensure: [t printString]\n    5\n",
+        "Actor subclass: Ac\n  state: blk = nil\n\n  doThen =>\n    t := 0\n    [t := 1. self.blk value] ensure: [t printString]\n    5\n",
+    ] {
+        let errors = analysis_errors(src, &[]);
+        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+        assert!(
+            errors[0].message.contains("non-local"),
+            "{}",
+            errors[0].message
+        );
+    }
+    // Accepted: a cleanup that does not read the write, a protected block that
+    // writes nothing the cleanup reads, `on:do:`, a constant passed on, a pure
+    // protected block, and an `ensure:` in a loop.
+    for body in [
+        "t := 0\nk := 3\n[t := 1. CvA ap: k] ensure: [0]\n9",
+        "t := 0\nk := 3\n[t := t + k] ensure: [t printString]\n9",
+        "t := 0\n[t := t + 1] ensure: [t printString]\n9",
+        "t := 0\n#(1, 2) do: [:e | [t := t + 1] ensure: [t printString]]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b value] ensure: [0]\n9",
+        "t := 0\nb := [^0]\n[b value] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b value] on: Error do: [:e | t]\n9",
+        "t := 0\nb := [^0]\n[b value. t := 1] ensure: [u := 2. u printString]\n9",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert!(errors.is_empty(), "{src}: {errors:?}");
+        }
+    }
+}
+
+/// BT-3993: a `match:` pattern variable is a local of the enclosing scope for
+/// the stale-cleanup rule (the arm itself also draws the BT-3743 error).
+#[test]
+fn an_ensure_in_a_match_arm_reading_a_pattern_variable_is_rejected() {
+    let body = "3 match: [k -> [k := 5. ^k] ensure: [k printString]]\n9";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        let errors = analysis_errors(&src, &[]);
+        assert!(
+            errors.iter().any(|e| e.message.contains("BT-3947")),
+            "{src}: {errors:?}"
+        );
+    }
+}
+
+/// BT-3993: every cleanup read counts, except a local the cleanup binds itself
+/// first: a cleanup that binds its own `x` reads that.
+#[test]
+fn an_ensure_cleanup_that_binds_its_own_local_is_not_a_stale_read() {
+    for body in [
+        "[x := 5. ^x] ensure: [x := 0. x printString]\n9",
+        "[x := 5. ^x] ensure: [x := 0. x printString]\nx",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert!(errors.is_empty(), "{src}: {errors:?}");
+        }
+    }
+    // The same shape with `x` bound before the `ensure:` is the stale read.
+    let body = "x := 1\n[x := 5. ^x] ensure: [x printString]\n9";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        let errors = analysis_errors(&src, &[]);
+        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+    }
+}
+
 /// BT-3910: every method of the `adr0131nested_assign_*.bt` fixtures
 /// (BT-3799's matrix, once inert `.pending` files) is accepted.
 #[test]
