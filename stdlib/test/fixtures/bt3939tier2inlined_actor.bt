@@ -28,8 +28,19 @@ Actor subclass: Bt3939Tier2InlinedActor
       ]
       with: #(1)
 
-  // evalValue (an evaluated `[...] value` binding in a plain-fun block) is
-  // removed until BT-3981 is fixed: it answers the leaked state tuple.
+  evalValue =>
+    xs := #(1, 2)
+    (Erlang lists)
+      map: [:x |
+        r := [
+          n := 0
+          xs do: [:y | n := n + y]
+          n
+        ] value
+        r
+      ]
+      with: #(1)
+
   nested: flag =>
     xs := #(1, 2)
     (Erlang lists)
