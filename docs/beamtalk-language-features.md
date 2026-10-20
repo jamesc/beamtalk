@@ -3149,8 +3149,13 @@ are kept. It does not run inline, so the rest of the current method does not
 see its effects.
 
 A send to a local that is bound only to `self` (`other := self. other foo`) is
-a compile error: it would run against the state the method had when the send
-was made and lose the callee's writes. Send to `self` directly.
+an ordinary send, not a self-send: it sees the state the method had when the
+send was made and its field writes are not kept. Read-only reflective sends
+(`other fieldNames`, `other fieldAt: #x`) and alias-only sequences work. It is
+a compile error where it would answer wrong: an alias send after a field write
+or self-send earlier in the method, or an alias send that may change state
+(any user method, `fieldAt:put:`) followed later by a read of `self.field` or a
+send to `self`. Send to `self` directly in those cases.
 
 ### Deadlock Prevention
 
