@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3992 fixture: a supervised actor whose first continuation (requested in
+// `initialize`) calls its parent supervisor synchronously — the documented
+// place for a first parent call (ADR 0135 hang rule). The supervisor is no
+// longer waiting on the child by then, so the call neither hangs nor fails
+// the parent's start. See stdlib/test/actor_continue_with_test.bt.
+
+Actor subclass: Bt3992ParentCaller
+  state: parent = nil
+  state: parentCount = nil
+
+  // `withClassMethod:` entry point.
+  class startUnder: aParent => self spawnWith: #{#parent => aParent}
+
+  initialize => self continueWith: #callParent
+
+  callParent => self.parentCount := self.parent count
+
+  parentCount => self.parentCount

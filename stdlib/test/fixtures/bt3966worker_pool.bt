@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3966: a DynamicSupervisor of Bt3966Worker, for `children` and for
+// nesting under Bt3966NestSup.
+
+DynamicSupervisor(Bt3966Worker) subclass: Bt3966WorkerPool
+
+  childClass => Bt3966Worker

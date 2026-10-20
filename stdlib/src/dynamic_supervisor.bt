@@ -285,9 +285,9 @@ abstract Object subclass: DynamicSupervisor(C)
   /// bookkeeping needed to recover its new pid.
   ///
   /// Look the child up again with `ChildClass named: aName` (ADR 0079).
-  /// `DynamicSupervisor` deliberately has no `which:`/`children` listing
-  /// method — see the BT-3376 amendment in ADR 0079 for why a name-keyed
-  /// point lookup is preferred over a `which_children`-style scan.
+  /// That name-keyed point lookup is the way to find one child: `children`
+  /// copies the whole child list and is meant for bulk operations (see the
+  /// BT-3376 amendment in ADR 0079).
   ///
   /// `aName` should come from a bounded, statically-known namespace (e.g. a
   /// fixed set of configured workers), not a dynamically-minted atom per
@@ -324,6 +324,29 @@ abstract Object subclass: DynamicSupervisor(C)
   /// `Result error: #beamtalk_error{kind = terminate_failed}`.
   terminateChild: child :: C -> Result(Nil, Error) =>
     (Erlang beamtalk_supervisor) terminateChild: self child: child
+
+  /// Return the live (running) children, as objects of the child class.
+  ///
+  /// Children OTP is restarting are left out, and the order is unspecified.
+  /// This copies the whole child list out of the supervisor in one message
+  /// (O(n) in the number of children): use it for bulk operations (drain,
+  /// broadcast, collecting connection pids), and `startChild:name:` with
+  /// `ChildClass named:` to find a single child. Works on any pool instance.
+  /// Raises with kind `#stale_handle` when the pool is no longer running.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pool startChild unwrap
+  /// pool startChild unwrap
+  /// pool children size                        // => 2
+  /// pool children do: [:w | w ping]
+  /// ```
+  children -> List(C) => self dynamicChildrenResult unwrap
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
+  /// `dynamicChildren/1` call.
+  internal dynamicChildrenResult -> Result(List(C), Error) =>
+    (Erlang beamtalk_supervisor) dynamicChildren: self
 
   /// Return the count of currently-running children.
   ///

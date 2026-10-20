@@ -552,10 +552,79 @@ pub mod test_support {
             .boxed()
     }
 
+    /// `self <selector>`: a unary self-send. The selector need not exist
+    /// (an unknown one is a runtime `does_not_understand`, see
+    /// [`arb_unary_send`]); what matters to codegen is that it is a send to
+    /// `self`, which counts as a state effect in a loop condition.
+    fn arb_self_send() -> BoxedStrategy<Expression> {
+        prop_oneof![
+            Just(EcoStr::from("done")),
+            Just(EcoStr::from("isEmpty")),
+            Just(EcoStr::from("printString")),
+        ]
+        .prop_map(|selector| Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(ident("self"))),
+            selector: MessageSelector::Unary(selector),
+            arguments: vec![],
+            is_cast: false,
+            span: zero_span(),
+        })
+        .boxed()
+    }
+
+    /// BT-3999: `[cond] whileTrue: [body]` / `[cond] whileFalse: [body]`.
+    /// The condition is a self-send, a self-send `and:` a block, or any
+    /// expression; the body is a statement sequence that may assign an outer
+    /// local (a prelude `locN :=` whose name is already in scope) and `^`.
+    /// The condition is a single expression: a condition that writes an outer
+    /// local with no state effect is a compile error (BT-3782), not a shape
+    /// codegen lowers.
+    fn arb_while_loop(depth: u32, scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
+        let self_send_and =
+            (arb_self_send(), arb_expr(depth - 1, scope.clone())).prop_map(|(send, rhs)| {
+                Expression::MessageSend {
+                    receiver: Box::new(Expression::Parenthesized {
+                        expression: Box::new(send),
+                        span: zero_span(),
+                    }),
+                    selector: MessageSelector::Keyword(vec![KeywordPart::new("and:", zero_span())]),
+                    arguments: vec![Expression::Block(Block::new(
+                        vec![],
+                        vec![ExpressionStatement::bare(rhs)],
+                        zero_span(),
+                    ))],
+                    is_cast: false,
+                    span: zero_span(),
+                }
+            });
+        let condition = prop_oneof![
+            2 => arb_self_send(),
+            1 => self_send_and,
+            1 => arb_expr(depth - 1, scope.clone()),
+        ];
+        (
+            condition,
+            prop_oneof![Just("whileTrue:"), Just("whileFalse:")],
+            arb_body(depth - 1, scope, true),
+        )
+            .prop_map(|(cond, keyword, body)| Expression::MessageSend {
+                receiver: Box::new(Expression::Block(Block::new(
+                    vec![],
+                    vec![ExpressionStatement::bare(cond)],
+                    zero_span(),
+                ))),
+                selector: MessageSelector::Keyword(vec![KeywordPart::new(keyword, zero_span())]),
+                arguments: vec![Expression::Block(Block::new(vec![], body, zero_span()))],
+                is_cast: false,
+                span: zero_span(),
+            })
+            .boxed()
+    }
+
     /// The core expression grammar (tier 1): literals/identifiers,
-    /// unary/binary/keyword sends, `ifTrue:ifFalse:`, and self-invoking
-    /// blocks -- recursing with a shrinking `depth` budget so generation
-    /// always terminates.
+    /// unary/binary/keyword sends, `ifTrue:ifFalse:`, self-invoking
+    /// blocks and `whileTrue:`/`whileFalse:` loops (BT-3999) -- recursing
+    /// with a shrinking `depth` budget so generation always terminates.
     fn arb_expr(depth: u32, scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
         if depth == 0 {
             return arb_leaf_expr(scope);
@@ -566,7 +635,8 @@ pub mod test_support {
             2 => arb_binary_send(depth, scope.clone()),
             2 => arb_keyword_send(depth, scope.clone()),
             1 => arb_if_true_if_false(depth, scope.clone()),
-            1 => arb_block_value_call(depth, scope),
+            1 => arb_block_value_call(depth, scope.clone()),
+            1 => arb_while_loop(depth, scope),
         ]
         .boxed()
     }
@@ -668,6 +738,34 @@ pub mod test_support {
             module.classes.push(class);
             module
         })
+    }
+
+    /// Draws `n` programs from [`arb_program`] with a fixed RNG, so a case
+    /// budget is the same corpus on every run and every machine (the sibling
+    /// of [`draw_class_programs`]). Every program is one `run` method on an
+    /// `Object subclass: <class_name>`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the strategy cannot produce a value (it never fails).
+    #[must_use]
+    pub fn draw_programs(class_name: &'static str, n: usize) -> Vec<Module> {
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+
+        let mut runner = TestRunner::new_with_rng(
+            Config::default(),
+            TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+        );
+        let strategy = arb_program(class_name);
+        (0..n)
+            .map(|_| {
+                strategy
+                    .new_tree(&mut runner)
+                    .expect("strategy draws a value")
+                    .current()
+            })
+            .collect()
     }
 
     /// Generates class-variable programs (BT-3705, ADR 0130 Phase 1): the

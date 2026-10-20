@@ -256,7 +256,7 @@ fn which(name: &str) -> Option<String> {
 
 /// Query the running OTP release version string (e.g. "27").
 fn get_otp_version() -> Option<String> {
-    let output = Command::new("erl")
+    let output = beamtalk_workspace::erl_command()
         .args([
             "-noshell",
             "-eval",

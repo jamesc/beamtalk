@@ -66,7 +66,11 @@ remote_spawn_test_() ->
                 {"spawnAs:on: + named:on: round-trip, survives the erpc worker's exit", fun() ->
                     named_spawn_and_lookup_round_trip(PeerNode)
                 end},
-                {"node_down on an unreachable node", fun() -> node_down_on_unreachable_node() end},
+                %% Own timeout: the group's `{timeout, 60, ...}` doesn't
+                %% lift EUnit's 5s per-test default, and four connect
+                %% attempts to a ghost node exceed 5s on Windows (BT-3980).
+                {"node_down on an unreachable node",
+                    {timeout, 30, fun() -> node_down_on_unreachable_node() end}},
                 {"class_not_found for a class not loaded on the peer", fun() ->
                     class_not_found_for_unregistered_class(PeerNode)
                 end},

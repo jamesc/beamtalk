@@ -230,9 +230,12 @@ The same diagnostic fires for every escaping shape, naming the shape:
 | `Logger onEvent: [:e \| seen := seen + 1]` (other process) | "`seen` is assigned in a block passed to a class method; it would run in another process" |
 
 The run-time side keeps one structured error for the cases the compiler
-cannot see (a block stored first and then laundered through FFI, a
-`perform:` with a runtime-built argument list): the existing
-`stateful_block_dispatch`, which already says "the block was not run".
+cannot see (a `perform:` with a runtime-built argument list, or a
+non-literal callable handed to a collection message): the existing
+`stateful_block_dispatch`, which already says "the block was not run". A
+block stored first and then laundered through FFI is not such a case: storing
+a block that assigns a captured local or a field is already an error (BT-3902,
+BT-3922), so no writing block exists to launder.
 
 **Amendment (BT-3936): a self-send in a closure that changes actor state.**
 A block that assigns nothing can still contain `self record: x`, where
