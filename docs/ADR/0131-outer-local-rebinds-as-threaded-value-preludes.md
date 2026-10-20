@@ -123,7 +123,7 @@ is incomplete even there:
 | s1 | `r := d at: #k ifAbsent: [t := t + 1. 0]` | `#[0, 1]` | `function_clause` crash | crash | crash |
 | s2 | `r := #(1, 2) detect: [:x \| x > 5] ifNone: [t := t + 1. 0]` | `#[0, 1]` | **verifier panic** (`verify.rs`) | unbound `State` | **`#[0, 0]`** |
 | s4 | `b := [t := t + 1]. b value. t` (stored closure) | `1` | `value` via `perform:` raises | raises | pass |
-| s6 | `(Erlang lists) map: [:x \| t := t + 1. x] with: #(1)` | lossy by design | pass (write dropped, ADR 0041 warning) | pass | pass |
+| s6 | `(Erlang lists) map: [:x \| t := t + 1. x] with: #(1)` | lossy by design | pass (write dropped, ADR 0041 warning) | pass | pass (compile error since BT-3917, ADR 0133) |
 | s7 | `r := nil ifNil: [t := t + 1. 1]` | `#[1, 1]` | arity crash | arity crash | pass |
 | s9 | `r := (#(1, 2) reject: [:x \| t := t + 1. false]) size` | `#[2, 2]` | **`#[2, 0]`** | **`#[2, 0]`** | **`#[2, 0]`** |
 | s3/s5/s8 | `inject:into:` RHS, `ifTrue:ifFalse:` RHS, statement `do:` | | pass | pass | pass |

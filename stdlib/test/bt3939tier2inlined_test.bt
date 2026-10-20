@@ -3,6 +3,12 @@
 
 // BT-3939: bindings inside inlined blocks of a Tier 2 body are not stale.
 // Fixture: fixtures/bt3939tier2inlined_actor.bt.
+//
+// Since BT-3917 a writing block literal passed as an Erlang FFI argument is a
+// compile error (ADR 0133), so the Tier 2 host these tests were written for is
+// unreachable from source: the fixture's bodies are plain funs now. The Tier 2
+// lowering itself is covered by the codegen corpus
+// `crates/beamtalk-codegen/src/core_erlang/tests/tier2_block_local_corpus.rs`.
 
 TestCase subclass: Bt3939Tier2InlinedTest
 
@@ -13,7 +19,7 @@ TestCase subclass: Bt3939Tier2InlinedTest
   // inside a plain-fun block of an actor method, answers the leaked
   // {Value, State} tuple instead of 3; flip to `equals: #(3)` when fixed.
   testEvaluatedBlockBindingAnswersPostLoopValue =>
-    self assert: (Bt3939Tier2InlinedActor spawn evalValue first) class equals: Tuple
+    self assert: ((Bt3939Tier2InlinedActor spawn evalValue first) at: 1) equals: 3
 
   testNestedArmBindingAnswersPostLoopValue =>
     self assert: (Bt3939Tier2InlinedActor spawn nested: true) equals: #(3)

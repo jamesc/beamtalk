@@ -744,7 +744,7 @@ fn erlang_ffi_argument_writing_block_is_an_escaping_block() {
         in_class("r := (Erlang lists) map: [:x | t := t + 1. x] with: #(1)\n#[r, t]"),
         in_value("r := Erlang lists map: [:x | t := t + 1. x] with: #(1)\n#[r, t]"),
         // keyword argument in the trailing position
-        in_value("r := Erlang lists foreach: #(1) fun: [:x | t := t + x]\nt"),
+        in_value("r := Erlang lists foreach: [:x | t := t + x] with: #(1)\nt"),
         // the repro: the block is the init argument of a nested FFI send
         in_value(
             "b := Erlang erlang element: 1 of: (Erlang erlang make_tuple: 1 init: [:x | t := t + x])\nt",
@@ -761,7 +761,7 @@ fn erlang_ffi_argument_writing_block_is_an_escaping_block() {
         let diags = adr0131_diagnostics(&src);
         let hint = diags[0].hint.as_deref().unwrap_or_default();
         assert!(
-            hint.contains("return the new value from the block and assign it where it is called"),
+            hint.contains("inject: t into:") && hint.contains("use the Erlang call's result"),
             "{hint}"
         );
     }

@@ -21,12 +21,12 @@
 //!   compiler lowers the block in place: as the direct argument (or receiver,
 //!   for `value` and the loops) of a control construct or a compiler-known
 //!   collection message ([`crate::state_threading_selectors`], the one list,
-//!   which [`threading_constructs_note`] also reads), or as an Erlang FFI
-//!   argument (ADR 0041 §Erlang Interop Boundary: lossy by design, codegen's
-//!   `generate_erlang_interop_wrapper` warns). A block literal that does so
-//!   and **escapes** (is stored in a local, returned, stored in a field or
-//!   class variable, placed in a collection literal, passed to any other
-//!   method, a cascade message included, or sent a message other than
+//!   which [`threading_constructs_note`] also reads). A block literal that
+//!   does so and **escapes** (is stored in a local, returned, stored in a
+//!   field or class variable, placed in a collection literal, passed to any
+//!   other method, a cascade message included, passed as an Erlang FFI
+//!   argument (BT-3917: Erlang calls it as a plain fun and drops the write;
+//!   ADR 0041 §Erlang Interop Boundary), or sent a message other than
 //!   `value`) is reported at the assignment, naming the shape ([`Escape`]),
 //!   in every context, the REPL root included (BT-3858). Reads of captured
 //!   variables and `^` inside an escaping block are unaffected.
@@ -1404,13 +1404,18 @@ impl Escape {
             Self::Passed(selector)
             | Self::Lookup(selector)
             | Self::ClassMethod(selector)
-            | Self::Ffi(_, selector)
             | Self::Cascade(selector) => {
                 format!(
                     "return the new value from the block and assign it where it is called: \
                      `{name} := ... {selector} [... {name} + 1]`"
                 )
             }
+            Self::Ffi(..) => format!(
+                "the Erlang function cannot hand `{name}` back from a fun it calls: fold on the \
+                 Beamtalk collection (`{name} := xs inject: {name} into: [:acc :e | acc + e]`), \
+                 or return the new value from the block and use the Erlang call's result \
+                 (`rs := Erlang lists map: [:e | ... {name} + e] with: xs`)"
+            ),
             Self::Receiver(selector) => format!(
                 "return the new value from the block and assign it where it is called: \
                  `{name} := [... {name} + 1] {selector}`"

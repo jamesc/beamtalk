@@ -17688,8 +17688,8 @@
         "testEvaluatedBlockBindingAnswersPostLoopValue",
         "testNestedArmBindingAnswersPostLoopValue"
       ],
-      "source": "// BT-3939: bindings inside inlined blocks of a Tier 2 body are not stale.\n// Fixture: fixtures/bt3939tier2inlined_actor.bt.\n\nTestCase subclass: Bt3939Tier2InlinedTest\n\n  testConditionalArmBindingAnswersPostLoopValue =>\n    self assert: (Bt3939Tier2InlinedActor spawn arm: true) equals: #(3)\n\n  // PIN-BUG BT-3981: an evaluated `[...] value` that binds a loop-rebound local,\n  // inside a plain-fun block of an actor method, answers the leaked\n  // {Value, State} tuple instead of 3; flip to `equals: #(3)` when fixed.\n  testEvaluatedBlockBindingAnswersPostLoopValue =>\n    self assert: (Bt3939Tier2InlinedActor spawn evalValue first) class equals: Tuple\n\n  testNestedArmBindingAnswersPostLoopValue =>\n    self assert: (Bt3939Tier2InlinedActor spawn nested: true) equals: #(3)",
-      "explanation": "BT-3939: bindings inside inlined blocks of a Tier 2 body are not stale. Fixture: fixtures/bt3939tier2inlined_actor.bt."
+      "source": "// BT-3939: bindings inside inlined blocks of a Tier 2 body are not stale.\n// Fixture: fixtures/bt3939tier2inlined_actor.bt.\n//\n// Since BT-3917 a writing block literal passed as an Erlang FFI argument is a\n// compile error (ADR 0133), so the Tier 2 host these tests were written for is\n// unreachable from source: the fixture's bodies are plain funs now. The Tier 2\n// lowering itself is covered by the codegen corpus\n// `crates/beamtalk-codegen/src/core_erlang/tests/tier2_block_local_corpus.rs`.\n\nTestCase subclass: Bt3939Tier2InlinedTest\n\n  testConditionalArmBindingAnswersPostLoopValue =>\n    self assert: (Bt3939Tier2InlinedActor spawn arm: true) equals: #(3)\n\n  // PIN-BUG BT-3981: an evaluated `[...] value` that binds a loop-rebound local,\n  // inside a plain-fun block of an actor method, answers the leaked\n  // {Value, State} tuple instead of 3; flip to `equals: #(3)` when fixed.\n  testEvaluatedBlockBindingAnswersPostLoopValue =>\n    self assert: ((Bt3939Tier2InlinedActor spawn evalValue first) at: 1) equals: 3\n\n  testNestedArmBindingAnswersPostLoopValue =>\n    self assert: (Bt3939Tier2InlinedActor spawn nested: true) equals: #(3)",
+      "explanation": "BT-3939: bindings inside inlined blocks of a Tier 2 body are not stale. Fixture: fixtures/bt3939tier2inlined_actor.bt.  Since BT-3917 a writing block literal passed as an Erlang FFI argument is a compile error (ADR 0133), so the Tier 2 host these tests were written for is unreachable from source: the fixture's bodies are plain funs now. The Tier 2 lowering itself is covered by the codegen corpus `crates/beamtalk-codegen/src/core_erlang/tests/tier2_block_local_corpus.rs`."
     },
     {
       "id": "stdlib-test-bt3971test",
@@ -17698,6 +17698,8 @@
       "tags": [
         "Bt3971Test",
         "TestCase",
+        "assign",
+        "assignment",
         "async",
         "bt3971test",
         "concurrent",
@@ -17706,15 +17708,18 @@
         "genserver",
         "inherit",
         "inheritance",
+        "mutate",
+        "mutation",
         "object",
         "process",
+        "set",
         "subclassing",
         "testAssignedBlockValueAnswersTheValue",
         "testBlockValueInConditionalArmAnswersTheValue",
         "testBlockValueNotLastIsDiscarded",
         "testPureBlockValueAnswersTheValue"
       ],
-      "source": "// BT-3971: see fixtures/bt3971actor.bt.\n\nTestCase subclass: Bt3971Test\n\n  testAssignedBlockValueAnswersTheValue =>\n    self assert: Bt3971Actor spawn assigned equals: #(3)\n\n  testBlockValueNotLastIsDiscarded =>\n    self assert: Bt3971Actor spawn notLast equals: #(7)\n\n  testPureBlockValueAnswersTheValue =>\n    self assert: Bt3971Actor spawn pureValue equals: #(3)\n\n  testBlockValueInConditionalArmAnswersTheValue =>\n    self assert: Bt3971Actor spawn inArm equals: #(3)",
+      "source": "// BT-3971: see fixtures/bt3971actor.bt.\n\nTestCase subclass: Bt3971Test\n\n  // PIN-BUG BT-3981: with the FFI block no longer a Tier 2 body (BT-3917), the\n  // assigned `r := [n := 3. n] value` in a plain-fun block of an actor method\n  // answers the leaked {Value, State} tuple instead of 3; flip to\n  // `equals: #(3)` when fixed.\n  testAssignedBlockValueAnswersTheValue =>\n    self assert: ((Bt3971Actor spawn assigned first) at: 1) equals: 3\n\n  testBlockValueNotLastIsDiscarded =>\n    self assert: Bt3971Actor spawn notLast equals: #(7)\n\n  testPureBlockValueAnswersTheValue =>\n    self assert: Bt3971Actor spawn pureValue equals: #(3)\n\n  testBlockValueInConditionalArmAnswersTheValue =>\n    self assert: Bt3971Actor spawn inArm equals: #(3)",
       "explanation": "BT-3971: see fixtures/bt3971actor.bt."
     },
     {
@@ -31309,8 +31314,8 @@
         "subclassing",
         "unless"
       ],
-      "source": "// BT-3971: an Erlang FFI argument block that writes a captured local (`t`) is\n// a Tier 2 body. Ending it in `[n := 3. n] value` is a compile error (it\n// answered the raw `{Value, State}` tuple; see the codegen corpus\n// `tier2_block_local_corpus.rs`). These neighbours answer right and are pinned.\n\nActor subclass: Bt3971Actor\n  state: hits = 0\n\n  assigned =>\n    t := 0\n    (Erlang lists)\n      map: [:x |\n        t := t + 1\n        r := [\n          n := 3\n          n\n        ] value\n        r\n      ]\n      with: #(1)\n\n  notLast =>\n    t := 0\n    (Erlang lists)\n      map: [:x |\n        t := t + 1\n        [\n          n := 3\n          n\n        ] value\n        7\n      ]\n      with: #(1)\n\n  pureValue =>\n    t := 0\n    (Erlang lists)\n      map: [:x |\n        t := t + 1\n        [3] value\n      ]\n      with: #(1)\n\n  inArm =>\n    t := 0\n    (Erlang lists)\n      map: [:x |\n        t := t + 1\n        (self.hits =:= 0)\n          ifTrue: [\n            [\n              n := 3\n              n\n            ] value\n          ]\n          ifFalse: [0]\n      ]\n      with: #(1)",
-      "explanation": "BT-3971: an Erlang FFI argument block that writes a captured local (`t`) is a Tier 2 body. Ending it in `[n := 3. n] value` is a compile error (it answered the raw `{Value, State}` tuple; see the codegen corpus `tier2_block_local_corpus.rs`). These neighbours answer right and are pinned."
+      "source": "// BT-3971: an Erlang FFI argument block that writes a captured local was a\n// Tier 2 body, and ending it in `[n := 3. n] value` answered the raw\n// `{Value, State}` tuple (a compile error since BT-3971; see the codegen corpus\n// `tier2_block_local_corpus.rs`). Since BT-3917 a writing block literal in an\n// FFI argument is itself a compile error (ADR 0133), so these neighbours are\n// plain funs that write nothing; they answer right and are pinned.\n\nActor subclass: Bt3971Actor\n  state: hits = 0\n\n  assigned =>\n    (Erlang lists)\n      map: [:x |\n        r := [\n          n := 3\n          n\n        ] value\n        r\n      ]\n      with: #(1)\n\n  notLast =>\n    (Erlang lists)\n      map: [:x |\n        [\n          n := 3\n          n\n        ] value\n        7\n      ]\n      with: #(1)\n\n  pureValue => (Erlang lists) map: [:x | [3] value] with: #(1)\n\n  inArm =>\n    (Erlang lists)\n      map: [:x |\n        (self.hits =:= 0)\n          ifTrue: [\n            [\n              n := 3\n              n\n            ] value\n          ]\n          ifFalse: [0]\n      ]\n      with: #(1)",
+      "explanation": "BT-3971: an Erlang FFI argument block that writes a captured local was a Tier 2 body, and ending it in `[n := 3. n] value` answered the raw `{Value, State}` tuple (a compile error since BT-3971; see the codegen corpus `tier2_block_local_corpus.rs`). Since BT-3917 a writing block literal in an FFI argument is itself a compile error (ADR 0133), so these neighbours are plain funs that write nothing; they answer right and are pinned."
     },
     {
       "id": "stdlib-test-fixtures-calculator",

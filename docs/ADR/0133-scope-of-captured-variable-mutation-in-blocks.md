@@ -226,7 +226,7 @@ The same diagnostic fires for every escaping shape, naming the shape:
 | `f := [t := t + 1]` | "`t` is assigned in a block stored in `f`" |
 | `^[t := t + 1]` | "`t` is assigned in a block returned from `run`" |
 | `self forEach: [:o \| t := t + o]` | "`t` is assigned in a block passed to `forEach:`, which is not a construct the compiler threads it through" |
-| `Erlang lists foreach: xs fun: [:e \| t := t + e]` (passed as an FFI argument) | "`t` is assigned in a block passed to Erlang `lists` `foreach:fun:`, which calls it as a plain fun" |
+| `Erlang lists foreach: [:e \| t := t + e] with: xs` (passed as an FFI argument) | "`t` is assigned in a block passed to Erlang `lists` `foreach:with:`, which calls it as a plain fun" |
 | `Logger onEvent: [:e \| seen := seen + 1]` (other process) | "`seen` is assigned in a block passed to a class method; it would run in another process" |
 
 The run-time side keeps one structured error for the cases the compiler
