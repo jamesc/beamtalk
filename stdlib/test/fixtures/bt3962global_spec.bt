@@ -6,4 +6,5 @@
 
 Supervisor subclass: Bt3962GlobalSpec
 
-  childSpecs => #((Bt3962Leaf supervisionSpec withName: #bt3962_global_leaf scope: #global))
+  childSpecs =>
+    #((Bt3962Leaf supervisionSpec withName: #bt3962_global_leaf scope: #global))

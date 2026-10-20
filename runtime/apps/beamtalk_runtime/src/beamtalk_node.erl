@@ -315,7 +315,8 @@ local_supervisors() ->
         end,
     Known = Root ++ Attached,
     KnownPids = [element(4, S) || S <- Known],
-    Known ++ [S || S <- beamtalk_supervisor:instances(), not lists:member(element(4, S), KnownPids)].
+    Known ++
+        [S || S <- beamtalk_supervisor:instances(), not lists:member(element(4, S), KnownPids)].
 
 %%% ============================================================================
 %%% Runtime helpers

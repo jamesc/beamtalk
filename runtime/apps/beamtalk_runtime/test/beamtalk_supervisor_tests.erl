@@ -1760,9 +1760,12 @@ spec_to_otp_supervisor_child_mapping_test() ->
     M = bt3962_map_sup_mod,
     {FakePid, ClassObj} = fake_supervisor_class('BT3962MapSupCls', M),
     Start = fun(StartFn, StartArgs, Mode) ->
-        maps:get(start, beamtalk_supervisor:spec_to_otp(
-            bt3962_bt_spec(ClassObj, 1, StartFn, StartArgs), Mode
-        ))
+        maps:get(
+            start,
+            beamtalk_supervisor:spec_to_otp(
+                bt3962_bt_spec(ClassObj, 1, StartFn, StartArgs), Mode
+            )
+        )
     end,
     try
         ?assertEqual(

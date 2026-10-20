@@ -5,4 +5,5 @@
 
 Supervisor subclass: Bt3962NamedChildSup
 
-  childSpecs => #((Bt3962Leaf supervisionSpec withName: #bt3962_named_leaf_child))
+  childSpecs =>
+    #((Bt3962Leaf supervisionSpec withName: #bt3962_named_leaf_child))

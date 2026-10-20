@@ -77,8 +77,7 @@ abstract Object subclass: Supervisor
   ///   childSpecs => #((Leaf supervisionSpec withId: 1), (Leaf supervisionSpec withId: 2 withArgs: #{#x => 2}))
   /// ```
   class supervisionSpec -> SupervisionSpec =>
-    (SupervisionSpec new withActorClass: ((Erlang beamtalk_supervisor) classObject: self))
-      withRestart: self supervisionPolicy
+    (SupervisionSpec new withActorClass: ((Erlang beamtalk_supervisor) classObject: self)) withRestart: self supervisionPolicy
 
   // === Class-side lifecycle ===
   //
@@ -151,7 +150,10 @@ abstract Object subclass: Supervisor
   /// (ServerSupervisor named: #http_server) unwrap == http   // => true
   /// ```
   class spawnWith: args :: Object as: name :: Symbol -> Result(Self, Error) =>
-    (Erlang beamtalk_supervisor) doSpawnWith: self args: args withName: name
+    (Erlang beamtalk_supervisor)
+      doSpawnWith: self
+      args: args
+      withName: name
 
   /// Look up a running supervisor registered under `name`.
   ///

@@ -14,7 +14,6 @@
 TestCase subclass: SupervisorInstancesTest
 
   // === spawn / spawnWith: ===
-
   testSpawnStartsANewInstancePerCall =>
     a := Bt3962Leaf spawn
     b := Bt3962Leaf spawn
@@ -90,7 +89,6 @@ TestCase subclass: SupervisorInstancesTest
     b stop
 
   // === named instances ===
-
   testSpawnAsRegistersAndNamedFindsIt =>
     a := (Bt3962Leaf spawnAs: #bt3962_named_leaf) unwrap
     self assert: (Bt3962Leaf named: #bt3962_named_leaf) unwrap == a
@@ -114,7 +112,6 @@ TestCase subclass: SupervisorInstancesTest
     p stop
 
   // === nesting via supervisionSpec ===
-
   testSupervisionSpecDefaults =>
     spec := Bt3962Leaf supervisionSpec
     self assert: spec actorClass equals: Bt3962Leaf
@@ -155,7 +152,6 @@ TestCase subclass: SupervisorInstancesTest
     self assert: (g hint includesSubstring: "scope: #global") equals: true
 
   // === DynamicSupervisor of supervisors ===
-
   testPoolOfSupervisorsStartsANewChildPerStartChild =>
     farm := Bt3962Farm spawn
     a := farm startChild unwrap
@@ -172,7 +168,6 @@ TestCase subclass: SupervisorInstancesTest
     farm stop
 
   // === discovery ===
-
   testNodeSupervisorsListsSpawnedInstanceWhileItRuns =>
     a := Bt3962Leaf spawn
     self assert: (Node current supervisors unwrap includes: a) equals: true

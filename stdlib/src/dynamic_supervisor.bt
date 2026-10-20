@@ -50,8 +50,7 @@ abstract Object subclass: DynamicSupervisor(C)
   /// `#supervisor`, shutdown `#infinity`, restart from `supervisionPolicy`;
   /// `withArgs:` gives the nested pool its `self args`.
   class supervisionSpec -> SupervisionSpec =>
-    (SupervisionSpec new withActorClass: ((Erlang beamtalk_supervisor) classObject: self))
-      withRestart: self supervisionPolicy
+    (SupervisionSpec new withActorClass: ((Erlang beamtalk_supervisor) classObject: self)) withRestart: self supervisionPolicy
 
   // === Class-side lifecycle ===
   //
@@ -92,7 +91,10 @@ abstract Object subclass: DynamicSupervisor(C)
 
   /// Start a new pool with start args, registered under `name`.
   class spawnWith: args :: Object as: name :: Symbol -> Result(Self, Error) =>
-    (Erlang beamtalk_supervisor) doSpawnWith: self args: args withName: name
+    (Erlang beamtalk_supervisor)
+      doSpawnWith: self
+      args: args
+      withName: name
 
   /// Look up a running pool registered under `name`: `#name_not_registered`,
   /// `#wrong_class` or `#type_error` on failure, as `Actor named:`.

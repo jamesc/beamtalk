@@ -7,7 +7,6 @@
 Supervisor subclass: Bt3962Pair
 
   childSpecs =>
-    #(
-      (Bt3962Leaf supervisionSpec withId: 1),
-      (Bt3962Leaf supervisionSpec withId: 2 withArgs: #{#x => 2})
-    )
+    #((Bt3962Leaf supervisionSpec withId: 1), (Bt3962Leaf supervisionSpec withId: 2 withArgs: #{
+      #x => 2
+    }))

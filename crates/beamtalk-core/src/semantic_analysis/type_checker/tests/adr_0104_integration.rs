@@ -462,7 +462,7 @@ Object subclass: Client
     );
 }
 
-/// ADR 0135 §1 (BT-3962): `spawnWith:` on a Supervisor / DynamicSupervisor
+/// ADR 0135 §1 (BT-3962): `spawnWith:` on a `Supervisor` / `DynamicSupervisor`
 /// class takes free-form start args (`self args`), not `state:` slots, so
 /// arbitrary literal-map keys type-check cleanly — from a class reference and
 /// from `self spawnWith:` in a class method — and the spawn family resolves
