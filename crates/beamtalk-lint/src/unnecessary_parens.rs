@@ -76,6 +76,22 @@ fn is_always_unnecessary(expr: &Expression) -> bool {
     }
 }
 
+/// Checks a string-interpolation segment's expression.
+///
+/// `"{({a, b})}"`: dropping the parens would yield the lexer-rejected
+/// `"{{a, b}}"` (ADR 0136), so parens around a tuple literal are significant
+/// here — lint only the inner expression.
+fn check_interpolated_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    match expr {
+        Expression::Parenthesized { expression, .. }
+            if matches!(**expression, Expression::TupleLiteral { .. }) =>
+        {
+            check_expr(expression, diagnostics);
+        }
+        _ => check_expr(expr, diagnostics),
+    }
+}
+
 /// Like `check_expr`, but skips the unnecessary-parens diagnostic for a
 /// top-level `Parenthesized` node and only recurses into its contents.
 ///
@@ -241,17 +257,7 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
                 if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
-                    // `"{({a, b})}"`: dropping the parens would yield the
-                    // lexer-rejected `"{{a, b}}"` (ADR 0136), so the parens
-                    // are significant here — lint only the inner expression.
-                    match e {
-                        Expression::Parenthesized { expression, .. }
-                            if matches!(**expression, Expression::TupleLiteral { .. }) =>
-                        {
-                            check_expr(expression, diagnostics);
-                        }
-                        _ => check_expr(e, diagnostics),
-                    }
+                    check_interpolated_expr(e, diagnostics);
                 }
             }
         }
@@ -293,6 +299,19 @@ mod tests {
             "message: {}",
             diags[0].message
         );
+    }
+
+    #[test]
+    fn parens_around_tuple_literal_is_flagged() {
+        let diags = lint("Object subclass: Foo\n  value => ({1, 2})\n");
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    #[test]
+    fn parens_around_interpolated_tuple_literal_are_not_flagged() {
+        // ADR 0136: `"{({a, b})}"` without parens would be the rejected `"{{"`.
+        let diags = lint("Object subclass: Foo\n  value: a => \"x{({a, a})}\"\n");
+        assert!(diags.is_empty(), "got: {diags:?}");
     }
 
     #[test]

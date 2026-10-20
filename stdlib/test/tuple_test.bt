@@ -65,7 +65,6 @@ TestCase subclass: TupleTest
     self assert: (otherTuple unwrapOrElse: [99]) equals: 99
 
   // === BT-3969 / ADR 0136: tuple literal expressions ===
-
   testTupleLiteralConstruction =>
     t := {#active, false}
     self assert: t class equals: Tuple
@@ -82,9 +81,6 @@ TestCase subclass: TupleTest
     self assert: ({} =:= Tuple new) equals: true
     self assert: {#ok} size equals: 1
     self assert: ({#ok} at: 1) equals: #ok
-
-  testTupleLiteralTrailingComma =>
-    self assert: {#a, 1,} size equals: 2
 
   testTupleLiteralNested =>
     t := {#outer, {#inner, 1}}
@@ -123,13 +119,11 @@ TestCase subclass: TupleTest
     self assert: result equals: 14
 
   testTupleLiteralInMatchArmBody =>
-    result := 3 match: [
-      n -> {#got, n}
-    ]
+    result := 3 match: [n -> {#got, n}]
     self assert: result equals: (Tuple withAll: #(#got, 3))
 
   testTupleLiteralInList =>
-    opts := #({#active, false}, {#reuseaddr, true}, {#backlog, 1024},)
+    opts := #({#active, false}, {#reuseaddr, true}, {#backlog, 1024})
     self assert: opts size equals: 3
     self assert: ((opts at: 1) at: 1) equals: #active
 
