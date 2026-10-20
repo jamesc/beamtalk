@@ -1477,7 +1477,7 @@ fn nlr_cause(protected: &Block, sources: &NlrSources) -> Option<String> {
 /// name whose first occurrence in the cleanup is the target of an assignment
 /// whose value does not mention it.
 fn names_bound_by_cleanup_first(cleanup: &Block) -> BTreeSet<EcoString> {
-    let mut first: std::collections::BTreeMap<EcoString, (u32, bool)> = Default::default();
+    let mut first = std::collections::BTreeMap::<EcoString, (u32, bool)>::new();
     let mut note = |name: &EcoString, at: u32, binds: bool| {
         let slot = first.entry(name.clone()).or_insert((at, binds));
         if at < slot.0 {
