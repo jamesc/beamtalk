@@ -3574,6 +3574,8 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
         "t := 0\nh := [^0]\n[t := 1. (h) run] ensure: [t printString]\n9",
         "t := 0\nh := [^0]\n[t := 1. (h) run; yourself] ensure: [t printString]\n9",
         "t := 0\nh := [^0]\n[t := 1. CvA ap: (h)] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b yourself; value] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. CvA ap: 1; ap: b] ensure: [t printString]\n9",
         // A parameter of an enclosing block is bound in the enclosing scope.
         "#(1, 2) do: [:x | [x := 5. ^x] ensure: [x printString]]\n9",
         "[:x | [x := 5. ^x] ensure: [x printString]] value: 1\n9",
