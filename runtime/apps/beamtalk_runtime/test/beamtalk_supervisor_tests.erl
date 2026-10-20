@@ -61,7 +61,8 @@ Tests cover:
     class_strategy/1,
     class_maxRestarts/1,
     class_restartWindow/1,
-    class_maxChildren/1
+    class_maxChildren/1,
+    class_childShutdown/1
 ]).
 
 %% Fake class methods for start_child_via_class_method tests.
@@ -811,7 +812,11 @@ dynamic_init_walks_hierarchy_via_ets_test() ->
         ?assertMatch(
             {ok, {#{strategy := simple_one_for_one, intensity := 3, period := 5}, [_ChildSpec]}},
             Result
-        )
+        ),
+        %% BT-3965: class childShutdown (1234 here) replaces the template's
+        %% shutdown (`infinity` for this supervisor child class).
+        {ok, {_, [ChildSpec]}} = Result,
+        ?assertEqual(1234, maps:get(shutdown, ChildSpec))
     after
         beamtalk_class_metadata:delete('BT1960DynChild'),
         beamtalk_class_metadata:delete('BT1960DynParent'),
@@ -867,6 +872,7 @@ class_strategy(_ClassSelf) -> oneForOne.
 class_maxRestarts(_ClassSelf) -> 3.
 class_restartWindow(_ClassSelf) -> 5.
 class_maxChildren(_ClassSelf) -> 7.
+class_childShutdown(_ClassSelf) -> 1234.
 
 %% Fake class_childClass for dynamic_init tests.
 %% Returns a class object for a supervisor subclass so build_child_spec takes the
@@ -2307,6 +2313,55 @@ validate_max_children_test() ->
     ?assertMatch(#beamtalk_error{kind = type_error, class = 'X', selector = maxChildren}, E1),
     E2 = raised_beamtalk_error(fun() -> beamtalk_supervisor:validate_max_children('X', lots) end),
     ?assertMatch(#beamtalk_error{kind = type_error, details = #{value := lots}}, E2).
+
+%%====================================================================
+%% BT-3965: shutdown timeouts
+%%====================================================================
+
+to_otp_shutdown_test() ->
+    ?assertEqual(infinity, beamtalk_supervisor:to_otp_shutdown('X', shutdown, infinity)),
+    ?assertEqual(brutal_kill, beamtalk_supervisor:to_otp_shutdown('X', shutdown, brutalKill)),
+    ?assertEqual(0, beamtalk_supervisor:to_otp_shutdown('X', shutdown, 0)),
+    ?assertEqual(1500, beamtalk_supervisor:to_otp_shutdown('X', shutdown, 1500)),
+    E1 = raised_beamtalk_error(fun() ->
+        beamtalk_supervisor:to_otp_shutdown('X', childShutdown, -1)
+    end),
+    ?assertMatch(#beamtalk_error{kind = type_error, class = 'X', selector = childShutdown}, E1),
+    %% Only the Beamtalk spelling is accepted — not OTP's raw atom.
+    E2 = raised_beamtalk_error(fun() ->
+        beamtalk_supervisor:to_otp_shutdown('X', shutdown, brutal_kill)
+    end),
+    ?assertMatch(#beamtalk_error{kind = type_error, details = #{value := brutal_kill}}, E2).
+
+spec_to_otp_translates_brutal_kill_test() ->
+    %% A Beamtalk `#brutalKill` shutdown reaches OTP as `brutal_kill`.
+    ClassObj = bt1990_make_counter_class_obj(),
+    try
+        BtSpec = #{
+            id => 'TestCounter',
+            start => #{
+                '$beamtalk_class' => 'Array',
+                data => #{0 => ClassObj, 1 => spawn, 2 => []}
+            },
+            restart => temporary,
+            shutdown => brutalKill,
+            type => worker
+        },
+        ?assertMatch(#{shutdown := brutal_kill}, beamtalk_supervisor:spec_to_otp(BtSpec)),
+        ?assertMatch(
+            #{shutdown := infinity},
+            beamtalk_supervisor:spec_to_otp(BtSpec#{shutdown => infinity})
+        ),
+        Err = raised_beamtalk_error(fun() ->
+            beamtalk_supervisor:spec_to_otp(BtSpec#{shutdown => soon})
+        end),
+        ?assertMatch(
+            #beamtalk_error{kind = type_error, class = 'SupervisionSpec', selector = shutdown},
+            Err
+        )
+    after
+        bt1990_cleanup_class_obj(ClassObj)
+    end.
 
 start_capped_dynamic_supervisor(Max) ->
     ChildSpec = #{

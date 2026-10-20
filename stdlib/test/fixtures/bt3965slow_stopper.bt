@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3965 fixture: an actor whose terminate: takes ~200 ms, so a supervisor
+// shutdown timeout either lets it finish (exit reason #shutdown) or kills it
+// first (exit reason #killed). Overriding terminate: makes it trap exits
+// (BT-3596), which is what gives it the shutdown window at all.
+// See stdlib/test/supervision_shutdown_test.bt.
+
+Actor subclass: Bt3965SlowStopper
+  state: tableName = nil
+
+  terminate: reason =>
+    Timer sleep: 200
+    self.tableName isNil
+      ifFalse: [(Ets named: self.tableName) at: #terminated put: reason]

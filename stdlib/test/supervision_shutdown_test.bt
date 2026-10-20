@@ -1,0 +1,102 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3965: per-child shutdown timeouts — `SupervisionSpec withShutdown:`
+// (Integer ms, #infinity, #brutalKill) and `DynamicSupervisor class
+// childShutdown`.
+//
+// Every fixture child is a Bt3965SlowStopper, whose terminate: sleeps 200 ms
+// and then records its reason in the Ets table named by its `tableName`. Each
+// test also records the exit reason `onExit:` observes, so it can tell a
+// clean stop (#shutdown) from a kill (#killed).
+//
+// Fixtures: stdlib/test/fixtures/bt3965*.bt
+
+TestCase subclass: SupervisionShutdownTest
+
+  // The fixtures are name-registered supervisors and named Ets tables.
+  class serial -> Boolean => true
+
+  // Watch `child` and wait (up to ~2 s) for its exit reason.
+  exitReasonOf: child stoppingWith: stopBlock in: table =>
+    child onExit: [:reason | table at: #exitReason put: reason]
+    stopBlock value
+    100 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 20]]
+    table at: #exitReason
+
+  // === SupervisionSpec withShutdown: ===
+
+  testChildWithinShutdownTimeoutExitsCleanly =>
+    table := Ets new: #bt3965Patient type: #set
+    sup := (Bt3965PatientSup supervise) unwrap
+    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap
+    reason := self exitReasonOf: child stoppingWith: [sup stop] in: table
+    self assert: reason equals: #shutdown
+    // terminate: ran to completion inside the 1000 ms window.
+    self assert: (table at: #terminated) equals: #shutdown
+    table delete
+
+  testChildOverrunningShutdownTimeoutIsKilled =>
+    table := Ets new: #bt3965Impatient type: #set
+    sup := (Bt3965ImpatientSup supervise) unwrap
+    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap
+    reason := self exitReasonOf: child stoppingWith: [sup stop] in: table
+    self assert: reason equals: #killed
+    // Killed 50 ms in, before its 200 ms terminate: could finish.
+    self assert: (table at: #terminated) equals: nil
+    table delete
+
+  testBrutalKillSkipsTerminate =>
+    table := Ets new: #bt3965Brutal type: #set
+    sup := (Bt3965BrutalSup supervise) unwrap
+    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap
+    reason := self exitReasonOf: child stoppingWith: [sup stop] in: table
+    self assert: reason equals: #killed
+    self assert: (table at: #terminated) equals: nil
+    table delete
+
+  testWithShutdownEmitsSymbolsInChildSpec =>
+    infinite := (Bt3965SlowStopper supervisionSpec withShutdown: #infinity) childSpec
+    self assert: (infinite at: #shutdown) equals: #infinity
+    brutal := (Bt3965SlowStopper supervisionSpec withShutdown: #brutalKill) childSpec
+    self assert: (brutal at: #shutdown) equals: #brutalKill
+
+  testWithShutdownChainsWithOtherOverrides =>
+    spec := (Bt3965SlowStopper supervisionSpec withId: #slow withRestart: #permanent)
+      withShutdown: 15000
+    self assert: spec id equals: #slow
+    self assert: spec restart equals: #permanent
+    self assert: (spec childSpec at: #shutdown) equals: 15000
+
+  // === DynamicSupervisor class childShutdown ===
+
+  testChildShutdownDefaultsToNil =>
+    self assert: DynamicSupervisor childShutdown equals: nil
+
+  testSubclassOverridesChildShutdown =>
+    self assert: Bt3965ImpatientPool childShutdown equals: 50
+
+  testDynamicChildWithinChildShutdownExitsCleanly =>
+    table := Ets new: #bt3965PatientPool type: #set
+    pool := (Bt3965PatientPool supervise) unwrap
+    child := (pool startChild: #{#tableName => #bt3965PatientPool}) unwrap
+    reason := self exitReasonOf: child stoppingWith: [pool stop] in: table
+    self assert: reason equals: #shutdown
+    self assert: (table at: #terminated) equals: #shutdown
+    table delete
+
+  testDynamicChildOverrunningChildShutdownIsKilled =>
+    table := Ets new: #bt3965ImpatientPool type: #set
+    pool := (Bt3965ImpatientPool supervise) unwrap
+    child := (pool startChild: #{#tableName => #bt3965ImpatientPool}) unwrap
+    reason := self exitReasonOf: child stoppingWith: [pool stop] in: table
+    self assert: reason equals: #killed
+    self assert: (table at: #terminated) equals: nil
+    table delete
+
+  testInvalidChildShutdownFailsSupervise =>
+    result := Bt3965BadShutdownPool supervise
+    self assert: result isError equals: true
+    self assert: result error kind equals: #supervisor_start_failed
+    self assert: (result error hint includesSubstring: "childShutdown") equals: true
+    self assert: Bt3965BadShutdownPool current equals: nil

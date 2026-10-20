@@ -68,7 +68,7 @@ functions that call OTP APIs from the caller's process context.
 ]).
 
 -ifdef(TEST).
--export([validate_max_children/2]).
+-export([validate_max_children/2, to_otp_shutdown/3]).
 -endif.
 
 -include("beamtalk.hrl").
@@ -132,7 +132,7 @@ startLink(Self) ->
     ClassPid = element(4, Self),
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
-    case precheck_max_children(ClassName, Module) of
+    case precheck_dynamic_config(ClassName, Module) of
         ok ->
             start_link_supervisor(ClassName, Module);
         {error, #beamtalk_error{hint = Msg}} ->
@@ -240,7 +240,12 @@ dynamic_init(Module, ClassName) ->
     ChildClass = call_class_method_direct(ClassName, Module, class_childClass, ClassSelf),
     MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf),
     MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf),
-    MaxC = validate_max_children(ClassName, read_max_children(ClassName, Module)),
+    MaxC = validate_max_children(
+        ClassName, read_dynamic_config(ClassName, Module, maxChildren)
+    ),
+    ChildShutdown = validate_child_shutdown(
+        ClassName, read_dynamic_config(ClassName, Module, childShutdown)
+    ),
     %% BT-3964: OTP's `supervisor` has no `max_children` flag (that is Elixir's
     %% DynamicSupervisor), so the limit is enforced by `startChild/1,2,3` via
     %% `with_child_capacity/4`. `init/1` runs in the supervisor process, so the
@@ -248,13 +253,20 @@ dynamic_init(Module, ClassName) ->
     %% this supervisor incarnation and is re-read from the class on restart.
     put(?MAX_CHILDREN_KEY, MaxC),
     SupFlags = #{strategy => simple_one_for_one, intensity => MaxR, period => MaxT},
-    Specs = build_child_specs([ChildClass], dynamic),
+    %% BT-3965: `class childShutdown` (when set) replaces the shutdown the
+    %% child class's own `supervisionSpec` produced. `simple_one_for_one` has
+    %% exactly one child spec, so the value covers every dynamic child.
+    Specs = [
+        apply_child_shutdown(S, ChildShutdown)
+     || S <- build_child_specs([ChildClass], dynamic)
+    ],
     ?LOG_DEBUG("DynamicSupervisor init", #{
         supervisor => ClassName,
         strategy => simple_one_for_one,
         max_restarts => MaxR,
         restart_window => MaxT,
         max_children => MaxC,
+        child_shutdown => ChildShutdown,
         domain => [beamtalk, runtime]
     }),
     {ok, {SupFlags, Specs}}.
@@ -1587,7 +1599,7 @@ spec_to_otp(BtSpec, Mode) ->
         id => maps:get(id, BtSpec),
         start => OtpStart,
         restart => maps:get(restart, BtSpec),
-        shutdown => maps:get(shutdown, BtSpec),
+        shutdown => to_otp_shutdown('SupervisionSpec', shutdown, maps:get(shutdown, BtSpec)),
         type => maps:get(type, BtSpec),
         modules => [ChildModule]
     }.
@@ -1735,7 +1747,7 @@ check_max_children(ClassName, Other) ->
 -doc """
 `check_max_children/2` for `dynamic_init/2`: returns the limit or raises the
 `type_error`. `startLink/1` pre-checks the same value with
-`precheck_max_children/2` so a misconfigured limit normally surfaces as a clean
+`precheck_dynamic_config/2` so a misconfigured limit normally surfaces as a clean
 `supervisor_start_failed` Result; this raise is the backstop for a supervisor
 started (or restarted) by other means.
 """.
@@ -1747,23 +1759,96 @@ validate_max_children(ClassName, Value) ->
     end.
 
 -doc """
-Validate `class maxChildren` in the caller before `start_link` (BT-3964).
+Translate a Beamtalk shutdown value into the OTP child-spec `shutdown` term
+(BT-3965).
+
+Accepts a non-negative Integer (milliseconds), `infinity` (Beamtalk
+`#infinity`) or `brutalKill` (Beamtalk `#brutalKill`, emitted as OTP
+`brutal_kill`); anything else raises a `type_error` attributed to
+`Class`/`Selector`, with the offending value in `details`. The single place
+the `ShutdownTimeout` rule is checked: both `SupervisionSpec childSpec`
+(via `spec_to_otp/2`) and `DynamicSupervisor class childShutdown` go
+through it.
+""".
+-spec to_otp_shutdown(atom(), atom(), term()) -> brutal_kill | infinity | non_neg_integer().
+to_otp_shutdown(Class, Selector, Value) ->
+    case check_shutdown(Class, Selector, Value) of
+        {ok, Shutdown} -> Shutdown;
+        {error, Error} -> beamtalk_error:raise(Error)
+    end.
+
+-spec check_shutdown(atom(), atom(), term()) ->
+    {ok, brutal_kill | infinity | non_neg_integer()} | {error, #beamtalk_error{}}.
+check_shutdown(_Class, _Selector, infinity) ->
+    {ok, infinity};
+check_shutdown(_Class, _Selector, brutalKill) ->
+    {ok, brutal_kill};
+check_shutdown(_Class, _Selector, Ms) when is_integer(Ms), Ms >= 0 ->
+    {ok, Ms};
+check_shutdown(Class, Selector, Other) ->
+    Error0 = beamtalk_error:new(
+        type_error,
+        Class,
+        Selector,
+        iolist_to_binary(
+            io_lib:format(
+                "~s must be a non-negative Integer (ms), #infinity or #brutalKill, got ~p",
+                [Selector, Other]
+            )
+        )
+    ),
+    {error, beamtalk_error:with_details(Error0, #{value => Other})}.
+
+-doc """
+Check a DynamicSupervisor's `class childShutdown` (BT-3965): `nil` (use the
+child class's own spec value) or any value `check_shutdown/3` accepts.
+""".
+-spec check_child_shutdown(atom(), term()) ->
+    {ok, nil | brutal_kill | infinity | non_neg_integer()} | {error, #beamtalk_error{}}.
+check_child_shutdown(_ClassName, nil) ->
+    {ok, nil};
+check_child_shutdown(ClassName, Value) ->
+    check_shutdown(ClassName, childShutdown, Value).
+
+-doc """
+`check_child_shutdown/2` for `dynamic_init/2`: returns the OTP shutdown (or
+`nil`) or raises the `type_error`. Backstop for `precheck_dynamic_config/2`,
+as `validate_max_children/2` is.
+""".
+-spec validate_child_shutdown(atom(), term()) ->
+    nil | brutal_kill | infinity | non_neg_integer().
+validate_child_shutdown(ClassName, Value) ->
+    case check_child_shutdown(ClassName, Value) of
+        {ok, Shutdown} -> Shutdown;
+        {error, Error} -> beamtalk_error:raise(Error)
+    end.
+
+-spec apply_child_shutdown(map(), nil | brutal_kill | infinity | non_neg_integer()) -> map().
+apply_child_shutdown(Spec, nil) ->
+    Spec;
+apply_child_shutdown(Spec, Shutdown) ->
+    Spec#{shutdown => Shutdown}.
+
+-doc """
+Validate a DynamicSupervisor's class-side configuration (`class maxChildren`,
+BT-3964; `class childShutdown`, BT-3965) in the caller before `start_link`.
 
 A raise inside the supervisor's `init/1` takes down the linked caller rather
-than returning `{error, _}`, so `startLink/1` checks the value first and turns
-a bad one into `supervisor_start_failed`. It reads the value through
-`read_max_children/2`, the same resolver `dynamic_init/2` uses, so the value
-validated here is the value the supervisor enforces. Only DynamicSupervisor
-subclasses have the setting, and an already-running supervisor is skipped so
+than returning `{error, _}`, so `startLink/1` checks the values first and turns
+a bad one into `supervisor_start_failed`. It reads each value through
+`read_dynamic_config/3`, the same resolver `dynamic_init/2` uses, so the value
+validated here is the value the supervisor applies. Only DynamicSupervisor
+subclasses have the settings, and an already-running supervisor is skipped so
 `supervise` stays an idempotent get-or-start for the live instance.
 
 A DynamicSupervisor nested under a static `Supervisor` is started by OTP
 directly from its child spec, bypassing this check; there the
-`validate_max_children/2` raise in `dynamic_init/2` fails the parent's start
-(or counts against the parent's restart intensity on a restart).
+`validate_max_children/2` / `validate_child_shutdown/2` raise in
+`dynamic_init/2` fails the parent's start (or counts against the parent's
+restart intensity on a restart).
 """.
--spec precheck_max_children(atom(), module()) -> ok | {error, #beamtalk_error{}}.
-precheck_max_children(ClassName, Module) ->
+-spec precheck_dynamic_config(atom(), module()) -> ok | {error, #beamtalk_error{}}.
+precheck_dynamic_config(ClassName, Module) ->
     case
         is_pid(whereis(Module)) orelse
             not beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor')
@@ -1771,29 +1856,52 @@ precheck_max_children(ClassName, Module) ->
         true ->
             ok;
         false ->
-            case check_max_children(ClassName, read_max_children(ClassName, Module)) of
-                {ok, _} -> ok;
-                {error, _} = Err -> Err
-            end
+            Checks = [
+                fun() ->
+                    check_max_children(
+                        ClassName, read_dynamic_config(ClassName, Module, maxChildren)
+                    )
+                end,
+                fun() ->
+                    check_child_shutdown(
+                        ClassName, read_dynamic_config(ClassName, Module, childShutdown)
+                    )
+                end
+            ],
+            first_config_error(Checks)
+    end.
+
+-spec first_config_error([fun(() -> {ok, term()} | {error, #beamtalk_error{}})]) ->
+    ok | {error, #beamtalk_error{}}.
+first_config_error([]) ->
+    ok;
+first_config_error([Check | Rest]) ->
+    case Check() of
+        {ok, _} -> first_config_error(Rest);
+        {error, _} = Err -> Err
     end.
 
 -doc """
-Read a DynamicSupervisor's `class maxChildren` in the calling process.
+Read a DynamicSupervisor class-side setting (`maxChildren`, `childShutdown`)
+in the calling process.
 
 Resolves the definition the way a class-side send would
 (`class_config_value/2`, so an ADR 0084 runtime class-method override wins),
 falling back to the compiled export via the ETS hierarchy walk when the class
-cannot be resolved that way. Shared by `precheck_max_children/2` and
-`dynamic_init/2` so the validated and the enforced value cannot diverge.
+cannot be resolved that way. Shared by `precheck_dynamic_config/2` and
+`dynamic_init/2` so the validated and the applied value cannot diverge.
 """.
--spec read_max_children(atom(), module()) -> term().
-read_max_children(ClassName, Module) ->
-    case class_config_value(ClassName, maxChildren) of
+-spec read_dynamic_config(atom(), module(), maxChildren | childShutdown) -> term().
+read_dynamic_config(ClassName, Module, Selector) ->
+    case class_config_value(ClassName, Selector) of
         {ok, Value} ->
             Value;
         not_found ->
             call_class_method_direct(
-                ClassName, Module, class_maxChildren, make_init_class_self(ClassName, Module)
+                ClassName,
+                Module,
+                beamtalk_class_dispatch:class_method_fun_name(Selector),
+                make_init_class_self(ClassName, Module)
             )
     end.
 
