@@ -3565,6 +3565,18 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
         "t := 0\nd := #{#k => 1}\n[t := 1. (d at: #k) value] ensure: [t printString]\n9",
         "t := 0\nb := [3]\n[t := 1. b value] ensure: [t printString]\n9",
         "t := 0\nb := CvA ap: [3]\n[t := 1. CvA ap: b] ensure: [t printString]\n9",
+        // A block local used as the receiver of any send, not only `value`:
+        // parenthesised, in a cascade, a unary or a keyword send.
+        "t := 0\nb := [^0]\n[t := 1. b on: Error do: [:e | 0]] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b ensure: [0]] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b whileFalse] ensure: [t printString]\n9",
+        "t := 0\nh := [^0]\n[t := 1. h run] ensure: [t printString]\n9",
+        "t := 0\nh := [^0]\n[t := 1. (h) run] ensure: [t printString]\n9",
+        "t := 0\nh := [^0]\n[t := 1. (h) run; yourself] ensure: [t printString]\n9",
+        "t := 0\nh := [^0]\n[t := 1. CvA ap: (h)] ensure: [t printString]\n9",
+        // A parameter of an enclosing block is bound in the enclosing scope.
+        "#(1, 2) do: [:x | [x := 5. ^x] ensure: [x printString]]\n9",
+        "[:x | [x := 5. ^x] ensure: [x printString]] value: 1\n9",
     ];
     for body in rejected {
         for src in [in_class(body), in_value(body), in_actor(body)] {
@@ -3576,7 +3588,7 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
                 errors[0].message
             );
             assert!(
-                errors[0].message.contains("possible non-local return"),
+                errors[0].message.contains("non-local"),
                 "{}",
                 errors[0].message
             );
@@ -3594,7 +3606,7 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
         let errors = analysis_errors(src, &[]);
         assert_eq!(errors.len(), 1, "{src}: {errors:?}");
         assert!(
-            errors[0].message.contains("possible non-local return"),
+            errors[0].message.contains("non-local"),
             "{}",
             errors[0].message
         );

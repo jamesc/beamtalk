@@ -1275,10 +1275,12 @@ fn check_body(
 /// `t`). The static view cannot tell which value is a block, so it is fully
 /// conservative ([`nlr_cause`]): any `value`-family send to a receiver that is
 /// not a block literal analysed in place (a call result and a collection
-/// element included), and any local, parameter or field passed as an argument
-/// of a keyword send, counts as a possible non-local return. Such a protected
+/// element included), and any non-constant local, parameter or field (parentheses
+/// unwrapped, cascades included) used as the receiver or an argument of a
+/// non-binary send, counts as a possible non-local return. Such a protected
 /// block is rejected when its cleanup reads a write of it, even if no block
-/// returns.
+/// returns. Residual (BT-3950): a self-send whose method evaluates a stored
+/// `^` block is not seen.
 ///
 /// Only a cleanup read of a local bound in the scope enclosing the `ensure:`
 /// counts: a cleanup that binds its own `x` (`[x := 5. ^x] ensure: [x := 0. x]`)
@@ -1300,6 +1302,13 @@ fn report_nlr_out_of_ensure(
     let mut other_bound: BTreeSet<EcoString> = BTreeSet::new();
     for stmt in body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            // A block's parameters are bound inside it: an `ensure:` within
+            // the block sees them as locals of an enclosing scope.
+            if let Expression::Block(b) = e {
+                for p in &b.parameters {
+                    assigned.push((p.name.clone(), b.span.start()));
+                }
+            }
             if let Expression::Assignment { target, value, .. } = e
                 && let Expression::Identifier(id) = target.as_ref()
             {
@@ -1342,9 +1351,9 @@ fn report_nlr_out_of_ensure(
                     diagnostics.push(
                         Diagnostic::error(
                             format!(
-                                "{cause} out of an `ensure:` protected block that writes \
-                                 `{name}` is not supported yet in {context}: the cleanup would \
-                                 not see the new `{name}` (BT-3947)"
+                                "an `ensure:` protected block that writes `{name}` {cause}, which \
+                                 is not supported yet in {context}: the cleanup would not see \
+                                 the new `{name}` (BT-3947)"
                             ),
                             protected.span,
                         )
@@ -1389,52 +1398,65 @@ fn block_holds_return(block: &Block) -> bool {
 /// does.
 fn nlr_cause(protected: &Block, sources: &NlrSources) -> Option<String> {
     if block_holds_return(protected) {
-        return Some("a non-local return (`^`)".to_string());
+        return Some("holds a non-local return (`^`)".to_string());
     }
+    // A local, parameter or field (parentheses unwrapped) that may hold a
+    // block: anything but `self`/`super`, the constants and a local that only
+    // ever holds a literal.
+    let blockish = |e: &Expression| -> Option<String> {
+        match e.unwrap_parens() {
+            Expression::Identifier(id)
+                if !matches!(
+                    id.name.as_str(),
+                    "self" | "super" | "nil" | "true" | "false"
+                ) && !sources.constant_locals.contains(&id.name) =>
+            {
+                Some(id.name.to_string())
+            }
+            Expression::FieldAccess { field, .. } => Some(field.name.to_string()),
+            _ => None,
+        }
+    };
+    let check_send = |receiver: &Expression,
+                      selector: &MessageSelector,
+                      args: &[Expression]|
+     -> Option<String> {
+        if selector.is_block_invocation() {
+            if matches!(receiver.unwrap_parens(), Expression::Block(_)) {
+                return None;
+            }
+            return Some("may return non-locally (it evaluates a block with `value`)".to_string());
+        }
+        // Binary operands are not block hand-overs.
+        if matches!(selector, MessageSelector::Binary(_)) {
+            return None;
+        }
+        std::iter::once(receiver)
+            .chain(args)
+            .find_map(&blockish)
+            .map(|name| format!("may return non-locally (`{name}` may be a block it runs)"))
+    };
     let mut cause = None;
     for stmt in &protected.body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            let Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                ..
-            } = e
-            else {
-                return;
-            };
             if cause.is_some() {
                 return;
             }
-            if selector.is_block_invocation() {
-                if !matches!(receiver.as_ref(), Expression::Block(_)) {
-                    cause = Some(
-                        "a possible non-local return (a block evaluated with `value`)".to_string(),
-                    );
+            match e {
+                Expression::MessageSend {
+                    receiver,
+                    selector,
+                    arguments,
+                    ..
+                } => cause = check_send(receiver, selector, arguments),
+                Expression::Cascade {
+                    receiver, messages, ..
+                } => {
+                    cause = messages
+                        .iter()
+                        .find_map(|m| check_send(receiver, &m.selector, &m.arguments));
                 }
-                return;
-            }
-            if !matches!(selector, MessageSelector::Keyword(_)) {
-                return;
-            }
-            for arg in arguments {
-                let name = match arg {
-                    Expression::Identifier(id)
-                        if !matches!(
-                            id.name.as_str(),
-                            "self" | "super" | "nil" | "true" | "false"
-                        ) && !sources.constant_locals.contains(&id.name) =>
-                    {
-                        Some(id.name.as_str())
-                    }
-                    Expression::FieldAccess { field, .. } => Some(field.name.as_str()),
-                    _ => None,
-                };
-                if let Some(name) = name {
-                    cause = Some(format!(
-                        "a possible non-local return (through the argument `{name}`)"
-                    ));
-                }
+                _ => {}
             }
         });
     }

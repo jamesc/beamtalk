@@ -454,6 +454,41 @@ fn headline(text: &str) -> String {
     normalize_cause(line)
 }
 
+/// Whether the compile errors of the fixtures `text` rejects with the BT-3947
+/// message are only that rejection (loud, not a wrong answer): an `ensure:`
+/// protected block whose cleanup would read a stale local. Matched on the exact
+/// message, whitespace-normalised since the diagnostic is line-wrapped. The
+/// errors of a fixture with such a rejection may also be the "Failed to compile
+/// fixture" trailer and unused-variable lints; errors of other fixtures in the
+/// batch are theirs to be judged when they are compiled alone.
+fn is_loud_ensure_nlr_rejection(text: &str) -> bool {
+    let flat = text.replace('│', " ");
+    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    let errors: Vec<&str> = flat.split('×').skip(1).map(str::trim).collect();
+    let is_pin = |e: &str| {
+        e.starts_with("an `ensure:` protected block that writes `")
+            && e.contains("which is not supported yet in")
+            && e.contains("the cleanup would not see the new `")
+            && e.contains("(BT-3947)")
+    };
+    // The fixtures a pin error is located in (`╭─[<file>:<line>:<col>]`).
+    let files: Vec<&str> = errors
+        .iter()
+        .filter(|e| is_pin(e))
+        .filter_map(|e| {
+            let rest = e.split("╭─[").nth(1)?;
+            rest.split(':').next()
+        })
+        .collect();
+    !files.is_empty()
+        && errors
+            .iter()
+            .filter(|e| files.iter().any(|f| e.contains(f)))
+            .all(|e| {
+                is_pin(e) || e.starts_with("Failed to compile") || e.starts_with("Unused variable")
+            })
+}
+
 fn tail(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let start = lines.len().saturating_sub(40);
@@ -647,11 +682,19 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
                 .map(|(_, owner)| *owner);
             if let Some(owner) = offender {
                 let c = cases.iter().find(|c| c.index == owner).expect("case");
-                record(c, Failure::Compile(headline(&text), tail(&text)), failed);
+                // PIN-BUG BT-3947 (BT-3993): the compiler's conservative,
+                // loud rejection of an `ensure:` protected block that may
+                // return non-locally is not a disagreement: the program is
+                // never compiled, so no wrong answer is produced.
+                if !is_loud_ensure_nlr_rejection(&text) {
+                    record(c, Failure::Compile(headline(&text), tail(&text)), failed);
+                }
                 let rest: Vec<&Case> = cases.iter().copied().filter(|c| c.index != owner).collect();
                 check(&rest, failed);
             } else if let [only] = cases {
-                record(only, Failure::Compile(headline(&text), tail(&text)), failed);
+                if !is_loud_ensure_nlr_rejection(&text) {
+                    record(only, Failure::Compile(headline(&text), tail(&text)), failed);
+                }
             } else {
                 let (a, b) = cases.split_at(cases.len() / 2);
                 let before = failed.len();
@@ -660,7 +703,9 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
                 // The batch was broken but every half passed (an interaction
                 // between programs, or a flaky run): never let that pass
                 // silently; blame the batch's first case.
-                if failed.len() == before {
+                // (A half that was only the loud BT-3947 rejection is skipped,
+                // not failed.)
+                if failed.len() == before && !is_loud_ensure_nlr_rejection(&text) {
                     record(
                         cases[0],
                         Failure::Compile(
