@@ -3957,3 +3957,60 @@ fn the_beam_run_evaluated_block_cells_are_accepted() {
         assert!(!flags_bt3981(src));
     }
 }
+
+/// PIN-BUG BT-3947 (closes BT-3981): an evaluated block that binds a local, in
+/// the body of a `do:`, collection operation or loop that writes an outer
+/// local, is a fold carrying that local. Measured in an actor: as a statement
+/// (non-last or last) the `ThreadedIr` verifier rejects it (a panic in a debug
+/// build, an `internal:` error in a release build) or `erlc` fails on an
+/// unbound `StateAcc`; assigned to a local other than the one written, or
+/// nested in another evaluated block, likewise. It answers as the value of the
+/// write to the one outer local, and inside an arm of the body. Class and
+/// value-type methods answer everywhere.
+#[test]
+fn evaluated_block_in_a_fold_that_writes_an_outer_local() {
+    let hosts = [
+        "#(1) do: [:z | {B}]",
+        "#(1) collect: [:z | {B}]",
+        "#(1) inject: 0 into: [:a :z | {B}]",
+        "#(1) select: [:z | {B}. true]",
+        "#(1) detect: [:z | {B}. true] ifNone: [0]",
+        "1 to: 1 do: [:z | {B}]",
+        "1 timesRepeat: [{B}]",
+    ];
+    let rejected = [
+        "r := 3. [n := 3. n] value",
+        "r := 3. [n := 3. n] value. 4",
+        "[n := 3. n] value. r := 3",
+        "r := 3. [[n := 3. n] value] value",
+        "r := 3. [:k | n := k. n] value: 3",
+        "q := [n := 3. n] value. r := q",
+        "r := 3. q := [n := 3. n] value. q",
+    ];
+    let accepted = [
+        "r := [n := 3. n] value",
+        "r := 3. true ifTrue: [[n := 4. n] value] ifFalse: [0]",
+        "true ifTrue: [r := [n := 3. n] value] ifFalse: [0]",
+    ];
+    // A `whileTrue:` body writes its counter too, so even the assignment is
+    // not the one write.
+    let src =
+        in_actor("r := 0\ni := 0\n[i < 1] whileTrue: [i := i + 1. r := [n := 3. n] value]\nr");
+    assert!(flags_bt3981(&src), "{src}");
+    for host in hosts {
+        for body in rejected {
+            let src = in_actor(&format!("r := 0\n{}\nr", host.replace("{B}", body)));
+            assert!(flags_bt3981(&src), "{src}");
+            for src in [
+                in_class(&format!("r := 0\n{}\nr", host.replace("{B}", body))),
+                in_value(&format!("r := 0\n{}\nr", host.replace("{B}", body))),
+            ] {
+                assert!(!flags_bt3981(&src), "{src}");
+            }
+        }
+        for body in accepted {
+            let src = in_actor(&format!("r := 0\n{}\nr", host.replace("{B}", body)));
+            assert!(!flags_bt3981(&src), "{src}");
+        }
+    }
+}

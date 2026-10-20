@@ -1006,3 +1006,36 @@ TestCase subclass: Bt3981EvalblockTest
 
   testClassMatchArmSend =>
     self assert: (Bt3981EvalblockClass matchArmSend) equals: 3
+
+  testActorFoldAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn foldAssignsOuter) equals: 3
+
+  testActorFoldArmAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn foldArmAssignsOuter) equals: 3
+
+  testActorFoldWritesThenArm =>
+    self assert: (Bt3981EvalblockActor spawn foldWritesThenArm) equals: 3
+
+  testActorCollectAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn collectAssignsOuter) equals: 3
+
+  testActorInjectAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn injectAssignsOuter) equals: 3
+
+  testActorSelectAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn selectAssignsOuter) equals: 3
+
+  testActorDetectAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn detectAssignsOuter) equals: 3
+
+  testActorCountedAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn countedAssignsOuter) equals: 3
+
+  testActorTimesAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn timesAssignsOuter) equals: 3
+
+  testActorCollectArmE =>
+    self assert: (Bt3981EvalblockActor spawn collectArmE) equals: 3
+
+  testActorInjectArmAssign =>
+    self assert: (Bt3981EvalblockActor spawn injectArmAssign) equals: 3
