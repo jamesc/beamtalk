@@ -4439,11 +4439,11 @@ bt3596_default_handle_info_still_ignores_unknown_messages_test() ->
 %% always clean both pdict keys so a failing assertion cannot leak a pending
 %% stop into later tests.
 in_dispatch(Fun) ->
-    put('$bt_actor_state', #{value => 0}),
+    beamtalk_actor_state:install(#{value => 0}),
     try
         Fun()
     after
-        erase('$bt_actor_state'),
+        beamtalk_actor_state:uninstall(undefined),
         beamtalk_actor:clear_pending_actions()
     end.
 
