@@ -368,7 +368,9 @@ impl CoreErlangGenerator {
         if let MessageSelector::Binary(op) = selector {
             // Method lookup via `>>` operator (e.g., Counter >> #increment)
             // Support `>>` on any expression, not just class literals
-            if op.as_str() == ">>" {
+            if super::operators::structural_binary(op)
+                == Some(super::operators::StructuralBinary::MethodLookup)
+            {
                 if let Expression::ClassReference { name, .. } = receiver {
                     return self.generate_method_lookup(&name.name, arguments);
                 }
@@ -376,8 +378,23 @@ impl CoreErlangGenerator {
                 return self.generate_runtime_method_lookup(receiver, arguments);
             }
 
-            let doc = self.generate_binary_op(op, receiver, arguments)?;
-            return Ok(doc);
+            // BT-3985: a user-defined binary selector sent to `self` in an
+            // actor instance method is a self-dispatch like any other (it
+            // threads the callee's State, and inside a Tier 1 closure hits
+            // `closure_self_dispatch_state_guard`); in a class method it is
+            // a direct class-side self-send (a send through the class's own
+            // gen_server would deadlock). Both take the HANDLERS path
+            // (`try_handle_self_dispatch` / `try_handle_class_method_self_send`)
+            // instead of the operator lowering. The threaded positions already route it through
+            // `generate_self_dispatch` via `is_dispatching_actor_self_send`.
+            let actor_self_dispatch = (self.in_class_method()
+                || self.context == CodeGenContext::Actor)
+                && super::expr_shape::is_self_identifier(receiver)
+                && super::expr_shape::binary_self_send_dispatches(op);
+            if !actor_self_dispatch {
+                let doc = self.generate_binary_op(op, receiver, arguments)?;
+                return Ok(doc);
+            }
         }
 
         // dispatch priority for every remaining message shape is
@@ -1811,6 +1828,20 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
+    /// Whether the code being compiled is inside an actor closure that cannot
+    /// hand a dispatch's returned `State` back (a Tier 1 `fun`): the one
+    /// condition [`Self::closure_self_dispatch_state_guard`] applies under,
+    /// shared with `generate_super_send` so both decide it identically.
+    fn in_state_dropping_closure(&self) -> bool {
+        // A class method of an actor class has `context == Actor` but no
+        // instance `State` to compare against (the `is_actor_self_send` rule,
+        // BT-3581): its closures never carry the guard.
+        self.block_depth > 0
+            && self.closure_drops_state
+            && self.context == CodeGenContext::Actor
+            && !self.in_class_method()
+    }
+
     /// BT-3936 (ADR 0133 § Error examples): the reply body of a self-send
     /// dispatch that is compiled inside a closure (`block_depth > 0`) that is a Tier 1 `fun`. The callee's returned
     /// `State` has nowhere to go from there: the closure answers one value,
@@ -1834,10 +1865,7 @@ impl CoreErlangGenerator {
         selector_atom: &str,
         ok_doc: Document<'static>,
     ) -> Document<'static> {
-        if self.block_depth == 0
-            || !self.closure_drops_state
-            || self.context != CodeGenContext::Actor
-        {
+        if !self.in_state_dropping_closure() {
             return ok_doc;
         }
         let class_name = self.class_name();
@@ -2409,6 +2437,9 @@ impl CoreErlangGenerator {
         }
 
         let current_state = self.current_state_var();
+        let in_closure = self.in_state_dropping_closure();
+        let dispatched_state = current_state.clone();
+        let selector_for_guard = selector_atom.clone();
         let doc = docvec![
             "call 'beamtalk_dispatch':'super'(",
             leaf::atom(selector_atom),
@@ -2420,7 +2451,42 @@ impl CoreErlangGenerator {
             leaf::atom(class_name),
             ")",
         ];
-        Ok(doc)
+        if !in_closure {
+            return Ok(doc);
+        }
+        // BT-3985: inside a Tier 1 closure the reply tuple has no consumer to
+        // thread `NewState` to, so unpack it here and run the same guard a
+        // self-send gets: a super method that changed actor state raises
+        // `stateful_block_dispatch` rather than drop the change silently.
+        let reply_var = self.fresh_temp_var("SuperReply");
+        let result_var = self.fresh_var("SuperResult");
+        let state_var = self.fresh_var("SuperState");
+        let error_var = self.fresh_temp_var("SuperError");
+        let reply_body = self.closure_self_dispatch_state_guard(
+            &state_var,
+            &dispatched_state,
+            &selector_for_guard,
+            leaf::var(result_var.clone()),
+        );
+        Ok(docvec![
+            "let ",
+            leaf::var(reply_var.clone()),
+            " = ",
+            doc,
+            " in case ",
+            leaf::var(reply_var),
+            " of <{'reply', ",
+            leaf::var(result_var),
+            ", ",
+            leaf::var(state_var),
+            "}> when 'true' -> ",
+            reply_body,
+            " <{'error', ",
+            leaf::var(error_var.clone()),
+            "}> when 'true' -> call 'beamtalk_error':'raise'(",
+            leaf::var(error_var),
+            ") end",
+        ])
     }
 
     /// Generates code for actor spawn with conditional REPL registry integration.

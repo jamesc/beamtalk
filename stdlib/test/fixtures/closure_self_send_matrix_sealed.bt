@@ -5,7 +5,7 @@
 // state-changing / read-only callee); see closure_self_send_matrix_test.bt.
 // A self-send inside a closure cannot return the callee's State: when the
 // callee changed it the send raises `stateful_block_dispatch`, when it did
-// not the send answers normally.
+// not the send answers normally. BT-3985 adds the binary-selector rows.
 
 sealed Actor subclass: ClosureSelfSendMatrixSealed
   state: items = #(1, 2, 3)
@@ -56,6 +56,8 @@ sealed Actor subclass: ClosureSelfSendMatrixSealed
 
   collectKeywordReadOnly => self.items collect: [:x | self peek: x]
 
+  collectBinaryChanging => self.items collect: [:x | self + x]
+
   collectBinaryReadOnly => self.items collect: [:x | self - x]
 
   selectUnaryChanging =>
@@ -83,6 +85,13 @@ sealed Actor subclass: ClosureSelfSendMatrixSealed
     self.items
       select: [:x |
         self peek: x
+        true
+      ]
+
+  selectBinaryChanging =>
+    self.items
+      select: [:x |
+        self + x
         true
       ]
 
@@ -122,6 +131,14 @@ sealed Actor subclass: ClosureSelfSendMatrixSealed
       inject: 0
       into: [:a :x |
         self peek: x
+        a + 1
+      ]
+
+  injectBinaryChanging =>
+    self.items
+      inject: 0
+      into: [:a :x |
+        self + x
         a + 1
       ]
 
@@ -165,6 +182,14 @@ sealed Actor subclass: ClosureSelfSendMatrixSealed
       ]
       ifNone: [0]
 
+  detectBinaryChanging =>
+    self.items
+      detect: [:x |
+        self + x
+        false
+      ]
+      ifNone: [0]
+
   detectBinaryReadOnly =>
     self.items
       detect: [:x |
@@ -180,6 +205,8 @@ sealed Actor subclass: ClosureSelfSendMatrixSealed
   userHomKeywordChanging => self each: [:x | self bump: x]
 
   userHomKeywordReadOnly => self each: [:x | self peek: x]
+
+  userHomBinaryChanging => self each: [:x | self + x]
 
   userHomBinaryReadOnly => self each: [:x | self - x]
 
@@ -199,6 +226,10 @@ sealed Actor subclass: ClosureSelfSendMatrixSealed
     blk := [:x | self peek: x]
     self.items collect: blk
 
+  storedBinaryChanging =>
+    blk := [:x | self + x]
+    self.items collect: blk
+
   storedBinaryReadOnly =>
     blk := [:x | self - x]
     self.items collect: blk
@@ -215,6 +246,9 @@ sealed Actor subclass: ClosureSelfSendMatrixSealed
   nestedKeywordReadOnly =>
     self.items collect: [:x | #(1) collect: [:y | self peek: x]]
 
+  nestedBinaryChanging =>
+    self.items collect: [:x | #(1) collect: [:y | self + x]]
+
   nestedBinaryReadOnly =>
     self.items collect: [:x | #(1) collect: [:y | self - x]]
 
@@ -229,6 +263,9 @@ sealed Actor subclass: ClosureSelfSendMatrixSealed
 
   branchKeywordReadOnly =>
     self.items collect: [:x | x > 0 ifTrue: [self peek: x] ifFalse: [0]]
+
+  branchBinaryChanging =>
+    self.items collect: [:x | x > 0 ifTrue: [self + x] ifFalse: [0]]
 
   branchBinaryReadOnly =>
     self.items collect: [:x | x > 0 ifTrue: [self - x] ifFalse: [0]]
@@ -263,4 +300,16 @@ sealed Actor subclass: ClosureSelfSendMatrixSealed
 
   inlineBranchKeyword =>
     self.items isEmpty ifFalse: [self bump: 5]
+    self.total
+
+  inlineBinary =>
+    self.items do: [:x | self + x]
+    self.total
+
+  inlineBranchBinary =>
+    self.items isEmpty ifFalse: [self + 5]
+    self.total
+
+  methodBinary =>
+    self + 5
     self.total
