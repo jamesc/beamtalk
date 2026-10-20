@@ -280,8 +280,7 @@ TestCase subclass: BinaryTest
   // ═══════════════════════════════════════════════════════════════════
   // byteSize — Binary-only, not overridden by String
   // ═══════════════════════════════════════════════════════════════════
-  testByteSize =>
-    self assert: self.binBytes byteSize equals: 3
+  testByteSize => self assert: self.binBytes byteSize equals: 3
 
   testByteSizeEmpty =>
     bin := Binary fromBytes: #()
