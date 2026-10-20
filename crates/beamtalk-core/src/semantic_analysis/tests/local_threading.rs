@@ -3809,9 +3809,13 @@ fn residual_repl_match_arm_write_is_the_match_arm_error() {
 /// carrier (every row below was measured on a BEAM). BT-3948 makes it a compile error; BT-3947 gives
 /// closure bodies a frame of their own, deletes the `InlineBlockLocalInLoop`
 /// row and flips these to accepted (the repro then answers 6). Class and
-/// value-type methods, `do:`/`collect:` bodies, stateful loops, blocks that
-/// assign no local and `r := [..] value: i` of a fresh local inside an arm
-/// were measured right and stay accepted.
+/// value-type methods, blocks that assign no local and `r := [..] value: i`
+/// of a fresh local inside an arm were measured right and stay accepted
+/// (BT-3948's row does not report them). Not every shape BT-3948's row leaves
+/// alone answers right: BT-3981 measured the `t := t + (E)` shapes in
+/// `do:` and `collect:` bodies and at the method level leaking the carrier
+/// (a "Tuple does not understand" or "expected a Dictionary" error), and
+/// rejects them with its own row.
 #[test]
 fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
     // The BT-3948 repro, in the language's newline syntax.
@@ -3885,9 +3889,10 @@ fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
         assert_eq!(messages.len(), 1, "{body}: {messages:?}");
         assert!(messages[0].contains("BT-3948"), "{body}: {messages:?}");
     }
-    // The shapes that compile and answer right stay accepted: other
-    // contexts, other bodies, a loop that rebinds nothing or touches state,
-    // a block that assigns no local, and a nested loop.
+    // The shapes BT-3948's row leaves alone: other contexts, other bodies, a
+    // loop that rebinds nothing or touches state, a block that assigns no
+    // local, and a nested loop. (Whether each answers right is not asserted
+    // here: the `t := t + (E)` forms do not, see BT-3981's check.)
     for src in [
         in_class("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
         in_value("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
@@ -3925,8 +3930,10 @@ fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
         in_actor("[[:k | true ifTrue: [x := k]] value: 1\n  t < 3] whileTrue: [t := t + 1]\nt"),
     ] {
         let messages = residual_messages(&src, None);
-        // Not BT-3948's. A position whose `{Value, State}` carrier leaks is
-        // BT-3981's (`t := t + (E)`, measured on a BEAM for BT-3981).
+        // Not BT-3948's. The `t := t + (E)` shapes here are NOT measured
+        // right: BT-3981 measured them on a BEAM (a method-level
+        // `t := t + (E)` raised "Tuple does not understand", a `do:` body
+        // "expected a Dictionary"), and its check rejects them.
         assert!(
             messages.iter().all(|m| !m.contains("BT-3948")),
             "{src}: {messages:?}"
@@ -4310,4 +4317,23 @@ fn an_unmeasured_container_anywhere_in_the_chain_rejects_the_site() {
         let src = in_actor(body);
         assert!(flags_bt3981(&src), "{src}");
     }
+}
+
+/// PIN-BUG BT-3947: measured correct on a BEAM by BT-3981 (answers 1: a
+/// `whileTrue:` condition whose first statement is an evaluated block that
+/// assigns a local, then `self.n < 1`); conservatively rejected by BT-3948's
+/// `InlineBlockLocalInLoop` — flip to accepted (and restore the `BUnit` cell
+/// `whileCondNonLast`) when BT-3947 lands. The other loop cells BT-3981
+/// measured (`whileTrue:` body, `to:do:` and `timesRepeat:`) are not reported by
+/// BT-3948 and stay in `bt3981evalblock_test.bt`.
+#[test]
+fn bt3981_measured_while_condition_cell_is_conservatively_rejected_by_bt3948() {
+    let src = in_actor(
+        "self.n := 0\n[\n  [w := 3. w] value\n  self.n < 1] whileTrue: [self.n := self.n + 1]\nself.n",
+    );
+    let messages = residual_messages(&src, None);
+    assert!(
+        messages.iter().any(|m| m.contains("BT-3948")),
+        "{messages:?}"
+    );
 }

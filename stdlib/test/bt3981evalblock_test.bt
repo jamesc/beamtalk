@@ -1120,3 +1120,24 @@ TestCase subclass: Bt3981EvalblockTest
 
   testActorFoldArmNonLast =>
     self assert: (Bt3981EvalblockActor spawn foldArmNonLast) equals: 3
+
+  testActorWhileBodyLast =>
+    self assert: (Bt3981EvalblockActor spawn whileBodyLast) equals: 1
+
+  testActorWhileBodyNonLast =>
+    self assert: (Bt3981EvalblockActor spawn whileBodyNonLast) equals: 1
+
+  testActorWhileBodyAssigned =>
+    self assert: (Bt3981EvalblockActor spawn whileBodyAssigned) equals: 1
+
+  testActorCountedLastStatement =>
+    self assert: (Bt3981EvalblockActor spawn countedLastStatement) equals: 3
+
+  testActorTimesLastStatement =>
+    self assert: (Bt3981EvalblockActor spawn timesLastStatement) equals: 3
+
+  testActorCountedAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn countedAssignsOuter) equals: 3
+
+  testActorTimesAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn timesAssignsOuter) equals: 3

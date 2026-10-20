@@ -866,3 +866,84 @@ Actor subclass: Bt3981EvalblockActor
           ifFalse: [0]
       ]
     r
+
+  // Loop bodies (BEAM-measured; BT-3948's row accepts them too).
+  whileBodyLast =>
+    self.hits := 0
+    [self.hits < 1]
+      whileTrue: [
+        self.hits := self.hits + 1
+        [
+          n := 3
+          n
+        ] value
+      ]
+    self.hits
+
+  whileBodyNonLast =>
+    self.hits := 0
+    [self.hits < 1]
+      whileTrue: [
+        [
+          n := 3
+          n
+        ] value
+        self.hits := self.hits + 1
+      ]
+    self.hits
+
+  whileBodyAssigned =>
+    self.hits := 0
+    [self.hits < 1]
+      whileTrue: [
+        q := [
+          n := 3
+          n
+        ] value
+        self.hits := self.hits + q - 2
+      ]
+    self.hits
+
+  countedLastStatement =>
+    1
+      to: 1
+      do: [:z |
+        [
+          n := 3
+          n
+        ] value
+      ]
+    3
+
+  timesLastStatement =>
+    1
+      timesRepeat: [
+        [
+          n := 3
+          n
+        ] value
+      ]
+    3
+
+  countedAssignsOuter =>
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        r := [
+          n := 3
+          n
+        ] value
+      ]
+    r
+
+  timesAssignsOuter =>
+    r := 0
+    1
+      timesRepeat: [
+        r := [
+          n := 3
+          n
+        ] value
+      ]
+    r
