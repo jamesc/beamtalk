@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3956: a value type that defines a compiler-known collection selector
+// itself and is sent it with a block that writes a captured local. Measured on
+// a BEAM: `do:` answers right (the fold lowering threads through the user's
+// own `do:`, whatever shape its body has); `collect:`/`detect:`/`inject:into:`
+// refuse at run time with `stateful_block_dispatch` (BT-3916 receiver guard).
+// Nothing is silently dropped, so no compile-time rule is added.
+// bt3956own_do_test.bt asserts the answers.
+
+Value subclass: Bt3956OwnDoColl
+  do: aBlock =>
+    #(1, 2, 3) collect: [:x | aBlock value: x]
+    self
+
+  collect: aBlock => #(1, 2, 3) collect: [:x | aBlock value: x]
+
+  inject: acc into: aBlock => #(1, 2, 3) inject: acc into: [:a :x | aBlock value: a value: x]
+
+  selfDo =>
+    total := 0
+    self do: [:x | total := total + x]
+    total
+
+  selfCollect =>
+    total := 0
+    self collect: [:x | total := total + x]
+    total
+
+  selfInject =>
+    total := 0
+    self inject: 0 into: [:a :x | total := total + x. a + x]
+    total
+
+  otherDo: other =>
+    total := 0
+    other do: [:x | total := total + x]
+    total
