@@ -90,29 +90,18 @@ send({beamtalk_future, _} = Future, Selector, Args) ->
     %% is awaited before re-dispatching.
     Value = beamtalk_future:await(Future),
     send(Value, Selector, Args);
-send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, isAlive, []) ->
-    %% ADR 0059: Supervisor lifecycle — check process liveness without gen_server.
-    is_process_alive(Pid) andalso ClassName =/= undefined;
-send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
-    %% ADR 0059: Supervisor stop — OTP supervisors are gen_servers; use gen_server:stop/1.
-    %% Catch noproc so a stale handle raises a structured error rather than a raw OTP exit.
-    try
-        gen_server:stop(Pid),
-        nil
-    catch
-        %% gen_server:stop/1 exits with bare noproc when the process is dead;
-        %% the {noproc, _} tuple form guards the gen_server:call path defensively.
-        exit:Reason when
-            Reason =:= noproc orelse
-                (tuple_size(Reason) =:= 2 andalso element(1, Reason) =:= noproc)
-        ->
-            Error = beamtalk_error:new(
-                runtime_error,
-                ClassName,
-                stop,
-                <<"supervisor is not running; the handle is stale">>
-            ),
-            beamtalk_exception_handler:reraise(Error)
+send({beamtalk_supervisor, _ClassName, _Module, _Pid} = Self, isAlive, []) ->
+    %% ADR 0059: Supervisor lifecycle — answered without a hierarchy walk, so
+    %% it works on any handle. `isAlive` and `stop` are sealed on Supervisor
+    %% and DynamicSupervisor (BT-3984), so no subclass override is skipped.
+    beamtalk_supervisor:isAlive(Self);
+send({beamtalk_supervisor, _ClassName, _Module, _Pid} = Self, stop, []) ->
+    %% ADR 0059: Supervisor stop. `beamtalk_supervisor:stop/1` maps a dead
+    %% supervisor to `stale_handle` and an unreachable node to `node_down`
+    %% (BT-3984), raised here as the stdlib `stop` (`stopResult unwrap`) does.
+    case beamtalk_supervisor:stop(Self) of
+        {ok, nil} -> nil;
+        {error, #beamtalk_error{} = Error} -> beamtalk_exception_handler:reraise(Error)
     end;
 send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
     %% ADR 0059: Route supervisor method calls via class hierarchy walk.
