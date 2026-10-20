@@ -94,3 +94,8 @@ t := Adr0132ReplCallee calleeDirect: [t + 1]
 // ===========================================================================
 
 // @load-error tests/repl-protocol/fixtures/adr0133_escaping_block_error.bt => `t` is assigned in a block passed to `twice:`, which is not a construct the compiler threads it through
+
+// BT-3922: a TestCase method is exempt from "Cannot assign to slot", so the
+// escaping field write must be reported by the ADR 0133 check instead.
+
+// @load-error tests/repl-protocol/fixtures/adr0133_testcase_field_write_error.bt => `self.n` is assigned in a block returned from `makeBumper`

@@ -220,8 +220,10 @@ const BLOCK_LOCAL_CASES: usize = 256;
 
 /// PIN-BUG BT-3849: how many of the [`BLOCK_LOCAL_CASES`] fixed-draw programs
 /// codegen rejects with "Multiple threaded variables in control flow" (7 of
-/// the first 1024 of the same draw, `measure_failure_rate`).
-const BT_3849_REJECTED: usize = 2;
+/// the first 1024 of the same draw, `measure_failure_rate`; it was 2 before
+/// BT-3922 stopped stored closures writing a class variable directly, which
+/// shifted the draw).
+const BT_3849_REJECTED: usize = 1;
 
 /// BT-3834: with [`Shapes::LOCAL_TOUCH`] off no block writes a method-level
 /// local, so a conditional arm, `ensure:` or `on:do:` block that introduces a

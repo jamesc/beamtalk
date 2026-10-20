@@ -296,6 +296,16 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Value")
     }
 
+    /// Returns true if `self.slot :=` in an instance method of the named class
+    /// is the "Cannot assign to slot" compile error: a `Value` subclass that is
+    /// not a `TestCase` subclass (`TestCase` is a permanent exception, see
+    /// `check_value_slot_assignment`). The one decision both that validator and
+    /// the ADR 0133 escaping-block check read (BT-3922).
+    #[must_use]
+    pub fn rejects_slot_assignment(&self, class_name: &str) -> bool {
+        self.is_value_subclass(class_name) && !self.is_testcase_subclass(class_name)
+    }
+
     /// Returns true if the named generic class has covariant type parameters (ADR 0068 Phase 2f).
     ///
     /// A class is covariant in its type parameters when:

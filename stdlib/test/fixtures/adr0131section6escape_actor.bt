@@ -4,8 +4,8 @@
 // BT-3756 (ADR 0131 §6): the neighbours of the escaping shapes that stay
 // legal because the block writes no local of the method frame: a pure
 // closure, a closure that writes only its own locals, a closure over a
-// read-only outer local, and (actor) a field-writing closure stored in a
-// field and run by a later call. The shapes
+// read-only outer local. (A field-writing closure stored in a field is an
+// ADR 0133 compile error since BT-3922.) The shapes
 // that are rejected, `^[t := t + 1]` and its siblings, have no compiled
 // fixture (they do not compile); they are pinned in
 // crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs
@@ -26,14 +26,6 @@ Actor subclass: Adr0131Section6EscapeActor
   returnedReadOnly =>
     t := 10
     ^[:x | x + t]
-
-  storedFieldWriter =>
-    self.h := [self.n := self.n + 1]
-    nil
-
-  runStored => self.h value
-
-  count => self.n
 
   // BT-3859: what a method whose last statement is a local assignment
   // answers (asserted in adr0131section6escape_test.bt; BT-3882).

@@ -1134,11 +1134,23 @@ fn propagate_inline_block_writes(
     }
 }
 
-/// One outer-local write found by [`outer_local_writes`]: the local's name and
-/// the span of the assignment that writes it.
+/// What an [`OuterLocalWrite`] writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteKind {
+    /// A local of an enclosing scope ([`outer_local_writes`]).
+    Local,
+    /// Object state: `self.field :=`, an instance field or, in a class-side
+    /// method, a class variable ([`outer_state_writes`], BT-3922).
+    ObjectState,
+}
+
+/// One outer write found by [`outer_local_writes`] or [`outer_state_writes`]:
+/// the name written and the span of the assignment that writes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OuterLocalWrite {
-    /// The outer local written.
+    /// What is written: a captured local, or object state.
+    pub kind: WriteKind,
+    /// The outer local, or the field, written.
     pub name: ecow::EcoString,
     /// The assignment (or destructuring pattern) that writes it.
     pub span: Span,
@@ -1167,11 +1179,30 @@ pub fn outer_local_writes(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
+        state_writes: Vec::new(),
         blocks_entered: 0,
         nested: NestedBlocks::All,
     };
     walker.block(block);
     walker.writes
+}
+
+/// ADR 0133 (BT-3922): the `self.field` assignments `block` makes anywhere in
+/// its body, nested blocks included, first write of each field. The
+/// object-state half of the escaping-block rule: in an instance method these
+/// are instance fields, in a class-side method class variables (ADR 0130).
+/// Computed by the same walk as [`outer_local_writes`].
+pub fn outer_state_writes(block: &Block) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside: &|_| false,
+        frames: Vec::new(),
+        writes: Vec::new(),
+        state_writes: Vec::new(),
+        blocks_entered: 0,
+        nested: NestedBlocks::All,
+    };
+    walker.block(block);
+    walker.state_writes
 }
 
 /// The names `stmt` itself binds by assignment or destructuring: those not
@@ -1189,6 +1220,7 @@ pub fn names_assigned_outside_nested_blocks(stmt: &Expression) -> HashSet<ecow::
         bound_outside: &|_| false,
         frames: vec![HashSet::new()],
         writes: Vec::new(),
+        state_writes: Vec::new(),
         blocks_entered: 1,
         nested: NestedBlocks::None,
     };
@@ -1202,6 +1234,9 @@ struct OuterWriteWalker<'a> {
     /// Names bound inside the block being analysed, innermost last.
     frames: Vec<HashSet<ecow::EcoString>>,
     writes: Vec<OuterLocalWrite>,
+    /// Assignments to `self.field` (an instance field, or a class variable in a
+    /// class-side method) inside the walked block, first write of each field.
+    state_writes: Vec<OuterLocalWrite>,
     /// Which nested blocks the walk descends into.
     nested: NestedBlocks,
     /// How many walked blocks enclose the current expression.
@@ -1246,12 +1281,48 @@ impl OuterWriteWalker<'_> {
         if (self.bound_outside)(name) {
             if !self.writes.iter().any(|w| &w.name == name) {
                 self.writes.push(OuterLocalWrite {
+                    kind: WriteKind::Local,
                     name: name.clone(),
                     span,
                 });
             }
         } else {
             self.define(name);
+        }
+    }
+
+    /// Whether an assignment to a field of `receiver` is a write to the state
+    /// of a captured `self`: `self.field :=` inside a walked block. A block
+    /// that takes `self` as a parameter (`[:self | self.n := ...]`, a
+    /// class-builder method body) writes its own receiver's state instead.
+    fn is_captured_self_field_write(&self, receiver: &Expression) -> bool {
+        self.blocks_entered > 0
+            && !self.bound_inside("self")
+            && matches!(receiver.unwrap_parens(), Expression::Identifier(r) if r.name == "self")
+    }
+
+    /// The target of an assignment at `span`: a local, a captured `self`'s
+    /// field, or an expression walked for what it contains.
+    fn assignment_target(&mut self, target: &Expression, span: Span) {
+        match target {
+            Expression::Identifier(id) => self.assign(&id.name, span),
+            Expression::FieldAccess {
+                receiver, field, ..
+            } if self.is_captured_self_field_write(receiver) => {
+                self.state_write(&field.name, span);
+            }
+            other => self.expr(other),
+        }
+    }
+
+    /// Records the first `self.field :=` write of each field.
+    fn state_write(&mut self, field: &ecow::EcoString, span: Span) {
+        if !self.state_writes.iter().any(|w| &w.name == field) {
+            self.state_writes.push(OuterLocalWrite {
+                kind: WriteKind::ObjectState,
+                name: field.clone(),
+                span,
+            });
         }
     }
 
@@ -1299,10 +1370,7 @@ impl OuterWriteWalker<'_> {
                 ..
             } => {
                 self.expr(value);
-                match target.as_ref() {
-                    Expression::Identifier(id) => self.assign(&id.name, *span),
-                    other => self.expr(other),
-                }
+                self.assignment_target(target, *span);
             }
             Expression::DestructureAssignment {
                 pattern,
@@ -1642,6 +1710,7 @@ pub fn expression_threaded_writes(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
+        state_writes: Vec::new(),
         blocks_entered: 0,
         nested: NestedBlocks::Producers,
     };
@@ -2849,6 +2918,7 @@ fn walk_construct_blocks(
         bound_outside,
         frames: Vec::new(),
         writes: Vec::new(),
+        state_writes: Vec::new(),
         blocks_entered: 0,
         nested,
     };

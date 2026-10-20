@@ -53,6 +53,23 @@ fn in_value(body: &str) -> String {
     )
 }
 
+/// An instance method of a `TestCase` subclass: a value-type context where
+/// "Cannot assign to slot" does not fire (BT-3922).
+fn in_testcase(body: &str) -> String {
+    format!(
+        "Object subclass: CvA\n  class ap: b => b value\n\nTestCase subclass: Tc\n  ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
+        indent(body)
+    )
+}
+
+/// An instance method of a plain `Object` subclass: likewise no slot error.
+fn in_object(body: &str) -> String {
+    format!(
+        "Object subclass: CvA\n  class ap: b => b value\n\nObject subclass: Ob\n  ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
+        indent(body)
+    )
+}
+
 fn in_actor(body: &str) -> String {
     format!(
         "Object subclass: CvA\n  class ap: b => b value\n\nActor subclass: Ac\n  state: n = 0\n\n  sealed ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
@@ -2553,16 +2570,141 @@ fn section6_escaping_blocks_that_write_no_outer_local_are_accepted() {
             assert_eq!(section6_errors(&src), 0, "{src}");
         }
     }
-    // BT-3806 item 4: §6 accepts these, and codegen rejects every one
-    // (`FieldAssignmentInUnsupportedBlock`, pinned by
-    // `test_escaping_field_writing_actor_block_is_compile_error_in_every_shape`),
-    // so none compiles to a block that loses its field write.
+}
+
+/// BT-3922 (ADR 0133, the rule's other half): a block that assigns `self.field`
+/// (an actor or value-type field, or a class variable in a class method) and
+/// escapes gets the same diagnostic as one that assigns a captured local,
+/// reported at the assignment. This flips BT-3806 item 4, where §6 accepted
+/// these and codegen rejected only some shapes.
+#[test]
+fn section6_escaping_block_that_writes_a_field_is_an_error() {
     for body in [
         "^[self.n := self.n + 1]",
         "b := [self.n := self.n + 1]\n^b",
         "#[[self.n := self.n + 1]]",
+        "self.items foo: [self.n := self.n + 1]\nnil",
+        "self foo: [self.n := self.n + 1]\nnil",
+        "^[:x | #(1) do: [:y | self.n := y]]",
     ] {
-        assert_eq!(section6_errors(&in_actor(body)), 0, "{body}");
+        // A value-type method cannot assign a slot: that error already covers
+        // the write, so §6 stays silent there.
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+        for src in [in_class(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            let d = diags
+                .iter()
+                .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
+                .unwrap_or_else(|| panic!("{src}: {diags:?}"));
+            assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
+            assert!(
+                d.message.contains("`self.n` is assigned in a block"),
+                "{d:?}"
+            );
+            assert!(
+                src[d.span.start() as usize..].starts_with("self.n :="),
+                "reported at the assignment: {src}"
+            );
+        }
+    }
+}
+
+/// BT-3922: a block literal stored straight into a field that assigns a field
+/// (not a captured local, which is the block analyzer's BT-2809 error) is
+/// reported here in class and actor methods (a value-type method's slot
+/// assignment is the "Cannot assign to slot" error).
+#[test]
+fn section6_field_stored_literal_that_writes_a_field_is_an_error() {
+    let body = "self.h := [:x | self.n := self.n + x]\nnil";
+    for src in [in_class(body), in_actor(body)] {
+        assert_eq!(section6_errors(&src), 1, "{src}");
+    }
+    assert_eq!(section6_errors(&in_value(body)), 0);
+}
+
+/// BT-3922: in a class method a `Dictionary` lookup handler that writes only a
+/// class variable writes it in place (ADR 0130), so it is not an escape;
+/// `stdlib/test/lookup_field_write_test.bt` proves the write survives.
+#[test]
+fn section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape() {
+    for (body, actor_errors) in [
+        (
+            "self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]\nnil",
+            1,
+        ),
+        (
+            "x := self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. 0]\n^x",
+            1,
+        ),
+        // One diagnostic per writing handler.
+        (
+            "self.cache at: 1 ifPresent: [:v | self.hits := self.hits + 1. v] ifAbsent: [self.misses := 1. nil]\nnil",
+            2,
+        ),
+        (
+            "^self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]",
+            1,
+        ),
+    ] {
+        let src = in_class(body);
+        assert_eq!(
+            section6_errors(&src),
+            0,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
+        );
+        // An actor method runs the handler as a closure and the field write
+        // is dropped, so the handler is an escape there; a value-type method
+        // cannot assign a slot, and that error already covers the write.
+        let src = in_actor(body);
+        assert_eq!(
+            section6_errors(&src),
+            actor_errors,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
+        );
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+    }
+}
+
+/// BT-3922: where "Cannot assign to slot" does not fire (a `TestCase` subclass
+/// and a plain `Object` subclass), an escaping block that writes a field is
+/// reported by §6, or the write would be dropped silently. A true `Value`
+/// subclass gets only the slot error.
+#[test]
+fn section6_field_write_in_testcase_and_object_methods_is_an_error() {
+    for body in [
+        "self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]\nnil",
+        "^[self.n := self.n + 1]",
+        "b := [self.n := self.n + 1]\n^b",
+    ] {
+        for src in [in_testcase(body), in_object(body)] {
+            assert_eq!(
+                section6_errors(&src),
+                1,
+                "{src}: {:?}",
+                adr0131_diagnostics(&src)
+            );
+        }
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+    }
+}
+
+/// A field write in a block that the compiler lowers in place, or that never
+/// leaves the method, is not an escape.
+#[test]
+fn section6_in_place_field_writes_are_not_escapes() {
+    for body in [
+        "#(1, 2) do: [:x | self.n := self.n + x]\nnil",
+        "true ifTrue: [self.n := 1] ifFalse: [self.n := 2]\nnil",
+        "[self.n := 1] value\nnil",
+        "^[:x | x + self.n]",
+        // A class-builder method body takes `self` as a parameter.
+        "^#{#bump => [:self | self.n := self.n + 1]}",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            assert_eq!(section6_errors(&src), 0, "{src}");
+        }
     }
 }
 

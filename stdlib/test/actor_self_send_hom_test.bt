@@ -60,26 +60,20 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: (pool collect: [:x | x * 2]) equals: #(2, 4, 6, 8)
     self assert: (pool select: [:x | x > 2]) equals: #(3, 4)
 
-  // PIN-BUG (BT-3922): a block that mutates ONLY `self.field`, passed
-  // through a self-send to `do:`, which forwards it to `self.items do:`. The
-  // ADR 0128 fold threaded the write; since ADR 0133 removed it (BT-3908) the
-  // write cannot be kept, so it raises rather than drop it. BT-3922 makes
-  // the shape a compile error, and this test and `accumulateTotal` go.
-  testFieldOnlyMutationOpaqueCallableThroughSelfSendDo =>
+  // PIN-BUG (BT-3936, BT-3922): `SelfSendHomPool`'s `recordAll`, the same
+  // block as the case A pin below. It used to be case B: `do:`'s parameter
+  // was a promoted Tier 2 position (a field-writing caller, now a compile
+  // error), the block was promoted too, and the ADR 0128 fold kept the
+  // change (10); since BT-3908 it raised `stateful_block_dispatch`. With no
+  // promotion it is a plain closure and drops the self-send's change
+  // silently, like case A. A fix for BT-3936 flips this to `equals: 10`.
+  testSelfSendStateChangeThroughSelfSendDoPinBug =>
     pool := SelfSendHomPool spawn
-    self should: [pool accumulateTotal] raise: #stateful_block_dispatch
+    self assert: pool recordAll equals: 0
 
-  // PIN-BUG (BT-3936, BT-3922): a block that assigns nothing, but whose
-  // self-send (`record:`) changes a field, passed through `self do:` to a
-  // `do:` whose parameter is a promoted Tier 2 position (case B). The ADR
-  // 0128 fold kept the change (answer 10); since BT-3908 it raises rather
-  // than drop it. A fix for BT-3936 flips this to `equals: 10`.
-  testSelfSendStateChangeThroughSelfSendDo =>
-    pool := SelfSendHomPool spawn
-    self should: [pool recordAll] raise: #stateful_block_dispatch
-
-  // PIN-BUG (BT-3936): the same block where `do:`'s parameter is not
-  // promoted (case A): the block is a plain closure, so the self-send's
+  // PIN-BUG (BT-3936): a block that assigns nothing, but whose self-send
+  // (`record:`) changes a field, passed through `self do:` to a `do:` whose
+  // parameter is not promoted (case A): the block is a plain closure, so the self-send's
   // change is dropped silently. It answers 0 on main too, before and
   // after BT-3908 (pre-existing, not introduced by BT-3908); the expected
   // answer is 6. A fix for BT-3936 flips this to `equals: 6`.
@@ -136,9 +130,10 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: (pool arrCollect: [:x | x * 2]) class equals: Array
 
   // BT-3908: a block passed through a self-send from inside the actor, to
-  // HOMs whose block position another caller's field-writing block promoted
-  // to Tier 2. A block that changes no state answers as it did before the
-  // ADR 0128 fold was removed (these are not pins).
+  // HOMs. (Before BT-3922 a field-writing caller in the same actor promoted
+  // each of these block positions to Tier 2; that caller is now a compile
+  // error.) A block that changes no state answers as it did before the
+  // ADR 0128 fold was removed (these are not pins, except the last).
   testPromotedPureBlockThroughSelfSendHom =>
     pool := SelfSendHomFoldPool spawn
     self assert: pool pureInject equals: 10
@@ -156,42 +151,28 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: pool pureGroupBySize equals: 2
     self assert: pool pureSort equals: #(4, 3, 2, 1)
     self assert: pool pureIfNone equals: 7
-    // The `ifNone:` handler reads the state the predicate's fold left.
-    self assert: pool pureIfNoneAfterFold equals: 4
 
-  // PIN-BUG (BT-3922): the same HOMs with a block that writes `self.total`.
-  // The ADR 0128 fold kept the write; since BT-3908 it raises rather than
-  // drop it (before this fix these raised raw `badarity` /
-  // `function_clause` / `type_error`). BT-3922 makes the shape a compile
-  // error.
-  testFieldWritingBlockThroughSelfSendHomRaises =>
+  // PIN-BUG BT-3952: should be 4. The handler `[self.total]` is created
+  // before the fold runs and reads `self.total` as it was then (0), but
+  // it is called at home, after the fold bumped the field four times. It
+  // answered 4 while a field-writing caller promoted this position to
+  // Tier 2 (the ADR 0128 fold); that promotion needed a block ADR 0133
+  // now rejects (BT-3922), so the handler is a plain closure. Flip to
+  // `equals: 4` when BT-3952 is fixed.
+  testPureIfNoneAfterFoldPinBug =>
     pool := SelfSendHomFoldPool spawn
-    self should: [pool tallyInject] raise: #stateful_block_dispatch
-    self should: [pool tallyDetect] raise: #stateful_block_dispatch
-    self should: [pool tallyDetectIfNone] raise: #stateful_block_dispatch
-    self should: [pool tallyCount] raise: #stateful_block_dispatch
-    self should: [pool tallyAnySatisfy] raise: #stateful_block_dispatch
-    self should: [pool tallyAllSatisfy] raise: #stateful_block_dispatch
-    self should: [pool tallyArrCollect] raise: #stateful_block_dispatch
-    self should: [pool tallyReject] raise: #stateful_block_dispatch
-    self should: [pool tallyFlatMap] raise: #stateful_block_dispatch
-    self should: [pool tallyTakeWhile] raise: #stateful_block_dispatch
-    self should: [pool tallyDropWhile] raise: #stateful_block_dispatch
-    self should: [pool tallyPartitionSize] raise: #stateful_block_dispatch
-    self should: [pool tallyGroupBySize] raise: #stateful_block_dispatch
-    self should: [pool tallySort] raise: #stateful_block_dispatch
-    self should: [pool tallyIfNone] raise: #stateful_block_dispatch
-    self should: [pool tallyIfNoneAfterFold] raise: #stateful_block_dispatch
+    self assert: pool pureIfNoneAfterFold equals: 0
 
-  // The error names the self-send selector the block was passed to, and its
-  // hint the collection message it was forwarded to.
-  testFieldWritingBlockErrorNamesTheForwardingSelector =>
+  // BT-3922: a block that writes `self.total` and is passed to one of these
+  // HOMs is an ADR 0133 compile error (it raised `stateful_block_dispatch`
+  // before), pinned in semantic_analysis/tests/local_threading.rs.
+
+  // BT-3939: a block that rebinds a block-local inside an inner loop. (The
+  // pin for the promoted form needed a field-writing caller, an ADR 0133
+  // compile error since BT-3922.)
+  testBlockWithInnerLoopLocal =>
     pool := SelfSendHomFoldPool spawn
-    hint := [pool tallyCount] on: Error do: [:e | e hint]
-    self assert: (hint includesSubstring: "`fwdCount:`") equals: true
-    self assert: (hint includesSubstring: "`count:`") equals: true
-    selector := [pool tallyCount] on: Error do: [:e | e selector]
-    self assert: selector equals: #fwdCount:
+    self assert: pool groupWeights equals: #(30, 30)
 
   // A Tier 1 block of the wrong arity is not misread as a Tier 2 block: its
   // reply is not `{Result, Map}`, so it raises the structured error.

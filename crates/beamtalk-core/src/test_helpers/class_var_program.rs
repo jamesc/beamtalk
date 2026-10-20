@@ -829,6 +829,10 @@ struct Ctx {
     can_return: bool,
     /// Do not add [`Stmt::Touch`] (stored closures keep their own locals).
     no_touch: bool,
+    /// Do not add a direct class-variable [`Stmt::Write`]: a block stored in a
+    /// local escapes, and ADR 0133 rejects an escaping block that assigns
+    /// `self.field` (BT-3922). A helper send still reaches the variable.
+    no_write: bool,
     /// Inside the body of a loop or fold.
     in_loop: bool,
     /// Integer locals a [`Stmt::Let`] introduced inside a block (not at
@@ -1113,7 +1117,7 @@ impl Gen {
         let loop_ok = self.loop_ok(c);
         let nested = c.depth > 0;
         let mut ks: Vec<(K, u64)> = Vec::new();
-        if !c.in_block || s.has(Shapes::DIRECT_BLOCK_WRITE) {
+        if !c.no_write && (!c.in_block || s.has(Shapes::DIRECT_BLOCK_WRITE)) {
             ks.push((K::Write, 5));
         }
         ks.push((K::Let, 2));
@@ -1243,6 +1247,7 @@ impl Gen {
                 let mut inner = Self::inner(c);
                 inner.can_return = false;
                 inner.no_touch = true;
+                inner.no_write = true;
                 inner.block_locals.clear();
                 inner.rebindable.clear();
                 let b = self.block(&inner, 0, 2);
@@ -1308,6 +1313,7 @@ impl Gen {
                 protected: false,
                 can_return: true,
                 no_touch: false,
+                no_write: false,
                 in_loop: false,
                 block_locals: Vec::new(),
                 rebindable: Vec::new(),
@@ -1324,6 +1330,7 @@ impl Gen {
             protected: false,
             can_return: true,
             no_touch: false,
+            no_write: false,
             in_loop: false,
             block_locals: Vec::new(),
             rebindable: Vec::new(),
