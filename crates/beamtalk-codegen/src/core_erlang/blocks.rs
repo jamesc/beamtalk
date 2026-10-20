@@ -541,15 +541,15 @@ impl CoreErlangGenerator {
     /// recognizer of an evaluated block literal that writes a local (every
     /// name written counts: nothing is "outside" the block here).
     fn reject_last_statement_block_value(stmt: &Expression) -> Result<()> {
+        use beamtalk_core::semantic_analysis::block_facts::{
+            repl_evaluated_block, repl_producer_writes,
+        };
         let result = match stmt {
             Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
                 value.as_ref()
             }
             Expression::Assignment { .. } => return Ok(()),
             other => other,
-        };
-        use beamtalk_core::semantic_analysis::block_facts::{
-            repl_evaluated_block, repl_producer_writes,
         };
         // Only the block-value family: a conditional or loop whose arm holds
         // the evaluated block is lowered by its own frame and answers right.
