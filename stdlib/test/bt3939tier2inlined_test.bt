@@ -15,11 +15,8 @@ TestCase subclass: Bt3939Tier2InlinedTest
   testConditionalArmBindingAnswersPostLoopValue =>
     self assert: (Bt3939Tier2InlinedActor spawn arm: true) equals: #(3)
 
-  // PIN-BUG BT-3981: an evaluated `[...] value` that binds a loop-rebound local,
-  // inside a plain-fun block of an actor method, answers the leaked
-  // {Value, State} tuple instead of 3; flip to `equals: #(3)` when fixed.
-  testEvaluatedBlockBindingAnswersPostLoopValue =>
-    self assert: ((Bt3939Tier2InlinedActor spawn evalValue first) at: 1) equals: 3
-
+  // The plain-fun form (`r := [n := 0. xs do: [...]. n] value` in an FFI block
+  // that writes no captured local) is a compile error: BT-3981, pinned in
+  // `semantic_analysis/tests/local_threading.rs` (PIN-BUG BT-3947).
   testNestedArmBindingAnswersPostLoopValue =>
     self assert: (Bt3939Tier2InlinedActor spawn nested: true) equals: #(3)
