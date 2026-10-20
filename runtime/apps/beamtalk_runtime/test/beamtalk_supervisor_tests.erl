@@ -1840,6 +1840,10 @@ start_supervisor_child_passes_args_and_name_test() ->
             ?assertMatch(
                 {error, #beamtalk_error{kind = type_error}},
                 beamtalk_supervisor:start_dynamic_supervisor_child(?BT3963_MOD, nil, nil, <<"n">>)
+            ),
+            ?assertMatch(
+                {error, #beamtalk_error{kind = reserved_name}},
+                beamtalk_supervisor:start_supervisor_child(?BT3963_MOD, nil, beamtalk_reserved)
             )
         after
             stop_linked(P1),

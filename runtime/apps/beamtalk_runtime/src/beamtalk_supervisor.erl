@@ -519,9 +519,23 @@ falls back to `start_link/0`.
 """.
 -spec start_supervisor_child(module(), term(), atom()) -> {ok, pid()} | ignore | {error, term()}.
 start_supervisor_child(Module, Args, Name) ->
-    case exports(Module, start_link, 2) of
-        true -> Module:start_link(Name, Args);
-        false -> Module:start_link()
+    case beamtalk_actor:reserved_name(Name) of
+        true ->
+            %% Same reserved-name policy as `spawnAs:` (ADR 0079).
+            {error,
+                beamtalk_error:new(
+                    reserved_name,
+                    'Supervisor',
+                    'withName:',
+                    iolist_to_binary(
+                        io_lib:format("Cannot start a supervisor under reserved name '~ts'", [Name])
+                    )
+                )};
+        false ->
+            case exports(Module, start_link, 2) of
+                true -> Module:start_link(Name, Args);
+                false -> Module:start_link()
+            end
     end.
 
 -doc """
