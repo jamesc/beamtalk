@@ -2900,8 +2900,9 @@ here, so they all report the same two kinds (BT-3984):
   still be running, so this is not reported as a stale handle.
 
 The classification is `classify_call_failure/2`; any other exception
-propagates unchanged, as does an unreachable-node shape when the supervisor
-is local (it came from some other call `Fun` made).
+propagates unchanged, as does a failure whose OTP call names another process
+(`call_target/1`), or an unreachable-node shape under a local supervisor:
+those came from some other call `Fun` made.
 
 ## Inner fun contract
 
@@ -2930,9 +2931,21 @@ with_live_supervisor(Self, Selector, Fun) ->
                     %% (a child class lookup, say), so it is not ours to map.
                     erlang:raise(Class, Reason, Stack);
                 Unavailable ->
-                    supervisor_unavailable_error(Self, Selector, Unavailable)
+                    case call_target(Reason) of
+                        {ok, Target} when Target =/= element(4, Self) ->
+                            %% The failed call was to another process.
+                            erlang:raise(Class, Reason, Stack);
+                        _ ->
+                            supervisor_unavailable_error(Self, Selector, Unavailable)
+                    end
             end
     end.
+
+%% The process an OTP call failure names (`{Reason, {M, F, [Target | _]}}`,
+%% as `gen_server:call` and `proc_lib:stop` exit), or `none` for a bare reason.
+-spec call_target(term()) -> {ok, term()} | none.
+call_target({_Reason, {M, F, [Target | _]}}) when is_atom(M), is_atom(F) -> {ok, Target};
+call_target(_Reason) -> none.
 
 -doc """
 Classify an exception raised by a call to a supervisor process (an OTP

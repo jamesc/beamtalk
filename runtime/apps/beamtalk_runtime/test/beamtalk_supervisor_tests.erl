@@ -646,6 +646,50 @@ local_supervisor_timeout_is_not_node_down_test() ->
         end)
     ).
 
+remote_supervisor_failure_of_another_call_propagates_test() ->
+    %% Under a remote handle, a failure whose OTP call names another process
+    %% (a class process lookup, say) is not blamed on the supervisor.
+    Self = make_supervisor_tuple('BT3984RemoteSup', bt3984_remote_mod, unreachable_remote_pid()),
+    lists:foreach(
+        fun(Reason) ->
+            ?assertExit(
+                Reason,
+                beamtalk_supervisor:with_live_supervisor(Self, count, fun() -> exit(Reason) end)
+            )
+        end,
+        [
+            {timeout, {gen_server, call, [self(), class_name]}},
+            {noproc, {gen_server, call, [self(), class_name]}}
+        ]
+    ),
+    %% The same shape naming the supervisor is mapped.
+    SupTimeout = {timeout, {gen_server, call, [element(4, Self), which_children]}},
+    ?assertMatch(
+        {error, #beamtalk_error{kind = node_down, details = #{reason := timeout}}},
+        beamtalk_supervisor:with_live_supervisor(Self, count, fun() -> exit(SupTimeout) end)
+    ).
+
+args_remote_erpc_timeout_is_node_down_test() ->
+    %% The reported bug: an `erpc` timeout reading a slow remote supervisor's
+    %% args was `stale_handle`.
+    meck:new(erpc, [unstick, passthrough]),
+    try
+        meck:expect(erpc, call, fun(_Node, erlang, process_info, _Args, _Timeout) ->
+            error({erpc, timeout})
+        end),
+        Self = make_supervisor_tuple(
+            'BT3984RemoteSup', bt3984_remote_mod, unreachable_remote_pid()
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{
+                kind = node_down, selector = args, details = #{reason := timeout}
+            }},
+            beamtalk_supervisor:args(Self)
+        )
+    after
+        meck:unload(erpc)
+    end.
+
 %% A pid on a node this VM is not connected to (`NEW_PID_EXT`).
 unreachable_remote_pid() ->
     NodeBin = atom_to_binary('bt3984_ghost@nohost', utf8),
