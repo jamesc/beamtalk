@@ -110,7 +110,8 @@ abstract Object subclass: Supervisor
   /// `andThen:` for recoverable starts. Failures surface as
   /// `Result error: #beamtalk_error{kind = supervisor_start_failed}`,
   /// including an `initialize` that raises and a call that waited too long
-  /// behind a concurrent `supervise` of the same class.
+  /// behind a concurrent `supervise` of the same class (concurrent calls are
+  /// served in arrival order).
   class sealed supervise -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) startLink: self
 

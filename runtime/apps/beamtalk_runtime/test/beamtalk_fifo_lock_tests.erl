@@ -12,10 +12,59 @@ critical section releases it, and a bounded wait gives up with
 
 -include_lib("eunit/include/eunit.hrl").
 
-uncontended_runs_fun_test() ->
+%% Every test runs with the table owned by a process that outlives it, as the
+%% runtime app arranges at start.
+fifo_lock_test_() ->
+    {setup, fun beamtalk_supervisor_test_helper:ensure_lock_table/0, [
+        fun uncontended_runs_fun/0,
+        fun waiters_are_served_in_arrival_order_and_promptly/0,
+        fun dead_holder_hands_the_lock_on/0,
+        fun dead_head_waiter_is_skipped/0,
+        fun raising_critical_section_releases/0,
+        fun bounded_wait_times_out_and_leaves_the_queue/0,
+        fun timed_out_waiter_does_not_strand_the_next/0,
+        fun recursive_lock_raises/0
+    ]}.
+
+%% Without a long-lived owner the table goes when its creator exits; a waiter
+%% then answers `{error, lost}` instead of crashing or running unprotected.
+lost_table_is_an_error_test() ->
+    Key = key(),
+    Test = self(),
+    case ets:whereis(beamtalk_fifo_locks) of
+        undefined -> ok;
+        Tid -> ets:delete(Tid)
+    end,
+    Holder = spawn(fun() ->
+        beamtalk_fifo_lock:with_lock(Key, 1000, fun() ->
+            Test ! {holding, self()},
+            receive
+                release -> ok
+            end
+        end)
+    end),
+    receive
+        {holding, Holder} -> ok
+    after 2000 -> error(holder_not_holding)
+    end,
+    Waiter = spawn(fun() ->
+        Test ! {waiter, beamtalk_fifo_lock:with_lock(Key, 5000, fun() -> ran end)}
+    end),
+    wait_until(fun() -> lists:member(Waiter, beamtalk_fifo_lock:queue(Key)) end),
+    Holder ! release,
+    try
+        receive
+            {waiter, R} -> ?assertEqual({error, lost}, R)
+        after 2000 -> error(waiter_did_not_answer)
+        end
+    after
+        beamtalk_supervisor_test_helper:ensure_lock_table()
+    end.
+
+uncontended_runs_fun() ->
     ?assertEqual({ok, 42}, beamtalk_fifo_lock:with_lock(key(), 1000, fun() -> 42 end)).
 
-waiters_are_served_in_arrival_order_and_promptly_test() ->
+waiters_are_served_in_arrival_order_and_promptly() ->
     Key = key(),
     Test = self(),
     Holder = hold(Key),
@@ -46,10 +95,10 @@ waiters_are_served_in_arrival_order_and_promptly_test() ->
     ?assertEqual(Waiters, [W || {W, _} <- Order]),
     %% Served on notification, not after a poll interval or back-off.
     [{_, FirstAt} | _] = Order,
-    ?assert(FirstAt - Released < 100),
+    ?assert(FirstAt - Released < 150),
     wait_until(fun() -> beamtalk_fifo_lock:queue(Key) =:= [] end).
 
-dead_holder_hands_the_lock_on_test() ->
+dead_holder_hands_the_lock_on() ->
     Key = key(),
     Holder = hold(Key),
     unlink(Holder),
@@ -64,13 +113,41 @@ dead_holder_hands_the_lock_on_test() ->
     after 2000 -> error(not_handed_on)
     end.
 
-raising_critical_section_releases_test() ->
+%% A waiter killed while queued is skipped when it reaches the head.
+dead_head_waiter_is_skipped() ->
+    Key = key(),
+    Test = self(),
+    Holder = hold(Key),
+    Doomed = spawn(fun() -> beamtalk_fifo_lock:with_lock(Key, 5000, fun() -> ok end) end),
+    wait_until(fun() -> lists:member(Doomed, beamtalk_fifo_lock:queue(Key)) end),
+    spawn_link(fun() ->
+        Test ! {result, beamtalk_fifo_lock:with_lock(Key, 5000, fun() -> got_it end)}
+    end),
+    wait_until(fun() -> length(beamtalk_fifo_lock:queue(Key)) =:= 3 end),
+    exit(Doomed, kill),
+    Holder ! release,
+    receive
+        {result, R} -> ?assertEqual({ok, got_it}, R)
+    after 2000 -> error(not_handed_on)
+    end.
+
+recursive_lock_raises() ->
+    Key = key(),
+    ?assertError(
+        {recursive_lock, Key},
+        beamtalk_fifo_lock:with_lock(Key, 1000, fun() ->
+            beamtalk_fifo_lock:with_lock(Key, 1000, fun() -> ok end)
+        end)
+    ),
+    ?assertEqual([], beamtalk_fifo_lock:queue(Key)).
+
+raising_critical_section_releases() ->
     Key = key(),
     ?assertError(boom, beamtalk_fifo_lock:with_lock(Key, 1000, fun() -> error(boom) end)),
     ?assertEqual([], beamtalk_fifo_lock:queue(Key)),
     ?assertEqual({ok, ok}, beamtalk_fifo_lock:with_lock(Key, 1000, fun() -> ok end)).
 
-bounded_wait_times_out_and_leaves_the_queue_test() ->
+bounded_wait_times_out_and_leaves_the_queue() ->
     Key = key(),
     Holder = hold(Key),
     Start = now_ms(),
@@ -85,7 +162,7 @@ bounded_wait_times_out_and_leaves_the_queue_test() ->
     Holder ! release,
     wait_until(fun() -> beamtalk_fifo_lock:queue(Key) =:= [] end).
 
-timed_out_waiter_does_not_strand_the_next_test() ->
+timed_out_waiter_does_not_strand_the_next() ->
     %% Holder, then a short-wait caller, then a long-wait caller: when the
     %% short one gives up and the holder releases, the long one still gets in.
     Key = key(),

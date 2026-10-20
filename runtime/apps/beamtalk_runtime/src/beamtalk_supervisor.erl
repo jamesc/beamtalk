@@ -270,9 +270,11 @@ and the arming of the `initializing` gate by a node-local FIFO lock keyed by
 module (`beamtalk_fifo_lock`, BT-3994): that is what the class gen_server
 used to provide, so a second caller that gets `already_started` always finds
 the gate armed. Waiters are served in arrival order as soon as the lock is
-released; one that waits longer than the `initialize` wait bound
-(`init_wait_timeout_ms`, 60s by default) behind a start that does not finish
-gets `Result error:` `#supervisor_start_failed` instead of blocking for good.
+released; one that waits longer than `init_wait_timeout_ms` (60s by default)
+for the lock, behind a start that does not finish, gets `Result error:`
+`#supervisor_start_failed` instead of blocking for good. The same bound then
+applies separately to waiting for a concurrent caller's `initialize`, so a
+caller can wait up to twice the bound in all.
 
 Every failure is a `Result error:` with kind `#supervisor_start_failed`,
 including an instance-side `initialize` that raises (the supervisor is then
@@ -316,11 +318,14 @@ supervise(ClassName, Module) ->
         {ok, {error, {already_started, Pid}}} ->
             SupTuple = {beamtalk_supervisor, ClassName, Module, Pid},
             initialize_result(ClassName, supervise, SupTuple, fun await_initialized/1);
-        {error, timeout} ->
-            ?LOG_ERROR("Supervisor start lock wait timed out", #{
-                supervisor => ClassName, module => Module, domain => [beamtalk, runtime]
+        {error, LockError} ->
+            ?LOG_ERROR("Supervisor start lock wait failed", #{
+                supervisor => ClassName,
+                module => Module,
+                reason => LockError,
+                domain => [beamtalk, runtime]
             }),
-            {error, start_lock_timeout_error(ClassName)};
+            {error, start_lock_error(ClassName, LockError)};
         {ok, Failure} ->
             Reason =
                 case Failure of
@@ -336,10 +341,11 @@ supervise(ClassName, Module) ->
             {error, start_failed_error(supervisor_start_failed, ClassName, supervise, Reason)}
     end.
 
-%% A `supervise` caller that gave up waiting for a concurrent caller's start
-%% of the same class (BT-3994).
--spec start_lock_timeout_error(atom()) -> #beamtalk_error{}.
-start_lock_timeout_error(ClassName) ->
+%% A `supervise` caller that could not take the start lock (BT-3994): it gave
+%% up waiting for a concurrent caller's start of the same class, or the lock
+%% table was lost while it waited.
+-spec start_lock_error(atom(), timeout | lost) -> #beamtalk_error{}.
+start_lock_error(ClassName, timeout) ->
     beamtalk_error:new(
         supervisor_start_failed,
         ClassName,
@@ -350,13 +356,22 @@ start_lock_timeout_error(ClassName) ->
                 [ClassName, init_wait_timeout()]
             )
         )
+    );
+start_lock_error(ClassName, lost) ->
+    beamtalk_error:new(
+        supervisor_start_failed,
+        ClassName,
+        supervise,
+        <<"the supervise start lock table was lost while waiting; retry">>
     ).
 
 %% Run `initialize` (or wait for a concurrent caller's, `Step`) and answer the
 %% handle, or `{error, #supervisor_start_failed}` when it raised: the
 %% `Result`-returning starts (`supervise`, `spawnAs:`, `spawnWith:as:`) report
 %% a failed `initialize` in their `Result`, as `Actor spawnAs:` does (BT-3994).
-%% `Step` has already stopped the supervisor.
+%% `Step` has already stopped the supervisor. A `#supervisor_start_failed`
+%% raised by `await_initialized/1` (a concurrent caller's wait failed) is
+%% answered as is rather than wrapped in a second one.
 -spec initialize_result(atom(), atom(), tuple(), fun((tuple()) -> ok)) ->
     {ok, tuple()} | {error, #beamtalk_error{}}.
 initialize_result(ClassName, Selector, SupTuple, Step) ->
@@ -370,8 +385,12 @@ initialize_result(ClassName, Selector, SupTuple, Step) ->
         throw:Nlr:Stack when ?IS_NLR(Nlr) ->
             erlang:raise(throw, Nlr, Stack);
         Class:Reason:Stack ->
-            Cause = raised_error(Class, Reason, Stack),
-            {error, start_failed_error(supervisor_start_failed, ClassName, Selector, Cause)}
+            case raised_error(Class, Reason, Stack) of
+                #beamtalk_error{kind = supervisor_start_failed, class = ClassName} = Failed ->
+                    {error, Failed#beamtalk_error{selector = Selector}};
+                Cause ->
+                    {error, start_failed_error(supervisor_start_failed, ClassName, Selector, Cause)}
+            end
     end.
 
 %% The `#beamtalk_error{}` behind a raise: a Beamtalk exception carries it

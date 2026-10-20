@@ -1003,6 +1003,7 @@ ensure_root_table_idempotent_test() ->
 %% the fixture as its module, answering the instance methods in `Config`.
 with_bt3963_class(ClassName, Config, Fun) ->
     beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_supervisor_test_helper:ensure_lock_table(),
     beamtalk_class_metadata:new(),
     ok = beamtalk_bt3963_sup_fixture:configure(Config),
     {ok, ClassPid} = beamtalk_object_class:start_link(ClassName, #{
@@ -3913,6 +3914,7 @@ concurrent_supervise(HookOutcome) ->
     Tab = beamtalk_supervisor_test_helper_tab,
     SupName = bt3759_named_sup,
     beamtalk_supervisor_test_helper:reset(),
+    beamtalk_supervisor_test_helper:ensure_lock_table(),
     beamtalk_supervisor_test_helper:set_mode(named, SupName),
     ets:insert(Tab, {coordinator, self()}),
     ClassInfo = #{
