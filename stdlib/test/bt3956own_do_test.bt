@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3956: measured answers for a block that writes state, sent a collection
+// selector the receiver's class defines itself. See
+// fixtures/bt3956own_do_coll.bt. A TestCase may assign its own fields (the
+// permanent exception to "Cannot assign to slot"), so it is the one
+// value-type shape where a `self.field :=` write in such a block compiles.
+
+TestCase subclass: Bt3956OwnDoTest
+  field: n = 0
+
+  do: aBlock =>
+    #(1, 2, 3) collect: [:x | aBlock value: x]
+    self
+
+  collect: aBlock => #(1, 2, 3) collect: [:x | aBlock value: x]
+
+  fieldDo =>
+    self do: [:x | self.n := self.n + x]
+    self.n
+
+  fieldCollect =>
+    self collect: [:x | self.n := self.n + x]
+    self.n
+
+  testLocalOwnDo => self assert: Bt3956OwnDoColl new selfDo equals: 6
+
+  testLocalOwnDoOtherReceiver =>
+    self assert: (Bt3956OwnDoColl new otherDo: Bt3956OwnDoColl new) equals: 6
+
+  testLocalPlainListReceiver =>
+    self assert: (Bt3956OwnDoColl new otherDo: #(1, 2, 3)) equals: 6
+
+  testFieldOwnDo => self assert: self fieldDo equals: 6
+
+  testLocalOwnCollectRefuses =>
+    self should: [
+      Bt3956OwnDoColl new selfCollect
+    ] raise: #stateful_block_dispatch
+
+  testLocalOwnInjectRefuses =>
+    self should: [
+      Bt3956OwnDoColl new selfInject
+    ] raise: #stateful_block_dispatch
+
+  testFieldOwnCollectRefuses =>
+    self should: [self fieldCollect] raise: #stateful_block_dispatch
