@@ -198,7 +198,47 @@ pub fn beamtalk_root_dir() -> Result<PathBuf> {
 /// informed choice, not something this function should second-guess.
 #[must_use]
 pub fn resolve_epmd_address() -> String {
-    std::env::var("ERL_EPMD_ADDRESS").unwrap_or_else(|_| "127.0.0.1".to_string())
+    std::env::var(EPMD_ADDRESS_VAR).unwrap_or_else(|_| DEFAULT_EPMD_ADDRESS.to_string())
+}
+
+/// The environment variable `erl`/`epmd` read for epmd's bind address.
+pub const EPMD_ADDRESS_VAR: &str = "ERL_EPMD_ADDRESS";
+
+/// Loopback: the address epmd binds when the operator hasn't chosen one.
+pub const DEFAULT_EPMD_ADDRESS: &str = "127.0.0.1";
+
+/// Apply the [`resolve_epmd_address`] rule to an `erl` command that starts a
+/// **named** (distributed) node, i.e. any `erl` spawn passing `-sname` or
+/// `-name` (BT-3987). Such a node runs `epmd -daemon` if none is running, and
+/// that daemon binds every interface unless `ERL_EPMD_ADDRESS` is set, keeping
+/// that posture until killed. Every named-node `erl` spawn in `beamtalk-cli`
+/// must go through this helper; `beamtalk-cli`'s
+/// `named_erl_spawns_pin_epmd_loopback` lint fails otherwise.
+///
+/// The value the child sees is decided in this order:
+///
+/// 1. The command already sets `ERL_EPMD_ADDRESS` explicitly (`cmd.env(..)`):
+///    left untouched, that caller's value wins.
+/// 2. The command explicitly removes it (`cmd.env_remove(..)`): treated as
+///    "operator has not set one", so loopback.
+/// 3. Otherwise [`resolve_epmd_address`]: the operator's `ERL_EPMD_ADDRESS`
+///    from this process's environment, else loopback. This also holds after
+///    `cmd.env_clear()`, so an env-allowlisted spawn still passes an
+///    operator-set value through.
+pub fn pin_epmd_loopback(cmd: &mut std::process::Command) {
+    let explicit = cmd
+        .get_envs()
+        .find(|(k, _)| *k == std::ffi::OsStr::new(EPMD_ADDRESS_VAR))
+        .map(|(_, v)| v.is_some());
+    match explicit {
+        Some(true) => {}
+        Some(false) => {
+            cmd.env(EPMD_ADDRESS_VAR, DEFAULT_EPMD_ADDRESS);
+        }
+        None => {
+            cmd.env(EPMD_ADDRESS_VAR, resolve_epmd_address());
+        }
+    }
 }
 
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
@@ -342,6 +382,42 @@ mod tests {
         // SAFETY: guarded by EPMD_ENV_LOCK above.
         unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
         assert_eq!(result, "10.0.0.5");
+    }
+
+    /// The `ERL_EPMD_ADDRESS` value `cmd` will hand its child, if it sets one.
+    fn epmd_env(cmd: &std::process::Command) -> Option<String> {
+        cmd.get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new(EPMD_ADDRESS_VAR))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn pin_epmd_loopback_defaults_to_loopback_when_unset() {
+        // Remove the variable in the *command's* env, not this process's, so
+        // the default path runs even on a host whose shell exports
+        // ERL_EPMD_ADDRESS globally.
+        let mut cmd = std::process::Command::new("erl");
+        cmd.env_remove(EPMD_ADDRESS_VAR);
+        pin_epmd_loopback(&mut cmd);
+        assert_eq!(epmd_env(&cmd).as_deref(), Some("127.0.0.1"));
+    }
+
+    #[test]
+    fn pin_epmd_loopback_passes_through_an_operator_set_value() {
+        let mut cmd = std::process::Command::new("erl");
+        cmd.env(EPMD_ADDRESS_VAR, "10.0.0.5");
+        pin_epmd_loopback(&mut cmd);
+        assert_eq!(epmd_env(&cmd).as_deref(), Some("10.0.0.5"));
+    }
+
+    #[test]
+    fn pin_epmd_loopback_falls_back_to_the_process_env_rule() {
+        let _guard = EPMD_ENV_LOCK.lock().unwrap();
+        let mut cmd = std::process::Command::new("erl");
+        cmd.env_clear();
+        pin_epmd_loopback(&mut cmd);
+        assert_eq!(epmd_env(&cmd), Some(resolve_epmd_address()));
     }
 
     #[test]

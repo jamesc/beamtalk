@@ -139,6 +139,9 @@ pub(crate) fn start_beam_node(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // With `--node` this is a named node that starts epmd if none is running;
+    // pin epmd's bind address (BT-3987). Harmless for an unnamed node.
+    beamtalk_workspace::pin_epmd_loopback(&mut cmd);
 
     // Tell the compiler app where to find the compiler port binary.
     // In installed mode, it lives next to the beamtalk binary in bin/.
