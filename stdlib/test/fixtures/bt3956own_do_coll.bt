@@ -10,13 +10,15 @@
 // bt3956own_do_test.bt asserts the answers.
 
 Value subclass: Bt3956OwnDoColl
+
   do: aBlock =>
     #(1, 2, 3) collect: [:x | aBlock value: x]
     self
 
   collect: aBlock => #(1, 2, 3) collect: [:x | aBlock value: x]
 
-  inject: acc into: aBlock => #(1, 2, 3) inject: acc into: [:a :x | aBlock value: a value: x]
+  inject: acc into: aBlock =>
+    #(1, 2, 3) inject: acc into: [:a :x | aBlock value: a value: x]
 
   selfDo =>
     total := 0
@@ -30,7 +32,12 @@ Value subclass: Bt3956OwnDoColl
 
   selfInject =>
     total := 0
-    self inject: 0 into: [:a :x | total := total + x. a + x]
+    self
+      inject: 0
+      into: [:a :x |
+        total := total + x
+        a + x
+      ]
     total
 
   otherDo: other =>

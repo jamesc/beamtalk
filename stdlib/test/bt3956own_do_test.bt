@@ -24,8 +24,7 @@ TestCase subclass: Bt3956OwnDoTest
     self collect: [:x | self.n := self.n + x]
     self.n
 
-  testLocalOwnDo =>
-    self assert: Bt3956OwnDoColl new selfDo equals: 6
+  testLocalOwnDo => self assert: Bt3956OwnDoColl new selfDo equals: 6
 
   testLocalOwnDoOtherReceiver =>
     self assert: (Bt3956OwnDoColl new otherDo: Bt3956OwnDoColl new) equals: 6
@@ -33,14 +32,17 @@ TestCase subclass: Bt3956OwnDoTest
   testLocalPlainListReceiver =>
     self assert: (Bt3956OwnDoColl new otherDo: #(1, 2, 3)) equals: 6
 
-  testFieldOwnDo =>
-    self assert: self fieldDo equals: 6
+  testFieldOwnDo => self assert: self fieldDo equals: 6
 
   testLocalOwnCollectRefuses =>
-    self should: [Bt3956OwnDoColl new selfCollect] raise: #stateful_block_dispatch
+    self should: [
+      Bt3956OwnDoColl new selfCollect
+    ] raise: #stateful_block_dispatch
 
   testLocalOwnInjectRefuses =>
-    self should: [Bt3956OwnDoColl new selfInject] raise: #stateful_block_dispatch
+    self should: [
+      Bt3956OwnDoColl new selfInject
+    ] raise: #stateful_block_dispatch
 
   testFieldOwnCollectRefuses =>
     self should: [self fieldCollect] raise: #stateful_block_dispatch
