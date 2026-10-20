@@ -1,14 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3939: the Tier 2 block-body gate is semantic (any construct reachable
+//! BT-3939 / BT-3947: the Tier 2 block body is a `BranchArm` frame, so every
+//! construct that rebinds a body local compiles (checked on a BEAM by
+//! `stdlib/test/bt3939tier2block_local_test.bt`). The old gate was semantic (any construct reachable
 //! from a statement, without crossing a closure, that rebinds a local the body
 //! bound), not the statement shapes of the repro in
 //! `tier2_block_local_inner_loop.rs`. Generated (host x binding x position x
 //! construct) cases, with a host that does not depend on the self-send
 //! promotion.
 
-use super::tier2_block_local_inner_loop::compile;
+use crate::core_erlang::{CodegenOptions, generate_module};
+
+fn compile(src: &str) -> Result<String, String> {
+    let (module, _) =
+        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
+    generate_module(&module, CodegenOptions::new("test")).map_err(|e| e.to_string())
+}
 
 /// Constructs that rebind the body local `n`.
 const CONSTRUCTS: &[&str] = &[
@@ -64,23 +72,16 @@ fn hosts(body: &str) -> [String; 2] {
     ]
 }
 
-// PIN-BUG BT-3947: every program below answers the pre-construct `n` (and
-// state) if it compiles; the correct answer is parked with BT-3947.
 #[test]
-fn every_construct_at_every_position_that_rebinds_a_body_local_is_an_error() {
+fn every_construct_at_every_position_that_rebinds_a_body_local_compiles() {
     let mut checked = 0;
     for binding in BINDINGS {
         for position in POSITIONS {
             for construct in CONSTRUCTS {
                 let body = format!("{binding}{}", position.replace("{c}", construct));
                 for src in hosts(&body) {
-                    match compile(&src) {
-                        Ok(_) => panic!("answers a stale value silently:\n{src}"),
-                        Err(e) => {
-                            assert!(e.contains("BT-3939") && e.contains("`n`"), "{e}\n{src}");
-                            checked += 1;
-                        }
-                    }
+                    compile(&src).unwrap_or_else(|e| panic!("{e}\n{src}"));
+                    checked += 1;
                 }
             }
         }
@@ -105,21 +106,21 @@ const SAME_STATEMENT_POSITIONS: &[&str] = &[
     "r := #[({n, m} := #(0, 0)), ({c})]. n",
 ];
 
-// PIN-BUG BT-3947: answers the pre-construct `n` if it compiles.
 #[test]
-fn a_local_bound_earlier_in_the_same_statement_is_an_error() {
+fn a_local_bound_earlier_in_the_same_statement_compiles() {
     let mut checked = 0;
     for position in SAME_STATEMENT_POSITIONS {
         for construct in CONSTRUCTS {
             let body = position.replace("{c}", construct);
             for src in hosts(&body) {
                 match compile(&src) {
-                    Ok(_) => panic!("answers a stale value silently:\n{src}"),
-                    Err(e) => {
-                        assert!(e.contains("BT-3939") && e.contains("`n`"), "{e}\n{src}");
-                        checked += 1;
-                    }
+                    Ok(_) => {}
+                    // A destructuring inside an operand is a loud, unrelated
+                    // rejection of its own.
+                    Err(e) if e.contains("destructuring assignment in expression position") => {}
+                    Err(e) => panic!("{e}\n{src}"),
                 }
+                checked += 1;
             }
         }
     }
@@ -152,12 +153,12 @@ fn a_local_bound_inside_an_inlined_block_is_that_blocks_own() {
     }
 }
 
-// PIN-BUG BT-3947: the one source path to a Tier 2 body that survives BT-3922
-// (found empirically): a block passed to an Erlang FFI call that writes a
-// captured local goes through `generate_erlang_interop_wrapper` and answered
-// `#(0)` for this program, silently, with the validator on.
+// The one source path to a Tier 2 body that survives BT-3922 (found
+// empirically): a block passed to an Erlang FFI call that writes a captured
+// local goes through `generate_erlang_interop_wrapper` and answered `#(0)` for
+// this program, silently, before the body was a frame.
 #[test]
-fn an_erlang_ffi_block_rebinding_a_body_local_in_a_loop_is_an_error() {
+fn an_erlang_ffi_block_rebinding_a_body_local_in_a_loop_compiles() {
     let src = "Actor subclass: G
   state: hits = 0
   ffi =>
@@ -172,8 +173,7 @@ fn an_erlang_ffi_block_rebinding_a_body_local_in_a_loop_is_an_error() {
       ]
       with: #(1)
 ";
-    let e = compile(src).expect_err("must not answer #(0) silently");
-    assert!(e.contains("BT-3939") && e.contains("`n`"), "{e}");
+    compile(src).expect("compiles");
 }
 
 #[test]
@@ -219,23 +219,16 @@ fn ffi_host(body: &str) -> String {
     )
 }
 
-// PIN-BUG BT-3947: the correct answer (`#(3)`) is parked with BT-3947's frame
-// work; until then these are compile errors, not `#({3, State})`.
 #[test]
-fn a_tier_2_body_ending_in_an_evaluated_block_that_assigns_is_an_error() {
+fn a_tier_2_body_ending_in_an_evaluated_block_that_assigns_compiles() {
     let mut checked = 0;
     for last in LAST_STATEMENT_BLOCK_VALUES {
         for body in [(*last).to_string(), format!("self note: c. {last}")] {
             let mut srcs = hosts(&body).to_vec();
             srcs.push(ffi_host(&body));
             for src in srcs {
-                match compile(&src) {
-                    Ok(_) => panic!("answers the raw {{Value, State}} tuple silently:\n{src}"),
-                    Err(e) => {
-                        assert!(e.contains("BT-3971"), "{e}\n{src}");
-                        checked += 1;
-                    }
-                }
+                compile(&src).unwrap_or_else(|e| panic!("{e}\n{src}"));
+                checked += 1;
             }
         }
     }

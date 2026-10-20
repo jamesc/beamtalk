@@ -123,17 +123,6 @@ const BODIES: &[&str] = &[
     "b := [@S. 1]\nb value",
 ];
 
-/// Whether `why` (a compile failure rendered with `{:?}`) is the exact
-/// `UnsupportedFeature` rejection of a Tier 2 block that assigns a local and
-/// rebinds it inside a loop (PIN-BUG BT-3947, BT-3939): loud, not dropped. Any
-/// other failure, a verifier panic included, is not it.
-#[must_use]
-pub fn is_tier2_loop_rebind_pin(why: &str) -> bool {
-    why.starts_with("UnsupportedFeature")
-        && why.contains("a Tier 2 block assigns local")
-        && why.contains(super::blocks::TIER2_LOOP_REBIND_PIN)
-}
-
 /// The locals every corpus body reads, bound ahead of it.
 pub const PRELUDE: &str = "t := 0\nu := 0\ns := 0\nw := 0\nx := 0";
 

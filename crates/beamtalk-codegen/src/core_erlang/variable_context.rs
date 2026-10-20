@@ -80,22 +80,6 @@ impl VariableContext {
         None
     }
 
-    /// The number of scopes on the stack (the depth a later
-    /// [`Self::is_bound_since`] is measured from).
-    pub(super) fn depth(&self) -> usize {
-        self.scopes.len()
-    }
-
-    /// Whether `name` is bound in a scope at or above `depth` (a value of
-    /// [`Self::depth`] taken when the scope of interest was the innermost):
-    /// bound by that scope or one pushed since, not by an enclosing one.
-    pub(super) fn is_bound_since(&self, name: &str, depth: usize) -> bool {
-        self.scopes
-            .iter()
-            .skip(depth.saturating_sub(1))
-            .any(|scope| scope.contains_key(name))
-    }
-
     /// Binds a Beamtalk identifier to a Core Erlang variable in the current scope.
     ///
     /// This establishes a mapping from the Beamtalk name (e.g., `"counter"`)

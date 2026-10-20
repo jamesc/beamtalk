@@ -132,6 +132,11 @@ pub(super) mod fault {
         /// answers `false`, so the assignment reaches the value-only lowering
         /// (`UnthreadedLocalAssignment`).
         NotAProducer,
+        /// BT-3939: a Tier 2 block body registers no producer sites, so a loop
+        /// or fold statement of it is lowered inside an opaque `let _ = ( ... )`
+        /// instead of as a producer (`ProducerSiteNotThreaded`): the shape that
+        /// answered the pre-loop value of a block-local the loop rebinds.
+        Tier2OpaqueProducers,
     }
 
     thread_local! {
@@ -727,6 +732,16 @@ impl CoreErlangGenerator {
         {
             return None;
         }
+        self.producer_locals_at_site(inner)
+    }
+
+    /// [`Self::local_producer_locals`] for an `inner` (paren-unwrapped) that is
+    /// already known to sit at a producer site: the rule that says whether it
+    /// is a producer there and the locals it threads, independent of whether
+    /// the site was registered ([`Self::local_producer_sites`]). The BT-3939
+    /// check of a Tier 2 block body asks it of the sites the core rule names,
+    /// so a body that registered none cannot also hide them from the check.
+    pub(super) fn producer_locals_at_site(&self, inner: &Expression) -> Option<Vec<String>> {
         // BT-3823: the REPL's one rule, for every family.
         if self.is_repl_mode() {
             return self.repl_producer_locals(inner);
@@ -1422,6 +1437,36 @@ impl CoreErlangGenerator {
         out
     }
 
+    /// The producer sites of the loop, fold or arm body statement `stmt`
+    /// (`beamtalk_core`'s `loop_body_producer_sites` narrowed by
+    /// `is_loop_body_producer_site`): the one rule behind
+    /// [`Self::with_body_producer_sites`] and the BT-3939 check that every
+    /// such site a Tier 2 block body threads a local through was lowered as a
+    /// producer.
+    pub(super) fn body_producer_site_exprs<'a>(
+        &self,
+        stmt: &'a Expression,
+        fold: bool,
+        arm: bool,
+    ) -> Vec<&'a Expression> {
+        use beamtalk_core::semantic_analysis::block_facts::{
+            LoopBodyContext, is_loop_body_producer_site, loop_body_producer_sites,
+        };
+        let mut ctx = LoopBodyContext::new(
+            stmt,
+            fold,
+            self.in_fold_frame,
+            self.in_actor_instance_context(),
+        );
+        if arm {
+            ctx = ctx.in_arm();
+        }
+        loop_body_producer_sites(stmt)
+            .into_iter()
+            .filter(|site| is_loop_body_producer_site(site, &ctx))
+            .collect()
+    }
+
     /// Runs `f` (a loop or fold body's lowering) with the body's own
     /// statements as local-producer sites (ADR 0131 Phase 2b): each
     /// statement that is itself a loop or fold, and each sequenced operand
@@ -1440,21 +1485,12 @@ impl CoreErlangGenerator {
         arm: bool,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        use beamtalk_core::semantic_analysis::block_facts::{
-            LoopBodyContext, is_loop_body_producer_site, loop_body_producer_sites,
-        };
-        let in_actor = self.in_actor_instance_context();
         let outer_fold = self.in_fold_frame;
         let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
         for stmt in body {
-            let mut ctx = LoopBodyContext::new(stmt, fold, outer_fold, in_actor);
-            if arm {
-                ctx = ctx.in_arm();
-            }
             sites.extend(
-                loop_body_producer_sites(stmt)
+                self.body_producer_site_exprs(stmt, fold, arm)
                     .into_iter()
-                    .filter(|site| is_loop_body_producer_site(site, &ctx))
                     .map(Expression::span),
             );
         }

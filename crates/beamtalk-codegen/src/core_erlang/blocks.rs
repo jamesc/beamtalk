@@ -17,10 +17,8 @@
 //! [`super::patterns`]; other expression code generation stays in
 //! [`super::expressions`].
 
-use super::threaded_ir::{
-    self, RebindFrame, RebindFrameKind, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
-    ValueRef, VersionPrefix, VersionedVar,
-};
+use super::control_flow::ArmFrame;
+use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
@@ -49,11 +47,6 @@ pub(super) enum BlockExprKind {
     /// Expression evaluated for side effects only — result discarded.
     SideEffect,
 }
-
-/// The marker the Tier 2 loop-rebind rejection ([`CoreErlangGenerator::reject_loop_rebind_of_body_local`])
-/// carries, which the value-position agreement corpora read to tell that
-/// pinned rejection from any other failure.
-pub(super) const TIER2_LOOP_REBIND_PIN: &str = "BT-3939, until BT-3947";
 
 impl CoreErlangGenerator {
     /// Extracts a block literal from an expression, unwrapping parentheses.
@@ -261,7 +254,7 @@ impl CoreErlangGenerator {
     /// wrapped in one [`threaded_ir::ThreadedStmt::Threaded`] node (this
     /// single-arm `with_branch_context`'s own [`threaded_ir::FrameId`]),
     /// [`threaded_ir::verify`]d and [`threaded_ir::render`]ed via
-    /// `conditionals.rs`'s `verify_and_render_branch_arm`. `UnboundVersion`
+    /// `conditionals.rs`'s `render_branch_arm`. `UnboundVersion`
     /// is a live check against this arm's real IR (see the scalar-synthesis
     /// `check_branch_frame_linearity` scaffolding's own doc comment for why
     /// it could not check this before).
@@ -309,62 +302,82 @@ impl CoreErlangGenerator {
         // Set up loop body context for StateAcc-based threading
         let result = self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
-            // BT-3910: the body is a `StateAcc` frame carrying the block's
-            // captured-mutated locals, so a value-position assignment to one
-            // `Put`s into the map the block hands back.
-            let rebind = RebindFrame {
+            let mut stmts: Vec<ThreadedStmt> = Vec::new();
+
+            // Unpack captured-mutated vars from StateAcc.
+            // Use maps:get/3 with the current outer value as fallback so the block
+            // remains callable even when StateAcc was not pre-seeded with the local state keys
+            // (e.g. when called through the runtime arity normalization wrapper).
+            for var_name in captured_vars {
+                let core_var = Self::to_core_erlang_var(var_name);
+                let key = Self::local_state_key(var_name);
+                // Look up the outer binding BEFORE rebinding so the fallback refers to the
+                // value at block-definition time (not the newly introduced inner binding).
+                // If no outer binding exists (e.g. REPL mode where vars come from state dict),
+                // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
+                let outer_binding = this.lookup_var(var_name).cloned();
+                this.bind_var(var_name, &core_var);
+                let unpack_doc = if let Some(outer_var) = outer_binding {
+                    docvec![
+                        "let ",
+                        leaf::var(core_var),
+                        " = call 'maps':'get'(",
+                        leaf::atom(key),
+                        ", StateAcc, ",
+                        leaf::var(outer_var),
+                        ") in "
+                    ]
+                } else {
+                    docvec![
+                        "let ",
+                        leaf::var(core_var),
+                        " = call 'maps':'get'(",
+                        leaf::atom(key),
+                        ", StateAcc) in "
+                    ]
+                };
+                stmts.push(ThreadedStmt::Statement(unpack_doc, block.span));
+            }
+
+            // BT-3939: the body is an arm frame (ADR 0131 §2, `BranchArm`)
+            // that carries every local its `StateAcc` scratch map holds: the
+            // captured-mutated ones unpacked above and the block's own
+            // top-level assignments. A loop or fold statement of the body is
+            // then a local-threading producer whose `LocalRebind`s this frame
+            // lowers (a `Put` into the map for a carried local), spliced into
+            // the body's statement list — not scoped inside an opaque
+            // `let _ = ( ... )` that drops the post-loop local and state.
+            let body = super::util::collect_body_exprs(&block.body);
+            let arm = ArmFrame {
+                threads: Self::tier2_body_threads(captured_vars, &body),
+            };
+            let rebind = threaded_ir::RebindFrame {
                 frame,
-                kind: RebindFrameKind::Loop(ThreadingMode::StateAcc(StateAccFallbackReason::None)),
-                threads: captured_vars.to_vec(),
+                kind: threaded_ir::RebindFrameKind::BranchArm,
+                threads: arm.threads.clone(),
             };
             this.with_rebind_frame(rebind, |this| {
-                let mut stmts: Vec<ThreadedStmt> = Vec::new();
-
-                // Unpack captured-mutated vars from StateAcc.
-                // Use maps:get/3 with the current outer value as fallback so the block
-                // remains callable even when StateAcc was not pre-seeded with the local state keys
-                // (e.g. when called through the runtime arity normalization wrapper).
-                for var_name in captured_vars {
-                    let core_var = Self::to_core_erlang_var(var_name);
-                    let key = Self::local_state_key(var_name);
-                    // Look up the outer binding BEFORE rebinding so the fallback refers to the
-                    // value at block-definition time (not the newly introduced inner binding).
-                    // If no outer binding exists (e.g. REPL mode where vars come from state dict),
-                    // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
-                    let outer_binding = this.lookup_var(var_name).cloned();
-                    this.bind_var(var_name, &core_var);
-                    let unpack_doc = if let Some(outer_var) = outer_binding {
-                        docvec![
-                            "let ",
-                            leaf::var(core_var),
-                            " = call 'maps':'get'(",
-                            leaf::atom(key),
-                            ", StateAcc, ",
-                            leaf::var(outer_var),
-                            ") in "
-                        ]
-                    } else {
-                        docvec![
-                            "let ",
-                            leaf::var(core_var),
-                            " = call 'maps':'get'(",
-                            leaf::atom(key),
-                            ", StateAcc) in "
-                        ]
-                    };
-                    stmts.push(ThreadedStmt::Statement(unpack_doc, block.span));
+                // Test-only fault (`Tier2OpaqueProducers`): the producer sites
+                // BT-3939 registers, withheld.
+                #[cfg(test)]
+                if super::threaded_expr::fault::active()
+                    == Some(super::threaded_expr::fault::LocalRebindFault::Tier2OpaqueProducers)
+                {
+                    return this.generate_block_stateful_body(block, frame, &mut stmts);
                 }
-
-                // Generate body expressions with state threading
-                this.generate_block_stateful_body(block, frame, captured_vars, &mut stmts)?;
-                let branch_final = this.state_version();
-                Ok::<_, crate::core_erlang::CodeGenError>(this.verify_and_render_branch_arm(
-                    stmts,
-                    frame,
-                    branch_final,
-                    block.span,
-                ))
-            })
+                this.with_body_producer_sites(&body, false, true, |this| {
+                    // Generate body expressions with state threading
+                    this.generate_block_stateful_body(block, frame, &mut stmts)
+                })
+            })?;
+            let branch_final = this.state_version();
+            Ok::<_, crate::core_erlang::CodeGenError>(this.render_branch_arm(
+                stmts,
+                frame,
+                branch_final,
+                block.span,
+                Some(&arm),
+            ))
         });
         // Ensure block_depth and scope are restored even on error.
         self.block_depth -= 1;
@@ -547,118 +560,25 @@ impl CoreErlangGenerator {
         Ok((wrapper_doc, true))
     }
 
-    /// BT-3971 (PIN-BUG BT-3947): a Tier 2 block body whose last statement
-    /// *is* an evaluated block literal that assigns a local (`[n := 3. n] value`,
-    /// `^[...] value`, `{a, b} := [...] value`, or one nested in another
-    /// evaluated block) answers the raw `{Value, State}` tuple of the inlined
-    /// block, not its value: measured on a BEAM in an Erlang FFI argument block
-    /// as `#({3, State})` for `#(3)`. A plain assignment `r := [...] value` and a
-    /// block that writes no local answer correctly, and are not rejected. The
-    /// correct lowering is parked with BT-3947's frame work, so until then the
-    /// shape is a compile error. The rule is `repl_producer_writes`', the one
-    /// recognizer of an evaluated block literal that writes a local (every
-    /// name written counts: nothing is "outside" the block here).
-    fn reject_last_statement_block_value(stmt: &Expression) -> Result<()> {
-        use beamtalk_core::semantic_analysis::block_facts::{
-            repl_evaluated_block, repl_producer_writes,
-        };
-        let result = match stmt {
-            Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-                value.as_ref()
+    /// The locals a Tier 2 block body's `StateAcc` scratch map carries (the
+    /// `threads` of its `BranchArm` frame): the captured-mutated locals the
+    /// caller seeded, then the block's own top-level assignment targets, each
+    /// once, in first-appearance order.
+    fn tier2_body_threads(captured_vars: &[String], body: &[&Expression]) -> Vec<String> {
+        let mut threads: Vec<String> = Vec::new();
+        let assigned = body.iter().filter_map(|stmt| match stmt {
+            Expression::Assignment { target, .. } => match target.as_ref() {
+                Expression::Identifier(id) => Some(id.name.to_string()),
+                _ => None,
+            },
+            _ => None,
+        });
+        for name in captured_vars.iter().cloned().chain(assigned) {
+            if !threads.contains(&name) {
+                threads.push(name);
             }
-            Expression::Assignment { .. } => return Ok(()),
-            other => other,
-        };
-        // Only the block-value family: a conditional or loop whose arm holds
-        // the evaluated block is lowered by its own frame and answers right.
-        if repl_evaluated_block(result.unwrap_parens()).is_none() {
-            return Ok(());
         }
-        let Some(writes) = repl_producer_writes(result, &|_| true) else {
-            return Ok(());
-        };
-        let names: Vec<String> = writes.iter().map(|w| format!("`{}`", w.name)).collect();
-        Err(CodeGenError::UnsupportedFeature {
-            feature: format!(
-                "a Tier 2 block ends in an evaluated block (`[...] value`) that assigns {}; \
-                 the block would answer the raw {{Value, State}} tuple instead of the value \
-                 (BT-3971, until BT-3947). Assign the block's value to a local and answer \
-                 that, or compute it in a method of its own",
-                names.join(", ")
-            ),
-            span: Some(result.span()),
-        })
-    }
-
-    /// BT-3939 (PIN-BUG, fixed by BT-3947's frame work): a Tier 2 block body
-    /// lowers a loop or fold inside an opaque `let _ = ( ... )`, so the loop's
-    /// rebind of a local the body bound (`n := 0. xs do: [:y | n := n + y]. n`)
-    /// is scoped inside that statement: the block would answer the value, and
-    /// the state, from before the loop, silently. Until the body is a frame
-    /// that lowers the loop as a producer, that shape is a compile error.
-    ///
-    /// The rule is semantic, not syntactic: any name a construct reachable from
-    /// `stmt` without crossing a closure (`reachable_threaded_locals`, the
-    /// recognizer `threaded_locals_of` and the Phase 0 check share, so a loop
-    /// nested in an operand, a conditional arm or a `[...] value` block is
-    /// seen) threads, that this body itself bound (`bound_since`: assigned,
-    /// destructured, however first bound) and that is neither a block parameter
-    /// nor a captured-mutated variable the caller seeds into `StateAcc`. A name
-    /// assigned elsewhere in the same statement, even after the construct, also
-    /// counts (conservative: see `names_assigned_outside_nested_blocks`).
-    /// `scope_depth` is the variable-scope depth at the body's entry.
-    fn reject_loop_rebind_of_body_local(
-        &self,
-        stmt: &Expression,
-        block: &Block,
-        captured_vars: &[String],
-        scope_depth: usize,
-        is_last: bool,
-    ) -> Result<()> {
-        if is_last {
-            Self::reject_last_statement_block_value(stmt)?;
-        }
-        // An assignment's, destructuring's or `^`'s own write is not a
-        // construct's: look at the value it holds.
-        let subject = match stmt {
-            Expression::Assignment { value, .. }
-            | Expression::DestructureAssignment { value, .. }
-            | Expression::Return { value, .. } => value.as_ref(),
-            other => other,
-        };
-        let is_param = |n: &str| block.parameters.iter().any(|p| p.name == n);
-        // A local assigned by this same statement before the construct runs
-        // (`r := (n := 0) + (xs inject: 0 into: [... n := n + y ...])`, an
-        // earlier keyword argument or cascade message) is not in scope yet
-        // when the statement is lowered, so the scope sees neither the local
-        // nor the construct's write to it. Conservatively, every name assigned
-        // anywhere in the statement outside a closure counts as bound by the
-        // body (an assignment *after* the construct too).
-        let assigned: Vec<String> =
-            beamtalk_core::semantic_analysis::block_facts::names_assigned_outside_nested_blocks(
-                subject,
-            )
-            .into_iter()
-            .map(|n| n.to_string())
-            .collect();
-        let names = self.reachable_threaded_locals(subject, &assigned);
-        let Some(local) = names.into_iter().find(|n| {
-            (self.bound_since(n, scope_depth) || assigned.contains(n))
-                && !is_param(n)
-                && !captured_vars.iter().any(|c| c == n)
-        }) else {
-            return Ok(());
-        };
-        Err(CodeGenError::UnsupportedFeature {
-            feature: format!(
-                "a Tier 2 block assigns local `{local}` and rebinds it inside a loop, fold or \
-                 other construct; the block would answer the value, and the state, from \
-                 before it ({TIER2_LOOP_REBIND_PIN}). An assignment to it elsewhere in the same \
-                 statement counts too. Compute it in a method of its own and call that \
-                 from the block"
-            ),
-            span: Some(subject.span()),
-        })
+        threads
     }
 
     /// Generates the body of a Tier 2 stateful block with state threading.
@@ -684,22 +604,25 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
         frame: threaded_ir::FrameId,
-        captured_vars: &[String],
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
         let filtered_body = super::util::collect_body_exprs(&block.body);
-        let scope_depth = self.scope_depth();
+        // BT-3939: the producer sites this body threads a local through,
+        // read off the AST just before the statement that holds them is
+        // lowered (a local bound by an earlier statement is live), and checked
+        // against the lowered IR once the body is built.
+        let mut producer_sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> =
+            Vec::new();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
-            self.reject_loop_rebind_of_body_local(
-                expr,
-                block,
-                captured_vars,
-                scope_depth,
-                is_last,
-            )?;
+            for site in self.body_producer_site_exprs(expr, false, true) {
+                let site = site.unwrap_parens();
+                if let Some(locals) = self.producer_locals_at_site(site) {
+                    producer_sites.push((site.span(), locals));
+                }
+            }
 
             if self.is_field_assignment(expr) {
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
@@ -817,6 +740,12 @@ impl CoreErlangGenerator {
                 }
             }
         }
+        let errors = threaded_ir::verify_producer_sites_threaded(stmts, &producer_sites);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "a Tier 2 block body's local-threading producer must be lowered as a producer",
+            block.span,
+        );
         Ok(())
     }
 

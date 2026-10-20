@@ -426,7 +426,7 @@ impl CoreErlangGenerator {
     ///
     /// The six callers render `prelude` via
     /// [`CoreErlangGenerator::threaded_prelude_doc`] rather than
-    /// `verify_and_render_branch_arm`'s own wrap-and-`verify()`: unlike a
+    /// `render_branch_arm`'s own wrap-and-`verify()`: unlike a
     /// branch arm (whose `state_version` `enter_branch_context` always
     /// resets to 0 before it runs), a conditional's receiver compiles at
     /// the CALLER's current, possibly non-zero state version — its
@@ -438,7 +438,7 @@ impl CoreErlangGenerator {
     /// `generate_if_true_if_false_with_mutations` during this migration.
     /// `prelude`'s `Bind`s still render through the exact same
     /// `render`/`render_value` production every SPLICED prelude uses
-    /// (`threaded_prelude_doc` and `verify_and_render_branch_arm` share
+    /// (`threaded_prelude_doc` and `render_branch_arm` share
     /// that renderer), so this is a real, correctly-shaped `ThreadedIr`
     /// prelude — just one this phase cannot re-verify in isolation; full
     /// verification arrives with ADR 0118 phase 4, when a mutation-threaded
@@ -3012,37 +3012,15 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0111 Addendum 5, Rule 3: wraps a branch arm's real `Bind`/
-    /// `Statement` sequence in one `ThreadedStmt::Threaded { mode:
-    /// StateAcc(None), frame, .. }` node, `verify()`s it, and `render()`s
-    /// it. `StateAcc` mode's rendering is a transparent pass-through
-    /// (`render_threaded`'s `TupleAcc(_) | StateAcc(_) => render(body,
-    /// ctx)` arm) — wrapping changes zero output bytes versus rendering
-    /// `stmts` directly, while giving `verify()`'s frame-scoped `check_use`
-    /// the correct non-ROOT frame to walk against (`verify`'s top-level
-    /// slice is always implicitly `FrameId::ROOT` — see `FrameId`'s doc
-    /// comment — so an un-wrapped `verify(&stmts)` would falsely reject
-    /// every reference to this arm's own frame).
-    ///
-    /// This is also called directly from `expressions.rs`'s
-    /// `generate_block_stateful` — a single-arm `with_branch_context` use
-    /// (the Tier 2 stateful-block-body threading), same wrap/verify/render
-    /// shape as a conditional branch arm.
-    pub(in crate::core_erlang) fn verify_and_render_branch_arm(
-        &mut self,
-        stmts: Vec<ThreadedStmt>,
-        frame: FrameId,
-        final_version: usize,
-        span: Span,
-    ) -> (Document<'static>, usize) {
-        self.render_branch_arm(stmts, frame, final_version, span, None)
-    }
-
-    /// [`Self::verify_and_render_branch_arm`] for a conditional arm: with an
+    /// ADR 0111 Addendum 5, Rule 3: wraps a branch arm's real `Bind`/`Statement`
+    /// sequence in one node, `verify()`s it and `render()`s it. With an
     /// [`ArmFrame`] the arm is a [`ThreadedStmt::BranchArm`] node recording the
     /// construct's seeded `threads` (ADR 0131 §2), so the verifier reads the
-    /// frame's rebind shapes off the node; without one it is the legacy
-    /// `Threaded` wrapper, which threads nothing of its own.
+    /// frame's rebind shapes off the node (a conditional arm, and since BT-3939
+    /// a Tier 2 block body, `generate_block_stateful`); without one it is the
+    /// legacy `Threaded` wrapper (`StateAcc` mode, a transparent pass-through
+    /// whose only job is giving `verify()` the arm's non-ROOT frame), which
+    /// threads nothing of its own.
     pub(in crate::core_erlang) fn render_branch_arm(
         &mut self,
         stmts: Vec<ThreadedStmt>,

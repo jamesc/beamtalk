@@ -1693,7 +1693,7 @@ impl CoreErlangGenerator {
     /// (E1/E3 reuse `conditionals.rs`'s C1/C2 helpers,
     /// `lower_field_assignment_bind`/`lower_local_var_assignment_bind`,
     /// exactly — same shape, same mint order) — then `verify()`d and
-    /// `render()`d via `conditionals.rs`'s `verify_and_render_branch_arm`.
+    /// `render()`d via `conditionals.rs`'s `render_branch_arm`.
     /// Rule 2's separator divergence (this file inserts a literal `" "`
     /// between SOURCE-level statements, `conditionals.rs` inserts none at
     /// all) is reproduced by pushing that literal space as its own
@@ -1704,7 +1704,7 @@ impl CoreErlangGenerator {
     /// space inside any shape that itself decomposes into more than one
     /// entry, e.g. E1's Statement+Bind pair — a real double-space bug, not
     /// a cosmetic one).
-    /// `verify_and_render_branch_arm`'s plain `render()` has no separator
+    /// `render_branch_arm`'s plain `render()` has no separator
     /// of its own, so the manually-inserted space is the only one that
     /// ends up in the output, at exactly the position this same
     /// `if i > 0 { docs.push(" ") }` loop below has always put it — this
@@ -2227,7 +2227,7 @@ Actor subclass: Srv
         // sibling with_branch_context arms independently produce
         // "StateAcc1" — in disjoint frames minted by `current_branch_frame`.
         // `generate_exception_body_with_threading_inner` now `verify()`s
-        // each arm's REAL IR (via `verify_and_render_branch_arm`); a
+        // each arm's REAL IR (via `render_branch_arm`); a
         // regression that collapsed frame identity across arms (e.g. reused
         // the same FrameId, or dropped the per-with_branch_context mint)
         // would trip `VerifyError::NonLinearVersion`, hard-failing via
