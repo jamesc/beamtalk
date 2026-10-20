@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135 §3): nests Bt3962Leaf as a bare class, which makes it an
+// anonymous child, so any number of Bt3962Nest instances can run at once.
+
+Supervisor subclass: Bt3962Nest
+
+  childSpecs => #(Bt3962Leaf)

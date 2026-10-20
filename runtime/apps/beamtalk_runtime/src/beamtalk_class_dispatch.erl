@@ -53,31 +53,68 @@ Unwraps {ok, Value} / {error, Error} results for seamless integration.
 class_send(undefined, Selector, _Args) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
     beamtalk_error:raise(Error);
+%% ADR 0135 §1: `supervise` and the spawn family on a Supervisor or
+%% DynamicSupervisor class start the tree in the caller, through
+%% `beamtalk_supervisor:class_start/4`, never in the class gen_server (which
+%% would queue every other send to the class behind the start and deadlock
+%% any child that messages the class while it starts).
+class_send(ClassPid, Selector, Args) when
+    is_pid(ClassPid),
+    (Selector =:= supervise orelse Selector =:= spawn orelse Selector =:= 'spawnWith:' orelse
+        Selector =:= 'spawnAs:' orelse Selector =:= 'spawnWith:as:')
+->
+    case supervisor_start_target(ClassPid) of
+        {ok, ClassName, Module} ->
+            beamtalk_supervisor:class_start(ClassName, Module, Selector, Args);
+        error ->
+            class_send_plain(ClassPid, Selector, Args)
+    end;
+class_send(ClassPid, Selector, Args) ->
+    class_send_plain(ClassPid, Selector, Args).
+
+%% `{ok, ClassName, Module}` when `ClassPid` is a Supervisor or
+%% DynamicSupervisor class (ETS reads only), else `error`.
+-spec supervisor_start_target(pid()) -> {ok, class_name(), module()} | error.
+supervisor_start_target(ClassPid) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} ->
+            case
+                beamtalk_supervisor:is_supervisor(ClassName) andalso
+                    beamtalk_class_metadata:lookup_module(ClassName)
+            of
+                {ok, Module} -> {ok, ClassName, Module};
+                _ -> error
+            end;
+        not_found ->
+            error
+    end.
+
+-spec class_send_plain(pid(), atom(), list()) -> term().
 %% Self-call for instantiation selectors — bypass gen_server to avoid deadlock.
 %% When a class method sends new/new:/spawn/spawnWith: to its own class (ClassPid == self()),
 %% gen_server:call(self(), ...) would deadlock. Instead, perform instantiation directly
 %% using class metadata from the process dictionary (set during init).
-class_send(ClassPid, 'new', Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, 'new', Args) when ClassPid =:= self() ->
     handle_self_instantiation(new, 'new', Args);
-class_send(ClassPid, 'new:', Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, 'new:', Args) when ClassPid =:= self() ->
     handle_self_instantiation(new, 'new:', Args);
-class_send(ClassPid, spawn, Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, spawn, Args) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, spawn, Args);
-class_send(ClassPid, 'spawnWith:', Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, 'spawnWith:', Args) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, 'spawnWith:', Args);
-class_send(ClassPid, 'new', []) ->
+class_send_plain(ClassPid, 'new', []) ->
     class_send_with_recovery(ClassPid, 'new', fun(P) ->
         unwrap_class_call(gen_server:call(P, {new, []}))
     end);
-class_send(ClassPid, 'new:', [Map]) ->
+class_send_plain(ClassPid, 'new:', [Map]) ->
     class_send_with_recovery(ClassPid, 'new:', fun(P) ->
         unwrap_class_call(gen_server:call(P, {new, [Map]}))
     end);
-class_send(ClassPid, spawn, []) ->
+class_send_plain(ClassPid, spawn, []) ->
     class_send_with_recovery(ClassPid, spawn, fun(P) ->
         unwrap_class_call(gen_server:call(P, {spawn, []}))
     end);
-class_send(ClassPid, 'spawnWith:', [Map]) ->
+class_send_plain(ClassPid, 'spawnWith:', [Map]) ->
     class_send_with_recovery(ClassPid, 'spawnWith:', fun(P) ->
         unwrap_class_call(gen_server:call(P, {spawn, [Map]}))
     end);
@@ -105,7 +142,7 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 %% Report it the way `handle_metaclass_self_call/2` already reports
 %% the metaclass equivalent. No working path changes: the alternative was an
 %% exit, not a successful call.
-class_send(ClassPid, Selector, Args) ->
+class_send_plain(ClassPid, Selector, Args) ->
     %% ADR 0129 Phase 0b: sealed, stateless classes' eligible class methods run
     %% in the caller, exactly like the static direct call. The eligibility set
     %% is generated metadata (Rust's `compute_direct_call_eligible`), never
@@ -566,68 +603,11 @@ class_send_dispatch(ClassPid, Selector, Args) ->
         )
     of
         {ok, Result} ->
-            %% ADR 0080 Phase 0a (option 2): run the
-            %% initialize: lifecycle hook in the caller's process after a
-            %% supervise call returns a freshly-started supervisor tuple.
-            %%
-            %% After Phase 0a option 2, `beamtalk_supervisor:startLink/1`
-            %% returns Result-shaped values:
-            %%   {ok, {beamtalk_supervisor_new, ...}}   (fresh start)
-            %%   {ok, {beamtalk_supervisor, ...}}       (already_started)
-            %%   {error, #beamtalk_error{}}             (failure)
-            %% which FFI coercion wraps into a `Result` tagged map. The
-            %% stdlib `supervise` method currently calls `.unwrap` on that
-            %% Result (preserving the pre-migration user-facing `Supervisor`
-            %% type until the full Phase 1 stdlib migration lands), so by
-            %% the time the class method body returns, the Result has been
-            %% unwrapped to the bare inner tuple.
-            %%
-            %% We therefore match TWO shapes:
-            %%   (a) the bare `{beamtalk_supervisor_new, ...}` tuple — the
-            %%       unwrapped case, and the historical case;
-            %%   (b) a Result tagged map wrapping the _new inner tuple —
-            %%       the post-Phase-1 case where `supervise` no longer
-            %%       unwraps and callers handle the Result themselves.
-            %% Idempotent `{beamtalk_supervisor, ...}` returns and error
-            %% branches flow through unchanged (no initialize: re-run).
-            %%
-            %% ARCHITECTURAL NOTE: shape (b) couples this generic dispatch
-            %% layer to the Beamtalk `Result` internal tagged-map
-            %% representation (`$beamtalk_class`, `isOk`, `okValue`). ADR
-            %% 0080 §Phase 0a explicitly accepts this tradeoff: the
-            %% alternative (option 3: helper process) was shown to
-            %% deadlock on existing e2e fixtures during testing.
-            %% If Result's internal representation changes, update both
-            %% `beamtalk_result:from_tagged_tuple/1` and this match
-            %% together — they are the only two sites that encode the shape.
-            case Result of
-                {beamtalk_supervisor_new, CN, Mod, Pid} ->
-                    SupTuple = {beamtalk_supervisor, CN, Mod, Pid},
-                    beamtalk_supervisor:run_initialize(SupTuple),
-                    SupTuple;
-                #{
-                    '$beamtalk_class' := 'Result',
-                    isOk := true,
-                    okValue := {beamtalk_supervisor_new, CN, Mod, Pid}
-                } = ResultMap ->
-                    SupTuple = {beamtalk_supervisor, CN, Mod, Pid},
-                    beamtalk_supervisor:run_initialize(SupTuple),
-                    ResultMap#{okValue := SupTuple};
-                {beamtalk_supervisor, _, _, _} = SupTuple when Selector =:= supervise ->
-                    %% Idempotent branch: wait for a concurrent first caller's
-                    %% initialize: hook to finish (BT-3759).
-                    beamtalk_supervisor:await_initialized(SupTuple),
-                    Result;
-                #{
-                    '$beamtalk_class' := 'Result',
-                    isOk := true,
-                    okValue := {beamtalk_supervisor, _, _, _} = SupTuple
-                } when Selector =:= supervise ->
-                    beamtalk_supervisor:await_initialized(SupTuple),
-                    Result;
-                _ ->
-                    Result
-            end;
+            %% ADR 0135 §1: no supervisor post-dispatch hook here any more.
+            %% `supervise` and the spawn family start in the caller
+            %% (`class_send/3` -> `beamtalk_supervisor:class_start/4`), which
+            %% runs the instance-side `initialize` itself.
+            Result;
         {error, not_found} ->
             %% BT-3820: resolve name/module from the metadata ETS rows, not by
             %% calling back into ClassPid. The `class_method_call` above already

@@ -238,3 +238,45 @@ Workspace stopSupervisor: E2EAppSupervisor
 
 Node current supervisors unwrap size
 // => 0
+
+// ===========================================================================
+// SPAWN FAMILY — several instances of one class (ADR 0135 §1, BT-3962)
+// ===========================================================================
+
+// REPL expression codegen lowers `Sup spawn` / `Sup spawnWith:` to the
+// supervisor start helper too (a supervisor module has no spawn/0,1).
+s1 := E2EAppSupervisor spawn
+// => Supervisor(E2EAppSupervisor, _)
+
+s2 := E2EAppSupervisor spawnWith: #{#n => 2}
+// => Supervisor(E2EAppSupervisor, _)
+
+s1 == s2
+// => false
+
+s2 args at: #n
+// => 2
+
+s1 count
+// => 1
+
+p1 := E2EWorkerPool spawn
+// => DynamicSupervisor(E2EWorkerPool, _)
+
+Node current supervisors unwrap size
+// => 3
+
+s1 stop
+// => nil
+
+s2 count
+// => 1
+
+s2 stop
+// => nil
+
+p1 stop
+// => nil
+
+Node current supervisors unwrap size
+// => 0

@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135 §3): two children of one supervisor class, told apart by
+// integer ids; the second gets start args.
+
+Supervisor subclass: Bt3962Pair
+
+  childSpecs =>
+    #((Bt3962Leaf supervisionSpec withId: 1), (Bt3962Leaf supervisionSpec withId: 2 withArgs: #{
+      #x => 2
+    }))

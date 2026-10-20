@@ -214,8 +214,10 @@ Key class-side API:
 
 | Message | Returns | Description |
 |---------|---------|-------------|
-| `MyApp supervise` | supervisor pid | Start the supervision tree |
-| `MyApp current` | supervisor pid | Get the running instance |
+| `MyApp supervise` | supervisor pid | Start the supervision tree (the one class-named instance) |
+| `MyApp spawnWith: args` | supervisor | Start another, anonymous instance with start args (`spawn` for none) |
+| `MyApp current` | supervisor pid | Get the running `supervise` instance |
+| `MyApp supervisionSpec` | SupervisionSpec | Nest this supervisor in another one (`withId:`, `withArgs:`, …) |
 | `MyApp isSupervisor` | Boolean | Always `true` for supervisors |
 
 Key instance-side API:
