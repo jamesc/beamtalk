@@ -30,7 +30,6 @@ Actor subclass: Bt3939Tier2InlinedActor
 
   // evalValue (an evaluated `[...] value` binding in a plain-fun block) is
   // removed until BT-3981 is fixed: it answers the leaked state tuple.
-
   nested: flag =>
     xs := #(1, 2)
     (Erlang lists)

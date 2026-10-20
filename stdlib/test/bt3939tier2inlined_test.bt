@@ -10,6 +10,5 @@ TestCase subclass: Bt3939Tier2InlinedTest
     self assert: (Bt3939Tier2InlinedActor spawn arm: true) equals: #(3)
 
   // testEvaluatedBlockBindingAnswersPostLoopValue: removed until BT-3981.
-
   testNestedArmBindingAnswersPostLoopValue =>
     self assert: (Bt3939Tier2InlinedActor spawn nested: true) equals: #(3)

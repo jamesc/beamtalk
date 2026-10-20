@@ -50,11 +50,7 @@ Object subclass: Adr0131LocalRebindClass
 
   class s6 =>
     t := 0
-    r := (Erlang lists)
-      map: [:x |
-        x + t
-      ]
-      with: #(1)
+    r := (Erlang lists) map: [:x | x + t] with: #(1)
     #[r, t]
 
   class s8 =>
