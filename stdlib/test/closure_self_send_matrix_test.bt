@@ -634,9 +634,10 @@ TestCase subclass: ClosureSelfSendMatrixTest
     self assert: ClosureSelfSendSuperMatrix spawn superBinaryAtMethodLevel equals: 5
 
   testOpenSuperInInlinedLoopAndBranchRaises =>
+    // PIN-BUG BT-3995: should be 6 (`inlineDoSuper`) and 5 (`inlineBranchSuper`).
     // A `super` send is not a State-threading position of an inlined loop or
     // conditional (unlike a self-send), so a callee that changes state raises
-    // rather than drop the change silently.
+    // rather than drop the change silently. BT-3995 flips this to threading.
     a := ClosureSelfSendSuperMatrix spawn
     self should: [a inlineDoSuper] raise: #stateful_block_dispatch
     self assert: a total equals: 0
@@ -789,9 +790,10 @@ TestCase subclass: ClosureSelfSendMatrixTest
     self assert: ClosureSelfSendSuperMatrixSealed spawn superBinaryAtMethodLevel equals: 5
 
   testSealedSuperInInlinedLoopAndBranchRaises =>
+    // PIN-BUG BT-3995: should be 6 (`inlineDoSuper`) and 5 (`inlineBranchSuper`).
     // A `super` send is not a State-threading position of an inlined loop or
     // conditional (unlike a self-send), so a callee that changes state raises
-    // rather than drop the change silently.
+    // rather than drop the change silently. BT-3995 flips this to threading.
     a := ClosureSelfSendSuperMatrixSealed spawn
     self should: [a inlineDoSuper] raise: #stateful_block_dispatch
     self assert: a total equals: 0

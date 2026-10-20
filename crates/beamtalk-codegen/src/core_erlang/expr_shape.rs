@@ -297,7 +297,10 @@ pub(super) fn is_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool 
 ///
 /// Excludes self-sends with selectors that are intercepted by handlers before
 /// `try_handle_self_dispatch` in `generate_message_send`:
-/// - Binary operators (`+`, `-`, `*`, etc.)
+/// - Structurally lowered binary operators (`>>`, `**`, `++`, `%`, `==`, `=:=`,
+///   `/=`, `=/=`); every other binary selector sent to `self` (`+`, `-`, `<`,
+///   user-defined ones) IS a dispatching self-send (BT-3985,
+///   [`binary_self_send_dispatches`])
 /// - `asType:` (compile-time erasure)
 /// - `ProtoObject` messages (`class`, `perform:`, `perform:withArguments:`)
 /// - Object reflection (`fieldAt:`, `fieldAt:put:`, `fieldNames`, `respondsTo:`)

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3985: superclass for the `super`-send rows of the closure self-send
-// matrix (closure_self_send_super_matrix_test.bt). Its methods write `total`.
+// matrix (closure_self_send_matrix_test.bt). Its methods write `total`.
 
 Actor subclass: ClosureSelfSendSuperBase
   state: items = #(1, 2, 3)

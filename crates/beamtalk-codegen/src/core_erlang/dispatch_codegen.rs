@@ -1758,6 +1758,14 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
+    /// Whether the code being compiled is inside an actor closure that cannot
+    /// hand a dispatch's returned `State` back (a Tier 1 `fun`): the one
+    /// condition [`Self::closure_self_dispatch_state_guard`] applies under,
+    /// shared with `generate_super_send` so both decide it identically.
+    fn in_state_dropping_closure(&self) -> bool {
+        self.block_depth > 0 && self.closure_drops_state && self.context == CodeGenContext::Actor
+    }
+
     /// BT-3936 (ADR 0133 § Error examples): the reply body of a self-send
     /// dispatch that is compiled inside a closure (`block_depth > 0`) that is a Tier 1 `fun`. The callee's returned
     /// `State` has nowhere to go from there: the closure answers one value,
@@ -1774,14 +1782,6 @@ impl CoreErlangGenerator {
     /// Outside a closure the doc is `ok_doc` unchanged. This is the one place
     /// every actor self-send dispatch form (threaded `Bind`, discarding,
     /// sealed) shares; not a per-call-site check.
-    /// Whether the code being compiled is inside an actor closure that cannot
-    /// hand a dispatch's returned `State` back (a Tier 1 `fun`): the one
-    /// condition [`Self::closure_self_dispatch_state_guard`] applies under,
-    /// shared with `generate_super_send` so both decide it identically.
-    fn in_state_dropping_closure(&self) -> bool {
-        self.block_depth > 0 && self.closure_drops_state && self.context == CodeGenContext::Actor
-    }
-
     fn closure_self_dispatch_state_guard(
         &mut self,
         reply_state: &str,

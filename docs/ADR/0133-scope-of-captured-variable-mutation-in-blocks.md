@@ -275,7 +275,7 @@ direct class-side send. A `super` send inside a closure (the
 reply. A `super` send inside a literal block the compiler would otherwise
 inline (`self.items do: [:x | super bump: x]`) is not a State-threading
 position, so a callee that changes state raises here instead of threading;
-threading it is a separate piece of work.
+threading it is a separate piece of work (BT-3995).
 
 ## Prior Art
 
