@@ -375,6 +375,8 @@ numbers := List with: 1 with: 2 with: 3
 
 ## Future Work: Array Literals and Tuple/Array Separation
 
+> **Superseded for the brace syntax by [ADR 0136](0136-tuple-literal-expressions.md) (2026-10-20).** Array got its own `#[...]` literal (ADR 0090), so bare braces `{a, b}` now build a raw Erlang `Tuple`, not a tagged Array.
+
 Array literal syntax (`{1, 2, 3}`) is intentionally deferred from this ADR. The key design question — **how to distinguish user-created arrays from raw Erlang tuples** — requires its own ADR.
 
 ### The Problem

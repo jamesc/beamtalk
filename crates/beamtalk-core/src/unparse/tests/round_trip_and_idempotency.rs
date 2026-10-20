@@ -411,3 +411,25 @@ fn identity_fixture_long_keyword_messages() {
 fn identity_empty_source() {
     assert_identity("");
 }
+
+#[test]
+fn identity_fixture_tuple_literals() {
+    assert_identity(include_str!("../fixtures/tuple_literals.bt"));
+}
+
+#[test]
+fn tuple_literal_trailing_comma_is_normalised_away() {
+    let formatted = format_source("x := {#a, 1,}\n").expect("format");
+    assert_eq!(formatted, "x := {#a, 1}\n");
+    let formatted = format_source("{a, b,} := t\n").expect("format");
+    assert_eq!(formatted, "{a, b} := t\n");
+}
+
+#[test]
+fn tuple_literal_interpolation_keeps_padding() {
+    // `"{{a, b}}"` would be rejected by the lexer, so the unparser must
+    // keep (or add) the padding when the interpolation starts with `{`.
+    assert_identity("x := \"x { {a, b} } y\"\n");
+    assert_identity("x := \"x { {a, b} size } y\"\n");
+    assert_identity("x := \"x {a} y\"\n");
+}

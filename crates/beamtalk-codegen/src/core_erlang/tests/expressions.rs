@@ -1453,6 +1453,37 @@ fn test_generate_map_literal_with_atoms() {
 }
 
 #[test]
+fn test_generate_tuple_literal_is_direct_tuple() {
+    // BT-3969 / ADR 0136: `{#ok, 1}` lowers to a Core Erlang tuple, not a
+    // `Tuple withAll:` send.
+    let mut generator = CoreErlangGenerator::new("test");
+    let elements = vec![
+        Expression::Literal(Literal::Symbol("ok".into()), Span::new(1, 4)),
+        Expression::Literal(Literal::Integer(1), Span::new(6, 7)),
+    ];
+    let doc = generator.generate_tuple_literal(&elements).unwrap();
+    assert_eq!(doc.to_pretty_string(), "{'ok', 1}");
+    let doc = generator.generate_tuple_literal(&[]).unwrap();
+    assert_eq!(doc.to_pretty_string(), "{}");
+}
+
+#[test]
+fn test_generate_tuple_literal_compiles() {
+    let code = codegen(
+        "Object subclass: T\n  m => #(#binary, {#active, false}, {#backlog, 1024}, {}, {#ok})",
+    );
+    assert!(
+        code.contains("{'active', 'false'}"),
+        "expected a direct Core Erlang tuple, got:\n{code}"
+    );
+    assert!(
+        !code.contains("withAll:"),
+        "tuple literal must not desugar to a withAll: send:\n{code}"
+    );
+    assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
 fn test_generate_map_literal_compiles() {
     // uses the shared `codegen()` class-method helper (workspace
     // mode) rather than `generate_repl_expression` — map-literal Core

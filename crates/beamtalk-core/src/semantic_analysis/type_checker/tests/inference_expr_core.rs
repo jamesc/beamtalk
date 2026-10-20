@@ -222,6 +222,64 @@ fn infer_expr_array_literal_empty_is_dynamic_element() {
 }
 
 #[test]
+fn infer_expr_tuple_literal_is_positional() {
+    // ADR 0136: `{#a, 1}` keeps one type per position — Tuple(#a, Integer).
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let expr = Expression::TupleLiteral {
+        elements: vec![symbol_lit("a"), int_lit(1)],
+        span: span(),
+    };
+    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    assert_eq!(
+        ty,
+        InferredType::known_with_args(
+            "Tuple",
+            vec![InferredType::known("#a"), InferredType::known("Integer")]
+        )
+    );
+}
+
+#[test]
+fn infer_expr_empty_tuple_literal_is_bare_tuple() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let expr = Expression::TupleLiteral {
+        elements: vec![],
+        span: span(),
+    };
+    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    assert_eq!(ty, InferredType::known("Tuple"));
+}
+
+#[test]
+fn infer_tuple_literal_at_literal_index_end_to_end() {
+    // `({#a, 1} at: 2)` reaches the positional `Tuple at:` shortcut.
+    let module = parse_source("x := {#a, 1} at: 2\nx");
+    let hierarchy = ClassHierarchy::with_builtins();
+    let type_map = infer_types(&module, &hierarchy, None);
+    let ty = type_map.get(module.expressions[1].expression.span());
+    assert_eq!(ty, Some(&InferredType::known("Integer")));
+}
+
+#[test]
+fn tuple_literal_argument_to_tuple_parameter_is_clean() {
+    let source = "\
+Object subclass: TupleSink
+  take: t :: Tuple -> Integer => t size
+
+TupleSink new take: {#active, false}
+TupleSink new take: {}
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+}
+
+#[test]
 fn infer_expr_list_literal_folds_typed_tail_element() {
     // a `List(Integer)` tail contributes its `Integer` element to
     // the join, so `[1 | someIntList]` stays `List(Integer)`.

@@ -1000,7 +1000,7 @@ fn collect_directives_from_expr(expr: &Expression, directives: &mut Vec<ExpectDi
                 collect_directives_from_expr(t, directives);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 collect_directives_from_expr(elem, directives);
             }

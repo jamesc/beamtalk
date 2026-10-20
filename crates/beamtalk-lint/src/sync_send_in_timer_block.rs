@@ -229,7 +229,7 @@ fn walk_for_timer_sends(
             }
         }
 
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 walk_for_timer_sends(elem, in_timer_block, diagnostics);
             }
