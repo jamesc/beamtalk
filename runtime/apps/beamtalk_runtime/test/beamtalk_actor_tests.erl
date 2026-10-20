@@ -2096,6 +2096,54 @@ safe_spawn_named_does_not_wait_for_initialize_continuation_test_() ->
         gen_server:stop(Pid)
     end}.
 
+spawn_named_for_caller_unlinks_before_continuations_can_kill_caller_test_() ->
+    %% A continuation requested by `initialize` runs concurrently with the
+    %% caller once the spawn returned. One that stops the actor abnormally
+    %% right away must not kill a non-trapping caller (the class process for
+    %% `self spawnAs:`): the link is gone before trap_exit is restored.
+    {timeout, 30, fun() ->
+        logger:set_primary_config(level, none),
+        try
+            Parent = self(),
+            Results = [
+                begin
+                    Name = list_to_atom("bt_3992_unlink_" ++ integer_to_list(I)),
+                    {Caller, MRef} = spawn_monitor(fun() ->
+                        false = process_flag(trap_exit, false),
+                        R = beamtalk_actor:spawn_named_for_caller(
+                            local, Name, test_init_ack_actor, #{mode => stop_continue}
+                        ),
+                        {ok, Pid} = R,
+                        {links, Links} = process_info(self(), links),
+                        Ref = erlang:monitor(process, Pid),
+                        receive
+                            {'DOWN', Ref, process, Pid, _} -> ok
+                        end,
+                        Stray =
+                            receive
+                                {'EXIT', Pid, _} = M -> M
+                            after 0 -> none
+                            end,
+                        Parent ! {self(), lists:member(Pid, Links), Stray}
+                    end),
+                    receive
+                        {Caller, Linked, Stray} ->
+                            receive
+                                {'DOWN', MRef, process, Caller, _} -> ok
+                            end,
+                            {Linked, Stray};
+                        {'DOWN', MRef, process, Caller, Reason} ->
+                            {caller_died, Reason}
+                    end
+                end
+             || I <- lists:seq(1, 50)
+            ],
+            ?assertEqual([], [R || R <- Results, R =/= {false, none}])
+        after
+            logger:set_primary_config(level, all)
+        end
+    end}.
+
 safe_spawn_slow_initialize_times_out_and_kills_test_() ->
     %% `initialize` itself is still bounded by the 5 s timeout: the spawn
     %% fails with `timeout` and the actor is killed.

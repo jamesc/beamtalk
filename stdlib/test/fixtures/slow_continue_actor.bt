@@ -4,18 +4,21 @@
 // BT-3992 fixture: an Actor whose `initialize` requests a slow continuation
 // (`stepDelay` ms). `spawn` returns as soon as `initialize` has returned; the
 // continuation runs afterwards, still before any message sent after `spawn`.
-// With `failFirst`, a continuation that raises is queued first. See
+// With `failFirst`, a continuation that raises is queued first; with
+// `stopInInit`, `initialize` also stops the actor, which fails the spawn. See
 // stdlib/test/actor_continue_with_test.bt.
 
 Actor subclass: SlowContinueActor
   state: log = #()
   state: stepDelay = 0
   state: failFirst = false
+  state: stopInInit = false
 
   initialize =>
     self.log := self.log add: #initialize
     self.failFirst ifTrue: [self continueWith: #explode]
     self continueWith: #slowStep
+    self.stopInInit ifTrue: [self stopWith: #badConfig]
 
   slowStep =>
     Timer sleep: self.stepDelay

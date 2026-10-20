@@ -71,6 +71,13 @@ TestCase subclass: ActorContinueWithTest
     self assert: actor isAlive
     actor stop
 
+  testStopInInitializeStillFailsSpawn =>
+    // The ack is sent only for a successful initialize step: a stop
+    // requested there wins over its continuations and fails the spawn.
+    self should: [
+      SlowContinueActor spawnWith: #{#stopInInit => true}
+    ] raise: #instantiation_error
+
   testNamedSupervisorChildContinuationMayCallParent =>
     start := DateTime monotonicNow
     sup := Bt3992NamedCallerSup spawn

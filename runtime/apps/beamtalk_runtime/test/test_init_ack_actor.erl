@@ -19,6 +19,9 @@ the `initialize` step passes its result through
   `initialize`).
 - `slow_initialize` — `initialize` itself sleeps `delay` ms.
 - `crash` — `initialize` fails (`{stop, {error, function_clause}, _}`).
+- `stop_continue` — `initialize` succeeds and requests a `{continue, die}`
+  step that stops the actor at once with reason `bad_config` (a
+  `self stopWith:` in a continuation).
 """.
 
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, terminate/2]).
@@ -32,6 +35,10 @@ handle_continue(initialize = Continue, #{mode := slow_continue} = State) ->
 handle_continue(initialize = Continue, #{mode := slow_initialize, delay := Delay} = State) ->
     timer:sleep(Delay),
     beamtalk_actor:ack_initialized(Continue, {noreply, State});
+handle_continue(initialize = Continue, #{mode := stop_continue} = State) ->
+    beamtalk_actor:ack_initialized(Continue, {noreply, State, {continue, die}});
+handle_continue(die, State) ->
+    {stop, bad_config, State};
 handle_continue(initialize = Continue, #{mode := crash} = State) ->
     beamtalk_actor:ack_initialized(Continue, {stop, {error, function_clause}, State});
 handle_continue(slow = Continue, #{delay := Delay} = State) ->

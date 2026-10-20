@@ -101,17 +101,17 @@ so it runs for ALL spawn paths — direct, supervised, and named.
 | REPL spawn | Module:spawn/0,1 + register_spawned/4 | REPL | Yes |
 | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
 | self spawn/spawnWith: | safe_spawn/2, unlinked (or linked if inside a `withClassMethod:` supervisor factory) | Class method | Yes |
-| self spawnAs:/spawnWith:as: | safe_spawn_named/4, unlinked after (or stays linked, same exception) | Class method | Yes |
-| withName: supervisor child | safe_spawn_named/4 → gen_server:start_link → init/1 | Supervised | Yes |
+| self spawnAs:/spawnWith:as: | safe_spawn_named/5, unlinked after (or stays linked, same exception) | Class method | Yes |
+| withName: supervisor child | safe_spawn_named/5 → gen_server:start_link → init/1 | Supervised | Yes |
 | Supervisor child (unnamed, plain spawn/spawnWith:) | start_link/1 → gen_server:start_link → init/1 | Supervised | Yes |
-| withClassMethod: supervisor child | start_child_via_class_method/4 → factory's `self spawn`/`spawnWith:`/`spawnAs:`/`spawnWith:as:` → safe_spawn/2 or safe_spawn_named/4, linked | Supervised | Yes |
+| withClassMethod: supervisor child | start_child_via_class_method/4 → factory's `self spawn`/`spawnWith:`/`spawnAs:`/`spawnWith:as:` → safe_spawn/2 or safe_spawn_named/5, linked | Supervised | Yes |
 | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
 
 unnamed `Module:spawn/0,1` (via `beamtalk_actor:safe_spawn/2`)
 spawns unlinked in the common case — the caller (which can be a class
 gen_server for dynamic dispatch, or a class method body for `self spawn`)
 is never linked to the actor it creates, so killing the actor cannot take
-the caller down with it. `safe_spawn_named/4` (`spawnAs:`/`spawnWith:as:`)
+the caller down with it. `safe_spawn_named/5` (`spawnAs:`/`spawnWith:as:`)
 stays linked, because it doubles as the real OTP supervisor child MFA for
 `SupervisionSpec withName:` children (ADR 0079) — that link is the
 restart mechanism, not a bug. Its own `self`-send risk (a class method's
@@ -250,6 +250,11 @@ handle_getValue([], State) ->
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
 -export([await_initialize/1, await_initialize/2, await_initialize/3, safe_spawn/2]).
+
+%% BT-3992: named spawns that must not leave the actor linked to the caller.
+-export([spawn_named_for_caller/4, spawn_named_unlinked/3]).
+
+-type link_mode() :: linked | unlinked.
 
 %% BT-3992: initialize acknowledgement, called from generated init/1 and
 %% handle_continue/2 (and this module's own init/1).
@@ -656,7 +661,7 @@ await_initialize(Pid, MonRef, AckRef) ->
 -doc """
 BT-3992: add the initialize-ack target `{self(), AckRef}` to a spawn's start
 args. Every Beamtalk start path (`safe_spawn/2`, `safe_spawn_linked/2`,
-`safe_spawn_named/4`) goes through this and then await_initialize/3; the
+`safe_spawn_named/5`) goes through this and then await_initialize/3; the
 actor strips the key from its state in `init/1` (take_init_ack/2). Start
 args that are not a map (a hand-written gen_server's own shape) carry no
 target (`none`); await_initialize/3 then takes the sys-based fallback.
@@ -780,7 +785,7 @@ the factory; since every hop in between is a plain synchronous call in the
 same process (no `spawn`/`erlang:apply` to a different process, no message
 send-and-receive), the key is still visible here. When it is set, this
 delegates to `safe_spawn_linked/2` instead, staying linked exactly like
-`safe_spawn_named/4` already does for the named-child case.
+`safe_spawn_named/5` already does for the named-child case.
 
 This consolidates the await_initialize logic so generated spawn
 functions stay simple.
@@ -807,11 +812,13 @@ Spawn an actor **linked**, with
 trap_exit + initialize synchronization, for the one `safe_spawn/2` case that
 needs the link — a `withClassMethod:` supervisor child's factory calling
 plain `self spawn`/`self spawnWith:` (see `safe_spawn/2`'s doc). Shares the
-trap_exit dance with `safe_spawn_named/4` via `start_link_and_await/1`.
+trap_exit dance with `safe_spawn_named/5` via `start_link_and_await/1`.
 """.
 -spec safe_spawn_linked(module(), map()) -> {ok, pid()} | {error, term()}.
 safe_spawn_linked(Module, InitArgs) ->
-    start_link_and_await(fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs).
+    start_link_and_await(
+        fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, linked
+    ).
 
 -doc """
 Spawn a named actor with trap_exit + initialize synchronization, per
@@ -862,14 +869,24 @@ ordinary, not a conflict, teardown) and reports `{already_started,
 ExistingPid}`, the exact shape `spawn_named_scoped/4` already translates to
 `name_registered` for the `local` path, so no separate error-mapping arm is
 needed for `global`.
+
+`Link` is `linked` for every caller above. `unlinked` (BT-3992,
+spawn_named_for_caller/4) drops the link to the caller inside
+start_link_and_await/3, before `trap_exit` is restored — see that
+function's doc for why the caller cannot do it after.
 """.
--spec safe_spawn_named(local | global, atom(), module(), map()) -> {ok, pid()} | {error, term()}.
-safe_spawn_named(local, Name, Module, InitArgs) ->
+-spec safe_spawn_named(local | global, link_mode(), atom(), module(), map()) ->
+    {ok, pid()} | {error, term()}.
+safe_spawn_named(local, Link, Name, Module, InitArgs) ->
     start_link_and_await(
-        fun(Args) -> gen_server:start_link({local, Name}, Module, Args, []) end, InitArgs
+        fun(Args) -> gen_server:start_link({local, Name}, Module, Args, []) end, InitArgs, Link
     );
-safe_spawn_named(global, Name, Module, InitArgs) ->
-    case start_link_and_await(fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs) of
+safe_spawn_named(global, Link, Name, Module, InitArgs) ->
+    case
+        start_link_and_await(
+            fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, Link
+        )
+    of
         {ok, Pid} ->
             case global:register_name(Name, Pid, fun ?MODULE:resolve_global_conflict/3) of
                 yes ->
@@ -884,18 +901,27 @@ safe_spawn_named(global, Name, Module, InitArgs) ->
 
 -doc """
 Shared linked-start + trap_exit + await_initialize dance for
-`safe_spawn_named/4` and `safe_spawn_linked/2`. `StartFun` performs the
+`safe_spawn_named/5` and `safe_spawn_linked/2`. `StartFun` performs the
 actual `gen_server:start_link/3,4` call (parametrized so the two callers can
 each pass their own registration shape) on `InitArgs` plus the
 initialize-ack target (with_init_ack/1, BT-3992), and is invoked exactly
 once, with `trap_exit` already set, so a crash during `initialize` delivers
 an `'EXIT'` message here instead of taking this process down.
+
+`Link = unlinked` (BT-3992) removes the start link before `trap_exit` is
+restored, and drops any `'EXIT'` the actor already sent over it. A caller
+that wants the actor unlinked (a class method's `self spawnAs:`, a remote
+spawn's erpc worker) must not unlink afterwards: `spawn` now returns as soon
+as `initialize` has returned, so continuations it requested run
+concurrently with the caller, and one that stops the actor
+(`self stopWith:`) in the window between the restore and the caller's
+`unlink/1` would kill a caller that does not trap exits.
 """.
 -spec start_link_and_await(
-    fun((term()) -> {ok, pid()} | {error, term()} | ignore), term()
+    fun((term()) -> {ok, pid()} | {error, term()} | ignore), term(), link_mode()
 ) ->
     {ok, pid()} | {error, term()}.
-start_link_and_await(StartFun, InitArgs) ->
+start_link_and_await(StartFun, InitArgs, Link) ->
     OldTrap = erlang:process_flag(trap_exit, true),
     {AckArgs, AckRef} = with_init_ack(InitArgs),
     Result = StartFun(AckArgs),
@@ -903,6 +929,7 @@ start_link_and_await(StartFun, InitArgs) ->
         {ok, Pid} ->
             case await_initialize(Pid, erlang:monitor(process, Pid), AckRef) of
                 ok ->
+                    ok = maybe_unlink_started(Link, Pid),
                     erlang:process_flag(trap_exit, OldTrap),
                     {ok, Pid};
                 {error, Reason} ->
@@ -930,6 +957,19 @@ start_link_and_await(StartFun, InitArgs) ->
         ignore ->
             erlang:process_flag(trap_exit, OldTrap),
             {error, ignore}
+    end.
+
+%% Unlink a just-started actor (BT-3992) while the caller still traps exits,
+%% then drop an `'EXIT'` that arrived over the link before it was removed —
+%% `unlink/1` guarantees no further link signal once it returns.
+-spec maybe_unlink_started(link_mode(), pid()) -> ok.
+maybe_unlink_started(linked, _Pid) ->
+    ok;
+maybe_unlink_started(unlinked, Pid) ->
+    true = unlink(Pid),
+    receive
+        {'EXIT', Pid, _} -> ok
+    after 0 -> ok
     end.
 
 -spec prefer_exit_reason(term(), term()) -> term().
@@ -2925,7 +2965,8 @@ init(State) when is_map(State) ->
                      || K <- maps:keys(State),
                         K =/= '__methods__',
                         K =/= ClassKey,
-                        K =/= '__class_mod__'
+                        K =/= '__class_mod__',
+                        K =/= ?BT_INIT_ACK_KEY
                     ],
                     ?LOG_INFO("Actor started", #{
                         class => Class,
@@ -4473,11 +4514,11 @@ and `'spawnAs'/3` (CLAUDE.md "No duplicate implementations").
         )}.
 
 -doc """
-Shared reserved-name check + `safe_spawn_named/4` dispatch behind
+Shared reserved-name check + `safe_spawn_named/5` dispatch behind
 `'spawnAs'/3` (`Scope = local`) and `'spawnAsGlobal'/3` (`Scope = global`) —
 the two differ only in which registry they land in (ADR 0126 §4: "`global`
 names go through the SAME `reserved_name/1` check as local names"). On
-`{already_started, _}` (both scopes — `global`'s own `safe_spawn_named/4`
+`{already_started, _}` (both scopes — `global`'s own `safe_spawn_named/5`
 clause translates a lost `global:register_name/3` race to this exact shape,
 see its doc) or `badarg` (the `local` scope's own
 `gen_server:start_link({local, Name}, ...)` failure mode) this returns the
@@ -4487,6 +4528,17 @@ structured `name_registered` error so the stdlib boundary can translate to
 -spec spawn_named_scoped(local | global, atom(), module(), term()) ->
     {ok, pid()} | {error, term()}.
 spawn_named_scoped(Scope, Name, Module, Args) ->
+    spawn_named_scoped(Scope, linked, Name, Module, Args).
+
+-doc """
+`spawn_named_scoped/4` with an explicit link mode (BT-3992): a caller that
+must not stay linked to the named actor passes `unlinked` (or
+caller_link_mode/0) instead of unlinking after the spawn returned — see
+start_link_and_await/3.
+""".
+-spec spawn_named_scoped(local | global, link_mode(), atom(), module(), term()) ->
+    {ok, pid()} | {error, term()}.
+spawn_named_scoped(Scope, Link, Name, Module, Args) ->
     case reserved_name(Name) of
         true ->
             {error,
@@ -4499,7 +4551,7 @@ spawn_named_scoped(Scope, Name, Module, Args) ->
                     )
                 )};
         false ->
-            try safe_spawn_named(Scope, Name, Module, Args) of
+            try safe_spawn_named(Scope, Link, Name, Module, Args) of
                 {ok, Pid} ->
                     {ok, Pid};
                 {error, {already_started, _Other}} ->
@@ -4514,6 +4566,43 @@ spawn_named_scoped(Scope, Name, Module, Args) ->
                     name_registered_error(Name)
             end
     end.
+
+-doc """
+BT-3992: spawn a named actor (`'spawnAs'/3` for `local`, `'spawnAsGlobal'/3`
+for `global`) for a caller that must not stay linked to it — a class
+method's `self spawnAs:` running in the class process, or a remote spawn's
+erpc worker. The link is removed inside the start (start_link_and_await/3),
+before the caller stops trapping exits; unlinking after this returned would
+leave a window in which a continuation requested by `initialize` that stops
+the actor kills the caller.
+
+`withClassMethod:` supervisor factories are the exception: when
+`?BT_SUPERVISOR_SPAWN_CONTEXT_KEY` is set the caller really is the OTP
+supervisor and the actor stays linked (see `safe_spawn/2`'s doc).
+""".
+-spec spawn_named_for_caller(local | global, term(), term(), term()) ->
+    {ok, pid()} | {error, term()}.
+spawn_named_for_caller(Scope, Name, Module, Args) when is_atom(Name), is_atom(Module) ->
+    Link =
+        case get(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY) of
+            true -> linked;
+            _ -> unlinked
+        end,
+    spawn_named_scoped(Scope, Link, Name, Module, Args);
+spawn_named_for_caller(local, Name, Module, Args) ->
+    'spawnAs'(Name, Module, Args);
+spawn_named_for_caller(global, Name, Module, Args) ->
+    'spawnAsGlobal'(Name, Module, Args).
+
+-doc """
+BT-3992: `spawn_named_for_caller/4` without the supervisor exception — the
+actor is never left linked to the caller (remote spawns' erpc workers).
+""".
+-spec spawn_named_unlinked(term(), term(), term()) -> {ok, pid()} | {error, term()}.
+spawn_named_unlinked(Name, Module, Args) when is_atom(Name), is_atom(Module) ->
+    spawn_named_scoped(local, unlinked, Name, Module, Args);
+spawn_named_unlinked(Name, Module, Args) ->
+    'spawnAs'(Name, Module, Args).
 
 %%% ============================================================================
 %%% Beamtalk stdlib FFI shims (ADR 0079)
@@ -4717,17 +4806,10 @@ attach_class_if_known(Self, Err, Selector) ->
 do_spawn_with_selector(Scope, Self, InitArgs, Name, Selector) ->
     case class_self_to_name_and_module(Self) of
         {ok, ClassName, Module} ->
-            SpawnResult =
-                case Scope of
-                    local -> 'spawnAs'(Name, Module, InitArgs);
-                    global -> 'spawnAsGlobal'(Name, Module, InitArgs)
-                end,
-            case SpawnResult of
+            %% BT-3992: unlinked inside the start (unless in a
+            %% withClassMethod: supervisor factory), not after it returned.
+            case spawn_named_for_caller(Scope, Name, Module, InitArgs) of
                 {ok, Pid} ->
-                    case get(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY) of
-                        true -> ok;
-                        _ -> unlink(Pid)
-                    end,
                     %% ADR 0126 §4: the `local` scope returns the raw pid
                     %% (unchanged, `doSpawnAs/2`'s existing contract) — a
                     %% local `{local, Name}` registration is bidirectional
@@ -5279,8 +5361,8 @@ An anonymous spawn (`NameOrUndefined =:= undefined`) delegates to
 `safe_spawn/2`, which (outside a supervisor context, never the case for an
 `erpc` worker) uses `gen_server:start/3` — already unlinked, so no
 unlink-after-start dance is needed there. A named spawn delegates to the
-public `'spawnAs'/3` wrapper (reserved-name check + `safe_spawn_named/4`,
-BT-3579's Phase 0.5 correction to this ADR — `safe_spawn_named/4` itself is
+public `'spawnAs'/3` wrapper (reserved-name check + `safe_spawn_named/5`,
+BT-3579's Phase 0.5 correction to this ADR — `safe_spawn_named/5` itself is
 not `-export`ed) and **unlinks immediately** after a successful start: the
 calling `erpc` worker process exits with a non-`normal` reason once this
 function returns, and a still-linked actor would die right along with it
@@ -5298,13 +5380,8 @@ remote_spawn_target(ClassName, NameOrUndefined) ->
                 undefined ->
                     safe_spawn(Module, #{});
                 Name when is_atom(Name) ->
-                    case 'spawnAs'(Name, Module, #{}) of
-                        {ok, Pid} ->
-                            unlink(Pid),
-                            {ok, Pid};
-                        {error, _} = Err ->
-                            Err
-                    end
+                    %% BT-3992: unlinked inside the start.
+                    spawn_named_unlinked(Name, Module, #{})
             end
     end.
 
@@ -5358,13 +5435,8 @@ remote_spawn_with_target(ClassName, NameOrUndefined, WireInitArgs) ->
                         undefined ->
                             safe_spawn(Module, InitArgs);
                         Name when is_atom(Name) ->
-                            case 'spawnAs'(Name, Module, InitArgs) of
-                                {ok, Pid} ->
-                                    unlink(Pid),
-                                    {ok, Pid};
-                                {error, _} = Err ->
-                                    Err
-                            end
+                            %% BT-3992: unlinked inside the start.
+                            spawn_named_unlinked(Name, Module, InitArgs)
                     end
             end;
         {error, #beamtalk_error{}} = Err ->
