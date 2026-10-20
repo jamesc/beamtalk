@@ -1525,7 +1525,7 @@ fn check_expr_for_unsafe_field_mutation(
                 check_expr_for_unsafe_field_mutation(t, class_name, diagnostics);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 check_expr_for_unsafe_field_mutation(elem, class_name, diagnostics);
             }

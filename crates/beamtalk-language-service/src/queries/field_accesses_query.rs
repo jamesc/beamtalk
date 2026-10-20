@@ -261,7 +261,7 @@ fn collect_access_lines(
                 collect_access_lines(tail_expr, field_name, kind, source, lines);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for element in elements {
                 collect_access_lines(element, field_name, kind, source, lines);
             }

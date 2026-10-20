@@ -333,7 +333,7 @@ fn walk_expr<V: SendVisitor>(expr: &Expression, source: &str, visitor: &mut V) {
                 walk_expr(tail_expr, source, visitor);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for element in elements {
                 walk_expr(element, source, visitor);
             }
@@ -718,7 +718,7 @@ fn collect_selector_send_spans(
                 collect_selector_send_spans(tail_expr, source, old_selector, new_selector, out);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for element in elements {
                 collect_selector_send_spans(element, source, old_selector, new_selector, out);
             }
@@ -1248,7 +1248,7 @@ fn collect_all_references(expr: &Expression, source: &str, hits: &mut Vec<(Strin
                 collect_all_references(tail_expr, source, hits);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for element in elements {
                 collect_all_references(element, source, hits);
             }

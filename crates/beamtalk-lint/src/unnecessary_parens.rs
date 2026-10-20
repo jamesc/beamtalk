@@ -60,6 +60,7 @@ fn is_always_unnecessary(expr: &Expression) -> bool {
         | Expression::MapLiteral { .. }
         | Expression::ListLiteral { .. }
         | Expression::ArrayLiteral { .. }
+        | Expression::TupleLiteral { .. }
         | Expression::Primitive { .. }
         | Expression::StringInterpolation { .. }
         | Expression::FieldAccess { .. }
@@ -231,7 +232,7 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             }
         }
 
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 check_expr(elem, diagnostics);
             }
@@ -240,7 +241,17 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
                 if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
-                    check_expr(e, diagnostics);
+                    // `"{({a, b})}"`: dropping the parens would yield the
+                    // lexer-rejected `"{{a, b}}"` (ADR 0136), so the parens
+                    // are significant here — lint only the inner expression.
+                    match e {
+                        Expression::Parenthesized { expression, .. }
+                            if matches!(**expression, Expression::TupleLiteral { .. }) =>
+                        {
+                            check_expr(expression, diagnostics);
+                        }
+                        _ => check_expr(e, diagnostics),
+                    }
                 }
             }
         }

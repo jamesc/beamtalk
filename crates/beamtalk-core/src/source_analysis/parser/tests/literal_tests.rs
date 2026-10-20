@@ -3,6 +3,7 @@
 
 //! Tests for list literal parsing and keyword message elements in list literals.
 use super::*;
+use crate::ast::Pattern;
 
 // ========================================================================
 // List Literal Tests
@@ -1232,5 +1233,220 @@ fn parse_exponentiation_right_associative() {
             }
         }
         _ => panic!("Expected ** at top level"),
+    }
+}
+
+// ========================================================================
+// Tuple Literal Tests (BT-3969 / ADR 0136)
+// ========================================================================
+
+/// Parses `source` and returns the first statement's expression.
+fn first_expr(source: &str) -> Expression {
+    let module = parse_ok(source);
+    module.expressions[0].expression.clone()
+}
+
+/// Asserts `expr` is a tuple literal and returns its elements.
+fn tuple_elements(expr: &Expression) -> &[Expression] {
+    match expr {
+        Expression::TupleLiteral { elements, .. } => elements,
+        other => panic!("Expected tuple literal, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_tuple_literal_two_elements() {
+    let expr = first_expr("{#active, false}");
+    let elements = tuple_elements(&expr);
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(&elements[0], Expression::Literal(Literal::Symbol(s), _) if s == "active"));
+}
+
+#[test]
+fn parse_tuple_literal_empty() {
+    let expr = first_expr("{}");
+    assert!(tuple_elements(&expr).is_empty());
+}
+
+#[test]
+fn parse_tuple_literal_single() {
+    let expr = first_expr("{#ok}");
+    assert_eq!(tuple_elements(&expr).len(), 1);
+}
+
+#[test]
+fn parse_tuple_literal_nested() {
+    let expr = first_expr("{#a, {#b, 1}}");
+    let elements = tuple_elements(&expr);
+    assert_eq!(elements.len(), 2);
+    assert_eq!(tuple_elements(&elements[1]).len(), 2);
+}
+
+#[test]
+fn parse_tuple_literal_trailing_comma() {
+    let expr = first_expr("{#a, 1,}");
+    assert_eq!(tuple_elements(&expr).len(), 2);
+}
+
+#[test]
+fn parse_tuple_literal_keyword_send_element() {
+    let expr = first_expr("{#backlog, opts at: #backlog}");
+    let elements = tuple_elements(&expr);
+    assert_eq!(elements.len(), 2);
+    assert!(
+        matches!(&elements[1], Expression::MessageSend { selector, .. } if selector.name() == "at:")
+    );
+}
+
+#[test]
+fn parse_tuple_literal_missing_close_brace_reports_error() {
+    let diagnostics = parse_err("x := {1, 2");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("Expected '}' to close tuple literal")),
+        "got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_tuple_literal_period_separator_gives_hint() {
+    let diagnostics = parse_err("x := {a. b}");
+    assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("Expected ',' or '}' in tuple literal")
+    );
+    assert!(
+        diagnostics[0]
+            .hint
+            .as_ref()
+            .is_some_and(|h| h.contains("{a, b}")),
+        "got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_statement_start_tuple_is_expression() {
+    let expr = first_expr("{a, b} size");
+    match expr {
+        Expression::MessageSend {
+            receiver, selector, ..
+        } => {
+            assert_eq!(selector.name(), "size");
+            assert_eq!(tuple_elements(&receiver).len(), 2);
+        }
+        other => panic!("Expected unary send on a tuple literal, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_statement_start_tuple_destructure_still_pattern() {
+    // `x :: Integer` is pattern-only syntax: it must keep the pattern path.
+    let expr = first_expr("{x :: Integer, #ok, _} := t");
+    match expr {
+        Expression::DestructureAssignment { pattern, .. } => {
+            assert!(matches!(pattern, Pattern::Tuple { ref elements, .. } if elements.len() == 3));
+        }
+        other => panic!("Expected destructure, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_tuple_swap() {
+    let expr = first_expr("{a, b} := {b, a}");
+    match expr {
+        Expression::DestructureAssignment { pattern, value, .. } => {
+            assert!(matches!(pattern, Pattern::Tuple { .. }));
+            assert_eq!(tuple_elements(&value).len(), 2);
+        }
+        other => panic!("Expected destructure, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_tuple_pattern_trailing_comma() {
+    let expr = first_expr("{a, b,} := t");
+    match expr {
+        Expression::DestructureAssignment {
+            pattern: Pattern::Tuple { elements, .. },
+            ..
+        } => assert_eq!(elements.len(), 2),
+        other => panic!("Expected tuple destructure, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_nested_brace_destructure_lookahead() {
+    // The lookahead must match the *outer* `}` (counting the nested `{`).
+    let expr = first_expr("{a, {b, c}} := t");
+    assert!(matches!(expr, Expression::DestructureAssignment { .. }));
+    let expr = first_expr("{a, #{#k => v}} size");
+    assert!(matches!(expr, Expression::MessageSend { .. }));
+}
+
+#[test]
+fn parse_tuple_destructure_type_annotation_still_rejected() {
+    let diagnostics = parse_err("{a, b} :: Tuple := x");
+    assert!(
+        diagnostics.iter().any(|d| d
+            .message
+            .contains("Type annotations on destructuring assignments are not yet supported")),
+        "got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_parenthesized_tuple_assignment_target_rejected() {
+    let diagnostics = parse_err("({a, b}) := x");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("Assignment target must be")),
+        "got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_tuple_literal_as_map_key() {
+    let expr = first_expr("#{{1, 2} => #pair}");
+    match expr {
+        Expression::MapLiteral { pairs, .. } => {
+            assert_eq!(tuple_elements(&pairs[0].key).len(), 2);
+        }
+        other => panic!("Expected map literal, got: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_tuple_literal_as_keyword_argument_and_return() {
+    let expr = first_expr("foo with: {a, b}");
+    assert!(
+        matches!(expr, Expression::MessageSend { ref arguments, .. } if matches!(arguments[0], Expression::TupleLiteral { .. }))
+    );
+    let expr = first_expr("^ {a, b}");
+    assert!(
+        matches!(expr, Expression::Return { ref value, .. } if matches!(**value, Expression::TupleLiteral { .. }))
+    );
+}
+
+#[test]
+fn parse_tuple_literal_in_block_body_and_match_arm_body() {
+    let expr = first_expr("[:x | {x, x}]");
+    match expr {
+        Expression::Block(block) => {
+            assert_eq!(tuple_elements(&block.body[0].expression).len(), 2);
+        }
+        other => panic!("Expected block, got: {other:?}"),
+    }
+    let expr = first_expr("v match: [{#ok, x} -> {x, x}; _ -> {}]");
+    match expr {
+        Expression::Match { arms, .. } => {
+            assert!(matches!(arms[0].pattern, Pattern::Tuple { .. }));
+            assert_eq!(tuple_elements(&arms[0].body).len(), 2);
+            assert!(tuple_elements(&arms[1].body).is_empty());
+        }
+        other => panic!("Expected match, got: {other:?}"),
     }
 }

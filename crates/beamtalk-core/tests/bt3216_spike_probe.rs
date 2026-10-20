@@ -89,7 +89,7 @@ fn collect_receiver_spans(expr: &Expression, out: &mut Vec<(String, Span)>) {
                 collect_receiver_spans(t, out);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for e in elements {
                 collect_receiver_spans(e, out);
             }

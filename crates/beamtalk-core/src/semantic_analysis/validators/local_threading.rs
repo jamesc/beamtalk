@@ -1916,7 +1916,8 @@ impl<'d> Walker<'d> {
                     self.operand(t, Position::LiteralElement);
                 }
             }
-            Expression::ArrayLiteral { elements, .. } => {
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
                 for e in elements {
                     self.operand(e, Position::LiteralElement);
                 }

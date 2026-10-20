@@ -211,7 +211,8 @@ impl TypeChecker {
                     }
                 }
             }
-            Expression::ArrayLiteral { elements, .. } => {
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
                 for elem in elements {
                     self.check_protocol_conformance_in_expr(elem, hierarchy, protocol_registry);
                 }
