@@ -1242,9 +1242,11 @@ childWithId(Self, Id) ->
         case lists:keyfind(Id, 1, supervisor:which_children(Pid)) of
             false ->
                 {error, child_not_found_error(SupClass, Selector, Id)};
-            Entry ->
-                #{child := Child} = supervisor_child_entry(Entry, module_classes([Entry])),
-                {ok, Child}
+            {_Id, ChildPid, _Type, Mods} when is_pid(ChildPid) ->
+                {ClassName, Module} = class_for_modules(Mods),
+                {ok, child_object(ClassName, Module, ChildPid)};
+            _NotRunning ->
+                {ok, nil}
         end
     end).
 
@@ -1582,10 +1584,21 @@ supervisor_child_entry({Id, PidOrStatus, Type, Mods}, ModClasses) ->
         childClass => child_class_object(ClassName)
     }.
 
-%% Module -> Beamtalk class name map for resolving `Entries`' modules: one
+%% `{ClassName | nil, Module | nil}` for one child's modules: the single-child
+%% counterpart of `module_classes/1` + `entry_class/2`.
+-spec class_for_modules([module()] | dynamic) -> {atom() | nil, module() | nil}.
+class_for_modules([Module | _]) when is_atom(Module) ->
+    case beamtalk_class_registry:class_name_for_module(Module) of
+        {ok, ClassName} -> {ClassName, Module};
+        not_found -> {nil, Module}
+    end;
+class_for_modules(_Mods) ->
+    {nil, nil}.
+
+%% Module -> Beamtalk class name map for resolving many entries' modules: one
 %% read of the class metadata table (`module_to_class_map/0`), not one per
-%% child, and none when there is nothing to resolve.
--spec module_classes([term()]) -> #{module() => atom()}.
+%% child, and none when there are no entries.
+-spec module_classes([which_child()]) -> #{module() => atom()}.
 module_classes([]) ->
     #{};
 module_classes(_Children) ->
@@ -1632,7 +1645,7 @@ restarted_child(SupPid, Id, ChildPid) when is_pid(ChildPid) ->
     %% `get_childspec/2` reads one spec, not the whole child list.
     case supervisor:get_childspec(SupPid, Id) of
         {ok, #{modules := Mods}} ->
-            {ClassName, Module} = entry_class(Mods, module_classes([Mods])),
+            {ClassName, Module} = class_for_modules(Mods),
             child_object(ClassName, Module, ChildPid);
         _ ->
             ChildPid
