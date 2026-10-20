@@ -302,6 +302,7 @@ fn while_loop(mode: ThreadingMode, frame: FrameId, body: Vec<ThreadedStmt>) -> T
         threads: threads(&["t"]),
         counter: None,
         condition: Vec::new(),
+        condition_families: Vec::new(),
         condition_value: ValueRef::Literal("'true'"),
         continue_arm: docvec!["<'true'> when 'true' -> "],
         body,

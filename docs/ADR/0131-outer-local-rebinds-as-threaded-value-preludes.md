@@ -633,9 +633,7 @@ The invariant, per scope kind, for the versioned variable after the loop:
   loop and `Self` after it is `Self` before it; with a threaded local, or a body
   that writes a field (`SelfVt`), the loop's `StateAcc` is seeded from
   `maps:new()` and carries them, as before. A field write in the *condition* is
-  not carried: the plan takes its families from the body only, so such a loop
-  still fails the verifier (no local) or drops the write (a local), as it did
-  before this fix (BT-4002, `PIN-BUG` in the corpus).
+  carried too since BT-4002 (see the BT-4002 amendment below).
 - *Class method:* unchanged. No condition effect counts (ADR 0130 §3).
 
 It holds wherever the loop sits (a method body, a conditional arm, an
@@ -652,6 +650,92 @@ method context (1,600 cases failed before the fix), and programs drawn from
 `arb_program`, which now generates `whileTrue:`/`whileFalse:` loops with
 self-send conditions (63 of 256 failed before the fix, in the value-type and
 `TestCase` scopes).
+
+**BT-4002 amendment: a loop carries what its condition produces.** A loop's
+carried families are the union of the families its condition and its body
+produce: outer locals, the actor `State`, the REPL bindings and the value-type
+`SelfVt`. A family version produced in the condition slot of a
+`ConditionalLoop` is carried into the body, the next iteration and out of the
+loop. Before, the plan took `SelfVt` from the body only
+(`loop_body_threads_value_self(body)`), so in a value-type or `TestCase`
+method `[self.n := self.n + 1. self.n < 3] whileTrue: [nil]` failed the
+verifier (`StateAccLoopWithoutLocals`), and with a threaded local
+(`whileTrue: [k := k + 1]`) it compiled and looped forever: `CondFun` bound
+`Self1` from the loop's `Self` and returned `{Bool, StateAcc}` without it.
+
+The mechanism, all in the `ConditionalLoop` lowering
+(`generate_while_loop_with_mutations`):
+
+- `ThreadingPlan::new_impl` asks `letrec_loop_threads_value_self(condition,
+  body)`: the body detector, run on the condition block too
+  (`loop_condition_threads_value_self`). The loop's result consumers
+  (`vt_loop_threaded_families`, `is_while_with_vt_local_threading`) and the
+  nested-loop rejection (`nested_loop_lost_value_self_mutation`) read the same
+  answer, so the tuple a loop builds and the tuple its consumer unpacks agree.
+- `CondFun` answers `{Bool, StateAcc, SelfN}`. The loop binds
+  `SelfN = element(3, CondPair)` with a real `ThreadedStmt::Bind` in the
+  condition slot, sourced from the loop's `Self` parameter. The body is lowered
+  on `SelfN`, the recursive call's `Self` argument follows the chain through
+  the condition then the body (`final_loop_arg_identities`), and the exit arm
+  answers `SelfN`, so the last iteration's condition write survives the loop.
+- A threaded outer local the condition writes rides the `StateAcc` the
+  condition hands back. The condition is lowered in the closure's own variable
+  scope, and the body re-reads the local from that map
+  (`ThreadingPlan::generate_unpack_of`). Before, the body read the closure's
+  own binding, which `erlc` rejected as unbound. That was the same bug in the
+  `Local` family, and it also affected actors
+  (`[t := t + 1. self.n := t. t < 3] whileTrue: [u := u + t]`).
+
+The invariant, per scope kind:
+
+- *Value-type or `TestCase` method:* the condition's `Self` is carried (above).
+  `Self` after the loop is the last condition's `Self`.
+- *Actor instance method:* unchanged for `State`, which the condition already
+  handed back in its `StateAcc`. A local the condition writes is now re-read
+  by the body.
+- *Class method:* unchanged. A class method threads no family (ADR 0130 §3).
+  A condition that assigns anything is the BT-3782 compile error, a
+  class-variable write included.
+- *REPL input:* not changed by BT-4002. A binding the condition writes is
+  still lowered as a plain closure: it is lost silently, or the body reads an
+  unbound name. This is BT-4015, pinned by `PIN-BUG BT-4015`
+  (`beamtalk-repl/tests/repl_while_condition_binding.rs`).
+
+It holds wherever the loop sits, with the same exception a body write has: a
+loop nested in a fold, another loop or a conditional arm whose condition writes
+a field is the same structured rejection
+(`ValueSelfMutationLostAcrossNestedLoop`, `FieldAssignmentInUnsupportedBlock`)
+that a body write there gets.
+
+The verifier check is `VerifyError::ConditionFamilyNotCarried`. A
+`ConditionalLoop` declares the families its condition advanced
+(`condition_families`, read off the `Self` version counter around the
+condition's lowering), and each one must be handed back by a `Bind` in the
+condition slot from one of the loop's `produces` seeds. It fails on both
+repros before the fix: the fault `LocalRebindFault::BodyOnlyLoopFamilies`
+restores the body-only answer.
+
+The proof is `while_condition_carrier_corpus.rs`:
+
+- Field-writing conditions x bodies (none, local, field, both, self-send) x
+  loop x position x context (value type, `TestCase`, actor, class side, each
+  with and without a prior field write). Each row compiles with the verifier
+  on and through `erlc`, or is a structured rejection exactly where its
+  body-side twin is one.
+- The same rows under the fault, where every value-type row reports
+  `ConditionFamilyNotCarried`.
+- `arb_program`'s corpus with a field write first in every loop condition
+  (`draw_programs_with_field_writing_conditions`), under `Value`, `TestCase`
+  and `Actor`.
+- 48 generated condition x body x loop x position programs run against a Rust
+  model of the loop, in a value-type and a `TestCase` class. Before the fix
+  they did not end.
+
+BUnit coverage is `stdlib/test/bt4002while_field_condition_test.bt`.
+
+A class-side loop that writes a local, as the argument of a class-side
+self-send, fails `erlc` whatever its condition. This predates BT-4002 and is
+BT-4014, pinned in the corpus.
 
 **Amendment (BT-3910): `CarrierSlot::Whole`.** `CarrierSlot` gains `Whole`:
 `<read>` is the carrier itself, with no `element`/`maps:get`. Every row of the

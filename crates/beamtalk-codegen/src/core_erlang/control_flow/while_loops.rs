@@ -34,7 +34,7 @@
 
 use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
 use super::super::threaded_ir::{
-    self, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, FrameId, RenderCtx, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CoreErlangGenerator, Result};
 use super::ThreadingPlan;
@@ -292,27 +292,51 @@ impl CoreErlangGenerator {
         // a value-position assignment in it `Put`s into the loop's own map: the
         // loop's frame (threads and all). Otherwise the closure hands back only
         // its boolean and threads nothing (ADR 0133, BT-3911).
-        let cond_doc = self.with_branch_context(|this| {
-            let frame = this.current_branch_frame();
-            let rebind = if cond_effects {
-                plan.rebind_frame(frame)
-            } else {
-                ThreadingPlan::condition_rebind_frame(frame)
-            };
-            this.with_rebind_frame(rebind, |this| {
-                if let Expression::Block(cond_block) = condition {
-                    if cond_effects {
-                        this.generate_stateful_while_condition(cond_block)
-                    } else {
-                        this.generate_block_body(cond_block)
-                    }
-                } else if cond_effects {
-                    this.generate_stateful_while_condition_tail(condition)
+        //
+        // BT-4002: a condition that writes a field produces a `SelfVt` version
+        // the loop carries (`ThreadingPlan::threaded_families` is the union of
+        // the condition's and the body's families), so `CondFun` hands it back
+        // as a third slot, `{Bool, FinalStateAcc, SelfN}`.
+        let cond_carries_self = cond_effects
+            && plan.threads_value_self()
+            && self.loop_condition_threads_value_self(condition);
+        let cond_entry_self = self.self_version();
+        let (cond_doc, cond_exit_self) =
+            self.with_loop_condition_context(cond_effects, |this, frame| {
+                let rebind = if cond_effects {
+                    plan.rebind_frame(frame)
                 } else {
-                    this.generate_expression(condition)
-                }
-            })
-        })?;
+                    ThreadingPlan::condition_rebind_frame(frame)
+                };
+                this.with_rebind_frame(rebind, |this| {
+                    if let Expression::Block(cond_block) = condition {
+                        if cond_effects {
+                            this.generate_stateful_while_condition(cond_block, cond_carries_self)
+                        } else {
+                            this.generate_block_body(cond_block)
+                        }
+                    } else if cond_effects {
+                        this.generate_stateful_while_condition_tail(condition, false)
+                    } else {
+                        this.generate_expression(condition)
+                    }
+                })
+            })?;
+        let condition_families = Self::condition_families(cond_entry_self, cond_exit_self);
+        // BT-4002: the threaded locals the condition writes. Their new values
+        // ride the `StateAcc` the closure hands back (the names the condition
+        // bound them to were the closure's own), so the body re-reads them.
+        let cond_written_locals: Vec<String> = match condition {
+            Expression::Block(cond_block) => {
+                let writes = super::super::block_analysis::analyze_block(cond_block).local_writes;
+                plan.threaded_locals
+                    .iter()
+                    .filter(|l| writes.contains(l.as_str()))
+                    .cloned()
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
 
         // Condition application and true/false arm headers
         let cond_apply_arm = if negate {
@@ -320,6 +344,7 @@ impl CoreErlangGenerator {
         } else {
             "<'true'> when 'true' -> "
         };
+        let mut cond_pair: Option<String> = None;
         let (condition_stmts, condition_value) = if cond_effects {
             // ADR 0118 phase 3: `CondFun` evaluates to
             // `{Bool, FinalStateAcc}` (see `generate_stateful_while_condition`),
@@ -353,11 +378,12 @@ impl CoreErlangGenerator {
                     " = call 'erlang':'element'(1, ",
                     leaf::var(cond_pair_var.clone()),
                     ") in let StateAcc = call 'erlang':'element'(2, ",
-                    leaf::var(cond_pair_var),
+                    leaf::var(cond_pair_var.clone()),
                     ") in ",
                 ],
                 condition.span(),
             );
+            cond_pair = Some(cond_pair_var);
             (vec![stmt], ValueRef::Doc(leaf::var(cond_bool_var)))
         } else {
             let stmt = ThreadedStmt::Statement(
@@ -373,20 +399,72 @@ impl CoreErlangGenerator {
             let value = ValueRef::Doc(docvec!["apply ", leaf::var(cond_var), " (StateAcc)"]);
             (vec![stmt], value)
         };
-        let condition_stmts: Vec<ThreadedStmt> = unpack_docs
+        let reunpack_docs = if cond_effects {
+            plan.generate_unpack_of(self, &cond_written_locals)
+        } else {
+            Vec::new()
+        };
+        let mut condition_stmts: Vec<ThreadedStmt> = unpack_docs
             .into_iter()
             .map(|doc| ThreadedStmt::Statement(doc, body.span))
             .chain(condition_stmts)
+            .chain(
+                reunpack_docs
+                    .into_iter()
+                    .map(|doc| ThreadedStmt::Statement(doc, condition.span())),
+            )
             .collect();
 
-        let (mut body_stmts, frame) = self.generate_letrec_body_ir(body, &plan)?;
+        // BT-4002: the body (and so the next iteration) starts from the
+        // condition's `Self`, not the loop parameter: it is lowered on the
+        // condition's final `Self` version, which the extraction `Bind` below
+        // binds in the loop's frame.
+        let outer_self = self.self_version();
+        if cond_carries_self {
+            self.set_self_version(cond_exit_self);
+        }
+        let body_ir = self.generate_letrec_body_ir(body, &plan);
+        if cond_carries_self {
+            self.set_self_version(outer_self);
+        }
+        let (mut body_stmts, frame) = body_ir?;
 
         self.pop_scope();
 
+        // BT-4002: each family's identity once the condition has run: the
+        // version the condition handed back (`element(3, CondPair)`, bound by a
+        // real `Bind` from the loop parameter so the verifier sees the
+        // hand-back), or the loop parameter itself when the condition does not
+        // write the family.
+        let mut post_condition: Vec<(VersionPrefix, VersionedVar)> = Vec::new();
+        for param in &family_params {
+            let seed = param.gensym_seed(frame);
+            let carried = cond_carries_self && param.prefix == VersionPrefix::SelfVt;
+            let identity = match (&cond_pair, carried) {
+                (Some(pair), true) => {
+                    let target = VersionedVar::new(param.prefix.clone(), cond_exit_self, frame);
+                    condition_stmts.push(ThreadedStmt::Bind {
+                        target: target.clone(),
+                        source: seed,
+                        op: BindOp::Direct(ValueRef::Doc(docvec![
+                            "call 'erlang':'element'(3, ",
+                            leaf::var(pair.clone()),
+                            ")"
+                        ])),
+                        span: condition.span(),
+                    });
+                    target
+                }
+                _ => seed,
+            };
+            post_condition.push((param.prefix.clone(), identity));
+        }
+
         // the exit arm is reached WITHOUT running the body this
-        // round (the condition check failed) — it must reference the fun's
-        // own incoming family parameter(s) (`family_params`, the SAME text
-        // as the fun signature), never a post-body identity.
+        // round (the condition check failed) — it must reference each
+        // family's post-condition identity (`post_condition`: the fun's own
+        // incoming family parameter, or the version the condition handed
+        // back), never a post-body identity.
         let exit_arm_atom = if negate {
             "<'true'> when 'true' -> "
         } else {
@@ -402,11 +480,12 @@ impl CoreErlangGenerator {
                 docvec!["{'nil', StateAcc"],
                 plan.threaded_families(),
                 |prefix| {
-                    family_params
+                    post_condition
                         .iter()
-                        .find(|p| &p.prefix == prefix)
+                        .find(|(p, _)| p == prefix)
                         .expect("append_family_slots only ever asks for a family in `families`")
-                        .gensym_seed(frame)
+                        .1
+                        .clone()
                 },
                 &ctx,
             )
@@ -428,6 +507,7 @@ impl CoreErlangGenerator {
             threads: plan.threaded_locals.clone(),
             counter: None,
             condition: condition_stmts,
+            condition_families,
             condition_value,
             continue_arm: Document::Str(cond_apply_arm),
             body: body_stmts,
@@ -475,9 +555,15 @@ impl CoreErlangGenerator {
     /// `generate_block_body_slice`'s own machinery) — the condition's own
     /// local writes thread exactly as before this phase; only the TAIL
     /// boolean gets the new `{Bool, State}` contract.
+    ///
+    /// BT-4002: with `carry_self` (the condition writes a value-type field the
+    /// loop threads as its `SelfVt` family) the closure hands back
+    /// `{Bool, FinalStateAcc, SelfN}`, `SelfN` being the condition's final
+    /// `Self` version.
     fn generate_stateful_while_condition(
         &mut self,
         cond_block: &Block,
+        carry_self: bool,
     ) -> Result<Document<'static>> {
         let filtered = super::super::util::collect_body_exprs(&cond_block.body);
         let Some((tail, rest)) = filtered.split_last() else {
@@ -510,16 +596,18 @@ impl CoreErlangGenerator {
                 docs.push(self.generate_block_expr(expr, &kind)?);
             }
         }
-        docs.push(self.generate_stateful_while_condition_tail(tail)?);
+        docs.push(self.generate_stateful_while_condition_tail(tail, carry_self)?);
         Ok(Document::Vec(docs))
     }
 
     /// The tail (boolean) statement of a state-effecting while condition —
     /// see [`Self::generate_stateful_while_condition`]'s doc comment. Always
-    /// produces `{BoolValue, FinalStateAcc}`.
+    /// produces `{BoolValue, FinalStateAcc}`, or with `carry_self`
+    /// `{BoolValue, FinalStateAcc, SelfN}` (BT-4002).
     fn generate_stateful_while_condition_tail(
         &mut self,
         tail: &Expression,
+        carry_self: bool,
     ) -> Result<Document<'static>> {
         if self.control_flow_has_mutations(tail) {
             // `and:`/`or:`/`ifTrue:ifFalse:` with a nested state effect:
@@ -528,8 +616,28 @@ impl CoreErlangGenerator {
             // (confirmed against real compiled output — the loop's own
             // only threaded var in tail position is `StateAcc` itself, so
             // that pair IS already exactly the contract this function
-            // promises). No further wrapping needed.
-            return self.generate_expression(tail);
+            // promises). No further wrapping needed, unless the condition
+            // carries `Self` (BT-4002): then the pair gains the `Self` the
+            // statements before the tail left current.
+            let pair = self.generate_expression(tail)?;
+            if !carry_self {
+                return Ok(pair);
+            }
+            let pair_var = self.fresh_temp_var("CondTail");
+            let self_var = self.current_self_var();
+            return Ok(docvec![
+                "let ",
+                leaf::var(pair_var.clone()),
+                " = ",
+                pair,
+                " in {call 'erlang':'element'(1, ",
+                leaf::var(pair_var.clone()),
+                "), call 'erlang':'element'(2, ",
+                leaf::var(pair_var),
+                "), ",
+                leaf::var(self_var),
+                "}"
+            ]);
         }
         // A bare self-send (or one nested in an ordinary binary/keyword
         // send) NOT wrapped by `and:`/`or:`/`ifTrue:ifFalse:`: thread it
@@ -546,14 +654,68 @@ impl CoreErlangGenerator {
         let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
         let value_doc = self.threaded_value_doc(&tv.value);
         let final_state_var = self.current_state_var();
+        let self_slot = if carry_self {
+            docvec![", ", leaf::var(self.current_self_var())]
+        } else {
+            Document::Nil
+        };
         Ok(docvec![
             prelude_doc,
             "{",
             value_doc,
             ", ",
             leaf::var(final_state_var),
+            self_slot,
             "}"
         ])
+    }
+
+    /// BT-4002: runs `lower`, a loop condition's lowering, in the condition
+    /// closure's own branch context (`lower` gets its frame) and answers its
+    /// result with the `Self` version the lowering ended on, read before the
+    /// context restores the enclosing one. Every while loop lowering lowers
+    /// its condition through here, so each `ConditionalLoop` can declare the
+    /// families its condition advanced ([`Self::condition_families`]).
+    ///
+    /// With `carried` (the condition hands its writes back in the loop's
+    /// `StateAcc`) the condition also gets the closure's own variable scope: a
+    /// name it binds is the closure's and is gone when it returns, and the
+    /// body re-reads a threaded local the condition wrote from the `StateAcc`
+    /// (`ThreadingPlan::generate_unpack_of`). Before, the body read the
+    /// closure's binding, an unbound variable (`erlc`). A condition whose
+    /// writes are not carried keeps the enclosing scope, so a body that reads
+    /// such a write still fails loudly rather than reading a stale value
+    /// (BT-4015).
+    fn with_loop_condition_context<T>(
+        &mut self,
+        carried: bool,
+        lower: impl FnOnce(&mut Self, FrameId) -> Result<T>,
+    ) -> Result<(T, usize)> {
+        if carried {
+            self.push_scope();
+        }
+        let result = self.with_branch_context(|this| {
+            let frame = this.current_branch_frame();
+            let out = lower(this, frame)?;
+            Ok((out, this.self_version()))
+        });
+        if carried {
+            self.pop_scope();
+        }
+        result
+    }
+
+    /// BT-4002: the families a loop condition advanced (a
+    /// `ConditionalLoop`'s `condition_families`), read off the `Self` version
+    /// counter before (`entry`) and after (`exit`) its lowering. The actor
+    /// `State` and REPL bindings ride the `StateAcc` map the condition already
+    /// hands back, so `SelfVt` is the only family a condition can drop.
+    fn condition_families(entry: usize, exit: usize) -> Vec<VersionPrefix> {
+        if exit == entry {
+            Vec::new()
+        } else {
+            vec![VersionPrefix::SelfVt]
+        }
     }
 
     /// The loop's condition body is ordinary AST-directed expression codegen
@@ -567,12 +729,14 @@ impl CoreErlangGenerator {
     /// conditional nested in it is lowered against the closure's scratch map
     /// (private: the closure has no `StateAcc` to continue), not the
     /// enclosing frame's.
+    ///
+    /// Answers the condition's document with the `Self` version its lowering
+    /// ended on ([`Self::with_loop_condition_context`], BT-4002).
     fn generate_loop_condition_body(
         &mut self,
         condition: &Expression,
-    ) -> Result<Document<'static>> {
-        self.with_branch_context(|this| {
-            let frame = this.current_branch_frame();
+    ) -> Result<(Document<'static>, usize)> {
+        self.with_loop_condition_context(false, |this, frame| {
             this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
                 if let Expression::Block(cond_block) = condition {
                     this.generate_block_body(cond_block)
@@ -667,7 +831,9 @@ impl CoreErlangGenerator {
 
         // The condition closure captures the current vars from scope.
         // We pass only the params (not StateAcc) since there is no StateAcc.
-        let cond_body_doc = self.generate_loop_condition_body(condition)?;
+        let cond_entry_self = self.self_version();
+        let (cond_body_doc, cond_exit_self) = self.generate_loop_condition_body(condition)?;
+        let condition_families = Self::condition_families(cond_entry_self, cond_exit_self);
         let condition_stmt = ThreadedStmt::Statement(
             docvec![
                 "let ",
@@ -722,6 +888,7 @@ impl CoreErlangGenerator {
             threads: plan.threaded_locals.clone(),
             counter: None,
             condition: vec![condition_stmt],
+            condition_families,
             condition_value,
             continue_arm: Document::Str(case_arm),
             body: body_stmts,
@@ -806,7 +973,10 @@ impl CoreErlangGenerator {
         // `if !use_direct_params && !use_hybrid_params` guard).
         plan.generate_unpack_at_iteration_start(self);
 
-        let cond_body_doc = self.generate_hybrid_condition(condition, plan, &all_field_params)?;
+        let cond_entry_self = self.self_version();
+        let (cond_body_doc, cond_exit_self) =
+            self.generate_hybrid_condition(condition, plan, &all_field_params)?;
+        let condition_families = Self::condition_families(cond_entry_self, cond_exit_self);
         let condition_stmt = ThreadedStmt::Statement(
             docvec![
                 "let ",
@@ -871,6 +1041,7 @@ impl CoreErlangGenerator {
             threads: plan.threaded_locals.clone(),
             counter: None,
             condition: vec![condition_stmt],
+            condition_families,
             condition_value,
             continue_arm: Document::Str(case_arm),
             body: body_stmts,
@@ -1012,7 +1183,7 @@ impl CoreErlangGenerator {
         condition: &Expression,
         plan: &ThreadingPlan,
         all_field_params: &std::collections::HashMap<String, String>,
-    ) -> Result<Document<'static>> {
+    ) -> Result<(Document<'static>, usize)> {
         let prev_readonly_field_params = std::mem::replace(
             &mut self.loop_mode.hybrid_readonly_field_params,
             all_field_params.clone(),
@@ -1021,10 +1192,9 @@ impl CoreErlangGenerator {
             &mut self.loop_mode.hybrid_mutated_fields,
             plan.mutated_fields.iter().cloned().collect(),
         );
-        let cond_result = self.with_branch_context(|this| {
+        let cond_result = self.with_loop_condition_context(false, |this, frame| {
             let prev_hybrid = this.loop_mode.in_hybrid_loop;
             this.loop_mode.in_hybrid_loop = true;
-            let frame = this.current_branch_frame();
             let result =
                 this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
                     if let Expression::Block(cond_block) = condition {
