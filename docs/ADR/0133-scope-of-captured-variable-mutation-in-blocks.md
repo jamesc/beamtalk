@@ -535,8 +535,10 @@ code.
   > callee runs the block before any write would answer right, and is rejected
   > too. Unaffected: blocks the compiler runs in place (`ifTrue:`, `do:`,
   > `detect:ifNone:`, ... on a non-self receiver), blocks passed to a
-  > non-self receiver, and a block stored in a local (the local's later uses
-  > are not followed). A class method is unaffected (class variables read live
+  > non-self receiver. A block bound to a local is followed to the
+  > local's escapes (`^b`, `self foo: b`, `self.cb := b`, `#[b]`), not to its
+  > calls: `b := [self.n]. b value` is accepted, and answers right unless a
+  > field write comes between the binding and the call (a known gap). A class method is unaffected (class variables read live
   > at home, ADR 0130 §3), as is a value type (its fields never change). The
   > idiom is to pass the value in: `[:v | ...]` with the callee doing
   > `block value: self.total`. Live read may be revisited after BT-3950 if real

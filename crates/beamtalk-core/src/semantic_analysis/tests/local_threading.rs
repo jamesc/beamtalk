@@ -2765,6 +2765,11 @@ fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
         "self.h := [self.n]\nnil",
         "#[[self.n]]",
         "self do: [:x | self.n]\nnil",
+        // Bound to a local, then escaping (measured: `^b` answers stale).
+        "b := [self.n]\n^b",
+        "b := [self.n]\nself foo: b\nnil",
+        "b := [self.n]\nself.h := b\nnil",
+        "b := [self.n]\n#[b]",
     ] {
         let src = in_actor(body);
         let diags = adr0131_diagnostics(&src);
@@ -2804,6 +2809,12 @@ fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
         // A block that does not read a field of `self`.
         "self foo: [other.n]\nnil",
         "^[:x | x + 1]",
+        // A local block run at once, before any write, answers right
+        // (measured); a use after a later write is a known gap.
+        "b := [self.n]\nb value",
+        "b := [self.n]\nself.items do: [:x | b value]\nnil",
+        // The local is rebound to a block that reads no field.
+        "b := [self.n]\nb := [1]\n^b",
         // A class-builder method body rebinds `self` to its parameter.
         "^#{#get => [:self | self.n]}",
     ] {

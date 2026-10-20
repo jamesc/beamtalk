@@ -1536,6 +1536,10 @@ struct Walker<'d> {
     /// The block literals already reported as escaping (one diagnostic per
     /// block, whichever way it is first seen to escape).
     reported_blocks: HashSet<Span>,
+    /// Locals bound to a block literal that reads a field of `self` in an
+    /// actor method, by name (BT-3952): a later escape of the local (`^b`,
+    /// `self foo: b`, `self.cb := b`) is the block's escape.
+    field_reading_locals: HashMap<EcoString, Block>,
     /// The escaping-block diagnostics, keyed by the assignment they report
     /// and the block that escapes, in walk order ([`Walker::report_escape`]).
     escaping_writes: Vec<(Span, Span, Diagnostic)>,
@@ -1602,6 +1606,7 @@ impl<'d> Walker<'d> {
             value_operands,
             value_block_writes: HashMap::new(),
             reported_blocks: HashSet::new(),
+            field_reading_locals: HashMap::new(),
             escaping_writes: Vec::new(),
             method_selector: None,
             operand_sites: HashSet::new(),
@@ -1993,8 +1998,8 @@ impl<'d> Walker<'d> {
             }
             // A local bound to a writing block was reported where it was bound
             // (`note_block_binding`), so a later escape of the local is not.
-            Expression::Identifier(_)
-            | Expression::Literal(..)
+            Expression::Identifier(id) => self.note_local_escape(id),
+            Expression::Literal(..)
             | Expression::ClassReference { .. }
             | Expression::Super(_)
             | Expression::Primitive { .. }
@@ -2012,7 +2017,17 @@ impl<'d> Walker<'d> {
     /// writes the `b` this assignment binds). A later use of `name` (`^b`,
     /// `self foo: b`) is not reported again.
     fn note_block_binding(&mut self, name: &EcoString, value: &Expression) {
+        // A rebinding forgets the old block; a block that reads a field of
+        // `self` is remembered for a later escape of the local (BT-3952).
+        self.field_reading_locals.remove(name);
         for block in value_blocks(value) {
+            if self.context == Actor
+                && self.escape_write_of(block).is_none()
+                && !outer_state_reads(block).is_empty()
+            {
+                self.field_reading_locals
+                    .insert(name.clone(), block.clone());
+            }
             let write = self
                 .value_block_writes
                 .get(&block.span)
@@ -2022,6 +2037,23 @@ impl<'d> Walker<'d> {
                 self.report_escape(block, &write, &Escape::Stored(name.clone()), None);
             }
         }
+    }
+
+    /// A use of the local `id` (BT-3952): when it is bound to a block that
+    /// reads a field and the use itself is a returned or stored operand
+    /// ([`escape_map`]), the block escapes that way. A use as a message
+    /// argument is [`Self::check_send`]'s.
+    fn note_local_escape(&mut self, id: &crate::ast::Identifier) {
+        let Some(block) = self.field_reading_locals.get(&id.name).cloned() else {
+            return;
+        };
+        let escape = match self.escapes.get(&id.span) {
+            Some(EscapeShape::StoredClassVar) => Escape::StoredState,
+            Some(EscapeShape::Returned) => Escape::Returned,
+            Some(EscapeShape::StoredInLiteral) => Escape::InLiteral,
+            _ => return,
+        };
+        self.report_stale_read(&block, &escape);
     }
 
     /// Whether `expr` is a conditional or an `on:do:`/`ensure:` that is a
@@ -2584,6 +2616,12 @@ impl<'d> Walker<'d> {
             }
             for block in value_blocks(arg) {
                 self.report_literal(block, &escape);
+            }
+            // A local bound to a block that reads a field (BT-3952).
+            if let Expression::Identifier(id) = arg.unwrap_parens() {
+                if let Some(block) = self.field_reading_locals.get(&id.name).cloned() {
+                    self.report_stale_read(&block, &escape);
+                }
             }
         }
     }
