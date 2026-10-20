@@ -12522,7 +12522,7 @@
         "testSelfCastWriteIsKept",
         "unless"
       ],
-      "source": "// BT-3998: `self foo!` is a real cast to the actor's own mailbox. It lands\n// after the current message and its State change is kept (it used to run\n// inline and drop the write).\n\nTestCase subclass: ActorSelfCastTest\n  field: a = nil\n\n  setUp => self withA: SelfCastActor spawn\n\n  tearDown => self.a isNil ifFalse: [self.a stop]\n\n  testSelfCastDoesNotRunInline =>\n    self assert: self.a castBump equals: 0\n\n  testSelfCastWriteIsKept =>\n    self.a castBump\n    self assert: self.a getBumped equals: 1\n\n  testSelfCastWithArgumentWriteIsKept =>\n    self assert: self.a castSetX equals: 0\n    self assert: self.a getX equals: 9",
+      "source": "// BT-3998: `self foo!` is a real cast to the actor's own mailbox. It lands\n// after the current message and its State change is kept (it used to run\n// inline and drop the write).\n\nTestCase subclass: ActorSelfCastTest\n  field: a = nil\n\n  setUp => self withA: SelfCastActor spawn\n\n  tearDown => self.a isNil ifFalse: [self.a stop]\n\n  testSelfCastDoesNotRunInline => self assert: self.a castBump equals: 0\n\n  testSelfCastWriteIsKept =>\n    self.a castBump\n    self assert: self.a getBumped equals: 1\n\n  testSelfCastWithArgumentWriteIsKept =>\n    self assert: self.a castSetX equals: 0\n    self assert: self.a getX equals: 9",
       "explanation": "BT-3998: `self foo!` is a real cast to the actor's own mailbox. It lands after the current message and its State change is kept (it used to run inline and drop the write)."
     },
     {
@@ -40602,7 +40602,7 @@
         "setX:",
         "subclassing"
       ],
-      "source": "// BT-3998: Fixture actor — `self foo!`.\n\nActor subclass: SelfCastActor\n  state: x = 0\n  state: bumped = 0\n\n  getX => self.x\n  getBumped => self.bumped\n  setX: v => self.x := v\n\n  bump => self.bumped := self.bumped + 1\n\n  // `self bump!` lands after the current message: the read here is still 0.\n  castBump =>\n    self bump!\n    self.bumped\n\n  castSetX =>\n    self setX: 9!\n    self.x",
+      "source": "// BT-3998: Fixture actor — `self foo!`.\n\nActor subclass: SelfCastActor\n  state: x = 0\n  state: bumped = 0\n\n  getX => self.x\n\n  getBumped => self.bumped\n\n  setX: v => self.x := v\n\n  bump => self.bumped := self.bumped + 1\n\n  // `self bump!` lands after the current message: the read here is still 0.\n  castBump =>\n    self bump!\n    self.bumped\n\n  castSetX =>\n    self setX: 9!\n    self.x",
       "explanation": "BT-3998: Fixture actor — `self foo!`."
     },
     {

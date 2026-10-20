@@ -12,8 +12,7 @@ TestCase subclass: ActorSelfCastTest
 
   tearDown => self.a isNil ifFalse: [self.a stop]
 
-  testSelfCastDoesNotRunInline =>
-    self assert: self.a castBump equals: 0
+  testSelfCastDoesNotRunInline => self assert: self.a castBump equals: 0
 
   testSelfCastWriteIsKept =>
     self.a castBump

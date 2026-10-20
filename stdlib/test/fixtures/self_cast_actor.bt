@@ -8,7 +8,9 @@ Actor subclass: SelfCastActor
   state: bumped = 0
 
   getX => self.x
+
   getBumped => self.bumped
+
   setX: v => self.x := v
 
   bump => self.bumped := self.bumped + 1
