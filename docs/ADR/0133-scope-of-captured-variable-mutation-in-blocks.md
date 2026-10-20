@@ -511,8 +511,40 @@ code.
   > (`beamtalk_collection_selectors`) are checked against the compiler's by a
   > Rust test.
 
+  > **Amendment (2026-10-20, BT-3952): an escaping block may not read a field of
+  > an actor.** "Reading captured variables in escaping blocks is unchanged"
+  > holds for locals, which are immutable once captured, but not for an
+  > actor's fields: the block captures the actor's `State` when it is made, so
+  > a block that reads `self.total` and runs after the actor wrote `total`
+  > answers the old value, silently. Measured on a BEAM: a block passed to the
+  > actor's own method answers stale when that method writes the field before
+  > running the block (`bumpThenRun: [self.n]` answers 0, not 10), and a block
+  > that is stored, returned or placed in a literal answers stale once a write
+  > follows; a block run before any write answers right, and the compiler
+  > cannot tell the two apart across a method boundary. The first design made
+  > the read live (publishing `State` on every field write); it was dropped as
+  > a runtime mechanism every write path must keep complete, with a call on
+  > every write, serving a shape with no occurrence in `stdlib/src` or
+  > `examples`. The rule is a compile error instead, in the escaping-block
+  > recognizer of this ADR (`validators/local_threading.rs`): in an actor
+  > instance method a block literal whose body reads `self.field` (any field,
+  > through nested blocks too) and that is passed to a message sent to `self`
+  > or `super` (the actor's own method, sealed or not, including `self do:`),
+  > assigned to a field, returned, or placed in a collection literal, is
+  > reported at the read. Conservative by construction: a self-send whose
+  > callee runs the block before any write would answer right, and is rejected
+  > too. Unaffected: blocks the compiler runs in place (`ifTrue:`, `do:`,
+  > `detect:ifNone:`, ... on a non-self receiver), blocks passed to a
+  > non-self receiver, and a block stored in a local (the local's later uses
+  > are not followed). A class method is unaffected (class variables read live
+  > at home, ADR 0130 §3), as is a value type (its fields never change). The
+  > idiom is to pass the value in: `[:v | ...]` with the callee doing
+  > `block value: self.total`. Live read may be revisited after BT-3950 if real
+  > code needs it.
+
 ### Neutral
-- Reading captured variables in escaping blocks is unchanged.
+- Reading captured variables in escaping blocks is unchanged (an actor's
+  `self.field` read is the BT-3952 amendment's exception).
 - Non-local return from any block, escaping or not, is unchanged.
 - Actor `State`, value-type `self` and class variables keep their threading
   and their existing rules (ADR 0120, 0130).

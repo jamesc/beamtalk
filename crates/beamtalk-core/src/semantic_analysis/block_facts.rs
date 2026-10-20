@@ -1206,6 +1206,47 @@ pub fn outer_state_writes(block: &Block) -> Vec<OuterLocalWrite> {
     walker.state_writes
 }
 
+/// ADR 0133 (BT-3952): the `self.field` reads `block` makes anywhere in its
+/// body, nested blocks included, first read of each field. An assignment's
+/// target is a write, not a read (`outer_state_writes`); a `self.x` inside the
+/// assigned value is a read. The read-side twin of [`outer_state_writes`].
+pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
+    let mut targets: HashSet<Span> = HashSet::new();
+    let mut reads: Vec<OuterLocalWrite> = Vec::new();
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::Assignment { target, .. } = e {
+                if let Expression::FieldAccess { span, .. } = target.as_ref() {
+                    targets.insert(*span);
+                }
+            }
+        });
+    }
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            let Expression::FieldAccess {
+                receiver,
+                field,
+                span,
+            } = e
+            else {
+                return;
+            };
+            if is_self_reference(receiver.unwrap_parens())
+                && !targets.contains(span)
+                && !reads.iter().any(|r| r.name == field.name)
+            {
+                reads.push(OuterLocalWrite {
+                    kind: WriteKind::ObjectState,
+                    name: field.name.clone(),
+                    span: *span,
+                });
+            }
+        });
+    }
+    reads
+}
+
 /// The names `stmt` itself binds by assignment or destructuring: those not
 /// inside a block nested in it, and not a match-arm binding. A nested block's
 /// own first assignment binds the name in that block
