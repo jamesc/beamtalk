@@ -234,6 +234,42 @@ cannot see (a block stored first and then laundered through FFI, a
 `perform:` with a runtime-built argument list): the existing
 `stateful_block_dispatch`, which already says "the block was not run".
 
+**Amendment (BT-3936): a self-send in a closure that changes actor state.**
+A block that assigns nothing can still contain `self record: x`, where
+`record:` writes a field. When that block is a real closure (a block passed to
+the actor's own method, or stored), the send dispatches against the `State`
+the closure captured at creation, and the callee's new `State` has nowhere to
+go: the closure answers one value. This is not an escaping-block assignment, so
+the compile-time rule above does not see it. It is a run-time check in the one
+place an actor self-send dispatch is generated (`dispatch_codegen.rs`; every
+form: threaded, discarding, sealed), active only inside a closure
+(a Tier 1 closure). It compares the callee's returned `State` with the
+`State` it was dispatched against using `=:=` (pointer identity first, so the
+read-only case is cheap). A different map is compared once more with the
+codegen-internal `__local__<name>` threading keys stripped
+(`beamtalk_actor:strip_local_temps/1`, the helper the gen_server boundary
+uses), because a read-only callee that rebinds a local through a conditional,
+`on:do:` or `ensure:` changes only those keys. Equal answers normally; different raises
+`#beamtalk_error{kind = stateful_block_dispatch}` carrying the selector and the
+hint "A self-send inside a block changed actor state, but the block cannot
+return it; return the value and assign it in the method instead". No
+threading is reintroduced and no surrounding lowering changes. A literal block
+the compiler inlines into the method (`self.items do: [...]`) is not a closure
+and still threads `State`, so its self-sends keep their changes. A Tier 2
+closure (`StateAcc` in, `{Result, StateAccN}` out) carries `State` back to its
+caller, so it is exempt; a consumer that cannot take that state back already
+raises `stateful_block_dispatch` itself.
+
+The error is an ordinary `Error`: an `on: Error do:` written inside the closure
+around the self-send catches it. That is the user's explicit choice to catch
+every `Error`, and the error stays catchable rather than being made special.
+
+Value types and class methods do not need the check: a `Value` method cannot
+assign a slot, so a self-send never changes anything to lose, and a class
+method has no `State` (class variables are written in place, ADR 0130). Not
+covered: a user-defined binary selector sent to `self`, which is not compiled
+as a self-dispatch at all and drops the change at method level too (BT-3985).
+
 ## Prior Art
 
 **Smalltalk-80 and Cog.** Smalltalk-80 blocks were not real closures: a block
@@ -511,8 +547,77 @@ code.
   > (`beamtalk_collection_selectors`) are checked against the compiler's by a
   > Rust test.
 
+  > **Amendment (2026-10-20, BT-3952): an escaping block may not read a field of
+  > an actor.** "Reading captured variables in escaping blocks is unchanged"
+  > holds for locals, which are immutable once captured, but not for an
+  > actor's fields: the block captures the actor's `State` when it is made, so
+  > a block that reads `self.total` and runs after the actor wrote `total`
+  > answers the old value, silently. Measured on a BEAM: a block passed to the
+  > actor's own method answers stale when that method writes the field before
+  > running the block (`bumpThenRun: [self.n]` answers 0, not 10), and a block
+  > that is stored, returned or placed in a literal answers stale once a write
+  > follows; a block run before any write answers right, and the compiler
+  > cannot tell the two apart across a method boundary. The first design made
+  > the read live (publishing `State` on every field write); it was dropped as
+  > a runtime mechanism every write path must keep complete, with a call on
+  > every write, serving a shape with no occurrence in `stdlib/src` or
+  > `examples`. The rule is a compile error instead, in the escaping-block
+  > recognizer of this ADR (`validators/local_threading.rs`): in an actor
+  > instance method a block literal whose body reads `self.field` (any field,
+  > through nested blocks too, or reflectively as `self fieldAt: k`) is
+  > reported at the read when it is passed to a message sent to `self` or
+  > `super` (the actor's own method, sealed or not, including `self do:`
+  > and a cascade to `self`), assigned to a field, returned, placed in a
+  > collection literal, or answered by a collection operation's block.
+  > Conservative by construction: a self-send whose callee runs the block
+  > before any write would answer right, and is rejected too. Unaffected:
+  > blocks the compiler runs in place (`ifTrue:`, `do:`, `detect:ifNone:`,
+  > ... on a non-self receiver) and blocks passed to a non-self receiver.
+  >
+  > A block bound to a local is followed through the local. An escape of the
+  > local (`^b`, `self foo: b`, `self.cb := b`, `#[b]`, an alias `c := b`, or
+  > a capture by an escaping block such as `^[b value]`) is an error. So is
+  > any use after something that may change the actor's state (a
+  > `self.field :=` write or any send to `self`/`super`, a cascade included,
+  > wherever it sits in between), or inside a block that contains one (a
+  > loop body's later iterations). The operands of a write or a self-send
+  > run before it, so `self.n := b value + 1` is accepted. A rebinding
+  > inside a nested block (`flag ifTrue: [b := [1]]`) may or may not run, so
+  > the local is still treated as holding the old block. A parameter that
+  > shadows the local's name is another variable.
+  > After such a change any use of the local counts, handing it to another
+  > object included (that object may call the block; before any change it is
+  > accepted, as the literal is). A change written in the body of a stored
+  > block counts where the block is written, though it has not run (a
+  > conservative rejection). A loop's condition block counts as changing the
+  > state when its body does, since it re-runs after the body. `b := [self.n]. b value`
+  > with nothing in between answers right and is accepted; with a write or
+  > self-send between, it measured stale (3, not the 13 written) and is an
+  > error.
+  >
+  > Not followed: a local bound to a block through a message answer (for
+  > example `b := self makeBlock`), and a block reaching the actor through a
+  > collection (`xs := OrderedCollection new. xs add: b`).
+  >
+  > A send to `self` or `super` in a block (a getter such as `self total`
+  > dispatches against the captured `State`; measured: a stored and a
+  > returned `[self total]` both answered the old value) is a second,
+  > narrower error, reported at the send ("is sent in a block that runs
+  > later"), only when the block is stored (assigned to a field, returned,
+  > placed in a literal, answered by a collection operation, or bound to a
+  > local that does one of those). Any send counts, `self class` included,
+  > since whether a selector reads state is not known here. A block passed
+  > directly to the actor's own method is exempt, since BT-3936's runtime
+  > check covers a state-changing callee there, and so is the later call of
+  > a local-bound block. Compute the value first and capture it. A class
+  > method is unaffected (class variables read live at home, ADR 0130 §3),
+  > as is a value type (its fields never change). The idiom is to pass the
+  > value in: `[:v | ...]` with the callee doing `block value: self.total`.
+  > Live read may be revisited after BT-3950 if real code needs it.
+
 ### Neutral
-- Reading captured variables in escaping blocks is unchanged.
+- Reading captured variables in escaping blocks is unchanged (an actor's
+  `self.field` read is the BT-3952 amendment's exception).
 - Non-local return from any block, escaping or not, is unchanged.
 - Actor `State`, value-type `self` and class variables keep their threading
   and their existing rules (ADR 0120, 0130).

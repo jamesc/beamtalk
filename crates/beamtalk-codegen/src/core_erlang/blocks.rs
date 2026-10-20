@@ -206,6 +206,7 @@ impl CoreErlangGenerator {
         let body_result = self.with_closed_fun_scope(|this| {
             // Track block nesting so self-cast sends route through the mailbox
             this.block_depth += 1;
+            let outer_drops_state = std::mem::replace(&mut this.closure_drops_state, true);
 
             let mut param_parts: Vec<Document<'static>> = Vec::new();
             for (i, param) in block.parameters.iter().enumerate() {
@@ -219,6 +220,7 @@ impl CoreErlangGenerator {
 
             // Generate block body as Document; restore block_depth even on error.
             let body = this.generate_block_body(block);
+            this.closure_drops_state = outer_drops_state;
             this.block_depth -= 1;
             body.map(|body| (header, body))
         });
@@ -285,6 +287,8 @@ impl CoreErlangGenerator {
         self.push_scope();
         // Track block nesting so self-cast sends route through the mailbox
         self.block_depth += 1;
+        // A Tier 2 `fun` returns `{Result, StateAccN}`: it carries State back.
+        let outer_drops_state = std::mem::replace(&mut self.closure_drops_state, false);
 
         // Bind block parameters
         let mut param_parts: Vec<Document<'static>> = Vec::new();
@@ -388,6 +392,7 @@ impl CoreErlangGenerator {
             ))
         });
         // Ensure block_depth and scope are restored even on error.
+        self.closure_drops_state = outer_drops_state;
         self.block_depth -= 1;
         self.pop_scope();
         // Stateful blocks are also closed `fun (...) -> {Result, NewStateAcc}`

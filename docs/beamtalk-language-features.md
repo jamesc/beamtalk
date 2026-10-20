@@ -2921,6 +2921,8 @@ processItems =>
 
 A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). A block literal that assigns a captured local and is passed as an Erlang FFI argument (`Erlang lists foreach: [:e \| t := t + e] with: xs`) is the same compile error (BT-3917): Erlang calls it as a plain fun and the write would be dropped. Return the value from the block and use the call's result instead (ADR 0041 §Erlang Interop Boundary); a block that only reads captured variables is fine. The same holds for object state: a block that assigns `self.field` (an actor or value-type field, or a class variable in a class method) and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; an actor field write through a `sealed` method of the same class, ADR 0132's BT-1140 path, is no longer accepted). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
 
+**An actor block that reads a field may not escape either** (BT-3952, [ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md) amendment). A block captures the actor's state when it is made, so in an actor instance method a block that reads `self.total` (or reflectively, `self fieldAt: #total`) and is passed to a message sent to `self` or `super` (the actor's own method, a cascade to `self` included), stored in a field, returned, placed in a collection literal, or answered by a collection operation's block would see the value from when it was made, not what the actor has written since. That is a compile error, reported at the read: `` `self.total` is read in a block that runs later; it would see the value from when the block was made ``. The check is conservative: it cannot tell a callee that runs the block before any write (which would answer right) from one that runs it after. A block bound to a local is followed through the local (an alias `c := b` and a capture by an escaping block such as `^[b value]` included): an escape of the local is an error, and calling it (`b value`) is an error once a `self.field :=` write or any send to `self`/`super` may have come between the binding and the call, or when the call sits in a block (a loop body) that contains one; calling it with nothing in between is accepted. After such a change any use of the local counts, handing it to another object included, and a change written inside a stored block counts where that block is written; a loop condition counts as changing the state when its body does. A block that sends any message to `self` or `super` (a getter `self total` dispatches against the same captured state; any send counts, `self class` included) is likewise an error, reported at the send, when it is stored (assigned to a field, returned, placed in a collection literal, answered by a collection operation, or bound to a local that does one of these); a block passed directly to the actor's own method may send to `self`, and so may the later call of a local-bound block. Compute the value first and capture it (`t := self total`, then `[t]`). Pass the value in instead (`[:v | ...]`, with the method that runs the block doing `block value: self.total`), or read the field after the call. Not followed: a block that reaches the actor through a message answer (`b := self makeBlock`) or a collection. Blocks run in place (`ifTrue:`, `do:`, `detect:ifNone:` and the other collection messages sent to a non-self receiver), blocks passed to another object, class methods (class variables are read live at home, ADR 0130 §3) and value types are unaffected.
+
 These lookup handlers are lowered inline, behind a runtime check that the receiver is a `Dictionary`: a handler that writes an outer local sent to anything else (an `Ets`, a value-type instance with its own `at:ifAbsent:`, a user class) raises a structured `type_error` instead of dropping the write. A receiver statically known not to be a `Dictionary` (`self`/`super` outside one, or an inferred type that is a known other class such as `Ets`) keeps the compile error. In a closure that is not inlined (a stored block, a block passed to another method) the enclosing block escapes, and in the REPL the handler is still a compile error.
 
 ```text
@@ -3486,7 +3488,7 @@ Both methods are defined on `Actor` and answer `#ok`.
 - **Arguments:** `continueWith:` takes a unary selector. `continueWith:withArguments:` takes a `List` whose size must match the selector's arity. A non-Symbol selector raises `type_error` at the call site, and a wrong argument count raises `arity_mismatch`. Whether the actor understands the selector is checked only when the step runs.
 - **Stop wins:** if the same message also calls `self stopWith:` (in either order), the actor stops and no queued continuation runs. A continuation that itself calls `self stopWith:` stops the actor after that step, and the rest of the queue is dropped.
 - **Errors:** if the method that requested the continuations fails with an error, the continuations it requested are dropped. An error inside a continuation is handled exactly like an error in a `!` cast (see ADR 0134): its own requests are dropped, but steps queued behind it by earlier messages still run.
-- **`initialize`:** continuations requested there run before any message, and `spawn` does not return until they have finished. They count against `spawn`'s 5-second initialization timeout: if `initialize` plus its continuation chain takes longer, `spawn` fails with a timeout and the actor is killed. Move slow setup into a message the actor sends itself instead.
+- **`initialize`:** a continuation requested in `initialize` runs after `spawn` returns, before any later message (OTP `{continue, _}` after `init/1`). Startup ends when `initialize` returns: `spawn`, `spawnWith:` and supervisor child starts do not wait for the continuation chain, and only `initialize` itself counts against the 5-second initialization timeout. An error in such a continuation does not fail the spawn; it is handled like any other continuation error. This is where slow setup, or a supervised child's first call to its parent, belongs.
 - **Starvation:** the continue chain runs before every other message, including system messages such as supervisor shutdown. A continuation that re-requests itself forever starves the mailbox, as in OTP.
 - **Only on `self`:** `actor continueWith: #x` sent from another process (sync, async or `!`) raises `invalid_continuation` in the caller.
 
@@ -3603,20 +3605,19 @@ Rules for configuration methods:
 
 - **Do not send messages to `self`.** They run inside the supervisor's own `init/1`; a message to the supervisor is a call to itself, which OTP rejects (`calling_self`). The start fails with `#supervisor_start_failed` and the hint "configuration methods run inside the supervisor's init; use `self args` and return specs, do not send messages to `self`". Passing `self` *as a value* (for example in a child's args, so the child can reach its parent) is the intended use.
 - **Never synchronously call a supervisor from code it is waiting on**: its configuration methods, those of its nested supervisor children, or the `initialize` of a `withName:`/`withClassMethod:` actor child. The supervisor is blocked in that child's start function during the initial start, every OTP restart and every `startChild:`, so a call to it or an ancestor hangs. The compiler cannot check this.
-- **Do not send messages to the supervisor's own class from configuration while `supervise` is starting it.** `supervise` currently runs inside that class's process (until BT-3962), so a class-side send such as `MySup settings` waits on the busy class process and times out. Pass values in through start args, or nest the supervisor under another one. Sends to *other* classes are fine.
 - **Each setting is a separate send**, so expensive work (reading files, say) belongs in `childSpecs` only.
 - **Arg lifetime:** args are replayed on every restart, so any pid or handle in them must outlive the child (an ancestor's handle does; a caller's pid or a socket does not).
 - A configuration method that raises, or returns an invalid value (`maxChildren`, `childShutdown`), fails the start once with `#supervisor_start_failed` (or fails the parent's start for a nested supervisor), carrying the error's hint.
 
 The post-start hook is the instance-side `initialize` (it was `class initialize: sup`). It runs once per top-level start, in the caller's process after the supervisor has started, so `self` is the supervisor and messages to it work. If it raises, the supervisor is stopped and the start fails. Only `class supervisionPolicy` stays class-side. The old class-side forms (`class children`, `class strategy`, …, `class initialize:`) are compile errors with a fix-it: drop `class`, rename `class children` to `childSpecs`, and use `self` for `sup` in `initialize`.
 
-**For Erlang/Elixir developers.** Every OTP concept has a direct counterpart (rows marked † arrive with BT-3962 and BT-3966):
+**For Erlang/Elixir developers.** Every OTP concept has a direct counterpart (rows marked † arrive with BT-3966):
 
 | OTP / Elixir | Beamtalk |
 |---|---|
-| `supervisor:start_link(Mod, Args)` | `MySup spawnWith: args` † (`spawn` passes `nil`); today: a `DynamicSupervisor` child started with `startChild: args` |
-| `supervisor:start_link({local, N}, Mod, Args)` | `MySup spawnWith: args as: #n` † |
-| `whereis(N)` | `MySup named: #n` † |
+| `supervisor:start_link(Mod, Args)` | `MySup spawnWith: args` (`spawn` passes `nil`) |
+| `supervisor:start_link({local, N}, Mod, Args)` | `MySup spawnWith: args as: #n` |
+| `whereis(N)` | `MySup named: #n` |
 | `Mod:init(Args)` | the configuration methods, reading `self args` |
 | `{ok, {#{strategy, intensity, period}, Children}}` | `strategy`, `maxRestarts`, `restartWindow`, `childSpecs` |
 | `self()` inside `init/1` | `self` inside those methods |
@@ -3631,6 +3632,55 @@ Three deliberate differences:
 1. `init/1` is split into one method per setting, so a subclass overrides `strategy` alone and inherits the rest. Each method is a separate send, so expensive work belongs in `childSpecs` only, not repeated in several settings.
 2. `supervise` (idempotent "ensure it is running") has no OTP counterpart; it serves REPL re-evaluation and the `[application]` boot path.
 3. `initialize` runs after start in the caller, where an Erlang programmer would put code after `start_link` returns.
+
+<a id="instances-and-arguments-adr-0135"></a>
+
+### Instances and arguments (ADR 0135)
+
+**`supervise` ensures, `spawn` creates.** `supervise` makes sure the one class-named instance is running (registered under the class's module, found by `current`, idempotent). The spawn family makes a new instance per call, so one class can run any number of trees — one per server, per tenant, per test:
+
+| Message (class side) | Registration | Returns |
+|---|---|---|
+| `supervise` | the class name, idempotent | `Result(Self, Error)` |
+| `spawn` / `spawnWith: args` | none (anonymous) | `Self`; raises `#supervisor_start_failed` |
+| `spawnAs: name` / `spawnWith: args as: name` | `name` | `Result(Self, Error)`; a taken name is `#name_registered` |
+| `named: name` | lookup + class check | `Result(Self, Error)`: `#name_not_registered`, `#wrong_class`, `#type_error` |
+| `current` | lookup by class name | `Self` or `nil` (the `supervise` instance only) |
+
+```beamtalk
+a := AcceptorSupervisor spawnWith: cfg1
+b := AcceptorSupervisor spawnWith: cfg2
+a == b                                    // => false
+AcceptorSupervisor current                // => nil   (spawned instances are not "current")
+(a args at: #port)                        // => cfg1's port
+a stop                                    // b keeps running
+
+http := (ServerSupervisor spawnWith: cfg as: #http_server) unwrap
+(ServerSupervisor named: #http_server) unwrap == http   // => true
+```
+
+Names are atoms: take them from a bounded, statically known set ([ADR 0079](ADR/0079-named-actor-registration.md)), never from runtime data.
+
+- **Starts run in the caller and are unlinked.** All of these start the tree in the calling process — never in the class's process — and then unlink it, like `Actor spawn`: a supervisor that exhausts its restart intensity dies alone, without taking its caller or its class down. Configuration may therefore send to its own class while the tree starts — except when the start is made from inside one of that class's own class methods (`class make => self spawnWith: …`), which run in the class's process like any class method body. To tie a supervisor's lifetime to something, nest it (below) or `stop` it.
+- **`initialize` runs once per top-level start** (each `supervise` that started the instance, each spawn), in the caller; never for a nested instance or an OTP restart.
+- **Discoverable.** `Node current supervisors` and `Node current processes` list an anonymous top-level instance while it runs and drop it after `stop`.
+
+**Nesting with `supervisionSpec`.** A supervisor class answers `supervisionSpec` like an actor class: type `#supervisor`, shutdown `#infinity`, restart from `class supervisionPolicy` (default `#permanent`). `withId:`, `withArgs:` (the child's `self args`), `withRestart:`, `withShutdown:` and `withName:` (registers the child under a bounded name) apply; `withClassMethod:` and `scope: #global` fail the parent's start with a `#type_error`. Child ids may be Symbols or **Integers**, which suit generated pools and mint no atoms:
+
+```beamtalk
+Supervisor subclass: AcceptorPoolSupervisor
+  childSpecs =>
+    ((1 to: (self args at: #numAcceptors)) collect: [:i |
+      AcceptorSupervisor supervisionSpec withId: i withArgs: #{#id => i, #parent => self}]) asList
+
+pool := AcceptorPoolSupervisor spawnWith: #{#numAcceptors => 3}
+pool count       // => 3
+pool children    // => #(1, 2, 3)
+```
+
+A bare supervisor class in `childSpecs` means `X supervisionSpec`, so it is an **anonymous** child: two parents that nest the same bare class run side by side, and `InnerSup current` does not find a nested instance (use `parent which: InnerSup`). A `DynamicSupervisor` whose child class is a supervisor starts a new anonymous child per `startChild` / `startChild: args`, and `startChild: args name: n` registers it.
+
+**The parent handle and the hang rule.** Passing `self` in a child's args (`#parent => self` above) is how a child reaches its parent; replaying it on restart is safe because a child never outlives its parent. **Never synchronously call a supervisor from code it is waiting on**: its configuration methods and those of its nested supervisor children (a call to an ancestor there hangs; a call to `self` fails fast), and the `initialize` of a `withName:`/`withClassMethod:` actor child (a call back stalls 5 s, then fails the start). This holds during the initial start, every OTP restart and every `DynamicSupervisor startChild:`. A continuation the child requests in `initialize` (`self continueWith:`) runs after its start has returned, so that is the place for a child's first call to its parent. An unnamed actor child's `initialize` runs after its start returns, so a call to the parent from there merely waits until the parent has started its remaining children (bounded by the 5 s call timeout, which a large tree can exceed).
 
 ### Actor Supervision Policy
 
@@ -3768,7 +3818,7 @@ Supervisor subclass: AppRoot
   childSpecs => #(DatabaseSupervisor WebTierSupervisor MetricsSupervisor)
 ```
 
-Nested supervisor children are identified by `isSupervisor => true` and started via OTP `start_link/0`, ensuring they are correctly linked into the supervision tree. The outer supervisor shuts down inner supervisors (and all their children) gracefully on `stop`.
+A nested supervisor class goes through its `supervisionSpec` like any child (type `#supervisor`, shutdown `#infinity`, restart `#permanent` by default), so it is an anonymous child linked into the tree; use `X supervisionSpec withId: … withArgs: …` to give it an id or start args, and nest several of one class (see [Instances and arguments](#instances-and-arguments-adr-0135)). The outer supervisor shuts down inner supervisors (and all their children) gracefully on `stop`.
 
 ```beamtalk
 root := (AppRoot supervise) unwrap
@@ -3783,6 +3833,8 @@ Supervisor lifecycle methods that can fail at a startup / registry boundary retu
 | Method | Signature | Error `kind`s |
 |--------|-----------|---------------|
 | `Supervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
+| `Supervisor class>>spawnAs: n` / `spawnWith: args as: n` (both bases) | `-> Result(Self, Error)` | `#name_registered`, `#reserved_name`, `#type_error`, `#supervisor_start_failed` |
+| `Supervisor class>>named: n` (both bases) | `-> Result(Self, Error)` | `#name_not_registered`, `#wrong_class`, `#type_error` |
 | `Supervisor>>terminate: aClass` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 | `Supervisor>>which: aClass` | `-> Result(Object, Error)` | `#stale_handle` |
 | `DynamicSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
@@ -3858,8 +3910,12 @@ See [ADR 0080](ADR/0080-supervisor-lifecycle-result.md) §Migration Path for the
 |----------|------|
 | `Supervisor subclass:` | `-behaviour(supervisor)` with `one_for_one` |
 | `DynamicSupervisor(C) subclass:` | `-behaviour(supervisor)` with `simple_one_for_one` |
-| `supervise` | `supervisor:start_link({local, Module}, Module, nil)` |
+| `supervise` | `supervisor:start_link({local, Module}, Module, nil)`, in the caller, then `unlink` |
+| `spawn` / `spawnWith: args` | `supervisor:start_link(Module, Args)`, in the caller, then `unlink` |
+| `spawnAs: n` / `spawnWith: args as: n` | `supervisor:start_link({local, N}, Module, Args)`, then `unlink` |
+| `named: n` | `whereis(N)` plus a class check |
 | `current` | `whereis(Module)` |
+| nested `X supervisionSpec` | child spec `{beamtalk_supervisor, start_supervisor_child, [Module, Args]}` → `Module:start_link(Args)` |
 | `count` | `supervisor:count_children/1` (active count) |
 | `children` | `supervisor:which_children/1` (running child ids) |
 | `which: Class` | find child by module in `which_children` result |
@@ -4333,7 +4389,7 @@ t match: [{#ok, v} -> v; {#error, _} -> 0]
 **Pattern failures (BT-3943):** a destructuring assignment whose tuple size, literal slot or array shape does not match, and a `match:` with no matching arm, raise a structured `#pattern_mismatch` error (class `RuntimeError`, the offending value in the error details). A map destructure with a missing key raises `#key_error` instead.
 
 ```beamtalk
-[{#ok, _v} := Tuple withAll: #(#error, 42)] on: Error do: [:e | e kind]
+[{#ok, _v} := {#error, 42}] on: Error do: [:e | e kind]
 // => #pattern_mismatch
 ```
 

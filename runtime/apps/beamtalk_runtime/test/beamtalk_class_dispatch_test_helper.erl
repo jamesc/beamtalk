@@ -32,15 +32,8 @@ through `beamtalk_class_vars`, never passed or returned.)
     class_testWriteThenRaise/1,
     class_testWriteThenNlr/1,
     'class_testTwoArgs:and:'/3,
-    class_testSupervisorNew/1,
-    class_testAlreadyStarted/1,
-    class_testSupError/1,
     class_testGroupLeader/1
 ]).
-
-%% Instance-side `initialize` (ADR 0135 §1) for the supervisor-new rewrap
-%% test: `run_initialize/1` sends it to the supervisor handle.
--export([dispatch/4, has_method/1, has_method_local/1]).
 
 -doc """
 Zero-argument class method that returns a plain value.
@@ -155,62 +148,6 @@ erlang:apply receives [ClassSelf, Arg1, Arg2] → function/4.
     {two_args, Arg1, Arg2}.
 
 -doc """
-Zero-argument class method that returns a Result-wrapped
-`beamtalk_supervisor_new` tuple.
-
-ADR 0080 Phase 0a (option 2): exercises the
-supervisor_new rewrap path in `class_send_dispatch` where a
-freshly-started supervisor tuple — now wrapped in a `Result` tagged
-map by FFI coercion at the `(Erlang beamtalk_supervisor) startLink: self`
-boundary — is converted to the standard supervisor tag after running
-the `initialize` lifecycle hook, and re-wrapped in the same `Result`
-tagged map.
-""".
--spec class_testSupervisorNew(term()) -> map().
-class_testSupervisorNew(_ClassSelf) ->
-    %% Inner tuple uses the helper module, whose dispatch/4 below answers
-    %% the instance-side `initialize` run_initialize sends, letting the test
-    %% assert the happy-path rewrite deterministically.
-    beamtalk_result:from_tagged_tuple(
-        {ok, {beamtalk_supervisor_new, 'BT1981SupNewClass', ?MODULE, self()}}
-    ).
-
--doc """
-Zero-argument class method that returns a Result-wrapped
-`beamtalk_supervisor` tuple (the already_started / idempotent path).
-
-ADR 0080 Phase 1: exercises the class_send_dispatch hook's
-pass-through behaviour for already-normalised supervisor tuples. The
-hook must NOT call run_initialize on this path — only the `_new` tag
-triggers initialization.
-""".
--spec class_testAlreadyStarted(term()) -> map().
-class_testAlreadyStarted(_ClassSelf) ->
-    %% Use the ClassName from the class_send caller — it will match
-    %% whatever ClassName beamtalk_object_class was started with.
-    ClassName = get(beamtalk_class_name),
-    beamtalk_result:from_tagged_tuple(
-        {ok, {beamtalk_supervisor, ClassName, ?MODULE, self()}}
-    ).
-
--doc """
-Zero-argument class method that returns a Result error tagged map.
-
-ADR 0080 Phase 1: exercises the class_send_dispatch hook's
-pass-through behaviour for error Results. The hook must NOT call
-run_initialize on error paths.
-""".
--spec class_testSupError(term()) -> map().
-class_testSupError(_ClassSelf) ->
-    BtError = beamtalk_error:new(
-        supervisor_start_failed,
-        'TestClass',
-        supervise,
-        <<"test error">>
-    ),
-    beamtalk_result:from_tagged_tuple({error, BtError}).
-
--doc """
 Zero-argument class method that reports where its output would go.
 
 Returns the class gen_server's group leader *as seen from inside the
@@ -222,23 +159,3 @@ the second is what a nested class-method call would re-propagate.
 -spec class_testGroupLeader(term()) -> {pid(), pid() | undefined}.
 class_testGroupLeader(_ClassSelf) ->
     {group_leader(), get(beamtalk_entry_group_leader)}.
-
--doc """
-Synchronous instance-side `initialize` target for the supervisor-new rewrap
-test.
-
-Records that it ran in the process dictionary so the test can assert the
-post-dispatch hook actually invoked `run_initialize/1` (rather than only
-that the hook pattern-matched the Result tagged map).
-""".
--spec dispatch(atom(), list(), term(), term()) -> {reply, nil, term()}.
-dispatch(initialize, [], _Self, State) ->
-    put(bt1994_initialize_called, true),
-    {reply, nil, State}.
-
--spec has_method(atom()) -> boolean().
-has_method(Selector) -> has_method_local(Selector).
-
--spec has_method_local(atom()) -> boolean().
-has_method_local(initialize) -> true;
-has_method_local(_) -> false.

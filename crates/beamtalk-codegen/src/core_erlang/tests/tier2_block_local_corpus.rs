@@ -10,13 +10,7 @@
 //! construct) cases, with a host that does not depend on the self-send
 //! promotion.
 
-use crate::core_erlang::{CodegenOptions, generate_module};
-
-fn compile(src: &str) -> Result<String, String> {
-    let (module, _) =
-        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
-    generate_module(&module, CodegenOptions::new("test")).map_err(|e| e.to_string())
-}
+use super::compile;
 
 /// Constructs that rebind the body local `n`.
 const CONSTRUCTS: &[&str] = &[

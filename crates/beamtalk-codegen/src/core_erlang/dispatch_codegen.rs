@@ -42,11 +42,16 @@ use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector, WellKnownSelector};
 use beamtalk_core::source_analysis::Span;
+
+/// Hint on the `stateful_block_dispatch` error a self-send inside a closure
+/// raises when the callee changed actor state (BT-3936).
+const CLOSURE_SELF_SEND_STATE_CHANGE_HINT: &str = "A self-send inside a block changed actor state, but the block cannot return it; return the value and assign it in the method instead";
 
 /// One `generate_message_send` dispatch strategy: `Some(doc)` claims the
 /// send, `None` defers to the next entry in [`HANDLERS`].
@@ -153,11 +158,13 @@ impl CoreErlangGenerator {
     ///
     /// Known caveat: `lookup_class/1` reads `beamtalk_instance_registry`,
     /// which the *spawner* populates only after `beamtalk_actor:safe_spawn/2`'s
-    /// `await_initialize/1` confirms `handle_continue(initialize, _)` has
-    /// finished (see `gen_server/spawn.rs`'s `instance_registration_doc`). A
-    /// self-send that raises *during* `initialize` therefore runs before this
-    /// actor's own registry entry exists, so `lookup_class(self())` falls
-    /// back to `'unknown'` for that narrow window — trading a guaranteed-
+    /// `await_initialize/3` confirms `initialize` has returned (see
+    /// `gen_server/spawn.rs`'s `instance_registration_doc`). A self-send that
+    /// raises *during* `initialize` — or in a continuation `initialize`
+    /// requested, which since BT-3992 runs concurrently with the spawner's
+    /// registration — can therefore run before this actor's own registry
+    /// entry exists, so `lookup_class(self())` falls back to `'unknown'` for
+    /// that narrow window — trading a guaranteed-
     /// correct compile-time atom (for non-inherited classes only) for a
     /// safe-but-less-specific fallback, in exchange for a correct answer in
     /// every other case (including all inherited-method self-sends, the
@@ -694,6 +701,26 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        // ADR 0135 §1: the spawn family on a Supervisor/DynamicSupervisor
+        // class reference starts the tree in the caller via the runtime
+        // start helper (a supervisor module has no `spawn/0,1`).
+        if let Expression::ClassReference { name, package, .. } = receiver {
+            let selector_atom = selector.name();
+            if is_supervisor_spawn_selector(&selector_atom, arguments.len())
+                && self.is_supervisor_class(&name.name)
+            {
+                let pkg = package.as_ref().map(|p| p.name.as_str());
+                let module_name = self.compiled_module_name_qualified(&name.name, pkg);
+                let doc = self.generate_supervisor_class_start(
+                    leaf::atom(name.name.to_string()),
+                    leaf::atom(module_name),
+                    &selector_atom,
+                    arguments,
+                )?;
+                return Ok(Some(doc));
+            }
+        }
+
         // Unary spawn/await messages
         if let MessageSelector::Unary(name) = selector {
             // Only match ClassReference, not Identifier.
@@ -1472,6 +1499,20 @@ impl CoreErlangGenerator {
         selector_atom: &str,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        // ADR 0135 §1: `self spawn…` in a class method of a supervisor class
+        // starts a supervisor instance of the receiving class (a subclass
+        // when inherited) in the calling process.
+        if is_supervisor_spawn_selector(selector_atom, arguments.len())
+            && self.is_supervisor_class(&self.class_name())
+        {
+            let doc = self.generate_supervisor_class_start(
+                Self::class_self_name_doc(),
+                Self::class_self_module_doc(selector_atom),
+                selector_atom,
+                arguments,
+            )?;
+            return Ok(Some(doc));
+        }
         match selector_atom {
             "new" | "new:" => {
                 // Hoist preambles from sub-expression class var mutations.
@@ -1526,6 +1567,46 @@ impl CoreErlangGenerator {
             )?)),
             _ => Ok(None),
         }
+    }
+
+    /// True when `class_name` is `Supervisor`, `DynamicSupervisor` or a
+    /// subclass of either (ADR 0135 §1 carve-out from the actor spawn
+    /// intrinsics).
+    fn is_supervisor_class(&self, class_name: &str) -> bool {
+        self.supervisor_classes.contains(class_name)
+            || self.class_hierarchy.as_ref().is_some_and(|h| {
+                h.is_supervisor_subclass(class_name) || h.is_dynamic_supervisor_subclass(class_name)
+            })
+    }
+
+    /// Lowers a spawn-family send on a supervisor class (ADR 0135 §1) to the
+    /// runtime start helper, run in the caller's process — never class-method
+    /// dispatch, which would run the whole tree start inside the class
+    /// `gen_server`:
+    ///
+    /// ```erlang
+    /// call 'beamtalk_supervisor':'class_start'('Pool', 'bt@pool', 'spawnWith:', [Args])
+    /// ```
+    fn generate_supervisor_class_start(
+        &mut self,
+        class_doc: Document<'static>,
+        module_doc: Document<'static>,
+        selector_atom: &str,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
+        let call_doc = docvec![
+            "call 'beamtalk_supervisor':'class_start'(",
+            class_doc,
+            ", ",
+            module_doc,
+            ", ",
+            leaf::atom(selector_atom.to_string()),
+            ", [",
+            args_doc,
+            "])"
+        ];
+        Ok(self.close_prelude(&args_preamble, call_doc, "SupStart"))
     }
 
     /// Shared emitter for `self spawnAs:` and `self spawnWith:as:` in
@@ -1714,22 +1795,90 @@ impl CoreErlangGenerator {
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let error_clause = self.generate_self_dispatch_error_clause("SelfError", &selector_atom);
 
+        let reply_body = self.closure_self_dispatch_state_guard(
+            &state_var,
+            &current_state,
+            &selector_atom,
+            leaf::var(result_var.clone()),
+        );
         let doc = docvec![
             "case ",
             self.safe_dispatch_call_doc(selector_atom, args_doc, current_state),
             " of ",
             "<{'reply', ",
-            leaf::var(result_var.clone()),
+            leaf::var(result_var),
             ", ",
             leaf::var(state_var),
             "}> when 'true' -> ",
-            leaf::var(result_var),
+            reply_body,
             " ",
             error_clause,
             "end"
         ];
 
         Ok(doc)
+    }
+
+    /// BT-3936 (ADR 0133 § Error examples): the reply body of a self-send
+    /// dispatch that is compiled inside a closure (`block_depth > 0`) that is a Tier 1 `fun`. The callee's returned
+    /// `State` has nowhere to go from there: the closure answers one value,
+    /// and the surrounding method's `State` is not the closure's to rebind.
+    /// A Tier 2 `fun` is exempt (`closure_drops_state` is false): it takes
+    /// `StateAcc` and returns `{Result, StateAccN}`, so it carries the change
+    /// back to its caller (and a consumer that cannot take it back already
+    /// raises `stateful_block_dispatch`).
+    /// So the callee's returned state (`reply_state`) is compared (`=:=`, which
+    /// shortcuts on identity) with the state the send was dispatched against
+    /// (`dispatched_state`): equal answers `ok_doc` as before, different
+    /// raises `stateful_block_dispatch` rather than drop the change silently.
+    ///
+    /// Outside a closure the doc is `ok_doc` unchanged. This is the one place
+    /// every actor self-send dispatch form (threaded `Bind`, discarding,
+    /// sealed) shares; not a per-call-site check.
+    fn closure_self_dispatch_state_guard(
+        &mut self,
+        reply_state: &str,
+        dispatched_state: &str,
+        selector_atom: &str,
+        ok_doc: Document<'static>,
+    ) -> Document<'static> {
+        if self.block_depth == 0
+            || !self.closure_drops_state
+            || self.context != CodeGenContext::Actor
+        {
+            return ok_doc;
+        }
+        let class_name = self.class_name();
+        let error_doc = self.generate_stateful_block_dispatch_error(
+            selector_atom,
+            &class_name,
+            CLOSURE_SELF_SEND_STATE_CHANGE_HINT,
+        );
+        // The fast path is plain `=:=` (identity first). A different map is
+        // compared again with the codegen-internal `__local__<name>` threading
+        // keys stripped (`beamtalk_actor:strip_local_temps/1`, the same helper
+        // the gen_server boundary uses): a read-only callee that rebinds a local
+        // through a conditional / `on:do:` / `ensure:` changes only those keys,
+        // which are not actor state.
+        let ok_slow = ok_doc.clone();
+        docvec![
+            "case call 'erlang':'=:='(",
+            leaf::var(reply_state.to_string()),
+            ", ",
+            leaf::var(dispatched_state.to_string()),
+            ") of <'true'> when 'true' -> ",
+            ok_doc,
+            " <'false'> when 'true' -> case call 'erlang':'=:='(",
+            "call 'beamtalk_actor':'strip_local_temps'(",
+            leaf::var(reply_state.to_string()),
+            "), call 'beamtalk_actor':'strip_local_temps'(",
+            leaf::var(dispatched_state.to_string()),
+            ")) of <'true'> when 'true' -> ",
+            ok_slow,
+            " <'false'> when 'true' -> ",
+            error_doc,
+            " end end",
+        ]
     }
 
     /// ADR 0111 Addendum 5 (shape E2): the dispatch-call/
@@ -1767,6 +1916,7 @@ impl CoreErlangGenerator {
             let result_var = self.fresh_var("SDResult");
             let state_var = self.fresh_var("SDState");
             let current_state = self.current_state_var();
+            let dispatch_state = current_state.clone();
 
             // Capture arguments via bridge (ADR 0018 Phase 0)
             let args_doc = self.capture_argument_list_doc(arguments)?;
@@ -1841,6 +1991,19 @@ impl CoreErlangGenerator {
             // the `Bind`-based callers re-derive it from the version number
             // via `render_bind`.
             let _ = self.next_state_var();
+            let ok_doc = docvec![
+                "{",
+                leaf::var(result_var.clone()),
+                ", ",
+                leaf::var(state_var.clone()),
+                "}"
+            ];
+            let reply_body = self.closure_self_dispatch_state_guard(
+                &state_var,
+                &dispatch_state,
+                &selector_atom_for_error,
+                ok_doc,
+            );
             let error_clause =
                 self.generate_self_dispatch_error_clause("SDError", &selector_atom_for_error);
             let doc = docvec![
@@ -1849,11 +2012,9 @@ impl CoreErlangGenerator {
                 leaf::var(result_var.clone()),
                 ", ",
                 leaf::var(state_var.clone()),
-                "}> when 'true' -> {",
-                leaf::var(result_var),
-                ", ",
-                leaf::var(state_var),
-                "} ",
+                "}> when 'true' -> ",
+                reply_body,
+                " ",
                 error_clause,
                 "end in ",
             ];
@@ -1892,6 +2053,13 @@ impl CoreErlangGenerator {
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let error_clause = self.generate_self_dispatch_error_clause("SealedError", &selector_atom);
+        let state_var = self.fresh_var("SealedState");
+        let reply_body = self.closure_self_dispatch_state_guard(
+            &state_var,
+            &current_state,
+            &selector_atom,
+            leaf::var(result_var.clone()),
+        );
 
         let doc = docvec![
             "let ",
@@ -1911,9 +2079,11 @@ impl CoreErlangGenerator {
             leaf::var(current_state),
             ") of ",
             "<{'reply', ",
-            leaf::var(result_var.clone()),
-            ", _}> when 'true' -> ",
             leaf::var(result_var),
+            ", ",
+            leaf::var(state_var),
+            "}> when 'true' -> ",
+            reply_body,
             " ",
             error_clause,
             "end"
@@ -1946,6 +2116,13 @@ impl CoreErlangGenerator {
         // dispatch atom used at the other call sites.
         let error_clause =
             self.generate_self_dispatch_error_clause("SealedDirectError", selector_atom);
+        let state_var = self.fresh_var("SealedState");
+        let reply_body = self.closure_self_dispatch_state_guard(
+            &state_var,
+            &current_state,
+            selector_atom,
+            leaf::var(result_var.clone()),
+        );
 
         let doc = docvec![
             "let ",
@@ -1965,9 +2142,11 @@ impl CoreErlangGenerator {
             leaf::var(current_state),
             ") of ",
             "<{'reply', ",
-            leaf::var(result_var.clone()),
-            ", _}> when 'true' -> ",
             leaf::var(result_var),
+            ", ",
+            leaf::var(state_var),
+            "}> when 'true' -> ",
+            reply_body,
             " ",
             error_clause,
             "end"
@@ -3300,6 +3479,16 @@ impl CoreErlangGenerator {
 /// → runtime `undef`).
 pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -> bool {
     arity == 0 && selector_atom == "class_name"
+}
+
+/// The class-side spawn-family selectors that start a supervisor instance
+/// (ADR 0135 §1), with their arities: lowered for supervisor receivers to
+/// `beamtalk_supervisor:class_start/4` instead of the actor spawn intrinsics.
+pub(super) fn is_supervisor_spawn_selector(selector_atom: &str, arity: usize) -> bool {
+    matches!(
+        (selector_atom, arity),
+        ("spawn", 0) | ("spawnWith:" | "spawnAs:", 1) | ("spawnWith:as:", 2)
+    )
 }
 
 /// Behaviour-protocol reflective primitives that are safe to

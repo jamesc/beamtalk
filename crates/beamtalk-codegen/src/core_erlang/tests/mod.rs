@@ -110,6 +110,15 @@ pub(crate) fn codegen(src: &str) -> String {
         .expect("codegen should succeed")
 }
 
+/// Parse `src` as a Beamtalk module and run codegen, answering the codegen error's message
+/// instead of panicking (for the corpora that assert a shape is a compile error).
+pub(crate) fn compile(src: &str) -> std::result::Result<String, String> {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    crate::core_erlang::generate_module(&module, crate::core_erlang::CodegenOptions::new("test"))
+        .map_err(|e| e.to_string())
+}
+
 /// The debug-build panic message of compiling `src` with `fault` active (for a verifier
 /// finding, `report_threaded_ir_verify_errors`'s), or `None` when the compile succeeds.
 ///
@@ -200,6 +209,7 @@ mod block_value_arity_agreement;
 mod branch_context;
 mod cascade_operand_state_corpus;
 mod closed_fun_state_version;
+mod closure_self_send_state_guard_corpus;
 mod control_flow;
 mod dispatch;
 mod expect_directive_statement;

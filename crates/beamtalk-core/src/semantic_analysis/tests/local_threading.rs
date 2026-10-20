@@ -2744,6 +2744,227 @@ fn section6_field_write_in_testcase_and_object_methods_is_an_error() {
     }
 }
 
+/// BT-3952 (ADR 0133 amendment): in an actor instance method a block that reads
+/// `self.field` and is handed to the actor's own method, stored, returned or
+/// placed in a literal sees the `State` from when it was made, so it is an
+/// error at the read. Measured on a BEAM: the self-send answers stale when the
+/// callee writes the field before running the block, the stored, returned and
+/// literal shapes when a write follows; no static rule tells the right-answering
+/// cases apart, so every one is rejected.
+#[test]
+fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
+    for body in [
+        "self foo: [self.n]\nnil",
+        "super foo: [self.n]\nnil",
+        "self foo: [:x | x + self.n]\nnil",
+        // Through a nested, non-inlined block.
+        "self foo: [self.items collect: [:x | x + self.n]]\nnil",
+        "self foo: [self.flag ifTrue: [self.n] ifFalse: [0]]\nnil",
+        "^[self.n]",
+        "self.h := [self.n]\nnil",
+        "#[[self.n]]",
+        "self do: [:x | self.n]\nnil",
+        // Bound to a local, then escaping (measured: `^b` answers stale).
+        "b := [self.n]\n^b",
+        "b := [self.n]\nself foo: b\nnil",
+        "b := [self.n]\nself.h := b\nnil",
+        "b := [self.n]\n#[b]",
+        // The reflective read is a field read too.
+        "self foo: [self fieldAt: #n]\nnil",
+        "super foo: [super fieldAt: #n]\nnil",
+        "^[self fieldAt: #n]",
+        "self.h := [self fieldAt: #n]\nnil",
+        "#[[self fieldAt: #n]]",
+        "self foo: [:k | self fieldAt: k]\nnil",
+        "b := [self fieldAt: #n]\n^b",
+        "b := [self fieldAt: #n]\nself foo: b\nnil",
+        "b := [self fieldAt: #n]\nself.n := 5\nb value",
+        "^[self fieldAt: #n; yourself]",
+        // A cascade to `self` dispatches to the actor's own method.
+        "self foo: [self.n]; yourself\nnil",
+        "super foo: [self.n]; yourself\nnil",
+        "b := [self.n]\nself foo: b; yourself\nnil",
+        // The blocks a collection operation answers leave with its result.
+        "^self.items collect: [:x | [self.n]]",
+        // A cascade to `self` may change the state.
+        "b := [self.n]\nself bump; yourself\nb value",
+        // Followed through an alias, a capture, and a rebinding that may run.
+        "b := [self.n]\nc := b\n^c",
+        // A wrapper that captures a tracked local holds its blocks.
+        "b := [self.n]\nc := [b value]\n^c",
+        "b := [self.n]\nc := [b value]\nself.n := 5\nc value",
+        // A loop condition re-runs after a body that changes the state.
+        "b := [self.n]\n[b value < 10] whileTrue: [self.n := self.n + 1]\nnil",
+        "b := [self.n]\n[b value < 10] whileFalse: [self bump]\nnil",
+        // Handed to another object after a write: it may call the block.
+        "b := [self.n]\nself.n := 1\nother foo: b\nnil",
+        "b := [self.n]\n^[b value]",
+        "b := [self.n]\nself.h := [b value]\nnil",
+        "b := [self.n]\nself foo: [b value]\nnil",
+        "b := [self.n]\nself.flag ifTrue: [b := [1]]\n^b",
+        // Called after something that may change the state (measured: a field
+        // write or a self-send between the binding and the call reads stale).
+        "b := [self.n]\nself.n := 5\nb value",
+        "b := [self.n]\nself bump\nb value",
+        "b := [self.n]\nself.flag ifTrue: [self.n := 1]\nb value",
+        // In a loop whose body may change it, before or after the call.
+        "b := [self.n]\nself.items do: [:x | self.n := x. b value]\nnil",
+        "b := [self.n]\nself.items do: [:x | b value. self.n := x]\nnil",
+        "b := [self.n]\nself.items do: [:x | self bump. b value]\nnil",
+    ] {
+        let src = in_actor(body);
+        let diags = adr0131_diagnostics(&src);
+        let d = diags
+            .iter()
+            .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
+            .unwrap_or_else(|| panic!("{src}: {diags:?}"));
+        assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
+        assert!(
+            d.message.contains("is read in a block that runs later"),
+            "{d:?}"
+        );
+        assert!(
+            ["self.", "self fieldAt:", "super fieldAt:", "b value"]
+                .iter()
+                .any(|at| src[d.span.start() as usize..].starts_with(at)),
+            "reported at the read: {src}"
+        );
+    }
+}
+
+/// BT-3952: the shapes that answer right keep compiling: a block run in place
+/// by an inlined construct, passed to a non-self receiver, passed in as a
+/// value, or in a context where a field read is not a stale `State` read.
+#[test]
+fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
+    for body in [
+        // Inlined control flow and collection messages on a non-self receiver.
+        "self.items do: [:x | self.n]\nnil",
+        "self.items detect: [:x | x > self.n] ifNone: [self.n]\nnil",
+        "self.flag ifTrue: [self.n] ifFalse: [0]\nnil",
+        "self.items collect: [:x | x + self.n]\nnil",
+        // A non-self receiver runs its own code, not this actor's.
+        "other foo: [self.n]\nnil",
+        "self.peer foo: [self.n]\nnil",
+        // The value is passed in, not read in the block.
+        "self foo: self.n\nnil",
+        "self foo: [:v | v + 1]\nnil",
+        // A block that does not read a field of `self`.
+        "self foo: [other.n]\nnil",
+        "^[:x | x + 1]",
+        // A local block run at once, before any write, answers right
+        // (measured); with nothing that may change the state in between.
+        "b := [self.n]\nb value",
+        "b := [self.n]\nself.items do: [:x | b value]\nnil",
+        "b := [self.n]\nb value\nself.n := 1\nnil",
+        // Read directly in the method body, not in a block.
+        "self foo: (self fieldAt: #n)\nnil",
+        "x := self fieldAt: #n\n^x",
+        "b := [self fieldAt: #n]\nb value",
+        "b := [self.n]\nself.items do: [:x | b value. x]\nnil",
+        // The operands run before the write or the self-send itself.
+        "b := [self.n]\nself.n := b value + 1\nnil",
+        // Handed to another object with nothing in between: like the literal.
+        "b := [self.n]\nother foo: b\nnil",
+        // A condition over a body that changes nothing.
+        "b := [self.n]\n[b value < 10] whileTrue: [self.items add: 1]\nnil",
+        "b := [self.n]\nself foo: b value\nnil",
+        // A parameter that shadows the local is another variable.
+        "b := [self.n]\nself.items do: [:b | self record: b]\nnil",
+        "b := [self.n]\nself.items do: [:b | self.h := b]\nnil",
+        // The local is rebound to a block that reads no field.
+        "b := [self.n]\nb := [1]\n^b",
+        // A class-builder method body rebinds `self` to its parameter.
+        "^#{#get => [:self | self.n]}",
+    ] {
+        let src = in_actor(body);
+        assert_eq!(
+            section6_errors(&src),
+            0,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
+        );
+    }
+    // Class methods read class variables live at home (ADR 0130 §3), and a
+    // value type's fields never change: neither can go stale.
+    for body in [
+        "self foo: [self.n]\nnil",
+        "^[self.n]",
+        "self.h := [self.n]\nnil",
+    ] {
+        assert_eq!(section6_errors(&in_class(body)), 0, "{body}");
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+    }
+}
+
+/// BT-3952: a block that sends to `self` or `super` dispatches against the
+/// `State` it captured (measured: a stored and a returned `[self total]` both
+/// answered the old value), so when it is stored, returned or placed in a
+/// literal (directly or through a local) it is an error at the send. A block
+/// passed to the actor's own method (BT-3936's runtime check covers it), run
+/// in place, or called through a local later is not.
+#[test]
+fn section6_actor_block_that_sends_to_self_and_is_stored_is_an_error() {
+    for body in [
+        "^[self total]",
+        "^[super total]",
+        "self.h := [self total]\nnil",
+        "#[[self total]]",
+        "^[:x | #(1) do: [:y | self record: y]]",
+        "b := [self total]\n^b",
+        "b := [self total]\nself.h := b\nnil",
+        "b := [self total]\n#[b]",
+        "^self.items collect: [:x | [self total]]",
+        "^[self foo; bar]",
+        // Followed through a capture and an alias.
+        "b := [self total]\n^[b value]",
+        "b := [self total]\nc := b\n^c",
+    ] {
+        let src = in_actor(body);
+        let diags = adr0131_diagnostics(&src);
+        let d = diags
+            .iter()
+            .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
+            .unwrap_or_else(|| panic!("{src}: {diags:?}"));
+        assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
+        assert!(
+            d.message.contains("is sent in a block that runs later"),
+            "{d:?}"
+        );
+        assert!(
+            ["self ", "super ", "b value"]
+                .iter()
+                .any(|at| src[d.span.start() as usize..].starts_with(at)),
+            "reported at the send: {src}"
+        );
+    }
+    for body in [
+        // Passed to the actor's own method: BT-3936's runtime check.
+        "self each: [:x | self record: x]\nnil",
+        "self each: [self total]\nnil",
+        // Run in place, or a local called later.
+        "self.items do: [:x | self record: x]\nnil",
+        "b := [self total]\nb value",
+        "b := [self total]\nself bump\nb value",
+        "b := [self total]\nself each: b\nnil",
+        // The value is computed first and captured.
+        "t := self total\n^[t]",
+    ] {
+        let src = in_actor(body);
+        assert_eq!(
+            section6_errors(&src),
+            0,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
+        );
+    }
+    // Class methods and value types are not actors.
+    for body in ["^[self total]", "self.h := [self total]\nnil"] {
+        assert_eq!(section6_errors(&in_class(body)), 0, "{body}");
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+    }
+}
+
 /// A field write in a block that the compiler lowers in place, or that never
 /// leaves the method, is not an escape.
 #[test]
@@ -2752,7 +2973,6 @@ fn section6_in_place_field_writes_are_not_escapes() {
         "#(1, 2) do: [:x | self.n := self.n + x]\nnil",
         "true ifTrue: [self.n := 1] ifFalse: [self.n := 2]\nnil",
         "[self.n := 1] value\nnil",
-        "^[:x | x + self.n]",
         // A class-builder method body takes `self` as a parameter.
         "^#{#bump => [:self | self.n := self.n + 1]}",
     ] {
@@ -2760,6 +2980,14 @@ fn section6_in_place_field_writes_are_not_escapes() {
             assert_eq!(section6_errors(&src), 0, "{src}");
         }
     }
+    // BT-3952: a returned block that only READS a field is no write, but in an
+    // actor it reads the `State` it was made with: an error there (the read
+    // rule), still none in a class method (live class variables, ADR 0130 §3)
+    // or a value type (fields never change).
+    let body = "^[:x | x + self.n]";
+    assert_eq!(section6_errors(&in_class(body)), 0);
+    assert_eq!(section6_errors(&in_value(body)), 0);
+    assert_eq!(section6_errors(&in_actor(body)), 1);
 }
 
 #[test]
@@ -3708,4 +3936,150 @@ fn residual_repl_match_arm_write_is_accepted_where_it_is_a_producer() {
         messages.iter().all(|m| !m.contains("`match:` arm")),
         "{messages:?}"
     );
+}
+
+/// PIN-BUG BT-3947 (closes BT-3948): in an actor method, a literal block
+/// applied in place (`[:z | ...] value: i`) that assigns a local of its own,
+/// in a `to:do:`/`whileTrue:`/`timesRepeat:` body that rebinds an outer
+/// local, below a conditional arm of such a body, in a loop condition, or
+/// with the loop inside another block, emitted an unbound `StateAcc`
+/// (`erlc` rejected the module), raised, or answered a `{Value, Locals}`
+/// carrier (every row below was measured on a BEAM). BT-3948 makes it a compile error; BT-3947 gives
+/// closure bodies a frame of their own, deletes the `InlineBlockLocalInLoop`
+/// row and flips these to accepted (the repro then answers 6). Class and
+/// value-type methods, `do:`/`collect:` bodies, stateful loops, blocks that
+/// assign no local and `r := [..] value: i` of a fresh local inside an arm
+/// were measured right and stay accepted.
+#[test]
+fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
+    // The BT-3948 repro, in the language's newline syntax.
+    let body = "1 to: 3 do: [:i |\n  t := t + ([:z |\n    w := 0\n    z > 0 ifTrue: [w := z]\n    w] value: i)]\nt";
+    let messages = residual_messages(&in_actor(body), None);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("assigns its local `w`")
+            && messages[0].contains("BT-3948, until BT-3947"),
+        "{messages:?}"
+    );
+    // The siblings measured failing on a BEAM: no conditional, a parameter
+    // rebind, no parameter, two arguments, statement and assignment
+    // positions, and the other counted and condition loops.
+    for body in [
+        "1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z | z := z + 1. z] value: i)]\nt",
+        "1 to: 3 do: [:i | t := t + ([v := 1. v] value)]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z :y | v := z + y. v] value: i value: 1)]\nt",
+        "1 to: 3 do: [:i |\n  t := t + 1\n  [:z | w := z. w] value: i]\nt",
+        "1 to: 3 do: [:i |\n  t := t + 1\n  r := [:z | w := z. w] value: i\n  r]\nt",
+        "[t < 3] whileTrue: [t := t + ([:z | w := z. w] value: 1)]\nt",
+        "3 timesRepeat: [t := t + ([:z | w := z. w] value: 1)]\nt",
+        // Below a conditional arm (BEAM-measured wrong or erlc failure).
+        "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i | c and: [([:z | w := z. w] value: i) > 0]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "c := true\n[t < 3] whileTrue: [t := t + 1\n  c and: [([:z | w := z. w] value: 1) > 0]]\nt",
+        // Measured: a loop inside a method-level arm, `on:do:`, `ensure:`,
+        // `value`, a `do:` body or another loop answered a carrier or
+        // raised; a `do:`, `collect:` or `inject:` body below the loop too.
+        "c := true\nc ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] on: Error do: [:e | 0]\nt",
+        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] ensure: [0]\nt",
+        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] value\nt",
+        "#(1) do: [:e | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\nc ifTrue: [c ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "2 timesRepeat: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "1 to: 2 do: [:j | 1 to: 2 do: [:k | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "q := 0\n1 to: 2 do: [:j | q := q + 1\n  1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "1 to: 3 do: [:i | #(1, 2) do: [:e | t := t + ([:z | w := z. w] value: e)]]\nt",
+        // Conservative rejections (not measured failing; BT-3947 flips
+        // them): a loop in a closure stored by `add:`, and one in a
+        // method-level arm with the block as a bare statement.
+        "fs := OrderedCollection new\n1 to: 3 do: [:i | fs add: [:x | [:z | w := z. w] value: x]]\nt",
+        "c := true\nc ifTrue: [1 to: 3 do: [:i | [:z | w := z. w] value: i]]\nt",
+        // An assignment in a nested `do:` body or closure of a condition
+        // statement is not the BT-3911 cell.
+        "[[:z | #(1) do: [:e | w := e]. z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        // An arm inside a `do:` body or closure is not a bare arm.
+        "[[:z | #(1) do: [:e | e > 0 ifTrue: [w := e]]] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | [:y | y > 0 ifTrue: [w := y]] value: z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        // A state-touching body: the arm operand and `and:` shapes.
+        "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c and: [([:z | w := z. w] value: i) > 0]]\nt",
+        // In a loop condition, whatever the body does.
+        "[([:z | w := z. w] value: t) < 3] whileTrue: [self.n := self.n + 1\n  t := t + 1]\nt",
+        "[([:z | z > 5 ifTrue: [z := 0]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
+        "[([:z | z > 0 ifTrue: [w := z]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | w := z. w] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | z > 0 ifTrue: [w := z]\n  z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) > 5] whileFalse: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := 5]\nt",
+        "[t < 3 and: [([:z | w := z. w] value: t) > 0]] whileTrue: [t := t + 1]\nt",
+        "[t < 3 ifTrue: [([:z | w := z. w] value: t) > 0] ifFalse: [false]] whileTrue: [t := t + 1]\nt",
+    ] {
+        let messages = residual_messages(&in_actor(body), None);
+        assert_eq!(messages.len(), 1, "{body}: {messages:?}");
+        assert!(messages[0].contains("BT-3948"), "{body}: {messages:?}");
+    }
+    // The shapes that compile and answer right stay accepted: other
+    // contexts, other bodies, a loop that rebinds nothing or touches state,
+    // a block that assigns no local, and a nested loop.
+    for src in [
+        in_class("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_value("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_actor("#(1, 2, 3) do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_actor("1 to: 3 do: [:i | [:z | w := z. w] value: i]\nt"),
+        in_actor("1 to: 3 do: [:i | r := [:z | w := z. w] value: i. r]\nt"),
+        in_actor("1 to: 3 do: [:i | t := t + ([:z | z + 1] value: i)]\nt"),
+        in_actor(
+            "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
+        ),
+        in_actor("t := t + ([:z | w := z. w] value: 2)\nt"),
+        // `r := [..] value: i` of a fresh local in an arm answers right in
+        // every arm family and loop kind (BEAM-measured).
+        in_actor(
+            "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [r := [:z | w := z. w] value: i\n    t := t + r]]\nt",
+        ),
+        in_actor(
+            "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [r := [:z | w := z. w] value: i\n  t := t + r]]]\nt",
+        ),
+        in_actor(
+            "c := true\n3 timesRepeat: [c and: [r := [:z | w := z. w] value: 2\n  t := t + r\n  true]]\nt",
+        ),
+        in_actor(
+            "c := true\n[t < 9] whileTrue: [c ifNotNil: [:u | r := [:z | w := z. w] value: 2\n  t := t + r + 1]]\nt",
+        ),
+        // A state-touching body answers right directly and for a statement
+        // of an arm (BEAM-measured).
+        in_actor(
+            "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
+        ),
+        in_actor(
+            "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
+        ),
+        // The BT-3911 cell: one arm-only statement in a condition.
+        in_actor("[[:k | true ifTrue: [x := k]] value: 1\n  t < 3] whileTrue: [t := t + 1]\nt"),
+    ] {
+        assert!(residual_messages(&src, None).is_empty(), "{src}");
+    }
+}
+
+/// BT-3948: an in-place block that assigns its own local AND writes an outer
+/// local inside a loop is left to the Phase 0 position check, which rejects it
+/// (measured with the CLI, 2026-10-20), so neither form slips past both checks.
+#[test]
+fn inline_block_local_that_also_writes_an_outer_local_in_a_loop_is_rejected_by_phase_0() {
+    for body in [
+        "1 to: 3 do: [:i | [:z | w := z. t := t + w] value: i]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z | w := z. t := t + w. w] value: i)]\nt",
+    ] {
+        let diags = adr0131_diagnostics(&in_actor(body));
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error)
+                && diags.iter().all(|d| !d.message.contains("BT-3948")),
+            "{body}: {diags:?}"
+        );
+    }
 }

@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135 §1): instance-side `initialize` runs once per spawned
+// instance, so every Bt3962InitFarm starts with exactly one worker.
+
+DynamicSupervisor(Bt3962Worker) subclass: Bt3962InitFarm
+
+  childClass => Bt3962Worker
+
+  initialize => self startChild unwrap

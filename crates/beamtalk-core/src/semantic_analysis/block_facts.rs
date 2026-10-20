@@ -945,6 +945,26 @@ fn collect_pattern_bindings(
 /// must-analysis (ADR 0124 A2a) — same "is this receiver `self`" question this
 /// may-analysis already answers, imported rather than redefined (CLAUDE.md's
 /// no-duplicate-implementations rule).
+/// Whether `expr` (parentheses looked through) is `self` or `super`: the
+/// receivers whose sends run the object's own methods.
+#[must_use]
+pub(crate) fn is_self_or_super(expr: &Expression) -> bool {
+    let expr = expr.unwrap_parens();
+    is_self_reference(expr) || matches!(expr, Expression::Super(_))
+}
+
+/// The receiver a cascade sends all its messages to: the parser folds the
+/// first message into `receiver`, so it is that send's own receiver.
+#[must_use]
+pub(crate) fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
+    match receiver {
+        Expression::MessageSend {
+            receiver: shared, ..
+        } => shared,
+        other => other,
+    }
+}
+
 pub(crate) fn is_self_reference(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
@@ -1183,6 +1203,170 @@ pub fn outer_state_writes(block: &Block) -> Vec<OuterLocalWrite> {
     };
     walker.block(block);
     walker.state_writes
+}
+
+/// The spans of the blocks nested in `block` that take a `self` parameter (a
+/// class-builder method body): inside one, `self` is that parameter, not the
+/// enclosing object. `None` when `block` itself takes one.
+fn self_rebound_spans(block: &Block) -> Option<Vec<Span>> {
+    if block.parameters.iter().any(|p| p.name == "self") {
+        return None;
+    }
+    let mut rebound = Vec::new();
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::Block(inner) = e {
+                if inner.parameters.iter().any(|p| p.name == "self") {
+                    rebound.push(inner.span);
+                }
+            }
+        });
+    }
+    Some(rebound)
+}
+
+/// ADR 0133 (BT-3952): the first message `block` sends to `self` or `super`
+/// anywhere in its body, nested blocks included: its selector and the span of
+/// the send. A self-send dispatches against the `State` the block captured
+/// when it was made, so it can answer a stale value as `self.field` can.
+pub fn outer_self_send(block: &Block) -> Option<(&'static str, ecow::EcoString, Span)> {
+    let rebound = self_rebound_spans(block)?;
+    let mut found = None;
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::MessageSend {
+                receiver,
+                selector,
+                span,
+                ..
+            } = e
+            {
+                if found.is_none()
+                    && is_self_or_super(receiver)
+                    && !rebound
+                        .iter()
+                        .any(|b| b.start() <= span.start() && span.end() <= b.end())
+                {
+                    let word = if matches!(receiver.unwrap_parens(), Expression::Super(_)) {
+                        "super"
+                    } else {
+                        "self"
+                    };
+                    found = Some((word, selector.name(), *span));
+                }
+            }
+        });
+    }
+    found
+}
+
+/// ADR 0133 (BT-3952): the `self.field` reads (and `self fieldAt: k` reads, named
+/// `self fieldAt:` or `super fieldAt:`) `block` makes anywhere in its
+/// body, nested blocks included, first read of each field. An assignment's
+/// target is a write, not a read (`outer_state_writes`); a `self.x` inside the
+/// assigned value is a read. The read-side twin of [`outer_state_writes`].
+pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
+    let mut targets: HashSet<Span> = HashSet::new();
+    let mut reads: Vec<OuterLocalWrite> = Vec::new();
+    let Some(rebound) = self_rebound_spans(block) else {
+        return reads;
+    };
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::Assignment { target, .. } = e {
+                if let Expression::FieldAccess { span, .. } = target.as_ref() {
+                    targets.insert(*span);
+                }
+            }
+        });
+    }
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            // The reflective read `self fieldAt: k` (or `super fieldAt: k`)
+            // reads the same captured `State` as `self.k`.
+            if let Expression::MessageSend {
+                receiver,
+                selector,
+                span,
+                ..
+            } = e
+            {
+                if selector.name() == "fieldAt:"
+                    && is_self_or_super(receiver)
+                    && !rebound
+                        .iter()
+                        .any(|b| b.start() <= span.start() && span.end() <= b.end())
+                {
+                    let word = if matches!(receiver.unwrap_parens(), Expression::Super(_)) {
+                        "super"
+                    } else {
+                        "self"
+                    };
+                    let name: ecow::EcoString = format!("{word} fieldAt:").into();
+                    if !reads.iter().any(|r| r.name == name) {
+                        reads.push(OuterLocalWrite {
+                            kind: WriteKind::ObjectState,
+                            name,
+                            span: *span,
+                        });
+                    }
+                }
+                return;
+            }
+            let Expression::FieldAccess {
+                receiver,
+                field,
+                span,
+            } = e
+            else {
+                return;
+            };
+            if is_self_reference(receiver.unwrap_parens())
+                && !targets.contains(span)
+                && !rebound
+                    .iter()
+                    .any(|b| b.start() <= span.start() && span.end() <= b.end())
+                && !reads.iter().any(|r| r.name == field.name)
+            {
+                reads.push(OuterLocalWrite {
+                    kind: WriteKind::ObjectState,
+                    name: field.name.clone(),
+                    span: *span,
+                });
+            }
+        });
+    }
+    reads
+}
+
+/// Whether evaluating `expr` itself (not its operands) can change the
+/// actor's `State` (BT-3952): a `self.field :=` write, or a message sent to
+/// `self` or `super` (a user method, `fieldAt:put:`, ... any of which may
+/// write a field). Conservative: every self-send counts.
+#[must_use]
+pub fn may_change_actor_state(expr: &Expression) -> bool {
+    match expr {
+        Expression::Assignment { target, .. } => matches!(
+            target.as_ref(),
+            Expression::FieldAccess { receiver, .. } if is_self_reference(receiver.unwrap_parens())
+        ),
+        Expression::MessageSend { receiver, .. } => is_self_or_super(receiver),
+        Expression::Cascade { receiver, .. } => is_self_or_super(cascade_shared_receiver(receiver)),
+        _ => false,
+    }
+}
+
+/// Whether `block` contains, anywhere (nested blocks included), an expression
+/// that [`may_change_actor_state`].
+#[must_use]
+pub fn block_may_change_actor_state(block: &Block) -> bool {
+    let mut changes = false;
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            changes |= may_change_actor_state(e);
+        });
+    }
+    changes
 }
 
 /// The names `stmt` itself binds by assignment or destructuring: those not

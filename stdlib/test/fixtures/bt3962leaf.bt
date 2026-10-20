@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135): a small supervisor that is spawned, nested and pooled
+// many times over. Its start args are readable as `self args`.
+
+Supervisor subclass: Bt3962Leaf
+
+  childSpecs => #(Bt3962Worker)

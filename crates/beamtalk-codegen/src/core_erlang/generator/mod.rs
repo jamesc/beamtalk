@@ -179,6 +179,10 @@ pub struct CoreErlangGenerator {
     /// `safe_dispatch` directly, because the block may execute in a different
     /// process (e.g. Timer callback, cross-actor callback).
     pub(in crate::core_erlang) block_depth: usize,
+    /// BT-3936: whether the innermost enclosing closure (`block_depth > 0`) is a
+    /// Tier 1 `fun`, which cannot hand the actor `State` back. A Tier 2 `fun`
+    /// returns `{Result, StateAccN}`, so it does carry it (false).
+    pub(in crate::core_erlang) closure_drops_state: bool,
     /// ADR 0130 §5: the Core Erlang variable holding the class-variable
     /// capture of the innermost enclosing block literal that reads a class
     /// variable (`beamtalk_class_vars:capture/2` bound at its creation), or
@@ -382,6 +386,11 @@ pub struct CoreErlangGenerator {
     /// hierarchy in `generate_module_with_warnings`.
     pub(in crate::core_erlang) direct_call_eligible:
         std::collections::HashMap<String, DirectCallClassInfo>,
+    /// ADR 0135 §1: names of `Supervisor` / `DynamicSupervisor` subclasses, for
+    /// REPL expression codegen, which has no `class_hierarchy`. Set by
+    /// `set_supervisor_classes_from_hierarchy`; module codegen asks
+    /// `class_hierarchy` instead.
+    pub(in crate::core_erlang) supervisor_classes: std::collections::HashSet<String>,
     /// ADR 0129 Phase 0b: the class being compiled's own direct-call-eligible
     /// class methods as sorted `(raw selector, safe fn name)` pairs — a view of
     /// `direct_call_eligible`, baked into `__beamtalk_meta/0`.
@@ -485,6 +494,7 @@ impl CoreErlangGenerator {
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
+            closure_drops_state: false,
             class_var_capture: None,
             class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,
@@ -514,6 +524,7 @@ impl CoreErlangGenerator {
             current_method_selector: None,
             is_server_subclass: false,
             direct_call_eligible: std::collections::HashMap::new(),
+            supervisor_classes: std::collections::HashSet::new(),
             own_direct_class_methods: Vec::new(),
             own_stdlib_trait_methods: Vec::new(),
             own_overrides_collection_selector: false,
