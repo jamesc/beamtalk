@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3916 (ADR 0133): an actor that `uses:` the stdlib's own `Enumerable`, so
+// every iteration message is a stdlib provision over `elements`. The receiver
+// guard classifies those by origin (the stdlib protocol), not by the actor's
+// own module, so a writing block sent from another process still folds.
+// Driven by adr0133enumerable_user_test.bt.
+
+Actor subclass: Adr0133EnumerableStdlibActor
+  uses: Enumerable(Integer)
+  state: items :: List(Integer) = #()
+
+  elements -> List(Integer) => self.items

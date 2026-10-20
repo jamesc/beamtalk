@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3916 (ADR 0133): a `Collection` with `do:` and its own `select:` (which
+// keeps nothing). The stdlib's `reject:` is `self select:`, so a writing block
+// sent `reject:` would, folded over `do:`, skip that override the pure send
+// runs: the receiver guard refuses it. Driven by
+// adr0133enumerable_user_test.bt.
+
+Collection subclass: Adr0133EnumerableOwnSelect
+  field: items :: List = #()
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    self.items do: block
+    nil
+
+  printString -> String => "Adr0133EnumerableOwnSelect"
+
+  select: _block :: Block(Object, Boolean) -> List => #()

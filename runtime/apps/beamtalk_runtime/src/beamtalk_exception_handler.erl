@@ -307,6 +307,9 @@ into three buckets that are presented differently:
 * **Bucket C — resource/env** (`resource_error`/`process_not_found`/
   `timeout_error`): `system_limit`, `noproc`, `timeout`.
 
+Every clause records the original raw term under `details.reason`, which
+`Exception>>reason` exposes to Beamtalk code (BT-3954).
+
 `Context` is the dispatch-layer breadcrumb: a map that may carry
 `selector` and `class` for the active send. It disambiguates the overloaded
 `badarg` and lets bucket-A errors render located messages
@@ -326,7 +329,7 @@ wrap_raw({badarity, {Fun, Args}}, _Context) when is_function(Fun), is_list(Args)
     Hint =
         <<"Check that your block has the right number of parameters (e.g., [:x | ...] for 1 argument)">>,
     wrap_classified(arity_mismatch, 'Block', undefined, Message, Hint, #{
-        expected_args => Expected, actual_args => Actual
+        expected_args => Expected, actual_args => Actual, reason => {badarity, {Fun, Args}}
     });
 %%% --- Bucket A: user-input errors ----------------------------------------
 wrap_raw(badarith, Context) ->
@@ -340,12 +343,16 @@ wrap_raw({badkey, Key}, Context) ->
     Core = iolist_to_binary(io_lib:format("key not found: ~tp", [Key])),
     Message = located(Sel, Cls, Core),
     Hint = <<"Use 'includesKey:' to test first, or 'at:ifAbsent:' to supply a default.">>,
-    wrap_classified(classify_kind({badkey, Key}), Cls, Sel, Message, Hint, #{key => Key});
+    wrap_classified(classify_kind({badkey, Key}), Cls, Sel, Message, Hint, #{
+        key => Key, reason => {badkey, Key}
+    });
 wrap_raw({badmap, Value}, Context) ->
     {Sel, Cls} = breadcrumb(Context),
     Message = located(Sel, Cls, <<"expected a Dictionary but got a non-map value">>),
     Hint = <<"This message is only understood by Dictionary values.">>,
-    wrap_classified(classify_kind({badmap, Value}), Cls, Sel, Message, Hint, #{value => Value});
+    wrap_classified(classify_kind({badmap, Value}), Cls, Sel, Message, Hint, #{
+        value => Value, reason => {badmap, Value}
+    });
 wrap_raw(badarg, Context) ->
     %% `badarg` is overloaded (user mistake vs internal misuse) and the bare
     %% error can't tell which. With a dispatch breadcrumb we can locate it as a
@@ -645,6 +652,10 @@ dispatch('selector', [], #{error := Error}) ->
     end;
 dispatch('errorClass', [], #{error := Error}) ->
     Error#beamtalk_error.class;
+dispatch('reason', [], #{error := #beamtalk_error{details = Details}}) ->
+    raw_reason(Details);
+dispatch('reason', [], _) ->
+    nil;
 dispatch('printString', [], #{error := Error}) ->
     beamtalk_error:format(Error);
 dispatch('stackTrace', [], #{stacktrace := Frames}) ->
@@ -663,6 +674,38 @@ dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
     %% Preserve exception class name from the signaling object
     signal_message(Message, ClassName).
 
+-doc """
+The raw Erlang term an exception wraps, for `Exception>>reason` (BT-3954).
+
+Producers record it under different `details` keys, checked in order:
+
+* `reason` — `wrap_raw/2` (raw `error:` via `on:do:`, the `R` of an FFI
+  `{error, R}`) and `ensure_wrapped/3` (`exit:`/`throw:`/`undef`);
+* `erlang_error` — the FFI proxy's specific `badarg`/`badarith`/
+  `function_clause` clauses (`beamtalk_erlang_proxy:raise_wrapped_error/7`);
+* `original_reason` — raw errors escaping a runtime-defined actor method or
+  DNU handler (`beamtalk_actor`).
+
+A recorded value that is itself a Beamtalk exception (a `#beamtalk_error{}` or
+its wrapped map, e.g. `Error signal:` inside a runtime-defined actor method) is
+not a raw Erlang term, so it answers `nil`, as does an exception with no
+recorded term.
+""".
+-spec raw_reason(map()) -> term().
+raw_reason(Details) ->
+    raw_reason_from(Details, [reason, erlang_error, original_reason]).
+
+-spec raw_reason_from(map(), [atom()]) -> term().
+raw_reason_from(_Details, []) ->
+    nil;
+raw_reason_from(Details, [Key | Rest]) ->
+    case Details of
+        #{Key := #beamtalk_error{}} -> nil;
+        #{Key := #{'$beamtalk_class' := _, error := #beamtalk_error{}}} -> nil;
+        #{Key := Reason} -> Reason;
+        _ -> raw_reason_from(Details, Rest)
+    end.
+
 -doc "Check if Exception responds to a selector.".
 -spec has_method(atom()) -> boolean().
 has_method('message') -> true;
@@ -670,6 +713,7 @@ has_method('hint') -> true;
 has_method('kind') -> true;
 has_method('selector') -> true;
 has_method('errorClass') -> true;
+has_method('reason') -> true;
 has_method('printString') -> true;
 has_method('stackTrace') -> true;
 has_method('class') -> true;

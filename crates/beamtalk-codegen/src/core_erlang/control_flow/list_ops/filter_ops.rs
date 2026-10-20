@@ -122,6 +122,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some(if negate { "reject:" } else { "select:" }),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -205,6 +206,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some(if negate { "reject:" } else { "select:" }),
             list_var,
             safe_list_var.clone(),
         ));

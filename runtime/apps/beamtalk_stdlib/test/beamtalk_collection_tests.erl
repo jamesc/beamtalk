@@ -12,6 +12,7 @@ Tests inject_into/3 and to_list/1 for list inputs.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Fixtures
@@ -214,3 +215,42 @@ from_list_like_other_receiver_test() ->
     %% Non-Array, non-Set, non-binary, non-list receiver (e.g. a Bag map) → list unchanged.
     Bag = #{'$beamtalk_class' => 'Bag', counts => #{}},
     ?assertEqual([1, 2], beamtalk_collection:from_list_like(Bag, [1, 2])).
+
+%%% ============================================================================
+%%% to_list_for_threading/2 — the receiver guard (BT-3916)
+%%% ============================================================================
+
+to_list_for_threading_test_() ->
+    {setup, fun stdlib_setup/0, fun stdlib_teardown/1, [
+        {"a list passes through for any selector", fun to_list_for_threading_list_test/0},
+        {"do: is never guarded", fun to_list_for_threading_do_test/0},
+        {"a stdlib selector folds over do:", fun to_list_for_threading_stdlib_test/0},
+        {"a selector the receiver lacks is does_not_understand",
+            fun to_list_for_threading_dnu_test/0}
+    ]}.
+
+to_list_for_threading_list_test() ->
+    ?assertEqual([1, 2], beamtalk_collection:to_list_for_threading([1, 2], 'anySatisfy:')).
+
+to_list_for_threading_do_test() ->
+    ?assertEqual(
+        [1, 2, 3],
+        beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'do:')
+    ).
+
+to_list_for_threading_stdlib_test() ->
+    lists:foreach(
+        fun(Selector) ->
+            ?assertEqual(
+                [1, 2, 3],
+                beamtalk_collection:to_list_for_threading(make_interval(1, 3), Selector)
+            )
+        end,
+        ['inject:into:', 'collect:', 'select:', 'anySatisfy:', 'detect:ifNone:']
+    ).
+
+to_list_for_threading_dnu_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = does_not_understand, selector = 'noSuchSelector:'}},
+        beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'noSuchSelector:')
+    ).

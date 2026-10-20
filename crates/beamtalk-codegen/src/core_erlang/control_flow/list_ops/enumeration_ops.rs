@@ -198,14 +198,15 @@ impl CoreErlangGenerator {
         &mut self,
         original_send: &Expression,
         inject_send: &Expression,
+        user_selector: &'static str,
     ) -> Result<Document<'static>> {
         // Both callers (`try_generate_each_with_index` / `try_generate_do_separated_by`)
         // build `inject_send` via `inject_into`, which always returns an
         // `Expression::MessageSend`, so this destructure cannot fail.
         let Expression::MessageSend {
             receiver,
-            selector,
             arguments,
+            span,
             ..
         } = inject_send
         else {
@@ -213,15 +214,23 @@ impl CoreErlangGenerator {
                 "finalize_enumeration_fold is only called with a synthetic inject:into: send"
             );
         };
+        // The synthetic fold is lowered by the `inject:into:` list-op itself,
+        // handed the selector the user sent for its receiver guard (BT-3916),
+        // not dispatched as a message.
+        let [initial, body] = arguments.as_slice() else {
+            unreachable!("a synthetic inject:into: send has two arguments");
+        };
         if self.enumeration_threads_actor_state() {
-            let inject_doc = self.expression_doc(inject_send)?;
+            // The annotated fold (its parentheses make a safe `let`-value).
+            let fold_doc = self.generate_list_inject_for(receiver, initial, body, user_selector)?;
+            let inject_doc = self.annotate_send_with_line(fold_doc, *span);
             return Ok(self.reproject_enumeration_fold(inject_doc));
         }
         // The synthetic send is generated as a message send, not as an
         // expression: its span is not one of the statement's producer sites, so
         // it must not be taken for a producer itself.
         let reproject = self.enumeration_yields_construct_tuple(original_send);
-        let fold_doc = self.generate_message_send(receiver, selector, arguments)?;
+        let fold_doc = self.generate_list_inject_for(receiver, initial, body, user_selector)?;
         if reproject {
             return Ok(self.reproject_enumeration_fold(fold_doc));
         }
@@ -288,9 +297,11 @@ impl CoreErlangGenerator {
             span,
         );
         let original_send = enumeration_send(receiver, selector, arguments);
-        Ok(Some(
-            self.finalize_enumeration_fold(&original_send, &inject_send)?,
-        ))
+        Ok(Some(self.finalize_enumeration_fold(
+            &original_send,
+            &inject_send,
+            "eachWithIndex:",
+        )?))
     }
 
     /// Desugars `receiver do: [:elem | body] separatedBy: [sep]` into a
@@ -372,8 +383,10 @@ impl CoreErlangGenerator {
             ),
             span,
         );
-        Ok(Some(
-            self.finalize_enumeration_fold(&original_send, &inject_send)?,
-        ))
+        Ok(Some(self.finalize_enumeration_fold(
+            &original_send,
+            &inject_send,
+            "do:separatedBy:",
+        )?))
     }
 }

@@ -1178,6 +1178,19 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // e is typed as BEAMError — `e message` type-checks without warnings
 ```
 
+**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
+
+```beamtalk
+(Erlang string to_integer: "abc") ifError: [:e | e reason]
+// => #no_integer
+[Erlang erlang error: #econnreset] on: Exception do: [:e | e reason]
+// => #econnreset
+[#(1, "x") sum] on: TypeError do: [:e | e reason]
+// => #badarith  (classified as type_error, original term still available)
+[Error signal: "boom"] on: Error do: [:e | e reason]
+// => nil
+```
+
 A `native:` method's wrapped error carries the Beamtalk `Class`/selector (e.g. `Type error in 'take:' on Stream`), whereas inline `(Erlang …)` FFI carries the Erlang-facing `ErlangModule` context (e.g. `Type error in 'atom_to_list' on ErlangModule`) — a documented limitation, since the proxy knows the MFA but not the calling class.
 
 ### Type Specs for Native Modules
@@ -2795,7 +2808,7 @@ t := Twice twice: [t + 1]
 
 This departs from Pharo, where `Twice twice: [t := t + 1]` answers 2: it relies on a heap shared between a block and its home method, which the BEAM does not have (see `docs/beamtalk-principles.md` §4). Reads of captured variables, and `^` from any block, are unaffected. The same diagnostic is reported by `beamtalk build`, the REPL, the LSP and MCP.
 
-**Your own collection classes.** The collection messages above (`do:`, `inject:into:`, `collect:`, `select:`, `detect:ifNone:`, `anySatisfy:`, …) thread a writing block literal for any receiver that implements `do:`, including your own class or actor: the compiler runs the block in place as a fold over the receiver's `do:`, whether that `do:` forwards to an inner `List` or walks by hand, and whether the other messages are your own, a trait's provisions, or absent (ADR 0133, BT-3903). The exception is an actor's `self do:` (or `super do:`, or any of these messages) from inside its own method: that is a message to the actor's own method, so the block escapes and writing a captured local in it is a compile error (BT-3918). With a writing block these messages therefore *mean* the fold over `do:`: a class that overrides, say, `anySatisfy:` with different semantics does not run its override for a writing block (BT-3916). A block passed to a message of your own (`orders sumOf: [:o | total := ...]`) is not covered; return the value from the block instead.
+**Your own collection classes.** The collection messages above (`do:`, `inject:into:`, `collect:`, `select:`, `detect:ifNone:`, `anySatisfy:`, …) thread a writing block literal for any receiver that implements `do:`, including your own class or actor: the compiler runs the block in place as a fold over the receiver's `do:`, whether that `do:` forwards to an inner `List` or walks by hand, and whether the other messages are the stdlib's or absent (ADR 0133, BT-3903). The exception is an actor's `self do:` (or `super do:`, or any of these messages) from inside its own method: that is a message to the actor's own method, so the block escapes and writing a captured local in it is a compile error (BT-3918). Every message but `do:` is checked first, at run time, against the receiver's class, and the write threads only when the class defines no collection message of its own: the sent message must resolve to the stdlib's own method, or to a provision of a stdlib trait such as `Enumerable` (judged by where the method comes from, not by the class that `uses:` it), **and** none of the collection messages above except `do:` may be a method outside the stdlib. The stdlib's `collect:`, `select:`, `count:`, `eachWithIndex:` and `do:separatedBy:` run through `self inject:into:` (and `reject:` through `select:`), so a class with its own `inject:into:` would have that override run by the plain send but skipped by the in-place fold. Any such override in the class or a package-local trait, or an extension method for the message actually sent, makes a writing send of any of these messages raise `stateful_block_dispatch` rather than silently running the fold over `do:` in its place (known gap: an extension registered at run time that overrides a *different* collection message is not yet detected, [BT-3951](https://linear.app/beamtalk/issue/BT-3951)); a receiver that does not respond to the message raises `does_not_understand`, as the plain send does (BT-3916). To thread a write through such a class, `uses: Enumerable` (the stdlib's provisions thread), define only `do:`, or compute the value without assigning from the block. A block passed to a message of your own (`orders sumOf: [:o | total := ...]`) is not covered; return the value from the block instead.
 
 ### Field Mutations
 
@@ -3548,6 +3561,23 @@ pool stop
 WorkerPool current                  // => nil
 ```
 
+**Capping the pool with `maxChildren`.** Override `class maxChildren` (default `#infinity`) to bound the number of live children — the Beamtalk equivalent of Elixir `DynamicSupervisor`'s `max_children`. Once the pool holds that many children (`count`, plus any child whose automatic restart is pending), `startChild`, `startChild:` and `startChild:name:` return `Result error:` with kind `#max_children` (the error's details carry the limit) instead of starting a child; terminating a child frees a slot. Automatic restarts of existing children are never refused. The value must be a non-negative Integer or `#infinity` — anything else makes `supervise` return `Result error:` with kind `#supervisor_start_failed` (or, for a pool nested under a static `Supervisor`, fails the parent's start) — and is read each time the supervisor (re)starts.
+
+```beamtalk
+DynamicSupervisor(Worker) subclass: ConnectionPool
+  class childClass => Worker
+  class maxChildren -> Integer => 2
+
+pool := (ConnectionPool supervise) unwrap
+w := pool startChild unwrap        // => Actor(Worker, _)
+pool startChild unwrap             // => Actor(Worker, _)
+pool startChild error kind         // => #max_children
+(pool terminateChild: w) unwrap    // => nil
+pool startChild isOk               // => true
+```
+
+The limit is checked by the calling process just before the start, so it is exact when a single process starts children (e.g. one acceptor per pool) — concurrent starters racing past the check can briefly overshoot it by up to the number of racers.
+
 **Automatic restart replays per-child args.** OTP tracks the exact args each dynamically-started child was started with. A child started via `startChild: args` that later crashes under a `#permanent` or `#transient` restart policy comes back with those same args, not blank defaults. A child started via the no-arg `startChild` restarts the same way. Restart re-runs `init/1` from scratch — it does not resume the child's prior runtime state.
 
 **Named dynamic children — identity that survives restart.** `startChild:` alone gives you a pid, and a `simple_one_for_one`-restarted child comes back as a *different*, unlabelled pid — there is no `which:`/`children` method on `DynamicSupervisor` to rediscover it (see below). `startChild: args name: aSymbol` closes that gap by combining args-replay with [named actor registration](ADR/0079-named-actor-registration.md): the child starts under `{local, aSymbol}` registration, and because OTP replays each dynamic child's own start args (including the name) on automatic restart, a crashed named child re-registers under the same name every time.
@@ -3597,8 +3627,8 @@ Supervisor lifecycle methods that can fail at a startup / registry boundary retu
 | `Supervisor>>terminate: aClass` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 | `Supervisor>>which: aClass` | `-> Result(Object, Error)` | `#stale_handle` |
 | `DynamicSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
-| `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#stale_handle` |
-| `DynamicSupervisor>>startChild: args name: aSymbol` | `-> Result(C, Error)` | `#child_start_failed`, `#name_registered`, `#reserved_name`, `#stale_handle` |
+| `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#max_children`, `#stale_handle` |
+| `DynamicSupervisor>>startChild: args name: aSymbol` | `-> Result(C, Error)` | `#child_start_failed`, `#max_children`, `#name_registered`, `#reserved_name`, `#stale_handle` |
 | `DynamicSupervisor>>terminateChild: child` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 
 `stop`, `current`, `children`, and `count` are **unchanged** — they are teardown / lookup / inspection operations over an already-valid handle and follow let-it-crash semantics (teardown) or nil-on-miss (lookup), matching the rules established in [ADR 0079](ADR/0079-named-actor-registration.md) for the parallel `Actor` surface.

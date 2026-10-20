@@ -236,14 +236,7 @@ impl CoreErlangGenerator {
                 } else {
                     self.generate_message_send(receiver, selector, arguments)?
                 };
-                // Annotate message sends with source line for BEAM stacktraces.
-                // Only annotate CLOSED expressions — see `can_annotate_closed_expression`.
-                if self.can_annotate_closed_expression() {
-                    if let Some(line_num) = self.span_to_line(*span) {
-                        return Ok(self.annotate_with_line(doc, line_num));
-                    }
-                }
-                Ok(doc)
+                Ok(self.annotate_send_with_line(doc, *span))
             }
             Expression::Assignment { target, value, .. } => {
                 // Tier 2 only ever supported captured-local mutations, not

@@ -98,6 +98,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("count:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -164,6 +165,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("count:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -304,6 +306,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("flatMap:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -380,6 +383,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("flatMap:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -454,6 +458,21 @@ impl CoreErlangGenerator {
         initial: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
+        self.generate_list_inject_for(receiver, initial, body, "inject:into:")
+    }
+
+    /// [`Self::generate_list_inject`] for a fold that stands in for
+    /// `guard_selector` (BT-3916): `inject:into:` for the message itself, or
+    /// the user's `eachWithIndex:` / `do:separatedBy:` that
+    /// `enumeration_ops.rs` lowers through a synthetic `inject:into:`. The
+    /// receiver guard of a writing fold checks that selector.
+    pub(in crate::core_erlang) fn generate_list_inject_for(
+        &mut self,
+        receiver: &Expression,
+        initial: &Expression,
+        body: &Expression,
+        guard_selector: &str,
+    ) -> Result<Document<'static>> {
         // Validate body block arity (must be 2-arg: accumulator and element)
         validate_block_arity_exact(
             body,
@@ -465,7 +484,12 @@ impl CoreErlangGenerator {
 
         // Check if body is a literal block (enables mutation analysis)
         if let Some(body_block) = self.block_needs_mutation_threading(body) {
-            return self.generate_list_inject_with_mutations(receiver, initial, body_block);
+            return self.generate_list_inject_with_mutations(
+                receiver,
+                initial,
+                body_block,
+                guard_selector,
+            );
         }
         // Pure-block fast path — emit inline lists:foldl instead of
         // calling beamtalk_collection:inject_into at runtime.
@@ -538,7 +562,7 @@ impl CoreErlangGenerator {
         };
 
         Ok(docvec![
-            super::list_recv_to_safe_list_doc(recv_code, list_var, safe_list_var.clone()),
+            super::list_recv_to_safe_list_doc(recv_code, None, list_var, safe_list_var.clone()),
             "let ",
             leaf::var(init_var.clone()),
             " = ",
@@ -563,6 +587,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         initial: &Expression,
         body: &Block,
+        guard_selector: &str,
     ) -> Result<Document<'static>> {
         // Use tuple accumulator when eligible.
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate)
@@ -591,6 +616,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some(guard_selector),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -670,6 +696,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some(guard_selector),
             list_var,
             safe_list_var.clone(),
         ));
@@ -846,6 +873,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("takeWhile:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -922,6 +950,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("takeWhile:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -1072,6 +1101,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("dropWhile:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -1147,6 +1177,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("dropWhile:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -1298,6 +1329,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("partition:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -1391,6 +1423,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("partition:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -1559,6 +1592,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
+                Some("groupBy:"),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -1633,6 +1667,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("groupBy:"),
             list_var,
             safe_list_var.clone(),
         ));
@@ -1808,6 +1843,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
+            Some("sort:"),
             list_var,
             safe_list_var.clone(),
         ));
