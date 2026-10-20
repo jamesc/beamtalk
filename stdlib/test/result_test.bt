@@ -233,9 +233,7 @@ TestCase subclass: ResultTest
     self assert: r value equals: "hello"
 
   testFromTupleInvalidTupleRaises =>
-    self should: [
-      Result fromTuple: {1, 2, 3}
-    ] raise: #type_error
+    self should: [Result fromTuple: {1, 2, 3}] raise: #type_error
 
   // =========================================================================
   // printString

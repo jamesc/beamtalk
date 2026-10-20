@@ -14,9 +14,7 @@ TestCase subclass: PatternMismatchTest
     self assert: result equals: #pattern_mismatch
 
   testTupleSizeMismatchRaises =>
-    self should: [
-      {_a, _b} := {1, 2, 3}
-    ] raise: #pattern_mismatch
+    self should: [{_a, _b} := {1, 2, 3}] raise: #pattern_mismatch
 
   testTupleLiteralSlotMismatchKind =>
     result := [
@@ -26,9 +24,7 @@ TestCase subclass: PatternMismatchTest
     self assert: result equals: #pattern_mismatch
 
   testTupleLiteralSlotMismatchRaises =>
-    self should: [
-      {#ok, _v} := {#error, 42}
-    ] raise: #pattern_mismatch
+    self should: [{#ok, _v} := {#error, 42}] raise: #pattern_mismatch
 
   testArrayLiteralMismatchKind =>
     result := [
