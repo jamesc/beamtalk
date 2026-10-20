@@ -91,49 +91,52 @@ module 'binary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_con
         <'false'> when 'true' ->
             let _TelPid = call 'erlang':'self'() in
             let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'binary_operators'}~) in
-            {'ok', FinalState}
+            let AckState = call 'beamtalk_actor':'take_init_ack'(FinalState, 'initialized') in
+            {'ok', AckState}
     end
 
 
 'handle_continue'/2 = fun (Continue, State) ->
-    let _PendingActionsCleared = call 'beamtalk_actor':'clear_pending_actions'() in
-    let _CallbackResult =
-        case Continue of
-            <'initialize'> when 'true' ->
-                let InitNewState = State in
-                let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in
-                {'noreply', InitCleanState}
-            <{'$bt_continue', [{CastSelector, CastArgs}|ContRest]}> when 'true' ->
-                let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in
-                let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
-                let _CastDispatchResult = call 'binary_operators':'safe_dispatch'(CastSelector, CastArgs, State) in
-                let _RestoreOk = case _OldState of
-                    <'undefined'> when 'true' ->
-                        call 'erlang':'erase'('$bt_actor_state')
-                    <_Prev> when 'true' ->
-                        call 'erlang':'put'('$bt_actor_state', _Prev)
-                end in
-                let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
-                case _CastDispatchResult of
-                    <{'reply', _CastResult, CastNewState}> when 'true' ->
-                        let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
-                        let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
-                        {'noreply', CleanCastNewState}
-                    <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
-                        let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
-                        let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
-                        in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
-                        {'noreply', State}
-                    <{'error', CastError, _CastState2}> when 'true' ->
-                        let CastErrMsg2 = call 'beamtalk_error':'format_safe'(CastError) in
-                        let _ = call 'logger':'warning'(CastErrMsg2, ~{'selector' => CastSelector, 'reason' => CastError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
-                        in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
-                        {'noreply', State}
-                end
-            <_> when 'true' -> {'noreply', State}
-        end
-    in call 'beamtalk_actor':'apply_pending_actions'(_CallbackResult)
+    let _ContinueResult =
+        let _PendingActionsCleared = call 'beamtalk_actor':'clear_pending_actions'() in
+        let _CallbackResult =
+            case Continue of
+                <'initialize'> when 'true' ->
+                    let InitNewState = State in
+                    let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in
+                    {'noreply', InitCleanState}
+                <{'$bt_continue', [{CastSelector, CastArgs}|ContRest]}> when 'true' ->
+                    let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in
+                    let _OldState = call 'erlang':'get'('$bt_actor_state') in
+                    let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                    let _CastDispatchResult = call 'binary_operators':'safe_dispatch'(CastSelector, CastArgs, State) in
+                    let _RestoreOk = case _OldState of
+                        <'undefined'> when 'true' ->
+                            call 'erlang':'erase'('$bt_actor_state')
+                        <_Prev> when 'true' ->
+                            call 'erlang':'put'('$bt_actor_state', _Prev)
+                    end in
+                    let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
+                    case _CastDispatchResult of
+                        <{'reply', _CastResult, CastNewState}> when 'true' ->
+                            let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
+                            let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
+                            {'noreply', CleanCastNewState}
+                        <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
+                            let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
+                            let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
+                            in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
+                            {'noreply', State}
+                        <{'error', CastError, _CastState2}> when 'true' ->
+                            let CastErrMsg2 = call 'beamtalk_error':'format_safe'(CastError) in
+                            let _ = call 'logger':'warning'(CastErrMsg2, ~{'selector' => CastSelector, 'reason' => CastError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
+                            in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
+                            {'noreply', State}
+                    end
+                <_> when 'true' -> {'noreply', State}
+            end
+        in call 'beamtalk_actor':'apply_pending_actions'(_CallbackResult)
+    in call 'beamtalk_actor':'ack_initialized'(Continue, _ContinueResult)
 
 
 'handle_cast'/2 = fun (Msg, State) ->

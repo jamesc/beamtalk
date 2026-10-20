@@ -224,6 +224,15 @@ handle_getValue([], State) ->
 %% BT-3968: the `handle_continue/2` term carrying the continuation queue.
 -define(BT_CONTINUE_TAG, '$bt_continue').
 
+%% BT-3992: start-args key carrying the starter's `{StarterPid, AckRef}`
+%% initialize-ack target (see with_init_ack/1 and await_initialize/3), and
+%% the process-dictionary key the actor keeps it under between init/1 and
+%% the `initialize` step of handle_continue/2.
+-define(BT_INIT_ACK_KEY, '$bt_init_ack').
+
+%% BT-3992: how long a starter waits for `initialize` to finish.
+-define(BT_INITIALIZE_TIMEOUT, 5000).
+
 %% BT-3968: the continuation-request selectors (`Actor>>continueWith:` /
 %% `continueWith:withArguments:`).
 -define(IS_CONTINUATION_SELECTOR(S),
@@ -240,7 +249,11 @@ handle_getValue([], State) ->
 
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
--export([await_initialize/1, await_initialize/2, safe_spawn/2]).
+-export([await_initialize/1, await_initialize/2, await_initialize/3, safe_spawn/2]).
+
+%% BT-3992: initialize acknowledgement, called from generated init/1 and
+%% handle_continue/2 (and this module's own init/1).
+-export([take_init_ack/2, ack_initialized/2]).
 
 %% Message send helpers (lifecycle-aware wrappers)
 -export([async_send/4, sync_send/3, sync_send/4, cast_send/3]).
@@ -530,14 +543,20 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
     end.
 
 -doc """
-Wait for handle_continue to finish after start_link.
+Wait for a started actor's `initialize` to finish — **sys-based fallback**.
 
-When an actor has an `initialize` method, init/1 returns
-{ok, State, {continue, initialize}} and the actual dispatch happens
-in handle_continue/2. This means start_link returns {ok, Pid} BEFORE
-initialize has run. This function synchronizes by sending a system
-message (sys:get_state) which OTP guarantees is processed after
-handle_continue.
+BT-3992: Beamtalk's own spawn paths no longer use this: they pass an ack
+target in the start args (with_init_ack/1) and wait with
+await_initialize/3, which returns as soon as `initialize` has returned —
+without waiting for any `continueWith:` continuations it requested (OTP
+`handle_continue` semantics). This form is kept for a pid that was started
+without an ack target, such as a hand-written gen_server, and for external
+callers.
+
+It synchronizes by sending a system message (`sys:get_state/2`), which OTP
+handles only between callbacks and never while a `{continue, _}` action is
+pending — so it returns only after `initialize` *and every continuation
+chained from it* have run (5 s timeout over the whole chain).
 
 Returns `ok` if the process is still alive after initialization,
 or `{error, Reason}` if it crashed during handle_continue.
@@ -547,8 +566,8 @@ await_initialize(Pid) ->
     await_initialize(Pid, erlang:monitor(process, Pid)).
 
 -doc """
-Like `await_initialize/1`, but with a monitor the caller established
-*atomically with the spawn* (`gen_server:start_monitor/3`).
+Like `await_initialize/1` (the sys-based fallback), but with a monitor the
+caller established *atomically with the spawn* (`gen_server:start_monitor/3`).
 
 BT-3677: `await_initialize/1` monitors AFTER `gen_server:start/3` returned.
 `handle_continue` runs concurrently with the caller, so under scheduler load
@@ -564,7 +583,7 @@ process always reports the true exit reason.
 """.
 -spec await_initialize(pid(), reference()) -> ok | {error, term()}.
 await_initialize(Pid, MonRef) ->
-    try sys:get_state(Pid, 5000) of
+    try sys:get_state(Pid, ?BT_INITIALIZE_TIMEOUT) of
         _State ->
             erlang:demonitor(MonRef, [flush]),
             ok
@@ -583,11 +602,154 @@ await_initialize(Pid, MonRef) ->
     end.
 
 -doc """
+BT-3992: wait until a just-started actor's `initialize` has returned,
+using the ack target `with_init_ack/1` put in its start args.
+
+Startup ends when `initialize` returns (OTP semantics: `init/1` returning
+`{ok, State, {continue, _}}` lets `start_link` return before
+`handle_continue` runs). Continuations `initialize` requested with
+`continueWith:` (and any they chain) run *after* this returns — still
+before any message sent to the actor after it — so a slow first step never
+blocks the starter or a supervisor, and never counts against the timeout.
+
+Must be called after the `gen_server` start call returned `{ok, Pid}`. The
+actor's `init/1` (take_init_ack/2) has then already sent, before
+`proc_lib`'s start reply and so already in this mailbox:
+
+- `{AckRef, initialized}` — no `initialize` step is pending; done.
+- `{AckRef, initializing}` — `initialize` is pending in `handle_continue/2`;
+  wait for `{AckRef, initialized}` (sent by ack_initialized/2 after it
+  succeeded and passed the post-initialize uninitialized-state check) or
+  the `'DOWN'` for `MonRef` (`{error, Reason}`), at most 5 s
+  (`{error, timeout}`; the caller kills the actor).
+- neither — the process never saw the ack target (a hand-written
+  gen_server that builds its own state): fall back to the sys-based
+  await_initialize/2.
+
+`MonRef` is consumed (demonitored or received) by this function. A late
+`{AckRef, _}` left after a timeout is the caller's to flush
+(flush_init_ack/1) once the actor is dead.
+""".
+-spec await_initialize(pid(), reference(), reference() | none) -> ok | {error, term()}.
+await_initialize(Pid, MonRef, none) ->
+    await_initialize(Pid, MonRef);
+await_initialize(Pid, MonRef, AckRef) ->
+    receive
+        {AckRef, initialized} ->
+            erlang:demonitor(MonRef, [flush]),
+            ok;
+        {AckRef, initializing} ->
+            receive
+                {AckRef, initialized} ->
+                    erlang:demonitor(MonRef, [flush]),
+                    ok;
+                {'DOWN', MonRef, process, Pid, Reason} ->
+                    {error, Reason}
+            after ?BT_INITIALIZE_TIMEOUT ->
+                erlang:demonitor(MonRef, [flush]),
+                {error, timeout}
+            end
+    after 0 ->
+        await_initialize(Pid, MonRef)
+    end.
+
+-doc """
+BT-3992: add the initialize-ack target `{self(), AckRef}` to a spawn's start
+args. Every Beamtalk start path (`safe_spawn/2`, `safe_spawn_linked/2`,
+`safe_spawn_named/4`) goes through this and then await_initialize/3; the
+actor strips the key from its state in `init/1` (take_init_ack/2). Start
+args that are not a map (a hand-written gen_server's own shape) carry no
+target (`none`); await_initialize/3 then takes the sys-based fallback.
+""".
+-spec with_init_ack(Args) -> {Args, reference() | none} when Args :: term().
+with_init_ack(InitArgs) when is_map(InitArgs) ->
+    AckRef = make_ref(),
+    {InitArgs#{?BT_INIT_ACK_KEY => {self(), AckRef}}, AckRef};
+with_init_ack(InitArgs) ->
+    {InitArgs, none}.
+
+-doc """
+BT-3992: drop any initialize ack still in the mailbox for `AckRef` — after a
+failed or timed-out start, once the actor is known dead (so nothing more
+can arrive).
+""".
+-spec flush_init_ack(reference() | none) -> ok.
+flush_init_ack(none) ->
+    ok;
+flush_init_ack(AckRef) ->
+    receive
+        {AckRef, _} -> flush_init_ack(AckRef)
+    after 0 -> ok
+    end.
+
+-doc """
+BT-3992: called by an actor's `init/1` on its initial state (generated
+`init/1`, outermost call only — never as a parent state helper — and this
+module's own init/1). Removes the starter's ack target
+(`'$bt_init_ack'`, see with_init_ack/1) from the state, and tells the
+starter where startup stands:
+
+- `initialized` — no `initialize` step follows; startup is complete.
+- `initializing` — `init/1` returns `{continue, initialize}`; the target is
+  kept in the process dictionary until ack_initialized/2 sends the final
+  `{AckRef, initialized}`.
+
+The message is sent before `init/1` returns, hence before `proc_lib`'s start
+reply, so the starter finds it as soon as its start call returns. A state
+with no ack target (the actor was started some other way) is returned
+unchanged and nothing is sent.
+""".
+-spec take_init_ack(map(), initializing | initialized) -> map().
+take_init_ack(State, Phase) when is_map(State) ->
+    case maps:take(?BT_INIT_ACK_KEY, State) of
+        {{From, AckRef} = Target, State1} when is_pid(From), is_reference(AckRef) ->
+            From ! {AckRef, Phase},
+            case Phase of
+                initializing -> put(?BT_INIT_ACK_KEY, Target);
+                initialized -> ok
+            end,
+            State1;
+        {_Malformed, State1} ->
+            State1;
+        error ->
+            State
+    end.
+
+-doc """
+BT-3992: called with the final return value of every `handle_continue/2`
+step (generated actors). For the `initialize` step it sends the starter
+`{AckRef, initialized}` when the step succeeded — `initialize` returned,
+the post-initialize uninitialized-state check passed, and no
+`self stopWith:` was requested — i.e. the result is a `{noreply, ...}`,
+possibly carrying the `{continue, _}` action for the continuations
+`initialize` requested. Those run after this callback returns, so the
+starter is released before them. A failing step sends nothing: the actor
+stops, and the starter sees its `'DOWN'`. The ack target is erased either
+way. Returns `Result` unchanged.
+""".
+-spec ack_initialized(term(), Result) -> Result when Result :: term().
+ack_initialized(initialize, Result) ->
+    case erase(?BT_INIT_ACK_KEY) of
+        {From, AckRef} when
+            is_tuple(Result),
+            element(1, Result) =:= noreply,
+            (tuple_size(Result) =:= 2 orelse tuple_size(Result) =:= 3)
+        ->
+            From ! {AckRef, initialized};
+        _ ->
+            ok
+    end,
+    Result;
+ack_initialized(_Continue, Result) ->
+    Result.
+
+-doc """
 Spawn an actor, with initialize synchronization.
 
 Handles the full spawn sequence:
 1. Choose linked vs unlinked start (see the rationale below)
-2. If start succeeds, wait for handle_continue (initialize) to complete
+2. If start succeeds, wait until `initialize` has returned (await_initialize/3 — not for
+   the continuations it requested, BT-3992)
 3. Return {ok, Pid} or {error, Reason}
 
 Deliberately uses `gen_server:start/3` (unlinked), not
@@ -632,8 +794,9 @@ safe_spawn(Module, InitArgs) ->
             %% start_monitor (not start + monitor): the monitor must exist before
             %% the actor can possibly die, or a fast-failing initialize reports
             %% `noproc` instead of its real stop reason (BT-3677).
-            case gen_server:start_monitor(Module, InitArgs, []) of
-                {ok, {Pid, MonRef}} -> await_initialize_or_kill_unlinked(Pid, MonRef);
+            {AckArgs, AckRef} = with_init_ack(InitArgs),
+            case gen_server:start_monitor(Module, AckArgs, []) of
+                {ok, {Pid, MonRef}} -> await_initialize_or_kill_unlinked(Pid, MonRef, AckRef);
                 {error, Reason} -> {error, Reason};
                 ignore -> {error, ignore}
             end
@@ -648,7 +811,7 @@ trap_exit dance with `safe_spawn_named/4` via `start_link_and_await/1`.
 """.
 -spec safe_spawn_linked(module(), map()) -> {ok, pid()} | {error, term()}.
 safe_spawn_linked(Module, InitArgs) ->
-    start_link_and_await(fun() -> gen_server:start_link(Module, InitArgs, []) end).
+    start_link_and_await(fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs).
 
 -doc """
 Spawn a named actor with trap_exit + initialize synchronization, per
@@ -657,7 +820,8 @@ Spawn a named actor with trap_exit + initialize synchronization, per
 Handles the full spawn sequence:
 1. Trap exits so a failed start_link or handle_continue doesn't kill caller
 2. Start the actor, registered per `Scope` (see below)
-3. If the start succeeds, wait for handle_continue (initialize) to complete
+3. If the start succeeds, wait until `initialize` has returned (await_initialize/3 — not for
+   the continuations it requested, BT-3992)
 4. Restore trap_exit and return {ok, Pid} or {error, Reason}
 
 Unlike `safe_spawn/2` (unnamed) in its common case, this stays
@@ -701,9 +865,13 @@ needed for `global`.
 """.
 -spec safe_spawn_named(local | global, atom(), module(), map()) -> {ok, pid()} | {error, term()}.
 safe_spawn_named(local, Name, Module, InitArgs) ->
-    start_link_and_await(fun() -> gen_server:start_link({local, Name}, Module, InitArgs, []) end);
+    start_link_and_await(
+        fun(Args) -> gen_server:start_link({local, Name}, Module, Args, []) end, InitArgs
+    );
 safe_spawn_named(global, Name, Module, InitArgs) ->
-    case start_link_and_await(fun() -> gen_server:start_link(Module, InitArgs, []) end) of
+    case
+        start_link_and_await(fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs)
+    of
         {ok, Pid} ->
             case global:register_name(Name, Pid, fun ?MODULE:resolve_global_conflict/3) of
                 yes ->
@@ -720,18 +888,22 @@ safe_spawn_named(global, Name, Module, InitArgs) ->
 Shared linked-start + trap_exit + await_initialize dance for
 `safe_spawn_named/4` and `safe_spawn_linked/2`. `StartFun` performs the
 actual `gen_server:start_link/3,4` call (parametrized so the two callers can
-each pass their own registration shape) and is invoked exactly once, with
-`trap_exit` already set, so a crash during `initialize` delivers an `'EXIT'`
-message here instead of taking this process down.
+each pass their own registration shape) on `InitArgs` plus the
+initialize-ack target (with_init_ack/1, BT-3992), and is invoked exactly
+once, with `trap_exit` already set, so a crash during `initialize` delivers
+an `'EXIT'` message here instead of taking this process down.
 """.
--spec start_link_and_await(fun(() -> {ok, pid()} | {error, term()} | ignore)) ->
+-spec start_link_and_await(
+    fun((term()) -> {ok, pid()} | {error, term()} | ignore), term()
+) ->
     {ok, pid()} | {error, term()}.
-start_link_and_await(StartFun) ->
+start_link_and_await(StartFun, InitArgs) ->
     OldTrap = erlang:process_flag(trap_exit, true),
-    Result = StartFun(),
+    {AckArgs, AckRef} = with_init_ack(InitArgs),
+    Result = StartFun(AckArgs),
     case Result of
         {ok, Pid} ->
-            case await_initialize(Pid) of
+            case await_initialize(Pid, erlang:monitor(process, Pid), AckRef) of
                 ok ->
                     erlang:process_flag(trap_exit, OldTrap),
                     {ok, Pid};
@@ -743,6 +915,7 @@ start_link_and_await(StartFun) ->
                     %% Wait unconditionally — EXIT is guaranteed after kill
                     receive
                         {'EXIT', Pid, ExitReason} ->
+                            ok = flush_init_ack(AckRef),
                             %% BT-3677: `noproc` means the actor died before
                             %% await_initialize could monitor it, so the monitor
                             %% lost the real reason. The link (established
@@ -771,9 +944,10 @@ Shared await_initialize + force-kill-on-timeout tail for the unlinked
 'EXIT' message on the force-kill path, so this monitors explicitly to
 deterministically observe termination before returning.
 """.
--spec await_initialize_or_kill_unlinked(pid(), reference()) -> {ok, pid()} | {error, term()}.
-await_initialize_or_kill_unlinked(Pid, MonRef) ->
-    case await_initialize(Pid, MonRef) of
+-spec await_initialize_or_kill_unlinked(pid(), reference(), reference() | none) ->
+    {ok, pid()} | {error, term()}.
+await_initialize_or_kill_unlinked(Pid, MonRef, AckRef) ->
+    case await_initialize(Pid, MonRef, AckRef) of
         ok ->
             {ok, Pid};
         {error, Reason} ->
@@ -782,6 +956,7 @@ await_initialize_or_kill_unlinked(Pid, MonRef) ->
             receive
                 {'DOWN', KillRef, process, Pid, _} -> ok
             end,
+            ok = flush_init_ack(AckRef),
             {error, Reason}
     end.
 
@@ -2767,7 +2942,9 @@ init(State) when is_map(State) ->
                         #{},
                         #{pid => self(), class => Class}
                     ),
-                    {ok, State};
+                    %% BT-3992: no `initialize` step on the runtime path —
+                    %% startup is complete once init/1 returns.
+                    {ok, take_init_ack(State, initialized)};
                 false ->
                     {stop, {missing_key, '__methods__'}}
             end;

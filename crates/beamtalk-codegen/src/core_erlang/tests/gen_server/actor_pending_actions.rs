@@ -119,6 +119,39 @@ fn test_handle_continue_runs_queued_continuation_like_a_cast() {
     assert!(step.contains(DISCARD_CONTINUATIONS), "Got:\n{step}");
 }
 
+/// BT-3992: startup ends when `initialize` returns. `init/1` hands the
+/// starter's ack target to `take_init_ack/2` (`'initializing'`, since an
+/// `initialize` step follows), and `handle_continue/2` passes its final
+/// result — after the pending actions were applied, so a `self stopWith:` in
+/// `initialize` still fails the start — through `ack_initialized/2`.
+#[test]
+fn test_initialize_step_acks_starter_after_pending_actions() {
+    let code = generate(
+        concat!(
+            "Actor subclass: Acker\n",
+            "  state: value = 0\n\n",
+            "  initialize => self continueWith: #bump\n\n",
+            "  bump => self.value := self.value + 1\n",
+        ),
+        "acker",
+    );
+    let init = extract_core_fn(&code, "'init'/1 = fun").expect("init/1");
+    assert!(
+        init.contains("call 'beamtalk_actor':'take_init_ack'(CleanState1, 'initializing')"),
+        "Got:\n{init}"
+    );
+    assert!(
+        init.contains("{'ok', AckState, {'continue', 'initialize'}}"),
+        "Got:\n{init}"
+    );
+    let cont = extract_core_fn(&code, "'handle_continue'/2 = fun").expect("handle_continue/2");
+    let apply = cont.find(APPLY_PENDING_ACTIONS).expect("apply_pending_actions");
+    let ack = cont
+        .find("call 'beamtalk_actor':'ack_initialized'(Continue, _ContinueResult)")
+        .unwrap_or_else(|| panic!("handle_continue must ack initialize. Got:\n{cont}"));
+    assert!(apply < ack, "the ack must see the applied result. Got:\n{cont}");
+}
+
 /// BT-3968: every dispatch-error arm drops the continuation queue — the
 /// failed dispatch's state rolls back, so its follow-ups are void.
 #[test]

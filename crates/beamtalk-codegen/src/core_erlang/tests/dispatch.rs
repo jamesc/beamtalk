@@ -331,7 +331,8 @@ fn test_generate_spawn_function() {
     assert!(code.contains("'value' => 0"));
     // Check that InitArgs is merged into DefaultState
     assert!(code.contains("call 'maps':'merge'(DefaultState, InitArgs)"));
-    assert!(code.contains("{'ok', FinalState}"));
+    assert!(code.contains("call 'beamtalk_actor':'take_init_ack'(FinalState, 'initialized')"));
+    assert!(code.contains("{'ok', AckState}"));
 }
 
 #[test]
