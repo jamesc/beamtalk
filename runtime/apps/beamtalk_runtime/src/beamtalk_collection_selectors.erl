@@ -9,16 +9,23 @@
 The messages a class can override that the stdlib's own collection methods run
 through (ADR 0133, BT-3916, BT-3951).
 
-The compiler's `state_threading_selectors::overridable_collection_selectors`
-is the one list. This module is its runtime copy, read when the receiver guard
-of an inlined list-op fold looks for a runtime extension method (which the
-compile-time `overrides_collection_selector` flag cannot see). The copy is
-enforced, not trusted: the Rust test
-`runtime_overridable_selector_list_matches_the_compiler_list` fails when the
-list between the markers differs from the compiler's.
+The compiler's `state_threading_selectors` module holds the lists. This module
+is their runtime copy, read when the receiver guard of an inlined list-op fold
+looks for a runtime extension method (which the compile-time
+`overrides_collection_selector` and `overrides_species_construction` flags
+cannot see). The copy is enforced, not trusted: the Rust test
+`runtime_overridable_selector_list_matches_the_compiler_list` fails when a list
+between its markers differs from the compiler's.
 """.
 
--export([overridable/0, overridable_class_side/0, extended_on/1]).
+-export([
+    overridable/0,
+    species_dependent/0,
+    species_construction/0,
+    species_construction_class_side/0,
+    extended_on/1,
+    species_construction_extended_on/1
+]).
 
 -doc "The overridable collection selectors, in the compiler's order.".
 -spec overridable() -> [atom()].
@@ -43,27 +50,44 @@ overridable() ->
         'eachWithIndex:',
         'do:separatedBy:',
         'doWithKey:',
-        'keysAndValuesDo:',
-        'species'
+        'keysAndValuesDo:'
     ].
 %% END SELECTORS
 
 -doc """
-The class-side overridable selectors: what the stdlib's `collect:`/`select:`
-reach through `self species withAll:`.
+The selectors whose `Collection` provision ends in `self species withAll:`.
 """.
--spec overridable_class_side() -> [atom()].
-overridable_class_side() ->
-    %% BEGIN CLASS SELECTORS
+-spec species_dependent() -> [atom()].
+species_dependent() ->
+    %% BEGIN SPECIES DEPENDENT
+    [
+        'collect:',
+        'select:',
+        'reject:'
+    ].
+%% END SPECIES DEPENDENT
+
+-doc "The instance-side messages that change what `species_dependent/0` answer.".
+-spec species_construction() -> [atom()].
+species_construction() ->
+    %% BEGIN SPECIES INSTANCE
+    [
+        'species'
+    ].
+%% END SPECIES INSTANCE
+
+-doc "The class-side messages that change what `species_dependent/0` answer.".
+-spec species_construction_class_side() -> [atom()].
+species_construction_class_side() ->
+    %% BEGIN SPECIES CLASS
     [
         'withAll:'
     ].
-%% END CLASS SELECTORS
+%% END SPECIES CLASS
 
 -doc """
 Whether a runtime extension method registered on `Class` has one of the
-overridable selectors, instance-side (keyed under the class name) or
-class-side (keyed under the class-object tag).
+overridable selectors.
 
 One O(1) `beamtalk_extensions:lookup/2` per selector rather than a table scan
 per class. `beamtalk_class_shadow_flags` is not usable here: it records
@@ -71,11 +95,29 @@ extensions on class-object tags only, never the instance-side ones.
 """.
 -spec extended_on(atom()) -> boolean().
 extended_on(Class) ->
+    guarded(fun() -> has_any(Class, overridable()) end).
+
+-doc """
+Whether a runtime extension on `Class` is a species-construction message:
+instance-side (keyed under the class name) or class-side (keyed under the
+class-object tag).
+""".
+-spec species_construction_extended_on(atom()) -> boolean().
+species_construction_extended_on(Class) ->
+    guarded(fun() ->
+        has_any(Class, species_construction()) orelse
+            has_any(
+                beamtalk_class_registry:class_object_tag(Class),
+                species_construction_class_side()
+            )
+    end).
+
+%% Registry table not initialised yet (early bootstrap): nothing is extended.
+-spec guarded(fun(() -> boolean())) -> boolean().
+guarded(Check) ->
     try
-        has_any(Class, overridable()) orelse
-            has_any(beamtalk_class_registry:class_object_tag(Class), overridable_class_side())
+        Check()
     catch
-        %% Registry table not initialised yet (early bootstrap): nothing is extended.
         error:badarg -> false
     end.
 

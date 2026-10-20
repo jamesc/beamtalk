@@ -392,6 +392,8 @@ impl CoreErlangGenerator {
             self.own_stdlib_trait_methods = self.own_stdlib_trait_methods_for(hierarchy, class);
             self.own_overrides_collection_selector =
                 self.overrides_collection_selector_for(hierarchy, class);
+            self.own_overrides_species_construction =
+                self.overrides_species_construction_for(hierarchy, class);
         }
     }
 
@@ -443,18 +445,46 @@ impl CoreErlangGenerator {
         let Some(info) = hierarchy.get_class(class.name.name.as_str()) else {
             return false;
         };
-        let defines_class_side = info.class_methods.iter().any(|m| {
-            beamtalk_core::state_threading_selectors::overridable_collection_class_selectors()
+        info.methods.iter().any(|m| {
+            let stdlib_provision = m.origin.as_ref().is_some_and(|origin| {
+                self.stdlib_protocol_uses
+                    .contains(&(class.name.name.clone(), origin.clone()))
+            });
+            !stdlib_provision
+                && beamtalk_core::state_threading_selectors::overridable_collection_selectors()
+                    .any(|sel| sel == m.selector.as_str())
+        })
+    }
+
+    /// Whether the class defines, outside the stdlib, a message the stdlib's
+    /// `Collection` provisions build their answer with (BT-3951): `species`, or
+    /// a class-side `withAll:` (the usual collection constructor). Recorded
+    /// apart from `overrides_collection_selector` because it poisons only the
+    /// species-dependent selectors (`collect:`, `select:`, `reject:`), and only
+    /// when the receiver gets them from `Collection` rather than a trait.
+    fn overrides_species_construction_for(
+        &self,
+        hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+        class: &beamtalk_core::ast::ClassDefinition,
+    ) -> bool {
+        if self.stdlib_mode() {
+            return false;
+        }
+        let Some(info) = hierarchy.get_class(class.name.name.as_str()) else {
+            return false;
+        };
+        let class_side = info.class_methods.iter().any(|m| {
+            beamtalk_core::state_threading_selectors::species_construction_class_selectors()
                 .any(|sel| sel == m.selector.as_str())
         });
-        defines_class_side
+        class_side
             || info.methods.iter().any(|m| {
                 let stdlib_provision = m.origin.as_ref().is_some_and(|origin| {
                     self.stdlib_protocol_uses
                         .contains(&(class.name.name.clone(), origin.clone()))
                 });
                 !stdlib_provision
-                    && beamtalk_core::state_threading_selectors::overridable_collection_selectors()
+                    && beamtalk_core::state_threading_selectors::species_construction_selectors()
                         .any(|sel| sel == m.selector.as_str())
             })
     }

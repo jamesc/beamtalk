@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3951 (ADR 0133): a user class that `uses:` the stdlib `Enumerable` and
+// defines the usual class-side `withAll:` constructor and an instance-side
+// `species`. `Enumerable`'s provisions forward to `self elements` and never
+// reach `species withAll:`, so every writing send still folds. Driven by
+// adr0133enumerable_user_test.bt.
+
+Value subclass: Adr0133EnumerableStdlibWithAll
+  uses: Enumerable(Integer)
+  field: items :: List(Integer) = #()
+
+  class withAll: list :: List(Integer) -> Adr0133EnumerableStdlibWithAll =>
+    self new: #{#items => list}
+
+  elements -> List(Integer) => self.items
+
+  species -> Self class => List

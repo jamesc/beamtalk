@@ -74,6 +74,7 @@ that the Behaviour/Class libraries can rely on.
     classCanUnderstandFromName/2,
     selectorProviderFromName/2,
     overridesCollectionSelectorFromName/1,
+    speciesConstructionOverriddenFromName/2,
     classFieldNames/1,
     classAllFieldNames/1,
     classAllFieldNamesByName/1,
@@ -471,6 +472,66 @@ overridesCollectionSelectorFromName(ClassName) ->
                                 _ -> {cont, false}
                             end
                     end
+            end
+        end,
+        false
+    ).
+
+-doc """
+Whether a `species` or class-side `withAll:` of the receiver's class changes
+what the stdlib's `Selector` answers (BT-3951).
+
+Only `collect:`, `select:` and `reject:` end in `self species withAll:`
+(`beamtalk_collection_selectors:species_dependent/0`), and only the `Collection`
+provision does: a selector the class gets from a stdlib trait such as
+`Enumerable` forwards to `self elements` and never reaches `species`. So this is
+`false` unless the selector is species-dependent, its first definer on the chain
+is not a trait provision, and a class on the chain defines a species-construction
+message outside the stdlib (the `overrides_species_construction` meta key) or a
+runtime extension does. A class without meta counts as `false`.
+""".
+-spec speciesConstructionOverriddenFromName(atom(), atom()) -> boolean().
+speciesConstructionOverriddenFromName(ClassName, Selector) ->
+    lists:member(Selector, beamtalk_collection_selectors:species_dependent()) andalso
+        reached_through_collection(ClassName, Selector) andalso
+        walk_hierarchy(
+            ClassName,
+            fun(CN, CPid, _Acc) ->
+                case beamtalk_collection_selectors:species_construction_extended_on(CN) of
+                    true ->
+                        {halt, true};
+                    false ->
+                        Module = beamtalk_object_class:module_name_safe(CPid),
+                        case is_stdlib_module_name(Module) of
+                            true ->
+                                {cont, false};
+                            false ->
+                                case meta_for_module(Module) of
+                                    {ok, #{overrides_species_construction := true}} ->
+                                        {halt, true};
+                                    _ ->
+                                        {cont, false}
+                                end
+                        end
+                end
+            end,
+            false
+        ).
+
+%% Is the first definer of `Selector` on the chain a stdlib class's own method
+%% (`Collection`'s), rather than a stdlib trait's provision flattened into a
+%% using class? Callers have already ruled out a non-stdlib definer.
+-spec reached_through_collection(atom(), atom()) -> boolean().
+reached_through_collection(ClassName, Selector) ->
+    walk_hierarchy(
+        ClassName,
+        fun(CN, CPid, _Acc) ->
+            case defines_selector_locally(CN, CPid, Selector) of
+                true ->
+                    Module = beamtalk_object_class:module_name_safe(CPid),
+                    {halt, not is_stdlib_trait_provision(Module, Selector)};
+                false ->
+                    {cont, false}
             end
         end,
         false

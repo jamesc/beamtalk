@@ -310,8 +310,6 @@ to_list_for_threading(Recv, Selector) ->
     case Provider of
         stdlib ->
             case beamtalk_behaviour_intrinsics:overridesCollectionSelectorFromName(Class) of
-                false ->
-                    to_list(Recv);
                 true ->
                     refuse_writing_fold(
                         Class,
@@ -324,7 +322,29 @@ to_list_for_threading(Recv, Selector) ->
                             atom_to_binary(Selector, utf8),
                             <<"' may run through; the in-place fold would skip it">>
                         ]
-                    )
+                    );
+                false ->
+                    case
+                        beamtalk_behaviour_intrinsics:speciesConstructionOverriddenFromName(
+                            Class, Selector
+                        )
+                    of
+                        false ->
+                            to_list(Recv);
+                        true ->
+                            refuse_writing_fold(
+                                Class,
+                                Selector,
+                                [
+                                    <<
+                                        " defines 'species' or a class-side 'withAll:' that the "
+                                        "stdlib's '"
+                                    >>,
+                                    atom_to_binary(Selector, utf8),
+                                    <<"' builds its answer with; the in-place fold would skip it">>
+                                ]
+                            )
+                    end
             end;
         none ->
             beamtalk_error:raise(beamtalk_error:new(does_not_understand, Class, Selector));

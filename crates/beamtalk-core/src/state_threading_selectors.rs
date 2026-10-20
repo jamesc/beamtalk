@@ -108,29 +108,46 @@ pub fn overridable_collection_selectors() -> impl Iterator<Item = &'static str> 
         .iter()
         .copied()
         .filter(|sel| *sel != "do:")
-        .chain(COLLECTION_SELF_SENDS.iter().copied())
 }
 
-/// Unary messages the stdlib's collection methods self-send (BT-3951): `collect:`
-/// and `select:` build their answer with `self species withAll:`, so a class's
-/// own `species` changes the pure answer and the in-place fold would skip it.
-const COLLECTION_SELF_SENDS: &[&str] = &["species"];
+/// The collection messages whose stdlib provision in `Collection` ends in
+/// `self species withAll: result` (BT-3951): `collect:` and `select:`, and
+/// `reject:` through `self select:`. `Enumerable`'s provisions of the same names
+/// forward to `self elements` and never reach `species`, and the other
+/// collection messages (`inject:into:`, `detect:`, `anySatisfy:`, ...) build no
+/// collection of the receiver's species. Every one is also in
+/// [`overridable_collection_selectors`].
+const SPECIES_DEPENDENT_SELECTORS: &[&str] = &["collect:", "select:", "reject:"];
 
-/// Class-side messages the stdlib's collection methods reach through `species`
-/// (BT-3951): `collect:`/`select:` answer `self species withAll: result`, and
-/// `species` defaults to `self class`, so a user collection usually overrides
-/// class-side `withAll:` rather than `species`. `Collection`'s provisions send
-/// no other class-side message to `species`. A class defining one of these
-/// outside the stdlib makes the pure answer differ from the in-place fold's.
-const COLLECTION_CLASS_SIDE_SELF_SENDS: &[&str] = &["withAll:"];
+/// Instance-side messages a class can define that change what
+/// [`species_dependent_collection_selectors`] answer (BT-3951): `species`.
+const SPECIES_CONSTRUCTION_SELECTORS: &[&str] = &["species"];
 
-/// The class-side counterpart of [`overridable_collection_selectors`]: the
-/// class-side messages a class can define that change the answer of the
-/// stdlib's own `collect:`/`select:`. Codegen sets the same
-/// `overrides_collection_selector` flag from it, and the runtime checks the
-/// class-side extension registry for them.
-pub fn overridable_collection_class_selectors() -> impl Iterator<Item = &'static str> {
-    COLLECTION_CLASS_SIDE_SELF_SENDS.iter().copied()
+/// Class-side counterpart: `species` defaults to `self class`, so a user
+/// collection usually overrides class-side `withAll:` rather than `species`.
+/// `Collection`'s provisions send no other class-side message to `species`.
+const SPECIES_CONSTRUCTION_CLASS_SELECTORS: &[&str] = &["withAll:"];
+
+/// The messages whose stdlib `Collection` provision builds its answer with
+/// `self species withAll:`. A class that defines a species-construction
+/// message outside the stdlib poisons exactly these, not the rest of the
+/// collection messages, and only when the receiver gets them from the
+/// `Collection` provision rather than a trait such as `Enumerable`.
+pub fn species_dependent_collection_selectors() -> impl Iterator<Item = &'static str> {
+    SPECIES_DEPENDENT_SELECTORS.iter().copied()
+}
+
+/// The instance-side species-construction trigger selectors (`species`).
+/// Codegen records the answer per class (`overrides_species_construction` in
+/// `__beamtalk_meta/0`) from this list and
+/// [`species_construction_class_selectors`].
+pub fn species_construction_selectors() -> impl Iterator<Item = &'static str> {
+    SPECIES_CONSTRUCTION_SELECTORS.iter().copied()
+}
+
+/// The class-side species-construction trigger selectors (`withAll:`).
+pub fn species_construction_class_selectors() -> impl Iterator<Item = &'static str> {
+    SPECIES_CONSTRUCTION_CLASS_SELECTORS.iter().copied()
 }
 
 /// Returns `true` if `sel` is a state-threading keyword selector.
@@ -613,12 +630,12 @@ mod tests {
             "/../../runtime/apps/beamtalk_runtime/src/beamtalk_collection_selectors.erl"
         );
         let src = std::fs::read_to_string(path).expect("read beamtalk_collection_selectors.erl");
-        let body = src
-            .split("%% BEGIN SELECTORS")
-            .nth(1)
-            .and_then(|rest| rest.split("%% END SELECTORS").next())
-            .expect("selector markers");
-        let atoms = |body: &str| -> Vec<String> {
+        let atoms = |name: &str| -> Vec<String> {
+            let body = src
+                .split(&format!("%% BEGIN {name}"))
+                .nth(1)
+                .and_then(|rest| rest.split(&format!("%% END {name}")).next())
+                .unwrap_or_else(|| panic!("markers for {name}"));
             body.lines()
                 .filter_map(|line| {
                     let line = line.trim().trim_end_matches([',', ']']);
@@ -626,15 +643,32 @@ mod tests {
                 })
                 .collect()
         };
-        let compiler: Vec<&str> = overridable_collection_selectors().collect();
-        assert_eq!(atoms(body), compiler);
-        let class_body = src
-            .split("%% BEGIN CLASS SELECTORS")
-            .nth(1)
-            .and_then(|rest| rest.split("%% END CLASS SELECTORS").next())
-            .expect("class selector markers");
-        let class_compiler: Vec<&str> = overridable_collection_class_selectors().collect();
-        assert_eq!(atoms(class_body), class_compiler);
+        let strs = |it: &mut dyn Iterator<Item = &'static str>| -> Vec<String> {
+            it.map(str::to_string).collect()
+        };
+        assert_eq!(
+            atoms("SELECTORS"),
+            strs(&mut overridable_collection_selectors())
+        );
+        assert_eq!(
+            atoms("SPECIES DEPENDENT"),
+            strs(&mut species_dependent_collection_selectors())
+        );
+        assert_eq!(
+            atoms("SPECIES INSTANCE"),
+            strs(&mut species_construction_selectors())
+        );
+        assert_eq!(
+            atoms("SPECIES CLASS"),
+            strs(&mut species_construction_class_selectors())
+        );
+        // Every species-dependent selector is also an overridable one.
+        for sel in species_dependent_collection_selectors() {
+            assert!(
+                overridable_collection_selectors().any(|s| s == sel),
+                "{sel}"
+            );
+        }
     }
 
     fn parse_expr(src: &str) -> Expression {

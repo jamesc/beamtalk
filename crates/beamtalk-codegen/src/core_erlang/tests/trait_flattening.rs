@@ -615,16 +615,23 @@ fn defining_any_overridable_collection_selector_sets_the_override_flag() {
     assert!(checked >= 15, "only {checked} selectors checked");
 }
 
-/// BT-3951: a class-side `withAll:` (reached through `self species withAll:`)
-/// sets the flag too, over the class-side list.
+/// BT-3951: `species` and a class-side `withAll:` (what `Collection`'s
+/// `collect:`/`select:` end in) set `overrides_species_construction`, and only
+/// that: refusing every writing send because a class has the usual collection
+/// constructor would turn the main shape of a user collection into a refusal.
 #[test]
-fn defining_a_class_side_with_all_sets_the_override_flag() {
-    for selector in
-        beamtalk_core::state_threading_selectors::overridable_collection_class_selectors()
-    {
-        let src = format!(
-            "Value subclass: Bag\n  field: n :: Integer = 0\n  class {selector} arg0 => nil\n"
-        );
+fn defining_a_species_construction_message_sets_only_the_species_flag() {
+    use beamtalk_core::state_threading_selectors::{
+        species_construction_class_selectors, species_construction_selectors,
+    };
+    let mut sources: Vec<String> = species_construction_selectors()
+        .map(|sel| format!("Value subclass: Bag\n  field: n :: Integer = 0\n  {sel} => nil\n"))
+        .collect();
+    sources.extend(species_construction_class_selectors().map(|sel| {
+        format!("Value subclass: Bag\n  field: n :: Integer = 0\n  class {sel} arg0 => nil\n")
+    }));
+    assert!(sources.len() >= 2);
+    for src in sources {
         let mut module = parse_fixture(&src);
         let analysis = analyse_full(&module, AnalysisContext::default());
         lower_analysed_module_for_codegen(&mut module, &analysis);
@@ -637,8 +644,12 @@ fn defining_a_class_side_with_all_sets_the_override_flag() {
         )
         .expect("codegen should succeed");
         assert!(
-            code.contains("'overrides_collection_selector' => 'true'"),
-            "a class-side {selector} must set the flag, got:\n{code}"
+            code.contains("'overrides_species_construction' => 'true'"),
+            "must set the species flag:\n{src}\ngot:\n{code}"
+        );
+        assert!(
+            !code.contains("overrides_collection_selector"),
+            "must not set the collection flag:\n{src}\ngot:\n{code}"
         );
     }
 }
