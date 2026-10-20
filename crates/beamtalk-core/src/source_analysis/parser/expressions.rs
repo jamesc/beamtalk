@@ -2939,11 +2939,21 @@ impl Parser {
     /// Error recovery inside a tuple literal: skip tokens up to (not
     /// including) this tuple's closing `}`, stopping early at a top-level
     /// `.` or `Eof` so an unclosed `{` does not swallow later statements.
+    /// Nested brackets, parens and braces are skipped whole, so a `.` inside
+    /// a nested block (`{1 2, [:x | x foo. x bar]}`) does not stop recovery.
     fn skip_to_tuple_close(&mut self) {
         let mut depth: usize = 0;
         while !self.is_at_end() {
             match self.current_kind() {
-                TokenKind::LeftBrace | TokenKind::MapOpen => depth += 1,
+                TokenKind::LeftBrace
+                | TokenKind::MapOpen
+                | TokenKind::LeftBracket
+                | TokenKind::ArrayOpen
+                | TokenKind::LeftParen
+                | TokenKind::ListOpen => depth += 1,
+                TokenKind::RightBracket | TokenKind::RightParen => {
+                    depth = depth.saturating_sub(1);
+                }
                 TokenKind::RightBrace => {
                     if depth == 0 {
                         return;

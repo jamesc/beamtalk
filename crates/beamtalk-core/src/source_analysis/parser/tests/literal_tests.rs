@@ -1328,6 +1328,14 @@ fn parse_tuple_literal_period_separator_gives_hint() {
 }
 
 #[test]
+fn parse_tuple_literal_recovery_skips_nested_block() {
+    // Recovery skips the nested block whole: one diagnostic, and the next
+    // statement still parses.
+    let diagnostics = parse_err("x := {1 2, [:y | y foo. y bar]}\nz := 3");
+    assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+}
+
+#[test]
 fn parse_statement_start_tuple_is_expression() {
     let expr = first_expr("{a, b} size");
     match expr {
