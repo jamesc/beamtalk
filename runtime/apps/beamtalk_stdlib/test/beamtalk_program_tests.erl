@@ -120,6 +120,91 @@ exit_non_integer_raises_type_error_test_() ->
     ]).
 
 %%====================================================================
+%% commandName/0
+%%====================================================================
+
+%% When `program_name` is set as a binary it is returned directly (line 52).
+commandName_returns_binary_when_set_as_binary_test() ->
+    Prev = application:get_env(beamtalk_runtime, program_name),
+    application:set_env(beamtalk_runtime, program_name, <<"my_app">>),
+    try
+        ?assertEqual(<<"my_app">>, beamtalk_program:commandName())
+    after
+        case Prev of
+            undefined -> application:unset_env(beamtalk_runtime, program_name);
+            {ok, V} -> application:set_env(beamtalk_runtime, program_name, V)
+        end
+    end.
+
+%% When `program_name` is set as a charlist it is converted via
+%% `list_to_binary/1` before being returned (line 53).
+commandName_returns_binary_when_set_as_list_test() ->
+    Prev = application:get_env(beamtalk_runtime, program_name),
+    application:set_env(beamtalk_runtime, program_name, "my_escript"),
+    try
+        ?assertEqual(<<"my_escript">>, beamtalk_program:commandName())
+    after
+        case Prev of
+            undefined -> application:unset_env(beamtalk_runtime, program_name);
+            {ok, V} -> application:set_env(beamtalk_runtime, program_name, V)
+        end
+    end.
+
+%%====================================================================
+%% package/0
+%%====================================================================
+
+%% Helpers to save and restore the `root_package` app-env key.
+save_root_package() ->
+    application:get_env(beamtalk_runtime, root_package).
+
+restore_root_package(undefined) ->
+    application:unset_env(beamtalk_runtime, root_package);
+restore_root_package({ok, V}) ->
+    application:set_env(beamtalk_runtime, root_package, V).
+
+%% When no root package has been set `package/0` raises `no_program_package`.
+package_raises_no_program_package_when_undefined_test() ->
+    Prev = save_root_package(),
+    application:unset_env(beamtalk_runtime, root_package),
+    try
+        ?assertError(
+            #{error := #beamtalk_error{kind = no_program_package}},
+            beamtalk_program:package()
+        )
+    after
+        restore_root_package(Prev)
+    end.
+
+%% When the root package is set to `ambiguous` (several packages under test),
+%% `package/0` raises `ambiguous_program_package` (line 93).
+package_raises_ambiguous_program_package_test() ->
+    Prev = save_root_package(),
+    beamtalk_package:set_ambiguous_root_package(),
+    try
+        ?assertError(
+            #{error := #beamtalk_error{kind = ambiguous_program_package}},
+            beamtalk_program:package()
+        )
+    after
+        restore_root_package(Prev)
+    end.
+
+%% When a root package name is recorded but its OTP application is not on the
+%% code path, `package/0` raises `package_not_loaded` (lines 82, 86).
+package_raises_package_not_loaded_when_app_missing_test() ->
+    Prev = save_root_package(),
+    application:set_env(beamtalk_runtime, root_package, <<"bt_nonexistent_pkg_eunit">>),
+    try
+        ?assertError(
+            #{error := #beamtalk_error{kind = package_not_loaded}},
+            beamtalk_program:package()
+        )
+    after
+        restore_root_package(Prev)
+    end.
+
+%%====================================================================
 %% rootSupervisor (moved from Workspace, BT-3633)
 %%====================================================================
 
