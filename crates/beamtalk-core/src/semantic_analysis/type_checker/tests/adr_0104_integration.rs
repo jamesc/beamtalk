@@ -461,3 +461,37 @@ Object subclass: Client
         "the did-you-mean hint must survive the process boundary"
     );
 }
+
+/// ADR 0135 §1 (BT-3962): `spawnWith:` on a Supervisor / DynamicSupervisor
+/// class takes free-form start args (`self args`), not `state:` slots, so
+/// arbitrary literal-map keys type-check cleanly — from a class reference and
+/// from `self spawnWith:` in a class method — and the spawn family resolves
+/// (no DNU).
+#[test]
+fn spawn_with_on_supervisor_class_takes_free_form_args() {
+    let source = "\
+Supervisor subclass: Pool
+  childSpecs => #()
+
+  class make -> Pool =>
+    self spawnWith: #{#port => 8080, #handler => nil}
+
+DynamicSupervisor subclass: Farm
+  childClass => Pool
+
+Pool spawnWith: #{#numAcceptors => 3}
+Farm spawnWith: #{#max => 2}
+Pool spawn
+(Pool spawnWith: #{#a => 1} as: #pool) unwrap
+(Pool named: #pool) unwrap
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert!(
+        diags
+            .iter()
+            .all(|d| !d.message.contains("state key") && !d.message.contains("does not understand")),
+        "supervisor spawnWith: keys and the spawn family must be clean: {diags:?}"
+    );
+}

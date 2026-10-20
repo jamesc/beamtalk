@@ -5,6 +5,10 @@
 // the supervisor's configuration (instance-side `childSpecs` since ADR 0135,
 // which runs inside the supervisor's own `init`). See
 // stdlib/test/fixtures/class_state_sup_app.bt.
+//
+// BT-3962: `supervise` starts the tree in the caller, so `childSpecs` can read
+// the class variable through its own class (`ClassStateSupApp cfg`) while
+// `ClassStateSupApp supervise` runs.
 
 TestCase subclass: ClassStateSupervisorTest
   field: sup = nil
@@ -13,7 +17,6 @@ TestCase subclass: ClassStateSupervisorTest
 
   testClassStateSetBeforeSuperviseIsVisibleInChildren =>
     ClassStateSupApp configure: #{#label => "hello"}
-    self.sup := ClassStateSupRoot supervise unwrap
-    app :: ClassStateSupApp := (self.sup which: ClassStateSupApp) unwrap
-    w :: ClassStateSupWorker := (app which: ClassStateSupWorker) unwrap
+    self.sup := ClassStateSupApp supervise unwrap
+    w :: ClassStateSupWorker := (self.sup which: ClassStateSupWorker) unwrap
     self assert: w label equals: "hello"

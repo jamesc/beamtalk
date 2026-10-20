@@ -6,7 +6,7 @@
 %%% **DDD Context:** Actor System Context
 
 -moduledoc """
-Test helper module for beamtalk_supervisor:startLink/1 tests.
+Test helper module for the BT-3759 concurrent `supervise` tests.
 
 Provides three `start_link/0` variants keyed by an ETS flag so a single
 Module:start_link() dispatch can return {ok, Pid}, {error, {already_started, Pid}},
@@ -16,9 +16,9 @@ Used only by beamtalk_supervisor_tests.erl.
 """.
 
 -export([start_link/0, init/1, set_mode/2, reset/0]).
-%% BT-3759: `supervise` (class side) and the instance-side `initialize` hook
+%% BT-3759: the instance-side `initialize` hook
 %% (ADR 0135 §1) for the concurrent-supervise tests.
--export([class_supervise/1, dispatch/4, has_method/1, has_method_local/1]).
+-export([dispatch/4, has_method/1, has_method_local/1]).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -define(TAB, beamtalk_supervisor_test_helper_tab).
@@ -77,13 +77,8 @@ init([]) ->
     {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, []}}.
 
 %%====================================================================
-%% BT-3759: `X supervise` + instance-side `initialize` stand-ins
+%% BT-3759: instance-side `initialize` stand-in
 %%====================================================================
-
--doc "Stand-in for `supervise`: startLink/1 wrapped as the FFI Result map.".
--spec class_supervise(term()) -> map().
-class_supervise(ClassSelf) ->
-    beamtalk_result:from_tagged_tuple(beamtalk_supervisor:startLink(ClassSelf)).
 
 -doc """
 Instance-side dispatch for the supervisor handle: answers `initialize` only

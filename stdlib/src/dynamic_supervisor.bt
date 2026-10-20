@@ -38,7 +38,27 @@ abstract Object subclass: DynamicSupervisor(C)
   /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.
   class isSupervisor -> Boolean => true
 
+  /// Default OTP restart policy when this pool is nested in another
+  /// supervisor (ADR 0135 §3): `#permanent`, OTP's default for supervisor
+  /// children.
+  class supervisionPolicy -> RestartStrategy => #permanent
+
+  /// Return a SupervisionSpec for nesting this pool in another supervisor,
+  /// or for a pool of pools (`childClass => ThisPool`).
+  ///
+  /// Same contract as `Supervisor class>>supervisionSpec`: `type`
+  /// `#supervisor`, shutdown `#infinity`, restart from `supervisionPolicy`;
+  /// `withArgs:` gives the nested pool its `self args`.
+  class supervisionSpec -> SupervisionSpec =>
+    (SupervisionSpec new withActorClass: ((Erlang beamtalk_supervisor) classObject: self))
+      withRestart: self supervisionPolicy
+
   // === Class-side lifecycle ===
+  //
+  // `supervise` *ensures* the class's registered pool is running; the spawn
+  // family *creates* a new pool per call (ADR 0135 §1). See `Supervisor` for
+  // the full contract: the start runs in the caller, unlinked, and
+  // instance-side `initialize` runs once per start.
 
   /// Start this dynamic supervisor (or return the already-running instance).
   ///
@@ -49,7 +69,38 @@ abstract Object subclass: DynamicSupervisor(C)
   class supervise -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) startLink: self
 
-  /// Return the running supervisor instance, or nil if not started.
+  /// Start a new, anonymous pool with `nil` args. Raises
+  /// `#supervisor_start_failed` when the start fails.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// a := WorkerPool spawn
+  /// b := WorkerPool spawn
+  /// a == b   // => false
+  /// ```
+  class spawn -> Self => (Erlang beamtalk_supervisor) doSpawn: self
+
+  /// Start a new, anonymous pool with start args (`self args`), so its
+  /// `childClass`, `maxChildren` and `childShutdown` can differ per pool.
+  class spawnWith: args :: Object -> Self =>
+    (Erlang beamtalk_supervisor) doSpawnWith: self args: args
+
+  /// Start a new pool registered under a bounded `name` (ADR 0079). A taken
+  /// name gives `Result error:` with kind `#name_registered`.
+  class spawnAs: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_supervisor) doSpawnAs: self withName: name
+
+  /// Start a new pool with start args, registered under `name`.
+  class spawnWith: args :: Object as: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_supervisor) doSpawnWith: self args: args withName: name
+
+  /// Look up a running pool registered under `name`: `#name_not_registered`,
+  /// `#wrong_class` or `#type_error` on failure, as `Actor named:`.
+  class named: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_supervisor) named: self withName: name
+
+  /// Return the running `supervise` pool, or nil if not started (spawned
+  /// and nested pools are not `current`).
   class current -> Self | Nil => (Erlang beamtalk_supervisor) current: self
 
   // === Instance-side configuration (override in concrete subclasses) ===
@@ -157,7 +208,8 @@ abstract Object subclass: DynamicSupervisor(C)
   /// process after the pool has finished starting, so messages to `self`
   /// work here. If it raises, the pool is stopped and the start fails.
   ///
-  /// Fires exactly once, at the initial `supervise` call — it does
+  /// Fires exactly once per top-level start (`supervise` or a spawn-family
+  /// message), not for a nested pool (ADR 0135 §1). It does
   /// **not** re-fire on OTP-driven child restarts (including
   /// `restForOne` cascades), since those start each child directly
   /// from its child spec and never re-enter this dispatch path. A

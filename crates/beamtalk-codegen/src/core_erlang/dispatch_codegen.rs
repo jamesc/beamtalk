@@ -694,6 +694,26 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        // ADR 0135 §1: the spawn family on a Supervisor/DynamicSupervisor
+        // class reference starts the tree in the caller via the runtime
+        // start helper (a supervisor module has no `spawn/0,1`).
+        if let Expression::ClassReference { name, package, .. } = receiver {
+            let selector_atom = selector.name();
+            if is_supervisor_spawn_selector(&selector_atom, arguments.len())
+                && self.is_supervisor_class(&name.name)
+            {
+                let pkg = package.as_ref().map(|p| p.name.as_str());
+                let module_name = self.compiled_module_name_qualified(&name.name, pkg);
+                let doc = self.generate_supervisor_class_start(
+                    leaf::atom(name.name.to_string()),
+                    leaf::atom(module_name),
+                    &selector_atom,
+                    arguments,
+                )?;
+                return Ok(Some(doc));
+            }
+        }
+
         // Unary spawn/await messages
         if let MessageSelector::Unary(name) = selector {
             // Only match ClassReference, not Identifier.
@@ -1472,6 +1492,20 @@ impl CoreErlangGenerator {
         selector_atom: &str,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        // ADR 0135 §1: `self spawn…` in a class method of a supervisor class
+        // starts a supervisor instance of the receiving class (a subclass
+        // when inherited) in the calling process.
+        if is_supervisor_spawn_selector(selector_atom, arguments.len())
+            && self.is_supervisor_class(&self.class_name())
+        {
+            let doc = self.generate_supervisor_class_start(
+                Self::class_self_name_doc(),
+                Self::class_self_module_doc(selector_atom),
+                selector_atom,
+                arguments,
+            )?;
+            return Ok(Some(doc));
+        }
         match selector_atom {
             "new" | "new:" => {
                 // Hoist preambles from sub-expression class var mutations.
@@ -1526,6 +1560,45 @@ impl CoreErlangGenerator {
             )?)),
             _ => Ok(None),
         }
+    }
+
+    /// True when `class_name` is `Supervisor`, `DynamicSupervisor` or a
+    /// subclass of either (ADR 0135 §1 carve-out from the actor spawn
+    /// intrinsics).
+    fn is_supervisor_class(&self, class_name: &str) -> bool {
+        self.class_hierarchy.as_ref().is_some_and(|h| {
+            h.is_supervisor_subclass(class_name) || h.is_dynamic_supervisor_subclass(class_name)
+        })
+    }
+
+    /// Lowers a spawn-family send on a supervisor class (ADR 0135 §1) to the
+    /// runtime start helper, run in the caller's process — never class-method
+    /// dispatch, which would run the whole tree start inside the class
+    /// `gen_server`:
+    ///
+    /// ```erlang
+    /// call 'beamtalk_supervisor':'class_start'('Pool', 'bt@pool', 'spawnWith:', [Args])
+    /// ```
+    fn generate_supervisor_class_start(
+        &mut self,
+        class_doc: Document<'static>,
+        module_doc: Document<'static>,
+        selector_atom: &str,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        let (args_preamble, args_doc) = self.thread_args(arguments)?;
+        let call_doc = docvec![
+            "call 'beamtalk_supervisor':'class_start'(",
+            class_doc,
+            ", ",
+            module_doc,
+            ", ",
+            leaf::atom(selector_atom.to_string()),
+            ", [",
+            args_doc,
+            "])"
+        ];
+        Ok(self.close_prelude(&args_preamble, call_doc, "SupStart"))
     }
 
     /// Shared emitter for `self spawnAs:` and `self spawnWith:as:` in
@@ -3300,6 +3373,16 @@ impl CoreErlangGenerator {
 /// → runtime `undef`).
 pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -> bool {
     arity == 0 && selector_atom == "class_name"
+}
+
+/// The class-side spawn-family selectors that start a supervisor instance
+/// (ADR 0135 §1), with their arities: lowered for supervisor receivers to
+/// `beamtalk_supervisor:class_start/4` instead of the actor spawn intrinsics.
+pub(super) fn is_supervisor_spawn_selector(selector_atom: &str, arity: usize) -> bool {
+    matches!(
+        (selector_atom, arity),
+        ("spawn", 0) | ("spawnWith:" | "spawnAs:", 1) | ("spawnWith:as:", 2)
+    )
 }
 
 /// Behaviour-protocol reflective primitives that are safe to

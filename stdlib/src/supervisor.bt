@@ -23,11 +23,6 @@ type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne
 ///   (`self count`, `self which: X`): the supervisor is still starting, and
 ///   the start fails with `#supervisor_start_failed`. Reading `self args` and
 ///   passing `self` *as a value* (e.g. in a child's args) are fine.
-/// - **Do not send to the supervisor's own class** (`self class helper`,
-///   `MySup settings`) from configuration while `supervise` is starting it:
-///   `supervise` currently runs in that class's process (until BT-3962), so
-///   the send waits on the busy class and times out. Pass values in through
-///   start args, or nest the supervisor under another one.
 /// - **Never synchronously call a supervisor from code it is waiting on**:
 ///   its configuration methods, those of its nested supervisor children, or
 ///   the `initialize` of a `withName:`/`withClassMethod:` actor child. A call
@@ -60,12 +55,47 @@ abstract Object subclass: Supervisor
   /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.
   class isSupervisor -> Boolean => true
 
+  /// Default OTP restart policy when this supervisor is nested in another
+  /// (ADR 0135 §3): `#permanent`, OTP's default for supervisor children.
+  /// Override to declare `#transient` or `#temporary`.
+  class supervisionPolicy -> RestartStrategy => #permanent
+
+  /// Return a SupervisionSpec for nesting this supervisor in another.
+  ///
+  /// The spec's `type` is `#supervisor` and its shutdown `#infinity`; its
+  /// restart comes from `supervisionPolicy`. `withId:` (a Symbol or an
+  /// Integer), `withArgs:` (this child's start args, read as `self args`),
+  /// `withRestart:`, `withShutdown:` and `withName:` (registers the child
+  /// under a bounded name) apply. `withClassMethod:` and `scope: #global`
+  /// are not supported for supervisor children: they fail the parent's
+  /// start with a `#type_error`. A bare class in `childSpecs` means
+  /// `X supervisionSpec`, so it is an anonymous child.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Supervisor subclass: Pool
+  ///   childSpecs => #((Leaf supervisionSpec withId: 1), (Leaf supervisionSpec withId: 2 withArgs: #{#x => 2}))
+  /// ```
+  class supervisionSpec -> SupervisionSpec =>
+    (SupervisionSpec new withActorClass: ((Erlang beamtalk_supervisor) classObject: self))
+      withRestart: self supervisionPolicy
+
   // === Class-side lifecycle ===
+  //
+  // `supervise` *ensures* the class's one registered instance is running;
+  // the spawn family *creates* a new instance per call (ADR 0135 §1). All of
+  // them start the tree in the calling process, unlinked from it (like
+  // `Actor spawn`): to tie a supervisor's lifetime to something, nest it via
+  // `supervisionSpec` or `stop` it. Instance-side `initialize` runs once per
+  // start, in the caller. An ordinary send of these messages is routed by
+  // the compiler and runtime straight to the start helper; the bodies below
+  // document the behaviour and serve the remaining dynamic paths.
 
   /// Start this supervisor (or return the already-running instance).
   ///
   /// Registers the supervisor under its class name. Subsequent calls to
-  /// `supervise` or `current` return the running instance.
+  /// `supervise` or `current` return the running instance. Start args are
+  /// `nil`; use `spawnWith:` for an instance with args.
   ///
   /// ADR 0080 Phase 2 (BT-1999): returns `Result(Self, Error)` so subclass
   /// typing is preserved (e.g. `MySupervisor supervise unwrap` is typed as
@@ -76,7 +106,65 @@ abstract Object subclass: Supervisor
   class supervise -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) startLink: self
 
-  /// Return the running supervisor instance, or nil if not started.
+  /// Start a new, anonymous instance of this supervisor with `nil` args.
+  ///
+  /// Each call starts a separate tree. Raises `#supervisor_start_failed`
+  /// when the start fails. Not `current`: look an anonymous instance up by
+  /// the handle you hold, or `Node current supervisors`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// a := WebApp spawn
+  /// b := WebApp spawn
+  /// a == b      // => false
+  /// a stop      // b keeps running
+  /// ```
+  class spawn -> Self => (Erlang beamtalk_supervisor) doSpawn: self
+
+  /// Start a new, anonymous instance with start args (`self args`).
+  ///
+  /// The configuration methods read `args` inside the new supervisor's
+  /// `init`; an OTP restart replays the same args. Raises
+  /// `#supervisor_start_failed` when the start fails.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// srv := ServerSupervisor spawnWith: #{#port => 8080}
+  /// srv args at: #port   // => 8080
+  /// ```
+  class spawnWith: args :: Object -> Self =>
+    (Erlang beamtalk_supervisor) doSpawnWith: self args: args
+
+  /// Start a new instance registered under `name` (`nil` args).
+  ///
+  /// `name` must come from a bounded, statically known set (ADR 0079): it is
+  /// an atom. A taken name gives `Result error:` with kind
+  /// `#name_registered`; any other failure `#supervisor_start_failed`.
+  class spawnAs: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_supervisor) doSpawnAs: self withName: name
+
+  /// Start a new instance with start args, registered under `name`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// http := (ServerSupervisor spawnWith: cfg as: #http_server) unwrap
+  /// (ServerSupervisor named: #http_server) unwrap == http   // => true
+  /// ```
+  class spawnWith: args :: Object as: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_supervisor) doSpawnWith: self args: args withName: name
+
+  /// Look up a running supervisor registered under `name`.
+  ///
+  /// `Result error:` with kind `#name_not_registered` for an unknown name,
+  /// `#wrong_class` when the process is not a supervisor of this class or a
+  /// subclass (an actor, say), `#type_error` for a non-Symbol name.
+  class named: name :: Symbol -> Result(Self, Error) =>
+    (Erlang beamtalk_supervisor) named: self withName: name
+
+  /// Return the running `supervise` instance, or nil if not started.
+  ///
+  /// Only the class-named singleton: instances from the spawn family (and
+  /// supervisors nested as a bare class) are not `current`.
   class current -> Self | Nil => (Erlang beamtalk_supervisor) current: self
 
   // === Instance-side configuration (override in concrete subclasses) ===
@@ -131,7 +219,9 @@ abstract Object subclass: Supervisor
   /// in the configuration methods). If it raises, the supervisor is stopped
   /// and the start fails.
   ///
-  /// Fires exactly once, at the initial `supervise` call — it does
+  /// Fires exactly once per top-level start — the `supervise` call that
+  /// started the instance, or each `spawn`/`spawnWith:`/`spawnAs:` — not for
+  /// a supervisor nested in another (ADR 0135 §1). It does
   /// **not** re-fire on OTP-driven child restarts (including
   /// `restForOne` cascades), since those start each child directly
   /// from its child spec and never re-enter this dispatch path. A
@@ -159,14 +249,15 @@ abstract Object subclass: Supervisor
   /// Stdlib signature updates land in Phase 2 (BT-P2-stdlib).
   ///
   /// BT-2254: now that FFI list element types are carried, `whichChildren`'s
-  /// `{ok, [atom()]}` spec resolves `unwrap` to `List(Symbol)`. The declared
-  /// return type matches that inferred body type so no type-mismatch warning
-  /// is produced (the runtime value is a list of atoms, i.e. `List(Symbol)`).
-  children -> List(Symbol) => self whichChildrenResult unwrap
+  /// `{ok, [atom() | integer()]}` spec resolves `unwrap` to
+  /// `List(Symbol | Integer)`: ids are class names or `withId:` values, which
+  /// may be Integers (ADR 0135 §3). The declared return type matches that
+  /// inferred body type so no type-mismatch warning is produced.
+  children -> List(Symbol | Integer) => self whichChildrenResult unwrap
 
   /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
   /// `whichChildren/1` call. Keeps `children` pure Beamtalk.
-  internal whichChildrenResult -> Result(List(Symbol), Error) =>
+  internal whichChildrenResult -> Result(List(Symbol | Integer), Error) =>
     (Erlang beamtalk_supervisor) whichChildren: self
 
   /// Look up the running child process for the given class.

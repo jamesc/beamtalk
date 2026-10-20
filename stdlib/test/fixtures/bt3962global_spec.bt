@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135 §3): `scope: #global` is not supported on a supervisor
+// child, so starting this parent fails with a structured `type_error`.
+
+Supervisor subclass: Bt3962GlobalSpec
+
+  childSpecs => #((Bt3962Leaf supervisionSpec withName: #bt3962_global_leaf scope: #global))

@@ -757,7 +757,10 @@ bt3963_static_config(Overrides) ->
             childSpecs => [],
             strategy => oneForOne,
             maxRestarts => 10,
-            restartWindow => 60
+            restartWindow => 60,
+            %% The stdlib default (a real class inherits it): a top-level
+            %% start sends `initialize` (ADR 0135 §1).
+            initialize => nil
         },
         Overrides
     ).
@@ -929,22 +932,56 @@ static_init_config_class_var_write_raises_read_only_test() ->
         ?assertMatch(#beamtalk_error{kind = class_state_read_only}, start_failing(nil))
     end).
 
-%% A fake class object for a supervisor child class (the nested-supervisor
-%% branch of build_child_spec/2 needs no message dispatch).
+%% A fake class object for a supervisor child class.
 bt3963_supervisor_child_class(Name) ->
+    fake_supervisor_class(Name, bt3963_child_mod).
+
+%% A fake Supervisor-subclass class process (ADR 0135 §3). A bare class in a
+%% child list goes through `Class supervisionSpec` -> `childSpec`: the fake
+%% answers `supervisionSpec` with its own class object and `childSpec` with
+%% the default Beamtalk child-spec dict `SupervisionSpec childSpec` builds for
+%% a supervisor (`#spawn`, no args, `#permanent`, shutdown `#infinity`).
+fake_supervisor_class(Name, Module) ->
     beamtalk_class_metadata:new(),
     beamtalk_class_metadata:insert(Name, undefined, undefined, 'Supervisor', undefined),
-    ClassPid = spawn(fun Loop() ->
-        receive
-            {'$gen_call', From, class_name} ->
-                gen_server:reply(From, Name),
-                Loop();
-            stop ->
-                ok
-        end
-    end),
     Tag = list_to_atom(atom_to_list(Name) ++ " class"),
-    {ClassPid, #beamtalk_object{class = Tag, class_mod = bt3963_child_mod, pid = ClassPid}}.
+    Parent = self(),
+    Ref = make_ref(),
+    ClassPid = spawn(fun() ->
+        ClassObj = #beamtalk_object{class = Tag, class_mod = Module, pid = self()},
+        Parent ! {Ref, ClassObj},
+        (fun Loop() ->
+            receive
+                {'$gen_call', From, class_name} ->
+                    gen_server:reply(From, Name),
+                    Loop();
+                {'$gen_call', From, {class_method_call, supervisionSpec, [], _}} ->
+                    gen_server:reply(From, {ok, ClassObj}),
+                    Loop();
+                {'$gen_call', From, {class_method_call, childSpec, [], _}} ->
+                    gen_server:reply(
+                        From,
+                        {ok, #{
+                            id => Name,
+                            start => #{
+                                '$beamtalk_class' => 'Array',
+                                data => #{0 => ClassObj, 1 => spawn, 2 => []}
+                            },
+                            restart => permanent,
+                            shutdown => infinity,
+                            type => supervisor
+                        }}
+                    ),
+                    Loop();
+                stop ->
+                    ok
+            end
+        end)()
+    end),
+    receive
+        {Ref, ClassObj} -> {ClassPid, ClassObj}
+    after 5000 -> error(fake_supervisor_class_timeout)
+    end.
 
 bt3963_dynamic_config(ChildClass, Overrides) ->
     maps:merge(
@@ -1525,112 +1562,354 @@ stop_terminates_children_test() ->
     ?assertEqual(false, is_process_alive(ChildPid)).
 
 %%====================================================================
-%% Tests: supervisor tuple element access
+%% ADR 0135 §1 (BT-3962): `supervise` and the spawn family
 %%====================================================================
 
-supervisor_tuple_new_tag_test() ->
-    %% startLink returns beamtalk_supervisor_new tag for fresh starts.
-    %% We can't easily test startLink without a real class, but we can verify
-    %% the tuple structure constants used throughout the module.
-    Tuple = {beamtalk_supervisor_new, 'MyClass', my_mod, self()},
-    ?assertEqual(beamtalk_supervisor_new, element(1, Tuple)),
-    ?assertEqual('MyClass', element(2, Tuple)),
-    ?assertEqual(my_mod, element(3, Tuple)),
-    ?assertEqual(self(), element(4, Tuple)).
+-define(BT3963_MOD, beamtalk_bt3963_sup_fixture).
 
-%%====================================================================
-%% startLink/1 — success, already_started, and error paths
-%%====================================================================
+%% The registered class object for a class started by `with_bt3963_class/3`.
+bt3962_class_self(ClassName) ->
+    beamtalk_class_registry:class_object_from_pid(
+        beamtalk_class_registry:whereis_class(ClassName)
+    ).
 
-%% Spawn a fake class gen_server that answers class_name and module_name
-%% (the two calls beamtalk_object_class makes). Returns {FakePid, Self tuple}.
-make_fake_class_self(ClassName, Module) ->
-    FakeClassPid = spawn(fun() ->
-        (fun Loop() ->
+linked_to_self(Pid) ->
+    {links, Links} = erlang:process_info(self(), links),
+    lists:member(Pid, Links).
+
+%% Poll (yielding) until `Pred()` holds, or fail after ~2 s.
+wait_until(Pred) ->
+    wait_until(Pred, 400).
+
+wait_until(Pred, 0) ->
+    ?assert(Pred());
+wait_until(Pred, N) ->
+    case Pred() of
+        true ->
+            ok;
+        false ->
+            timer:sleep(5),
+            wait_until(Pred, N - 1)
+    end.
+
+supervise_starts_registered_unlinked_and_runs_initialize_once_test() ->
+    Test = self(),
+    Config = bt3963_static_config(#{
+        initialize => fun(Self) ->
+            Test ! {initialized, Self, self()},
+            nil
+        end
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        {ok, Sup} = beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD),
+        Pid = element(4, Sup),
+        try
+            ?assertEqual(bt3963_sup('BT3963Sup', Pid), Sup),
+            ?assertEqual(Pid, whereis(?BT3963_MOD)),
+            %% Unlinked from the caller (and so from any class process).
+            ?assertNot(linked_to_self(Pid)),
             receive
-                {'$gen_call', From, class_name} ->
-                    gen_server:reply(From, ClassName),
-                    Loop();
-                {'$gen_call', From, module_name} ->
-                    gen_server:reply(From, Module),
-                    Loop();
-                stop ->
-                    ok
+                {initialized, Sup, Runner} -> ?assertEqual(Test, Runner)
+            after 2000 -> error(not_initialized)
+            end,
+            %% Idempotent: the running instance, and no second initialize.
+            ?assertEqual({ok, Sup}, beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)),
+            receive
+                {initialized, _, _} -> error(initialized_twice)
+            after 100 -> ok
             end
-        end)()
-    end),
-    Self = {beamtalk_object, atom_to_list_class_tag(ClassName), Module, FakeClassPid},
-    {FakeClassPid, Self}.
+        after
+            gen_server:stop(Pid)
+        end
+    end).
 
-atom_to_list_class_tag(ClassName) ->
-    list_to_atom(atom_to_list(ClassName) ++ " class").
-
-startLink_success_returns_ok_new_tuple_test() ->
-    %% ADR 0080 Phase 0a, option 2: startLink returns
-    %% {ok, {beamtalk_supervisor_new, ...}} on first start. The inner
-    %% `_new` tag signals the post-dispatch hook in beamtalk_class_dispatch
-    %% that this is a fresh start; the hook rewrites the inner tag and
-    %% runs initialize: in the caller's process after the FFI Result
-    %% coercion has wrapped this return.
-    beamtalk_supervisor_test_helper:set_mode(ok, undefined),
-    {FakeClassPid, Self} =
-        make_fake_class_self('BT1994StartOK', beamtalk_supervisor_test_helper),
-    try
-        Result = beamtalk_supervisor:startLink(Self),
+supervise_start_failure_returns_supervisor_start_failed_test() ->
+    Config = bt3963_static_config(#{childSpecs => fun(_) -> error(boom) end}),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
         ?assertMatch(
-            {ok, {beamtalk_supervisor_new, 'BT1994StartOK', beamtalk_supervisor_test_helper, _}},
-            Result
+            {error, #beamtalk_error{
+                kind = supervisor_start_failed, class = 'BT3963Sup', selector = supervise
+            }},
+            beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)
         ),
-        {ok, Inner} = Result,
-        SupPid = element(4, Inner),
-        ?assert(is_pid(SupPid)),
-        ?assert(is_process_alive(SupPid)),
-        gen_server:stop(SupPid)
-    after
-        FakeClassPid ! stop,
-        beamtalk_supervisor_test_helper:reset()
-    end.
+        ?assertEqual(undefined, whereis(?BT3963_MOD))
+    end).
 
-startLink_already_started_returns_ok_existing_tuple_test() ->
-    %% ADR 0080 Phase 0a, option 2: startLink returns
-    %% {ok, {beamtalk_supervisor, ...}} when start_link reports
-    %% {error, {already_started, Pid}}. The inner tag is NOT `_new`, so
-    %% the post-dispatch hook does not re-run initialize: on this path.
-    beamtalk_supervisor_test_helper:set_mode(already_started, undefined),
-    {FakeClassPid, Self} =
-        make_fake_class_self('BT1994AlreadyStarted', beamtalk_supervisor_test_helper),
-    try
-        Result = beamtalk_supervisor:startLink(Self),
+spawn_starts_independent_unlinked_listed_instances_test() ->
+    Test = self(),
+    Config = bt3963_static_config(#{
+        initialize => fun(Self) ->
+            Test ! {initialized, Self},
+            nil
+        end
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        A = beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, []),
+        B = beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, 'spawnWith:', [#{n => 2}]),
+        PA = element(4, A),
+        PB = element(4, B),
+        try
+            ?assertNotEqual(PA, PB),
+            ?assertNot(linked_to_self(PA)),
+            ?assertNot(linked_to_self(PB)),
+            ?assertEqual(undefined, whereis(?BT3963_MOD)),
+            ?assertEqual({ok, nil}, beamtalk_supervisor:args(A)),
+            ?assertEqual({ok, #{n => 2}}, beamtalk_supervisor:args(B)),
+            %% initialize ran once per instance, in the caller.
+            receive
+                {initialized, A} -> ok
+            after 2000 -> error(a_not_initialized)
+            end,
+            receive
+                {initialized, B} -> ok
+            after 2000 -> error(b_not_initialized)
+            end,
+            %% Both are listed as top-level instances (`pg`) ...
+            ?assert(lists:member(PA, beamtalk_supervisor:instance_pids())),
+            ?assert(lists:member(B, beamtalk_supervisor:instances())),
+            gen_server:stop(PA),
+            ?assert(is_process_alive(PB)),
+            %% ... and `pg` drops a stopped one.
+            wait_until(fun() -> not lists:member(PA, beamtalk_supervisor:instance_pids()) end)
+        after
+            catch gen_server:stop(PA),
+            catch gen_server:stop(PB)
+        end
+    end).
+
+spawn_start_failure_raises_supervisor_start_failed_test() ->
+    Config = bt3963_static_config(#{childSpecs => fun(_) -> error(boom) end}),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        ?assertError(
+            #{error := #beamtalk_error{kind = supervisor_start_failed, selector = spawn}},
+            beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, [])
+        )
+    end).
+
+spawn_as_registers_and_named_finds_it_test() ->
+    Name = bt3962_named_sup,
+    with_bt3963_class('BT3963Sup', bt3963_static_config(#{}), fun() ->
+        R1 = beamtalk_supervisor:class_start(
+            'BT3963Sup', ?BT3963_MOD, 'spawnWith:as:', [#{n => 1}, Name]
+        ),
         ?assertMatch(
-            {ok, {beamtalk_supervisor, 'BT1994AlreadyStarted', beamtalk_supervisor_test_helper, _}},
-            Result
+            #{isOk := true, okValue := {beamtalk_supervisor, 'BT3963Sup', ?BT3963_MOD, _}}, R1
         ),
-        {ok, Inner} = Result,
-        SupPid = element(4, Inner),
-        gen_server:stop(SupPid)
+        #{okValue := Sup} = R1,
+        Pid = element(4, Sup),
+        try
+            ?assertEqual(Pid, whereis(Name)),
+            ?assertNot(linked_to_self(Pid)),
+            ?assertEqual({ok, #{n => 1}}, beamtalk_supervisor:args(Sup)),
+            ClassSelf = bt3962_class_self('BT3963Sup'),
+            ?assertEqual({ok, Sup}, beamtalk_supervisor:named(ClassSelf, Name)),
+            ?assertMatch(
+                {error, #beamtalk_error{kind = name_registered, selector = 'spawnAs:'}},
+                beamtalk_supervisor:doSpawnAs(ClassSelf, Name)
+            ),
+            ?assertMatch(
+                {error, #beamtalk_error{kind = reserved_name}},
+                beamtalk_supervisor:doSpawnAs(ClassSelf, beamtalk_bt3962_reserved)
+            ),
+            ?assertMatch(
+                {error, #beamtalk_error{kind = name_not_registered}},
+                beamtalk_supervisor:named(ClassSelf, bt3962_no_such_sup)
+            ),
+            ?assertMatch(
+                {error, #beamtalk_error{kind = type_error}},
+                beamtalk_supervisor:named(ClassSelf, <<"bt3962">>)
+            ),
+            Other = spawn(fun() ->
+                receive
+                    stop -> ok
+                end
+            end),
+            register(bt3962_not_a_sup, Other),
+            try
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = wrong_class}},
+                    beamtalk_supervisor:named(ClassSelf, bt3962_not_a_sup)
+                )
+            after
+                Other ! stop
+            end
+        after
+            gen_server:stop(Pid)
+        end
+    end).
+
+%%====================================================================
+%% ADR 0135 §3 (BT-3962): nested supervisor children
+%%====================================================================
+
+%% A Beamtalk child-spec dict for a supervisor child, as `SupervisionSpec
+%% childSpec` builds it.
+bt3962_bt_spec(ClassObj, Id, StartFn, StartArgs) ->
+    #{
+        id => Id,
+        start => #{
+            '$beamtalk_class' => 'Array',
+            data => #{0 => ClassObj, 1 => StartFn, 2 => StartArgs}
+        },
+        restart => permanent,
+        shutdown => infinity,
+        type => supervisor
+    }.
+
+spec_to_otp_supervisor_child_mapping_test() ->
+    M = bt3962_map_sup_mod,
+    {FakePid, ClassObj} = fake_supervisor_class('BT3962MapSupCls', M),
+    Start = fun(StartFn, StartArgs, Mode) ->
+        maps:get(start, beamtalk_supervisor:spec_to_otp(
+            bt3962_bt_spec(ClassObj, 1, StartFn, StartArgs), Mode
+        ))
+    end,
+    try
+        ?assertEqual(
+            {beamtalk_supervisor, start_supervisor_child, [M, nil]}, Start(spawn, [], static)
+        ),
+        ?assertEqual(
+            {beamtalk_supervisor, start_supervisor_child, [M, #{x => 1}]},
+            Start('spawnWith:', [#{x => 1}], static)
+        ),
+        ?assertEqual(
+            {beamtalk_supervisor, start_supervisor_child, [M, nil, n1]},
+            Start('spawnAs:', [n1], static)
+        ),
+        ?assertEqual(
+            {beamtalk_supervisor, start_supervisor_child, [M, #{x => 1}, n1]},
+            Start('spawnWith:as:', [#{x => 1}, n1], static)
+        ),
+        ?assertEqual(
+            {beamtalk_supervisor, start_dynamic_supervisor_child, [M, nil]},
+            Start(spawn, [], dynamic)
+        ),
+        ?assertEqual(
+            {beamtalk_supervisor, start_dynamic_supervisor_child, [M, #{x => 1}]},
+            Start('spawnWith:', [#{x => 1}], dynamic)
+        ),
+        %% Integer ids pass through untouched.
+        ?assertEqual(
+            1,
+            maps:get(id, beamtalk_supervisor:spec_to_otp(bt3962_bt_spec(ClassObj, 1, spawn, [])))
+        ),
+        %% withClassMethod: and scope: #global are not supported.
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            Start(classMethod, [foo, []], static)
+        ),
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            Start('spawnAs:scope:', [n1], static)
+        )
     after
-        FakeClassPid ! stop,
-        beamtalk_supervisor_test_helper:reset()
+        FakePid ! stop,
+        beamtalk_class_metadata:delete('BT3962MapSupCls')
     end.
 
-startLink_error_returns_supervisor_start_failed_test() ->
-    %% ADR 0080 Phase 0a, option 2: startLink returns
-    %% {error, #beamtalk_error{kind = supervisor_start_failed, ...}}
-    %% instead of raising. FFI coercion converts this to a Result error
-    %% tagged map on the Beamtalk side.
-    beamtalk_supervisor_test_helper:set_mode(error, {foo, bar}),
-    {FakeClassPid, Self} =
-        make_fake_class_self('BT1994StartErr', beamtalk_supervisor_test_helper),
+start_supervisor_child_passes_args_and_name_test() ->
+    Test = self(),
+    Config = bt3963_static_config(#{
+        childSpecs => fun(Self) ->
+            Test ! {child_args, beamtalk_supervisor:args(Self)},
+            []
+        end
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        {ok, P1} = beamtalk_supervisor:start_supervisor_child(?BT3963_MOD, #{n => 1}),
+        {ok, P2} = beamtalk_supervisor:start_supervisor_child(
+            ?BT3963_MOD, #{n => 2}, bt3962_trampoline_named
+        ),
+        try
+            receive
+                {child_args, A1} -> ?assertEqual({ok, #{n => 1}}, A1)
+            after 2000 -> error(no_args)
+            end,
+            receive
+                {child_args, A2} -> ?assertEqual({ok, #{n => 2}}, A2)
+            after 2000 -> error(no_args)
+            end,
+            ?assertEqual(P2, whereis(bt3962_trampoline_named)),
+            ?assertEqual(undefined, whereis(?BT3963_MOD)),
+            %% A pool's template: arity 2/3/4 = startChild / startChild: / startChild:name:.
+            {ok, P3} = beamtalk_supervisor:start_dynamic_supervisor_child(?BT3963_MOD, nil),
+            stop_linked(P3),
+            ?assertMatch(
+                {error, #beamtalk_error{kind = type_error}},
+                beamtalk_supervisor:start_dynamic_supervisor_child(?BT3963_MOD, nil, nil, <<"n">>)
+            )
+        after
+            stop_linked(P1),
+            stop_linked(P2)
+        end
+    end).
+
+start_supervisor_child_falls_back_to_start_link_0_for_old_modules_test() ->
+    Old = beamtalk_bt3962_old_sup_fixture,
+    {ok, P1} = beamtalk_supervisor:start_supervisor_child(Old, #{ignored => true}),
+    ?assertEqual(P1, whereis(Old)),
+    stop_linked(P1),
+    {ok, P2} = beamtalk_supervisor:start_supervisor_child(Old, nil, bt3962_unused_name),
+    ?assertEqual(P2, whereis(Old)),
+    stop_linked(P2).
+
+nested_old_module_child_starts_through_the_trampoline_test() ->
+    %% A parent built after ADR 0135 nests a child supervisor module that
+    %% exports only start_link/0 (ADR 0125).
+    Old = beamtalk_bt3962_old_sup_fixture,
+    {FakePid, ClassObj} = fake_supervisor_class('BT3962OldSupCls', Old),
     try
-        Result = beamtalk_supervisor:startLink(Self),
-        ?assertMatch({error, #beamtalk_error{kind = supervisor_start_failed}}, Result),
-        {error, BtError} = Result,
-        ?assertEqual('BT1994StartErr', BtError#beamtalk_error.class),
-        ?assertEqual(supervise, BtError#beamtalk_error.selector)
+        [Spec] = beamtalk_supervisor:build_child_specs([ClassObj]),
+        SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
+        {ok, Parent} = supervisor:start_link(?MODULE, {SupFlags, [Spec]}),
+        try
+            [{'BT3962OldSupCls', Child, supervisor, [Old]}] = supervisor:which_children(Parent),
+            ?assertEqual(Child, whereis(Old))
+        after
+            stop_linked(Parent)
+        end
     after
-        FakeClassPid ! stop,
-        beamtalk_supervisor_test_helper:reset()
+        FakePid ! stop,
+        beamtalk_class_metadata:delete('BT3962OldSupCls')
     end.
+
+nested_supervisor_children_with_integer_ids_restart_independently_test() ->
+    with_bt3963_class('BT3963Sup', bt3963_static_config(#{}), fun() ->
+        {FakePid, ClassObj} = fake_supervisor_class('BT3962PairLeafCls', ?BT3963_MOD),
+        try
+            Specs = [
+                beamtalk_supervisor:spec_to_otp(bt3962_bt_spec(ClassObj, 1, spawn, [])),
+                beamtalk_supervisor:spec_to_otp(
+                    bt3962_bt_spec(ClassObj, 2, 'spawnWith:', [#{x => 2}])
+                )
+            ],
+            SupFlags = #{strategy => one_for_one, intensity => 3, period => 5},
+            {ok, Parent} = supervisor:start_link(?MODULE, {SupFlags, Specs}),
+            try
+                Children = fun() ->
+                    maps:from_list([{Id, P} || {Id, P, _, _} <- supervisor:which_children(Parent)])
+                end,
+                #{1 := C1, 2 := C2} = Children(),
+                ?assertNotEqual(C1, C2),
+                ?assertEqual(
+                    {ok, #{x => 2}}, beamtalk_supervisor:args(bt3963_sup('BT3963Sup', C2))
+                ),
+                exit(C1, kill),
+                wait_until(fun() ->
+                    case Children() of
+                        #{1 := New1} when is_pid(New1), New1 =/= C1 -> true;
+                        _ -> false
+                    end
+                end),
+                ?assertEqual(C2, maps:get(2, Children()))
+            after
+                stop_linked(Parent)
+            end
+        after
+            FakePid ! stop,
+            beamtalk_class_metadata:delete('BT3962PairLeafCls')
+        end
+    end).
 
 %%====================================================================
 %% terminateChild/2 — static supervisor (by class name) path
@@ -2037,35 +2316,22 @@ wrap_child_supervisor_returns_beamtalk_supervisor_test() ->
 %%====================================================================
 
 build_child_specs_nested_supervisor_test() ->
-    %% A Supervisor-subclass class object becomes an OTP spec with
-    %% {ChildModule, start_link, []}, type => supervisor, shutdown => infinity.
-    beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert(
-        'BT1980NestedSupCls', undefined, undefined, 'Supervisor', undefined
-    ),
-    FakeClassPid = spawn(fun() ->
-        (fun Loop() ->
-            receive
-                {'$gen_call', From, class_name} ->
-                    gen_server:reply(From, 'BT1980NestedSupCls'),
-                    Loop();
-                stop ->
-                    ok
-            end
-        end)()
-    end),
+    %% ADR 0135 §3: a bare Supervisor-subclass class goes through
+    %% `supervisionSpec` -> `childSpec` like any child, and starts through the
+    %% `start_supervisor_child` trampoline (anonymous, args nil), type
+    %% supervisor, shutdown infinity, restart permanent.
+    {FakeClassPid, ClassObj} = fake_supervisor_class('BT1980NestedSupCls', bt1980_nested_sup_mod),
     try
-        %% Must be a class object (suffix " class" and is_class_object=true).
-        %% is_class_object inspects element(2) for a "_class" suffix — see
-        %% beamtalk_class_registry. Use the convention " class".
-        ClassObj =
-            {beamtalk_object, 'BT1980NestedSupCls class', bt1980_nested_sup_mod, FakeClassPid},
-        %% is_class_object may require registry lookup. Register the class_tag.
         [Spec] = beamtalk_supervisor:build_child_specs([ClassObj]),
         ?assertEqual('BT1980NestedSupCls', maps:get(id, Spec)),
-        ?assertEqual({bt1980_nested_sup_mod, start_link, []}, maps:get(start, Spec)),
+        ?assertEqual(
+            {beamtalk_supervisor, start_supervisor_child, [bt1980_nested_sup_mod, nil]},
+            maps:get(start, Spec)
+        ),
         ?assertEqual(infinity, maps:get(shutdown, Spec)),
-        ?assertEqual(supervisor, maps:get(type, Spec))
+        ?assertEqual(permanent, maps:get(restart, Spec)),
+        ?assertEqual(supervisor, maps:get(type, Spec)),
+        ?assertEqual([bt1980_nested_sup_mod], maps:get(modules, Spec))
     after
         FakeClassPid ! stop,
         beamtalk_class_metadata:delete('BT1980NestedSupCls')
@@ -2518,115 +2784,6 @@ with_live_supervisor_passes_through_error_test() ->
 %% the root ETS table and races readers is removed because get_root/0 is not
 %% designed to handle a deleted table — ets:lookup_element raises badarg by
 %% design and the test proved flaky under CI load.
-
-%%====================================================================
-%% ADR 0080 Phase 1: class_dispatch hook — initialize: on
-%%   fresh start only (not on already_started or error paths)
-%%====================================================================
-
-%% These tests exercise the post-dispatch hook in
-%% beamtalk_class_dispatch:class_send_dispatch/3, verifying that
-%% run_initialize/1 runs exactly once on a fresh supervisor start and
-%% is NOT re-run on idempotent (already_started) or error paths.
-%%
-%% They use class_dispatch_test_helper's `class_testSupervisorNew`
-%% method for the fresh-start path, and hand-craft Result tagged maps
-%% for the already_started and error paths to drive through class_send.
-
-class_dispatch_hook_does_not_initialize_on_already_started_test_() ->
-    %% When class_send_dispatch receives a Result wrapping an
-    %% already-normalised {beamtalk_supervisor, ...} tuple (the
-    %% idempotent already_started path), it must NOT call run_initialize.
-    {setup,
-        fun() ->
-            setup_class_dispatch_runtime()
-        end,
-        fun(Ctx) ->
-            teardown_class_dispatch_runtime(Ctx)
-        end,
-        fun(_Ctx) ->
-            [
-                {"initialize: is not called on already_started path",
-                    fun test_no_initialize_on_already_started/0}
-            ]
-        end}.
-
-test_no_initialize_on_already_started() ->
-    ClassName = 'BT1996AlreadyStarted',
-    ClassInfo = #{
-        superclass => none,
-        module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{testAlreadyStarted => <<>>, 'initialize:' => <<>>},
-        class_state => #{}
-    },
-    erase(bt1994_initialize_called),
-    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
-    try
-        Outcome = beamtalk_class_dispatch:class_send(Pid, testAlreadyStarted, []),
-        %% The Result wraps {beamtalk_supervisor, ...} (not _new), so
-        %% the hook must pass it through without calling initialize:.
-        ?assertMatch(
-            #{
-                '$beamtalk_class' := 'Result',
-                isOk := true,
-                okValue := {beamtalk_supervisor, 'BT1996AlreadyStarted', _, _}
-            },
-            Outcome
-        ),
-        ?assertEqual(undefined, get(bt1994_initialize_called))
-    after
-        erase(bt1994_initialize_called),
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
-    end.
-
-class_dispatch_hook_does_not_initialize_on_error_test_() ->
-    %% When class_send_dispatch receives a Result error tagged
-    %% map, it must NOT call run_initialize.
-    {setup,
-        fun() ->
-            setup_class_dispatch_runtime()
-        end,
-        fun(Ctx) ->
-            teardown_class_dispatch_runtime(Ctx)
-        end,
-        fun(_Ctx) ->
-            [{"initialize: is not called on error path", fun test_no_initialize_on_error/0}]
-        end}.
-
-test_no_initialize_on_error() ->
-    ClassName = 'BT1996ErrorPath',
-    ClassInfo = #{
-        superclass => none,
-        module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{testSupError => <<>>, 'initialize:' => <<>>},
-        class_state => #{}
-    },
-    erase(bt1994_initialize_called),
-    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
-    try
-        Outcome = beamtalk_class_dispatch:class_send(Pid, testSupError, []),
-        %% The Result wraps an error, so the hook must pass it through
-        %% without calling initialize:.
-        ?assertMatch(
-            #{
-                '$beamtalk_class' := 'Result',
-                isOk := false
-            },
-            Outcome
-        ),
-        ?assertEqual(undefined, get(bt1994_initialize_called))
-    after
-        erase(bt1994_initialize_called),
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
-    end.
 
 %%====================================================================
 %% Helpers for class_dispatch hook tests
@@ -3216,9 +3373,10 @@ bt1990_build_from_bt_spec(BtSpec) ->
 %% BT-3759: concurrent `supervise` while the first caller's initialize: runs
 %%====================================================================
 
-%% Drives the real class_send -> startLink -> dispatch hook path with a real
-%% named supervisor. The first caller's `initialize:` hook blocks on a message
-%% barrier, so the second caller deterministically arrives mid-hook.
+%% Drives the real `supervise` path (`class_start/4` -> `supervise/2`, in each
+%% caller's process, ADR 0135 §1) with a real named supervisor. The first
+%% caller's `initialize` hook blocks on a message barrier, so the second caller
+%% deterministically arrives mid-hook.
 
 concurrent_supervise_initialize_test_() ->
     {setup, fun setup_class_dispatch_runtime/0, fun teardown_class_dispatch_runtime/1, fun(_) ->
@@ -3243,16 +3401,16 @@ concurrent_supervise(HookOutcome) ->
     ClassInfo = #{
         superclass => none,
         module => Helper,
-        class_methods => #{supervise => <<>>},
         class_state => #{}
     },
+    %% The class process serves instance dispatch of `initialize`.
     {ok, ClassPid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
     Parent = self(),
     Caller = fun(Tag) ->
         spawn_link(fun() ->
             Outcome =
                 try
-                    {returned, beamtalk_class_dispatch:class_send(ClassPid, supervise, [])}
+                    {returned, beamtalk_supervisor:class_start(ClassName, Helper, supervise, [])}
                 catch
                     Class:Reason -> {raised, Class, Reason}
                 end,

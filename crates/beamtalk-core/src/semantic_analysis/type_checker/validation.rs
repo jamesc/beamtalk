@@ -2542,6 +2542,10 @@ impl TypeChecker {
         // `state:` slots that receives a `spawnWith:` send is already a terminal
         // DNU — key-checking on top of that is noise. Guard on the class kind so
         // the diagnostic only fires where `spawnWith:` is a real constructor.
+        // Supervisor / DynamicSupervisor receivers (ADR 0135 §1) are not Actor
+        // subclasses, so they are skipped here too: a supervisor's
+        // `spawnWith:` args are free-form start args (`self args`), not
+        // `state:` slots.
         //
         // Scoping note: `is_actor_subclass` returns `false` when any link in the
         // superclass chain is absent from the hierarchy, so key-checking is
