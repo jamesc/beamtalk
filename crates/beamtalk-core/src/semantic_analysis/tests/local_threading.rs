@@ -2770,6 +2770,15 @@ fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
         "b := [self.n]\nself foo: b\nnil",
         "b := [self.n]\nself.h := b\nnil",
         "b := [self.n]\n#[b]",
+        // Called after something that may change the state (measured: a field
+        // write or a self-send between the binding and the call reads stale).
+        "b := [self.n]\nself.n := 5\nb value",
+        "b := [self.n]\nself bump\nb value",
+        "b := [self.n]\nself.flag ifTrue: [self.n := 1]\nb value",
+        // In a loop whose body may change it, before or after the call.
+        "b := [self.n]\nself.items do: [:x | self.n := x. b value]\nnil",
+        "b := [self.n]\nself.items do: [:x | b value. self.n := x]\nnil",
+        "b := [self.n]\nself.items do: [:x | self bump. b value]\nnil",
     ] {
         let src = in_actor(body);
         let diags = adr0131_diagnostics(&src);
@@ -2810,9 +2819,11 @@ fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
         "self foo: [other.n]\nnil",
         "^[:x | x + 1]",
         // A local block run at once, before any write, answers right
-        // (measured); a use after a later write is a known gap.
+        // (measured); with nothing that may change the state in between.
         "b := [self.n]\nb value",
         "b := [self.n]\nself.items do: [:x | b value]\nnil",
+        "b := [self.n]\nb value\nself.n := 1\nnil",
+        "b := [self.n]\nself.items do: [:x | b value. x]\nnil",
         // The local is rebound to a block that reads no field.
         "b := [self.n]\nb := [1]\n^b",
         // A class-builder method body rebinds `self` to its parameter.

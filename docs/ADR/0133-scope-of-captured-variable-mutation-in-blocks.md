@@ -536,9 +536,13 @@ code.
   > too. Unaffected: blocks the compiler runs in place (`ifTrue:`, `do:`,
   > `detect:ifNone:`, ... on a non-self receiver), blocks passed to a
   > non-self receiver. A block bound to a local is followed to the
-  > local's escapes (`^b`, `self foo: b`, `self.cb := b`, `#[b]`), not to its
-  > calls: `b := [self.n]. b value` is accepted, and answers right unless a
-  > field write comes between the binding and the call (a known gap). A class method is unaffected (class variables read live
+  > local's uses: an escape (`^b`, `self foo: b`, `self.cb := b`, `#[b]`) is
+  > an error, and so is any use after something that may change the actor's
+  > state (a `self.field :=` write or any send to `self`/`super`, wherever
+  > it sits in between) or inside a block that contains one (a loop body's
+  > later iterations). `b := [self.n]. b value` with nothing in between
+  > answers right and is accepted; with a write or self-send between, it
+  > measured stale (3, not the 13 written) and is an error. A class method is unaffected (class variables read live
   > at home, ADR 0130 §3), as is a value type (its fields never change). The
   > idiom is to pass the value in: `[:v | ...]` with the callee doing
   > `block value: self.total`. Live read may be revisited after BT-3950 if real

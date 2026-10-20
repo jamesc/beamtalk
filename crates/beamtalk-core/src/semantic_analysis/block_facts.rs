@@ -1261,6 +1261,40 @@ pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
     reads
 }
 
+/// Whether evaluating `expr` itself (not its operands) can change the
+/// actor's `State` (BT-3952): a `self.field :=` write, or a message sent to
+/// `self` or `super` (a user method, `fieldAt:put:`, ... any of which may
+/// write a field). Conservative: every self-send counts.
+#[must_use]
+pub fn may_change_actor_state(expr: &Expression) -> bool {
+    let self_like = |r: &Expression| {
+        is_self_reference(r.unwrap_parens()) || matches!(r.unwrap_parens(), Expression::Super(_))
+    };
+    match expr {
+        Expression::Assignment { target, .. } => matches!(
+            target.as_ref(),
+            Expression::FieldAccess { receiver, .. } if is_self_reference(receiver.unwrap_parens())
+        ),
+        Expression::MessageSend { receiver, .. } | Expression::Cascade { receiver, .. } => {
+            self_like(receiver)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `block` contains, anywhere (nested blocks included), an expression
+/// that [`may_change_actor_state`].
+#[must_use]
+pub fn block_may_change_actor_state(block: &Block) -> bool {
+    let mut changes = false;
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            changes |= may_change_actor_state(e);
+        });
+    }
+    changes
+}
+
 /// The names `stmt` itself binds by assignment or destructuring: those not
 /// inside a block nested in it, and not a match-arm binding. A nested block's
 /// own first assignment binds the name in that block

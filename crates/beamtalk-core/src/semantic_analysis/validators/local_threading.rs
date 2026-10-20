@@ -47,15 +47,15 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, WriteKind, block_literal_of_other_arity, conditional_arm_blocks,
-    conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
-    exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
-    is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
-    local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
-    operand_producer_writes, outer_local_writes, outer_state_reads, outer_state_writes,
-    producer_body_block, receiver_statically_not_dictionary, repl_arm_producer_sites,
-    repl_evaluated_block, repl_operand_sites, repl_producer_writes, root_producer_writes,
-    sequenced_operand_sites, value_blocks, value_position_local_assignments,
+    RootMethodKind, WriteKind, block_literal_of_other_arity, block_may_change_actor_state,
+    conditional_arm_blocks, conditional_producer_writes, construct_outer_local_writes,
+    escape_sites, exception_arm_blocks, exception_producer_writes, group_by_fold_threads,
+    is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
+    is_threaded_frame_body, literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
+    loop_body_producer_sites, may_change_actor_state, operand_producer_writes, outer_local_writes,
+    outer_state_reads, outer_state_writes, producer_body_block, receiver_statically_not_dictionary,
+    repl_arm_producer_sites, repl_evaluated_block, repl_operand_sites, repl_producer_writes,
+    root_producer_writes, sequenced_operand_sites, value_blocks, value_position_local_assignments,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -1315,6 +1315,9 @@ enum Escape {
     /// actor instance method (BT-3952): the actor's own method runs the block,
     /// possibly after it has changed a field.
     ActorSelfCall(EcoString),
+    /// A use of a local bound to a block that reads a field, after the actor's
+    /// state may have changed (BT-3952).
+    LaterUse(EcoString),
     /// An argument of this collection message sent to `self` or `super` in
     /// an actor instance method: a dispatched self-send, so the actor's own
     /// method runs the block, not the inlined collection loop (BT-3908).
@@ -1353,6 +1356,9 @@ impl Escape {
             Self::StoredState => "stored in a field or class variable".to_string(),
             Self::InLiteral => "placed in a collection literal".to_string(),
             Self::CollectionResult => "answered by the block of a collection operation".to_string(),
+            Self::LaterUse(local) => {
+                format!("used through `{local}` after the actor's state may have changed")
+            }
             Self::Passed(selector) | Self::ActorSelfCall(selector) => format!(
                 "passed to `{selector}`, which is not a construct the compiler threads it through"
             ),
@@ -1395,6 +1401,7 @@ impl Escape {
             Self::StoredState
                 | Self::Returned
                 | Self::InLiteral
+                | Self::LaterUse(_)
                 | Self::ActorSelfCall(_)
                 | Self::ActorSelfSend(..)
         )
@@ -1407,7 +1414,11 @@ impl Escape {
                 "have the block answer the new value and assign it where the block is \
                  called: `{local} := [{name} + 1]`, then `{name} := {local} value`"
             ),
-            Self::Returned | Self::StoredState | Self::InLiteral | Self::CollectionResult => {
+            Self::Returned
+            | Self::StoredState
+            | Self::InLiteral
+            | Self::CollectionResult
+            | Self::LaterUse(_) => {
                 format!(
                     "once the block has left this scope, no later call of it can hand `{name}` \
                  back: keep the state in a field (`self.{name} := self.{name} + 1`) or return \
@@ -1494,6 +1505,16 @@ struct FrameBody {
     arm: bool,
 }
 
+/// A local bound to a block literal that reads a field of `self` (BT-3952).
+struct FieldReader {
+    block: Block,
+    /// Block nesting depth of the binding.
+    depth: usize,
+    /// Something that may change the actor's state has been walked since the
+    /// binding, so a use now may see a stale value.
+    tainted: bool,
+}
+
 struct Walker<'d> {
     context: MethodContext,
     /// Names bound in the method so far, innermost frame last.
@@ -1539,7 +1560,10 @@ struct Walker<'d> {
     /// Locals bound to a block literal that reads a field of `self` in an
     /// actor method, by name (BT-3952): a later escape of the local (`^b`,
     /// `self foo: b`, `self.cb := b`) is the block's escape.
-    field_reading_locals: HashMap<EcoString, Block>,
+    field_reading_locals: HashMap<EcoString, FieldReader>,
+    /// Per enclosing block (outermost first), whether it contains anything
+    /// that may change the actor's state ([`block_may_change_actor_state`]).
+    block_changes_state: Vec<bool>,
     /// The escaping-block diagnostics, keyed by the assignment they report
     /// and the block that escapes, in walk order ([`Walker::report_escape`]).
     escaping_writes: Vec<(Span, Span, Diagnostic)>,
@@ -1607,6 +1631,7 @@ impl<'d> Walker<'d> {
             value_block_writes: HashMap::new(),
             reported_blocks: HashSet::new(),
             field_reading_locals: HashMap::new(),
+            block_changes_state: Vec::new(),
             escaping_writes: Vec::new(),
             method_selector: None,
             operand_sites: HashSet::new(),
@@ -1759,6 +1784,8 @@ impl<'d> Walker<'d> {
         self.direct_blocks.push(direct);
         self.block_frames.push(self.scope.len());
         self.containers.push(container);
+        self.block_changes_state
+            .push(self.context == Actor && block_may_change_actor_state(block));
         let listed = std::mem::take(&mut self.pending_group_by_assign_block);
         self.group_by_assign_blocks.push(listed);
         self.scope
@@ -1768,6 +1795,7 @@ impl<'d> Walker<'d> {
         self.depth -= 1;
         self.pop_frame();
         self.containers.pop();
+        self.block_changes_state.pop();
         self.group_by_assign_blocks.pop();
         self.direct_blocks.pop();
         self.block_frames.pop();
@@ -1795,6 +1823,11 @@ impl<'d> Walker<'d> {
 
     #[allow(clippy::too_many_lines)] // one arm per expression kind
     fn expr(&mut self, expr: &Expression, position: Position) {
+        if self.context == Actor && may_change_actor_state(expr) {
+            for reader in self.field_reading_locals.values_mut() {
+                reader.tainted = true;
+            }
+        }
         let nested = self.depth > 0;
         match expr {
             Expression::Parenthesized { expression, .. } => self.expr(expression, position),
@@ -2025,8 +2058,14 @@ impl<'d> Walker<'d> {
                 && self.escape_write_of(block).is_none()
                 && !outer_state_reads(block).is_empty()
             {
-                self.field_reading_locals
-                    .insert(name.clone(), block.clone());
+                self.field_reading_locals.insert(
+                    name.clone(),
+                    FieldReader {
+                        block: block.clone(),
+                        depth: self.depth,
+                        tainted: false,
+                    },
+                );
             }
             let write = self
                 .value_block_writes
@@ -2044,13 +2083,24 @@ impl<'d> Walker<'d> {
     /// ([`escape_map`]), the block escapes that way. A use as a message
     /// argument is [`Self::check_send`]'s.
     fn note_local_escape(&mut self, id: &crate::ast::Identifier) {
-        let Some(block) = self.field_reading_locals.get(&id.name).cloned() else {
+        let Some(reader) = self.field_reading_locals.get(&id.name) else {
             return;
         };
+        let block = reader.block.clone();
+        // A use after something that may change the state, or inside a block
+        // (a loop body, say) that may change it on another iteration, sees the
+        // `State` the block was made with. Textual order is the walk's order.
+        let stale_use = reader.tainted
+            || self
+                .block_changes_state
+                .iter()
+                .skip(reader.depth)
+                .any(|changes| *changes);
         let escape = match self.escapes.get(&id.span) {
             Some(EscapeShape::StoredClassVar) => Escape::StoredState,
             Some(EscapeShape::Returned) => Escape::Returned,
             Some(EscapeShape::StoredInLiteral) => Escape::InLiteral,
+            _ if stale_use => Escape::LaterUse(id.name.clone()),
             _ => return,
         };
         self.report_stale_read(&block, &escape);
@@ -2619,7 +2669,8 @@ impl<'d> Walker<'d> {
             }
             // A local bound to a block that reads a field (BT-3952).
             if let Expression::Identifier(id) = arg.unwrap_parens() {
-                if let Some(block) = self.field_reading_locals.get(&id.name).cloned() {
+                if let Some(reader) = self.field_reading_locals.get(&id.name) {
+                    let block = reader.block.clone();
                     self.report_stale_read(&block, &escape);
                 }
             }
