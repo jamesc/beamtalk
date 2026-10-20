@@ -429,12 +429,11 @@ fn validate_type_pattern_class(
     }
 
     // `Supervisor`/`DynamicSupervisor` subclasses reference a
-    // supervisor process, tagged `{'beamtalk_supervisor' |
-    // 'beamtalk_supervisor_new', ClassName, Module, Pid}` at runtime
-    // (`beamtalk_supervisor.erl`) — a third shape distinct from both the
-    // tagged-map (`Value`/`Object`) and actor-tuple (`'beamtalk_object'`)
-    // strategies. `generate_type_pattern`'s `wrap_supervisor_class_tag_test`
-    // handles this shape directly (accepting either reserved tag), so
+    // supervisor process, tagged `{'beamtalk_supervisor', ClassName, Module,
+    // Pid}` at runtime (`beamtalk_supervisor.erl`) — a third shape distinct
+    // from both the tagged-map (`Value`/`Object`) and actor-tuple
+    // (`'beamtalk_object'`) strategies. `generate_type_pattern`'s
+    // `wrap_supervisor_class_tag_test` handles this shape directly, so
     // concrete subclasses fall through to the ordinary leaf-class check
     // below rather than being rejected outright. The abstract bases themselves
     // (`Supervisor`, `DynamicSupervisor`) are still rejected below: no live
