@@ -1336,6 +1336,42 @@ fn parse_tuple_literal_recovery_skips_nested_block() {
 }
 
 #[test]
+fn parse_unclosed_tuple_does_not_swallow_sibling_methods() {
+    // An unclosed `{` mid-edit must not drop the following methods.
+    let source = "Object subclass: C\n  m1 => x := {1, 2\n  m2 => 3\n  m3 => 4\n";
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("Expected '}' to close tuple literal")),
+        "got: {diagnostics:?}"
+    );
+    let names: Vec<_> = module.classes[0]
+        .methods
+        .iter()
+        .map(|m| m.selector.name().to_string())
+        .collect();
+    assert_eq!(names, vec!["m1", "m2", "m3"], "got: {diagnostics:?}");
+}
+
+#[test]
+fn parse_multi_line_tuple_literal() {
+    let expr = first_expr("{\n  #active,\n  false,\n}");
+    assert_eq!(tuple_elements(&expr).len(), 2);
+    let expr = first_expr("{#a\n , 1\n}");
+    assert_eq!(tuple_elements(&expr).len(), 2);
+}
+
+#[test]
+fn parse_unclosed_tuple_does_not_eat_enclosing_bracket() {
+    let tokens = lex_with_eof("y := [ {1, 2 ] value\nz := 3");
+    let (module, diagnostics) = parse(tokens);
+    assert_eq!(module.expressions.len(), 2, "got: {diagnostics:?}");
+    assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+}
+
+#[test]
 fn parse_statement_start_tuple_is_expression() {
     let expr = first_expr("{a, b} size");
     match expr {

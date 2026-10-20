@@ -2900,7 +2900,13 @@ impl Parser {
                 if self.check(&TokenKind::RightBrace) {
                     break; // trailing comma
                 }
-            } else if self.check(&TokenKind::RightBrace) || self.is_at_end() {
+            } else if self.check(&TokenKind::RightBrace)
+                || self.is_at_end()
+                || self.at_tuple_recovery_boundary()
+            {
+                // A `]`/`)` belongs to an enclosing construct, and a token on
+                // a new line starts the next statement or method: leave both
+                // for the caller and report the missing `}` below.
                 break;
             } else {
                 let bad_token = self.advance();
@@ -2936,14 +2942,33 @@ impl Parser {
         Expression::TupleLiteral { elements, span }
     }
 
+    /// Whether the current token, at the tuple's own nesting level, belongs
+    /// outside the tuple: an enclosing construct's `]`/`)`, or a token on a
+    /// new line (the next statement or method definition).
+    fn at_tuple_recovery_boundary(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            TokenKind::RightBracket | TokenKind::RightParen
+        ) || self.current_token().has_leading_newline()
+    }
+
     /// Error recovery inside a tuple literal: skip tokens up to (not
-    /// including) this tuple's closing `}`, stopping early at a top-level
-    /// `.` or `Eof` so an unclosed `{` does not swallow later statements.
-    /// Nested brackets, parens and braces are skipped whole, so a `.` inside
-    /// a nested block (`{1 2, [:x | x foo. x bar]}`) does not stop recovery.
+    /// including) this tuple's closing `}`. At the tuple's own nesting level
+    /// it also stops at a `.` and at [`Self::at_tuple_recovery_boundary`], so an unclosed
+    /// `{` never swallows later statements, sibling methods, or an enclosing
+    /// block's `]`. Nested brackets, parens and braces are skipped whole, so
+    /// a `.` inside a nested block (`{1 2, [:x | x foo. x bar]}`) does not
+    /// stop recovery.
     fn skip_to_tuple_close(&mut self) {
         let mut depth: usize = 0;
         while !self.is_at_end() {
+            if depth == 0
+                && (self.check(&TokenKind::RightBrace)
+                    || self.check(&TokenKind::Period)
+                    || self.at_tuple_recovery_boundary())
+            {
+                return;
+            }
             match self.current_kind() {
                 TokenKind::LeftBrace
                 | TokenKind::MapOpen
@@ -2951,16 +2976,9 @@ impl Parser {
                 | TokenKind::ArrayOpen
                 | TokenKind::LeftParen
                 | TokenKind::ListOpen => depth += 1,
-                TokenKind::RightBracket | TokenKind::RightParen => {
+                TokenKind::RightBrace | TokenKind::RightBracket | TokenKind::RightParen => {
                     depth = depth.saturating_sub(1);
                 }
-                TokenKind::RightBrace => {
-                    if depth == 0 {
-                        return;
-                    }
-                    depth -= 1;
-                }
-                TokenKind::Period if depth == 0 => return,
                 _ => {}
             }
             self.advance();
