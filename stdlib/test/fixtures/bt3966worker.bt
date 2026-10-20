@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3966: the worker the bt3966 supervisor fixtures run (default restart
+// policy, #temporary, unless a spec overrides it).
+
+Actor subclass: Bt3966Worker
+
+  ping => #pong

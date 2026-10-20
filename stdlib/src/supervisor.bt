@@ -249,27 +249,123 @@ abstract Object subclass: Supervisor
   initialize -> Nil => nil
 
   // === Instance-side inspection ===
+  //
+  // Every method below talks to this supervisor instance through its handle
+  // (its pid), never through the class: they work the same on the
+  // `supervise` singleton, on any instance from the spawn family, and on a
+  // nested supervisor reached through `childWithId:` or `children`.
 
-  /// Return the OTP child ids of currently-running children.
+  /// Return the running children as objects, in declaration order.
   ///
-  /// BT-1997 / ADR 0080 Phase 1: `whichChildren/1` returns a Result-shaped
-  /// value; call `unwrap` at the FFI boundary so the user-facing signature is
-  /// a list of child-id Symbols while the runtime migrates to Result returns.
-  /// Stdlib signature updates land in Phase 2 (BT-P2-stdlib).
+  /// Each element is the live child: an Actor, or a Supervisor /
+  /// DynamicSupervisor handle for a nested supervisor. Children that are
+  /// restarting or stopped are left out; `whichChildren` lists every spec.
   ///
-  /// BT-2254: now that FFI list element types are carried, `whichChildren`'s
-  /// `{ok, [atom() | integer()]}` spec resolves `unwrap` to
-  /// `List(Symbol | Integer)`: ids are class names or `withId:` values, which
-  /// may be Integers (ADR 0135 §3). The declared return type matches that
-  /// inferred body type so no type-mismatch warning is produced.
-  children -> List(Symbol | Integer) => self whichChildrenResult unwrap
+  /// **Changed in BT-3966:** this used to return the child ids as Symbols.
+  /// For the ids use `whichChildren collect: [:c | c id]`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// app children size                   // => 2
+  /// app children first ping             // => #pong
+  /// app whichChildren collect: [:c | c id]   // => #(#db, #router)
+  /// ```
+  children -> List(Object) => self whichChildrenResult unwrap
 
   /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
   /// `whichChildren/1` call. Keeps `children` pure Beamtalk.
-  internal whichChildrenResult -> Result(List(Symbol | Integer), Error) =>
+  internal whichChildrenResult -> Result(List(Object), Error) =>
     (Erlang beamtalk_supervisor) whichChildren: self
 
+  /// Return one `SupervisorChild` per child spec, in declaration order.
+  ///
+  /// Includes children that OTP is restarting (`#restarting`) and ones that
+  /// were terminated but whose spec is still held (`#stopped`), both with
+  /// `child` nil. Raises with kind `#stale_handle` when the supervisor is no
+  /// longer running.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (app whichChildren collect: [:c | c id])       // => #(#listener, #acceptorPool)
+  /// (app whichChildren detect: [:c | c isRunning]) child
+  /// ```
+  whichChildren -> List(SupervisorChild) => self childInfosResult unwrap
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
+  /// `childInfos/1` call.
+  internal childInfosResult -> Result(List(SupervisorChild), Error) =>
+    (Erlang beamtalk_supervisor) childInfos: self
+
+  /// Look up the running child with the given OTP child id.
+  ///
+  /// The id is the child's class name by default, or the value given to
+  /// `SupervisionSpec withId:` (a Symbol or an Integer). Returns the child
+  /// for a running child; `Result ok: nil` when the id exists but the child
+  /// is restarting or stopped; `Result error:` with kind `#child_not_found`
+  /// for an unknown id, `#type_error` for an id that is not a Symbol or an
+  /// Integer, `#stale_handle` when the supervisor is not running.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// listener := (server childWithId: #listener) unwrap
+  /// (server childWithId: #nope) error kind   // => #child_not_found
+  /// ```
+  childWithId: anId :: Symbol | Integer -> Result(Object, Error) =>
+    (Erlang beamtalk_supervisor) childWithId: self id: anId
+
+  /// Terminate the child with the given OTP child id.
+  ///
+  /// Idempotent (ADR 0080): an unknown or already-terminated id returns
+  /// `Result ok: nil`, since a terminated `#temporary` child's spec is gone.
+  /// A `#permanent` or `#transient` child keeps its spec (`#stopped` in
+  /// `whichChildren`) until `restartChild:` or `deleteChild:`. Other
+  /// failures give `#terminate_failed`; a non-Symbol, non-Integer id
+  /// `#type_error`; a stopped supervisor `#stale_handle`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (server terminateChild: #acceptorPool) unwrap   // suspend
+  /// ```
+  terminateChild: anId :: Symbol | Integer -> Result(Nil, Error) =>
+    (Erlang beamtalk_supervisor) terminateChildId: self id: anId
+
+  /// Restart a terminated child by its OTP child id; returns the new child.
+  ///
+  /// Only a `#permanent` or `#transient` child can be restarted: OTP removes
+  /// a `#temporary` child's spec (the default restart policy) when it
+  /// terminates, so `restartChild:` then gives `#child_not_found`. A child
+  /// that is running or restarting gives `#child_running`; a failing start
+  /// `#child_start_failed`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (server terminateChild: #acceptorPool) unwrap
+  /// pool := (server restartChild: #acceptorPool) unwrap   // resume
+  /// (server restartChild: #acceptorPool) error kind       // => #child_running
+  /// ```
+  restartChild: anId :: Symbol | Integer -> Result(Object, Error) =>
+    (Erlang beamtalk_supervisor) restartChild: self id: anId
+
+  /// Delete the spec of a terminated child, so `whichChildren` no longer
+  /// lists it.
+  ///
+  /// A running or restarting child gives `#child_running` (terminate it
+  /// first); an unknown id `#child_not_found`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (server terminateChild: #acceptor_3) unwrap
+  /// (server deleteChild: #acceptor_3) unwrap
+  /// ```
+  deleteChild: anId :: Symbol | Integer -> Result(Nil, Error) =>
+    (Erlang beamtalk_supervisor) deleteChild: self id: anId
+
   /// Look up the running child process for the given class.
+  ///
+  /// A convenience for trees with one child per class: when several children
+  /// share the class, it returns `Result error:` with kind `#ambiguous_child`
+  /// (use `childWithId:` then). Matches by the child's class, so a child
+  /// declared `withId:` is found too.
   ///
   /// ADR 0080 Phase 2 (BT-2041): returns `Result(Object, Error)`. The ok
   /// variant spans `Object | nil` — a class with no running child returns
@@ -279,6 +375,11 @@ abstract Object subclass: Supervisor
     (Erlang beamtalk_supervisor) whichChild: self class: aClass
 
   /// Terminate the running child process for the given class.
+  ///
+  /// The child is found by its class, so one declared `withId:` is
+  /// terminated too. When several children share the class nothing is
+  /// terminated and the result is `Result error:` with kind
+  /// `#ambiguous_child`: use `terminateChild:` with an id then.
   ///
   /// ADR 0080 Phase 2 (BT-1999): returns `Result(Nil, Error)`. Idempotent
   /// on `not_found` — terminating an already-gone child returns `Result ok: nil`.

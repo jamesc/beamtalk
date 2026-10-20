@@ -1,0 +1,198 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3966: Supervisor child introspection and control by id —
+// whichChildren, children, childWithId:, terminateChild:, restartChild:,
+// deleteChild:, and the #ambiguous_child rule for which:/terminate:.
+//
+// Every test uses its own anonymous instance (`spawn`), so they also show the
+// API works on any supervisor instance, not only the `supervise` singleton.
+
+TestCase subclass: SupervisorChildByIdTest
+
+  // === whichChildren ===
+  testWhichChildrenListsEverySpecInDeclarationOrder =>
+    sup := Bt3966PoolSup spawn
+    infos := sup whichChildren
+    self assert: (infos collect: [:c | c id]) equals: #(#a1, #a2, #a3, #t1)
+    self assert: (infos allSatisfy: [:c | c status == #running]) equals: true
+    self assert: (infos allSatisfy: [:c | c isRunning]) equals: true
+    self assert: (infos allSatisfy: [:c |
+      c childClass == Bt3966Worker
+    ]) equals: true
+    self assert: (infos allSatisfy: [:c | c type == #worker]) equals: true
+    self assert: (infos anySatisfy: [:c | c isSupervisor]) equals: false
+    sup stop
+
+  testWhichChildrenShowsTerminatedPermanentChildAsStopped =>
+    sup := Bt3966PoolSup spawn
+    (sup terminateChild: #a2) unwrap
+    infos := sup whichChildren
+    self assert: (infos collect: [:c | c id]) equals: #(#a1, #a2, #a3, #t1)
+    self assert: (infos collect: [:c |
+      c status
+    ]) equals: #(#running, #stopped, #running, #running)
+    a2 := infos detect: [:c | c id == #a2]
+    self assert: a2 child equals: nil
+    self assert: a2 isRunning equals: false
+    sup stop
+
+  // === children ===
+  testChildrenReturnsLiveObjectsInDeclarationOrder =>
+    sup := Bt3966PoolSup spawn
+    kids := sup children
+    self assert: kids size equals: 4
+    self assert: kids first equals: (sup childWithId: #a1) unwrap
+    self assert: kids last equals: (sup childWithId: #t1) unwrap
+    w :: Bt3966Worker := kids first
+    self assert: w ping equals: #pong
+    (sup terminateChild: #a2) unwrap
+    self assert: sup children size equals: 3
+    sup stop
+
+  // === childWithId: ===
+  testChildWithIdAnswersMessages =>
+    sup := Bt3966PoolSup spawn
+    w :: Bt3966Worker := (sup childWithId: #a2) unwrap
+    self assert: w ping equals: #pong
+    sup stop
+
+  testChildWithIdUnknownIdIsChildNotFound =>
+    sup := Bt3966PoolSup spawn
+    result := sup childWithId: #nope
+    self assert: result isError equals: true
+    self assert: result error kind equals: #child_not_found
+    sup stop
+
+  testChildWithIdOfStoppedChildIsOkNil =>
+    sup := Bt3966PoolSup spawn
+    (sup terminateChild: #a2) unwrap
+    result := sup childWithId: #a2
+    self assert: result isOk equals: true
+    self assert: result unwrap equals: nil
+    sup stop
+
+  testChildWithIdRejectsNonIdArgument =>
+    sup := Bt3966PoolSup spawn
+    @expect type
+    result := sup childWithId: "a2"
+    self assert: result error kind equals: #type_error
+    sup stop
+
+  // === terminateChild: ===
+  testTerminateChildTerminatesExactlyThatChild =>
+    sup := Bt3966PoolSup spawn
+    a1 := (sup childWithId: #a1) unwrap
+    a3 := (sup childWithId: #a3) unwrap
+    self assert: (sup terminateChild: #a2) isOk equals: true
+    self assert: sup count equals: 3
+    self assert: (sup childWithId: #a1) unwrap equals: a1
+    self assert: (sup childWithId: #a3) unwrap equals: a3
+    sup stop
+
+  testTerminateChildIsIdempotent =>
+    sup := Bt3966PoolSup spawn
+    (sup terminateChild: #a2) unwrap
+    again := sup terminateChild: #a2
+    self assert: again isOk equals: true
+    self assert: again unwrap equals: nil
+    unknown := sup terminateChild: #nope
+    self assert: unknown isOk equals: true
+    sup stop
+
+  // === restartChild: ===
+  testRestartChildStartsANewChild =>
+    sup := Bt3966PoolSup spawn
+    old := (sup childWithId: #a2) unwrap
+    (sup terminateChild: #a2) unwrap
+    fresh :: Bt3966Worker := (sup restartChild: #a2) unwrap
+    self assert: fresh ping equals: #pong
+    self assert: (fresh =:= old) equals: false
+    self assert: (sup childWithId: #a2) unwrap equals: fresh
+    self assert: sup count equals: 4
+    again := sup restartChild: #a2
+    self assert: again error kind equals: #child_running
+    sup stop
+
+  testRestartChildOfRunningChildIsChildRunning =>
+    sup := Bt3966PoolSup spawn
+    self assert: (sup restartChild: #a1) error kind equals: #child_running
+    sup stop
+
+  testTemporaryChildCannotBeRestarted =>
+    sup := Bt3966PoolSup spawn
+    (sup terminateChild: #t1) unwrap
+    self assert: (sup restartChild: #t1) error kind equals: #child_not_found
+    self assert: (sup terminateChild: #t1) isOk equals: true
+    self assert: (sup whichChildren collect: [:c |
+      c id
+    ]) equals: #(#a1, #a2, #a3)
+    sup stop
+
+  // === deleteChild: ===
+  testDeleteChildRemovesATerminatedSpec =>
+    sup := Bt3966PoolSup spawn
+    (sup terminateChild: #a3) unwrap
+    self assert: (sup deleteChild: #a3) isOk equals: true
+    self assert: (sup whichChildren collect: [:c |
+      c id
+    ]) equals: #(#a1, #a2, #t1)
+    self assert: (sup deleteChild: #a3) error kind equals: #child_not_found
+    sup stop
+
+  testDeleteChildOfRunningChildIsChildRunning =>
+    sup := Bt3966PoolSup spawn
+    self assert: (sup deleteChild: #a1) error kind equals: #child_running
+    self assert: sup count equals: 4
+    sup stop
+
+  // === which: / terminate: by class ===
+  testWhichWithSeveralChildrenOfTheClassIsAmbiguous =>
+    sup := Bt3966PoolSup spawn
+    self assert: (sup which: Bt3966Worker) error kind equals: #ambiguous_child
+    sup stop
+
+  testTerminateWithSeveralChildrenOfTheClassIsAmbiguousAndTerminatesNothing =>
+    sup := Bt3966PoolSup spawn
+    self assert: (sup terminate: Bt3966Worker) error kind equals: #ambiguous_child
+    self assert: sup count equals: 4
+    sup stop
+
+  testWhichFindsSingleChildDeclaredWithId =>
+    sup := Bt3966NestSup spawn
+    w :: Bt3966Worker := (sup which: Bt3966Worker) unwrap
+    self assert: w ping equals: #pong
+    self assert: w equals: (sup childWithId: #solo) unwrap
+    sup stop
+
+  testTerminateTerminatesSingleChildDeclaredWithId =>
+    sup := Bt3966NestSup spawn
+    self assert: (sup terminate: Bt3966Worker) isOk equals: true
+    self assert: ((sup whichChildren detect: [:c |
+      c id == #solo
+    ]) status) equals: #stopped
+    self assert: sup count equals: 1
+    sup stop
+
+  // === nested supervisor child ===
+  testNestedDynamicSupervisorChildIsAUsableHandle =>
+    sup := Bt3966NestSup spawn
+    info := sup whichChildren detect: [:c | c id == #pool]
+    self assert: info isSupervisor equals: true
+    self assert: info childClass equals: Bt3966WorkerPool
+    pool :: Bt3966WorkerPool := (sup childWithId: #pool) unwrap
+    w := pool startChild unwrap
+    self assert: w ping equals: #pong
+    self assert: pool count equals: 1
+    sup stop
+
+  // === stale handle ===
+  testEveryMethodReportsStaleHandleAfterStop =>
+    sup := Bt3966PoolSup spawn
+    sup stop
+    self assert: (sup childWithId: #a1) error kind equals: #stale_handle
+    self assert: (sup terminateChild: #a1) error kind equals: #stale_handle
+    self assert: (sup restartChild: #a1) error kind equals: #stale_handle
+    self assert: (sup deleteChild: #a1) error kind equals: #stale_handle
+    self should: [sup whichChildren] raise: #stale_handle
+    self should: [sup children] raise: #stale_handle

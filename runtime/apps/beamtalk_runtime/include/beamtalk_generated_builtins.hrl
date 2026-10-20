@@ -107,6 +107,7 @@
     'SupervisionSpec',
     'SupervisionTree',
     'Supervisor',
+    'SupervisorChild',
     'Symbol',
     'System',
     'SystemAnnouncer',
