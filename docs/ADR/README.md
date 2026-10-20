@@ -163,7 +163,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0134](0134-errors-in-no-reply-handlers-crash-the-actor.md) | Errors in No-Reply Handlers Crash the Actor | Accepted | 2026-10-19 |
 | [0135](0135-supervisor-instances-and-start-arguments.md) | Supervisor Instances and Start Arguments | Accepted | 2026-10-20 |
 | [0136](0136-tuple-literal-expressions.md) | Tuple Literal Expressions | Implemented | 2026-10-20 |
-| [0137](0137-actor-closures-see-live-state.md) | Actor Closures See the Actor's Live State | Proposed | 2026-10-20 |
+| [0137](0137-actor-closures-see-live-state.md) | Actor Closures See the Actor's Live State | Accepted | 2026-10-20 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

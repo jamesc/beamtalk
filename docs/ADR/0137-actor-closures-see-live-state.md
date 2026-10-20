@@ -1,7 +1,7 @@
 # ADR 0137: Actor Closures See the Actor's Live State
 
 ## Status
-Proposed (2026-10-20)
+Accepted (2026-10-20); Proposed 2026-10-20
 
 Amends ADR 0133 (an escaping block may assign `self.field`) and ADR 0041 (an
 actor's closures no longer capture `State`). ADR 0130 is the precedent and is
