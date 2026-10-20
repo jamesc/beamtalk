@@ -12,7 +12,7 @@ Server subclass: StopWithServer
 
   handleInfo: msg =>
     msg == #close ifTrue: [
-      self stopWith: (Tuple withAll: #(#shutdown, #peer_closed))
+      self stopWith: {#shutdown, #peer_closed}
     ] ifFalse: [self.handled := self.handled + 1]
 
   stopSelfWith: reason =>

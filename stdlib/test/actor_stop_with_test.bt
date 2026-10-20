@@ -15,7 +15,7 @@ TestCase subclass: ActorStopWithTest
     table := Ets new: #stopWithHandleInfo type: #set
     server := StopWithServer spawnWith: #{#tableName => #stopWithHandleInfo}
     server onExit: [:reason | table at: #exitReason put: reason]
-    expected := Tuple withAll: #(#shutdown, #peer_closed)
+    expected := {#shutdown, #peer_closed}
     Erlang erlang send: server pid msg: #close
     50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
     self deny: server isAlive
@@ -89,7 +89,7 @@ TestCase subclass: ActorStopWithTest
     table := Ets new: #stopWithExternal type: #set
     server := StopWithServer spawnWith: #{#tableName => #stopWithExternal}
     server onExit: [:reason | table at: #exitReason put: reason]
-    expected := Tuple withAll: #(#shutdown, #local_closed)
+    expected := {#shutdown, #local_closed}
     self assert: (server stopWith: expected) equals: #ok
     self deny: server isAlive
     self assert: (table at: #reason) equals: expected
@@ -124,7 +124,7 @@ TestCase subclass: ActorStopWithTest
     sup := (StopWithTransientSup supervise) unwrap
     child :: StopWithTransientActor := (sup which: StopWithTransientActor) unwrap
     self assert: child ping equals: #pong
-    self assert: (child stopWith: (Tuple withAll: #(#shutdown, #peer_closed))) equals: #ok
+    self assert: (child stopWith: {#shutdown, #peer_closed}) equals: #ok
     Timer sleep: 50
     self assert: (sup which: StopWithTransientActor) unwrap equals: nil
     sup stop
