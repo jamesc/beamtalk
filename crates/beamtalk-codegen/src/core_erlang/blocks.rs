@@ -21,7 +21,7 @@ use super::threaded_ir::{
     self, RebindFrame, RebindFrameKind, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
     ValueRef, VersionPrefix, VersionedVar,
 };
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -73,7 +73,7 @@ impl CoreErlangGenerator {
     }
 
     /// This is the Tier 2 promotion check: non-empty → stateful block, empty → pure block.
-    /// Centralised here so both `generate_block` and `generate_erlang_interop_wrapper`
+    /// Centralised here so both `generate_block` and `generate_erlang_interop_block`
     /// use identical logic and cannot drift independently.
     pub(super) fn captured_mutations_for_block(block: &Block) -> Vec<String> {
         use crate::core_erlang::block_analysis::analyze_block;
@@ -384,172 +384,30 @@ impl CoreErlangGenerator {
         Ok(docvec![header, body_doc])
     }
 
-    /// Generates an Erlang-compatible wrapper for a block at an Erlang call site.
+    /// Generates a block literal handed to an Erlang call site (an FFI
+    /// argument, or the callable of `lists:foreach/map/filter`).
     ///
-    /// Erlang/Elixir code does not know about the Beamtalk state-threading protocol.
-    /// When a Beamtalk block is passed to an Erlang call site (e.g. `lists:map/2`),
-    /// this function generates a wrapper that strips the `StateAcc` protocol:
-    ///
-    /// ```erlang
-    /// %% For a stateful block: fun(X, StateAcc) -> {X + Count, StateAcc1}
-    /// let _BtBlock = fun(X, StateAcc) -> ... in
-    /// fun(X) ->
-    ///     let _WT = apply _BtBlock(X, CurrentState) in
-    ///     let _WRes = call 'erlang':'element'(1, _WT) in _WRes
-    /// ```
-    ///
-    /// The wrapper captures `CurrentState` from the enclosing scope so that reads of
-    /// captured variables succeed. Mutations made inside the block are dropped — the
-    /// updated `StateAcc` is not propagated back to the Beamtalk caller.
-    ///
-    /// For **pure blocks** (no captured mutations), returns the plain Tier 1 block
-    /// `fun(Params...) -> Body` unchanged and `is_stateful = false`.
-    ///
-    /// For **stateful blocks** (captured mutations), returns the wrapper expression
-    /// and `is_stateful = true`. Callers should emit a diagnostic warning because
-    /// mutations will be silently dropped.
-    pub(super) fn generate_erlang_interop_wrapper(
+    /// Erlang calls the block as a plain fun and cannot carry the Tier 2
+    /// `StateAcc` protocol back, so only a Tier 1 block may cross. A block
+    /// literal that writes a captured local is rejected at compile time by
+    /// semantic analysis (ADR 0133 `Escape::Ffi`, BT-3917) and the list ops
+    /// route a mutating block down their `_with_mutations` path first, so a
+    /// block that reaches here with captured mutations is a compiler bug:
+    /// it raises an internal error instead of emitting a wrapper that would
+    /// silently drop the writes (BT-3986 removed that wrapper).
+    pub(super) fn generate_erlang_interop_block(
         &mut self,
         block: &Block,
-    ) -> Result<(Document<'static>, bool)> {
-        // Use the shared helper to ensure consistent Tier 2 promotion logic.
+    ) -> Result<Document<'static>> {
         let captured_mutations = Self::captured_mutations_for_block(block);
-
-        if captured_mutations.is_empty() {
-            // Pure block — plain Tier 1 fun, no wrapping needed.
-            return Ok((self.generate_block(block)?, false));
+        if !captured_mutations.is_empty() {
+            return Err(CodeGenError::Internal(format!(
+                "a block literal that writes the captured local(s) {} reached an Erlang call \
+                 site; semantic analysis rejects it (ADR 0133 `Escape::Ffi`, BT-3917)",
+                captured_mutations.join(", ")
+            )));
         }
-
-        // Stateful block (captured local mutations) — generate Tier 2 block,
-        // then wrap it to strip the protocol so Erlang can call it as a plain fun.
-        let bt_block_var = self.fresh_temp_var("BtBlock");
-
-        // Generate the Tier 2 block: fun(Params..., StateAcc) -> {Result, NewStateAcc}
-        let tier2_doc = self.generate_block_stateful(block, &captured_mutations)?;
-
-        // Seed StateAcc with captured locals before passing to the Tier 2 block.
-        // The Tier 2 block expects keys like "__local__count" in the StateAcc for
-        // captured mutations. For ValueType context, start with an empty map since
-        // there's no State var in the signature. For Actor/Repl, start from current_state.
-        let mut seed_state = if matches!(self.context, CodeGenContext::ValueType) {
-            self.fresh_temp_var("WStateAcc")
-        } else {
-            self.current_state_var().clone()
-        };
-        let mut seed_docs: Vec<Document<'static>> = Vec::new();
-
-        // If ValueType, initialize StateAcc to empty map.
-        if matches!(self.context, CodeGenContext::ValueType) {
-            seed_docs.push(docvec![
-                "let ",
-                leaf::var(seed_state.clone()),
-                " = ~{}~ in "
-            ]);
-        }
-
-        // Pack captured locals into StateAcc under "__local__*" keys.
-        for var_name in &captured_mutations {
-            let next_state = self.fresh_temp_var("WStateAcc");
-            let key = Self::local_state_key(var_name);
-
-            // Generate code to fetch the captured variable.
-            // If the variable is bound in the local scope, use it directly.
-            // Otherwise, fetch it from the current State map (for REPL/Actor contexts).
-            let var_ref = if let Some(bound_var) = self.lookup_var(var_name).cloned() {
-                docvec![leaf::var(bound_var)]
-            } else {
-                // Variable not in scope — fetch from State map
-                // In REPL context, captured mutations are stored in State (the bindings map)
-                let state_var = self.current_state_var();
-                docvec![
-                    "call 'maps':'get'(",
-                    leaf::atom(var_name.clone()),
-                    ", ",
-                    leaf::var(state_var),
-                    ")"
-                ]
-            };
-
-            seed_docs.push(docvec![
-                "let ",
-                leaf::var(next_state.clone()),
-                " = call 'maps':'put'(",
-                leaf::atom(key),
-                ", ",
-                var_ref,
-                ", ",
-                leaf::var(seed_state),
-                ") in "
-            ]);
-            seed_state = next_state;
-        }
-
-        // Fresh parameter names for the wrapper fun (separate scope from the Tier 2 block).
-        let n_params = block.parameters.len();
-        let wrap_params: Vec<String> = (0..n_params).map(|_| self.fresh_temp_var("WArg")).collect();
-
-        // Build wrapper parameter list: "WArg1, WArg2, ..."
-        let mut param_parts: Vec<Document<'static>> = Vec::new();
-        for (i, p) in wrap_params.iter().enumerate() {
-            if i > 0 {
-                param_parts.push(Document::Str(", "));
-            }
-            param_parts.push(leaf::var(p.clone()));
-        }
-
-        // Build apply arguments: "WArg1, ..., WArgN, SeedStateAcc"
-        let mut apply_parts: Vec<Document<'static>> = Vec::new();
-        for (i, p) in wrap_params.iter().enumerate() {
-            if i > 0 {
-                apply_parts.push(Document::Str(", "));
-            }
-            apply_parts.push(leaf::var(p.clone()));
-        }
-        if !wrap_params.is_empty() {
-            apply_parts.push(Document::Str(", "));
-        }
-        apply_parts.push(leaf::var(seed_state));
-
-        // Emit:
-        // let _BtBlock = fun(Params..., StateAcc) -> ... in
-        // let WStateAcc0 = ~{}~ in  (if ValueType)
-        // let WStateAcc1 = call 'maps':'put'('__local__count', Count, WStateAcc0) in
-        // ... (for each captured local)
-        // fun(WArg1, ..., WArgN) ->
-        //     let _WT = apply _BtBlock(WArg1, ..., WArgN, WStateAccN) in
-        //     let _WRes = call 'erlang':'element'(1, _WT) in _WRes
-        //
-        // NOTE 1: `let {_WRes, _} = apply ...` is invalid Core Erlang inside a fun body
-        // (erlc rejects tuple patterns in let). Use element/2 extraction instead.
-        // NOTE 2: In Core Erlang, `fun (Params) -> Body` does NOT use `end` to
-        // terminate the fun — the Body expression ends the fun.
-
-        let wrap_tuple = self.fresh_temp_var("WT");
-        let wrap_result = self.fresh_temp_var("WRes");
-        let wrapper_doc = docvec![
-            "let ",
-            leaf::var(bt_block_var.clone()),
-            " = ",
-            tier2_doc,
-            " in ",
-            Document::Vec(seed_docs),
-            "fun (",
-            Document::Vec(param_parts),
-            ") -> let ",
-            leaf::var(wrap_tuple.clone()),
-            " = apply ",
-            leaf::var(bt_block_var),
-            " (",
-            Document::Vec(apply_parts),
-            ") in let ",
-            leaf::var(wrap_result.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(wrap_tuple),
-            ") in ",
-            leaf::var(wrap_result),
-        ];
-
-        Ok((wrapper_doc, true))
+        self.generate_block(block)
     }
 
     /// BT-3971 (PIN-BUG BT-3947): a Tier 2 block body whose last statement
