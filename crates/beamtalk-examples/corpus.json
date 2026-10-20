@@ -11468,12 +11468,10 @@
         "subclassing",
         "tearDown",
         "testAliasedFieldAt",
-        "testAliasedFieldAtPut",
         "testAliasedFieldNames",
-        "testAliasedUserMethod",
         "unless"
       ],
-      "source": "// BT-1325 Layer 1: Tests that aliased self-sends (other := self; other msg)\n// dispatch directly without deadlocking via gen_server:call.\n\nTestCase subclass: ActorAliasedSelfSendTest\n  field: a = nil\n\n  setUp => self withA: AliasedSelfSendActor spawn\n\n  tearDown => self.a isNil ifFalse: [self.a stop]\n\n  testAliasedFieldNames =>\n    names := self.a aliasedFieldNames\n    self assert: names size equals: 2\n    self assert: (names includes: #x)\n    self assert: (names includes: #y)\n\n  testAliasedFieldAt => self assert: self.a aliasedFieldAt equals: 0\n\n  testAliasedFieldAtPut => self assert: self.a aliasedFieldAtPut equals: 42\n\n  testAliasedUserMethod => self assert: self.a aliasedUserMethod equals: 0",
+      "source": "// BT-1325 Layer 1: Tests that aliased self-sends (other := self; other msg)\n// dispatch directly without deadlocking via gen_server:call.\n\nTestCase subclass: ActorAliasedSelfSendTest\n  field: a = nil\n\n  setUp => self withA: AliasedSelfSendActor spawn\n\n  tearDown => self.a isNil ifFalse: [self.a stop]\n\n  testAliasedFieldNames =>\n    names := self.a aliasedFieldNames\n    self assert: names size equals: 2\n    self assert: (names includes: #x)\n    self assert: (names includes: #y)\n\n  testAliasedFieldAt => self assert: self.a aliasedFieldAt equals: 0",
       "explanation": "BT-1325 Layer 1: Tests that aliased self-sends (other := self; other msg) dispatch directly without deadlocking via gen_server:call."
     },
     {
@@ -29774,9 +29772,7 @@
         "AliasedSelfSendActor",
         "actor",
         "aliasedFieldAt",
-        "aliasedFieldAtPut",
         "aliasedFieldNames",
-        "aliasedUserMethod",
         "aliased_self_send_actor",
         "assign",
         "assignment",
@@ -29798,7 +29794,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// BT-1325: Fixture actor for testing aliased self-send (Layer 1).\n\nActor subclass: AliasedSelfSendActor\n  state: x = 0\n  state: y = 0\n\n  // Alias self and read fieldNames via the alias\n  aliasedFieldNames =>\n    other := self\n    other fieldNames\n\n  // Alias self and read a field via the alias\n  aliasedFieldAt =>\n    other := self\n    other fieldAt: #x\n\n  // Alias self and mutate a field via the alias, then read back via alias\n  aliasedFieldAtPut =>\n    other := self\n    other fieldAt: #x put: 42\n    other fieldAt: #x\n\n  // Alias self and call a user-defined method via the alias\n  aliasedUserMethod =>\n    other := self\n    other getValue\n\n  // Read the current x value\n  getValue => self.x",
+      "source": "// BT-1325: Fixture actor for testing aliased self-send (Layer 1).\n\nActor subclass: AliasedSelfSendActor\n  state: x = 0\n  state: y = 0\n\n  // Alias self and read fieldNames via the alias\n  aliasedFieldNames =>\n    other := self\n    other fieldNames\n\n  // Alias self and read a field via the alias\n  aliasedFieldAt =>\n    other := self\n    other fieldAt: #x\n\n  // BT-3998: a state-changing send to an alias of self (`other fieldAt: #x\n  // put: 42`, `other setX: 1`, any user method) is a compile error, since the\n  // change is lost when the message ends; see\n  // tests/repl-protocol/cases/adr0133_escaping_block.btscript. ADR 0137\n  // (BT-4006) makes alias writes correct. A read-only user method is\n  // rejected conservatively too.\n\n  // Read the current x value\n  getValue => self.x",
       "explanation": "BT-1325: Fixture actor for testing aliased self-send (Layer 1)."
     },
     {
@@ -54313,6 +54309,42 @@
       ],
       "source": "// Fixture that triggers a compile error: an Actor method sends to a local\n// bound only to `self` (BT-3998). The send would not see the method's field\n// writes and its own writes would be lost. Used by\n// tests/repl-protocol/cases/adr0133_escaping_block.btscript via @load-error.\n\nActor subclass: Bt3998SelfAliasError\n  state: x = 0\n\n  getX => self.x\n\n  readThroughAlias =>\n    self.x := 5\n    other := self\n    other getX",
       "explanation": "Fixture that triggers a compile error: an Actor method sends to a local bound only to `self` (BT-3998). The send would not see the method's field writes and its own writes would be lost. Used by tests/repl-protocol/cases/adr0133_escaping_block.btscript via @load-error."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-bt3998-self-alias-write-error",
+      "title": "Bt3998SelfAliasWriteError",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Actor",
+        "Bt3998SelfAliasWriteError",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "bt3998_self_alias_write_error",
+        "concurrent",
+        "exception",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "raise",
+        "set",
+        "setX:",
+        "subclassing",
+        "throw",
+        "writeThroughAlias"
+      ],
+      "source": "// Fixture that triggers a compile error: an Actor method makes a\n// state-changing send to a local bound only to `self` (BT-3998). The change is\n// lost when the message ends. Used by\n// tests/repl-protocol/cases/adr0133_escaping_block.btscript via @load-error.\n\nActor subclass: Bt3998SelfAliasWriteError\n  state: x = 0\n\n  setX: v => self.x := v\n\n  writeThroughAlias =>\n    other := self\n    other setX: 7",
+      "explanation": "Fixture that triggers a compile error: an Actor method makes a state-changing send to a local bound only to `self` (BT-3998). The change is lost when the message ends. Used by tests/repl-protocol/cases/adr0133_escaping_block.btscript via @load-error."
     },
     {
       "id": "tests-repl-protocol-fixtures-chat-member",
