@@ -242,8 +242,14 @@ fn test_supervisor_start_link_forms() {
         let code =
             generate_module(&module, CodegenOptions::new(name)).expect("codegen should succeed");
         assert!(
-            code.contains("'start_link'/0, 'start_link'/1, 'init'/1"),
-            "must export start_link/0,1. Got:\n{code}"
+            code.contains("'start_link'/0, 'start_link'/1, 'start_link'/2, 'init'/1"),
+            "must export start_link/0,1,2. Got:\n{code}"
+        );
+        assert!(
+            code.contains(&format!(
+                "'start_link'/2 = fun (Name, Args) ->\n    call 'supervisor':'start_link'({{'local', Name}}, '{name}', Args)"
+            )),
+            "start_link/2 must register the instance under Name (ADR 0135 §3). Got:\n{code}"
         );
         assert!(
             code.contains(&format!(
@@ -808,5 +814,69 @@ fn test_dynamic_supervisor_with_user_class_method_exports_it() {
         header_exports.contains("'class_maxConcurrency'/1"),
         "Dynamic supervisor with user class method must export class_maxConcurrency/1 \
          in the module header. Got header exports:\n{header_exports}"
+    );
+}
+
+/// Compile `src` (its first class is the one compiled) to Core Erlang.
+fn compile_source(src: &str, module_name: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    generate_module(&module, CodegenOptions::new(module_name)).expect("codegen should succeed")
+}
+
+#[test]
+fn test_class_ref_spawn_family_on_supervisor_lowers_to_class_start() {
+    // ADR 0135 §1: `ClassRef spawn…` on a supervisor class starts the tree in
+    // the caller through the runtime start helper, never the actor spawn
+    // intrinsic (a supervisor module has no `spawn/0,1`) nor class dispatch.
+    let src = "Object subclass: Foo\n  a => Leaf spawn\n  b => Leaf spawnWith: #{#n => 1}\n  c => Leaf spawnAs: #leaf\n  d => Leaf spawnWith: 1 as: #leaf\n  e => Pool spawn\n\nSupervisor subclass: Leaf\n  childSpecs => #()\n\nDynamicSupervisor subclass: Pool\n  childClass => Leaf\n";
+    let code = compile_source(src, "foo");
+    for selector in ["'spawn'", "'spawnWith:'", "'spawnAs:'", "'spawnWith:as:'"] {
+        assert!(
+            code.contains(&format!(
+                "call 'beamtalk_supervisor':'class_start'('Leaf', 'bt@leaf', {selector}, ["
+            )),
+            "Leaf {selector} must lower to class_start. Got:\n{code}"
+        );
+    }
+    assert!(
+        code.contains("call 'beamtalk_supervisor':'class_start'('Pool', 'bt@pool', 'spawn', [])"),
+        "a DynamicSupervisor receiver takes the same carve-out. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'bt@leaf':'spawn'"),
+        "must not call the actor spawn intrinsic on a supervisor module. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_class_ref_spawn_on_actor_keeps_actor_intrinsic() {
+    let src =
+        "Object subclass: Foo\n  a => Counter spawn\n\nActor subclass: Counter\n  state: n = 0\n";
+    let code = compile_source(src, "foo");
+    assert!(
+        code.contains("call 'bt@counter':'spawn'()"),
+        "an actor receiver keeps the spawn intrinsic. Got:\n{code}"
+    );
+    assert!(!code.contains("'class_start'"), "Got:\n{code}");
+}
+
+#[test]
+fn test_self_spawn_family_in_supervisor_class_method_lowers_to_class_start() {
+    // ADR 0135 §1: `self spawnWith:` in a class method of a supervisor class
+    // starts an instance of the receiving class (resolved from `ClassSelf`)
+    // through the runtime start helper, not `class_self_spawn`.
+    let src = "Supervisor subclass: Leaf\n  class make: n => self spawnWith: n\n  class one => self spawn\n  childSpecs => #()\n";
+    let code = compile_source(src, "bt@leaf");
+    assert!(
+        code.contains(
+            "call 'beamtalk_supervisor':'class_start'(call 'beamtalk_primitive':'class_name_from_tag'("
+        ),
+        "self spawn… must lower to class_start with the receiver's class. Got:\n{code}"
+    );
+    assert!(code.contains("'spawnWith:', ["), "Got:\n{code}");
+    assert!(
+        !code.contains("class_self_spawn"),
+        "must not use the actor class_self_spawn helper. Got:\n{code}"
     );
 }

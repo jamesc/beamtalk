@@ -285,7 +285,10 @@ local_actors() ->
 local_actor_at(PidString) ->
     beamtalk_repl_actors:object_at(PidString).
 
--doc "Target of `supervisors/1`: root application supervisor plus workspace-attached ones.".
+-doc """
+Target of `supervisors/1`: root application supervisor, workspace-attached
+ones, and running top-level spawn-family instances (ADR 0135 §1), each once.
+""".
 -spec local_supervisors() -> [tuple()].
 local_supervisors() ->
     Root =
@@ -310,7 +313,10 @@ local_supervisors() ->
                     supervisor:which_children(beamtalk_workspace_sup)
                 )
         end,
-    Root ++ Attached.
+    Known = Root ++ Attached,
+    KnownPids = [element(4, S) || S <- Known],
+    Known ++
+        [S || S <- beamtalk_supervisor:instances(), not lists:member(element(4, S), KnownPids)].
 
 %%% ============================================================================
 %%% Runtime helpers

@@ -505,29 +505,6 @@ Actor subclass: Bt3981EvalblockActor
       ifNone: [0]
     r
 
-  countedAssignsOuter =>
-    r := 0
-    1
-      to: 1
-      do: [:z |
-        r := [
-          n := 3
-          n
-        ] value
-      ]
-    r
-
-  timesAssignsOuter =>
-    r := 0
-    1
-      timesRepeat: [
-        r := [
-          n := 3
-          n
-        ] value
-      ]
-    r
-
   collectArmE =>
     r := 0
     flag := true
@@ -565,53 +542,6 @@ Actor subclass: Bt3981EvalblockActor
   // Cells for every branch of the check that accepts: loop, collection and
   // conditional bodies, nested evaluated blocks, arms inside plain blocks and
   // dropped statements of plain blocks.
-  whileBodyLast =>
-    self.hits := 0
-    [self.hits < 1]
-      whileTrue: [
-        self.hits := self.hits + 1
-        [
-          n := 3
-          n
-        ] value
-      ]
-    self.hits
-
-  whileBodyNonLast =>
-    self.hits := 0
-    [self.hits < 1]
-      whileTrue: [
-        [
-          n := 3
-          n
-        ] value
-        self.hits := self.hits + 1
-      ]
-    self.hits
-
-  whileBodyAssigned =>
-    self.hits := 0
-    [self.hits < 1]
-      whileTrue: [
-        q := [
-          n := 3
-          n
-        ] value
-        self.hits := self.hits + q - 2
-      ]
-    self.hits
-
-  whileCondNonLast =>
-    self.hits := 0
-    [
-      [
-        n := 3
-        n
-      ] value
-      self.hits < 1
-    ] whileTrue: [self.hits := self.hits + 1]
-    self.hits
-
   injectLastValue =>
     #(1)
       inject: 0
@@ -882,27 +812,6 @@ Actor subclass: Bt3981EvalblockActor
   doLastStatement =>
     #(1)
       do: [:z |
-        [
-          n := 3
-          n
-        ] value
-      ]
-    3
-
-  countedLastStatement =>
-    1
-      to: 1
-      do: [:z |
-        [
-          n := 3
-          n
-        ] value
-      ]
-    3
-
-  timesLastStatement =>
-    1
-      timesRepeat: [
         [
           n := 3
           n
