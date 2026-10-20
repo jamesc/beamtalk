@@ -3705,6 +3705,14 @@ fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
         // unmeasured.
         "r := nil\ntrue ifTrue: [#(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",
         "r := nil\n[#(1) collect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. z]. 0] on: Error do: [:e | 0]\nr",
+        // A non-final statement is unpacked only in the measured `do:` and
+        // `timesRepeat:` bodies (BT-3940): a loop condition, a handler, an
+        // arm and a nested block stay rejected.
+        "i := 0\n[#(1, 3) groupBy: [:x | k := x > 2. k]. i < 3] whileTrue: [i := i + 1]\ni",
+        "[Error signal: \"x\"] on: Error do: [:e | #(1, 3) groupBy: [:x | k := x > 2. k]. 0]",
+        "true ifTrue: [#(1, 3) groupBy: [:x | k := x > 2. k]. 0]",
+        "#(1) do: [:z | #(1) do: [:y | #(1, 3) groupBy: [:x | k := x > 2. k]. nil]. nil]",
+        "#(1) collect: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]. z]",
         // Measured right, but keyed on every enclosing role: an arm in a
         // loop body stays rejected (loud, not silent).
         "r := nil\n1 to: 1 do: [:z | true ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",

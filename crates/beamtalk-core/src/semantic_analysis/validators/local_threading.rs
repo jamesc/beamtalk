@@ -1051,8 +1051,9 @@ fn residual_denied(shape: Residual, context: MethodContext) -> Option<&'static R
 /// Whether the value of a `groupBy:` threaded fold at `position` in `context`
 /// is unpacked from its `{Map, StateAcc}` carrier ([`Residual::GroupByValue`],
 /// measured on a BEAM for BT-3909). In an actor method: a method-body
-/// statement (the last one included: the reply) or a statement inside a block
-/// whose value is discarded (not the block's last); a method-body field
+/// statement (the last one included: the reply) or a non-final statement
+/// directly in exactly one [`GROUP_BY_STATEMENT_BLOCKS`] block
+/// (`in_statement_blocks`); a method-body field
 /// assignment or `^`; and the value of an assignment to a local when every
 /// assignment sits at the method body or directly in exactly one
 /// [`GROUP_BY_ASSIGN_BLOCKS`] block with no other block around it
@@ -1066,6 +1067,7 @@ fn group_by_value_unpacked(
     depth: usize,
     last: bool,
     in_listed_blocks: bool,
+    in_statement_blocks: bool,
 ) -> bool {
     if context == Repl {
         return depth == 0
@@ -1075,7 +1077,7 @@ fn group_by_value_unpacked(
             );
     }
     match position {
-        Position::Statement => depth == 0 || !last,
+        Position::Statement => depth == 0 || (!last && in_statement_blocks),
         Position::AssignValue { .. } => in_listed_blocks,
         Position::FieldAssignValue { nested: false } | Position::ReturnValue { nested: false } => {
             true
@@ -1105,12 +1107,29 @@ const GROUP_BY_ASSIGN_BLOCKS: &[(&str, Option<usize>)] = &[
     ("detect:ifNone:", Some(1)), // assignedInIfNone
 ];
 
+/// The construct blocks in which a non-final statement `groupBy:` fold
+/// unpacks, each proven by a `BUnit` cell (`statementInDo`,
+/// `statementInTimesRepeat` in `adr0133residuals_test.bt`). Keyed like
+/// [`GROUP_BY_ASSIGN_BLOCKS`] and single level only. Every other block (a
+/// `whileTrue:` condition, an `on:do:` handler, an arm...) is unmeasured, so a
+/// statement there stays a compile error (BT-3940).
+const GROUP_BY_STATEMENT_BLOCKS: &[(&str, Option<usize>)] =
+    &[("do:", Some(0)), ("timesRepeat:", Some(0))];
+
 /// Whether `block` of a send of `selector` is a [`GROUP_BY_ASSIGN_BLOCKS`]
 /// block.
 fn is_group_by_assign_block(selector: &str, block: Option<usize>) -> bool {
-    GROUP_BY_ASSIGN_BLOCKS
-        .iter()
-        .any(|&(s, b)| s == selector && b == block)
+    is_listed(GROUP_BY_ASSIGN_BLOCKS, selector, block)
+}
+
+/// Whether `block` of a send of `selector` is a [`GROUP_BY_STATEMENT_BLOCKS`]
+/// block.
+fn is_group_by_statement_block(selector: &str, block: Option<usize>) -> bool {
+    is_listed(GROUP_BY_STATEMENT_BLOCKS, selector, block)
+}
+
+fn is_listed(list: &[(&str, Option<usize>)], selector: &str, block: Option<usize>) -> bool {
+    list.iter().any(|&(s, b)| s == selector && b == block)
 }
 
 /// Whether the Phase 0 check accepts `kind` in `position` in `context`: a
@@ -1545,6 +1564,9 @@ struct Walker<'d> {
     /// For each enclosing block, innermost last: whether it is a
     /// [`GROUP_BY_ASSIGN_BLOCKS`] block ([`Residual::GroupByValue`]).
     group_by_assign_blocks: Vec<bool>,
+    /// As `group_by_assign_blocks`, for [`GROUP_BY_STATEMENT_BLOCKS`].
+    group_by_statement_blocks: Vec<bool>,
+    pending_group_by_statement_block: Option<()>,
     /// Set by a send's walk just before it descends into a block operand
     /// that is a [`GROUP_BY_ASSIGN_BLOCKS`] block; consumed by
     /// [`Walker::block_in_frame`].
@@ -1638,6 +1660,8 @@ impl<'d> Walker<'d> {
             block_frames: Vec::new(),
             containers: Vec::new(),
             group_by_assign_blocks: Vec::new(),
+            group_by_statement_blocks: Vec::new(),
+            pending_group_by_statement_block: None,
             pending_group_by_assign_block: false,
             assign_target_fresh: false,
             inline_local_reported: Vec::new(),
@@ -1801,6 +1825,8 @@ impl<'d> Walker<'d> {
         self.containers.push(container);
         let listed = std::mem::take(&mut self.pending_group_by_assign_block);
         self.group_by_assign_blocks.push(listed);
+        let listed = self.pending_group_by_statement_block.take().is_some();
+        self.group_by_statement_blocks.push(listed);
         self.scope
             .push(block.parameters.iter().map(|p| p.name.clone()).collect());
         self.depth += 1;
@@ -1809,6 +1835,7 @@ impl<'d> Walker<'d> {
         self.pop_frame();
         self.containers.pop();
         self.group_by_assign_blocks.pop();
+        self.group_by_statement_blocks.pop();
         self.direct_blocks.pop();
         self.block_frames.pop();
     }
@@ -1907,6 +1934,15 @@ impl<'d> Walker<'d> {
                     }
                     _ => false,
                 };
+                let listed_statement = |e: &Expression, block: Option<usize>| match (e, &construct)
+                {
+                    (Expression::Block(b), Some(c))
+                        if c.blocks.iter().any(|blk| std::ptr::eq(*blk, b)) =>
+                    {
+                        is_group_by_statement_block(&c.selector, block)
+                    }
+                    _ => false,
+                };
                 // ADR 0131 Phase 3 (BT-3738): the arms of a conditional that is
                 // a local-threading producer are `BranchArm` frames, so a loop
                 // or fold in an arm is a producer there (codegen's
@@ -1932,9 +1968,12 @@ impl<'d> Walker<'d> {
                     _ => None,
                 };
                 self.pending_group_by_assign_block = listed(receiver, None);
+                self.pending_group_by_statement_block =
+                    listed_statement(receiver, None).then_some(());
                 self.operand_in(receiver, Position::Receiver, receiver_role);
                 self.pending_frame_body = None;
                 self.pending_group_by_assign_block = false;
+                self.pending_group_by_statement_block = None;
                 for (index, arg) in arguments.iter().enumerate() {
                     let arg_role = role(arg, false);
                     self.pending_frame_body = match arg {
@@ -1951,9 +1990,12 @@ impl<'d> Walker<'d> {
                         _ => None,
                     };
                     self.pending_group_by_assign_block = listed(arg, Some(index));
+                    self.pending_group_by_statement_block =
+                        listed_statement(arg, Some(index)).then_some(());
                     self.operand_in(arg, Position::Argument, arg_role);
                     self.pending_frame_body = None;
                     self.pending_group_by_assign_block = false;
+                    self.pending_group_by_statement_block = None;
                 }
             }
             Expression::Cascade {
@@ -2843,7 +2885,19 @@ impl<'d> Walker<'d> {
             [listed] => *listed,
             _ => false,
         };
-        if group_by_value_unpacked(self.context, position, self.depth, last, in_listed_blocks) {
+        let in_statement_blocks = match self.group_by_statement_blocks.as_slice() {
+            [] => true,
+            [listed] => *listed,
+            _ => false,
+        };
+        if group_by_value_unpacked(
+            self.context,
+            position,
+            self.depth,
+            last,
+            in_listed_blocks,
+            in_statement_blocks,
+        ) {
             return;
         }
         self.diagnostics.push(
