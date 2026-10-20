@@ -298,7 +298,7 @@ impl Analyser {
                 }
             }
 
-            ArrayLiteral { elements, .. } => {
+            ArrayLiteral { elements, .. } | TupleLiteral { elements, .. } => {
                 for elem in elements {
                     self.analyse_expression(elem, None);
                 }

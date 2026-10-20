@@ -735,6 +735,11 @@ pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<Se
                 None
             }
         }),
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            elements
+                .iter()
+                .find_map(|e| find_selector_lookup_in_expr(e, offset))
+        }
         Expression::ListLiteral { elements, tail, .. } => elements
             .iter()
             .find_map(|e| find_selector_lookup_in_expr(e, offset))
@@ -1135,6 +1140,11 @@ fn find_ffi_call_in_expr(expr: &Expression, offset: u32) -> Option<FfiCallInfo> 
                 None
             }
         }),
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            elements
+                .iter()
+                .find_map(|e| find_ffi_call_in_expr(e, offset))
+        }
         Expression::ListLiteral { elements, tail, .. } => elements
             .iter()
             .find_map(|e| find_ffi_call_in_expr(e, offset))

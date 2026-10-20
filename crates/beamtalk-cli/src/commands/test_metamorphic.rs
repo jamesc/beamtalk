@@ -328,7 +328,7 @@ fn walk_names_ref(expr: &Expression, on_name: &mut dyn FnMut(&EcoString, NameKin
                 walk_names_ref(t, on_name);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for e in elements {
                 walk_names_ref(e, on_name);
             }
@@ -461,7 +461,7 @@ fn rename_names_mut(
                 rename_names_mut(t, mapping, scope);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for e in elements {
                 rename_names_mut(e, mapping, scope);
             }
@@ -1563,6 +1563,37 @@ mod tests {
         for el in arr_elements {
             assert!(matches!(el, Expression::Identifier(id) if id.name == renamed_x));
         }
+    }
+
+    #[test]
+    fn rename_locals_handles_tuple_literal() {
+        // ADR 0136: tuple-literal elements are renamed like array elements.
+        let expr = parse_expr("[:x | {x, {#k, x}}] value: 1");
+        let renamed = rename_locals(&expr).expect("block parameter is bound, should rename");
+
+        let Expression::MessageSend { receiver, .. } = &renamed else {
+            panic!("expected `[...] value: 1`, got {renamed:?}");
+        };
+        let Expression::Block(block) = receiver.as_ref() else {
+            panic!("expected block receiver, got {receiver:?}");
+        };
+        let renamed_x = block.parameters[0].name.clone();
+        assert_ne!(renamed_x.as_str(), "x");
+
+        let Expression::TupleLiteral { elements, .. } = &block.body[0].expression else {
+            panic!(
+                "expected TupleLiteral body, got {:?}",
+                block.body[0].expression
+            );
+        };
+        assert!(matches!(&elements[0], Expression::Identifier(id) if id.name == renamed_x));
+        let Expression::TupleLiteral {
+            elements: inner, ..
+        } = &elements[1]
+        else {
+            panic!("expected nested TupleLiteral, got {:?}", elements[1]);
+        };
+        assert!(matches!(&inner[1], Expression::Identifier(id) if id.name == renamed_x));
     }
 
     #[test]

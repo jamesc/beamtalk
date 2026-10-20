@@ -1295,6 +1295,29 @@ fn find_hover_in_expr(
                 None
             }
         }
+        Expression::TupleLiteral { elements, span } => {
+            if offset >= span.start() && offset < span.end() {
+                for elem in elements {
+                    if let Some(hover) = find_hover_in_expr(
+                        elem,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
+                        return Some(hover);
+                    }
+                }
+                Some(HoverInfo::new(
+                    format!("Tuple literal with {} elements", elements.len()),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
         Expression::Primitive {
             name,
             is_quoted,
@@ -1822,6 +1845,20 @@ mod tests {
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(hover.contents.contains("String"));
+    }
+
+    #[test]
+    fn compute_hover_inside_tuple_literal_element() {
+        // ADR 0136: hover descends into tuple-literal elements.
+        let src = r#"x := {#a, "hello"}"#;
+        let hover = hover_at(src, pos_at(src, src.find("\"hello").unwrap())).expect("hover");
+        assert!(hover.contents.contains("String"), "got: {}", hover.contents);
+        let hover = hover_at(src, pos_at(src, src.find('{').unwrap())).expect("hover");
+        assert!(
+            hover.contents.contains("Tuple literal with 2 elements"),
+            "got: {}",
+            hover.contents
+        );
     }
 
     #[test]

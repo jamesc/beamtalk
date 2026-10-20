@@ -746,6 +746,12 @@ impl TypeChecker {
                 self.infer_array_literal(elements, hierarchy, env, in_abstract_method)
             }
 
+            // Tuple literal → positional Tuple(T1, …, Tn) — see
+            // `literals::infer_tuple_literal` (ADR 0136).
+            Expression::TupleLiteral { elements, .. } => {
+                self.infer_tuple_literal(elements, hierarchy, env, in_abstract_method)
+            }
+
             // String interpolation → String — see
             // `literals::infer_string_interpolation`.
             Expression::StringInterpolation { segments, .. } => {

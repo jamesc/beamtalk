@@ -344,7 +344,7 @@ fn check_expression_cross_package(
             }
         }
 
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 check_expression_cross_package(elem, current_pkg, hierarchy, diagnostics);
             }

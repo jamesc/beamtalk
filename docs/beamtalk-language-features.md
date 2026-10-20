@@ -223,7 +223,7 @@ Both hooks are optional — actors without them work normally.
 ```beamtalk
 Server subclass: Connection
   handleInfo: msg =>
-    msg == #tcp_closed ifTrue: [self stopWith: (Tuple withAll: #(#shutdown, #peer_closed))]
+    msg == #tcp_closed ifTrue: [self stopWith: {#shutdown, #peer_closed}]
 
   terminate: reason =>
     reason =:= #normal ifTrue: [^nil]
@@ -1284,6 +1284,41 @@ pair at: 2                  // inferred Integer
 A non-literal index (`pair at: i`) or an out-of-range literal falls back to
 `Dynamic` — no false-positive warning. An untyped `tuple()` spec (unknown
 arity) stays bare `Tuple`, so `at:` on it remains `Dynamic` as before.
+
+### Tuple Literals (ADR 0136)
+
+`{e1, e2, ...}` builds a raw Erlang tuple (class `Tuple`). It is the expression
+form of the `{a, b}` tuple pattern, and the value is exactly the Erlang term:
+symbols and `true`/`false`/`nil` are atoms, so `{#active, false}` is Erlang's
+`{active, false}`. This makes FFI option lists read like the Erlang docs:
+
+```beamtalk
+(Erlang gen_tcp) listen: port with: #(#binary, {#active, false}, {#reuseaddr, true}, {#backlog, 1024})
+
+pair := {#backlog, opts at: #backlog}   // elements are keyword-level expressions
+{#ok, 1} =:= (Tuple withAll: #(#ok, 1)) // => true
+{#a, 1} at: 2                           // => 1 (inferred Integer)
+single := {#ok}                          // 1-tuple
+empty := {}                              // 0-tuple
+opts := #({#local, path}, {#nodelay, true},)  // trailing comma is allowed
+```
+
+- Elements are separated by `,` — Smalltalk's `{a. b}` brace-array form is a
+  syntax error (`.` separates statements). A cascade or assignment inside an
+  element needs parentheses, as in a list.
+- At the start of a statement, `{a, b} := x` is still a destructuring
+  assignment; `{a, b} size` is an expression. `{a, b} := {b, a}` swaps.
+- A tuple literal infers the positional type `Tuple(T1, …, Tn)`, so `at:` with a
+  literal index is typed (see above). `{}` infers as bare `Tuple`.
+- **`{#ok, x}` is a `Tuple`, not a `Result`.** FFI `ok`/`error` conversion
+  (ADR 0076) applies only to values *returned* from Erlang; arguments pass
+  through unchanged. Use `Result ok:` / `Result error:` to build a `Result`.
+- To interpolate a tuple literal in a string, add a space: `"pair: { {a, b} }"`.
+  `"{{...}}"` is rejected as a mistaken literal-brace escape.
+- Tuple literals are not supported inside `when:` guards (nor are list literals).
+- Caveat: a tuple whose first element is a runtime tag atom (`#beamtalk_object`,
+  `#beamtalk_supervisor`) is misclassified by the runtime's class lookup. This
+  is not new — `Tuple withAll:` behaves the same.
 
 ### FFI Type Stub Files (ADR 0075 Phase 2)
 
@@ -2880,10 +2915,11 @@ processItems =>
 | `self forEach: [:o \| t := t + o]` | `` `t` is assigned in a block passed to `forEach:`, which is not a construct the compiler threads it through `` |
 | `self do: [:x \| t := t + x]` (in an actor) | `` `t` is assigned in a block passed to `self do:`, which runs the actor's own `do:` method rather than the collection loop the compiler threads it through `` |
 | `Logger onEvent: [:e \| seen := seen + 1]` | `` `seen` is assigned in a block passed to a class method (`onEvent:`); it would run in another process `` |
+| `Erlang lists foreach: [:e \| t := t + e] with: xs` | `` `t` is assigned in a block passed to Erlang `lists` `foreach:with:`, which calls it as a plain fun `` |
 | `#([t := t + 1])` | `` `t` is assigned in a block placed in a collection literal `` |
 | `xs collect: [:x \| [t := t + x]]` | `` `t` is assigned in a block answered by the block of a collection operation `` |
 
-A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). An Erlang FFI argument is exempt: it is lossy by design and codegen warns (ADR 0041 §Erlang Interop Boundary). The same holds for object state: a block that assigns `self.field` (an actor or value-type field, or a class variable in a class method) and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; an actor field write through a `sealed` method of the same class, ADR 0132's BT-1140 path, is no longer accepted). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
+A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). A block literal that assigns a captured local and is passed as an Erlang FFI argument (`Erlang lists foreach: [:e \| t := t + e] with: xs`) is the same compile error (BT-3917): Erlang calls it as a plain fun and the write would be dropped. Return the value from the block and use the call's result instead (ADR 0041 §Erlang Interop Boundary); a block that only reads captured variables is fine. The same holds for object state: a block that assigns `self.field` (an actor or value-type field, or a class variable in a class method) and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; an actor field write through a `sealed` method of the same class, ADR 0132's BT-1140 path, is no longer accepted). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
 
 These lookup handlers are lowered inline, behind a runtime check that the receiver is a `Dictionary`: a handler that writes an outer local sent to anything else (an `Ets`, a value-type instance with its own `at:ifAbsent:`, a user class) raises a structured `type_error` instead of dropping the write. A receiver statically known not to be a `Dictionary` (`self`/`super` outside one, or an inferred type that is a known other class such as `Ets`) keeps the compile error. In a closure that is not inlined (a stored block, a block passed to another method) the enclosing block escapes, and in the REPL the handler is still a compile error.
 
@@ -4112,7 +4148,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Literal character | `$a` | Exact character match |
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
-| Tuple | `{a, b}` | Destructure tuple in assignment and match arms |
+| Tuple | `{a, b}` | Destructure tuple in assignment and match arms (`{a, b}` is also a tuple literal expression — see Tuple Literals) |
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
@@ -4234,7 +4270,7 @@ The `...identifier` syntax in array destructuring captures remaining elements:
 
 The rest element must be the last in the pattern. Rest patterns are supported in destructuring assignment only — they are not yet supported in `match:` arms.
 
-> **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. `collect:` with pattern blocks is not yet supported.
+> **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. A tuple pattern may end with a trailing comma (`{x, y,} := expr`), like the tuple literal it mirrors. `collect:` with pattern blocks is not yet supported.
 
 ### Value of a Destructuring Assignment (BT-3889)
 

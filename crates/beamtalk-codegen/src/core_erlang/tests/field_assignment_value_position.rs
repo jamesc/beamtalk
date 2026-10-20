@@ -85,6 +85,7 @@ const POSITIONS: &[(&str, &str)] = &[
         "self take: EXPR with: self.n",
     ),
     ("list_literal_element", "#(1, EXPR)"),
+    ("tuple_literal_element", "{1, EXPR}"),
     ("string_interpolation", "\"v={EXPR}\""),
     ("assigned_to_local", "c := EXPR. c"),
     ("assigned_to_field", "self.m := EXPR"),
@@ -363,6 +364,7 @@ pub(super) const VT_POSITIONS: &[(&str, &str)] = &[
         "self take: EXPR with: self.n",
     ),
     ("list_literal_element", "#(1, EXPR)"),
+    ("tuple_literal_element", "{1, EXPR}"),
     ("string_interpolation", "\"v={EXPR}\""),
     ("assigned_to_local", "c := EXPR. c"),
     ("assigned_to_field", "self.m := EXPR"),
@@ -422,6 +424,11 @@ pub(super) const VT_POSITIONS: &[(&str, &str)] = &[
     (
         "conditional_field_arms_list_element",
         "#(1, (EXPR > 3 ifTrue: [self.m := 4] ifFalse: [0]), self.m)",
+    ),
+    // BT-3969 / ADR 0136: a tuple literal sequences its elements like a list.
+    (
+        "conditional_field_arms_tuple_element",
+        "{1, (EXPR > 3 ifTrue: [self.m := 4] ifFalse: [0]), self.m}",
     ),
     (
         "conditional_field_arms_interpolated",
@@ -728,7 +735,7 @@ const VT_SHAPE_FAMILIES: &[std::ops::Range<usize>] =
 /// field's value). Every shape family runs once per position family
 /// (`VT_SHAPE_FAMILIES` x `VT_POSITION_FAMILIES`), so a statement-level shape, whose every
 /// position is an `erlc` run, is three tests rather than one long one.
-const VT_POSITION_FAMILIES: &[std::ops::Range<usize>] = &[0..13, 13..29, 29..48];
+const VT_POSITION_FAMILIES: &[std::ops::Range<usize>] = &[0..14, 14..31, 31..50];
 
 /// The position families partition [`VT_POSITIONS`] (one `per_family_tests!` invocation each
 /// below, so every shape family x position family pair has exactly one test).
