@@ -10,6 +10,8 @@
 //! - `class_state_abroad` — blocks that touch their home class's variables
 //!   where they run outside an invocation of it (ADR 0130 §5, BT-3712)
 //! - `class_validators` — class-hierarchy-dependent checks
+//! - `handleinfo_catch_all_validators` — `handleInfo:` written as a `match:`
+//!   with no catch-all arm (ADR 0134, BT-3959)
 //! - `late_slot_validators` — `late` slot declaration checks (ADR 0124 §1, §5)
 //! - `lint_validators` — code quality lints
 //! - `local_threading` — ADR 0131 §6 Tier 2 block values with no return
@@ -24,6 +26,7 @@
 
 mod class_state_abroad;
 mod class_validators;
+mod handleinfo_catch_all_validators;
 mod late_slot_validators;
 mod lint_validators;
 mod local_threading;
@@ -48,6 +51,7 @@ pub(crate) use class_validators::{
     check_shape_version_and_migrations, check_value_nil_return, check_value_slot_assignment,
     check_value_slot_case_collision,
 };
+pub(crate) use handleinfo_catch_all_validators::check_handle_info_catch_all;
 pub(crate) use late_slot_validators::check_late_slot_declarations;
 pub(crate) use local_threading::check_local_threading;
 // `pub`, not `pub(crate)`: the standalone `beamtalk-lint`

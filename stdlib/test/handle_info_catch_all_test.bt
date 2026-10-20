@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for ADR 0134 (BT-3959): the `handleinfo-no-catch-all` lint.
+//
+// Fixtures: stdlib/test/fixtures/handle_info_match_no_catch_all_server.bt
+//           stdlib/test/fixtures/handle_info_match_catch_all_server.bt
+//
+// The diagnostic itself is compile-time and its arm shapes are covered
+// against the analyzer in
+// crates/beamtalk-core/src/semantic_analysis/validators/handleinfo_catch_all_validators.rs.
+// These BUnit tests confirm each fixture compiles under
+// `--warnings-as-errors` (`just test-bunit`): the no-catch-all server only
+// compiles because of its `@expect all`, which goes stale (and fails the
+// build) if the lint stops firing. They send only messages an arm matches,
+// so they don't depend on what an unmatched message does at run time.
+
+TestCase subclass: HandleInfoCatchAllTest
+
+  testNoCatchAllServerHandlesMatchedMessages =>
+    server := HandleInfoMatchNoCatchAllServer spawn
+    Erlang erlang send: server pid msg: {#add, 3}
+    Erlang erlang send: server pid msg: {#add, 4}
+    self assert: server count equals: 7
+    Erlang erlang send: server pid msg: #reset
+    self assert: server count equals: 0
+    server stop
+
+  testCatchAllServerHandlesMatchedMessages =>
+    server := HandleInfoMatchCatchAllServer spawn
+    Erlang erlang send: server pid msg: {#add, 5}
+    self assert: server count equals: 5
+    server stop
+
+  testCatchAllServerIgnoresStrayMessages =>
+    server := HandleInfoMatchCatchAllServer spawn
+    Erlang erlang send: server pid msg: {#add, 2}
+    Erlang erlang send: server pid msg: #unexpected
+    Erlang erlang send: server pid msg: {#add, 1, 2}
+    self assert: server count equals: 2
+    self assert: server isAlive
+    server stop

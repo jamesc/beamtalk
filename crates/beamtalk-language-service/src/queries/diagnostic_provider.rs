@@ -2561,4 +2561,54 @@ Object subclass: Helper
             "a guarded read must not produce an UnguardedLateRead finding, got: {diagnostics:?}"
         );
     }
+
+    // ── ADR 0134 (BT-3959): HandleInfoNoCatchAll surfaces through the same
+    // `compute_diagnostics` pipeline. The check's arm shapes are covered by
+    // `beamtalk-core`'s
+    // `semantic_analysis::validators::handleinfo_catch_all_validators` unit
+    // tests; this pins that the LSP/REPL/MCP entry point reaches it with its
+    // category, severity and hint intact, and that a catch-all silences it.
+
+    #[test]
+    fn handle_info_no_catch_all_finding_reaches_diagnostic_provider() {
+        let source = "Server subclass: Watcher\n  handleInfo: msg =>\n    msg match: [\n      {#tick, n} -> n;\n      #stop -> nil\n    ]";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let finding = diagnostics
+            .iter()
+            .find(|d| d.category == Some(DiagnosticCategory::HandleInfoNoCatchAll))
+            .unwrap_or_else(|| {
+                panic!("expected a HandleInfoNoCatchAll finding, got: {diagnostics:?}")
+            });
+        assert_eq!(finding.severity, Severity::Warning);
+        assert!(
+            finding.message.contains("`msg`") && finding.message.contains("#pattern_mismatch"),
+            "message should name the scrutinee and the raised error: {}",
+            finding.message
+        );
+        assert!(
+            finding
+                .hint
+                .as_ref()
+                .is_some_and(|h| h.contains("_ -> nil")),
+            "hint should suggest the `_ -> nil` arm: {finding:?}"
+        );
+    }
+
+    #[test]
+    fn handle_info_with_catch_all_does_not_reach_diagnostic_provider() {
+        let source = "Server subclass: Watcher\n  handleInfo: msg =>\n    msg match: [\n      {#tick, n} -> n;\n      _ -> nil\n    ]";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::HandleInfoNoCatchAll)),
+            "a catch-all arm must silence the lint, got: {diagnostics:?}"
+        );
+    }
 }

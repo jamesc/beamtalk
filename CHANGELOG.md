@@ -239,6 +239,7 @@
 
 ### Tooling
 
+- **`handleinfo-no-catch-all` compile-time warning (ADR 0134, BT-3959)** — a `handleInfo:` whose body is a `match:` with no catch-all arm (an unguarded `_` or bare-variable pattern; a tuple pattern such as `{tag, payload}` is not one) now warns at the `match:`, with the hint "Add `_ -> nil` as the last arm to ignore unexpected messages": `match:` with no matching arm raises `#pattern_mismatch`, which crashes the server once errors in `handleInfo:` crash it. Reported on every surface (CLI, REPL, LSP, MCP). No `@expect` category; configure per project with `handleinfo-no-catch-all` under `[diagnostics]`.
 - **LSP code action: "return the value instead" (ADR 0133 Phase 4; BT-3914)** — a quick-fix for the escaping-block assignment diagnostic rewrites a `[t := t + 1]` block to the value-returning idiom `t := Twice twice: [t + 1]`. Offered when the block is the argument of a synchronous send statement and has exactly one assignment as its last statement (#4384)
 - **`beamtalk new` generates snake_case file names** — `src/foo.bt`, `test/foo_test.bt` instead of `src/Foo.bt`, `test/FooTest.bt`. `beamtalk generate native` also finds snake_case files. Existing CamelCase projects keep compiling (#4371)
 - **`beamtalk new` AGENTS.md template refreshed** — rewritten against the current language reference, covers class kinds, Results, destructuring, actors, BUnit fixtures and a corrected pitfalls table (#4371)

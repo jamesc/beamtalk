@@ -579,6 +579,23 @@ is surface-specific.
   class-variable write from a supervisor factory or `performLocally:` raises
   `class_state_read_only` on every surface.
 
+### `handleinfo-no-catch-all` diagnostic (ADR 0134, BT-3959)
+
+A `handleInfo:` method with a top-level `match:`/`matchExhaustive:` statement
+that has no unguarded `_` or bare-variable arm gets a `handleinfo-no-catch-all`
+warning at the `match:`, with the hint ``Add `_ -> nil` as the last arm``. It
+is computed in `beamtalk-core` semantic analysis (`analyse_full`,
+`validators/handleinfo_catch_all_validators.rs`), so every surface that reports
+semantic diagnostics (CLI `build`/`check`/`lint`/`test`, REPL load, LSP
+`textDocument/publishDiagnostics`, MCP `lint`/`diagnostic_summary`) reports the
+same message at the same span. No operation is surface-specific.
+
+- Category `HandleInfoNoCatchAll`; `[diagnostics]` key
+  `handleinfo-no-catch-all` (`"off"` drops it). No dedicated `@expect`
+  category by design (the catch-all arm is the fix); `@expect all` covers it.
+- A tuple-pattern arm (`{a, b}`) is never a catch-all, even when every element
+  is a variable.
+
 ### Outer-local threading errors (ADR 0131 §6 and Phase 0, BT-3745)
 
 Three compile errors, computed in `beamtalk-core` semantic analysis
