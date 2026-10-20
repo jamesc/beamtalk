@@ -647,7 +647,6 @@ pub(in crate::core_erlang) fn build_discard_locals(
 
 /// Builds a [`ThreadedStmt::MethodBody`] frame node. `threads` is empty
 /// except in the REPL, where it is the bindings map's keys.
-#[allow(dead_code)]
 pub(in crate::core_erlang) fn build_method_body(
     frame: FrameId,
     threads: Vec<String>,

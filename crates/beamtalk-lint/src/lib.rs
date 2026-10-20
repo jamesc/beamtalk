@@ -30,6 +30,7 @@
 
 mod cascade_candidate;
 mod dead_block_assignment;
+mod dead_returned_assignment;
 mod effect_free_statement;
 mod inspect_in_string_position;
 mod shadowed_block_param;
@@ -75,6 +76,7 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
     vec![
         Box::new(cascade_candidate::CascadeCandidatePass),
         Box::new(dead_block_assignment::DeadBlockAssignmentPass),
+        Box::new(dead_returned_assignment::DeadReturnedAssignmentPass),
         Box::new(effect_free_statement::EffectFreeStatementPass),
         Box::new(inspect_in_string_position::InspectInStringPositionPass),
         Box::new(shadowed_block_param::ShadowedBlockParamPass),

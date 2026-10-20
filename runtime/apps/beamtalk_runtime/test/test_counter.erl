@@ -15,6 +15,7 @@
     handle_cast/2,
     handle_call/3,
     handle_info/2,
+    handle_continue/2,
     code_change/3,
     terminate/2
 ]).
@@ -27,7 +28,8 @@
     'handle_setValue:'/2,
     handle_test_make_self/2,
     'handle_slowGet:'/2,
-    handle_node/2
+    handle_node/2,
+    handle_incrementLater/2
 ]).
 
 start_link(InitialValue) ->
@@ -50,7 +52,8 @@ init(InitialValue) ->
             'setValue:' => fun ?MODULE:'handle_setValue:'/2,
             test_make_self => fun ?MODULE:handle_test_make_self/2,
             'slowGet:' => fun ?MODULE:'handle_slowGet:'/2,
-            node => fun ?MODULE:handle_node/2
+            node => fun ?MODULE:handle_node/2,
+            incrementLater => fun ?MODULE:handle_incrementLater/2
         },
         value => InitialValue
     }).
@@ -58,6 +61,7 @@ init(InitialValue) ->
 handle_cast(Msg, State) -> beamtalk_actor:handle_cast(Msg, State).
 handle_call(Msg, From, State) -> beamtalk_actor:handle_call(Msg, From, State).
 handle_info(Msg, State) -> beamtalk_actor:handle_info(Msg, State).
+handle_continue(Continue, State) -> beamtalk_actor:handle_continue(Continue, State).
 code_change(OldVsn, State, Extra) -> beamtalk_actor:code_change(OldVsn, State, Extra).
 terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
 
@@ -102,3 +106,9 @@ handle_test_make_self([], State) ->
     timer:sleep(SleepMs),
     Value = maps:get(value, State),
     {reply, Value, State}.
+
+%% BT-3968: request `increment` as a continuation (runs after the reply,
+%% before the next message) and reply with the current, unincremented value.
+handle_incrementLater([], State) ->
+    ok = beamtalk_actor:sync_send(self(), 'continueWith:', [increment]),
+    {reply, maps:get(value, State), State}.

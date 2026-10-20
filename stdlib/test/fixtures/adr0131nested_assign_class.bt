@@ -1,12 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3864 (ADR 0131 stopgap): the shapes of
-// adr0131nested_assign_class_pending.bt.pending with each value-position local
-// assignment hoisted into its own statement, the rewrite the
-// `ValuePositionLocalAssignment` error names. They answer the correct values
-// today (stdlib/test/adr0131nested_assign_test.bt); the value-type and actor
-// columns are adr0131nested_assign_{value,actor}.bt.
+// BT-3860 (ADR 0131): the shapes of adr0131nested_assign_value_pos_class.bt with
+// each value-position local assignment hoisted into its own statement. They
+// answer the same values (stdlib/test/adr0131nested_assign_test.bt, against
+// adr0131nested_assign_value_position_test.bt); the other columns are
+// adr0131nested_assign_{class,value,actor}.bt.
 
 Object subclass: Adr0131NestedAssignClass
 

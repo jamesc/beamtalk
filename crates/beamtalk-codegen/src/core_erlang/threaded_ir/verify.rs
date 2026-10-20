@@ -289,6 +289,16 @@ pub(in crate::core_erlang) enum VerifyError {
     /// Applies to every arm of every frame.
     ArmLocalPutNotCarried { local: String, at: Span },
 
+    /// BT-3910 (ADR 0131 §4): an identifier-target assignment whose value is
+    /// consumed reached value-only lowering (`generate_expression`'s
+    /// `Expression::Assignment` arm) instead of the value-position producer
+    /// (`lower_local_assignment_producer`): `local` is evaluated but never
+    /// rebound, so every later read sees its old binding (`x := (t := t + 1) + 1`
+    /// then `t`). A consumer that compiled a producer assignment as a plain
+    /// sub-expression, or a producer gate that missed the shape, is the cause.
+    /// Applies in every frame and context.
+    UnthreadedLocalAssignment { local: String, span: Span },
+
     /// BT-3830: a child an enclosing sequencing pass compiled ahead
     /// (`precompiled_subexprs`) was read back `reads` (> 1) times by its
     /// parent's compile. Its prelude ran once; every read after the first
@@ -387,6 +397,11 @@ pub(in crate::core_erlang) enum ScopeKind {
     /// (`CodeGenContext::ValueType`, not a class method). Threads `SelfVt`
     /// when it writes a field, never the actor `State` family.
     ValueType,
+    /// BT-3910: a REPL input. Like [`Self::Instance`] it constrains no family,
+    /// but its frames' maps are the bindings map: every binding is a member of
+    /// the root, an arm and a `StateAcc` loop body (ADR 0131 §2, `MethodBody
+    /// (REPL)` row; [`RebindFrame::with_repl_binding`]).
+    Repl,
     /// Any other scope.
     Instance,
 }
@@ -905,6 +920,14 @@ impl VerifyWalk<'_> {
                 at,
             });
         }
+        // In a REPL input the frame's map is the bindings map: `local` is a
+        // member of it whatever the frame's recorded set (the one rule,
+        // `RebindFrame::with_repl_binding`, the producer lowers by too).
+        let enclosing = if self.scope == ScopeKind::Repl {
+            enclosing.with_repl_binding(local)
+        } else {
+            enclosing
+        };
         if enclosing.shape_for(local) != lowered_as {
             self.errors.push(VerifyError::LocalRebindModeMismatch {
                 frame: enclosing.frame,
@@ -949,7 +972,7 @@ impl VerifyWalk<'_> {
     /// In a [`ScopeKind::ValueType`] scope only the method-level `State`
     /// family is flagged: `SelfVt` is the value type's own family.
     fn check_class_method_family(&mut self, var: &VersionedVar, at: Span) {
-        if self.scope == ScopeKind::Instance || var.version == 0 {
+        if matches!(self.scope, ScopeKind::Instance | ScopeKind::Repl) || var.version == 0 {
             return;
         }
         let is_family = match var.prefix {
@@ -1321,6 +1344,8 @@ impl CoreErlangGenerator {
             ScopeKind::ClassMethod
         } else if self.context == CodeGenContext::ValueType {
             ScopeKind::ValueType
+        } else if self.is_repl_mode() {
+            ScopeKind::Repl
         } else {
             ScopeKind::Instance
         }

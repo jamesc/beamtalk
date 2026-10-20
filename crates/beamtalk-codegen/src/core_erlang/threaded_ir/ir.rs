@@ -1003,6 +1003,10 @@ pub(in crate::core_erlang) enum CarrierSlot {
     /// A flat-tuple construct (`{Value, L1, …, Ln}`): the local is the
     /// 1-based tuple position — `element(k, CF)`.
     Pos(usize),
+    /// BT-3910 (ADR 0131 §2): a value-position local assignment's carrier is
+    /// the assigned value itself — `<read>` is the carrier variable, with no
+    /// `element`/`maps:get`.
+    Whole,
 }
 
 /// The enclosing frame kind of a [`ThreadedStmt::LocalRebind`] — the
@@ -1137,6 +1141,28 @@ impl RebindFrame {
             kind: RebindFrameKind::MethodBody,
             threads: Vec::new(),
         }
+    }
+
+    /// BT-3910 (ADR 0131 §2, `MethodBody (REPL)` row): this frame as a REPL
+    /// input sees it. The REPL root, a REPL arm and a `StateAcc` loop or fold
+    /// body all run over the bindings map itself, so every binding is a member
+    /// of their threaded set: `local` is `Put` there, never a plain `let` (the
+    /// frame's recorded set is empty or partial, because the REPL threads its
+    /// loops through the map rather than through `__local__` keys). Any other
+    /// frame is returned as it is. The one rule the producer lowers by and the
+    /// verifier re-derives ([`super::verify::ScopeKind::Repl`]).
+    pub(in crate::core_erlang) fn with_repl_binding(&self, local: &str) -> Self {
+        let mut frame = self.clone();
+        let over_bindings = matches!(
+            frame.kind,
+            RebindFrameKind::MethodBody
+                | RebindFrameKind::BranchArm
+                | RebindFrameKind::Loop(ThreadingMode::StateAcc(_))
+        );
+        if over_bindings && !frame.threads_local(local) {
+            frame.threads.push(local.to_string());
+        }
+        frame
     }
 
     /// Whether `local` is one of this frame's own threaded locals.

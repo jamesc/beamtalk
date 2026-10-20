@@ -21,8 +21,7 @@
 //!   the one codegen's `threaded_locals_of` reads.
 //! - **Shapes a compile error rejects** are never warned about: a write
 //!   inside the span of a [`local_threading_diagnostics`] error (§6
-//!   `Tier2BlockNoReturnChannel`, Phase 0 `UnmigratedLocalThreading`, the
-//!   BT-3864 stopgap `ValuePositionLocalAssignment`) is
+//!   `Tier2BlockNoReturnChannel`, Phase 0 `UnmigratedLocalThreading`) is
 //!   that error's to report, so `beamtalk lint` and `beamtalk build` never
 //!   flag the same write twice, and when a later phase widens any of them
 //!   this lint steps back without a change here.
@@ -633,11 +632,10 @@ Object subclass: Foo
         assert!(diags[0].message.contains("`x`"));
     }
 
-    /// An assignment in a message argument within a stored block is in value
-    /// position (BT-3864's `ValuePositionLocalAssignment`) and in a block that
-    /// escapes (ADR 0133). One compile error owns the assignment, the
-    /// escaping-block one (BT-3902: one diagnostic per assignment), so the
-    /// lint steps back.
+    /// An assignment in a message argument within a stored block is in a block
+    /// that escapes (ADR 0133). The escaping-block compile error owns the
+    /// assignment (BT-3902: one diagnostic per assignment), so the lint steps
+    /// back.
     #[test]
     fn assignment_in_msg_arg_inside_block_is_the_compile_errors() {
         let src = "x := 0.\nblk := [foo bar: (x := 1)]";
@@ -1085,7 +1083,6 @@ sealed typed Value subclass: Foo
         let compile_error_categories = [
             DiagnosticCategory::Tier2BlockNoReturnChannel,
             DiagnosticCategory::UnmigratedLocalThreading,
-            DiagnosticCategory::ValuePositionLocalAssignment,
         ];
         let mut failures = Vec::new();
         let tailed = shapes

@@ -196,7 +196,6 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
         DiagnosticCategory::UnmigratedLocalThreading => "UnmigratedLocalThreading",
-        DiagnosticCategory::ValuePositionLocalAssignment => "ValuePositionLocalAssignment",
         DiagnosticCategory::InternalVerifier => "InternalVerifier",
     }
 }
@@ -425,10 +424,6 @@ mod tests {
             (
                 DiagnosticCategory::UnmigratedLocalThreading,
                 "UnmigratedLocalThreading",
-            ),
-            (
-                DiagnosticCategory::ValuePositionLocalAssignment,
-                "ValuePositionLocalAssignment",
             ),
             (DiagnosticCategory::InternalVerifier, "InternalVerifier"),
         ];

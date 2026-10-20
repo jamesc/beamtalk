@@ -17,7 +17,10 @@
 //! [`super::patterns`]; other expression code generation stays in
 //! [`super::expressions`].
 
-use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
+use super::threaded_ir::{
+    self, RebindFrame, RebindFrameKind, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
+    ValueRef, VersionPrefix, VersionedVar,
+};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
@@ -46,6 +49,11 @@ pub(super) enum BlockExprKind {
     /// Expression evaluated for side effects only — result discarded.
     SideEffect,
 }
+
+/// The marker the Tier 2 loop-rebind rejection ([`CoreErlangGenerator::reject_loop_rebind_of_body_local`])
+/// carries, which the value-position agreement corpora read to tell that
+/// pinned rejection from any other failure.
+pub(super) const TIER2_LOOP_REBIND_PIN: &str = "BT-3939, until BT-3947";
 
 impl CoreErlangGenerator {
     /// Extracts a block literal from an expression, unwrapping parentheses.
@@ -200,6 +208,7 @@ impl CoreErlangGenerator {
         let body_result = self.with_closed_fun_scope(|this| {
             // Track block nesting so self-cast sends route through the mailbox
             this.block_depth += 1;
+            let outer_drops_state = std::mem::replace(&mut this.closure_drops_state, true);
 
             let mut param_parts: Vec<Document<'static>> = Vec::new();
             for (i, param) in block.parameters.iter().enumerate() {
@@ -213,6 +222,7 @@ impl CoreErlangGenerator {
 
             // Generate block body as Document; restore block_depth even on error.
             let body = this.generate_block_body(block);
+            this.closure_drops_state = outer_drops_state;
             this.block_depth -= 1;
             body.map(|body| (header, body))
         });
@@ -279,6 +289,8 @@ impl CoreErlangGenerator {
         self.push_scope();
         // Track block nesting so self-cast sends route through the mailbox
         self.block_depth += 1;
+        // A Tier 2 `fun` returns `{Result, StateAccN}`: it carries State back.
+        let outer_drops_state = std::mem::replace(&mut self.closure_drops_state, false);
 
         // Bind block parameters
         let mut param_parts: Vec<Document<'static>> = Vec::new();
@@ -301,54 +313,65 @@ impl CoreErlangGenerator {
         // Set up loop body context for StateAcc-based threading
         let result = self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
-            let mut stmts: Vec<ThreadedStmt> = Vec::new();
-
-            // Unpack captured-mutated vars from StateAcc.
-            // Use maps:get/3 with the current outer value as fallback so the block
-            // remains callable even when StateAcc was not pre-seeded with the local state keys
-            // (e.g. when called through the runtime arity normalization wrapper).
-            for var_name in captured_vars {
-                let core_var = Self::to_core_erlang_var(var_name);
-                let key = Self::local_state_key(var_name);
-                // Look up the outer binding BEFORE rebinding so the fallback refers to the
-                // value at block-definition time (not the newly introduced inner binding).
-                // If no outer binding exists (e.g. REPL mode where vars come from state dict),
-                // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
-                let outer_binding = this.lookup_var(var_name).cloned();
-                this.bind_var(var_name, &core_var);
-                let unpack_doc = if let Some(outer_var) = outer_binding {
-                    docvec![
-                        "let ",
-                        leaf::var(core_var),
-                        " = call 'maps':'get'(",
-                        leaf::atom(key),
-                        ", StateAcc, ",
-                        leaf::var(outer_var),
-                        ") in "
-                    ]
-                } else {
-                    docvec![
-                        "let ",
-                        leaf::var(core_var),
-                        " = call 'maps':'get'(",
-                        leaf::atom(key),
-                        ", StateAcc) in "
-                    ]
-                };
-                stmts.push(ThreadedStmt::Statement(unpack_doc, block.span));
-            }
-
-            // Generate body expressions with state threading
-            this.generate_block_stateful_body(block, frame, captured_vars, &mut stmts)?;
-            let branch_final = this.state_version();
-            Ok::<_, crate::core_erlang::CodeGenError>(this.verify_and_render_branch_arm(
-                stmts,
+            // BT-3910: the body is a `StateAcc` frame carrying the block's
+            // captured-mutated locals, so a value-position assignment to one
+            // `Put`s into the map the block hands back.
+            let rebind = RebindFrame {
                 frame,
-                branch_final,
-                block.span,
-            ))
+                kind: RebindFrameKind::Loop(ThreadingMode::StateAcc(StateAccFallbackReason::None)),
+                threads: captured_vars.to_vec(),
+            };
+            this.with_rebind_frame(rebind, |this| {
+                let mut stmts: Vec<ThreadedStmt> = Vec::new();
+
+                // Unpack captured-mutated vars from StateAcc.
+                // Use maps:get/3 with the current outer value as fallback so the block
+                // remains callable even when StateAcc was not pre-seeded with the local state keys
+                // (e.g. when called through the runtime arity normalization wrapper).
+                for var_name in captured_vars {
+                    let core_var = Self::to_core_erlang_var(var_name);
+                    let key = Self::local_state_key(var_name);
+                    // Look up the outer binding BEFORE rebinding so the fallback refers to the
+                    // value at block-definition time (not the newly introduced inner binding).
+                    // If no outer binding exists (e.g. REPL mode where vars come from state dict),
+                    // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
+                    let outer_binding = this.lookup_var(var_name).cloned();
+                    this.bind_var(var_name, &core_var);
+                    let unpack_doc = if let Some(outer_var) = outer_binding {
+                        docvec![
+                            "let ",
+                            leaf::var(core_var),
+                            " = call 'maps':'get'(",
+                            leaf::atom(key),
+                            ", StateAcc, ",
+                            leaf::var(outer_var),
+                            ") in "
+                        ]
+                    } else {
+                        docvec![
+                            "let ",
+                            leaf::var(core_var),
+                            " = call 'maps':'get'(",
+                            leaf::atom(key),
+                            ", StateAcc) in "
+                        ]
+                    };
+                    stmts.push(ThreadedStmt::Statement(unpack_doc, block.span));
+                }
+
+                // Generate body expressions with state threading
+                this.generate_block_stateful_body(block, frame, captured_vars, &mut stmts)?;
+                let branch_final = this.state_version();
+                Ok::<_, crate::core_erlang::CodeGenError>(this.verify_and_render_branch_arm(
+                    stmts,
+                    frame,
+                    branch_final,
+                    block.span,
+                ))
+            })
         });
         // Ensure block_depth and scope are restored even on error.
+        self.closure_drops_state = outer_drops_state;
         self.block_depth -= 1;
         self.pop_scope();
         // Stateful blocks are also closed `fun (...) -> {Result, NewStateAcc}`
@@ -635,7 +658,7 @@ impl CoreErlangGenerator {
             feature: format!(
                 "a Tier 2 block assigns local `{local}` and rebinds it inside a loop, fold or \
                  other construct; the block would answer the value, and the state, from \
-                 before it (BT-3939, until BT-3947). An assignment to it elsewhere in the same \
+                 before it ({TIER2_LOOP_REBIND_PIN}). An assignment to it elsewhere in the same \
                  statement counts too. Compute it in a method of its own and call that \
                  from the block"
             ),

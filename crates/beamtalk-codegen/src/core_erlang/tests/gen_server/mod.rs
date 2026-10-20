@@ -88,7 +88,7 @@ fn extract_module_exports(code: &str) -> String {
 
 mod abstract_actor_stubs;
 mod actor_init_and_field_validation;
-mod actor_pending_stop;
+mod actor_pending_actions;
 mod actor_trap_exit_on_terminate;
 mod class_kind_and_value_accessors;
 mod class_registration;

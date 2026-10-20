@@ -76,13 +76,13 @@ pub(super) use build::{
 // the method-root ones; the frame-node builders stay test-only until the
 // phases that lower inside those frames (`#[cfg(test)]` for the same reason
 // as `AccParam`/`CloseContext` below).
+#[cfg(test)]
+pub(super) use build::build_local_rebind;
 pub(super) use build::{
     ThreadedLocalSlot, build_branch_arm, build_construct_tuple, build_discard_locals,
     build_family_construct_tuple, build_family_local_threading_prelude,
-    build_local_threading_prelude, opaque_escapes, stepping_local_rebinds,
+    build_local_threading_prelude, build_method_body, opaque_escapes, stepping_local_rebinds,
 };
-#[cfg(test)]
-pub(super) use build::{build_local_rebind, build_method_body};
 pub(super) use emit::{RenderCtx, render, render_value};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::RebindFrameKind;

@@ -1,17 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3799 / BT-3860 / BT-3864 (ADR 0131): a local assignment in value position
-// (a receiver, an operand, a literal element, an assignment's value) such as
-// `(t := t + 1) > 1 ifTrue: [u := 9]` never rebinds its local (BT-3860). Until
-// BT-3860 makes the shape a producer it is a `ValuePositionLocalAssignment`
-// compile error in every context (BT-3864): the original shapes and their
-// correct answers are in adr0131nested_assign_pending_test.bt.pending and
-// fixtures/adr0131nested_assign_*_pending.bt.pending (inert).
-//
-// The tests below run the rewrite the error names, each assignment hoisted
-// into its own statement (fixtures/adr0131nested_assign_{class,value,actor}.bt),
-// and assert the correct answers in all three columns. The REPL pins are in
+// BT-3799 / BT-3860 (ADR 0131): the hoisted forms of the value-position
+// local assignments tested in adr0131nested_assign_value_position_test.bt: each
+// assignment is its own statement (fixtures/adr0131nested_assign_{class,value,actor}.bt),
+// and the answers are the same in all three columns. The REPL cases are in
 // tests/repl-protocol/cases/adr0131_nested_assign.btscript.
 
 TestCase subclass: Adr0131NestedAssignTest
