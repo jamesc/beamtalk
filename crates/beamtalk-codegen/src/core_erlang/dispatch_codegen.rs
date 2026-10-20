@@ -158,11 +158,13 @@ impl CoreErlangGenerator {
     ///
     /// Known caveat: `lookup_class/1` reads `beamtalk_instance_registry`,
     /// which the *spawner* populates only after `beamtalk_actor:safe_spawn/2`'s
-    /// `await_initialize/1` confirms `handle_continue(initialize, _)` has
-    /// finished (see `gen_server/spawn.rs`'s `instance_registration_doc`). A
-    /// self-send that raises *during* `initialize` therefore runs before this
-    /// actor's own registry entry exists, so `lookup_class(self())` falls
-    /// back to `'unknown'` for that narrow window — trading a guaranteed-
+    /// `await_initialize/3` confirms `initialize` has returned (see
+    /// `gen_server/spawn.rs`'s `instance_registration_doc`). A self-send that
+    /// raises *during* `initialize` — or in a continuation `initialize`
+    /// requested, which since BT-3992 runs concurrently with the spawner's
+    /// registration — can therefore run before this actor's own registry
+    /// entry exists, so `lookup_class(self())` falls back to `'unknown'` for
+    /// that narrow window — trading a guaranteed-
     /// correct compile-time atom (for non-inherited classes only) for a
     /// safe-but-less-specific fallback, in exchange for a correct answer in
     /// every other case (including all inherited-method self-sends, the

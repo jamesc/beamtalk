@@ -2059,6 +2059,211 @@ safe_spawn_failing_initialize_always_reports_real_reason_test_() ->
         end
     end}.
 
+%%% BT-3992: startup ends when `initialize` returns (initialize ack)
+
+safe_spawn_does_not_wait_for_initialize_continuation_test_() ->
+    %% A continuation requested by `initialize` that runs past the 5 s
+    %% initialize timeout neither delays nor fails the spawn; it still runs
+    %% before the first message, and the ack target never reaches the state.
+    {timeout, 30, fun() ->
+        T0 = erlang:monotonic_time(millisecond),
+        {ok, Pid} = beamtalk_actor:safe_spawn(
+            test_init_ack_actor, #{mode => slow_continue, delay => 6000}
+        ),
+        ?assert(erlang:monotonic_time(millisecond) - T0 < 2000),
+        ?assert(is_process_alive(Pid)),
+        State = gen_server:call(Pid, get_state, 15000),
+        ?assertEqual(true, maps:get(slow_done, State, false)),
+        ?assertNot(maps:is_key('$bt_init_ack', State)),
+        ?assertEqual(no_stray_ack, stray_ack()),
+        gen_server:stop(Pid)
+    end}.
+
+safe_spawn_named_does_not_wait_for_initialize_continuation_test_() ->
+    %% Same through the linked start used by `withName:` supervisor children.
+    {timeout, 30, fun() ->
+        Name = bt_3992_named_ack_actor,
+        unregister_if_alive(Name),
+        T0 = erlang:monotonic_time(millisecond),
+        {ok, Pid} = beamtalk_actor:'spawnAs'(
+            Name, test_init_ack_actor, #{mode => slow_continue, delay => 6000}
+        ),
+        ?assert(erlang:monotonic_time(millisecond) - T0 < 2000),
+        unlink(Pid),
+        ?assertEqual(Pid, whereis(Name)),
+        State = gen_server:call(Pid, get_state, 15000),
+        ?assertEqual(true, maps:get(slow_done, State, false)),
+        gen_server:stop(Pid)
+    end}.
+
+spawn_named_for_caller_unlinks_before_continuations_can_kill_caller_test_() ->
+    %% A continuation requested by `initialize` runs concurrently with the
+    %% caller once the spawn returned. One that stops the actor abnormally
+    %% right away must not kill a non-trapping caller (the class process for
+    %% `self spawnAs:`): the link is gone before trap_exit is restored.
+    {timeout, 30, fun() ->
+        logger:set_primary_config(level, none),
+        try
+            Parent = self(),
+            Results = [
+                begin
+                    Name = list_to_atom("bt_3992_unlink_" ++ integer_to_list(I)),
+                    {Caller, MRef} = spawn_monitor(fun() ->
+                        false = process_flag(trap_exit, false),
+                        R = beamtalk_actor:spawn_named_for_caller(
+                            local, Name, test_init_ack_actor, #{mode => stop_continue}
+                        ),
+                        {ok, Pid} = R,
+                        {links, Links} = process_info(self(), links),
+                        Ref = erlang:monitor(process, Pid),
+                        receive
+                            {'DOWN', Ref, process, Pid, _} -> ok
+                        end,
+                        Stray =
+                            receive
+                                {'EXIT', Pid, _} = M -> M
+                            after 0 -> none
+                            end,
+                        Parent ! {self(), lists:member(Pid, Links), Stray}
+                    end),
+                    receive
+                        {Caller, Linked, Stray} ->
+                            receive
+                                {'DOWN', MRef, process, Caller, _} -> ok
+                            end,
+                            {Linked, Stray};
+                        {'DOWN', MRef, process, Caller, Reason} ->
+                            {caller_died, Reason}
+                    end
+                end
+             || I <- lists:seq(1, 50)
+            ],
+            ?assertEqual([], [R || R <- Results, R =/= {false, none}])
+        after
+            logger:set_primary_config(level, all)
+        end
+    end}.
+
+safe_spawn_slow_initialize_times_out_and_kills_test_() ->
+    %% `initialize` itself is still bounded by the 5 s timeout: the spawn
+    %% fails with `timeout` and the actor is killed.
+    {timeout, 30, fun() ->
+        Before = erlang:processes(),
+        ?assertEqual(
+            {error, timeout},
+            beamtalk_actor:safe_spawn(
+                test_init_ack_actor, #{mode => slow_initialize, delay => 7000}
+            )
+        ),
+        Leaked = [
+            P
+         || P <- erlang:processes() -- Before,
+            proc_lib:initial_call(P) =:= {test_init_ack_actor, init, 1}
+        ],
+        ?assertEqual([], Leaked),
+        ?assertEqual(no_stray_ack, stray_ack())
+    end}.
+
+safe_spawn_failing_initialize_with_ack_reports_real_reason_test_() ->
+    %% BT-3677 on the ack path: a failing `initialize` never acks, and the
+    %% spawn reports its real stop reason on every spawn, never `noproc`.
+    {timeout, 60, fun() ->
+        logger:set_primary_config(level, none),
+        try
+            Results = [
+                beamtalk_actor:safe_spawn(test_init_ack_actor, #{mode => crash})
+             || _ <- lists:seq(1, 500)
+            ],
+            Bad = [R || R <- Results, R =/= {error, {error, function_clause}}],
+            ?assertEqual([], lists:sublist(Bad, 3)),
+            ?assertEqual(no_stray_ack, stray_ack())
+        after
+            logger:set_primary_config(level, all)
+        end
+    end}.
+
+safe_spawn_fallback_strips_ack_target_from_merged_state_test() ->
+    %% An init/1 that merges its start args into its state without
+    %% consuming the ack target (an actor module compiled before BT-3992)
+    %% still starts, and the target does not stay in its state.
+    {ok, Pid} = beamtalk_actor:safe_spawn(test_merging_init_actor, #{value => 7}),
+    State = sys:get_state(Pid),
+    ?assertEqual(7, maps:get(value, State)),
+    ?assertNot(maps:is_key('$bt_init_ack', State)),
+    ?assertEqual(no_stray_ack, stray_ack()),
+    gen_server:stop(Pid).
+
+safe_spawn_without_ack_target_falls_back_to_sys_test() ->
+    %% A hand-written gen_server that never sees the ack target (it builds
+    %% its own state) is awaited through the sys-based fallback.
+    {ok, Pid} = beamtalk_actor:safe_spawn(test_counter, #{init_count => 0}),
+    ?assert(is_process_alive(Pid)),
+    ?assertEqual(no_stray_ack, stray_ack()),
+    gen_server:stop(Pid).
+
+take_init_ack_test() ->
+    Ref = make_ref(),
+    Args = #{'$bt_init_ack' => {self(), Ref}, value => 1},
+    %% `initialized`: stripped and acked at once, nothing kept.
+    ?assertEqual(#{value => 1}, beamtalk_actor:take_init_ack(Args, initialized)),
+    ?assertEqual(
+        ok,
+        receive
+            {Ref, initialized} -> ok
+        after 0 -> missing
+        end
+    ),
+    ?assertEqual(undefined, get('$bt_init_ack')),
+    %% `initializing`: stripped, announced, and kept for ack_initialized/2.
+    ?assertEqual(#{value => 1}, beamtalk_actor:take_init_ack(Args, initializing)),
+    ?assertEqual(
+        ok,
+        receive
+            {Ref, initializing} -> ok
+        after 0 -> missing
+        end
+    ),
+    ?assertEqual({self(), Ref}, get('$bt_init_ack')),
+    %% A failed initialize step erases the target without acking.
+    Stop = {stop, boom, #{}},
+    ?assertEqual(Stop, beamtalk_actor:ack_initialized(initialize, Stop)),
+    ?assertEqual(undefined, get('$bt_init_ack')),
+    ?assertEqual(no_stray_ack, stray_ack()),
+    %% A successful one acks once; later steps are no-ops.
+    _ = beamtalk_actor:take_init_ack(Args, initializing),
+    ?assertEqual(
+        ok,
+        receive
+            {Ref, initializing} -> ok
+        after 0 -> missing
+        end
+    ),
+    Ok = {noreply, #{}, {continue, x}},
+    ?assertEqual(Ok, beamtalk_actor:ack_initialized(initialize, Ok)),
+    ?assertEqual(
+        ok,
+        receive
+            {Ref, initialized} -> ok
+        after 0 -> missing
+        end
+    ),
+    ?assertEqual(Ok, beamtalk_actor:ack_initialized(x, Ok)),
+    ?assertEqual(no_stray_ack, stray_ack()),
+    %% No ack target: state unchanged, nothing sent.
+    ?assertEqual(#{value => 1}, beamtalk_actor:take_init_ack(#{value => 1}, initialized)),
+    ?assertEqual(no_stray_ack, stray_ack()).
+
+%% Any `{Ref, initializing | initialized}` ack left in the test process's
+%% mailbox.
+stray_ack() ->
+    receive
+        {Ref, Phase} = Msg when
+            is_reference(Ref), (Phase =:= initializing orelse Phase =:= initialized)
+        ->
+            {stray_ack, Msg}
+    after 0 -> no_stray_ack
+    end.
+
 safe_spawn_restores_trap_exit_test() ->
     %% safe_spawn restores the original trap_exit flag
     OldTrap = process_flag(trap_exit, false),
