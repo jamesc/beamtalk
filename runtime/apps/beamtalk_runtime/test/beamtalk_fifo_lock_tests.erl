@@ -26,22 +26,21 @@ fifo_lock_test_() ->
         fun recursive_lock_raises/0
     ]}.
 
-%% Without a long-lived owner the table goes when its creator exits; a waiter
-%% then answers `{error, lost}` instead of crashing or running unprotected.
+%% If the table disappears (its owner died with no heir) while a caller
+%% waits, the waiter answers `{error, lost}` instead of crashing or running
+%% unprotected, and the holder's release does not raise.
 lost_table_is_an_error_test() ->
+    beamtalk_supervisor_test_helper:ensure_lock_table(),
     Key = key(),
     Test = self(),
-    case ets:whereis(beamtalk_fifo_locks) of
-        undefined -> ok;
-        Tid -> ets:delete(Tid)
-    end,
     Holder = spawn(fun() ->
-        beamtalk_fifo_lock:with_lock(Key, 1000, fun() ->
+        R = beamtalk_fifo_lock:with_lock(Key, 1000, fun() ->
             Test ! {holding, self()},
             receive
                 release -> ok
             end
-        end)
+        end),
+        Test ! {holder, R}
     end),
     receive
         {holding, Holder} -> ok
@@ -51,11 +50,16 @@ lost_table_is_an_error_test() ->
         Test ! {waiter, beamtalk_fifo_lock:with_lock(Key, 5000, fun() -> ran end)}
     end),
     wait_until(fun() -> lists:member(Waiter, beamtalk_fifo_lock:queue(Key)) end),
-    Holder ! release,
     try
+        ets:delete(beamtalk_fifo_locks),
         receive
             {waiter, R} -> ?assertEqual({error, lost}, R)
         after 2000 -> error(waiter_did_not_answer)
+        end,
+        Holder ! release,
+        receive
+            {holder, HR} -> ?assertEqual({ok, ok}, HR)
+        after 2000 -> error(holder_did_not_answer)
         end
     after
         beamtalk_supervisor_test_helper:ensure_lock_table()
