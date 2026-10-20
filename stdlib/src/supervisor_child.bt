@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Whether a supervised child is running, being restarted by OTP, or stopped
+/// with its spec still held (terminated, not yet restarted or deleted).
+type SupervisorChildStatus = #running | #restarting | #stopped
+
+/// SupervisorChild — one child spec of a running `Supervisor`, as reported by
+/// `Supervisor>>whichChildren` (BT-3966).
+///
+/// A point-in-time value: the runtime mints one per child spec from OTP's
+/// `supervisor:which_children/1`. A running child carries its live object
+/// (an Actor, or a Supervisor/DynamicSupervisor handle); a child that OTP is
+/// restarting, or that was terminated but whose spec is still held, has
+/// `child` nil and a `status` of `#restarting` or `#stopped`. Ask the
+/// supervisor again to observe change.
+///
+/// ## Examples
+/// ```beamtalk
+/// info := app whichChildren first
+/// info id            // => #listener
+/// info status        // => #running
+/// info isRunning     // => true
+/// info child         // => the running Listener
+/// info childClass    // => Listener
+/// info type          // => #worker
+/// ```
+///
+/// @see Supervisor (whichChildren, childWithId:, terminateChild:, restartChild:)
+sealed typed Value subclass: SupervisorChild
+  /// The OTP child id: the class name by default, or the `withId:` value
+  /// (a Symbol or an Integer).
+  field: id :: Symbol | Integer = #unknown
+  /// The running child (an Actor or a Supervisor/DynamicSupervisor handle),
+  /// or nil when `status` is not `#running`.
+  field: child :: Object | Nil = nil
+  /// `#running`, `#restarting` or `#stopped`.
+  field: status :: SupervisorChildStatus = #stopped
+  /// `#worker` or `#supervisor` (the OTP child type).
+  field: type :: Symbol = #worker
+  /// The child's Beamtalk class, or nil if its module is not a Beamtalk class.
+  field: childClass :: Class | Nil = nil
+
+  /// Whether the child is running (`status` is `#running`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// info isRunning   // => true
+  /// ```
+  isRunning -> Boolean => self status == #running
+
+  /// Whether the child is a supervisor (`type` is `#supervisor`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// info isSupervisor   // => false
+  /// ```
+  isSupervisor -> Boolean => self type == #supervisor

@@ -1027,7 +1027,7 @@ pub(crate) fn run_all_eunit_tests(
          end."
     );
 
-    let mut cmd = std::process::Command::new("erl");
+    let mut cmd = beamtalk_workspace::erl_command();
     cmd.arg("-noshell")
         .arg("-pa")
         .arg(util::to_forward_slash(build_dir.as_str()));

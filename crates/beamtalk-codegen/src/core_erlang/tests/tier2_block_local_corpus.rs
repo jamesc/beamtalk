@@ -35,23 +35,13 @@ const POSITIONS: &[&str] = &[
 /// How the body binds `n` before the construct.
 const BINDINGS: &[&str] = &["n := 0. ", "{n, m} := #(0, 0). "];
 
-/// Block hosts: a block an actor self-send promotes, and a stored block that
-/// writes a captured local (Tier 2 without any promotion).
-fn hosts(body: &str) -> [String; 2] {
-    [
-        format!(
-            "Actor subclass: G
-  state: groups = #(#(1, 2), #(3))
-  state: hits = 0
-  sealed fwd: block => self.groups collect: block
-  promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
-  note: x => x
-  note: x with: z => x
-  go: flag => self fwd: [:xs | {body}]
-"
-        ),
-        format!(
-            "Actor subclass: G
+/// Block host: a stored block that writes a captured local (Tier 2 without
+/// any promotion). BT-3986: the other host, a block an actor self-send
+/// promotes, is gone (passing a writing block to a self-send is a compile
+/// error, ADR 0133 `Escape`, as is passing one to an FFI call).
+fn hosts(body: &str) -> [String; 1] {
+    [format!(
+        "Actor subclass: G
   state: hits = 0
   note: x => x
   note: x with: z => x
@@ -60,8 +50,7 @@ fn hosts(body: &str) -> [String; 2] {
     blk := [:xs | c := c + 1. {body}]
     blk value: #(1, 2)
 "
-        ),
-    ]
+    )]
 }
 
 // PIN-BUG BT-3947: every program below answers the pre-construct `n` (and
@@ -85,10 +74,7 @@ fn every_construct_at_every_position_that_rebinds_a_body_local_is_an_error() {
             }
         }
     }
-    assert_eq!(
-        checked,
-        BINDINGS.len() * POSITIONS.len() * CONSTRUCTS.len() * 2
-    );
+    assert_eq!(checked, BINDINGS.len() * POSITIONS.len() * CONSTRUCTS.len());
 }
 
 /// The binding is part of the same statement as the construct, before it runs:
@@ -123,10 +109,7 @@ fn a_local_bound_earlier_in_the_same_statement_is_an_error() {
             }
         }
     }
-    assert_eq!(
-        checked,
-        SAME_STATEMENT_POSITIONS.len() * CONSTRUCTS.len() * 2
-    );
+    assert_eq!(checked, SAME_STATEMENT_POSITIONS.len() * CONSTRUCTS.len());
 }
 
 /// The binding is made inside an INLINED block (a conditional arm, an
@@ -150,30 +133,6 @@ fn a_local_bound_inside_an_inlined_block_is_that_blocks_own() {
             }
         }
     }
-}
-
-// PIN-BUG BT-3947: the one source path to a Tier 2 body that survives BT-3922
-// (found empirically): a block passed to an Erlang FFI call that writes a
-// captured local goes through `generate_erlang_interop_wrapper` and answered
-// `#(0)` for this program, silently, with the validator on.
-#[test]
-fn an_erlang_ffi_block_rebinding_a_body_local_in_a_loop_is_an_error() {
-    let src = "Actor subclass: G
-  state: hits = 0
-  ffi =>
-    t := 0
-    ys := #(1, 2)
-    (Erlang lists)
-      map: [:x |
-        t := t + 1
-        n := 0
-        ys do: [:y | n := n + y]
-        n
-      ]
-      with: #(1)
-";
-    let e = compile(src).expect_err("must not answer #(0) silently");
-    assert!(e.contains("BT-3939") && e.contains("`n`"), "{e}");
 }
 
 #[test]
@@ -202,23 +161,6 @@ const LAST_STATEMENT_BLOCK_VALUES: &[&str] = &[
     "{a, b} := [n := 3. #(n, 4)] value",
 ];
 
-/// The FFI argument block, the source-reachable Tier 2 host.
-fn ffi_host(body: &str) -> String {
-    format!(
-        "Actor subclass: G
-  state: hits = 0
-  ffi =>
-    c := 0
-    (Erlang lists)
-      map: [:x |
-        c := c + 1
-        {body}
-      ]
-      with: #(1)
-"
-    )
-}
-
 // PIN-BUG BT-3947: the correct answer (`#(3)`) is parked with BT-3947's frame
 // work; until then these are compile errors, not `#({3, State})`.
 #[test]
@@ -226,9 +168,7 @@ fn a_tier_2_body_ending_in_an_evaluated_block_that_assigns_is_an_error() {
     let mut checked = 0;
     for last in LAST_STATEMENT_BLOCK_VALUES {
         for body in [(*last).to_string(), format!("self note: c. {last}")] {
-            let mut srcs = hosts(&body).to_vec();
-            srcs.push(ffi_host(&body));
-            for src in srcs {
+            for src in hosts(&body) {
                 match compile(&src) {
                     Ok(_) => panic!("answers the raw {{Value, State}} tuple silently:\n{src}"),
                     Err(e) => {
@@ -239,7 +179,7 @@ fn a_tier_2_body_ending_in_an_evaluated_block_that_assigns_is_an_error() {
             }
         }
     }
-    assert_eq!(checked, LAST_STATEMENT_BLOCK_VALUES.len() * 2 * 3);
+    assert_eq!(checked, LAST_STATEMENT_BLOCK_VALUES.len() * 2);
 }
 
 /// Shapes measured right on a BEAM (or that never reach the tuple): not this
@@ -260,9 +200,7 @@ const LAST_STATEMENT_OK: &[&str] = &[
 #[test]
 fn a_tier_2_body_whose_last_statement_is_not_an_assigning_block_value_compiles() {
     for body in LAST_STATEMENT_OK {
-        let mut srcs = hosts(body).to_vec();
-        srcs.push(ffi_host(body));
-        for src in srcs {
+        for src in hosts(body) {
             compile(&src).unwrap_or_else(|e| panic!("{e}\n{src}"));
         }
     }

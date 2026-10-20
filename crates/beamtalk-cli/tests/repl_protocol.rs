@@ -521,7 +521,7 @@ impl ProcessManager {
             std::env::temp_dir().join(format!("bt_e2e_project_{sname}_{}", std::process::id()));
         std::fs::create_dir_all(&e2e_project_dir).expect("create e2e project dir");
 
-        let mut beam_child = Command::new("erl")
+        let mut beam_child = beamtalk_workspace::erl_command()
             .arg("-noshell")
             .arg("-sname")
             .arg(format!("{sname}@localhost"))
@@ -584,7 +584,7 @@ impl ProcessManager {
         } else {
             Stdio::null()
         };
-        let mut beam_child = Command::new("erl")
+        let mut beam_child = beamtalk_workspace::erl_command()
             .arg("-noshell")
             .arg("-sname")
             .arg(format!("bt_e2e_lib_{}@localhost", std::process::id()))
@@ -666,7 +666,7 @@ impl ProcessManager {
             std::env::temp_dir().join(format!("bt_e2e_release_project_{}", std::process::id()));
         std::fs::create_dir_all(&e2e_project_dir).expect("create e2e release project dir");
 
-        let mut beam_child = Command::new("erl")
+        let mut beam_child = beamtalk_workspace::erl_command()
             .arg("-noshell")
             .arg("-sname")
             .arg(&sname)
@@ -807,7 +807,7 @@ impl ProcessManager {
         // already does above.
         let sname = format!("beamtalk_e2e_release_smoke_{}", std::process::id());
 
-        let mut beam_child = Command::new("erl")
+        let mut beam_child = beamtalk_workspace::erl_command()
             .arg("-noshell")
             .arg("-noinput")
             .arg("-sname")
@@ -2078,7 +2078,7 @@ Supervisor subclass: E2EOtpRootSup\n\
     pa_args.push("-eval".into());
     pa_args.push(eval_cmd.into());
 
-    let mut beam_child = Command::new("erl")
+    let mut beam_child = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-sname")
         .arg(format!(

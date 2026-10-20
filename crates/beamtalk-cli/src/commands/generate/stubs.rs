@@ -26,7 +26,6 @@ use beamtalk_core::semantic_analysis::type_checker::FunctionSignature;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fmt::Write as _;
-use std::process::Command;
 
 /// Run the `generate stubs` command.
 ///
@@ -181,7 +180,7 @@ fn locate_beam_file(module_name: &str) -> Result<BeamLocation> {
          end."
     );
 
-    let output = Command::new("erl")
+    let output = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-noinput")
         .arg("-boot")

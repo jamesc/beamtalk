@@ -125,7 +125,7 @@ pub(crate) fn start_beam_node(
     args.push(OsString::from("-eval"));
     args.push(OsString::from(eval_cmd));
 
-    let mut cmd = Command::new("erl");
+    let mut cmd = beamtalk_workspace::erl_command();
     cmd.arg("-noshell")
         .args(&args)
         // Redirect OTP default logger to stderr from boot. The startup

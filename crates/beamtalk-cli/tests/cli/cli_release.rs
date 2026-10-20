@@ -180,7 +180,7 @@ fn release_builds_staged_tree_and_boot_artifacts() {
         .find(|e| e.file_name().to_string_lossy().starts_with("ranch-"))
         .expect("a staged ranch-* dir must exist (checked above)");
     let ranch_staged_ebin = ranch_lib_entry.path().join("ebin");
-    let ranch_load_check = Command::new("erl")
+    let ranch_load_check = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-noinput")
         .arg("-pa")
@@ -231,7 +231,7 @@ fn release_builds_staged_tree_and_boot_artifacts() {
     let release_dir_for_boot_var = beamtalk_cli::path_util::to_forward_slash(
         output_dir.to_str().expect("output_dir must be UTF-8"),
     );
-    let status = Command::new("erl")
+    let status = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-noinput")
         .arg("-boot")
@@ -449,7 +449,7 @@ fn release_no_include_erts_skips_erts_and_still_boots_test() {
     let boot_eval = "timer:sleep(200), \
          Ok = is_pid(erlang:whereis(beamtalk_workspace_sup)), \
          case Ok of true -> halt(0); false -> halt(1) end.";
-    let status = Command::new("erl")
+    let status = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-noinput")
         .arg("-boot")
@@ -535,7 +535,7 @@ fn release_strip_beams_removes_debug_info_but_keeps_meta_test() {
          halt(0).",
         beam = fixture_sup_beam.to_str().unwrap().replace('\\', "/"),
     );
-    let status = Command::new("erl")
+    let status = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-noinput")
         .arg("-eval")

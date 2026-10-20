@@ -123,7 +123,7 @@ TestCase subclass: SupervisorInstancesTest
   testTwoChildrenOfOneSupervisorClassWithIntegerIds =>
     p := Bt3962Pair spawn
     self assert: p count equals: 2
-    self assert: p children asSet equals: #(1, 2) asSet
+    self assert: (p whichChildren collect: [:c | c id]) equals: #(1, 2)
     p stop
 
   testBareNestedSupervisorIsAnonymous =>
