@@ -5,14 +5,22 @@
 ///
 /// Subclass `DynamicSupervisor` to define a dynamic supervision tree: one
 /// where children are added at runtime rather than declared at startup.
-/// Override `class childClass` to declare which actor class this pool manages.
+/// Override `childClass` to declare which actor class this pool manages.
 ///
-/// See ADR 0059 for the full design.
+/// Configuration (`childClass`, `maxChildren`, `childShutdown`,
+/// `maxRestarts`, `restartWindow`) is instance-side and is read from the
+/// pool being started, inside its own OTP `init/1` (ADR 0135 §2): `self` is
+/// the pool and `self args` its start args (`nil` for `supervise`), so each
+/// pool can compute its own child class and limits. Do not send messages to
+/// `self` from these methods (the start fails with
+/// `#supervisor_start_failed`); see `Supervisor` for the full rules.
+///
+/// See ADR 0059 and ADR 0135 for the full design.
 ///
 /// ## Examples
 /// ```beamtalk
 /// DynamicSupervisor(Worker) subclass: WorkerPool
-///   class childClass => Worker
+///   childClass => Worker
 ///
 /// pool := (WorkerPool supervise) unwrap
 /// w := pool startChild unwrap   // => Worker (type-narrowed via C)
@@ -23,15 +31,51 @@
 /// @see Actor (base class for supervised processes)
 abstract Object subclass: DynamicSupervisor(C)
 
-  // === Class-side configuration (override in concrete subclasses) ===
+  // === Class-side ===
+
+  /// Whether this class is a supervisor (always true for DynamicSupervisor subclasses).
+  ///
+  /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.
+  class isSupervisor -> Boolean => true
+
+  // === Class-side lifecycle ===
+
+  /// Start this dynamic supervisor (or return the already-running instance).
+  ///
+  /// ADR 0080 Phase 2 (BT-1999): returns `Result(Self, Error)`. Use
+  /// `unwrap` for boot-style "crash on failure" call sites, or
+  /// `ifOk:ifError:` / `andThen:` for recoverable starts. Failures surface
+  /// as `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
+  class supervise -> Result(Self, Error) =>
+    (Erlang beamtalk_supervisor) startLink: self
+
+  /// Return the running supervisor instance, or nil if not started.
+  class current -> Self | Nil => (Erlang beamtalk_supervisor) current: self
+
+  // === Instance-side configuration (override in concrete subclasses) ===
+  //
+  // Read from the pool being started, inside its `init/1` (ADR 0135).
+
+  /// Return the actor class that this dynamic supervisor manages.
+  ///
+  /// Must be overridden by concrete subclasses. Raises SubclassResponsibility
+  /// otherwise. Read once per (re)start of the pool, so it may depend on
+  /// `self args`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DynamicSupervisor(Worker) subclass: WorkerPool
+  ///   childClass => Worker
+  /// ```
+  childClass -> Class => self subclassResponsibility
 
   /// Maximum number of restarts within `restartWindow` seconds.
   ///
   /// If this rate is exceeded, the supervisor itself shuts down.
-  class maxRestarts -> Integer => 10
+  maxRestarts -> Integer => 10
 
   /// Time window in seconds for the `maxRestarts` rate limit.
-  class restartWindow -> Integer => 60
+  restartWindow -> Integer => 60
 
   /// Maximum number of live children, or `#infinity` (the default) for no limit.
   ///
@@ -42,10 +86,12 @@ abstract Object subclass: DynamicSupervisor(C)
   /// Callers can back off and retry; terminating a child frees a slot.
   /// Automatic restarts of existing children are never refused.
   ///
-  /// Must be a non-negative Integer or `#infinity`. Any other value makes
-  /// `supervise` return `Result error:` (`#supervisor_start_failed`); a pool
-  /// nested under a static `Supervisor` instead fails that parent's start.
-  /// Read each time the supervisor (re)starts.
+  /// Must be a non-negative Integer or `#infinity`. Any other value fails
+  /// the pool's start once, inside its `init`: `supervise` returns
+  /// `Result error:` (`#supervisor_start_failed`) carrying the validator's
+  /// hint, and a pool nested under a static `Supervisor` fails that parent's
+  /// start. Read each time the supervisor (re)starts, so it may depend on
+  /// `self args`.
   ///
   /// The check is made by the caller just before the start, so it is exact
   /// when one process starts children (e.g. a single acceptor); concurrent
@@ -54,10 +100,10 @@ abstract Object subclass: DynamicSupervisor(C)
   /// ## Examples
   /// ```beamtalk
   /// DynamicSupervisor(Worker) subclass: ConnectionPool
-  ///   class childClass => Worker
-  ///   class maxChildren -> Integer => 16384
+  ///   childClass => Worker
+  ///   maxChildren -> Integer => 16384
   /// ```
-  class maxChildren -> Integer | Symbol => #infinity
+  maxChildren -> Integer | Symbol => #infinity
 
   /// How long each child gets to stop when the pool shuts it down, or nil
   /// (the default) to use the child class's own `supervisionSpec` shutdown.
@@ -77,43 +123,39 @@ abstract Object subclass: DynamicSupervisor(C)
   ///
   /// The value applies to every child of the pool: OTP's
   /// `simple_one_for_one` keeps one child spec for all dynamic children, so
-  /// there is no per-`startChild:` override. Use a separate pool class for
-  /// children that need a different timeout.
+  /// there is no per-`startChild:` override. It is per pool instance, so it
+  /// may depend on `self args`.
   ///
-  /// Any other value makes `supervise` return `Result error:`
-  /// (`#supervisor_start_failed`); a pool nested under a static `Supervisor`
-  /// instead fails that parent's start. Read each time the supervisor
+  /// Any other value fails the pool's start once, inside its `init`:
+  /// `supervise` returns `Result error:` (`#supervisor_start_failed`)
+  /// carrying the validator's hint, and a pool nested under a static
+  /// `Supervisor` fails that parent's start. Read each time the supervisor
   /// (re)starts.
   ///
   /// ## Examples
   /// ```beamtalk
   /// DynamicSupervisor(Connection) subclass: ConnectionPool
-  ///   class childClass => Connection
-  ///   class childShutdown -> Integer => 15000   // let requests finish
+  ///   childClass => Connection
+  ///   childShutdown -> Integer => 15000   // let requests finish
   /// ```
-  class childShutdown -> ShutdownTimeout | Nil => nil
+  childShutdown -> ShutdownTimeout | Nil => nil
 
-  /// Whether this class is a supervisor (always true for DynamicSupervisor subclasses).
+  /// The start args this pool was started with: `nil` for `supervise`.
   ///
-  /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.
-  class isSupervisor -> Boolean => true
+  /// OTP restarts replay the same args. Readable from the configuration
+  /// methods (inside `init`) and from outside; raises with kind
+  /// `#stale_handle` when the pool is no longer running.
+  args -> Dynamic => self argsResult unwrap
 
-  /// Return the actor class that this dynamic supervisor manages.
-  ///
-  /// Must be overridden by concrete subclasses. Raises SubclassResponsibility otherwise.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// DynamicSupervisor(Worker) subclass: WorkerPool
-  ///   class childClass => Worker
-  /// ```
-  class childClass -> Class => self subclassResponsibility
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped `args/1` call.
+  internal argsResult => (Erlang beamtalk_supervisor) args: self
 
   /// Lifecycle hook called after the dynamic supervisor has started.
   ///
   /// Override to perform post-start setup (e.g., pre-populating workers
-  /// via `startChild`). Runs in the caller's process, so supervisor
-  /// calls will not deadlock.
+  /// via `startChild`). `self` is the new pool. Runs in the caller's
+  /// process after the pool has finished starting, so messages to `self`
+  /// work here. If it raises, the pool is stopped and the start fails.
   ///
   /// Fires exactly once, at the initial `supervise` call — it does
   /// **not** re-fire on OTP-driven child restarts (including
@@ -125,25 +167,11 @@ abstract Object subclass: DynamicSupervisor(C)
   /// ## Examples
   /// ```beamtalk
   /// DynamicSupervisor(Worker) subclass: WorkerPool
-  ///   class childClass => Worker
-  ///   class initialize: sup =>
-  ///     3 timesRepeat: [sup startChild unwrap]
+  ///   childClass => Worker
+  ///   initialize =>
+  ///     3 timesRepeat: [self startChild unwrap]
   /// ```
-  class initialize: _supervisor -> Nil => nil
-
-  // === Class-side lifecycle ===
-
-  /// Start this dynamic supervisor (or return the already-running instance).
-  ///
-  /// ADR 0080 Phase 2 (BT-1999): returns `Result(Self, Error)`. Use
-  /// `unwrap` for boot-style "crash on failure" call sites, or
-  /// `ifOk:ifError:` / `andThen:` for recoverable starts. Failures surface
-  /// as `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
-  class supervise -> Result(Self, Error) =>
-    (Erlang beamtalk_supervisor) startLink: self
-
-  /// Return the running supervisor instance, or nil if not started.
-  class current -> Self | Nil => (Erlang beamtalk_supervisor) current: self
+  initialize -> Nil => nil
 
   // === Instance-side child management ===
 
@@ -184,7 +212,7 @@ abstract Object subclass: DynamicSupervisor(C)
   /// ## Examples
   /// ```beamtalk
   /// DynamicSupervisor(Widget) subclass: WidgetSupervisor
-  ///   class childClass => Widget
+  ///   childClass => Widget
   ///
   /// pool := (WidgetSupervisor supervise) unwrap
   /// w := (pool startChild: #{#label => "y"}) unwrap  // => Widget(label: "y")
@@ -222,7 +250,7 @@ abstract Object subclass: DynamicSupervisor(C)
   /// ## Examples
   /// ```beamtalk
   /// DynamicSupervisor(Monitor) subclass: CheckRegistry
-  ///   class childClass => Monitor
+  ///   childClass => Monitor
   ///
   /// pool := (CheckRegistry supervise) unwrap
   /// m := (pool startChild: #{#check => "db"} name: #dbCheck) unwrap

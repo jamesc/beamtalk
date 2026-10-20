@@ -104,8 +104,8 @@ Actor subclass: Server
 
 // OTP supervision tree — for long-running services
 Supervisor subclass: MyApp
-  class strategy => #oneForOne
-  class children => #(DatabasePool, HttpServer, Worker)
+  strategy => #oneForOne
+  childSpecs => #(DatabasePool, HttpServer, Worker)
 ```
 
 Rules:

@@ -14,8 +14,8 @@ This is a [Beamtalk](https://jamesc.github.io/beamtalk) workspace demonstrating 
 - `Supervisor subclass:` — static supervision tree (children known at startup)
 - `DynamicSupervisor subclass:` — dynamic pool (children added at runtime)
 - `class supervisionPolicy =>` — per-actor restart strategy (`#permanent`, `#transient`, `#temporary`)
-- `class children =>` — returns the list of child classes for the supervisor
-- `class childClass =>` — the worker class for a DynamicSupervisor
+- `childSpecs =>` — returns the list of child classes for the supervisor (instance-side, ADR 0135)
+- `childClass =>` — the worker class for a DynamicSupervisor (instance-side)
 - `supervise` — starts the supervisor (or returns the running instance); returns `Result(Self, Error)` — use `unwrap` for boot-style call sites or `ifOk:ifError:` / `andThen:` to handle failures
 - `current` — returns the running supervisor instance by class name (Supervisor/DynamicSupervisor only)
 - `startChild` / `startChild:` — spawns a new dynamic child; returns `Result(C, Error)` (child type narrowed via the `DynamicSupervisor(C)` parameter)

@@ -43,7 +43,7 @@ fn make_releasable(project: &std::path::Path) {
          \n\
          Supervisor subclass: FixtureSup\n\
          \n\
-         \x20\x20class children => #()\n",
+         \x20\x20childSpecs => #()\n",
     )
     .expect("write src/FixtureSup.bt");
 }

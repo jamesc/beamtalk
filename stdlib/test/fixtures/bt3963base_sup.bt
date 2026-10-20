@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3963 (ADR 0135 §2): a user supervisor class with instance-side
+// configuration that a further user subclass (Bt3963LeafSup) inherits.
+
+Supervisor subclass: Bt3963BaseSup
+
+  strategy => #oneForAll
+
+  childSpecs => #()

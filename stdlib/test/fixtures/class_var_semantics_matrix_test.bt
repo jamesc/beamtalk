@@ -21,7 +21,7 @@ abstract TestCase subclass: ClassVarSemanticsMatrixTest
   // The spelling under test: a class with the rows of fixtures/cvs_open.bt.
   subject => self subclassResponsibility
 
-  // The spelling's supervisor whose `class initialize:` hook writes `n`.
+  // The spelling's supervisor whose `initialize` hook writes `n`.
   initSubject => self subclassResponsibility
 
   // A selector the subject defines itself that answers `n`, for the
@@ -215,8 +215,13 @@ abstract TestCase subclass: ClassVarSemanticsMatrixTest
     self assert: self subject rowForeignNlrSealedDriver equals: 5
     self assert: self subject n equals: 1
 
-  // ADR 0130 §5 runtime-owned snapshot
-  testInitializeHookWriteRaises =>
+  // ADR 0135 §1: a supervisor's `initialize` is instance-side and runs in the
+  // caller once the supervisor has started, so a class method it sends writes
+  // in its own class process and the write is kept (ADR 0130 §4). (Before
+  // ADR 0135 the class-side `initialize:` hook ran in a read-only snapshot
+  // and the write raised `class_state_read_only`.)
+  testInitializeHookWriteThroughClassMethodIsKept =>
     self initSubject reset
-    self should: [self initSubject supervise] raise: #class_state_read_only
-    self assert: self initSubject n equals: 0
+    sup := self initSubject supervise unwrap
+    sup stop
+    self assert: self initSubject n equals: 1

@@ -4,4 +4,6 @@
 // Fixture for docs/learning/17-otp-supervisors.md
 
 Supervisor subclass: CounterApp
-  class children => #[Counter supervisionSpec]
+  childSpecs =>
+    spec := Counter supervisionSpec
+    #(spec)

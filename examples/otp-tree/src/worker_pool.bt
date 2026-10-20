@@ -10,4 +10,4 @@ DynamicSupervisor(TaskWorker) subclass: WorkerPool
 
   class supervisionPolicy -> #permanent | #transient | #temporary => #permanent
 
-  class childClass => TaskWorker
+  childClass => TaskWorker

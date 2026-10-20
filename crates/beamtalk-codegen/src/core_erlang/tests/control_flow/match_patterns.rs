@@ -425,7 +425,7 @@ fn test_match_type_pattern_supervisor_subclass_uses_tuple_tag_check_and_compiles
     // as a value-type module whose `test:` method contains the pattern
     // match — a concrete Supervisor subclass cannot itself carry compiled
     // custom instance methods (OTP's supervisor behaviour owns `handle_call`).
-    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: WebApp -> s;\n      _ -> \"none\"\n    ]\n\nSupervisor subclass: WebApp\n  class children => #()\n";
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: WebApp -> s;\n      _ -> \"none\"\n    ]\n\nSupervisor subclass: WebApp\n  childSpecs => #()\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code =
@@ -462,7 +462,7 @@ fn test_match_type_pattern_dynamic_supervisor_subclass_uses_tuple_tag_check_and_
     // `DynamicSupervisor(C)` subclass through the supervisor strategy.
     // See the Supervisor test above for why `Foo` (the class whose method
     // actually gets compiled) must be `module.classes.first()`.
-    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      p :: Pool -> p;\n      _ -> \"none\"\n    ]\n\nObject subclass: Widget\n\nDynamicSupervisor(Widget) subclass: Pool\n  class childClass => Widget\n";
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      p :: Pool -> p;\n      _ -> \"none\"\n    ]\n\nObject subclass: Widget\n\nDynamicSupervisor(Widget) subclass: Pool\n  childClass => Widget\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let code =

@@ -2056,16 +2056,16 @@ test_class_send_supervisor_new_rewrap() ->
     ClassInfo = #{
         superclass => none,
         module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{testSupervisorNew => <<>>, 'initialize:' => <<>>},
+        class_methods => #{testSupervisorNew => <<>>},
         class_state => #{}
     },
     erase(bt1994_initialize_called),
     {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
     try
         %% The class method returns a Result tagged map wrapping the
-        %% _new tuple (option-2 shape). With the helper module providing
-        %% class_initialize:/2, run_initialize resolves the method directly
-        %% (no hierarchy walk needed) and the hook completes the rewrite.
+        %% _new tuple (option-2 shape). The helper module answers the
+        %% instance-side `initialize` run_initialize sends, and the hook
+        %% completes the rewrite.
         Outcome = beamtalk_class_dispatch:class_send(Pid, testSupervisorNew, []),
         ?assertMatch(
             #{

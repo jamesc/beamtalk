@@ -6,6 +6,6 @@
 
 DynamicSupervisor(Counter) subclass: TestDynamicSupervisorCapped
 
-  class childClass => Counter
+  childClass => Counter
 
-  class maxChildren -> Integer => 2
+  maxChildren -> Integer => 2
