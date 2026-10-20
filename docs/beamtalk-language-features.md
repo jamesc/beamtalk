@@ -210,13 +210,31 @@ Actor subclass: ResourceActor
 
 | Aspect | `initialize` | `terminate:` |
 |--------|--------------|--------------|
-| Called on | `spawn` / `spawnWith:` | `stop`, supervisor shutdown (`rest_for_one`/`one_for_all` cascade, direct `terminate:`), linked exit |
+| Called on | `spawn` / `spawnWith:` | `stop`, `stopWith:`, supervisor shutdown (`rest_for_one`/`one_for_all` cascade, direct `terminate:`), linked exit |
 | Error effect | Spawn fails with `InstantiationError` | Shutdown proceeds anyway |
 | Called on `kill`? | N/A | No — `kill` bypasses `terminate:` |
 | Side effect | — | Overriding `terminate:` causes the actor to trap exits (`process_flag(trap_exit, true)`); actors without an override keep untrapped link semantics |
 | Actor state | Accessible via `self.field` | Accessible via `self.field` |
 
 Both hooks are optional — actors without them work normally.
+
+**Stopping with a reason** — `stop` stops an actor with reason `#normal`. `stopWith: reason` (and `stopWith: reason timeout: ms`) stops it with any reason you choose; `terminate:` receives exactly that reason, and so does every `onExit:` block. This lets an actor route its cleanup on *why* it stopped, OTP-style:
+
+```beamtalk
+Server subclass: Connection
+  handleInfo: msg =>
+    msg == #tcp_closed ifTrue: [self stopWith: (Tuple withAll: #(#shutdown, #peer_closed))]
+
+  terminate: reason =>
+    reason =:= #normal ifTrue: [^nil]
+    // e.g. {shutdown, peer_closed}, {shutdown, read_timeout}, or an error
+    self logClose: reason
+```
+
+- Sent to `self` from inside one of the actor's own methods, the stop takes effect **after the current message has been handled** — a pending caller still gets its reply — then the actor terminates. (The same applies to `self stop`.) From another process it is `gen_server:stop/3`: the call returns once the actor has terminated (default timeout 5 seconds), and stopping an already-stopped actor succeeds silently.
+- `#normal`, `#shutdown` and `{shutdown, term}` tuples are **clean** stops: no crash report, and a `#transient` supervised child is not restarted. Any other reason — a Symbol like `#boom`, an exception — is a **crash**: it is logged, a `#transient` child is restarted, and any process linked to the actor (its supervisor, or the spawner of a `spawnAs:` actor — plain `spawn`/`spawnWith:` do not link) receives the exit signal, as with any OTP process exit.
+- Stopping itself from `initialize` (`self stop` or `self stopWith:`) makes the `spawn` fail, since the actor is gone before it is handed back.
+- A stop requested earlier in a method still happens if the method then raises: the caller gets the error, then the actor stops.
 
 **Initialization chaining** — `initialize` methods defined on ancestors run automatically, parent-first, before the child's own `initialize`. State threads through each call so the child sees the parent's mutations. Do **not** write `super initialize` yourself — the compiler warns on redundant `super initialize` sends inside an Actor's `initialize`. After the full chain runs, any typed `state:` field without a default (on the child or any ancestor, including cross-file parents) must have been assigned, or the actor crashes with `UninitializedStateError` naming the owning class. See [ADR 0078](ADR/0078-actor-initialize-inheritance.md).
 

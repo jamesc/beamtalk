@@ -198,6 +198,14 @@ handle_getValue([], State) ->
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+%% Default `gen_server:stop/3` timeout for `stop` / `stopWith:` (ms).
+-define(STOP_TIMEOUT, 5000).
+
+%% BT-3967: process-dictionary key holding a deferred self-stop request
+%% (`self stopWith: Reason` from inside a method), consumed by
+%% apply_pending_stop/1 once the current gen_server callback returns.
+-define(PENDING_STOP_KEY, '$bt_pending_stop').
+
 %% ADR 0126 §3: timeout for the `erpc:call/5` a remote spawn/lookup/list
 %% makes to the target node — matches `gen_server:call/2`'s own 5000ms
 %% default so a stuck remote op fails on the same order of magnitude as a
@@ -238,6 +246,24 @@ handle_getValue([], State) ->
 
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
+
+%% BT-3967: `Actor`'s quoted `@intrinsic` bodies (`actorStop`,
+%% `actorStopWith`, ...) compile to `bt@stdlib@actor:dispatch/3`, which
+%% delegates here. Reached only when the send was not intercepted at the
+%% send site — i.e. a self-send from inside one of the actor's own methods.
+-export([dispatch/3]).
+-ifdef(TEST).
+-export([intrinsic_selector/1]).
+-endif.
+
+%% BT-3967: deferred self-stop. Every gen_server callback that runs a
+%% Beamtalk dispatch (this module's own and every compiled actor's
+%% generated handle_continue/handle_call/handle_cast/handle_info) passes its
+%% return value through apply_pending_stop/1, which turns it into a
+%% `{stop, ...}` return when the dispatch requested `self stopWith:`;
+%% clear_pending_stop/0 runs first so a request can never leak in from
+%% anywhere else.
+-export([clear_pending_stop/0, apply_pending_stop/1]).
 
 %% exported so generated self-dispatch error breadcrumbs
 %% (dispatch_codegen.rs's generate_self_dispatch_error_clause) can resolve
@@ -852,27 +878,18 @@ async_send(ActorPid, stop, [], FuturePid) ->
     %% stop is handled locally - gracefully stops the actor process
     %% No send-site telemetry for stop — terminate/2 handles it
     %% to avoid double-counting (request + termination).
-    try
-        gen_server:stop(ActorPid, normal, 5000),
-        beamtalk_future:resolve(FuturePid, ok)
-    catch
-        exit:noproc ->
-            %% Actor already stopped (bare atom exit) - treat as successful stop
-            beamtalk_future:resolve(FuturePid, ok);
-        exit:{noproc, _} ->
-            %% Actor already stopped (tuple exit) - treat as successful stop
-            beamtalk_future:resolve(FuturePid, ok);
-        exit:Reason ->
-            %% Other stop failures (e.g., timeout) - reject Future deterministically
-            Error = beamtalk_error:new(
-                actor_dead,
-                unknown,
-                stop,
-                iolist_to_binary(io_lib:format("Actor stop failed: ~p", [Reason]))
-            ),
-            beamtalk_future:reject(FuturePid, Error)
-    end,
-    ok;
+    async_stop(ActorPid, normal, ?STOP_TIMEOUT, stop, FuturePid);
+async_send(ActorPid, 'stopWith:', [Reason], FuturePid) ->
+    %% BT-3967: stop with a caller-chosen exit reason.
+    async_stop(ActorPid, Reason, ?STOP_TIMEOUT, 'stopWith:', FuturePid);
+async_send(ActorPid, 'stopWith:timeout:', [Reason, Timeout], FuturePid) ->
+    case is_stop_timeout(Timeout) of
+        true ->
+            async_stop(ActorPid, Reason, Timeout, 'stopWith:timeout:', FuturePid);
+        false ->
+            beamtalk_future:reject(FuturePid, stop_timeout_type_error('stopWith:timeout:')),
+            ok
+    end;
 async_send(ActorPid, kill, [], FuturePid) ->
     %% kill is handled locally - forcefully kills the actor process.
     %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
@@ -1158,20 +1175,16 @@ sync_send(ActorPid, stop, []) ->
     %% stop is handled locally - gracefully stops the actor process
     %% No send-site telemetry for stop — terminate/2 handles it
     %% to avoid double-counting (request + termination).
-    try
-        gen_server:stop(ActorPid, normal, 5000)
-    catch
-        exit:noproc ->
-            %% Idempotent: actor already stopped (bare atom exit)
-            ok;
-        exit:{noproc, _} ->
-            %% Idempotent: actor already stopped (tuple exit)
-            ok;
-        exit:Other ->
-            %% Preserve sync_send/3 contract: translate exits to structured errors
-            beamtalk_exception_handler:reraise(
-                beamtalk_error:with_details(actor_dead_error_record(stop), #{exit_reason => Other})
-            )
+    sync_stop(ActorPid, normal, ?STOP_TIMEOUT, stop);
+sync_send(ActorPid, 'stopWith:', [Reason]) ->
+    %% BT-3967: stop with a caller-chosen exit reason.
+    sync_stop(ActorPid, Reason, ?STOP_TIMEOUT, 'stopWith:');
+sync_send(ActorPid, 'stopWith:timeout:', [Reason, Timeout]) ->
+    case is_stop_timeout(Timeout) of
+        true ->
+            sync_stop(ActorPid, Reason, Timeout, 'stopWith:timeout:');
+        false ->
+            beamtalk_exception_handler:reraise(stop_timeout_type_error('stopWith:timeout:'))
     end;
 sync_send(ActorPid, kill, []) ->
     %% kill is handled locally - forcefully kills the actor process.
@@ -1861,6 +1874,198 @@ kill_and_wait(ActorPid) ->
     end.
 
 -doc """
+BT-3967: stop `ActorPid` with `Reason`, shared by `stop`, `stopWith:` and
+`stopWith:timeout:` on both the sync and async send paths.
+
+From another process this is `gen_server:stop(ActorPid, Reason, Timeout)`;
+an already-dead actor counts as stopped (idempotent `stop`). From inside the
+actor's own process — `self stopWith:` from a method, or an aliased self —
+`gen_server:stop/3` would fail with `calling_self`, so the stop is deferred
+instead: request_deferred_stop/1 records it and the enclosing gen_server
+callback returns `{stop, Reason, ...}` once the current dispatch finishes
+(see apply_pending_stop/1).
+
+Returns `ok`, or `{exit, ExitReason}` when `gen_server:stop/3` itself
+exited (timeout, or the actor died with some other reason first).
+""".
+-spec stop_actor(pid(), term(), timeout()) -> ok | {exit, term()}.
+stop_actor(ActorPid, Reason, Timeout) when ActorPid =:= self() ->
+    %% Defer only inside a dispatching callback — the same guard as the
+    %% Layer 1 self-send fast path in sync_send/3. '$bt_actor_state' is
+    %% stashed by every callback wrapped with apply_pending_stop/1, so a
+    %% request recorded here is guaranteed to be consumed. Anywhere else
+    %% (e.g. a hand-written native gen_server) there is nothing to consume
+    %% it, so fall through and let gen_server:stop/3 fail visibly
+    %% (calling_self) instead of answering ok and never stopping.
+    case get('$bt_actor_state') of
+        undefined -> stop_external(ActorPid, Reason, Timeout);
+        _ -> request_deferred_stop(Reason)
+    end;
+stop_actor(ActorPid, Reason, Timeout) ->
+    stop_external(ActorPid, Reason, Timeout).
+
+-spec stop_external(pid(), term(), timeout()) -> ok | {exit, term()}.
+stop_external(ActorPid, Reason, Timeout) ->
+    try gen_server:stop(ActorPid, Reason, Timeout) of
+        ok -> ok
+    catch
+        exit:noproc ->
+            %% Actor already stopped (bare atom exit) - treat as successful stop
+            ok;
+        exit:{noproc, _} ->
+            %% Actor already stopped (tuple exit) - treat as successful stop
+            ok;
+        exit:Other ->
+            {exit, Other}
+    end.
+
+-doc """
+Sync-send half of stop_actor/3: answers `ok` or raises the structured
+`actor_dead` error `stop` has always raised for a failed stop.
+""".
+-spec sync_stop(pid(), term(), timeout(), atom()) -> ok.
+sync_stop(ActorPid, Reason, Timeout, Selector) ->
+    case stop_actor(ActorPid, Reason, Timeout) of
+        ok ->
+            ok;
+        {exit, Other} ->
+            %% Preserve sync_send/3 contract: translate exits to structured errors
+            beamtalk_exception_handler:reraise(
+                beamtalk_error:with_details(
+                    actor_dead_error_record(Selector), #{exit_reason => Other}
+                )
+            )
+    end.
+
+-doc """
+Async-send half of stop_actor/3: resolves `FuturePid` with `ok`, or rejects
+it with the structured error `stop` has always used for a failed stop.
+""".
+-spec async_stop(pid(), term(), timeout(), atom(), pid()) -> ok.
+async_stop(ActorPid, Reason, Timeout, Selector, FuturePid) ->
+    case stop_actor(ActorPid, Reason, Timeout) of
+        ok ->
+            beamtalk_future:resolve(FuturePid, ok);
+        {exit, Other} ->
+            %% Other stop failures (e.g., timeout) - reject Future deterministically
+            Error = beamtalk_error:new(
+                actor_dead,
+                unknown,
+                Selector,
+                iolist_to_binary(io_lib:format("Actor stop failed: ~p", [Other]))
+            ),
+            beamtalk_future:reject(FuturePid, Error)
+    end,
+    ok.
+
+-doc "Whether `Timeout` is a valid `gen_server:stop/3` timeout.".
+-spec is_stop_timeout(term()) -> boolean().
+is_stop_timeout(infinity) -> true;
+is_stop_timeout(Timeout) -> is_integer(Timeout) andalso Timeout >= 0.
+
+-spec stop_timeout_type_error(atom()) -> #beamtalk_error{}.
+stop_timeout_type_error(Selector) ->
+    beamtalk_error:new(
+        type_error,
+        unknown,
+        Selector,
+        <<"Timeout must be a non-negative integer (milliseconds) or #infinity">>
+    ).
+
+-doc """
+BT-3967: record a deferred self-stop. The first request in a dispatch wins
+(a later `stopWith:` in the same method does not overwrite the reason), so
+the reason `terminate:` sees is the one the method asked for first.
+""".
+-spec request_deferred_stop(term()) -> ok.
+request_deferred_stop(Reason) ->
+    case get(?PENDING_STOP_KEY) of
+        undefined -> put(?PENDING_STOP_KEY, {stop, Reason});
+        {stop, _} -> ok
+    end,
+    ok.
+
+-doc """
+BT-3967: discard any deferred self-stop request. Called on entry to every
+callback wrapped with apply_pending_stop/1, so only a request made by that
+callback's own dispatch can stop the actor — never a stale one recorded by
+some unwrapped path earlier.
+""".
+-spec clear_pending_stop() -> ok.
+clear_pending_stop() ->
+    _ = erase(?PENDING_STOP_KEY),
+    ok.
+
+-doc """
+BT-3967: apply a deferred self-stop to a gen_server callback's return value.
+
+If the dispatch that just ran requested `self stopWith: Reason` (see
+request_deferred_stop/1), the request is consumed and the callback's
+`{reply, Reply, State}` / `{noreply, State}` becomes
+`{stop, Reason, Reply, State}` / `{stop, Reason, State}`, so OTP replies to a
+pending caller first, then runs `terminate/2` with exactly `Reason` and exits
+with it. A return value that is already a `{stop, ...}` (e.g. a failed
+`initialize`) wins over the request. With no pending request the value is
+returned unchanged.
+""".
+-spec apply_pending_stop(Result) ->
+    Result | {stop, term(), map()} | {stop, term(), term(), map()}
+when
+    Result :: term().
+apply_pending_stop(Result) ->
+    case erase(?PENDING_STOP_KEY) of
+        undefined -> Result;
+        {stop, Reason} -> pending_stop_result(Result, Reason)
+    end.
+
+-spec pending_stop_result(term(), term()) -> term().
+pending_stop_result({reply, Reply, State}, Reason) -> {stop, Reason, Reply, State};
+%% A `{continue, _}` / timeout action is dropped: once the actor has asked to
+%% stop, no further step runs.
+pending_stop_result({reply, Reply, State, _Action}, Reason) -> {stop, Reason, Reply, State};
+pending_stop_result({noreply, State}, Reason) -> {stop, Reason, State};
+pending_stop_result({noreply, State, _Action}, Reason) -> {stop, Reason, State};
+%% Any other value — already a `{stop, ...}` — wins over the request.
+pending_stop_result(Other, _Reason) -> Other.
+
+-doc """
+BT-3967: entry point for `Actor`'s quoted `@intrinsic` bodies, reached via
+`bt@stdlib@actor:dispatch/3` when the message was not intercepted at the
+send site — in practice a self-send (`self stop`, `self stopWith: r`,
+`self pid`, ...) from inside one of the actor's own methods, which
+dispatches through the class hierarchy rather than sync_send/3. Each
+intrinsic maps back onto the matching send-site selector so both paths
+share one implementation; the stop family defers via stop_actor/3 because
+`Self`'s pid is the calling process.
+""".
+-spec dispatch(atom(), list(), #beamtalk_object{}) -> term().
+dispatch(Intrinsic, Args, #beamtalk_object{class = Class, pid = Pid}) ->
+    case intrinsic_selector(Intrinsic) of
+        undefined ->
+            beamtalk_exception_handler:reraise(
+                beamtalk_error:new(does_not_understand, Class, Intrinsic)
+            );
+        Selector ->
+            sync_send(Pid, Selector, Args)
+    end.
+
+%% Every selector here must have its own sync_send/3 clause ahead of the
+%% generic Layer 1 self-send clause; otherwise a self-send would re-enter the
+%% same Actor method through self_dispatch/2 and loop. The eunit test
+%% bt3967_every_actor_intrinsic_is_mapped_test checks actor.bt against this.
+-spec intrinsic_selector(atom()) -> atom() | undefined.
+intrinsic_selector(actorStop) -> stop;
+intrinsic_selector(actorStopWith) -> 'stopWith:';
+intrinsic_selector(actorStopWithTimeout) -> 'stopWith:timeout:';
+intrinsic_selector(actorKill) -> kill;
+intrinsic_selector(actorPid) -> pid;
+intrinsic_selector(actorMonitor) -> monitor;
+intrinsic_selector(actorOnExit) -> 'onExit:';
+intrinsic_selector(actorIsAlive) -> isAlive;
+intrinsic_selector(actorDelegate) -> delegate;
+intrinsic_selector(_) -> undefined.
+
+-doc """
 Construct a structured `signal` error for the `delegate` selector sent to a
 non-native Actor.
 
@@ -2292,7 +2497,13 @@ Accepts two wire formats:
 Errors in fire-and-forget are logged but do not crash the actor.
 Errors in async-with-future are communicated via future rejection.
 """.
--spec handle_cast(term(), map()) -> {noreply, map()}.
+-spec handle_cast(term(), map()) -> {noreply, map()} | {stop, term(), map()}.
+handle_cast(Msg, State) ->
+    %% BT-3967: honour a `self stopWith:` requested during the dispatch.
+    ok = clear_pending_stop(),
+    apply_pending_stop(do_handle_cast(Msg, State)).
+
+-spec do_handle_cast(term(), map()) -> {noreply, map()}.
 %% Wire-tagged remote sends (ADR 0126 §5.1) — decode_wire_cast/1 recognises
 %% every `'$beamtalk_wire'` cast/async shape (the one place that logic
 %% lives, shared with generated compiled-actor handle_cast/2 — see its own
@@ -2311,23 +2522,23 @@ Errors in async-with-future are communicated via future rejection.
 %% turns into a livelock, not a crash. Restricting `kind` here means any
 %% such message instead falls through to the ordinary "unknown cast
 %% message" catch-all below (log and ignore).
-handle_cast({'$beamtalk_wire', _, cast, _, _, _} = Msg, State) ->
+do_handle_cast({'$beamtalk_wire', _, cast, _, _, _} = Msg, State) ->
     case decode_wire_cast(Msg) of
-        {redispatch, Msg2} -> handle_cast(Msg2, State);
+        {redispatch, Msg2} -> do_handle_cast(Msg2, State);
         noreply -> {noreply, State}
     end;
-handle_cast({'$beamtalk_wire', _, async, _, _, _, _} = Msg, State) ->
+do_handle_cast({'$beamtalk_wire', _, async, _, _, _, _} = Msg, State) ->
     case decode_wire_cast(Msg) of
-        {redispatch, Msg2} -> handle_cast(Msg2, State);
+        {redispatch, Msg2} -> do_handle_cast(Msg2, State);
         noreply -> {noreply, State}
     end;
 %% Fire-and-forget cast with propagated context (ADR 0069 Phase 2b)
-handle_cast({cast, Selector, Args, PropCtx}, State) when
+do_handle_cast({cast, Selector, Args, PropCtx}, State) when
     is_atom(Selector), is_list(Args), is_map(PropCtx)
 ->
     restore_propagated_ctx(PropCtx),
-    handle_cast({cast, Selector, Args}, State);
-handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args) ->
+    do_handle_cast({cast, Selector, Args}, State);
+do_handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (cast fire-and-forget)", #{
         class => beamtalk_tagged_map:class_of(State, unknown),
@@ -2363,10 +2574,10 @@ handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args)
         restore_dispatch_pdict(OldState)
     end;
 %% Async send with propagated context (ADR 0069 Phase 2b)
-handle_cast({Selector, Args, FuturePid, PropCtx}, State) when is_map(PropCtx) ->
+do_handle_cast({Selector, Args, FuturePid, PropCtx}, State) when is_map(PropCtx) ->
     restore_propagated_ctx(PropCtx),
-    handle_cast({Selector, Args, FuturePid}, State);
-handle_cast({Selector, Args, FuturePid}, State) ->
+    do_handle_cast({Selector, Args, FuturePid}, State);
+do_handle_cast({Selector, Args, FuturePid}, State) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (async)", #{
         class => beamtalk_tagged_map:class_of(State, unknown),
@@ -2400,7 +2611,7 @@ handle_cast({Selector, Args, FuturePid}, State) ->
     after
         restore_dispatch_pdict(OldState)
     end;
-handle_cast(Msg, State) ->
+do_handle_cast(Msg, State) ->
     %% Unknown cast message format - log and ignore
     ?LOG_WARNING("Unknown cast message", #{message => Msg, domain => [beamtalk, runtime]}),
     {noreply, State}.
@@ -2410,7 +2621,14 @@ Handle synchronous messages (call).
 Message format: {Selector, Args} or {Selector, Args, PropCtx} (ADR 0069 Phase 2b)
 Dispatches to method and returns result immediately.
 """.
--spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
+-spec handle_call(term(), term(), map()) ->
+    {reply, term(), map()} | {stop, term(), term(), map()}.
+handle_call(Msg, From, State) ->
+    %% BT-3967: honour a `self stopWith:` requested during the dispatch.
+    ok = clear_pending_stop(),
+    apply_pending_stop(do_handle_call(Msg, From, State)).
+
+-spec do_handle_call(term(), term(), map()) -> {reply, term(), map()}.
 %% Wire-tagged remote sends (ADR 0126 §5.1) — decode_wire_call/1 recognises
 %% every `'$beamtalk_wire'` call shape (the one place that logic lives,
 %% shared with generated compiled-actor handle_call/3 — see its own doc and
@@ -2427,16 +2645,16 @@ Dispatches to method and returns result immediately.
 %% unexpected-kind message back unchanged, re-entering this same clause
 %% with the identical term and livelocking (worse here, since the caller
 %% also blocks forever in `gen_server:call` waiting on a reply).
-handle_call({'$beamtalk_wire', _, call, _, _, _} = Msg, From, State) ->
+do_handle_call({'$beamtalk_wire', _, call, _, _, _} = Msg, From, State) ->
     case decode_wire_call(Msg) of
-        {redispatch, Msg2} -> handle_call(Msg2, From, State);
+        {redispatch, Msg2} -> do_handle_call(Msg2, From, State);
         {reply, ReplyVal} -> {reply, ReplyVal, State}
     end;
 %% Sync call with propagated context (ADR 0069 Phase 2b)
-handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
+do_handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     restore_propagated_ctx(PropCtx),
-    handle_call({Selector, Args}, From, State);
-handle_call({Selector, Args}, From, State) ->
+    do_handle_call({Selector, Args}, From, State);
+do_handle_call({Selector, Args}, From, State) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (sync)", #{
         class => beamtalk_tagged_map:class_of(State, unknown),
@@ -2467,7 +2685,7 @@ handle_call({Selector, Args}, From, State) ->
     after
         restore_dispatch_pdict(OldState)
     end;
-handle_call(Msg, _From, State) ->
+do_handle_call(Msg, _From, State) ->
     %% Unknown call message format
     ClassName = beamtalk_tagged_map:class_of(State, unknown),
     Error0 = beamtalk_error:new(does_not_understand, ClassName),
