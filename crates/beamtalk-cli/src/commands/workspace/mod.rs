@@ -49,6 +49,9 @@ pub mod cli;
 pub mod discovery;
 /// epmd client: TCP NAMES_REQ protocol, deregistration polling, conflict detection.
 mod epmd;
+/// Lint: every `erl` spawn in this crate pins epmd to loopback (BT-3987).
+#[cfg(test)]
+mod erl_spawn_lint;
 /// Workspace lifecycle operations: create, start, list, status.
 pub(crate) mod lifecycle;
 /// Node liveness queries: OS process checks, port-file nonce validation, health probes.

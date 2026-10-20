@@ -304,7 +304,7 @@ fn run_script(
 
     eprintln!("\nRunning {class_name}>>{selector}...");
 
-    let mut cmd = Command::new("erl");
+    let mut cmd = beamtalk_workspace::erl_command();
     cmd.arg("-noshell")
         .args(&args)
         .current_dir(project_root.as_std_path())
@@ -669,6 +669,21 @@ fn node_name_flag(node_name: &str) -> &'static str {
     }
 }
 
+/// Build the `erl -noshell -hidden` command for a short-lived named client
+/// node that RPCs into the workspace (`args` carries its `-sname`/`-name`).
+///
+/// A named node starts epmd if none is running, so this goes through
+/// [`beamtalk_workspace::erl_command`], which pins epmd's bind address
+/// (BT-3987).
+fn hidden_client_command(args: &[OsString], project_root: &std::path::Path) -> Command {
+    let mut cmd = beamtalk_workspace::erl_command();
+    cmd.arg("-noshell")
+        .arg("-hidden")
+        .args(args)
+        .current_dir(project_root);
+    cmd
+}
+
 /// Probe whether the named OTP application is already running in the project's workspace.
 ///
 /// Returns `Some(port)` if the application is running, `None` otherwise.
@@ -708,13 +723,7 @@ fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -
     args.push(OsString::from("-eval"));
     args.push(OsString::from(&eval_cmd));
 
-    let output = Command::new("erl")
-        .arg("-noshell")
-        .arg("-hidden")
-        .args(&args)
-        .current_dir(project_root)
-        .output()
-        .ok()?;
+    let output = hidden_client_command(&args, project_root).output().ok()?;
 
     if output.status.success()
         && String::from_utf8_lossy(&output.stdout)
@@ -769,11 +778,7 @@ fn ensure_otp_app_in_workspace(
     args.push(OsString::from("-eval"));
     args.push(OsString::from(&eval_cmd));
 
-    let output = Command::new("erl")
-        .arg("-noshell")
-        .arg("-hidden")
-        .args(&args)
-        .current_dir(project_root)
+    let output = hidden_client_command(&args, project_root)
         .output()
         .map_err(|e| miette!("Failed to start RPC probe: {e}\nIs Erlang/OTP installed?"))?;
 
@@ -1087,6 +1092,19 @@ mod tests {
     #[test]
     fn test_node_name_flag_no_host() {
         assert_eq!(node_name_flag("beamtalk_workspace_abc"), "-sname");
+    }
+
+    #[test]
+    fn test_hidden_client_command_pins_epmd_address() {
+        // BT-3987: the probe/RPC client is a named node, so it must hand erl
+        // an explicit epmd address (the value rule is beamtalk_workspace's).
+        let args = [OsString::from("-sname"), OsString::from("probe@localhost")];
+        let cmd = hidden_client_command(&args, std::path::Path::new("."));
+        let epmd = cmd
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("ERL_EPMD_ADDRESS"))
+            .and_then(|(_, v)| v);
+        assert!(epmd.is_some(), "ERL_EPMD_ADDRESS must be set");
     }
 
     #[test]
