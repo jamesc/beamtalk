@@ -88,8 +88,8 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Result fromTuple: (Tuple withAll: #(#ok, 42))       // => Result ok: 42
-  /// Result fromTuple: (Tuple withAll: #(#error, #oops)) // => Result error: ...
+  /// Result fromTuple: {#ok, 42}       // => Result ok: 42
+  /// Result fromTuple: {#error, #oops} // => Result error: ...
   /// ```
   class fromTuple: tuple :: Tuple -> Result(T, E) => self delegate
 
