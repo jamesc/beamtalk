@@ -1,9 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3939: a block an actor self-send promotes to Tier 2
-//! (`detect_tier2_self_send`) that assigns a local and rebinds it in an inner
-//! loop or fold used to answer the local's pre-loop value, silently (`#(0, 0)`
+//! BT-3939: a Tier 2 block (a stored block that writes a captured local) that
+//! assigns a local and rebinds it in an inner loop or fold used to answer the local's pre-loop value, silently (`#(0, 0)`
 //! for the repro below). The Tier 2 body lowers the loop inside an opaque
 //! `let _ = ( ... )`, so the rebind and the state it hands back are lost.
 //!
@@ -22,11 +21,11 @@ pub(super) fn compile(src: &str) -> Result<String, String> {
 fn actor(sums_body: &str) -> String {
     format!(
         "Actor subclass: P
-  state: groups = #(#(1, 2), #(3))
   state: hits = 0
-  sealed fwd: block => self.groups collect: block
-  promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
-  sums => self fwd: [:xs | {sums_body}]
+  sums =>
+    c := 0
+    blk := [:xs | c := c + 1. {sums_body}]
+    blk value: #(1, 2)
 "
     )
 }
@@ -38,13 +37,13 @@ fn assert_loud(src: &str) {
 
 // PIN-BUG BT-3947: correct answer #(3, 3), parked with BT-3947's frame work.
 #[test]
-fn a_promoted_block_rebinding_its_local_in_an_inner_do_is_an_error() {
+fn a_tier_2_block_rebinding_its_local_in_an_inner_do_is_an_error() {
     assert_loud(&actor("n := 0. xs do: [:y | n := n + y]. n"));
 }
 
 // PIN-BUG BT-3947: the same through a fold and an assignment's value.
 #[test]
-fn a_promoted_block_rebinding_its_local_in_an_inner_fold_is_an_error() {
+fn a_tier_2_block_rebinding_its_local_in_an_inner_fold_is_an_error() {
     assert_loud(&actor(
         "n := 0. r := xs inject: 0 into: [:a :y | n := n + y. a + y]. n",
     ));
@@ -52,7 +51,7 @@ fn a_promoted_block_rebinding_its_local_in_an_inner_fold_is_an_error() {
 
 // PIN-BUG BT-3947: and through a counted loop.
 #[test]
-fn a_promoted_block_rebinding_its_local_in_a_counted_loop_is_an_error() {
+fn a_tier_2_block_rebinding_its_local_in_a_counted_loop_is_an_error() {
     assert_loud(&actor("n := 0. 1 to: 2 do: [:i | n := n + i]. n"));
 }
 
@@ -64,14 +63,4 @@ fn a_loop_that_rebinds_no_block_local_still_compiles() {
     compile(&actor("xs do: [:y | m := y + 1. m]. 1")).expect("compiles");
     // No loop.
     compile(&actor("n := 0. n := n + 1. n")).expect("compiles");
-}
-
-#[test]
-fn the_same_block_is_fine_when_it_is_not_promoted() {
-    let src = "Actor subclass: P
-  state: groups = #(#(1, 2), #(3))
-  sealed fwd: block => self.groups collect: block
-  sums => self fwd: [:xs | n := 0. xs do: [:y | n := n + y]. n]
-";
-    compile(src).expect("a block nothing promotes compiles");
 }

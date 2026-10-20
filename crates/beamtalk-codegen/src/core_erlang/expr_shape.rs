@@ -166,21 +166,6 @@ pub(super) fn local_assign_field_write(rhs: &Expression) -> Option<&Expression> 
     is_field_assignment(inner).then_some(inner)
 }
 
-/// Checks if an expression is a self-field access (`self.field`).
-///
-/// Used to scope the runtime Tier 1/Tier 2 discrimination for block value
-/// calls (`self.field value: ...`) to exactly the shape that needs it — a
-/// block stored in an instance field, whose Tier-ness can't be known
-/// statically since it may have been assigned from a different method.
-pub(super) fn is_self_field_access(expr: &Expression) -> bool {
-    if let Expression::FieldAccess { receiver, .. } = expr {
-        if let Expression::Identifier(recv_id) = receiver.as_ref() {
-            return recv_id.name == "self";
-        }
-    }
-    false
-}
-
 /// The syntactic shape `self.classVar := value` in a class method.
 fn class_var_assignment_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     if !ctx.in_class_method {
@@ -554,11 +539,6 @@ impl CoreErlangGenerator {
             return None;
         }
         local_assign_field_write(rhs)
-    }
-
-    /// See [`is_self_field_access`].
-    pub(super) fn is_self_field_access(expr: &Expression) -> bool {
-        is_self_field_access(expr)
     }
 
     /// See [`is_local_var_assignment`].

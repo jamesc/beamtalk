@@ -616,33 +616,6 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Emits the standard warning for a stateful block at an Erlang call boundary.
-    ///
-    /// Both `generate_simple_list_op` and `generate_direct_erlang_call` call this helper
-    /// to ensure consistent warning messages across all Erlang interop sites.
-    ///
-    /// `erlang_target` is a human-readable call target, e.g. `"'lists':'map'"` or
-    /// `"'mymod':'myfun'"`.
-    /// `span` is the source span of the block literal that crosses the boundary.
-    pub(in crate::core_erlang) fn warn_stateful_block_at_erlang_boundary(
-        &mut self,
-        erlang_target: &str,
-        span: Span,
-    ) {
-        self.add_codegen_warning(
-            Diagnostic::warning(
-                format!(
-                    "stateful block passed to Erlang {erlang_target} — mutations inside \
-                     the block will be silently dropped (Erlang cannot propagate the updated \
-                     StateAcc back to the Beamtalk caller)"
-                ),
-                span,
-            )
-            .with_hint("Extract the block body into a method, or use a stateless block")
-            .with_category(DiagnosticCategory::Type),
-        );
-    }
-
     /// Emits a warning for a non-literal callable at an Erlang call boundary.
     pub(in crate::core_erlang) fn warn_non_literal_callable_at_erlang_boundary(
         &mut self,

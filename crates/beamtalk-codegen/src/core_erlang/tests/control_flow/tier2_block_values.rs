@@ -329,67 +329,6 @@ fn test_bt2797_local_tier2_block_invoked_inside_nested_if_true_block_is_still_co
 }
 
 #[test]
-fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_correctly() {
-    // the main real-world motivator — a block with field mutations,
-    // assigned to an instance field in one method (`setup`) and invoked via
-    // `value:` from a *different* method (`tick:`). Static per-method tracking
-    // (tier2_block_params / tier2_local_vars) can't see across methods, so this
-    // relies on:
-    // 1. `generate_field_assignment_value_doc` (dispatch_codegen.rs) promoting
-    //    the stored block to Tier 2 unconditionally (safe because every
-    //    `self.field value(:...)` call site now runtime-discriminates), and
-    // 2. `generate_block_value_call_runtime_discriminated` (intrinsics.rs)
-    //    checking the field's *runtime* arity (`is_function/2`) at the call
-    //    site to decide whether to thread state — the same precedent already
-    //    used for Erlang FFI interop, generalized to Beamtalk-level block calls.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup =>\n    self.onTick := [:x | self.total := self.total + x]\n\n  tick: x =>\n    self.onTick value: x\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile (BT-2797)");
-
-    // Structural checks (not hardcoded fresh-variable counter values).
-    assert!(
-        regex::Regex::new(r"fun \(_\w+, StateAcc\) ->")
-            .unwrap()
-            .is_match(&code)
-            && code.contains("'maps':'put'('onTick',"),
-        "setup must store a 2-arity Tier 2 fun (block param + trailing state \
-         accumulator) into the onTick field. Got: {code}"
-    );
-    assert!(
-        code.contains("'maps':'get'('onTick', State)"),
-        "tick: must read the block back out of the onTick field. Got: {code}"
-    );
-    // The Tier 1 and Tier 2 arity checks, and the Tier 2 apply, must all
-    // reference the *same* captured block variable — tie them together via
-    // the name captured from the arity-1 check rather than three independent
-    // (and therefore looser) pattern matches.
-    let arity_check_re = regex::Regex::new(r"is_function'\((_Fun\w*), 1\)").unwrap();
-    let fun_var = &arity_check_re.captures(&code).unwrap_or_else(|| {
-        panic!(
-            "tick: must runtime-discriminate Tier 1 (arity 1: just the block \
-                 param) before applying. Got: {code}"
-        )
-    })[1];
-    assert!(
-        code.contains(&format!("is_function'({fun_var}, 2)")),
-        "tick: must also check Tier 2 arity (block param + state) for the \
-         same block variable ({fun_var}). Got: {code}"
-    );
-    assert!(
-        regex::Regex::new(&format!(r"apply {fun_var} \(_\w+, State\)"))
-            .unwrap()
-            .is_match(&code),
-        "the Tier 2 branch must apply the field's block ({fun_var}) with the \
-         calling method's State as a trailing argument. Got: {code}"
-    );
-}
-
-#[test]
 fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_compile_error() {
     // PR #2899 review fix: a block stored in a field that mutates
     // BOTH a captured outer local AND a field must still be rejected at
@@ -465,10 +404,7 @@ fn test_bt2797_no_regression_pure_block_value_fast_path() {
     // acceptance criterion 7: the zero-cost fast path for a pure
     // (non-mutating) block literal immediately invoked via `value`/`value:`
     // must be untouched — no `is_function` runtime check, no state-threading
-    // overhead. The runtime-discrimination codegen
-    // (generate_block_value_call_runtime_discriminated) is deliberately
-    // scoped to `self.field value(:...)` receivers only (see
-    // try_generate_block_value_unary/keyword in intrinsics.rs) — a literal
+    // overhead. A literal
     // block receiver is intercepted earlier and takes the plain
     // generate_block_value_call path regardless.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run =>\n    [42] value\n";
@@ -507,82 +443,6 @@ fn test_bt2797_no_regression_pure_local_var_block_value_fast_path() {
         !code.contains("StateAcc"),
         "A pure block stored in a local var must not be promoted to the \
          Tier 2 stateful protocol. Got: {code}"
-    );
-}
-
-#[test]
-fn test_bt2803_field_stored_block_invoked_via_value_with_arguments_threads_state_correctly() {
-    // valueWithArguments: on a self.field receiver needs the same
-    // runtime Tier 1/Tier 2 discrimination as `value:`, but the
-    // argument count is a runtime list length instead of a compile-time-known
-    // static arity —
-    // generate_block_value_with_arguments_call_runtime_discriminated
-    // generalizes generate_block_value_call_runtime_discriminated for this.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup =>\n    self.onTick := [:x | self.total := self.total + x]\n\n  tick =>\n    self.onTick valueWithArguments: #(5)\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile (BT-2803)");
-
-    assert!(
-        code.contains("'maps':'get'('onTick', State)"),
-        "tick must read the block back out of the onTick field. Got: {code}"
-    );
-
-    // Tie the length computation, both arity checks, and both applies
-    // together via the captured fun/args/length variable names rather than
-    // three independent (and therefore looser) pattern matches.
-    let len_re =
-        regex::Regex::new(r"let (_Fun\w*) = .*'onTick', State\) in let (_Args\w*) = \[5\] in let (_ArgsLen\w*) = call 'erlang':'length'\((_Args\w*)\) in let (_ArgsLenPlusOne\w*) = call 'erlang':'\+'\((_ArgsLen\w*), 1\)")
-            .unwrap();
-    let caps = len_re.captures(&code).unwrap_or_else(|| {
-        panic!(
-            "tick must bind the field's block, hoist Args to a runtime list, \
-             and compute both length(Args) and length(Args) + 1 before \
-             discriminating. Got: {code}"
-        )
-    });
-    let fun_var = &caps[1];
-    let args_var = &caps[2];
-    let tier1_len_var = &caps[3];
-    let tier2_len_var = &caps[5];
-
-    assert!(
-        code.contains(&format!("is_function'({fun_var}, {tier1_len_var})")),
-        "tick must runtime-discriminate Tier 1 arity (length(Args)) for the \
-         field's block ({fun_var}). Got: {code}"
-    );
-    assert!(
-        code.contains(&format!("is_function'({fun_var}, {tier2_len_var})")),
-        "tick must also check the Tier 2 arity (length(Args) + 1) for the \
-         same block variable ({fun_var}). Got: {code}"
-    );
-    assert!(
-        code.contains(&format!(
-            "{{call 'erlang':'apply'({fun_var}, {args_var}), State}}"
-        )),
-        "the Tier 1 branch must apply the field's block ({fun_var}) with the \
-         plain Args list, leaving State unchanged. Got: {code}"
-    );
-    assert!(
-        code.contains(&format!(
-            "call 'erlang':'apply'({fun_var}, call 'erlang':'++'({args_var}, [State]))"
-        )),
-        "the Tier 2 branch must apply the field's block ({fun_var}) with the \
-         calling method's State appended to the Args list. Got: {code}"
-    );
-    assert!(
-        code.contains(&format!(
-            "{{call 'beamtalk_message_dispatch':'send'({fun_var}, 'valueWithArguments:', [{args_var}]), State}}"
-        )),
-        "the non-function fallback must dispatch valueWithArguments: through \
-         beamtalk_message_dispatch:send (BT-3377), not beamtalk_primitive:send \
-         — the field may hold a live actor whose gen_server reply only \
-         beamtalk_actor:sync_send knows how to unwrap. State must stay \
-         unchanged. Got: {code}"
     );
 }
 
@@ -648,61 +508,6 @@ fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
 }
 
 #[test]
-fn test_bt2813_bare_tier2_value_call_inside_do_loop_body_unpacks_tuple() {
-    // A bare (non-assigned) `self.field value:` statement inside a
-    // `do:` loop body. The outer loop is correctly routed
-    // into the state-threading (StateAcc) path by `block_needs_mutation_threading`'s
-    // `has_field_value_call` fact, but the loop body's own
-    // statement codegen (`lower_foldl_body`) needs its own case for
-    // a bare Tier2ValueCall — falling through to `lower_non_assign_expr`
-    // would emit a plain (Tier-1-only) apply and crash with badarity for
-    // a genuinely Tier 2 (2-arity) field-stored block. Structural check only
-    // (see the former stdlib/test/tier2stored_block_matrix_test.bt, removed by BT-3922 for the runtime
-    // end-to-end check).
-    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickEach: items =>\n    items do: [:x | self.onTick value: x]\n    self.total\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile (BT-2813)");
-
-    assert!(
-        regex::Regex::new(r"let _T2LoopTuple\w* = .*is_function.*in let StateAcc\w* = call 'erlang':'element'\(2, _T2LoopTuple")
-            .unwrap()
-            .is_match(&code),
-        "the bare Tier2ValueCall statement inside the do: loop body must \
-         runtime-discriminate the field's block and unpack the returned \
-         {{Result, NewState}} tuple via element/2, threading the new state \
-         forward into the next fold iteration. Got: {code}"
-    );
-}
-
-#[test]
-fn test_bt2813_bare_tier2_value_call_inside_collect_block_unpacks_tuple() {
-    // same gap as the do: case above, but for collect: — the loop
-    // body must also extract element(1) of the tuple as the collected value.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickEachCollect: items =>\n    items collect: [:x | self.onTick value: x]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile (BT-2813)");
-
-    assert!(
-        regex::Regex::new(r"let _T2LoopVal\w* = call 'erlang':'element'\(1, _T2LoopTuple\w*\) in \{\[_T2LoopVal\w* \| AccList\]")
-            .unwrap()
-            .is_match(&code),
-        "the bare Tier2ValueCall statement inside the collect: loop body \
-         must extract element(1) of the returned tuple as the collected \
-         item value. Got: {code}"
-    );
-}
-
-#[test]
 fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() {
     // a Tier 2 block held in a local var, invoked via `value:` in
     // *argument* (sub-expression) position. Before the fix,
@@ -740,36 +545,6 @@ fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() 
          be let-bound to a self-contained let-chain that extracts element(1) \
          of the returned tuple before the addition, not the raw tuple. \
          Got: {code}"
-    );
-}
-
-#[test]
-fn test_bt2814_field_stored_tier2_value_call_in_argument_position_unpacks_result() {
-    // the self.field variant of the same gap. Before the fix,
-    // `try_generate_block_value_keyword`/`_unary` deliberately did NOT
-    // intercept a self.field receiver in sub-expression position at all,
-    // falling back to a Tier-1-only (arity-N, no State) apply — badarity for
-    // a genuinely Tier 2 block. `close_tier2_value_subexpr_doc` now
-    // intercepts and unpacks it, consistent with the local-var case above.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  addTickResult: x =>\n    self.total := self.total + (self.onTick value: x)\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile (BT-2814)");
-
-    assert!(
-        regex::Regex::new(
-            r"let _T2SubTuple\w* = .*is_function.*in call 'erlang':'element'\(1, _T2SubTuple"
-        )
-        .unwrap()
-        .is_match(&code),
-        "the field-stored Tier2 block's value: call in argument position \
-         must runtime-discriminate the field's block and extract element(1) \
-         of the returned tuple, not leak the raw tuple or fall back to a \
-         Tier-1-only apply. Got: {code}"
     );
 }
 
@@ -834,63 +609,6 @@ fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
         "after the named-local-var Tier2 block's cascade (value: x; value: \
          x), the caller's own `outer` binding must be rebound from \
          '__local__outer' in the cascade's final NewState. Got: {code}"
-    );
-}
-
-#[test]
-fn test_local_var_assignment_with_tier2_block_value_call_inside_conditional_branch() {
-    // ADR 0111 Addendum 5 C3: `lower_local_var_assignment_bind`'s Tier 2
-    // sub-branch — `result := aBlock value` where `aBlock` is a Tier 2 block
-    // parameter, inside an `ifTrue:` branch that also has field mutations.
-    //
-    // `scan_class_for_tier2_blocks` sees `self applyWith:ifTrue:` called from
-    // `runExample` with a literal block that has field writes, so `aBlock`
-    // (position 0) is registered as Tier 2. Inside the `ifTrue:` branch,
-    // `result := aBlock value` hits `is_tier2_value_call` → the Gensym two-hop
-    // extraction path (element(1,...) for value, element(2,...) for new state).
-    let src = concat!(
-        "Actor subclass: Applier\n",
-        "  state: count = 0\n\n",
-        "  applyWith: aBlock ifTrue: flag =>\n",
-        "    flag ifTrue: [\n",
-        "      result := aBlock value.\n",
-        "      self.count := self.count + result\n",
-        "    ].\n",
-        "    self.count\n\n",
-        "  runExample =>\n",
-        "    self applyWith: [self.count := self.count + 10] ifTrue: true\n",
-    );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("applier_tier2_in_cond"))
-        .expect("Tier 2 block value call inside ifTrue: branch with field mutation must compile");
-
-    eprintln!("Generated code for Tier 2 local-var assignment inside conditional:\n{code}");
-
-    // Tier 2 two-hop extraction: element(1, ...) for value, element(2, ...) for new state.
-    assert!(
-        code.contains("'erlang':'element'(1,"),
-        "Tier 2 path must extract the value from the {{Result, NewState}} tuple \
-         via erlang:element(1, ...). Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'element'(2,"),
-        "Tier 2 path must extract the new state from the {{Result, NewState}} tuple \
-         via erlang:element(2, ...). Got:\n{code}"
-    );
-
-    // Field mutation `self.count := self.count + result` inside the branch.
-    assert!(
-        code.contains("maps':'put'('count'"),
-        "Field mutation inside the true branch must produce maps:put('count', ...). \
-         Got:\n{code}"
-    );
-
-    // The whole conditional must be inlined as a case expression.
-    assert!(
-        code.contains("case "),
-        "ifTrue: with field mutation must compile to an inline case expression. \
-         Got:\n{code}"
     );
 }
 

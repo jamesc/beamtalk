@@ -132,21 +132,21 @@ fn value_types_and_class_methods_have_no_guard() {
 
 #[test]
 fn a_tier2_closure_carries_state_back_so_its_self_sends_are_not_guarded() {
-    // `fwd:`'s block parameter is a promoted Tier 2 position (`promote` passes
-    // it a field-writing block), so the block `sums` passes is a Tier 2 `fun`
-    // (`StateAcc` in, `{Result, StateAccN}` out): the self-send's new `State` is
-    // returned to the caller, so the guard (which exists for closures that
-    // cannot hand it back) must not fire. A consumer that cannot take the state
-    // back raises `stateful_block_dispatch` itself.
+    // A block stored in a local that writes a captured local is a Tier 2 `fun`
+    // (`StateAcc` in, `{Result, StateAccN}` out): the self-send's new `State`
+    // is returned to the caller, so the guard (which exists for closures that
+    // cannot hand it back) must not fire. (BT-3986: the host was a block an
+    // actor self-send promoted; passing a writing block to a self-send is now
+    // a compile error, so the stored-local host is used.)
     let tier2 = |body: &str| {
         format!(
             "Actor subclass: P
-  state: groups = #(#(1, 2), #(3))
   state: hits = 0
-  sealed fwd: block => self.groups collect: block
   peek: x => self.hits + x
-  promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
-  sums => self fwd: [:xs | {body}]
+  sums =>
+    c := 0
+    blk := [:xs | c := c + 1. {body}]
+    blk value: #(1, 2)
 "
         )
     };

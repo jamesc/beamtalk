@@ -266,21 +266,6 @@ impl CoreErlangGenerator {
                 return Ok(Some(doc));
             }
         }
-        // `self.field value` in sub-expression position (e.g.
-        // `self log: (self.field value)`). `generate_block_value_call_runtime_discriminated`
-        // always returns a raw `{Result, NewState}` tuple; this function
-        // (reached via the generic `expression_doc` dispatch) is called from
-        // *any* expression position, where nothing else would unpack it — so
-        // unpack it here, discarding NewState. The block's own field/local
-        // mutation is NOT threaded forward to later statements in this
-        // position (same documented, pre-existing limitation noted in
-        // `close_tier2_value_subexpr_doc` — a bare Tier2ValueCall *statement*
-        // still gets full state threading via `BodyExprKind::Tier2ValueCall`).
-        if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
-            let tuple_doc =
-                self.generate_block_value_call_runtime_discriminated(receiver, arguments, "value")?;
-            return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
-        }
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
         } else {
@@ -403,7 +388,7 @@ impl CoreErlangGenerator {
     ///
     /// mirrors `try_generate_block_value_keyword`'s generic
     /// (non-Tier2) fallback path. Deliberately does NOT special-case
-    /// `tier2_block_params`/`tier2_local_vars`/`self.field` receivers here —
+    /// `tier2_block_params`/`tier2_local_vars` receivers here —
     /// `generate_block_value_with_arguments_call_runtime_discriminated`
     /// always returns a raw `{Result, NewState}` tuple, and this function is
     /// reached from the generic, any-position `expression_doc` dispatch,
@@ -411,8 +396,7 @@ impl CoreErlangGenerator {
     /// reaching here by the top-level `Tier2ValueCall` classification in
     /// `gen_server/methods.rs` (`is_tier2_value_call`/
     /// `generate_tier2_value_call_doc`), the only place that unpacks the
-    /// tuple (same scoping as `try_generate_block_value_keyword`'s
-    /// comment for `self.field value:`).
+    /// tuple.
     fn try_generate_block_value_with_arguments_keyword(
         &mut self,
         receiver: &Expression,
@@ -516,17 +500,6 @@ impl CoreErlangGenerator {
         // the actor-style `sync_send` path with no matching handle_call clause.
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
-        }
-        // `self.field value:...` in sub-expression position — see
-        // the matching comment (and `close_tier2_value_subexpr_doc`) in
-        // `try_generate_block_value_unary`.
-        if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
-            let tuple_doc = self.generate_block_value_call_runtime_discriminated(
-                receiver,
-                arguments,
-                selector_name,
-            )?;
-            return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
         }
         // Unknown receiver → runtime is_function guard with fallback
         let doc = self.generate_value_keyword_guard(receiver, arguments, selector_name)?;
@@ -1152,125 +1125,6 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates a runtime Tier 1/Tier 2 discriminated block value call.
-    ///
-    /// Used when the receiver's Tier-ness can't be determined statically — the
-    /// motivating case is a block stored in an instance field and invoked from
-    /// a *different* method than the one that assigned it, so no static
-    /// local/param tracking (`tier2_block_params` / `tier2_local_vars`, both
-    /// scoped to a single method) can see it. Generalizes the
-    /// `erlang:is_function/2` arity-discrimination pattern (used there for
-    /// Erlang FFI interop) to Beamtalk-level block value calls.
-    ///
-    /// Deliberately scoped to `self.field value(:...)` receivers only (see the
-    /// `is_tier2_value_call`/call-site callers) — not every opaque receiver —
-    /// to keep the blast radius contained to the one shape that genuinely
-    /// needs it, leaving the far more common "block passed as a Tier 1 method
-    /// parameter" call sites untouched.
-    ///
-    /// Always returns a raw `{Result, NewState}` tuple, same contract as
-    /// `generate_block_value_call_stateful`:
-    /// - Tier 1 (`is_function(Fun, N)`, N = arity of `arguments`): synthesizes
-    ///   `{ApplyResult, State}` — state is unchanged.
-    /// - Tier 2 (`is_function(Fun, N + 1)`): returns the block's own
-    ///   `{Result, NewState}` tuple directly (Tier 2 funs already return this
-    ///   shape — see `generate_block_stateful`).
-    /// - Non-function receiver: falls back to `beamtalk_message_dispatch:send/3`
-    ///   (not `beamtalk_primitive:send/3` — the receiver may be a
-    ///   live actor, whose reply envelope only `beamtalk_actor:sync_send/3`
-    ///   knows how to unwrap; mirrors `generate_value_keyword_guard`'s
-    ///   fallback), wrapped as `{SendResult, State}`.
-    ///
-    /// Callers must unpack this tuple. `is_tier2_value_call` (extended to
-    /// recognize `self.field` receivers) is what makes
-    /// `classify_body_expr` route the statement calling this function to
-    /// `BodyExprKind::Tier2ValueCall`/`LocalAssignTier2`.
-    ///
-    /// Called ONLY from
-    /// `gen_server/methods.rs`'s `generate_tier2_value_call_doc` — the single
-    /// place that actually unpacks this tuple. Deliberately not wired into
-    /// the generic `try_generate_block_value_unary`/`try_generate_block_value_keyword`
-    /// dispatch (reached via `expression_doc` from *any* expression
-    /// position): a `self.field value(:...)` in sub-expression position
-    /// (e.g. an argument to another call) has no tuple-unpacking caller, so
-    /// intercepting it there would silently hand the raw tuple to code
-    /// expecting a plain value — a regression for a Tier 1 (pure) block that
-    /// worked correctly before this function existed.
-    pub(in crate::core_erlang) fn generate_block_value_call_runtime_discriminated(
-        &mut self,
-        receiver: &Expression,
-        arguments: &[Expression],
-        selector_name: &str,
-    ) -> Result<Document<'static>> {
-        let fun_var = self.fresh_temp_var("Fun");
-        let recv_code = self.expression_doc(receiver)?;
-        let current_state = self.current_state_var();
-        let arity = arguments.len();
-
-        let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() + 2);
-        parts.push(docvec![
-            "let ",
-            leaf::var(fun_var.clone()),
-            " = ",
-            recv_code,
-            " in ",
-        ]);
-        let mut arg_vars: Vec<String> = Vec::with_capacity(arguments.len());
-        for arg in arguments {
-            let arg_var = self.fresh_temp_var("Arg");
-            let arg_code = self.expression_doc(arg)?;
-            parts.push(docvec![
-                "let ",
-                leaf::var(arg_var.clone()),
-                " = ",
-                arg_code,
-                " in ",
-            ]);
-            arg_vars.push(arg_var);
-        }
-
-        let arg_var_docs: Vec<Document<'static>> =
-            arg_vars.iter().map(|v| leaf::var(v.clone())).collect();
-        let tier1_apply_args = join(arg_var_docs.clone(), &Document::Str(", "));
-        let mut tier2_arg_docs = arg_var_docs.clone();
-        tier2_arg_docs.push(leaf::var(current_state.clone()));
-        let tier2_apply_args = join(tier2_arg_docs, &Document::Str(", "));
-        let send_list = docvec!["[", join(arg_var_docs, &Document::Str(", ")), "]"];
-
-        let case_doc = docvec![
-            "case call 'erlang':'is_function'(",
-            leaf::var(fun_var.clone()),
-            ", ",
-            leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
-            ") of 'true' when 'true' -> {apply ",
-            leaf::var(fun_var.clone()),
-            " (",
-            tier1_apply_args,
-            "), ",
-            leaf::var(current_state.clone()),
-            "} 'false' when 'true' -> case call 'erlang':'is_function'(",
-            leaf::var(fun_var.clone()),
-            ", ",
-            leaf::int_lit(i64::try_from(arity + 1).unwrap_or(i64::MAX)),
-            ") of 'true' when 'true' -> apply ",
-            leaf::var(fun_var.clone()),
-            " (",
-            tier2_apply_args,
-            ") 'false' when 'true' -> {call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(fun_var),
-            ", ",
-            leaf::atom(selector_name.to_string()),
-            ", ",
-            send_list,
-            "), ",
-            leaf::var(current_state),
-            "} end end",
-        ];
-        parts.push(case_doc);
-
-        Ok(Document::Vec(parts))
-    }
-
     /// Generates the fallback method body for `blockValue`/`blockValue1`/
     /// `blockValue2`/`blockValue3` — Block's `value`/`value:`/`value:value:`/
     /// `value:value:value:`. This body is reached only when something bypasses the
@@ -1281,8 +1135,8 @@ impl CoreErlangGenerator {
     /// universal state-threading protocol, a Tier 2 (stateful) block compiles to
     /// `fun(Args..., StateAcc) -> {Result, NewStateAcc}`, and invoking it correctly
     /// requires a live `StateAcc` that only a call-site-aware caller has (see this
-    /// file's `generate_block_value_call_runtime_discriminated`, which this mirrors
-    /// via the same `erlang:is_function/2` arity-discrimination idiom). Generic
+    /// file's `generate_block_value_with_arguments_call_runtime_discriminated`, which
+    /// uses the same `erlang:is_function/2` arity-discrimination idiom). Generic
     /// dispatch has no such state, so:
     /// - Tier 1 (`Self` is a plain fun of the expected arity): real `erlang:apply`
     ///   fix — this is the common, pure-block case.
@@ -1515,12 +1369,9 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
-    /// Generalizes `generate_block_value_call_runtime_discriminated`
-    /// to `valueWithArguments:`, whose argument count is a runtime list
-    /// length rather than a compile-time-known static arity.
-    ///
-    /// Same contract and scoping as
-    /// `generate_block_value_call_runtime_discriminated` — reached only from
+    /// The runtime Tier 1/Tier 2 discriminated `valueWithArguments:` call
+    /// (the argument count is a runtime list length rather than a
+    /// compile-time-known static arity). Reached only from
     /// `gen_server/methods.rs`'s `generate_tier2_value_call_doc` (the tuple
     /// unpacker), never from generic `expression_doc` dispatch. Always
     /// returns a raw `{Result, NewState}` tuple:
@@ -1531,9 +1382,8 @@ impl CoreErlangGenerator {
     ///   the block's own `{Result, NewState}` tuple directly (Tier 2 funs
     ///   already return this shape).
     /// - Non-function receiver: falls back to `beamtalk_message_dispatch:send/3`
-    ///   (see `generate_block_value_call_runtime_discriminated`'s
-    ///   doc comment for why `beamtalk_primitive:send/3` is wrong here),
-    ///   wrapped as `{SendResult, State}`.
+    ///   (`beamtalk_primitive:send/3` is wrong here: the receiver may be a
+    ///   live actor), wrapped as `{SendResult, State}`.
     pub(in crate::core_erlang) fn generate_block_value_with_arguments_call_runtime_discriminated(
         &mut self,
         receiver: &Expression,
