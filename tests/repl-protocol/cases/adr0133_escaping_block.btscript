@@ -99,3 +99,9 @@ t := Adr0132ReplCallee calleeDirect: [t + 1]
 // escaping field write must be reported by the ADR 0133 check instead.
 
 // @load-error tests/repl-protocol/fixtures/adr0133_testcase_field_write_error.bt => `self.n` is assigned in a block returned from `makeBumper`
+
+// BT-3952: the read-side rule. A block that READS `self.total` and is passed
+// to the actor's own method (or stored, returned, placed in a literal) would
+// see the value from when it was made, not the one the method has set since.
+
+// @load-error tests/repl-protocol/fixtures/bt3952_stale_field_read_error.bt => `self.total` is read in a block that runs later; it would see the value from when the block was made

@@ -47,15 +47,16 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity, conditional_arm_blocks,
-    conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
-    exception_producer_writes, group_by_fold_threads, inline_block_threads,
-    is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
-    is_threaded_frame_body, literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
-    loop_body_producer_sites, operand_producer_writes, outer_local_writes, outer_state_writes,
-    producer_body_block, receiver_statically_not_dictionary, repl_arm_producer_sites,
-    repl_evaluated_block, repl_operand_sites, repl_producer_writes, root_producer_writes,
-    sequenced_operand_sites, value_blocks,
+    RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity,
+    block_may_change_actor_state, conditional_arm_blocks, conditional_producer_writes,
+    construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
+    group_by_fold_threads, inline_block_threads, is_actor_fold_value_site, is_fold_frame_body,
+    is_loop_body_producer_site, is_self_or_super, is_threaded_frame_body, literal_block_value_arm,
+    local_threading_construct, lookup_arm_blocks, loop_body_producer_sites, may_change_actor_state,
+    operand_producer_writes, outer_local_writes, outer_self_send, outer_state_reads,
+    outer_state_writes, producer_body_block, receiver_statically_not_dictionary,
+    repl_arm_producer_sites, repl_evaluated_block, repl_operand_sites, repl_producer_writes,
+    root_producer_writes, sequenced_operand_sites, value_blocks, value_locals,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -1537,6 +1538,17 @@ enum Escape {
     /// An argument of an ordinary send of this selector: a user-defined method,
     /// or a stdlib method outside the known list.
     Passed(EcoString),
+    /// An argument of this user-defined method sent to `self` or `super` in an
+    /// actor instance method (BT-3952): the actor's own method runs the block,
+    /// possibly after it has changed a field.
+    ActorSelfCall(EcoString),
+    /// An argument of a cascade to `self` or `super` in an actor instance
+    /// method: dispatched to the actor's own method like a plain self-send
+    /// (BT-3952), though a cascade inlines nothing.
+    SelfCascade(EcoString),
+    /// A use of a local bound to a block that reads a field, after the actor's
+    /// state may have changed (BT-3952).
+    LaterUse(EcoString),
     /// An argument of this collection message sent to `self` or `super` in
     /// an actor instance method: a dispatched self-send, so the actor's own
     /// method runs the block, not the inlined collection loop (BT-3908).
@@ -1575,7 +1587,10 @@ impl Escape {
             Self::StoredState => "stored in a field or class variable".to_string(),
             Self::InLiteral => "placed in a collection literal".to_string(),
             Self::CollectionResult => "answered by the block of a collection operation".to_string(),
-            Self::Passed(selector) => format!(
+            Self::LaterUse(local) => {
+                format!("used through `{local}` after the actor's state may have changed")
+            }
+            Self::Passed(selector) | Self::ActorSelfCall(selector) => format!(
                 "passed to `{selector}`, which is not a construct the compiler threads it through"
             ),
             Self::ActorSelfSend(receiver, owner, selector) => format!(
@@ -1592,7 +1607,7 @@ impl Escape {
             Self::Ffi(module, selector) => {
                 format!("passed to Erlang `{module}` `{selector}`, which calls it as a plain fun")
             }
-            Self::Cascade(selector) => format!(
+            Self::Cascade(selector) | Self::SelfCascade(selector) => format!(
                 "sent in a cascade (`{selector}`), which the compiler does not thread it through"
             ),
             Self::Receiver(selector) => format!(
@@ -1605,6 +1620,26 @@ impl Escape {
         }
     }
 
+    /// Whether a block that only *reads* `self.field` and escapes this way can
+    /// see a stale value in an actor instance method (BT-3952): it is stored,
+    /// returned, placed in a literal, or handed to the actor's own method,
+    /// each of which may run it after a later field write, where it still sees
+    /// the `State` captured when it was made. Every other shape either runs
+    /// the block in place, or is not an actor-state read.
+    fn may_read_stale_state(&self) -> bool {
+        matches!(
+            self,
+            Self::StoredState
+                | Self::Returned
+                | Self::InLiteral
+                | Self::LaterUse(_)
+                | Self::CollectionResult
+                | Self::SelfCascade(_)
+                | Self::ActorSelfCall(_)
+                | Self::ActorSelfSend(..)
+        )
+    }
+
     /// The fix: the ADR's idiom for the shape.
     fn help(&self, name: &str) -> String {
         match self {
@@ -1612,7 +1647,11 @@ impl Escape {
                 "have the block answer the new value and assign it where the block is \
                  called: `{local} := [{name} + 1]`, then `{name} := {local} value`"
             ),
-            Self::Returned | Self::StoredState | Self::InLiteral | Self::CollectionResult => {
+            Self::Returned
+            | Self::StoredState
+            | Self::InLiteral
+            | Self::CollectionResult
+            | Self::LaterUse(_) => {
                 format!(
                     "once the block has left this scope, no later call of it can hand `{name}` \
                  back: keep the state in a field (`self.{name} := self.{name} + 1`) or return \
@@ -1628,9 +1667,11 @@ impl Escape {
                  or return the new value from the block and assign it where it is called"
             ),
             Self::Passed(selector)
+            | Self::ActorSelfCall(selector)
             | Self::Lookup(selector)
             | Self::ClassMethod(selector)
-            | Self::Cascade(selector) => {
+            | Self::Cascade(selector)
+            | Self::SelfCascade(selector) => {
                 format!(
                     "return the new value from the block and assign it where it is called: \
                      `{name} := ... {selector} [... {name} + 1]`"
@@ -1698,6 +1739,22 @@ struct FrameBody {
     arm: bool,
 }
 
+/// A local bound to a block literal that reads a field of `self` (BT-3952).
+struct FieldReader {
+    /// The block literals the local may hold (a rebinding in a nested block
+    /// keeps the old one, conservatively), and a block aliased from another
+    /// tracked local (`c := b`) carries that local's.
+    blocks: Vec<Block>,
+    /// Block nesting depth of the binding.
+    depth: usize,
+    /// Number of scope frames at the binding's definition: a deeper frame
+    /// that binds the same name (a shadowing parameter) is another variable.
+    scope_len: usize,
+    /// Something that may change the actor's state has been walked since the
+    /// binding, so a use now may see a stale value.
+    tainted: bool,
+}
+
 #[allow(clippy::struct_excessive_bools)] // independent per-walk flags of separate residual checks
 struct Walker<'d> {
     context: MethodContext,
@@ -1757,6 +1814,17 @@ struct Walker<'d> {
     /// The block literals already reported as escaping (one diagnostic per
     /// block, whichever way it is first seen to escape).
     reported_blocks: HashSet<Span>,
+    /// Locals bound to a block literal that reads a field of `self` in an
+    /// actor method, by name (BT-3952): a later escape of the local (`^b`,
+    /// `self foo: b`, `self.cb := b`) is the block's escape.
+    field_reading_locals: HashMap<EcoString, FieldReader>,
+    /// Per enclosing block (outermost first), whether it contains anything
+    /// that may change the actor's state ([`block_may_change_actor_state`]).
+    block_changes_state: Vec<bool>,
+    /// Set while the condition block of a `whileTrue:`/`whileFalse:` is about
+    /// to be walked, when its body may change the actor's state: the
+    /// condition re-runs after the body (BT-3952).
+    pending_loop_changes: Option<bool>,
     /// The escaping-block diagnostics, keyed by the assignment they report
     /// and the block that escapes, in walk order ([`Walker::report_escape`]).
     escaping_writes: Vec<(Span, Span, Diagnostic)>,
@@ -1836,6 +1904,9 @@ impl<'d> Walker<'d> {
             value_operands,
             value_block_writes: HashMap::new(),
             reported_blocks: HashSet::new(),
+            field_reading_locals: HashMap::new(),
+            block_changes_state: Vec::new(),
+            pending_loop_changes: None,
             escaping_writes: Vec::new(),
             method_selector: None,
             operand_sites: HashSet::new(),
@@ -1993,6 +2064,9 @@ impl<'d> Walker<'d> {
         writes_outer_locals.sort();
         writes_outer_locals.dedup();
         self.writes_outer_local_blocks.push(writes_outer_locals);
+        let loop_changes = self.pending_loop_changes.take().unwrap_or(false);
+        self.block_changes_state
+            .push(self.context == Actor && (loop_changes || block_may_change_actor_state(block)));
         let listed = std::mem::take(&mut self.pending_group_by_assign_block);
         let unmeasured = std::mem::take(&mut self.pending_unmeasured_block);
         self.unmeasured_blocks.push(unmeasured);
@@ -2006,6 +2080,7 @@ impl<'d> Walker<'d> {
         self.containers.pop();
         self.unmeasured_blocks.pop();
         self.writes_outer_local_blocks.pop();
+        self.block_changes_state.pop();
         self.group_by_assign_blocks.pop();
         self.direct_blocks.pop();
         self.block_frames.pop();
@@ -2014,6 +2089,38 @@ impl<'d> Walker<'d> {
     /// Leaves the innermost scope frame.
     fn pop_frame(&mut self) {
         self.scope.pop();
+        let len = self.scope.len();
+        self.field_reading_locals.retain(|_, r| r.scope_len <= len);
+    }
+
+    /// The tracked field-reading local `name` (BT-3952), unless a deeper scope
+    /// frame binds the same name (a shadowing parameter or block local).
+    fn tracked_local(&self, name: &str) -> Option<&FieldReader> {
+        let reader = self.field_reading_locals.get(name)?;
+        let shadowed = self
+            .scope
+            .get(reader.scope_len..)
+            .is_none_or(|frames| frames.iter().any(|f| f.contains(name)));
+        (!shadowed).then_some(reader)
+    }
+
+    /// The first tracked local `block` captures (a use of it anywhere in the
+    /// block, nested blocks included, unless the block takes a parameter of
+    /// that name): its tracked blocks, and where the block mentions it.
+    fn captured_tracked(&self, block: &Block) -> Option<(Vec<Block>, Span)> {
+        let mut found = None;
+        for stmt in &block.body {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                if let Expression::Identifier(id) = e {
+                    if found.is_none() && !block.parameters.iter().any(|p| p.name == id.name) {
+                        if let Some(reader) = self.tracked_local(&id.name) {
+                            found = Some((reader.blocks.clone(), id.span));
+                        }
+                    }
+                }
+            });
+        }
+        found
     }
 
     /// Walks `expr` as an operand: a block literal is walked as a block (of
@@ -2031,8 +2138,21 @@ impl<'d> Walker<'d> {
         }
     }
 
-    #[allow(clippy::too_many_lines)] // one arm per expression kind
     fn expr(&mut self, expr: &Expression, position: Position) {
+        let changes_state = self.context == Actor && may_change_actor_state(expr);
+        self.expr_inner(expr, position);
+        // Post-order (BT-3952): the operands run before the write or the
+        // self-send itself, so a use inside them (`self.n := b value + 1`)
+        // still sees the state the block was made with.
+        if changes_state {
+            for reader in self.field_reading_locals.values_mut() {
+                reader.tainted = true;
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_lines)] // one arm per expression kind
+    fn expr_inner(&mut self, expr: &Expression, position: Position) {
         let nested = self.depth > 0;
         match expr {
             Expression::Parenthesized { expression, .. } => {
@@ -2145,7 +2265,15 @@ impl<'d> Walker<'d> {
                 };
                 self.pending_group_by_assign_block = listed(receiver, None);
                 self.pending_unmeasured_block = unmeasured(receiver);
+                // A loop's condition re-runs after its body (BT-3952).
+                self.pending_loop_changes = Some(self.context == Actor
+                    && matches!(selector.name().as_str(), "whileTrue:" | "whileFalse:")
+                    && matches!(receiver.unwrap_parens(), Expression::Block(_))
+                    && arguments.iter().any(|a| {
+                        matches!(a, Expression::Block(body) if block_may_change_actor_state(body))
+                    }));
                 self.operand_in(receiver, Position::Receiver, receiver_role);
+                self.pending_loop_changes = None;
                 self.pending_frame_body = None;
                 self.pending_group_by_assign_block = false;
                 self.pending_unmeasured_block = false;
@@ -2257,8 +2385,8 @@ impl<'d> Walker<'d> {
             }
             // A local bound to a writing block was reported where it was bound
             // (`note_block_binding`), so a later escape of the local is not.
-            Expression::Identifier(_)
-            | Expression::Literal(..)
+            Expression::Identifier(id) => self.note_local_escape(id),
+            Expression::Literal(..)
             | Expression::ClassReference { .. }
             | Expression::Super(_)
             | Expression::Primitive { .. }
@@ -2276,6 +2404,58 @@ impl<'d> Walker<'d> {
     /// writes the `b` this assignment binds). A later use of `name` (`^b`,
     /// `self foo: b`) is not reported again.
     fn note_block_binding(&mut self, name: &EcoString, value: &Expression) {
+        // A block that reads a field of `self`, or sends to it, is remembered
+        // for a later escape of the local (BT-3952); an alias (`c := b`)
+        // carries the aliased local's blocks.
+        let mut found: Vec<Block> = Vec::new();
+        if self.context == Actor {
+            for block in value_blocks(value) {
+                if self.escape_write_of(block).is_none()
+                    && (!outer_state_reads(block).is_empty() || outer_self_send(block).is_some())
+                {
+                    found.push(block.clone());
+                }
+                // A wrapper that captures a tracked local (`c := [b value]`)
+                // holds the blocks that local does.
+                if let Some((captured, _)) = self.captured_tracked(block) {
+                    found.extend(captured);
+                }
+            }
+            for id in value_locals(value) {
+                if let Some(reader) = self.tracked_local(&id.name) {
+                    found.extend(reader.blocks.clone());
+                }
+            }
+        }
+        let scope_len = self.scope.len();
+        let defined_at = self
+            .scope
+            .iter()
+            .position(|f| f.contains(name))
+            .map_or(scope_len, |i| i + 1);
+        match self.field_reading_locals.get_mut(name) {
+            // A rebinding in a nested block (a conditional arm) may or may not
+            // run: the local may still hold the old block, or the new one.
+            Some(old) if scope_len > old.scope_len => old.blocks.extend(found),
+            _ => {
+                self.field_reading_locals.remove(name);
+                if !found.is_empty() {
+                    self.field_reading_locals.insert(
+                        name.clone(),
+                        FieldReader {
+                            blocks: found,
+                            depth: if scope_len == defined_at {
+                                self.depth
+                            } else {
+                                0
+                            },
+                            scope_len: defined_at,
+                            tainted: false,
+                        },
+                    );
+                }
+            }
+        }
         for block in value_blocks(value) {
             let write = self
                 .value_block_writes
@@ -2285,6 +2465,36 @@ impl<'d> Walker<'d> {
             if let Some(write) = write {
                 self.report_escape(block, &write, &Escape::Stored(name.clone()), None);
             }
+        }
+    }
+
+    /// A use of the local `id` (BT-3952): when it is bound to a block that
+    /// reads a field and the use itself is a returned or stored operand
+    /// ([`escape_map`]), the block escapes that way. A use as a message
+    /// argument is [`Self::check_send`]'s.
+    fn note_local_escape(&mut self, id: &crate::ast::Identifier) {
+        let Some(reader) = self.tracked_local(&id.name) else {
+            return;
+        };
+        let blocks = reader.blocks.clone();
+        // A use after something that may change the state, or inside a block
+        // (a loop body, say) that may change it on another iteration, sees the
+        // `State` the block was made with. Textual order is the walk's order.
+        let stale_use = reader.tainted
+            || self
+                .block_changes_state
+                .iter()
+                .skip(reader.depth)
+                .any(|changes| *changes);
+        let escape = match self.escapes.get(&id.span) {
+            Some(EscapeShape::StoredClassVar) => Escape::StoredState,
+            Some(EscapeShape::Returned) => Escape::Returned,
+            Some(EscapeShape::StoredInLiteral) => Escape::InLiteral,
+            _ if stale_use => Escape::LaterUse(id.name.clone()),
+            _ => return,
+        };
+        for block in &blocks {
+            self.report_stale_read(block, &escape);
         }
     }
 
@@ -2718,8 +2928,7 @@ impl<'d> Walker<'d> {
             return false;
         };
         matches!(self.context, Actor | Class)
-            && (matches!(receiver.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
-                || matches!(receiver.unwrap_parens(), Expression::Super(_)))
+            && is_self_or_super(receiver)
             && local_threading_construct(expr)
                 .is_some_and(|c| c.family == LocalThreadingFamily::Fold)
     }
@@ -2829,7 +3038,14 @@ impl<'d> Walker<'d> {
             };
             Escape::ActorSelfSend(word, owner, sel.clone())
         } else if inlined {
-            self.passed_escape(receiver, &sel)
+            if self.context == Actor && is_self_or_super(receiver) {
+                Escape::ActorSelfCall(sel.clone())
+            } else {
+                self.passed_escape(receiver, &sel)
+            }
+        } else if self.context == Actor && is_self_or_super(receiver) {
+            // A cascade to `self` dispatches to the actor's own method too.
+            Escape::SelfCascade(sel.clone())
         } else {
             Escape::Cascade(sel.clone())
         };
@@ -2841,6 +3057,15 @@ impl<'d> Walker<'d> {
             }
             for block in value_blocks(arg) {
                 self.report_literal(block, &escape);
+            }
+            // A local bound to a block that reads a field (BT-3952).
+            if let Expression::Identifier(id) = arg.unwrap_parens() {
+                if let Some(reader) = self.tracked_local(&id.name) {
+                    let blocks = reader.blocks.clone();
+                    for block in &blocks {
+                        self.report_stale_read(block, &escape);
+                    }
+                }
             }
         }
     }
@@ -2910,7 +3135,11 @@ impl<'d> Walker<'d> {
         let Some(row) = residual_denied(Residual::EvaluatedBlockValue, self.context) else {
             return;
         };
-        if self.inline_local_reported.contains(&expr.span()) {
+        if self
+            .inline_local_reported
+            .iter()
+            .any(|r| r.start() <= expr.span().start() && expr.span().end() <= r.end())
+        {
             return;
         }
         if !inline_block_threads(block, self.context.root_method_kind()) {
@@ -3276,9 +3505,123 @@ impl<'d> Walker<'d> {
     /// Reports `block` as escaping (`escape`) if it assigns a captured local.
     fn report_literal(&mut self, block: &Block, escape: &Escape) {
         let Some(write) = self.escape_write_of(block) else {
+            self.report_stale_read(block, escape);
             return;
         };
         self.report_escape(block, &write, escape, None);
+    }
+
+    /// BT-3952: a block that sends to `self` or `super` and is *stored*
+    /// (assigned to a field, returned, placed in a literal or the result of a
+    /// collection operation, or bound to a local that does one of those)
+    /// dispatches against the captured `State` when it runs. A block passed to
+    /// the actor's own method is exempt (BT-3936's runtime check covers its
+    /// callee), and so is a local's later call. Any send counts, `self class`
+    /// included: whether the selector reads state is not known here.
+    fn report_stale_self_send(&mut self, block: &Block, escape: &Escape) {
+        if !matches!(
+            escape,
+            Escape::StoredState | Escape::Returned | Escape::InLiteral | Escape::CollectionResult
+        ) {
+            return;
+        }
+        let found = outer_self_send(block).or_else(|| {
+            // A tracked local the block captures holds a block that sends.
+            let (blocks, at) = self.captured_tracked(block)?;
+            blocks
+                .iter()
+                .find_map(outer_self_send)
+                .map(|(word, selector, _)| (word, selector, at))
+        });
+        let Some((word, selector, span)) = found else {
+            return;
+        };
+        if !self.reported_blocks.insert(block.span) {
+            return;
+        }
+        let diagnostic = Diagnostic::error(
+            format!(
+                "`{word} {selector}` is sent in a block that runs later; it would see the \
+                 actor's state from when the block was made"
+            ),
+            span,
+        )
+        .with_hint(
+            "compute the value first and capture it (`total := self total`, then `[total]`), \
+             or send the message after the call. Any send to `self` or `super` is rejected \
+             here, because whether the selector reads state is not known",
+        )
+        .with_note("the block", Some(block.span))
+        .with_note(
+            format!(
+                "the block is {}, so it may run after a later write to a field (ADR 0133)",
+                escape.fragment(self.method_selector.as_deref())
+            ),
+            None,
+        )
+        .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel);
+        self.push_escaping(span, block.span, diagnostic);
+    }
+
+    /// BT-3952 (ADR 0133 amendment): in an actor instance method, a block that
+    /// reads `self.field` (anywhere in its body, nested blocks included, or
+    /// through a tracked local it captures) and escapes by an
+    /// [`Escape::may_read_stale_state`] shape reads the `State` captured when
+    /// the block was made, not the actor's current one. Whether a write
+    /// intervenes before it runs cannot be told statically, so every such
+    /// block is rejected, at the first read.
+    fn report_stale_read(&mut self, block: &Block, escape: &Escape) {
+        if self.context != Actor || !escape.may_read_stale_state() {
+            return;
+        }
+        let direct = outer_state_reads(block).into_iter().next();
+        let found = direct
+            .map(|read| {
+                let at = read.span;
+                (read, at)
+            })
+            .or_else(|| {
+                let (blocks, at) = self.captured_tracked(block)?;
+                blocks
+                    .iter()
+                    .find_map(|b| outer_state_reads(b).into_iter().next())
+                    .map(|read| (read, at))
+            });
+        let Some((read, at)) = found else {
+            self.report_stale_self_send(block, escape);
+            return;
+        };
+        if !self.reported_blocks.insert(block.span) {
+            return;
+        }
+        // A reflective read is named `self fieldAt:` / `super fieldAt:`.
+        let (name, shown) = if read.name.ends_with(':') {
+            (read.name.to_string(), format!("{} #key", read.name))
+        } else {
+            let field = format!("self.{}", read.name);
+            (field.clone(), field)
+        };
+        let diagnostic = Diagnostic::error(
+            format!(
+                "`{name}` is read in a block that runs later; it would see the value from when \
+                 the block was made"
+            ),
+            at,
+        )
+        .with_hint(format!(
+            "pass the value in (`[:v | ...]`, with the method that runs the block doing \
+             `block value: {shown}`), or read the field after the call"
+        ))
+        .with_note("the block", Some(block.span))
+        .with_note(
+            format!(
+                "the block is {}, so it may run after a later write to the field (ADR 0133)",
+                escape.fragment(self.method_selector.as_deref())
+            ),
+            None,
+        )
+        .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel);
+        self.push_escaping(at, block.span, diagnostic);
     }
 
     /// The ADR 0133 diagnostic: `write` (the block's first assignment to a
@@ -3326,20 +3669,24 @@ impl<'d> Walker<'d> {
         // One diagnostic per assignment: a write inside nested escaping blocks
         // (`f := [:d | d at: k ifAbsent: [t := t + 1]]`) is reported for the
         // outermost one, which is the escape to fix.
+        self.push_escaping(write.span, block.span, diagnostic);
+    }
+
+    /// Records the escaping-block `diagnostic` found at `at` for `block`,
+    /// keeping the outermost block's when nested blocks report the same site.
+    fn push_escaping(&mut self, at: Span, block: Span, diagnostic: Diagnostic) {
         let within =
             |outer: Span, inner: Span| outer.start() <= inner.start() && inner.end() <= outer.end();
         match self
             .escaping_writes
             .iter_mut()
-            .find(|(at, ..)| *at == write.span)
+            .find(|(found, ..)| *found == at)
         {
-            Some(entry) if within(block.span, entry.1) => {
-                *entry = (write.span, block.span, diagnostic);
+            Some(entry) if within(block, entry.1) => {
+                *entry = (at, block, diagnostic);
             }
             Some(_) => {}
-            None => self
-                .escaping_writes
-                .push((write.span, block.span, diagnostic)),
+            None => self.escaping_writes.push((at, block, diagnostic)),
         }
     }
 
