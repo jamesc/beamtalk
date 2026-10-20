@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3966: DynamicSupervisor>>children lists the pool's live children as
+// objects of its child class.
+
+TestCase subclass: DynamicSupervisorChildrenTest
+
+  testChildrenIsEmptyAtStart =>
+    pool := Bt3966WorkerPool spawn
+    self assert: pool children isEmpty equals: true
+    pool stop
+
+  testChildrenListsStartedChildren =>
+    pool := Bt3966WorkerPool spawn
+    a := pool startChild unwrap
+    b := pool startChild unwrap
+    kids := pool children
+    self assert: kids size equals: 2
+    self assert: (kids includes: a) equals: true
+    self assert: (kids includes: b) equals: true
+    self assert: (kids collect: [:w | w ping]) equals: #(#pong, #pong)
+    pool stop
+
+  testChildrenDropsTerminatedChild =>
+    pool := Bt3966WorkerPool spawn
+    a := pool startChild unwrap
+    b := pool startChild unwrap
+    (pool terminateChild: a) unwrap
+    self assert: pool children equals: #(b)
+    (pool terminateChild: b) unwrap
+    self assert: pool children isEmpty equals: true
+    pool stop
+
+  testChildrenOnStoppedPoolIsStaleHandle =>
+    pool := Bt3966WorkerPool spawn
+    pool stop
+    self should: [pool children] raise: #stale_handle

@@ -281,6 +281,50 @@ impl CoreErlangGenerator {
             || (self.block_arg_needs_threading(body) && self.loop_has_ambient_carrier(body))
     }
 
+    /// BT-3999: whether a `whileTrue:`/`whileFalse:` `condition` has a state
+    /// effect the loop carries, so the condition is compiled in the loop's own
+    /// frame and hands back `{Bool, StateAcc}`.
+    ///
+    /// The effect itself is core's one rule
+    /// ([`while_condition_has_state_effects`](beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects):
+    /// a field write, a self-send, a stored-block call or an opaque-callable HOM
+    /// send; none in a class method). It is the condition-side twin of
+    /// [`Self::loop_body_has_carried_mutations`] (BT-3834): an effect counts only
+    /// when the loop has something to carry it in. That is a threaded outer
+    /// local (the loop's set over `condition` and `body`, ADR 0131's one
+    /// recognizer) or the scope's ambient carrier for the condition or the body
+    /// ([`Self::loop_has_ambient_carrier`]: the actor `State`, the REPL bindings,
+    /// a `SelfVt` family). Anywhere else (a value-type or `TestCase` method that
+    /// writes no field) a self-send in the condition rebinds nothing, and
+    /// answering `true` there opened a locals-less `StateAcc` loop seeded from
+    /// an unbound `State` (`[self done] whileTrue: [nil]`, caught by
+    /// `ClassMethodDefect::StateAccLoopWithoutLocals` in the `ValueType` scope).
+    ///
+    /// `body` is the loop's literal body block when it has one; without one
+    /// only the condition's own locals and carrier are consulted.
+    pub(in crate::core_erlang) fn while_condition_has_carried_effects(
+        &self,
+        condition: &Expression,
+        body: Option<&Block>,
+    ) -> bool {
+        let Expression::Block(cond_block) = condition else {
+            return false;
+        };
+        if !beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
+            condition,
+            self.in_class_method(),
+        ) {
+            return false;
+        }
+        let threaded_locals = match body {
+            Some(body) => self.loop_threaded_locals(body, Some(condition)),
+            None => self.loop_threaded_locals(cond_block, None),
+        };
+        !threaded_locals.is_empty()
+            || self.loop_has_ambient_carrier(cond_block)
+            || body.is_some_and(|body| self.loop_has_ambient_carrier(body))
+    }
+
     /// Whether a loop over `body` that threads no local still has a map to
     /// seed a `StateAcc` with: the REPL bindings, or a family the body
     /// threads (the actor `State`, `SelfVt` in a value-type method that

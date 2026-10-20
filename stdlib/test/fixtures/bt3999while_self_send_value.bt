@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3999: `whileTrue:`/`whileFalse:` loops whose condition sends to `self`
+// and whose body writes no outer local, in a value-type method (the scope a plain-object instance method compiles in too). Each one
+// failed `erlc` with `unbound variable 'State'`. See
+// stdlib/test/bt3999while_self_send_condition_test.bt.
+
+Value subclass: Bt3999WhileSelfSendValue
+
+  done => false
+
+  yes => true
+
+  isAlive: n => n > 0
+
+  emptyBody =>
+    [self done] whileTrue: [nil]
+    #ok
+
+  keywordCondition =>
+    [self isAlive: 0] whileTrue: [nil]
+    #ok
+
+  localArgument =>
+    n := 0
+    [self isAlive: n] whileTrue: [Timer sleep: 10]
+    #ok
+
+  andTrue =>
+    n := 0
+    [(self isAlive: n) and: [true]] whileTrue: [Timer sleep: 10]
+    #ok
+
+  andDeadline =>
+    n := 0
+    deadline := Time nowMs + 50
+    [
+      (self isAlive: n) and: [Time nowMs < deadline]
+    ] whileTrue: [Timer sleep: 10]
+    #ok
+
+  // The loop runs until the deadline: the condition is re-evaluated.
+  pollsUntilDeadline =>
+    deadline := Time nowMs + 30
+    [(self yes) and: [Time nowMs < deadline]] whileTrue: [Timer sleep: 5]
+    Time nowMs >= deadline
+
+  whileFalseUntilDeadline =>
+    deadline := Time nowMs + 30
+    [
+      (self isAlive: 0) or: [Time nowMs >= deadline]
+    ] whileFalse: [Timer sleep: 5]
+    Time nowMs >= deadline

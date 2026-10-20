@@ -265,14 +265,18 @@ struct BodyEffects {
 /// [`while_condition_has_state_effects`](beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects),
 /// which the ADR 0131 §6 validator reads too (BT-3845), so the validator's
 /// "this condition write threads" and this lowering cannot disagree.
+///
+/// BT-3999: an effect counts only when the loop carries it (a threaded local or
+/// the scope's ambient carrier), the condition-side twin of BT-3834's
+/// `loop_body_has_carried_mutations`; see
+/// [`CoreErlangGenerator::while_condition_has_carried_effects`]. `body` is the
+/// loop's literal body block, when it has one.
 pub(in crate::core_erlang) fn condition_has_state_effects(
     generator: &CoreErlangGenerator,
     condition: &Expression,
+    body: Option<&beamtalk_core::ast::Block>,
 ) -> bool {
-    beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
-        condition,
-        generator.in_class_method(),
-    )
+    generator.while_condition_has_carried_effects(condition, body)
 }
 
 impl BodyEffects {
@@ -293,7 +297,7 @@ impl BodyEffects {
         threaded_locals: &[String],
     ) -> Self {
         let cond_has_state_effects =
-            condition.is_some_and(|c| condition_has_state_effects(generator, c));
+            condition.is_some_and(|c| condition_has_state_effects(generator, c, Some(body)));
 
         // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
         // fall back to StateAcc mode so `generate_local_var_assignment_in_loop`

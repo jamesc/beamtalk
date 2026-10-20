@@ -533,6 +533,15 @@ repeat the same caution given to `spawnAs:`/`registerAs:`.
   survives restart) from `DynamicSupervisor count` (aggregate count only)
   and static `Supervisor which:` (fixed, class-declared children only).
 
+**Amendment (2026-10-20, BT-3966): `DynamicSupervisor children`.** The
+name-keyed point lookup above is still the recommended way to find one
+dynamic child. `DynamicSupervisor` now also has `children -> List(C)`, the
+live children, for bulk operations (drain, broadcast, collecting connection
+pids — Thousand Island's `connection_pids/1`, which Catalina needs). It is
+backed by `supervisor:which_children/1` and so pays the O(n) copy described
+above on every call; its doc says so and points single-child lookups to
+`startChild:name:` + `Actor named:`.
+
 **Regression test.** Start a child under a name via
 `startChild: args name: #x`, kill the resulting pid directly (not via
 `terminateChild:`), and confirm `(ChildClass named: #x) unwrap pid`

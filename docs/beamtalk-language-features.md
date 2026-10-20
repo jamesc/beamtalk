@@ -3546,7 +3546,7 @@ Inspect and manage children:
 
 ```beamtalk
 app count                                 // => 3  (number of running children)
-app children                              // => ["DatabasePool","HTTPRouter","MetricsCollector"]  (child ids)
+app children                              // => the 3 running child objects, in declaration order
 (app which: DatabasePool) unwrap           // => Actor(DatabasePool, _)  (running child instance)
 (app terminate: HTTPRouter) unwrap        // gracefully stop a single child; Result(Nil, Error)
 app stop                                  // stop the supervisor and all children (unchanged — Nil)
@@ -3556,6 +3556,43 @@ WebApp current                            // => nil
 ```
 
 `terminate:` is **idempotent** — terminating a child that is already gone returns `Result ok: nil`, not an error (see [idempotent-startup convention](#supervisor-idempotent-startup-convention-adr-0080) below).
+
+`which:` and `terminate:` find a child by its class, including one declared `withId:`. When several children share the class, both return `Result error:` with kind `#ambiguous_child` (and `terminate:` terminates nothing); use the by-id API below then.
+
+**By id (BT-3966).** Every child spec has an OTP id: the class name by default, or the `withId:` value (a Symbol or an Integer). These methods work on any supervisor instance — the `supervise` singleton, a `spawn`/`spawnWith:` instance, or a nested supervisor reached through `childWithId:` or `children`:
+
+```beamtalk
+Supervisor subclass: ServerSupervisor
+  strategy => #restForOne
+  childSpecs => #(
+    (Listener supervisionSpec withId: #listener withRestart: #permanent),
+    (AcceptorPoolSupervisor supervisionSpec withId: #acceptorPool withRestart: #permanent))
+
+server := ServerSupervisor spawn
+server whichChildren collect: [:c | c id]       // => #(#listener, #acceptorPool)
+listener := (server childWithId: #listener) unwrap
+(server terminateChild: #acceptorPool) unwrap   // suspend
+(server restartChild: #acceptorPool) unwrap     // resume => the new AcceptorPoolSupervisor
+(server terminateChild: #acceptorPool) unwrap
+(server deleteChild: #acceptorPool) unwrap      // drop the spec for good
+```
+
+| Method | Returns | Errors |
+|--------|---------|--------|
+| `children` | `List(Object)`: the running children, in declaration order | raises `#stale_handle` |
+| `whichChildren` | `List(SupervisorChild)`: one per spec, in declaration order, incl. restarting/stopped | raises `#stale_handle` |
+| `childWithId: id` | `Result`: the running child, or `ok: nil` if the spec's child is restarting/stopped | `#child_not_found`, `#type_error`, `#stale_handle` |
+| `terminateChild: id` | `Result ok: nil`; idempotent for an unknown or already-gone id | `#terminate_failed`, `#type_error`, `#stale_handle` |
+| `restartChild: id` | `Result`: the newly started child | `#child_not_found`, `#child_running`, `#child_start_failed`, `#type_error`, `#stale_handle` |
+| `deleteChild: id` | `Result ok: nil` | `#child_not_found`, `#child_running`, `#type_error`, `#stale_handle` |
+
+A `SupervisorChild` is a value with `id`, `child` (nil unless running), `status` (`#running`, `#restarting` or `#stopped`), `type` (`#worker` or `#supervisor`) and `childClass` (nil for a non-Beamtalk module), plus `isRunning` and `isSupervisor`.
+
+> **`restartChild:` needs a `#permanent` or `#transient` child.** The default restart policy is `#temporary`, and OTP removes a temporary child's spec as soon as it terminates, so `restartChild:` on it returns `#child_not_found` (and `terminateChild:` on it again returns `ok: nil`). Declare `withRestart: #permanent` on children you suspend and resume.
+
+**Breaking (BT-3966):** `Supervisor>>children` used to return the child ids as Symbols. It now returns the running child objects, the same as `DynamicSupervisor>>children`; use `whichChildren collect: [:c | c id]` for the ids.
+
+`DynamicSupervisor` has `children -> List(C)`: its live children (restarting ones left out, order unspecified). It copies the whole child list out of the supervisor in one message, O(n) in the number of children, so use it for bulk operations (drain, broadcast) and `startChild:name:` + `ChildClass named:` to find one child. `simple_one_for_one` children have no ids, so `DynamicSupervisor` has no `whichChildren`/`childWithId:`/`restartChild:`/`deleteChild:`; its `terminateChild:` takes the child object.
 
 ### Configuration Defaults
 

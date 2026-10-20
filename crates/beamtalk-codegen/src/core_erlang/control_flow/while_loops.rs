@@ -68,7 +68,7 @@ impl CoreErlangGenerator {
         body_block: &beamtalk_core::ast::Block,
     ) -> bool {
         self.loop_body_has_carried_mutations(body_block)
-            || super::condition_has_state_effects(self, condition)
+            || super::condition_has_state_effects(self, condition, Some(body_block))
     }
 
     pub(in crate::core_erlang) fn generate_while_true(
@@ -255,7 +255,7 @@ impl CoreErlangGenerator {
         // effects (a self-send, or an `and:`/`or:`/`ifTrue:ifFalse:` that
         // carries one) — decides whether `CondFun` must return a
         // `{Bool, FinalStateAcc}` pair instead of a bare boolean, below.
-        let cond_effects = super::condition_has_state_effects(self, condition);
+        let cond_effects = super::condition_has_state_effects(self, condition, Some(body));
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
