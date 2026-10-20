@@ -7,9 +7,9 @@
 
 Supervisor subclass: Bt3965ImpatientSup
 
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
 
-  class children -> List =>
+  childSpecs -> List =>
     spec := (Bt3965SlowStopper supervisionSpec withArgs: #{
       #tableName => #bt3965Shutdown
     }) withShutdown: 50

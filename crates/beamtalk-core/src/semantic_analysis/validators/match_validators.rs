@@ -916,7 +916,7 @@ mod tests {
     #[test]
     fn type_pattern_supervisor_subclass_no_diagnostics() {
         let (module, hierarchy) = hierarchy_for(
-            "Supervisor subclass: WebApp\n  class children => #()\nx match: [s :: WebApp -> s; _ -> 0]",
+            "Supervisor subclass: WebApp\n  childSpecs => #()\nx match: [s :: WebApp -> s; _ -> 0]",
         );
         let mut diagnostics = Vec::new();
         check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
@@ -930,7 +930,7 @@ mod tests {
     #[test]
     fn type_pattern_dynamic_supervisor_subclass_no_diagnostics() {
         let (module, hierarchy) = hierarchy_for(
-            "Object subclass: Widget\nDynamicSupervisor(Widget) subclass: Pool\n  class childClass => Widget\nx match: [p :: Pool -> p; _ -> 0]",
+            "Object subclass: Widget\nDynamicSupervisor(Widget) subclass: Pool\n  childClass => Widget\nx match: [p :: Pool -> p; _ -> 0]",
         );
         let mut diagnostics = Vec::new();
         check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);

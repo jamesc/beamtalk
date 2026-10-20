@@ -309,7 +309,7 @@ fn run_service_mode_status_lines_go_to_stderr_not_stdout() {
          \n\
          Supervisor subclass: SmokeSup\n\
          \n\
-         \x20\x20class children => #()\n",
+         \x20\x20childSpecs => #()\n",
     )
     .unwrap();
 

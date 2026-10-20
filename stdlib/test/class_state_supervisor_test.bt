@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3407: classState value set via one class-method call must be visible to
-// another class-method call on the same class — specifically inside a
-// Supervisor's `class children`, invoked via the deadlock-avoiding
-// `static_init` bypass path. See stdlib/test/fixtures/class_state_sup_app.bt.
+// the supervisor's configuration (instance-side `childSpecs` since ADR 0135,
+// which runs inside the supervisor's own `init`). See
+// stdlib/test/fixtures/class_state_sup_app.bt.
 
 TestCase subclass: ClassStateSupervisorTest
   field: sup = nil
@@ -13,6 +13,7 @@ TestCase subclass: ClassStateSupervisorTest
 
   testClassStateSetBeforeSuperviseIsVisibleInChildren =>
     ClassStateSupApp configure: #{#label => "hello"}
-    self.sup := ClassStateSupApp supervise unwrap
-    w :: ClassStateSupWorker := (self.sup which: ClassStateSupWorker) unwrap
+    self.sup := ClassStateSupRoot supervise unwrap
+    app :: ClassStateSupApp := (self.sup which: ClassStateSupApp) unwrap
+    w :: ClassStateSupWorker := (app which: ClassStateSupWorker) unwrap
     self assert: w label equals: "hello"
