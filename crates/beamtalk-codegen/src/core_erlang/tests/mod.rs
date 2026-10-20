@@ -200,6 +200,7 @@ mod block_value_arity_agreement;
 mod branch_context;
 mod cascade_operand_state_corpus;
 mod closed_fun_state_version;
+mod closure_self_send_state_guard_corpus;
 mod control_flow;
 mod dispatch;
 mod expect_directive_statement;
