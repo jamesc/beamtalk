@@ -3153,8 +3153,12 @@ other setX: 7`) is a compile error: it is an ordinary send, not a self-send,
 and the state change it makes is lost when the message ends. So is any send
 to such a local after an earlier field write in the same method. Read-only
 reflective sends to it (`other fieldNames`, `other fieldAt: #x`) and `!` casts
-(`other foo!`) are fine. Every user method counts as state-changing, since the
-compiler cannot tell. Send to `self` directly. ADR 0137 will lift this.
+(`other foo!`) are fine. Every other selector, including every user method
+and overridable ones such as `printString`, counts as state-changing, since the
+compiler cannot tell. Send to `self` directly. The check is narrow: it only
+finds a local assigned from a bare `self`, not `self` passed as an argument,
+`self yourself`, or `self` read back out of a collection, which can still lose
+a write until ADR 0137 lifts this restriction.
 
 ### Deadlock Prevention
 

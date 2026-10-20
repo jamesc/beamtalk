@@ -1456,18 +1456,11 @@ fn check_method_for_self_alias_send(method: &MethodDefinition, diagnostics: &mut
     }
 }
 
-/// Selectors that only read, whichever object answers: an alias send of one
-/// cannot lose a write.
-const READ_ONLY_REFLECTIVE_SELECTORS: &[&str] = &[
-    "fieldNames",
-    "fieldAt:",
-    "class",
-    "respondsTo:",
-    "printString",
-    "displayString",
-    "isNil",
-    "notNil",
-];
+/// Selectors that only read and that a class cannot override, so an alias
+/// send of one cannot lose a write. Overridable selectors such as
+/// `printString` or `isNil` are left out: an actor's own `printString` may
+/// write a field, and that write would be lost through the alias.
+const READ_ONLY_REFLECTIVE_SELECTORS: &[&str] = &["fieldNames", "fieldAt:", "class"];
 
 /// Builds the diagnostic for an unsafe field mutation in a block closure.
 ///
@@ -2523,6 +2516,24 @@ mod tests {
             "Actor subclass: A\n  state: x = 0\n  m =>\n    other := self\n    other fieldAt: #x put: 42",
         );
         assert_eq!(d.len(), 1, "{d:?}");
+    }
+
+    #[test]
+    fn actor_alias_send_of_an_overridable_selector_errors() {
+        // An actor's own `printString` may write a field; through the alias
+        // that write is lost, so only non-overridable reflection is exempt.
+        for sel in [
+            "printString",
+            "displayString",
+            "isNil",
+            "notNil",
+            "respondsTo: #x",
+        ] {
+            let d = self_alias_diagnostics(&format!(
+                "Actor subclass: A\n  state: hits = 0\n  m =>\n    o := self\n    o {sel}"
+            ));
+            assert_eq!(d.len(), 1, "{sel}: {d:?}");
+        }
     }
 
     #[test]
