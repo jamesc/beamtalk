@@ -304,8 +304,7 @@ fn run_script(
 
     eprintln!("\nRunning {class_name}>>{selector}...");
 
-    // epmd: unnamed node — run-mode script nodes are not distributed.
-    let mut cmd = Command::new("erl");
+    let mut cmd = beamtalk_workspace::erl_command();
     cmd.arg("-noshell")
         .args(&args)
         .current_dir(project_root.as_std_path())
@@ -673,15 +672,15 @@ fn node_name_flag(node_name: &str) -> &'static str {
 /// Build the `erl -noshell -hidden` command for a short-lived named client
 /// node that RPCs into the workspace (`args` carries its `-sname`/`-name`).
 ///
-/// A named node starts epmd if none is running, so epmd's bind address is
-/// pinned via [`beamtalk_workspace::pin_epmd_loopback`] (BT-3987).
+/// A named node starts epmd if none is running, so this goes through
+/// [`beamtalk_workspace::erl_command`], which pins epmd's bind address
+/// (BT-3987).
 fn hidden_client_command(args: &[OsString], project_root: &std::path::Path) -> Command {
-    let mut cmd = Command::new("erl");
+    let mut cmd = beamtalk_workspace::erl_command();
     cmd.arg("-noshell")
         .arg("-hidden")
         .args(args)
         .current_dir(project_root);
-    beamtalk_workspace::pin_epmd_loopback(&mut cmd);
     cmd
 }
 
@@ -1098,15 +1097,14 @@ mod tests {
     #[test]
     fn test_hidden_client_command_pins_epmd_address() {
         // BT-3987: the probe/RPC client is a named node, so it must hand erl
-        // the resolved epmd address (loopback unless the operator set one).
+        // an explicit epmd address (the value rule is beamtalk_workspace's).
         let args = [OsString::from("-sname"), OsString::from("probe@localhost")];
         let cmd = hidden_client_command(&args, std::path::Path::new("."));
         let epmd = cmd
             .get_envs()
             .find(|(k, _)| *k == std::ffi::OsStr::new("ERL_EPMD_ADDRESS"))
-            .and_then(|(_, v)| v)
-            .map(|v| v.to_string_lossy().into_owned());
-        assert_eq!(epmd, Some(beamtalk_workspace::resolve_epmd_address()));
+            .and_then(|(_, v)| v);
+        assert!(epmd.is_some(), "ERL_EPMD_ADDRESS must be set");
     }
 
     #[test]

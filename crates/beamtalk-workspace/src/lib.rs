@@ -188,17 +188,25 @@ pub fn beamtalk_root_dir() -> Result<PathBuf> {
 /// BEAM node (ADR 0091 Decision 5), so a node that *starts* epmd (there is
 /// only one epmd per machine; whoever gets there first sets its bind
 /// address for as long as it keeps running) never exposes the port mapper
-/// on `0.0.0.0`. Shared by `beamtalk-cli`'s workspace startup
-/// (`commands::workspace::startup_command`) and
-/// `beamtalk-desktop-broker`'s front spawn (`spawn::build_env`) — both set
-/// `ERL_EPMD_ADDRESS` in the child process env from this same resolution,
-/// rather than each re-deriving the "does the operator want to override
-/// loopback" policy independently. Never returns `"0.0.0.0"` on its own —
-/// an operator who explicitly exports that anyway is making their own
-/// informed choice, not something this function should second-guess.
+/// on `0.0.0.0`. Shared by every `erl` spawn in `beamtalk-cli` (via
+/// [`pin_epmd_loopback`] / [`erl_command`]) and `beamtalk-desktop-broker`'s
+/// front spawn (`spawn::build_env`) — both set `ERL_EPMD_ADDRESS` in the
+/// child process env from this same resolution, rather than each
+/// re-deriving the "does the operator want to override loopback" policy
+/// independently.
+///
+/// An empty or whitespace-only value counts as unset: epmd reads an empty
+/// address list as "every interface", so passing it through would produce
+/// exactly the wildcard epmd this rule exists to prevent (BT-3987). Never
+/// returns `"0.0.0.0"` on its own — an operator who explicitly exports that
+/// anyway is making their own informed choice, not something this function
+/// should second-guess.
 #[must_use]
 pub fn resolve_epmd_address() -> String {
-    std::env::var(EPMD_ADDRESS_VAR).unwrap_or_else(|_| DEFAULT_EPMD_ADDRESS.to_string())
+    std::env::var(EPMD_ADDRESS_VAR)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_EPMD_ADDRESS.to_string())
 }
 
 /// The environment variable `erl`/`epmd` read for epmd's bind address.
@@ -207,20 +215,24 @@ pub const EPMD_ADDRESS_VAR: &str = "ERL_EPMD_ADDRESS";
 /// Loopback: the address epmd binds when the operator hasn't chosen one.
 pub const DEFAULT_EPMD_ADDRESS: &str = "127.0.0.1";
 
-/// Apply the [`resolve_epmd_address`] rule to an `erl` command that starts a
-/// **named** (distributed) node, i.e. any `erl` spawn passing `-sname` or
-/// `-name` (BT-3987). Such a node runs `epmd -daemon` if none is running, and
-/// that daemon binds every interface unless `ERL_EPMD_ADDRESS` is set, keeping
-/// that posture until killed. Every named-node `erl` spawn in `beamtalk-cli`
-/// must go through this helper; `beamtalk-cli`'s
-/// `named_erl_spawns_pin_epmd_loopback` lint fails otherwise.
+/// Apply the [`resolve_epmd_address`] rule to an `erl` command (BT-3987).
+///
+/// A distributed node (`-sname`/`-name`, which can also arrive via
+/// `ERL_FLAGS`/`ERL_AFLAGS`/`ERL_ZFLAGS` or an `-args_file`) runs
+/// `epmd -daemon` if none is running, and that daemon binds every interface
+/// unless `ERL_EPMD_ADDRESS` is set, keeping that posture until killed. A
+/// node that never starts distribution ignores the variable, so
+/// `beamtalk-cli` pins it on **every** `erl` it spawns rather than trying to
+/// tell named spawns from unnamed ones; its `erl_spawns_pin_epmd_loopback`
+/// lint fails on a spawn that skips this helper. Call it *after* any
+/// `cmd.env_clear()`, which would otherwise wipe the pin.
 ///
 /// The value the child sees is decided in this order:
 ///
-/// 1. The command already sets `ERL_EPMD_ADDRESS` explicitly (`cmd.env(..)`):
+/// 1. The command already sets a non-empty `ERL_EPMD_ADDRESS` (`cmd.env(..)`):
 ///    left untouched, that caller's value wins.
-/// 2. The command explicitly removes it (`cmd.env_remove(..)`): treated as
-///    "operator has not set one", so loopback.
+/// 2. The command sets it empty, or removes it (`cmd.env_remove(..)`): the
+///    caller has said "no operator value here", so loopback.
 /// 3. Otherwise [`resolve_epmd_address`]: the operator's `ERL_EPMD_ADDRESS`
 ///    from this process's environment, else loopback. This also holds after
 ///    `cmd.env_clear()`, so an env-allowlisted spawn still passes an
@@ -229,7 +241,7 @@ pub fn pin_epmd_loopback(cmd: &mut std::process::Command) {
     let explicit = cmd
         .get_envs()
         .find(|(k, _)| *k == std::ffi::OsStr::new(EPMD_ADDRESS_VAR))
-        .map(|(_, v)| v.is_some());
+        .map(|(_, v)| v.is_some_and(|v| !v.to_string_lossy().trim().is_empty()));
     match explicit {
         Some(true) => {}
         Some(false) => {
@@ -239,6 +251,15 @@ pub fn pin_epmd_loopback(cmd: &mut std::process::Command) {
             cmd.env(EPMD_ADDRESS_VAR, resolve_epmd_address());
         }
     }
+}
+
+/// `Command::new("erl")` with [`pin_epmd_loopback`] already applied: the
+/// constructor for an `erl` spawn that doesn't clear its environment.
+#[must_use]
+pub fn erl_command() -> std::process::Command {
+    let mut cmd = std::process::Command::new("erl");
+    pin_epmd_loopback(&mut cmd);
+    cmd
 }
 
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
@@ -412,12 +433,47 @@ mod tests {
     }
 
     #[test]
-    fn pin_epmd_loopback_falls_back_to_the_process_env_rule() {
-        let _guard = EPMD_ENV_LOCK.lock().unwrap();
+    fn pin_epmd_loopback_treats_an_empty_command_value_as_unset() {
         let mut cmd = std::process::Command::new("erl");
-        cmd.env_clear();
+        cmd.env(EPMD_ADDRESS_VAR, " ");
         pin_epmd_loopback(&mut cmd);
-        assert_eq!(epmd_env(&cmd), Some(resolve_epmd_address()));
+        assert_eq!(epmd_env(&cmd).as_deref(), Some("127.0.0.1"));
+    }
+
+    #[test]
+    fn pin_epmd_loopback_passes_the_operator_value_through_env_clear() {
+        let _guard = EPMD_ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::set_var(EPMD_ADDRESS_VAR, "10.0.0.5") };
+        let mut operator_set = std::process::Command::new("erl");
+        operator_set.env_clear();
+        pin_epmd_loopback(&mut operator_set);
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::remove_var(EPMD_ADDRESS_VAR) };
+        let mut unset = std::process::Command::new("erl");
+        unset.env_clear();
+        pin_epmd_loopback(&mut unset);
+        assert_eq!(epmd_env(&operator_set).as_deref(), Some("10.0.0.5"));
+        assert_eq!(epmd_env(&unset).as_deref(), Some("127.0.0.1"));
+    }
+
+    #[test]
+    fn resolve_epmd_address_treats_an_empty_value_as_unset() {
+        let _guard = EPMD_ENV_LOCK.lock().unwrap();
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::set_var(EPMD_ADDRESS_VAR, "") };
+        let result = resolve_epmd_address();
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::remove_var(EPMD_ADDRESS_VAR) };
+        assert_eq!(result, "127.0.0.1");
+    }
+
+    #[test]
+    fn erl_command_is_pinned() {
+        let _guard = EPMD_ENV_LOCK.lock().unwrap();
+        let cmd = erl_command();
+        assert_eq!(cmd.get_program(), "erl");
+        assert!(epmd_env(&cmd).is_some());
     }
 
     #[test]

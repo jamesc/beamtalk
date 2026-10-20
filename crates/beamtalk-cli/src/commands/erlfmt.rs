@@ -126,7 +126,7 @@ fn invoke_erlfmt(
         let action = if check_only { "check" } else { "write" };
         let eval_expr = ErlangEval::new(file.as_str()).build(check_only);
 
-        let output = Command::new("erl")
+        let output = beamtalk_workspace::erl_command()
             .arg("-noshell")
             .arg("-pa")
             .arg(ebin_dir.as_str())

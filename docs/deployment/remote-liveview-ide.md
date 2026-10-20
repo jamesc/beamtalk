@@ -103,7 +103,9 @@ Run Phoenix and the workspace on the **same host**. Distribution stays on
 loopback and never leaves the machine; the only network-facing service is
 Phoenix's HTTPS port.
 
-The workspace launcher pins `ERL_EPMD_ADDRESS=127.0.0.1` for an epmd it starts,
+The workspace launcher, like every other `erl` the `beamtalk` CLI starts
+(including `beamtalk run`'s workspace RPC client and `beamtalk repl --node`), pins
+`ERL_EPMD_ADDRESS=127.0.0.1` for an epmd it starts unless you set it yourself,
 and **warns** at launch if it detects a pre-existing epmd already bound to a
 non-loopback interface (epmd is a shared per-user daemon — loopback is not
 automatic). If you see that warning, stop the stray epmd (`epmd -kill` when no

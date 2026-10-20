@@ -125,7 +125,7 @@ pub(crate) fn start_beam_node(
     args.push(OsString::from("-eval"));
     args.push(OsString::from(eval_cmd));
 
-    let mut cmd = Command::new("erl");
+    let mut cmd = beamtalk_workspace::erl_command();
     cmd.arg("-noshell")
         .args(&args)
         // Redirect OTP default logger to stderr from boot. The startup
@@ -139,9 +139,6 @@ pub(crate) fn start_beam_node(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // With `--node` this is a named node that starts epmd if none is running;
-    // pin epmd's bind address (BT-3987). Harmless for an unnamed node.
-    beamtalk_workspace::pin_epmd_loopback(&mut cmd);
 
     // Tell the compiler app where to find the compiler port binary.
     // In installed mode, it lives next to the beamtalk binary in bin/.
