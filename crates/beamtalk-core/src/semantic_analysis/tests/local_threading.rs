@@ -4120,3 +4120,33 @@ fn evaluated_blocks_nested_beyond_four_deep_are_rejected() {
         "[[[[[n := 3. n] value] value] value] value] value"
     )));
 }
+
+/// The union of every enclosing fold's writes counts, so the inner fold's one
+/// write does not make `s := E` the one write.
+#[test]
+fn evaluated_block_assignment_under_two_folds_that_write_different_locals() {
+    let src = in_actor(
+        "r := 0\ns := 0\n#(1) do: [:y | r := 1. #(1) do: [:z | s := [n := 3. n] value]]\nr",
+    );
+    assert!(flags_bt3981(&src), "{src}");
+    let one = in_actor("s := 0\n#(1) do: [:y | #(1) do: [:z | s := [n := 3. n] value]]\ns");
+    assert!(!flags_bt3981(&one), "{one}");
+}
+
+/// A construct block of a selector without a measured cell is judged as a plain
+/// block: its last statement and assignments are rejected (a `Dictionary`
+/// lookup handler is a plain fun unless the receiver is statically one).
+#[test]
+fn evaluated_block_in_a_block_of_an_unmeasured_selector() {
+    for body in [
+        "#(1) at: 5 ifAbsent: [[n := 3. n] value]",
+        "#(1) at: 5 ifAbsent: [r := [n := 3. n] value. r]",
+        "flag := true\nflag or: [[n := true. n] value]",
+        "#(1) reject: [:z | [n := true. n] value]",
+        "#(1) anySatisfy: [:z | [n := true. n] value]",
+        "i := 0\n[i >= 1] whileFalse: [i := i + 1]\n#(1) keysAndValuesDo: [:k :v | [n := 3. n] value]",
+    ] {
+        let src = in_actor(body);
+        assert!(flags_bt3981(&src), "{src}");
+    }
+}

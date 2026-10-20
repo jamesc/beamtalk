@@ -1153,6 +1153,33 @@ fn evaluated_block_value_unpacked(position: Position, site: &EvaluatedBlockSite)
     }
 }
 
+/// The selectors whose construct blocks have a BEAM-run evaluated-block cell
+/// in `stdlib/test/fixtures/bt3981evalblock_actor.bt`. The container role
+/// ([`Container::of`]) is per family, so another selector of a family (`or:`,
+/// `at:ifAbsent:`, `reject:`, `whileFalse:`, `keysAndValuesDo:`, ...) is judged
+/// as a plain block: a `Dictionary` lookup handler is a plain fun unless the
+/// receiver is statically a `Dictionary`.
+const EVALUATED_BLOCK_MEASURED_SELECTORS: &[&str] = &[
+    "ifTrue:ifFalse:",
+    "ifTrue:",
+    "ifFalse:",
+    "and:",
+    "ifNil:",
+    "ifNotNil:",
+    "collect:",
+    "inject:into:",
+    "select:",
+    "detect:ifNone:",
+    "whileTrue:",
+    "do:",
+    "to:do:",
+    "timesRepeat:",
+    "on:do:",
+    "ensure:",
+    "value",
+    "value:",
+];
+
 /// Where an evaluated block sits, as [`evaluated_block_value_unpacked`] reads
 /// it.
 struct EvaluatedBlockSite {
@@ -1162,10 +1189,9 @@ struct EvaluatedBlockSite {
     parenthesized: bool,
     /// The role of the innermost enclosing block.
     inner: Option<Container>,
-    /// The outer locals written by the nearest enclosing fold-like block
-    /// (`do:`, a collection operation, a loop or counted loop) that writes any,
-    /// with no conditional arm between it and the site; empty when there is
-    /// none.
+    /// The outer locals written by the enclosing fold-like blocks (`do:`, a
+    /// collection operation, a loop or counted loop), with no conditional arm
+    /// between them and the site; empty when there is none.
     fold_writes: Vec<EcoString>,
     /// The local the statement assigns the evaluated block's value to.
     assign_target: Option<EcoString>,
@@ -1627,6 +1653,12 @@ struct Walker<'d> {
     /// that is a [`GROUP_BY_ASSIGN_BLOCKS`] block; consumed by
     /// [`Walker::block_in_frame`].
     pending_group_by_assign_block: bool,
+    /// Set like `pending_group_by_assign_block`: the next block operand is a
+    /// construct block of a selector with no measured evaluated-block cell
+    /// ([`EVALUATED_BLOCK_MEASURED_SELECTORS`]).
+    pending_unmeasured_block: bool,
+    /// For each enclosing block, innermost last: whether it is such a block.
+    unmeasured_blocks: Vec<bool>,
     /// For the method body and each enclosing block, innermost last:
     /// whether the statement being walked in that body is its last.
     last_statements: Vec<bool>,
@@ -1714,6 +1746,8 @@ impl<'d> Walker<'d> {
             writes_outer_local_blocks: Vec::new(),
             assign_target: None,
             pending_group_by_assign_block: false,
+            pending_unmeasured_block: false,
+            unmeasured_blocks: Vec::new(),
             last_statements: Vec::new(),
             outer_stateful: false,
             direct_blocks: Vec::new(),
@@ -1878,6 +1912,8 @@ impl<'d> Walker<'d> {
         writes_outer_locals.dedup();
         self.writes_outer_local_blocks.push(writes_outer_locals);
         let listed = std::mem::take(&mut self.pending_group_by_assign_block);
+        let unmeasured = std::mem::take(&mut self.pending_unmeasured_block);
+        self.unmeasured_blocks.push(unmeasured);
         self.group_by_assign_blocks.push(listed);
         self.scope
             .push(block.parameters.iter().map(|p| p.name.clone()).collect());
@@ -1886,6 +1922,7 @@ impl<'d> Walker<'d> {
         self.depth -= 1;
         self.pop_frame();
         self.containers.pop();
+        self.unmeasured_blocks.pop();
         self.writes_outer_local_blocks.pop();
         self.group_by_assign_blocks.pop();
         self.direct_blocks.pop();
@@ -1980,6 +2017,14 @@ impl<'d> Walker<'d> {
                     _ => Container::Other,
                 };
                 let receiver_role = role(receiver, true);
+                let unmeasured = |e: &Expression| match (e, &construct) {
+                    (Expression::Block(b), Some(c))
+                        if c.blocks.iter().any(|blk| std::ptr::eq(*blk, b)) =>
+                    {
+                        !EVALUATED_BLOCK_MEASURED_SELECTORS.contains(&c.selector.as_str())
+                    }
+                    _ => false,
+                };
                 // `GROUP_BY_ASSIGN_BLOCKS` is keyed on the construct's own blocks.
                 let listed = |e: &Expression, block: Option<usize>| match (e, &construct) {
                     (Expression::Block(b), Some(c))
@@ -2014,9 +2059,11 @@ impl<'d> Walker<'d> {
                     _ => None,
                 };
                 self.pending_group_by_assign_block = listed(receiver, None);
+                self.pending_unmeasured_block = unmeasured(receiver);
                 self.operand_in(receiver, Position::Receiver, receiver_role);
                 self.pending_frame_body = None;
                 self.pending_group_by_assign_block = false;
+                self.pending_unmeasured_block = false;
                 for (index, arg) in arguments.iter().enumerate() {
                     let arg_role = role(arg, false);
                     self.pending_frame_body = match arg {
@@ -2033,9 +2080,11 @@ impl<'d> Walker<'d> {
                         _ => None,
                     };
                     self.pending_group_by_assign_block = listed(arg, Some(index));
+                    self.pending_unmeasured_block = unmeasured(arg);
                     self.operand_in(arg, Position::Argument, arg_role);
                     self.pending_frame_body = None;
                     self.pending_group_by_assign_block = false;
+                    self.pending_unmeasured_block = false;
                 }
             }
             Expression::Cascade {
@@ -2784,11 +2833,10 @@ impl<'d> Walker<'d> {
         let parenthesized = self
             .parenthesized_sends
             .contains(&expr.unwrap_parens().span());
-        // The nearest enclosing fold-like block (`do:`, a collection
-        // operation, a loop or counted loop) that writes an outer local, with
-        // no conditional arm between it and the site: an arm is a frame of its
-        // own (measured). Conservative: any such block counts, not only the
-        // nearest enclosing one.
+        // Every enclosing fold-like block (`do:`, a collection operation, a
+        // loop or counted loop) that writes an outer local, with no
+        // conditional arm between it and the site (an arm is a frame of its
+        // own, measured): the union of their writes.
         let mut fold_writes: Vec<EcoString> = Vec::new();
         for (container, writes) in self
             .containers
@@ -2801,19 +2849,22 @@ impl<'d> Walker<'d> {
                 Container::DoBody
                 | Container::ListOpBody
                 | Container::LoopBody
-                | Container::CountedLoopBody
-                    if !writes.is_empty() =>
-                {
-                    fold_writes.clone_from(writes);
-                    break;
-                }
+                | Container::CountedLoopBody => fold_writes.extend(writes.iter().cloned()),
                 _ => {}
             }
         }
+        fold_writes.sort();
+        fold_writes.dedup();
         let site = EvaluatedBlockSite {
             depth: self.depth,
             parenthesized,
-            inner: self.containers.last().copied(),
+            // A construct block of a selector with no measured cell is judged
+            // as a plain block (its last statement and assignments leak).
+            inner: if self.unmeasured_blocks.last().copied().unwrap_or(false) {
+                Some(Container::Other)
+            } else {
+                self.containers.last().copied()
+            },
             fold_writes,
             assign_target: self.assign_target.clone(),
             evaluated_nesting: self
