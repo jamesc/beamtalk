@@ -49,13 +49,13 @@ use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
     RootMethodKind, WriteKind, block_literal_of_other_arity, conditional_arm_blocks,
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
-    exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
-    is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
-    local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
-    operand_producer_writes, outer_local_writes, outer_state_writes, producer_body_block,
-    receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
-    repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
-    value_blocks, value_position_local_assignments,
+    exception_producer_writes, group_by_fold_threads, inline_block_threads,
+    is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
+    is_threaded_frame_body, literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
+    loop_body_producer_sites, operand_producer_writes, outer_local_writes, outer_state_writes,
+    producer_body_block, receiver_statically_not_dictionary, repl_arm_producer_sites,
+    repl_evaluated_block, repl_operand_sites, repl_producer_writes, root_producer_writes,
+    sequenced_operand_sites, value_blocks, value_position_local_assignments,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -961,6 +961,13 @@ pub(crate) enum Residual {
     /// answered the stale value until BT-3864 rejected the arm's assignment
     /// as a value-position assignment, and draws this error since BT-3909.
     MatchArmWrite,
+    /// BT-3981: an evaluated block literal (`[...] value`, `[:k | ...]
+    /// value: x`) that binds a local, writes a field or sends to `self` is
+    /// inlined as a state-threading block in an actor method, and only some
+    /// positions unpack its `{Value, State}` result
+    /// ([`evaluated_block_value_unpacked`]); anywhere else the raw tuple is
+    /// the value, silently. Class and value-type methods answer the value.
+    EvaluatedBlockValue,
 }
 
 /// One [`RESIDUAL_DENY_SET`] row: `shape` is an error in `contexts`.
@@ -996,6 +1003,12 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         shape: Residual::MatchArmWrite,
         contexts: &[Class, ValueType, Actor, Repl],
         issue: "BT-3875",
+        fixed_by: "BT-3947",
+    },
+    ResidualDenied {
+        shape: Residual::EvaluatedBlockValue,
+        contexts: &[Actor],
+        issue: "BT-3981",
         fixed_by: "BT-3947",
     },
 ];
@@ -1044,6 +1057,72 @@ fn group_by_value_unpacked(
         Position::FieldAssignValue { nested: false } | Position::ReturnValue { nested: false } => {
             true
         }
+        _ => false,
+    }
+}
+
+/// Whether the value of an evaluated block literal that threads state
+/// ([`Residual::EvaluatedBlockValue`]) at `position` in an actor method is
+/// unpacked from its `{Value, State}` pair, each cell measured on a BEAM for
+/// BT-3981 (`stdlib/test/bt3981evalblock_test.bt` runs the unpacked ones).
+///
+/// Unpacked: a method body statement, `x := <here>` or `^<here>`; a `match:`
+/// arm; inside a block, `x := <here>` or a statement of an inlined block: an
+/// arm, a collection operation's block, a `whileTrue:` block or another
+/// evaluated block (always); a `do:` or counted-loop body (when its last
+/// statement: a non-last one raised or failed to compile); a protected body or
+/// handler (when not its last, whose value a caller may use).
+///
+/// Not unpacked: a statement or assignment directly in a block that is a value
+/// (a stored block, an Erlang FFI argument, a block passed to a method:
+/// `inner` is [`Container::Other`] and `inner_carries_state` is false; a
+/// conditional arm inside such a block is still an arm), `^` inside a block, a
+/// field assignment, a parenthesized evaluated block and every operand
+/// position (receiver, argument, cascade, literal element, ...). A block that
+/// writes a captured local or a field is stateful (Tier 2): it unpacks the
+/// same, and its last statement is codegen's gate (BT-3971). `last` is
+/// whether the statement is the last of its innermost block.
+fn evaluated_block_value_unpacked(
+    position: Position,
+    depth: usize,
+    parenthesized: bool,
+    inner: Option<Container>,
+    inner_carries_state: bool,
+    last: bool,
+) -> bool {
+    if parenthesized {
+        return false;
+    }
+    match position {
+        // A `match:` arm's body is lowered with the arm's own state
+        // (`nil_type_match_self_mutation_registry.bt`, `bt3981evalblock_test.bt`).
+        Position::Statement if depth == 0 => true,
+        Position::MatchArm
+        | Position::AssignValue { nested: false }
+        | Position::ReturnValue { nested: false } => true,
+        Position::AssignValue { nested: true } => {
+            inner != Some(Container::Other) || inner_carries_state
+        }
+        // The walker reports a statement of a block body as `Statement` too.
+        Position::Statement | Position::NestedStatement { .. } => match inner {
+            // An evaluated block's own value is judged at the outer evaluated
+            // block's position (it is a send of its own to check); a
+            // `whileTrue:` block's condition statements are a frame of their
+            // own (BT-3911, `bt3911arm_frames_test.bt`).
+            Some(
+                Container::Arm
+                | Container::ListOpBody
+                | Container::EvaluatedBlock
+                | Container::LoopBody,
+            ) => true,
+            Some(Container::DoBody | Container::CountedLoopBody) => last,
+            Some(Container::ProtectedBody | Container::Handler) => !last,
+            // A block that writes a captured local or a field is a stateful
+            // block, not a plain fun: it unpacks a non-last statement, and its
+            // last one is codegen's gate (BT-3971).
+            Some(Container::Other) => inner_carries_state,
+            None => false,
+        },
         _ => false,
     }
 }
@@ -1474,6 +1553,14 @@ struct Walker<'d> {
     /// For each enclosing block, innermost last: whether it is a
     /// [`GROUP_BY_ASSIGN_BLOCKS`] block ([`Residual::GroupByValue`]).
     group_by_assign_blocks: Vec<bool>,
+    /// The spans of the sends written in parentheses (`([...] value)`):
+    /// [`evaluated_block_value_unpacked`] does not unpack a parenthesized
+    /// evaluated block's value anywhere.
+    parenthesized_sends: HashSet<Span>,
+    /// For each enclosing block, innermost last: whether it writes a captured
+    /// local or a field ([`Walker::escape_write_of`]), which makes it a
+    /// stateful (Tier 2) block rather than a plain fun.
+    carries_state_blocks: Vec<bool>,
     /// Set by a send's walk just before it descends into a block operand
     /// that is a [`GROUP_BY_ASSIGN_BLOCKS`] block; consumed by
     /// [`Walker::block_in_frame`].
@@ -1561,6 +1648,8 @@ impl<'d> Walker<'d> {
             block_frames: Vec::new(),
             containers: Vec::new(),
             group_by_assign_blocks: Vec::new(),
+            parenthesized_sends: HashSet::new(),
+            carries_state_blocks: Vec::new(),
             pending_group_by_assign_block: false,
             last_statements: Vec::new(),
             outer_stateful: false,
@@ -1720,6 +1809,8 @@ impl<'d> Walker<'d> {
         self.direct_blocks.push(direct);
         self.block_frames.push(self.scope.len());
         self.containers.push(container);
+        let carries_state = self.escape_write_of(block).is_some();
+        self.carries_state_blocks.push(carries_state);
         let listed = std::mem::take(&mut self.pending_group_by_assign_block);
         self.group_by_assign_blocks.push(listed);
         self.scope
@@ -1729,6 +1820,7 @@ impl<'d> Walker<'d> {
         self.depth -= 1;
         self.pop_frame();
         self.containers.pop();
+        self.carries_state_blocks.pop();
         self.group_by_assign_blocks.pop();
         self.direct_blocks.pop();
         self.block_frames.pop();
@@ -1758,7 +1850,11 @@ impl<'d> Walker<'d> {
     fn expr(&mut self, expr: &Expression, position: Position) {
         let nested = self.depth > 0;
         match expr {
-            Expression::Parenthesized { expression, .. } => self.expr(expression, position),
+            Expression::Parenthesized { expression, .. } => {
+                self.parenthesized_sends
+                    .insert(expression.unwrap_parens().span());
+                self.expr(expression, position);
+            }
             Expression::Assignment { target, value, .. } => match target.as_ref() {
                 Expression::Identifier(id) => {
                     self.operand(value, Position::AssignValue { nested });
@@ -2582,6 +2678,64 @@ impl<'d> Walker<'d> {
         {
             self.check_group_by_value(expr, block, position);
         }
+        if let Some(block) = repl_evaluated_block(expr.unwrap_parens()) {
+            self.check_evaluated_block_value(expr, block, position);
+        }
+    }
+
+    /// [`Residual::EvaluatedBlockValue`] (BT-3981): an actor evaluated block
+    /// literal that binds a local, writes a field or sends to `self` (codegen
+    /// inlines it as a state-threading block: [`inline_block_threads`]) and
+    /// writes no outer local (that is the Phase 0 check's), at a position
+    /// whose value is the raw `{Value, State}` tuple.
+    fn check_evaluated_block_value(
+        &mut self,
+        expr: &Expression,
+        block: &Block,
+        position: Position,
+    ) {
+        let Some(row) = residual_denied(Residual::EvaluatedBlockValue, self.context) else {
+            return;
+        };
+        if !inline_block_threads(block, self.context.root_method_kind()) {
+            return;
+        }
+        if !self.writes_of(block).is_empty() {
+            return;
+        }
+        let last = self.last_statements.last().copied().unwrap_or(false);
+        let parenthesized = self
+            .parenthesized_sends
+            .contains(&expr.unwrap_parens().span());
+        if evaluated_block_value_unpacked(
+            position,
+            self.depth,
+            parenthesized,
+            self.containers.last().copied(),
+            self.carries_state_blocks.last().copied().unwrap_or(false),
+            last,
+        ) {
+            return;
+        }
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "an evaluated block (`[...] value`) binds a local, writes a field or sends \
+                     to `self`, but as {position} in {context} its value is not unpacked from \
+                     the block's state yet ({issue}, until {fixed_by})",
+                    context = self.context,
+                    issue = row.issue,
+                    fixed_by = row.fixed_by,
+                ),
+                expr.span(),
+            )
+            .with_hint(
+                "assign the block's value to a local in a statement of the method body \
+                 (`r := [...] value`) and use the local here, or compute it in a method \
+                 of its own",
+            )
+            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+        );
     }
 
     /// [`Residual::GroupByValue`] (BT-3897): an actor or REPL `groupBy:` whose

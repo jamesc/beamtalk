@@ -3781,3 +3781,179 @@ fn residual_repl_match_arm_write_is_the_match_arm_error() {
         "{messages:?}"
     );
 }
+
+/// PIN-BUG BT-3947 (closes BT-3981): an actor evaluated block literal
+/// (`[...] value`) that binds a local, writes a field or sends to `self` is
+/// inlined as a state-threading block, and answered the raw `{Value, State}`
+/// tuple at every position that does not unpack it (measured on a BEAM, the
+/// generated cells of `stdlib/test/bt3981evalblock_test.bt`). BT-3981
+/// makes those positions a compile error; BT-3947 lowers the block as a frame,
+/// deletes the `EvaluatedBlockValue` row and flips these to accepted.
+#[test]
+fn residual_evaluated_block_value_is_an_error_where_the_tuple_leaks() {
+    // The BT-3981 repro, verbatim.
+    let repro = "Actor subclass: A\n  evalValue =>\n    xs := #(1, 2)\n    (Erlang lists)\n      map: [:x |\n        r := [\n          n := 0\n          xs do: [:y | n := n + y]\n          n\n        ] value\n        r\n      ]\n      with: #(1)\n";
+    let messages = residual_messages(repro, None);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("an evaluated block")
+            && messages[0].contains("the value of an assignment inside a block in an actor method")
+            && messages[0].contains("BT-3981, until BT-3947"),
+        "{messages:?}"
+    );
+}
+
+/// The evaluated blocks of the generated BT-3981 corpus: each binds a local,
+/// writes a field or sends to `self`, and answers 3.
+const EVALUATED_BLOCKS: &[&str] = &[
+    "[n := 3. n] value",
+    "[n := 0. #(1, 2) do: [:y | n := n + y]. n] value",
+    "[n := 1. n := n + 2. n] value",
+    "[self peek: 3] value",
+];
+
+/// `(host, position)` cells that are rejected in an actor method: the ones
+/// measured leaking the tuple on a BEAM
+/// (`stdlib/test/bt3981evalblock_test.bt` runs the others):
+/// - any argument, in every host;
+/// - `^E` in every block (at the method body it unpacks);
+/// - `r := E`, `E` as the last statement and `[E] value`, directly in a block
+///   that is a value (stored, FFI argument, passed to a method);
+/// - `E` (or `[E] value`) as the last statement of an `on:do:` protected body
+///   (conservative: its value may be the method's, which leaks).
+fn evaluated_block_leaks(host: &str, position: &str) -> bool {
+    let plain_fun = matches!(host, "stored" | "ffi" | "user");
+    match position {
+        "argument" => true,
+        "return" => host != "method",
+        "assigned" => plain_fun,
+        "last" | "nested" => plain_fun || host == "protected",
+        other => unreachable!("{other}"),
+    }
+}
+
+fn evaluated_block_program(host: &str, position: &str, block: &str) -> String {
+    let at = match position {
+        "assigned" => format!("r := {block}\nr"),
+        "last" => block.to_string(),
+        "nested" => format!("[{block}] value"),
+        "return" => format!("^{block}"),
+        "argument" => format!("#(3) includes: {block}"),
+        other => unreachable!("{other}"),
+    };
+    match host {
+        "method" => at,
+        "arm" => format!("true ifTrue: [{at}] ifFalse: [0]"),
+        "collect" => format!("#(1) collect: [:z | {at}]"),
+        "protected" => format!("[{at}] on: Error do: [:e | 0]"),
+        "stored" => format!("b := [:z | {at}]\nb value: 1"),
+        "ffi" => format!("(Erlang lists) map: [:z | {at}] with: #(1)"),
+        "user" => format!("self ap: [{at}]"),
+        other => unreachable!("{other}"),
+    }
+}
+
+const EVALUATED_BLOCK_HOSTS: &[&str] = &[
+    "method",
+    "arm",
+    "collect",
+    "protected",
+    "stored",
+    "ffi",
+    "user",
+];
+const EVALUATED_BLOCK_POSITIONS: &[&str] = &["assigned", "last", "nested", "return", "argument"];
+
+fn flags_bt3981(src: &str) -> bool {
+    residual_messages(src, None)
+        .iter()
+        .any(|m| m.contains("BT-3981"))
+}
+
+/// The generated corpus of BT-3981: hosts x positions x evaluated blocks x
+/// contexts. In an actor method a cell is an error exactly when it leaks
+/// ([`evaluated_block_leaks`]); in a class or value-type method, which answer
+/// the value everywhere, nothing is.
+#[test]
+fn evaluated_block_value_corpus_is_rejected_exactly_where_it_leaks() {
+    let mut rejected = 0;
+    let mut accepted = 0;
+    for host in EVALUATED_BLOCK_HOSTS {
+        for position in EVALUATED_BLOCK_POSITIONS {
+            for block in EVALUATED_BLOCKS {
+                let body = evaluated_block_program(host, position, block);
+                let actor = in_actor(&body).replace("  probe =>", "  peek: v => v\n\n  probe =>");
+                assert_eq!(
+                    flags_bt3981(&actor),
+                    evaluated_block_leaks(host, position),
+                    "{host} x {position} x {block}:\n{actor}"
+                );
+                if evaluated_block_leaks(host, position) {
+                    rejected += 1;
+                } else {
+                    accepted += 1;
+                }
+                for src in [in_class(&body), in_value(&body)] {
+                    assert!(!flags_bt3981(&src), "{host} x {position} x {block}:\n{src}");
+                }
+            }
+        }
+    }
+    assert!(rejected > 50 && accepted > 30, "{rejected} / {accepted}");
+}
+
+/// An evaluated block that binds nothing, writes nothing and sends nothing to
+/// `self` is not inlined as a state-threading block: it answers the value at
+/// every position, in a plain block too.
+#[test]
+fn a_pure_evaluated_block_is_not_this_error() {
+    for host in EVALUATED_BLOCK_HOSTS {
+        for position in EVALUATED_BLOCK_POSITIONS {
+            for block in ["[3] value", "[:k | k] value: 3", "[#(3) size] value"] {
+                let body = evaluated_block_program(host, position, block);
+                assert!(
+                    !flags_bt3981(&in_actor(&body)),
+                    "{host} x {position} x {block}"
+                );
+            }
+        }
+    }
+}
+
+/// The parenthesized form answers the tuple even where the bare one unpacks;
+/// the `value:` form is the same recognizer.
+#[test]
+fn a_parenthesized_or_value_colon_evaluated_block_is_judged_too() {
+    assert!(!flags_bt3981(&in_actor("r := [n := 3. n] value\nr")));
+    assert!(flags_bt3981(&in_actor("r := ([n := 3. n] value)\nr")));
+    assert!(flags_bt3981(&in_actor("([n := 3. n] value)")));
+    assert!(!flags_bt3981(&in_actor("[:k | n := k. n] value: 3")));
+    assert!(flags_bt3981(&in_actor(
+        "b := [:z | [:k | n := k. n] value: 3]\nb value: 1"
+    )));
+    assert!(flags_bt3981(&in_actor("[n := 3. n] value + 1")));
+    assert!(flags_bt3981(&in_actor("self.n := [m := 3. m] value")));
+    // A statement that is not the last of a loop body is not unpacked
+    // (measured: a runtime error).
+    assert!(flags_bt3981(&in_actor(
+        "#(1) do: [:z | [n := 3. n] value. nil]\nnil"
+    )));
+    assert!(!flags_bt3981(&in_actor(
+        "#(1) do: [:z | [n := 3. n] value]\nnil"
+    )));
+}
+
+/// Every cell of the BEAM-run fixture
+/// (`stdlib/test/bt3981evalblock_test.bt`) is a shape the check accepts: the
+/// fixtures hold exactly the cells measured to answer the value, so a check
+/// that rejects one makes that `BUnit` cell unrunnable.
+#[test]
+fn the_beam_run_evaluated_block_cells_are_accepted() {
+    for src in [
+        include_str!("../../../../../stdlib/test/fixtures/bt3981evalblock_actor.bt"),
+        include_str!("../../../../../stdlib/test/fixtures/bt3981evalblock_value.bt"),
+        include_str!("../../../../../stdlib/test/fixtures/bt3981evalblock_class.bt"),
+    ] {
+        assert!(!flags_bt3981(src));
+    }
+}
