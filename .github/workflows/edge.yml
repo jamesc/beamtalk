@@ -112,9 +112,10 @@ jobs:
           **Full SHA:** $(git rev-parse HEAD)
 
           > [!WARNING]
-          > Edge builds track the development tip and are consumed by the
-          > beamtalk-uat acceptance gate. They are not a supported install
-          > channel — use a tagged release or \`--nightly\`." \
+          > Edge builds track the development tip. They are consumed by the
+          > beamtalk-uat acceptance gate and by downstream package CI via
+          > \`install.sh --edge\` (linux-x86_64 only). For general use, prefer
+          > a tagged release or \`--nightly\`." \
             --prerelease \
             --target "${GITHUB_SHA}" \
             "${{ steps.package.outputs.archive }}" \
