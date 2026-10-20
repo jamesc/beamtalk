@@ -70,8 +70,7 @@ Actor subclass: Adr0131LocalRebindActor
     t := 0
     r := (Erlang lists)
       map: [:x |
-        t := t + 1
-        x
+        x + t
       ]
       with: #(1)
     #[r, t]

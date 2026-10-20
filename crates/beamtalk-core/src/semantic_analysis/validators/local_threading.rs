@@ -1322,6 +1322,9 @@ enum Escape {
     /// An argument of this class-side selector, which runs in the class's
     /// process (not a direct-called `class sealed` method, ADR 0129 Phase 0b).
     ClassMethod(EcoString),
+    /// An argument of an Erlang FFI send (`Erlang <module> <selector>`): the
+    /// block is handed to Erlang as a plain fun (BT-3917).
+    Ffi(EcoString, EcoString),
     /// An argument or the receiver of a cascade message: a cascade sends every
     /// message through ordinary dispatch.
     Cascade(EcoString),
@@ -1359,6 +1362,9 @@ impl Escape {
             ),
             Self::ClassMethod(selector) => {
                 format!("passed to a class method (`{selector}`); it would run in another process")
+            }
+            Self::Ffi(module, selector) => {
+                format!("passed to Erlang `{module}` `{selector}`, which calls it as a plain fun")
             }
             Self::Cascade(selector) => format!(
                 "sent in a cascade (`{selector}`), which the compiler does not thread it through"
@@ -1398,6 +1404,7 @@ impl Escape {
             Self::Passed(selector)
             | Self::Lookup(selector)
             | Self::ClassMethod(selector)
+            | Self::Ffi(_, selector)
             | Self::Cascade(selector) => {
                 format!(
                     "return the new value from the block and assign it where it is called: \
@@ -2442,8 +2449,16 @@ impl<'d> Walker<'d> {
         dispatched: bool,
     ) {
         let sel = selector.name();
-        if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
-            // ADR 0041 §Erlang Interop Boundary: lossy by design (warned by codegen).
+        if let Some(module) = crate::ffi_receiver::erlang_module_of_receiver(receiver) {
+            // BT-3917: a block literal in an FFI argument position is handed to
+            // Erlang, which calls it as a plain fun, so a write to a captured
+            // local is dropped: it escapes (ADR 0133, ADR 0041).
+            let escape = Escape::Ffi(EcoString::from(module), sel.clone());
+            for arg in arguments {
+                for block in value_blocks(arg) {
+                    self.report_literal(block, &escape);
+                }
+            }
             return;
         }
         // EXEMPTION (§1 construct): a bare `[...]` argument of an inlined

@@ -5,11 +5,7 @@
 //
 // Covers two scenarios from the Erlang Interop Boundary acceptance criteria:
 //   1. Pure block passed to lists:map — correct result, no state overhead
-//   2. Stateful block passed to lists:foreach — mutations dropped (documented behaviour)
-//
-// Note: The compiler warning for stateful blocks at the Erlang boundary is tested
-// at the unit test level (see tests.rs BT-855 tests), because codegen warnings
-// are not currently plumbed through the REPL eval response path.
+//   2. Writing block passed to lists:foreach — compile error (ADR 0133, BT-3917)
 
 // ===========================================================================
 // PURE BLOCK TO lists:map — CORRECT RESULT
@@ -27,22 +23,18 @@ Erlang lists filter: [:x | x > 2] with: #(1, 2, 3, 4, 5)
 // => [3,4,5]
 
 // ===========================================================================
-// STATEFUL BLOCK TO lists:foreach — MUTATIONS DROPPED
+// WRITING BLOCK TO lists:foreach — COMPILE ERROR (ADR 0133, BT-3917)
 // ===========================================================================
 //
-// A stateful block (captures and mutates `count`) is passed to lists:foreach.
-// The compiler generates an Erlang wrapper fun that:
-//   - Captures the current StateAcc at creation time (count = 0)
-//   - Calls the Beamtalk block with each element
-//   - Discards the updated StateAcc (_State is ignored)
-// Result: lists:foreach returns ok, but `count` stays 0 because the mutations
-// inside the wrapper fun are dropped (Erlang cannot propagate StateAcc back).
+// A block that assigns a captured variable and is passed as an Erlang FFI
+// argument would have its writes dropped (Erlang calls it as a plain fun), so
+// it is rejected at compile time. Return the value instead.
 
 count := 0
 // => 0
 
 Erlang lists foreach: [:x | count := count + x] with: #(1, 2, 3)
-// => Result ok: nil
+// => ERROR: `count` is assigned in a block passed to Erlang `lists` `foreach:with:`
 
 count
 // => 0

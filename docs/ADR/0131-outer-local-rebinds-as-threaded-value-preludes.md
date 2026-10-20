@@ -769,10 +769,11 @@ Phase 0's position allow-set does not cover this shape (it accepts any
 statement position), so this is a §6 rule, not an allow-set row; Phase 5
 removes it together with the lowering.
 
-**Exempt:** an Erlang FFI argument (`(Erlang lists) map: [:x | t := t + 1.
-x] with: …`, s6). ADR 0041 §Erlang Interop Boundary defines that as lossy
-by design, with a warning, and `generate_erlang_interop_wrapper` already
-implements it; this ADR keeps it.
+**Not exempt (BT-3917):** an Erlang FFI argument (`(Erlang lists) map: [:x |
+t := t + 1. x] with: …`, s6) was first exempt as lossy by design (ADR 0041
+§Erlang Interop Boundary). ADR 0133 now reports a block literal that assigns a
+captured local, passed as an FFI argument, as an escaping block; a block that
+only reads captured locals still compiles.
 
 **What it costs.** A Tier 2 block value that is stored but never invoked
 through a channel-less send (`d at: #k put: [t := t + 1]`, a block only
