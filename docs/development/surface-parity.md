@@ -581,8 +581,10 @@ is surface-specific.
 
 ### `handleinfo-no-catch-all` diagnostic (ADR 0134, BT-3959)
 
-A `handleInfo:` method with a top-level `match:`/`matchExhaustive:` statement
-that has no unguarded `_` or bare-variable arm gets a `handleinfo-no-catch-all`
+A `Server` subclass's `handleInfo:` method with a top-level
+`match:`/`matchExhaustive:` statement (bare, parenthesised, returned with `^`
+or as an assignment's value) that has no unguarded `_` or bare-variable arm
+gets a `handleinfo-no-catch-all`
 warning at the `match:`, with the hint ``Add `_ -> nil` as the last arm``. It
 is computed in `beamtalk-core` semantic analysis (`analyse_full`,
 `validators/handleinfo_catch_all_validators.rs`), so every surface that reports

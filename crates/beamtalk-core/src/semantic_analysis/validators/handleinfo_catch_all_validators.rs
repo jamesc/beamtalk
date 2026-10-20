@@ -19,9 +19,10 @@
 //! typed unions; `msg` in `handleInfo: msg` is untyped, so it never fires
 //! here — hence a dedicated check.
 //!
-//! **What counts.** For every instance-side `handleInfo:` method, each
-//! **top-level** statement of the body (stripped of wrapping parentheses
-//! and a leading `^`) that is a `match:`/`matchExhaustive:` send is checked.
+//! **What counts.** For every instance-side `handleInfo:` method of a
+//! `Server` subclass, each **top-level** statement of the body (stripped of
+//! wrapping parentheses, a leading `^` and an assignment's target) that is a
+//! `match:`/`matchExhaustive:` send is checked.
 //! A `match:` nested inside another expression (an `ifTrue:` block, an arm
 //! body, a send argument) is not reported: the lint is purely syntactic and
 //! only looks at the shape ADR 0134 names.
@@ -40,32 +41,56 @@
 //! `@expect all` still acknowledges it where a fixture triggers it on
 //! purpose.
 
-use crate::ast::{Expression, MatchArm, Module, Pattern};
+use crate::ast::{Expression, MatchArm, MethodDefinition, Module, Pattern};
+use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use crate::unparse::unparse_expression;
 
 /// The selector this lint applies to.
 const HANDLE_INFO_SELECTOR: &str = "handleInfo:";
 
-/// Runs the ADR 0134 `handleinfo-no-catch-all` check over every class in
-/// `module`.
-pub(crate) fn check_handle_info_catch_all(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    for class in &module.classes {
-        for method in &class.methods {
-            if method.is_class_method || method.selector.name() != HANDLE_INFO_SELECTOR {
-                continue;
-            }
-            for stmt in &method.body {
-                let Expression::Match {
-                    value, arms, span, ..
-                } = strip_parens_and_return(&stmt.expression)
-                else {
-                    continue;
-                };
-                if !arms.iter().any(is_catch_all_arm) {
-                    diagnostics.push(build_diagnostic(value, *span));
-                }
-            }
+/// Runs the ADR 0134 `handleinfo-no-catch-all` check over every
+/// instance-side `handleInfo:` of a `Server` subclass in `module`: those
+/// declared in a class body and standalone `Foo >> handleInfo: msg => ...`
+/// definitions. Only `Server` gives `handleInfo:` its raw-message meaning
+/// (ADR 0065); on any other class it is an ordinary method.
+pub(crate) fn check_handle_info_catch_all(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let class_methods = module
+        .classes
+        .iter()
+        .filter(|class| hierarchy.is_server_subclass(class.name.name.as_str()))
+        .flat_map(|class| &class.methods);
+    let standalone_methods = module
+        .method_definitions
+        .iter()
+        .filter(|def| {
+            !def.is_class_method && hierarchy.is_server_subclass(def.class_name.name.as_str())
+        })
+        .map(|def| &def.method);
+    for method in class_methods.chain(standalone_methods) {
+        if method.is_class_method || method.selector.name() != HANDLE_INFO_SELECTOR {
+            continue;
+        }
+        check_method_body(method, diagnostics);
+    }
+}
+
+/// Reports every top-level `match:` statement of `method`'s body that has
+/// no catch-all arm.
+fn check_method_body(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
+    for stmt in &method.body {
+        let Expression::Match {
+            value, arms, span, ..
+        } = strip_to_statement_value(&stmt.expression)
+        else {
+            continue;
+        };
+        if !arms.iter().any(is_catch_all_arm) {
+            diagnostics.push(build_diagnostic(value, *span));
         }
     }
 }
@@ -76,12 +101,16 @@ fn is_catch_all_arm(arm: &MatchArm) -> bool {
     arm.guard.is_none() && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
 }
 
-/// Unwraps any number of `Parenthesized` wrappers and `^` returns, so
-/// `^msg match: [...]` and `(msg match: [...])` count as top-level.
-fn strip_parens_and_return(expr: &Expression) -> &Expression {
+/// Unwraps any number of `Parenthesized` wrappers, `^` returns and
+/// assignments, so `^msg match: [...]`, `(msg match: [...])` and
+/// `self.count := msg match: [...]` count as top-level: each evaluates the
+/// `match:` unconditionally, so an unmatched message raises just the same.
+fn strip_to_statement_value(expr: &Expression) -> &Expression {
     match expr {
-        Expression::Parenthesized { expression, .. } => strip_parens_and_return(expression),
-        Expression::Return { value, .. } => strip_parens_and_return(value),
+        Expression::Parenthesized { expression, .. } => strip_to_statement_value(expression),
+        Expression::Return { value, .. }
+        | Expression::Assignment { value, .. }
+        | Expression::DestructureAssignment { value, .. } => strip_to_statement_value(value),
         other => other,
     }
 }
@@ -117,8 +146,9 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let mut diagnostics = Vec::new();
-        check_handle_info_catch_all(&module, &mut diagnostics);
+        check_handle_info_catch_all(&module, &hierarchy, &mut diagnostics);
         diagnostics
     }
 
@@ -190,6 +220,38 @@ mod tests {
         assert_eq!(findings(&src).len(), 1);
     }
 
+    #[test]
+    fn assigned_match_without_catch_all_warns() {
+        let src = server("    self.n := msg match: [#tick -> 1]");
+        assert_eq!(findings(&src).len(), 1);
+        let src = server("    x := msg match: [#tick -> 1]\n    self.n := x");
+        assert_eq!(findings(&src).len(), 1);
+    }
+
+    #[test]
+    fn parenthesized_match_without_catch_all_warns() {
+        let src = server("    (msg match: [#tick -> nil])");
+        assert_eq!(findings(&src).len(), 1);
+    }
+
+    #[test]
+    fn each_top_level_match_without_catch_all_warns() {
+        let src = server("    msg match: [#tick -> nil]\n    msg match: [#tock -> nil]");
+        assert_eq!(findings(&src).len(), 2);
+    }
+
+    #[test]
+    fn nil_and_type_patterns_are_not_catch_alls() {
+        let src = server("    msg match: [\n      nil -> nil;\n      s :: String -> nil\n    ]");
+        assert_eq!(findings(&src).len(), 1);
+    }
+
+    #[test]
+    fn indirect_server_subclass_warns() {
+        let src = "Server subclass: Base\n\nBase subclass: Watcher\n  handleInfo: msg => msg match: [#tick -> nil]";
+        assert_eq!(findings(src).len(), 1);
+    }
+
     // ── silent ───────────────────────────────────────────────────────────
 
     #[test]
@@ -227,6 +289,28 @@ mod tests {
     }
 
     #[test]
+    fn standalone_handle_info_without_catch_all_warns() {
+        let src =
+            "Server subclass: Watcher\n\nWatcher >> handleInfo: msg => msg match: [#tick -> nil]";
+        assert_eq!(findings(src).len(), 1);
+    }
+
+    #[test]
+    fn underscore_prefixed_variable_arm_is_silent() {
+        let src = server("    msg match: [\n      #tick -> nil;\n      _other -> nil\n    ]");
+        assert!(findings(&src).is_empty());
+    }
+
+    #[test]
+    fn non_server_handle_info_is_silent() {
+        // Only `Server` dispatches raw messages to `handleInfo:` (ADR 0065).
+        let src = "Actor subclass: Plain\n  handleInfo: msg => msg match: [#tick -> nil]";
+        assert!(findings(src).is_empty());
+        let src = "Object subclass: Plain\n  handleInfo: msg => msg match: [#tick -> nil]";
+        assert!(findings(src).is_empty());
+    }
+
+    #[test]
     fn other_selectors_are_silent() {
         let src = "Server subclass: Watcher\n  handle: msg => msg match: [#tick -> nil]";
         assert!(findings(src).is_empty());
@@ -234,7 +318,7 @@ mod tests {
 
     #[test]
     fn class_side_handle_info_is_silent() {
-        let src = "Object subclass: Watcher\n  class handleInfo: msg => msg match: [#tick -> nil]";
+        let src = "Server subclass: Watcher\n  class handleInfo: msg => msg match: [#tick -> nil]";
         assert!(findings(src).is_empty());
     }
 }
