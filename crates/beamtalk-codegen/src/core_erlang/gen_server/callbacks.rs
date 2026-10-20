@@ -430,7 +430,12 @@ impl CoreErlangGenerator {
                             line(),
                             Self::lifecycle_start_telemetry_doc(class_name),
                             line(),
-                            "{'ok', FinalState}",
+                            // BT-3992: strip the starter's initialize-ack
+                            // target and ack at once — no `initialize` step
+                            // follows, so startup ends here.
+                            "let AckState = call 'beamtalk_actor':'take_init_ack'(FinalState, 'initialized') in",
+                            line(),
+                            "{'ok', AckState}",
                         ]
                     ),
                 ]
@@ -485,9 +490,14 @@ impl CoreErlangGenerator {
                             // Emit lifecycle start telemetry before returning
                             Self::lifecycle_start_telemetry_doc(class_name),
                             line(),
+                            // BT-3992: strip the starter's initialize-ack
+                            // target and keep it for handle_continue's
+                            // `initialize` step, which acks once it succeeds.
+                            "let AckState = call 'beamtalk_actor':'take_init_ack'(CleanState1, 'initializing') in",
+                            line(),
                             // Return {ok, State, {continue, initialize}} to defer
                             // initialize dispatch to handle_continue where the loop is running
-                            "{'ok', CleanState1, {'continue', 'initialize'}}",
+                            "{'ok', AckState, {'continue', 'initialize'}}",
                         ]
                     ),
                 ]
@@ -1197,57 +1207,66 @@ impl CoreErlangGenerator {
             inner
         };
 
+        let wrapped = Self::pending_actions_wrap(docvec![
+            "case Continue of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'initialize'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        // The auto-chained dispatch body. Each
+                        // class's initialize is bracketed by its own
+                        // pdict stash/restore pair to preserve
+                        // re-entrant self-send semantics.
+                        inner,
+                    ),
+                    // BT-3968: one queued `self continueWith:`
+                    // step. The rest of the queue is seeded back
+                    // first (FIFO: a request made by this step
+                    // runs after them), then the step dispatches
+                    // through the very same case as a
+                    // fire-and-forget cast — pdict stash/restore,
+                    // strip_local_temps, notify_state_change and
+                    // the shared no-reply error arms — by binding
+                    // CastSelector / CastArgs in the pattern.
+                    line(),
+                    docvec![
+                        "<{",
+                        leaf::atom("$bt_continue"),
+                        ", [{CastSelector, CastArgs}|ContRest]}> when 'true' ->",
+                    ],
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in",
+                            Self::cast_dispatch_case(&module_name),
+                        ]
+                    ),
+                    line(),
+                    "<_> when 'true' -> {'noreply', State}",
+                ]
+            ),
+            line(),
+            "end",
+        ]);
+
         let doc = docvec![
             "'handle_continue'/2 = fun (Continue, State) ->",
             nest(
                 INDENT,
                 docvec![
                     line(),
-                    Self::pending_actions_wrap(docvec![
-                        "case Continue of",
-                        nest(
-                            INDENT,
-                            docvec![
-                                line(),
-                                "<'initialize'> when 'true' ->",
-                                nest(
-                                    INDENT,
-                                    // The auto-chained dispatch body. Each
-                                    // class's initialize is bracketed by its own
-                                    // pdict stash/restore pair to preserve
-                                    // re-entrant self-send semantics.
-                                    inner,
-                                ),
-                                // BT-3968: one queued `self continueWith:`
-                                // step. The rest of the queue is seeded back
-                                // first (FIFO: a request made by this step
-                                // runs after them), then the step dispatches
-                                // through the very same case as a
-                                // fire-and-forget cast — pdict stash/restore,
-                                // strip_local_temps, notify_state_change and
-                                // the shared no-reply error arms — by binding
-                                // CastSelector / CastArgs in the pattern.
-                                line(),
-                                docvec![
-                                    "<{",
-                                    leaf::atom("$bt_continue"),
-                                    ", [{CastSelector, CastArgs}|ContRest]}> when 'true' ->",
-                                ],
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in",
-                                        Self::cast_dispatch_case(&module_name),
-                                    ]
-                                ),
-                                line(),
-                                "<_> when 'true' -> {'noreply', State}",
-                            ]
-                        ),
-                        line(),
-                        "end",
-                    ]),
+                    // BT-3992: once the `initialize` step (with its pending
+                    // actions applied) has its final result, tell the starter
+                    // startup is over — before OTP runs any continuation
+                    // `initialize` requested. A no-op for every other step.
+                    "let _ContinueResult =",
+                    nest(INDENT, docvec![line(), wrapped]),
+                    line(),
+                    "in call 'beamtalk_actor':'ack_initialized'(Continue, _ContinueResult)",
                 ]
             ),
             "\n",
