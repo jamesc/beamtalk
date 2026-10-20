@@ -3634,7 +3634,7 @@ http := (ServerSupervisor spawnWith: cfg as: #http_server) unwrap
 
 Names are atoms: take them from a bounded, statically known set ([ADR 0079](ADR/0079-named-actor-registration.md)), never from runtime data.
 
-- **Starts run in the caller and are unlinked.** All of these start the tree in the calling process — never in the class's process — and then unlink it, like `Actor spawn`: a supervisor that exhausts its restart intensity dies alone, without taking its caller or its class down. Configuration may therefore send to its own class while the tree starts. To tie a supervisor's lifetime to something, nest it (below) or `stop` it.
+- **Starts run in the caller and are unlinked.** All of these start the tree in the calling process — never in the class's process — and then unlink it, like `Actor spawn`: a supervisor that exhausts its restart intensity dies alone, without taking its caller or its class down. Configuration may therefore send to its own class while the tree starts — except when the start is made from inside one of that class's own class methods (`class make => self spawnWith: …`), which run in the class's process like any class method body. To tie a supervisor's lifetime to something, nest it (below) or `stop` it.
 - **`initialize` runs once per top-level start** (each `supervise` that started the instance, each spawn), in the caller; never for a nested instance or an OTP restart.
 - **Discoverable.** `Node current supervisors` and `Node current processes` list an anonymous top-level instance while it runs and drop it after `stop`.
 

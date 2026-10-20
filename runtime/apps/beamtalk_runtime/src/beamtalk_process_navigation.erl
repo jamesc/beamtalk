@@ -1214,6 +1214,9 @@ restarting_class_name(_) ->
 -spec restarting_label(atom() | term()) -> binary().
 restarting_label(Id) when is_atom(Id) ->
     atom_to_binary(Id, utf8);
+restarting_label(Id) when is_integer(Id) ->
+    %% ADR 0135 §3: integer child ids (`withId: 3`).
+    integer_to_binary(Id);
 restarting_label(_) ->
     <<"restarting">>.
 

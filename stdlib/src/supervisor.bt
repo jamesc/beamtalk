@@ -17,7 +17,7 @@ type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne
 /// is instance-side (ADR 0135 §2): the runtime sends each setting to the
 /// supervisor being started, from inside its own OTP `init/1`. So `self` is
 /// that supervisor and `self args` its start args (`nil` for `supervise`).
-/// Two rules follow:
+/// The rules:
 ///
 /// - **Do not send messages to `self`** from a configuration method
 ///   (`self count`, `self which: X`): the supervisor is still starting, and
@@ -28,6 +28,12 @@ type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne
 ///   the `initialize` of a `withName:`/`withClassMethod:` actor child. A call
 ///   to an ancestor from there hangs during start, every OTP restart and
 ///   every `DynamicSupervisor startChild:`.
+/// - **A start made from inside one of the class's own class methods**
+///   (`class make => self spawnWith: …`, or `self supervise`) runs in that
+///   class's process, like any class method body. Its configuration must not
+///   send to that same class (`MySup settings`): the class is busy and the
+///   send fails. Starts from anywhere else run in the caller, so there such
+///   sends are fine.
 ///
 /// Each setting is a separate send, so put expensive work (reading files,
 /// say) in `childSpecs` only.
@@ -88,7 +94,8 @@ abstract Object subclass: Supervisor
   // `supervisionSpec` or `stop` it. Instance-side `initialize` runs once per
   // start, in the caller. An ordinary send of these messages is routed by
   // the compiler and runtime straight to the start helper; the bodies below
-  // document the behaviour and serve the remaining dynamic paths.
+  // document the behaviour and serve the remaining dynamic paths. They are
+  // `sealed` because an override would never run on those routed sends.
 
   /// Start this supervisor (or return the already-running instance).
   ///
@@ -102,7 +109,7 @@ abstract Object subclass: Supervisor
   /// boot-style "crash on failure" call sites, or `ifOk:ifError:` /
   /// `andThen:` for recoverable starts. Failures surface as
   /// `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
-  class supervise -> Result(Self, Error) =>
+  class sealed supervise -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) startLink: self
 
   /// Start a new, anonymous instance of this supervisor with `nil` args.
@@ -118,7 +125,7 @@ abstract Object subclass: Supervisor
   /// a == b      // => false
   /// a stop      // b keeps running
   /// ```
-  class spawn -> Self => (Erlang beamtalk_supervisor) doSpawn: self
+  class sealed spawn -> Self => (Erlang beamtalk_supervisor) doSpawn: self
 
   /// Start a new, anonymous instance with start args (`self args`).
   ///
@@ -131,7 +138,7 @@ abstract Object subclass: Supervisor
   /// srv := ServerSupervisor spawnWith: #{#port => 8080}
   /// srv args at: #port   // => 8080
   /// ```
-  class spawnWith: args :: Object -> Self =>
+  class sealed spawnWith: args :: Object -> Self =>
     (Erlang beamtalk_supervisor) doSpawnWith: self args: args
 
   /// Start a new instance registered under `name` (`nil` args).
@@ -139,7 +146,7 @@ abstract Object subclass: Supervisor
   /// `name` must come from a bounded, statically known set (ADR 0079): it is
   /// an atom. A taken name gives `Result error:` with kind
   /// `#name_registered`; any other failure `#supervisor_start_failed`.
-  class spawnAs: name :: Symbol -> Result(Self, Error) =>
+  class sealed spawnAs: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) doSpawnAs: self withName: name
 
   /// Start a new instance with start args, registered under `name`.
@@ -149,7 +156,7 @@ abstract Object subclass: Supervisor
   /// http := (ServerSupervisor spawnWith: cfg as: #http_server) unwrap
   /// (ServerSupervisor named: #http_server) unwrap == http   // => true
   /// ```
-  class spawnWith: args :: Object as: name :: Symbol -> Result(Self, Error) =>
+  class sealed spawnWith: args :: Object as: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor)
       doSpawnWith: self
       args: args

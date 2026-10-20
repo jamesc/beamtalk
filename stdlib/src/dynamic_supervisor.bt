@@ -65,7 +65,7 @@ abstract Object subclass: DynamicSupervisor(C)
   /// `unwrap` for boot-style "crash on failure" call sites, or
   /// `ifOk:ifError:` / `andThen:` for recoverable starts. Failures surface
   /// as `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
-  class supervise -> Result(Self, Error) =>
+  class sealed supervise -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) startLink: self
 
   /// Start a new, anonymous pool with `nil` args. Raises
@@ -77,20 +77,20 @@ abstract Object subclass: DynamicSupervisor(C)
   /// b := WorkerPool spawn
   /// a == b   // => false
   /// ```
-  class spawn -> Self => (Erlang beamtalk_supervisor) doSpawn: self
+  class sealed spawn -> Self => (Erlang beamtalk_supervisor) doSpawn: self
 
   /// Start a new, anonymous pool with start args (`self args`), so its
   /// `childClass`, `maxChildren` and `childShutdown` can differ per pool.
-  class spawnWith: args :: Object -> Self =>
+  class sealed spawnWith: args :: Object -> Self =>
     (Erlang beamtalk_supervisor) doSpawnWith: self args: args
 
   /// Start a new pool registered under a bounded `name` (ADR 0079). A taken
   /// name gives `Result error:` with kind `#name_registered`.
-  class spawnAs: name :: Symbol -> Result(Self, Error) =>
+  class sealed spawnAs: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) doSpawnAs: self withName: name
 
   /// Start a new pool with start args, registered under `name`.
-  class spawnWith: args :: Object as: name :: Symbol -> Result(Self, Error) =>
+  class sealed spawnWith: args :: Object as: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor)
       doSpawnWith: self
       args: args

@@ -156,8 +156,10 @@ instance-side `initialize`.
 An ordinary `X supervise` send never reaches this body: the runtime routes
 it straight to `class_start/4` in the caller (`beamtalk_class_dispatch`), so
 the start does not run in the class gen_server. This shim serves the
-remaining paths (a `self supervise` inside a class method, `super`), which
-already run in the calling process.
+remaining paths: a `self supervise` (or `super supervise`) inside one of the
+class's own class methods, which runs in that class's process like the rest
+of the method body, so configuration started from there must not send to the
+same class.
 """.
 -spec startLink(beamtalk_object()) ->
     {ok, {beamtalk_supervisor, atom(), module(), pid()}} | {error, #beamtalk_error{}}.
@@ -207,6 +209,20 @@ class_start_concrete(ClassName, Module, 'spawnAs:', [Name]) ->
 class_start_concrete(ClassName, Module, 'spawnWith:as:', [Args, Name]) ->
     beamtalk_result:from_tagged_tuple(
         spawn_named_instance(ClassName, Module, Args, Name, 'spawnWith:as:')
+    );
+class_start_concrete(ClassName, _Module, Selector, Args) ->
+    %% A dynamic send with the wrong argument count (`perform:withArguments:`).
+    beamtalk_error:raise(
+        beamtalk_error:new(
+            arity_mismatch,
+            ClassName,
+            Selector,
+            iolist_to_binary(
+                io_lib:format("~ts takes a different number of arguments, got ~b", [
+                    Selector, length(Args)
+                ])
+            )
+        )
     ).
 
 -doc """
@@ -228,22 +244,32 @@ caller that gets `already_started` always finds the gate armed.
 -spec supervise(atom(), module()) ->
     {ok, {beamtalk_supervisor, atom(), module(), pid()}} | {error, #beamtalk_error{}}.
 supervise(ClassName, Module) ->
+    %% No `whereis` fast path before the lock: the name is registered before
+    %% `init/1` runs, so a running-looking singleton may still be inside its
+    %% start with no gate armed yet. The lock makes such a caller wait until the
+    %% gate is armed.
     Started = global:trans(
         {{beamtalk_supervise, Module}, self()},
         fun() ->
-            case start_unlinked(fun() -> Module:start_link() end) of
-                {ok, Pid} ->
-                    arm_init_gate(Pid),
-                    {new, Pid};
-                Other ->
-                    Other
-            end
+            %% Arm the gate before unlinking: if this caller dies after the
+            %% unlink but before `run_initialize/1` claims the gate, the next
+            %% `supervise` waits on it and reclaims the orphan at the deadline
+            %% instead of answering an uninitialised singleton.
+            start_unlinked(fun() ->
+                case Module:start_link() of
+                    {ok, Pid} = Ok ->
+                        arm_init_gate(Pid),
+                        Ok;
+                    Other ->
+                        Other
+                end
+            end)
         end,
         [node()],
         infinity
     ),
     case Started of
-        {new, Pid} ->
+        {ok, Pid} ->
             ?LOG_INFO("Supervisor started", #{
                 supervisor => ClassName, module => Module, pid => Pid, domain => [beamtalk, runtime]
             }),
@@ -478,6 +504,7 @@ from a supervisor that died in between is flushed. The previous
 """.
 -spec start_unlinked(fun(() -> term())) -> {ok, pid()} | ignore | {error, term()}.
 start_unlinked(StartFun) ->
+    {links, LinkedBefore} = erlang:process_info(self(), links),
     Trapping = process_flag(trap_exit, true),
     try StartFun() of
         {ok, Pid} = Ok when is_pid(Pid) ->
@@ -490,7 +517,25 @@ start_unlinked(StartFun) ->
         Other ->
             Other
     after
-        process_flag(trap_exit, Trapping)
+        process_flag(trap_exit, Trapping),
+        _ = Trapping orelse propagate_trapped_exits(LinkedBefore)
+    end.
+
+%% The caller did not trap exits, so an exit signal that reached it through a
+%% link it already had while `start_unlinked/1` was trapping would have killed
+%% it. Honour that now instead of leaving the signal as an ignored message.
+%% Only links that existed before the start are considered: the supervisor
+%% being started (and anything `proc_lib` links during the start) are not.
+-spec propagate_trapped_exits([pid() | port()]) -> true.
+propagate_trapped_exits(LinkedBefore) ->
+    receive
+        {'EXIT', From, Reason} when Reason =/= normal ->
+            case lists:member(From, LinkedBefore) of
+                true -> exit(Reason);
+                false -> propagate_trapped_exits(LinkedBefore)
+            end
+    after 0 ->
+        true
     end.
 
 -doc """
@@ -533,8 +578,14 @@ start_supervisor_child(Module, Args, Name) ->
                 )};
         false ->
             case exports(Module, start_link, 2) of
-                true -> Module:start_link(Name, Args);
-                false -> Module:start_link()
+                true ->
+                    Module:start_link(Name, Args);
+                false ->
+                    ?LOG_WARNING(
+                        "Supervisor child compiled before ADR 0135: withName: and args ignored",
+                        #{module => Module, name => Name, domain => [beamtalk, runtime]}
+                    ),
+                    Module:start_link()
             end
     end.
 
@@ -695,9 +746,9 @@ configuration setting (`childSpecs`, `strategy`, `maxRestarts`,
 `restartWindow`) by **instance dispatch** on that handle, so user overrides,
 inherited defaults and runtime overrides resolve as for any instance method.
 
-The class gen_server is never involved: it may be blocked inside
-`startLink/1` waiting for `supervisor:start_link` to return, so a
-`class_send` from here would deadlock. A configuration method that messages
+The configuration is read by instance dispatch, never through the class
+gen_server, which may be blocked (a start made from one of its own class methods),
+so a `class_send` from here could deadlock. A configuration method that messages
 `self` makes OTP exit with `calling_self`; that, and any other failure, ends
 `init/1` with a `#beamtalk_error{}` that the caller reports as
 `supervisor_start_failed` (see `config_step/3`).
@@ -873,8 +924,13 @@ begin_init(Module, ClassName, Args) ->
 %% simply not listed.
 -spec join_instances_group() -> ok.
 join_instances_group() ->
+    %% `init/1` can run again in the same process (a supervisor's
+    %% `code_change` re-runs it with the stored args): join only once.
     try
-        pg:join(?INSTANCES_GROUP, self())
+        case lists:member(self(), pg:get_local_members(?INSTANCES_GROUP)) of
+            true -> ok;
+            false -> pg:join(?INSTANCES_GROUP, self())
+        end
     catch
         error:badarg -> ok;
         exit:{noproc, _} -> ok
@@ -903,7 +959,7 @@ read_config(Self, ClassName, Selector) ->
 Run one step of supervisor configuration inside `init/1`; on failure, exit
 `init/1` with a `#beamtalk_error{}` (ADR 0135 §2).
 
-`start_link_supervisor/2` reports such an exit as `supervisor_start_failed`
+`supervise/2` and the spawn family report such an exit as `supervisor_start_failed`
 carrying the error's hint (a parent reports a nested failure as its own
 start failure). A configuration method that sent a message to its own
 supervisor (OTP `calling_self`, raw or wrapped by dispatch) gets the
@@ -1626,7 +1682,7 @@ gate until `?INIT_WAIT_TIMEOUT` and then get the structured error.
 -spec run_initialize(term()) -> ok.
 run_initialize({beamtalk_supervisor, _ClassName, _Module, Pid} = SupTuple) ->
     claim_init_gate(Pid),
-    %% The supervisor is already started and linked by the time the hook runs.
+    %% The supervisor is already started (and unlinked from the caller) by the time the hook runs.
     %% If the hook raises, the caller never receives the supervisor, so stop
     %% it before re-raising: no half-started supervisor, registered name or
     %% orphaned children are left behind (BT-3720). The gate is released only

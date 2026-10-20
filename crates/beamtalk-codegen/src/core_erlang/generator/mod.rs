@@ -349,6 +349,11 @@ pub struct CoreErlangGenerator {
     /// hierarchy in `generate_module_with_warnings`.
     pub(in crate::core_erlang) direct_call_eligible:
         std::collections::HashMap<String, DirectCallClassInfo>,
+    /// ADR 0135 §1: names of `Supervisor` / `DynamicSupervisor` subclasses, for
+    /// REPL expression codegen, which has no `class_hierarchy`. Set by
+    /// `set_supervisor_classes_from_hierarchy`; module codegen asks
+    /// `class_hierarchy` instead.
+    pub(in crate::core_erlang) supervisor_classes: std::collections::HashSet<String>,
     /// ADR 0129 Phase 0b: the class being compiled's own direct-call-eligible
     /// class methods as sorted `(raw selector, safe fn name)` pairs — a view of
     /// `direct_call_eligible`, baked into `__beamtalk_meta/0`.
@@ -477,6 +482,7 @@ impl CoreErlangGenerator {
             current_method_selector: None,
             is_server_subclass: false,
             direct_call_eligible: std::collections::HashMap::new(),
+            supervisor_classes: std::collections::HashSet::new(),
             own_direct_class_methods: Vec::new(),
             own_stdlib_trait_methods: Vec::new(),
             own_overrides_collection_selector: false,

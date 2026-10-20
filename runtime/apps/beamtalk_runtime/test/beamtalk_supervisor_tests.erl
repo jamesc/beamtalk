@@ -1635,6 +1635,120 @@ supervise_start_failure_returns_supervisor_start_failed_test() ->
         ?assertEqual(undefined, whereis(?BT3963_MOD))
     end).
 
+supervise_callers_racing_during_start_get_one_instance_test() ->
+    %% Two `supervise` callers race while the first is still inside
+    %% `start_link` (its `childSpecs` is blocked): the second waits, then
+    %% answers the same instance; `initialize` runs once.
+    Test = self(),
+    Config = bt3963_static_config(#{
+        childSpecs => fun(_) ->
+            Test ! {in_start, self()},
+            receive
+                go -> []
+            after 5000 -> []
+            end
+        end,
+        initialize => fun(_) ->
+            Test ! initialized,
+            nil
+        end
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        Caller = fun(Tag) ->
+            spawn(fun() ->
+                Test ! {Tag, beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)}
+            end)
+        end,
+        Caller(first),
+        SupPid =
+            receive
+                {in_start, P} -> P
+            after 5000 -> error(not_started)
+            end,
+        Caller(second),
+        timer:sleep(50),
+        SupPid ! go,
+        First =
+            receive
+                {first, F} -> F
+            after 10000 -> error(first_timeout)
+            end,
+        Second =
+            receive
+                {second, S} -> S
+            after 10000 -> error(second_timeout)
+            end,
+        try
+            ?assertEqual({ok, bt3963_sup('BT3963Sup', SupPid)}, First),
+            ?assertEqual(First, Second),
+            receive
+                initialized -> ok
+            after 2000 -> error(not_initialized)
+            end,
+            receive
+                initialized -> error(initialized_twice)
+            after 100 -> ok
+            end
+        after
+            gen_server:stop(SupPid)
+        end
+    end).
+
+start_honours_exit_signals_from_existing_links_test() ->
+    %% The start traps exits in the caller; a non-trapping caller whose
+    %% existing link dies meanwhile must still die once the start returns.
+    Test = self(),
+    Config = bt3963_static_config(#{
+        childSpecs => fun(_) ->
+            Test ! {in_start, self()},
+            receive
+                go -> []
+            after 5000 -> []
+            end
+        end
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        {Caller, Ref} = spawn_monitor(fun() ->
+            Helper = spawn_link(fun() ->
+                receive
+                    stop -> ok
+                end
+            end),
+            Test ! {helper, Helper},
+            _ = beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, []),
+            Test ! survived,
+            receive
+                stop -> ok
+            end
+        end),
+        Helper =
+            receive
+                {helper, H} -> H
+            after 2000 -> error(no_helper)
+            end,
+        SupPid =
+            receive
+                {in_start, P} -> P
+            after 5000 -> error(not_started)
+            end,
+        %% Kill the caller's link while the caller is inside the start.
+        exit(Helper, boom),
+        timer:sleep(20),
+        SupPid ! go,
+        try
+            receive
+                {'DOWN', Ref, process, Caller, Reason} -> ?assertEqual(boom, Reason)
+            after 5000 -> error(caller_survived_linked_exit)
+            end,
+            receive
+                survived -> error(caller_survived_linked_exit)
+            after 0 -> ok
+            end
+        after
+            catch gen_server:stop(SupPid)
+        end
+    end).
+
 spawn_starts_independent_unlinked_listed_instances_test() ->
     Test = self(),
     Config = bt3963_static_config(#{

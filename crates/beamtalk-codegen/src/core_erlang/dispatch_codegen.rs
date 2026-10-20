@@ -1566,9 +1566,10 @@ impl CoreErlangGenerator {
     /// subclass of either (ADR 0135 §1 carve-out from the actor spawn
     /// intrinsics).
     fn is_supervisor_class(&self, class_name: &str) -> bool {
-        self.class_hierarchy.as_ref().is_some_and(|h| {
-            h.is_supervisor_subclass(class_name) || h.is_dynamic_supervisor_subclass(class_name)
-        })
+        self.supervisor_classes.contains(class_name)
+            || self.class_hierarchy.as_ref().is_some_and(|h| {
+                h.is_supervisor_subclass(class_name) || h.is_dynamic_supervisor_subclass(class_name)
+            })
     }
 
     /// Lowers a spawn-family send on a supervisor class (ADR 0135 §1) to the
