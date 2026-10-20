@@ -96,20 +96,48 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
 
 
 'handle_continue'/2 = fun (Continue, State) ->
-    let _PendingStopCleared = call 'beamtalk_actor':'clear_pending_stop'() in
+    let _PendingActionsCleared = call 'beamtalk_actor':'clear_pending_actions'() in
     let _CallbackResult =
         case Continue of
             <'initialize'> when 'true' ->
                 let InitNewState = State in
                 let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in
                 {'noreply', InitCleanState}
+            <{'$bt_continue', [{CastSelector, CastArgs}|ContRest]}> when 'true' ->
+                let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in
+                let _OldState = call 'erlang':'get'('$bt_actor_state') in
+                let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                let _CastDispatchResult = call 'foldl_stateacc_fallbacks':'safe_dispatch'(CastSelector, CastArgs, State) in
+                let _RestoreOk = case _OldState of
+                    <'undefined'> when 'true' ->
+                        call 'erlang':'erase'('$bt_actor_state')
+                    <_Prev> when 'true' ->
+                        call 'erlang':'put'('$bt_actor_state', _Prev)
+                end in
+                let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
+                case _CastDispatchResult of
+                    <{'reply', _CastResult, CastNewState}> when 'true' ->
+                        let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
+                        let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
+                        {'noreply', CleanCastNewState}
+                    <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
+                        let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
+                        let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
+                        in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
+                        {'noreply', State}
+                    <{'error', CastError, _CastState2}> when 'true' ->
+                        let CastErrMsg2 = call 'beamtalk_error':'format_safe'(CastError) in
+                        let _ = call 'logger':'warning'(CastErrMsg2, ~{'selector' => CastSelector, 'reason' => CastError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
+                        in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
+                        {'noreply', State}
+                end
             <_> when 'true' -> {'noreply', State}
         end
-    in call 'beamtalk_actor':'apply_pending_stop'(_CallbackResult)
+    in call 'beamtalk_actor':'apply_pending_actions'(_CallbackResult)
 
 
 'handle_cast'/2 = fun (Msg, State) ->
-    let _PendingStopCleared = call 'beamtalk_actor':'clear_pending_stop'() in
+    let _PendingActionsCleared = call 'beamtalk_actor':'clear_pending_actions'() in
     let _CallbackResult =
         case Msg of
             <{'$beamtalk_wire', _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->
@@ -139,11 +167,13 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                     <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
                         let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
                         let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
-                        in {'noreply', State}
+                        in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
+                        {'noreply', State}
                     <{'error', CastError, _CastState2}> when 'true' ->
                         let CastErrMsg2 = call 'beamtalk_error':'format_safe'(CastError) in
                         let _ = call 'logger':'warning'(CastErrMsg2, ~{'selector' => CastSelector, 'reason' => CastError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
-                        in {'noreply', State}
+                        in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
+                        {'noreply', State}
                 end
             <{'cast', CastSelector, CastArgs}> when 'true' ->
                 let _OldState = call 'erlang':'get'('$bt_actor_state') in
@@ -164,19 +194,21 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                     <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
                         let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
                         let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
-                        in {'noreply', State}
+                        in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
+                        {'noreply', State}
                     <{'error', CastError, _CastState2}> when 'true' ->
                         let CastErrMsg2 = call 'beamtalk_error':'format_safe'(CastError) in
                         let _ = call 'logger':'warning'(CastErrMsg2, ~{'selector' => CastSelector, 'reason' => CastError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
-                        in {'noreply', State}
+                        in let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
+                        {'noreply', State}
                 end
             <_> when 'true' -> {'noreply', State}
         end
-    in call 'beamtalk_actor':'apply_pending_stop'(_CallbackResult)
+    in call 'beamtalk_actor':'apply_pending_actions'(_CallbackResult)
 
 
 'handle_call'/3 = fun (Msg, From, State) ->
-    let _PendingStopCleared = call 'beamtalk_actor':'clear_pending_stop'() in
+    let _PendingActionsCleared = call 'beamtalk_actor':'clear_pending_actions'() in
     let _CallbackResult =
         case Msg of
             <{'$beamtalk_wire', _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->
@@ -209,6 +241,7 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                                 {'reply', {'ok', EncodedResult}, CleanNewState}
                         end
                     <{'error', Error, ErrState}> when 'true' ->
+                        let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
                         let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
                         case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of
                             <{'error', EncErr}> when 'true' ->
@@ -239,6 +272,7 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                                 {'reply', {'ok', EncodedResult}, CleanNewState}
                         end
                     <{'error', Error, ErrState}> when 'true' ->
+                        let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
                         let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
                         case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of
                             <{'error', EncErr}> when 'true' ->
@@ -248,7 +282,7 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                         end
                 end
         end
-    in call 'beamtalk_actor':'apply_pending_stop'(_CallbackResult)
+    in call 'beamtalk_actor':'apply_pending_actions'(_CallbackResult)
 
 
 'handle_info'/2 = fun (Msg, State) ->

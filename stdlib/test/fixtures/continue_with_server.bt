@@ -1,0 +1,121 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3968 fixture: a Server that requests follow-up steps with
+// `self continueWith:` from handleInfo:, casts and sync methods, and records
+// the order everything ran in. Steps that must be observed after the actor
+// has stopped write into the shared Ets table named by `tableName`. See
+// stdlib/test/actor_continue_with_test.bt.
+
+Server subclass: ContinueWithServer
+  state: tableName = nil
+  state: log = #()
+  state: counter = 0
+
+  // `#one` sleeps first, so `#two` / `#three` sent right behind it are
+  // already queued when it requests its continuation.
+  handleInfo: msg =>
+    msg == #one
+      ifTrue: [
+        Timer sleep: 50
+        self.log := self.log add: #one
+        self continueWith: #afterOne
+      ]
+      ifFalse: [self.log := self.log add: msg]
+
+  one =>
+    Timer sleep: 50
+    self.log := self.log add: #one
+    self continueWith: #afterOne
+
+  two => self.log := self.log add: #two
+
+  three => self.log := self.log add: #three
+
+  afterOne => self.log := self.log add: #continuation
+
+  log => self.log
+
+  // === FIFO ===
+  fifo =>
+    self continueWith: #stepA
+    self continueWith: #stepB
+    #requested
+
+  stepA =>
+    self.log := self.log add: #a
+    self continueWith: #stepC
+
+  stepB => self.log := self.log add: #b
+
+  stepC => self.log := self.log add: #c
+
+  // A request made by a helper (a nested self-send) joins the same queue.
+  viaHelper =>
+    self requestAfterOne
+    #requested
+
+  requestAfterOne => self continueWith: #afterOne
+
+  // === Sync reply comes first ===
+  bumpLater =>
+    self continueWith: #bump
+    self.counter
+
+  bump => self.counter := self.counter + 1
+
+  counter => self.counter
+
+  // === Arguments ===
+  addLater =>
+    self continueWith: #add:and: withArguments: #(1, 2)
+    #requested
+
+  add: a and: b => self.log := self.log add: a + b
+
+  continueWithSelector: selector => self continueWith: selector
+
+  continueWithSelector: selector args: args =>
+    self continueWith: selector withArguments: args
+
+  // === Errors ===
+  continueThenFail =>
+    self continueWith: #afterOne
+    self error: "boom after continue request"
+
+  failLater =>
+    self continueWith: #explode
+    #requested
+
+  explode =>
+    self.counter := 99
+    self error: "boom in continuation"
+
+  // === Stop interaction (observed through Ets) ===
+  stopThenContinue =>
+    self stopWith: #shutdown
+    self continueWith: #markX
+    #stillRunning
+
+  continueThenStop =>
+    self continueWith: #markX
+    self stopWith: #shutdown
+    #stillRunning
+
+  chainStop =>
+    self continueWith: #stopNow
+    self continueWith: #markX
+    #requested
+
+  stopNow =>
+    self tableAt: #stopNowRan put: true
+    self stopWith: #shutdown
+
+  markX => self tableAt: #xRan put: true
+
+  tableAt: key put: value =>
+    self.tableName isNil ifFalse: [
+      (Ets named: self.tableName) at: key put: value
+    ]
+
+  terminate: reason => self tableAt: #reason put: reason

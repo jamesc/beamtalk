@@ -4239,13 +4239,13 @@ in_dispatch(Fun) ->
         Fun()
     after
         erase('$bt_actor_state'),
-        beamtalk_actor:clear_pending_stop()
+        beamtalk_actor:clear_pending_actions()
     end.
 
-bt3967_apply_pending_stop_passes_through_without_request_test() ->
+bt3967_apply_pending_actions_passes_through_without_request_test() ->
     State = #{value => 0},
-    ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_stop({noreply, State})),
-    ?assertEqual({reply, 1, State}, beamtalk_actor:apply_pending_stop({reply, 1, State})).
+    ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_actions({noreply, State})),
+    ?assertEqual({reply, 1, State}, beamtalk_actor:apply_pending_actions({reply, 1, State})).
 
 bt3967_self_stop_with_is_deferred_until_callback_returns_test() ->
     in_dispatch(fun() ->
@@ -4256,17 +4256,17 @@ bt3967_self_stop_with_is_deferred_until_callback_returns_test() ->
         ?assertEqual(ok, beamtalk_actor:sync_send(self(), 'stopWith:', [Reason])),
         ?assertEqual(
             {stop, Reason, reply_value, State},
-            beamtalk_actor:apply_pending_stop({reply, reply_value, State})
+            beamtalk_actor:apply_pending_actions({reply, reply_value, State})
         ),
         %% The request is consumed.
-        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_stop({noreply, State}))
+        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_actions({noreply, State}))
     end).
 
 bt3967_self_stop_noreply_becomes_stop_normal_test() ->
     in_dispatch(fun() ->
         State = #{value => 0},
         ok = beamtalk_actor:sync_send(self(), stop, []),
-        ?assertEqual({stop, normal, State}, beamtalk_actor:apply_pending_stop({noreply, State}))
+        ?assertEqual({stop, normal, State}, beamtalk_actor:apply_pending_actions({noreply, State}))
     end).
 
 bt3967_first_stop_request_wins_test() ->
@@ -4274,7 +4274,7 @@ bt3967_first_stop_request_wins_test() ->
         State = #{value => 0},
         ok = beamtalk_actor:sync_send(self(), 'stopWith:', [first]),
         ok = beamtalk_actor:sync_send(self(), 'stopWith:', [second]),
-        ?assertEqual({stop, first, State}, beamtalk_actor:apply_pending_stop({noreply, State}))
+        ?assertEqual({stop, first, State}, beamtalk_actor:apply_pending_actions({noreply, State}))
     end).
 
 bt3967_existing_stop_return_wins_test() ->
@@ -4283,10 +4283,10 @@ bt3967_existing_stop_return_wins_test() ->
         ok = beamtalk_actor:sync_send(self(), 'stopWith:', [requested]),
         ?assertEqual(
             {stop, init_failed, State},
-            beamtalk_actor:apply_pending_stop({stop, init_failed, State})
+            beamtalk_actor:apply_pending_actions({stop, init_failed, State})
         ),
         %% Still consumed, so it cannot leak into a later callback.
-        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_stop({noreply, State}))
+        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_actions({noreply, State}))
     end).
 
 bt3967_intrinsic_dispatch_routes_self_stop_test() ->
@@ -4295,7 +4295,7 @@ bt3967_intrinsic_dispatch_routes_self_stop_test() ->
         Self = #beamtalk_object{class = 'Counter', class_mod = undefined, pid = self()},
         ?assertEqual(ok, beamtalk_actor:dispatch(actorStopWith, [{shutdown, x}], Self)),
         ?assertEqual(
-            {stop, {shutdown, x}, State}, beamtalk_actor:apply_pending_stop({noreply, State})
+            {stop, {shutdown, x}, State}, beamtalk_actor:apply_pending_actions({noreply, State})
         )
     end).
 
@@ -4320,13 +4320,13 @@ bt3967_self_stop_outside_dispatch_is_not_silently_dropped_test() ->
     %% so a self-stop must fail visibly (gen_server:stop/3's calling_self)
     %% rather than answer ok and never stop.
     ?assertError(_, beamtalk_actor:sync_send(self(), 'stopWith:', [normal])),
-    ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_stop({noreply, #{}})).
+    ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_actions({noreply, #{}})).
 
-bt3967_clear_pending_stop_discards_stale_request_test() ->
+bt3967_clear_pending_actions_discards_stale_request_test() ->
     in_dispatch(fun() ->
         ok = beamtalk_actor:sync_send(self(), 'stopWith:', [stale]),
-        ok = beamtalk_actor:clear_pending_stop(),
-        ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_stop({noreply, #{}}))
+        ok = beamtalk_actor:clear_pending_actions(),
+        ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_actions({noreply, #{}}))
     end).
 
 %% Every `@intrinsic "actor..."` body in stdlib/src/actor.bt must have a
@@ -4343,3 +4343,217 @@ bt3967_every_actor_intrinsic_is_mapped_test() ->
     ?assert(lists:member(actorStopWith, Intrinsics)),
     Unmapped = [I || I <- Intrinsics, beamtalk_actor:intrinsic_selector(I) =:= undefined],
     ?assertEqual([], Unmapped).
+
+%%% BT-3968: continueWith: / deferred continuations
+
+%% The kind of the structured error a raising send-site helper reraises.
+continuation_error_kind(Fun) ->
+    try Fun() of
+        Other -> {no_error, Other}
+    catch
+        error:#{error := #beamtalk_error{kind = Kind}} -> Kind
+    end.
+
+bt3968_continuation_becomes_continue_action_on_noreply_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        ?assertEqual(ok, beamtalk_actor:sync_send(self(), 'continueWith:', [step])),
+        ?assertEqual(
+            {noreply, State, {continue, {'$bt_continue', [{step, []}]}}},
+            beamtalk_actor:apply_pending_actions({noreply, State})
+        ),
+        %% Consumed.
+        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_actions({noreply, State}))
+    end).
+
+bt3968_continuation_becomes_continue_action_on_reply_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:withArguments:', ['at:put:', [1, x]]),
+        ?assertEqual(
+            {reply, r, State, {continue, {'$bt_continue', [{'at:put:', [1, x]}]}}},
+            beamtalk_actor:apply_pending_actions({reply, r, State})
+        )
+    end).
+
+bt3968_continuations_are_fifo_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [a]),
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [b]),
+        ?assertEqual(
+            {noreply, State, {continue, {'$bt_continue', [{a, []}, {b, []}]}}},
+            beamtalk_actor:apply_pending_actions({noreply, State})
+        )
+    end).
+
+bt3968_seeded_queue_stays_ahead_of_new_requests_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        %% handle_continue running `a` with [b, c] still queued.
+        ok = beamtalk_actor:clear_pending_actions(),
+        ok = beamtalk_actor:seed_pending_continuations([{b, []}, {c, []}]),
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [d]),
+        ?assertEqual(
+            {noreply, State, {continue, {'$bt_continue', [{b, []}, {c, []}, {d, []}]}}},
+            beamtalk_actor:apply_pending_actions({noreply, State})
+        )
+    end).
+
+bt3968_seeding_an_empty_rest_queues_nothing_test() ->
+    in_dispatch(fun() ->
+        ok = beamtalk_actor:seed_pending_continuations([]),
+        ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_actions({noreply, #{}}))
+    end).
+
+bt3968_pending_stop_wins_over_continuations_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [x]),
+        ok = beamtalk_actor:sync_send(self(), 'stopWith:', [shutdown]),
+        ?assertEqual(
+            {stop, shutdown, r, State}, beamtalk_actor:apply_pending_actions({reply, r, State})
+        ),
+        %% Both requests consumed.
+        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_actions({noreply, State}))
+    end).
+
+bt3968_existing_stop_return_drops_continuations_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [x]),
+        ?assertEqual(
+            {stop, init_failed, State},
+            beamtalk_actor:apply_pending_actions({stop, init_failed, State})
+        ),
+        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_actions({noreply, State}))
+    end).
+
+bt3968_result_with_action_conflicts_loudly_test() ->
+    in_dispatch(fun() ->
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [x]),
+        ?assertError(
+            {bt_continue_conflicts_with_action, _},
+            beamtalk_actor:apply_pending_actions({noreply, #{}, hibernate})
+        )
+    end).
+
+bt3968_discard_drops_continuations_but_keeps_stop_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [x]),
+        ok = beamtalk_actor:sync_send(self(), 'stopWith:', [shutdown]),
+        ok = beamtalk_actor:discard_pending_continuations(),
+        ?assertEqual(
+            {stop, shutdown, State}, beamtalk_actor:apply_pending_actions({noreply, State})
+        )
+    end),
+    in_dispatch(fun() ->
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [x]),
+        ok = beamtalk_actor:discard_pending_continuations(),
+        ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_actions({noreply, #{}}))
+    end).
+
+bt3968_clear_pending_actions_discards_stale_continuations_test() ->
+    in_dispatch(fun() ->
+        ok = beamtalk_actor:sync_send(self(), 'continueWith:', [stale]),
+        ok = beamtalk_actor:clear_pending_actions(),
+        ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_actions({noreply, #{}}))
+    end).
+
+bt3968_request_outside_dispatch_raises_test() ->
+    %% Self, but no dispatching callback running: nothing would consume it.
+    ?assertEqual(
+        invalid_continuation,
+        continuation_error_kind(fun() ->
+            beamtalk_actor:request_continuation(self(), 'continueWith:', x, none)
+        end)
+    ),
+    ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_actions({noreply, #{}})).
+
+bt3968_request_for_another_process_raises_test() ->
+    Other = spawn(fun() -> ok end),
+    in_dispatch(fun() ->
+        ?assertEqual(
+            invalid_continuation,
+            continuation_error_kind(fun() ->
+                beamtalk_actor:sync_send(Other, 'continueWith:', [x])
+            end)
+        ),
+        ?assertEqual(
+            invalid_continuation,
+            continuation_error_kind(fun() ->
+                beamtalk_actor:cast_send(Other, 'continueWith:withArguments:', [x, []])
+            end)
+        ),
+        ?assertEqual(
+            invalid_continuation,
+            continuation_error_kind(fun() ->
+                beamtalk_actor:sync_send(Other, 'continueWith:', [x], 1000)
+            end)
+        ),
+        ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_actions({noreply, #{}}))
+    end).
+
+bt3968_async_request_for_another_process_rejects_future_test() ->
+    Other = spawn(fun() -> ok end),
+    Future = beamtalk_future:new(),
+    ok = beamtalk_actor:async_send(Other, 'continueWith:', [x], Future),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = invalid_continuation}},
+        beamtalk_future:await(Future, 1000)
+    ).
+
+bt3968_request_validates_selector_and_arity_test() ->
+    in_dispatch(fun() ->
+        ?assertEqual(
+            type_error,
+            continuation_error_kind(fun() ->
+                beamtalk_actor:sync_send(self(), 'continueWith:', [<<"x">>])
+            end)
+        ),
+        ?assertEqual(
+            type_error,
+            continuation_error_kind(fun() ->
+                beamtalk_actor:sync_send(self(), 'continueWith:withArguments:', [x, not_a_list])
+            end)
+        ),
+        ?assertEqual(
+            arity_mismatch,
+            continuation_error_kind(fun() ->
+                beamtalk_actor:sync_send(self(), 'continueWith:', ['at:'])
+            end)
+        ),
+        ?assertEqual(
+            arity_mismatch,
+            continuation_error_kind(fun() ->
+                beamtalk_actor:sync_send(self(), 'continueWith:withArguments:', ['at:put:', [1]])
+            end)
+        ),
+        %% Binary selectors take one argument.
+        ?assertEqual(
+            ok, beamtalk_actor:sync_send(self(), 'continueWith:withArguments:', ['+', [1]])
+        ),
+        ?assertEqual(
+            {noreply, #{}, {continue, {'$bt_continue', [{'+', [1]}]}}},
+            beamtalk_actor:apply_pending_actions({noreply, #{}})
+        )
+    end).
+
+bt3968_intrinsic_dispatch_routes_continue_with_test() ->
+    in_dispatch(fun() ->
+        Self = #beamtalk_object{class = 'Counter', class_mod = undefined, pid = self()},
+        ?assertEqual(ok, beamtalk_actor:dispatch(actorContinueWith, [a], Self)),
+        ?assertEqual(ok, beamtalk_actor:dispatch(actorContinueWithArgs, ['b:', [1]], Self)),
+        ?assertEqual(
+            {noreply, #{}, {continue, {'$bt_continue', [{a, []}, {'b:', [1]}]}}},
+            beamtalk_actor:apply_pending_actions({noreply, #{}})
+        )
+    end),
+    ?assertEqual('continueWith:', beamtalk_actor:intrinsic_selector(actorContinueWith)),
+    ?assertEqual(
+        'continueWith:withArguments:', beamtalk_actor:intrinsic_selector(actorContinueWithArgs)
+    ).
+
+bt3968_runtime_handle_continue_ignores_unknown_term_test() ->
+    ?assertEqual({noreply, #{}}, beamtalk_actor:handle_continue(something_else, #{})).

@@ -203,8 +203,17 @@ handle_getValue([], State) ->
 
 %% BT-3967: process-dictionary key holding a deferred self-stop request
 %% (`self stopWith: Reason` from inside a method), consumed by
-%% apply_pending_stop/1 once the current gen_server callback returns.
+%% apply_pending_actions/1 once the current gen_server callback returns.
 -define(PENDING_STOP_KEY, '$bt_pending_stop').
+
+%% BT-3968: process-dictionary key holding the deferred continuation queue
+%% (`self continueWith: #sel` from inside a method) as a *reversed* list of
+%% `{Selector, Args}`, consumed by apply_pending_actions/1 once the current
+%% gen_server callback returns — it becomes OTP's `{continue, _}` action.
+-define(PENDING_CONTINUE_KEY, '$bt_pending_continue').
+
+%% BT-3968: the `handle_continue/2` term carrying the continuation queue.
+-define(BT_CONTINUE_TAG, '$bt_continue').
 
 %% ADR 0126 §3: timeout for the `erpc:call/5` a remote spawn/lookup/list
 %% makes to the target node — matches `gen_server:call/2`'s own 5000ms
@@ -236,6 +245,7 @@ handle_getValue([], State) ->
     handle_cast/2,
     handle_call/3,
     handle_info/2,
+    handle_continue/2,
     code_change/3,
     terminate/2
 ]).
@@ -253,17 +263,26 @@ handle_getValue([], State) ->
 %% send site — i.e. a self-send from inside one of the actor's own methods.
 -export([dispatch/3]).
 -ifdef(TEST).
--export([intrinsic_selector/1]).
+-export([intrinsic_selector/1, request_continuation/4]).
 -endif.
 
-%% BT-3967: deferred self-stop. Every gen_server callback that runs a
-%% Beamtalk dispatch (this module's own and every compiled actor's
-%% generated handle_continue/handle_call/handle_cast/handle_info) passes its
-%% return value through apply_pending_stop/1, which turns it into a
-%% `{stop, ...}` return when the dispatch requested `self stopWith:`;
-%% clear_pending_stop/0 runs first so a request can never leak in from
-%% anywhere else.
--export([clear_pending_stop/0, apply_pending_stop/1]).
+%% BT-3967 / BT-3968: deferred pending actions. Every gen_server callback
+%% that runs a Beamtalk dispatch (this module's own and every compiled
+%% actor's generated handle_continue/handle_call/handle_cast/handle_info)
+%% passes its return value through apply_pending_actions/1, which turns it
+%% into a `{stop, ...}` return when the dispatch requested `self stopWith:`,
+%% or adds a `{continue, ...}` action when it requested
+%% `self continueWith:`; clear_pending_actions/0 runs first so a request can
+%% never leak in from anywhere else. seed_pending_continuations/1 (from
+%% handle_continue) keeps an already-queued chain ahead of new requests, and
+%% discard_pending_continuations/0 (from the dispatch-error arms) drops the
+%% queue when the dispatch's state rolls back.
+-export([
+    clear_pending_actions/0,
+    apply_pending_actions/1,
+    seed_pending_continuations/1,
+    discard_pending_continuations/0
+]).
 
 %% exported so generated self-dispatch error breadcrumbs
 %% (dispatch_codegen.rs's generate_self_dispatch_error_clause) can resolve
@@ -890,6 +909,11 @@ async_send(ActorPid, 'stopWith:timeout:', [Reason, Timeout], FuturePid) ->
             beamtalk_future:reject(FuturePid, stop_timeout_type_error('stopWith:timeout:')),
             ok
     end;
+async_send(ActorPid, 'continueWith:' = Selector, [ContSelector], FuturePid) ->
+    %% BT-3968: only meaningful on `self`; raises in the caller otherwise.
+    async_request_continuation(ActorPid, Selector, ContSelector, none, FuturePid);
+async_send(ActorPid, 'continueWith:withArguments:' = Selector, [ContSelector, ContArgs], FuturePid) ->
+    async_request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs}, FuturePid);
 async_send(ActorPid, kill, [], FuturePid) ->
     %% kill is handled locally - forcefully kills the actor process.
     %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
@@ -1052,6 +1076,12 @@ cast_send({global, Name}, Selector, Args) when is_atom(Name) ->
         undefined -> ok;
         Pid when is_pid(Pid) -> cast_send(Pid, Selector, Args)
     end;
+cast_send(ActorPid, 'continueWith:' = Selector, [ContSelector]) ->
+    %% BT-3968: `actor continueWith: #x!` from another process is caller
+    %% misuse, not a remote request — raise in the caller rather than cast.
+    request_continuation(ActorPid, Selector, ContSelector, none);
+cast_send(ActorPid, 'continueWith:withArguments:' = Selector, [ContSelector, ContArgs]) ->
+    request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs});
 cast_send(ActorPid, Selector, Args) ->
     %% Instrument with telemetry:span/3 (ADR 0069 Phase 2a).
     %% Measures dispatch-to-mailbox time for cast sends.
@@ -1186,6 +1216,11 @@ sync_send(ActorPid, 'stopWith:timeout:', [Reason, Timeout]) ->
         false ->
             beamtalk_exception_handler:reraise(stop_timeout_type_error('stopWith:timeout:'))
     end;
+sync_send(ActorPid, 'continueWith:' = Selector, [ContSelector]) ->
+    %% BT-3968: record a follow-up step for the current callback (self only).
+    request_continuation(ActorPid, Selector, ContSelector, none);
+sync_send(ActorPid, 'continueWith:withArguments:' = Selector, [ContSelector, ContArgs]) ->
+    request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs});
 sync_send(ActorPid, kill, []) ->
     %% kill is handled locally - forcefully kills the actor process.
     %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
@@ -1490,6 +1525,12 @@ sync_send({global, Name} = Ref, Selector, Args, Timeout) when is_atom(Name) ->
     end;
 sync_send(ActorPid, isRemote, [], Timeout) ->
     is_remote(ActorPid, fun() -> sync_send(ActorPid, node, [], Timeout) end);
+sync_send(ActorPid, Selector, Args, _Timeout) when
+    Selector =:= 'continueWith:'; Selector =:= 'continueWith:withArguments:'
+->
+    %% BT-3968: never forwarded to the actor — a continuation can only be
+    %% requested by the actor's own callback (see sync_send/3).
+    sync_send(ActorPid, Selector, Args);
 sync_send(ActorPid, Selector, Args, Timeout) when
     is_integer(Timeout), Timeout >= 0;
     Timeout =:= infinity
@@ -1883,7 +1924,7 @@ actor's own process — `self stopWith:` from a method, or an aliased self —
 `gen_server:stop/3` would fail with `calling_self`, so the stop is deferred
 instead: request_deferred_stop/1 records it and the enclosing gen_server
 callback returns `{stop, Reason, ...}` once the current dispatch finishes
-(see apply_pending_stop/1).
+(see apply_pending_actions/1).
 
 Returns `ok`, or `{exit, ExitReason}` when `gen_server:stop/3` itself
 exited (timeout, or the actor died with some other reason first).
@@ -1892,7 +1933,7 @@ exited (timeout, or the actor died with some other reason first).
 stop_actor(ActorPid, Reason, Timeout) when ActorPid =:= self() ->
     %% Defer only inside a dispatching callback — the same guard as the
     %% Layer 1 self-send fast path in sync_send/3. '$bt_actor_state' is
-    %% stashed by every callback wrapped with apply_pending_stop/1, so a
+    %% stashed by every callback wrapped with apply_pending_actions/1, so a
     %% request recorded here is guaranteed to be consumed. Anywhere else
     %% (e.g. a hand-written native gen_server) there is nothing to consume
     %% it, so fall through and let gen_server:stop/3 fail visibly
@@ -1986,37 +2027,206 @@ request_deferred_stop(Reason) ->
     ok.
 
 -doc """
-BT-3967: discard any deferred self-stop request. Called on entry to every
-callback wrapped with apply_pending_stop/1, so only a request made by that
-callback's own dispatch can stop the actor — never a stale one recorded by
+BT-3967 / BT-3968: discard every deferred pending action (a self-stop
+request and the continuation queue). Called on entry to every callback
+wrapped with apply_pending_actions/1, so only a request made by that
+callback's own dispatch can take effect — never a stale one recorded by
 some unwrapped path earlier.
 """.
--spec clear_pending_stop() -> ok.
-clear_pending_stop() ->
+-spec clear_pending_actions() -> ok.
+clear_pending_actions() ->
     _ = erase(?PENDING_STOP_KEY),
+    _ = erase(?PENDING_CONTINUE_KEY),
     ok.
 
 -doc """
-BT-3967: apply a deferred self-stop to a gen_server callback's return value.
+BT-3967 / BT-3968: apply the deferred pending actions to a gen_server
+callback's return value. Both requests are consumed.
 
-If the dispatch that just ran requested `self stopWith: Reason` (see
-request_deferred_stop/1), the request is consumed and the callback's
-`{reply, Reply, State}` / `{noreply, State}` becomes
-`{stop, Reason, Reply, State}` / `{stop, Reason, State}`, so OTP replies to a
-pending caller first, then runs `terminate/2` with exactly `Reason` and exits
-with it. A return value that is already a `{stop, ...}` (e.g. a failed
-`initialize`) wins over the request. With no pending request the value is
-returned unchanged.
+- **Stop pending** (`self stopWith: Reason`, see request_deferred_stop/1):
+  the callback's `{reply, Reply, State}` / `{noreply, State}` becomes
+  `{stop, Reason, Reply, State}` / `{stop, Reason, State}`, so OTP replies to
+  a pending caller first, then runs `terminate/2` with exactly `Reason` and
+  exits with it. A pending stop wins over any queued continuation, which is
+  dropped. A return value that is already a `{stop, ...}` (e.g. a failed
+  `initialize`) wins over the request.
+- **Continuations pending** (`self continueWith:`, see
+  request_continuation/4): `{noreply, State}` / `{reply, Reply, State}` gain
+  the action `{continue, {'$bt_continue', Queue}}` (request order), so OTP
+  sends any reply first and runs `handle_continue/2` before the next
+  mailbox message. A `{stop, ...}` return drops the queue.
+- **Nothing pending:** the value is returned unchanged.
 """.
--spec apply_pending_stop(Result) ->
-    Result | {stop, term(), map()} | {stop, term(), term(), map()}
+-spec apply_pending_actions(Result) ->
+    Result
+    | {stop, term(), map()}
+    | {stop, term(), term(), map()}
+    | {noreply, map(), {continue, term()}}
+    | {reply, term(), map(), {continue, term()}}
 when
     Result :: term().
-apply_pending_stop(Result) ->
-    case erase(?PENDING_STOP_KEY) of
-        undefined -> Result;
-        {stop, Reason} -> pending_stop_result(Result, Reason)
+apply_pending_actions(Result) ->
+    Stop = erase(?PENDING_STOP_KEY),
+    Continuations = erase(?PENDING_CONTINUE_KEY),
+    case {Stop, Continuations} of
+        {{stop, Reason}, _} -> pending_stop_result(Result, Reason);
+        {undefined, [_ | _] = RevQueue} -> add_continue(Result, lists:reverse(RevQueue));
+        {undefined, _} -> Result
     end.
+
+-spec add_continue(term(), [{atom(), list()}, ...]) -> term().
+add_continue({noreply, State}, Queue) ->
+    {noreply, State, {continue, {?BT_CONTINUE_TAG, Queue}}};
+add_continue({reply, Reply, State}, Queue) ->
+    {reply, Reply, State, {continue, {?BT_CONTINUE_TAG, Queue}}};
+%% Stopping anyway (a failed `initialize`, say): no further step runs.
+add_continue({stop, _, _} = Stop, _Queue) ->
+    Stop;
+add_continue({stop, _, _, _} = Stop, _Queue) ->
+    Stop;
+%% No dispatching callback returns an action of its own today; merging two
+%% would silently drop one, so fail loudly instead.
+add_continue(Result, _Queue) ->
+    error({bt_continue_conflicts_with_action, Result}).
+
+-doc """
+BT-3968: seed the continuation queue at the start of a `handle_continue/2`
+step with the continuations still waiting behind the one about to run, so
+any request the running continuation makes is appended *after* them (FIFO).
+Runs after clear_pending_actions/0 inside the wrapped callback.
+""".
+-spec seed_pending_continuations([{atom(), list()}]) -> ok.
+seed_pending_continuations([]) ->
+    ok;
+seed_pending_continuations(Rest) when is_list(Rest) ->
+    put(?PENDING_CONTINUE_KEY, lists:reverse(Rest)),
+    ok.
+
+-doc """
+BT-3968: drop the continuation queue. Called from the dispatch-error arms:
+the dispatch's state rolls back, so follow-up steps it requested against
+that state are void. A pending stop is left alone and still honoured.
+""".
+-spec discard_pending_continuations() -> ok.
+discard_pending_continuations() ->
+    _ = erase(?PENDING_CONTINUE_KEY),
+    ok.
+
+-doc """
+BT-3968: record a follow-up send to `self` (`continueWith:` /
+`continueWith:withArguments:`), run after the current gen_server callback
+returns and before the next mailbox message (see apply_pending_actions/1).
+
+`RequestSelector` is the public selector, for error reporting; `ArgSpec` is
+`none` for `continueWith:` (unary selector, no arguments) or
+`{args, Args}` for `continueWith:withArguments:`.
+
+Raises in the caller — never silently drops the request:
+- `invalid_continuation` when `Pid` is not the calling process, or it is
+  but no wrapped dispatching callback is running (`'$bt_actor_state'` is
+  undefined), since nothing would consume the request — the same guard as
+  stop_actor/3's deferred self-stop;
+- `type_error` when the selector is not a Symbol or the arguments are not a
+  List;
+- `arity_mismatch` when the argument count does not match the selector.
+
+Whether the selector is understood is not checked here: a
+`does_not_understand` surfaces when the continuation runs, as an ordinary
+no-reply error.
+""".
+-spec request_continuation(term(), atom(), term(), none | {args, term()}) -> ok.
+request_continuation(Pid, RequestSelector, ContSelector, ArgSpec) ->
+    case record_continuation(Pid, RequestSelector, ContSelector, ArgSpec) of
+        ok -> ok;
+        {error, Error} -> beamtalk_exception_handler:reraise(Error)
+    end.
+
+-doc "Async-send half of request_continuation/4: resolves or rejects `FuturePid`.".
+-spec async_request_continuation(term(), atom(), term(), none | {args, term()}, pid()) -> ok.
+async_request_continuation(Pid, RequestSelector, ContSelector, ArgSpec, FuturePid) ->
+    case record_continuation(Pid, RequestSelector, ContSelector, ArgSpec) of
+        ok -> beamtalk_future:resolve(FuturePid, ok);
+        {error, Error} -> beamtalk_future:reject(FuturePid, Error)
+    end,
+    ok.
+
+-spec record_continuation(term(), atom(), term(), none | {args, term()}) ->
+    ok | {error, #beamtalk_error{}}.
+record_continuation(Pid, RequestSelector, ContSelector, ArgSpec) ->
+    case Pid =:= self() andalso get('$bt_actor_state') =/= undefined of
+        false ->
+            {error, invalid_continuation_error(Pid, RequestSelector)};
+        true ->
+            case validate_continuation(RequestSelector, ContSelector, ArgSpec) of
+                {ok, Args} ->
+                    Queue =
+                        case get(?PENDING_CONTINUE_KEY) of
+                            undefined -> [];
+                            Q -> Q
+                        end,
+                    put(?PENDING_CONTINUE_KEY, [{ContSelector, Args} | Queue]),
+                    ok;
+                {error, _} = Error ->
+                    Error
+            end
+    end.
+
+-spec validate_continuation(atom(), term(), none | {args, term()}) ->
+    {ok, list()} | {error, #beamtalk_error{}}.
+validate_continuation(RequestSelector, ContSelector, _ArgSpec) when not is_atom(ContSelector) ->
+    {error,
+        continuation_error(
+            type_error, RequestSelector, <<"Continuation selector must be a Symbol">>
+        )};
+validate_continuation(RequestSelector, _ContSelector, {args, Args}) when not is_list(Args) ->
+    {error,
+        continuation_error(
+            type_error, RequestSelector, <<"Continuation arguments must be a List">>
+        )};
+validate_continuation(RequestSelector, ContSelector, ArgSpec) ->
+    Args =
+        case ArgSpec of
+            none -> [];
+            {args, A} -> A
+        end,
+    Expected = beamtalk_class_builder:selector_arity(ContSelector),
+    case length(Args) of
+        Expected ->
+            {ok, Args};
+        Actual ->
+            {error,
+                beamtalk_error:with_details(
+                    continuation_error(
+                        arity_mismatch,
+                        RequestSelector,
+                        iolist_to_binary(
+                            io_lib:format(
+                                "Continuation #~ts takes ~B argument(s), got ~B",
+                                [atom_to_binary(ContSelector), Expected, Actual]
+                            )
+                        )
+                    ),
+                    #{continuation => ContSelector, expected => Expected, actual => Actual}
+                )}
+    end.
+
+-spec invalid_continuation_error(term(), atom()) -> #beamtalk_error{}.
+invalid_continuation_error(Pid, RequestSelector) ->
+    Message =
+        case Pid =:= self() of
+            true ->
+                <<"continueWith: is only valid inside one of the actor's own message handlers">>;
+            false ->
+                <<"continueWith: can only be sent to self, from inside the actor's own methods">>
+        end,
+    beamtalk_error:with_hint(
+        continuation_error(invalid_continuation, RequestSelector, Message),
+        <<"Use `self continueWith: #selector` inside a method of the actor itself">>
+    ).
+
+-spec continuation_error(atom(), atom(), binary()) -> #beamtalk_error{}.
+continuation_error(Kind, RequestSelector, Message) ->
+    beamtalk_error:with_message(beamtalk_error:new(Kind, 'Actor', RequestSelector), Message).
 
 -spec pending_stop_result(term(), term()) -> term().
 pending_stop_result({reply, Reply, State}, Reason) -> {stop, Reason, Reply, State};
@@ -2063,6 +2273,8 @@ intrinsic_selector(actorMonitor) -> monitor;
 intrinsic_selector(actorOnExit) -> 'onExit:';
 intrinsic_selector(actorIsAlive) -> isAlive;
 intrinsic_selector(actorDelegate) -> delegate;
+intrinsic_selector(actorContinueWith) -> 'continueWith:';
+intrinsic_selector(actorContinueWithArgs) -> 'continueWith:withArguments:';
 intrinsic_selector(_) -> undefined.
 
 -doc """
@@ -2497,11 +2709,29 @@ Accepts two wire formats:
 Errors in fire-and-forget are logged but do not crash the actor.
 Errors in async-with-future are communicated via future rejection.
 """.
--spec handle_cast(term(), map()) -> {noreply, map()} | {stop, term(), map()}.
+-spec handle_cast(term(), map()) ->
+    {noreply, map()} | {noreply, map(), {continue, term()}} | {stop, term(), map()}.
 handle_cast(Msg, State) ->
-    %% BT-3967: honour a `self stopWith:` requested during the dispatch.
-    ok = clear_pending_stop(),
-    apply_pending_stop(do_handle_cast(Msg, State)).
+    %% BT-3967 / BT-3968: honour a `self stopWith:` / `self continueWith:`
+    %% requested during the dispatch.
+    ok = clear_pending_actions(),
+    apply_pending_actions(do_handle_cast(Msg, State)).
+
+-doc """
+BT-3968: run one queued continuation (`self continueWith:`) for a
+runtime-path actor. The rest of the queue is seeded back first so any
+continuation this step requests runs after them (FIFO); the step itself is
+dispatched exactly like a fire-and-forget cast, sharing its error policy.
+Compiled actors generate their own `handle_continue/2` with the same shape.
+""".
+-spec handle_continue(term(), map()) ->
+    {noreply, map()} | {noreply, map(), {continue, term()}} | {stop, term(), map()}.
+handle_continue({?BT_CONTINUE_TAG, [{Selector, Args} | Rest]}, State) ->
+    ok = clear_pending_actions(),
+    ok = seed_pending_continuations(Rest),
+    apply_pending_actions(do_handle_cast({cast, Selector, Args}, State));
+handle_continue(_Continue, State) ->
+    {noreply, State}.
 
 -spec do_handle_cast(term(), map()) -> {noreply, map()}.
 %% Wire-tagged remote sends (ADR 0126 §5.1) — decode_wire_cast/1 recognises
@@ -2560,7 +2790,9 @@ do_handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Ar
                 log_dispatch_complete(State, NewState, Selector, cast, T0),
                 {noreply, NewState};
             {error, Reason, NewState} ->
-                %% Log error but don't crash — caller expects no reply
+                %% Log error but don't crash — caller expects no reply.
+                %% BT-3968: the failed dispatch's continuations are void.
+                ok = discard_pending_continuations(),
                 T1 = erlang:monotonic_time(microsecond),
                 ?LOG_WARNING("Fire-and-forget dispatch error", #{
                     selector => Selector,
@@ -2603,7 +2835,9 @@ do_handle_cast({Selector, Args, FuturePid}, State) ->
                 maybe_resolve_future(FuturePid, nil),
                 {noreply, NewState};
             {error, Reason, NewState} ->
-                %% Method failed, reject the future
+                %% Method failed, reject the future.
+                %% BT-3968: the failed dispatch's continuations are void.
+                ok = discard_pending_continuations(),
                 log_dispatch_complete(State, NewState, Selector, async, T0),
                 maybe_reject_future(FuturePid, Reason),
                 {noreply, NewState}
@@ -2622,11 +2856,14 @@ Message format: {Selector, Args} or {Selector, Args, PropCtx} (ADR 0069 Phase 2b
 Dispatches to method and returns result immediately.
 """.
 -spec handle_call(term(), term(), map()) ->
-    {reply, term(), map()} | {stop, term(), term(), map()}.
+    {reply, term(), map()}
+    | {reply, term(), map(), {continue, term()}}
+    | {stop, term(), term(), map()}.
 handle_call(Msg, From, State) ->
-    %% BT-3967: honour a `self stopWith:` requested during the dispatch.
-    ok = clear_pending_stop(),
-    apply_pending_stop(do_handle_call(Msg, From, State)).
+    %% BT-3967 / BT-3968: honour a `self stopWith:` / `self continueWith:`
+    %% requested during the dispatch.
+    ok = clear_pending_actions(),
+    apply_pending_actions(do_handle_call(Msg, From, State)).
 
 -spec do_handle_call(term(), term(), map()) -> {reply, term(), map()}.
 %% Wire-tagged remote sends (ADR 0126 §5.1) — decode_wire_call/1 recognises
@@ -2678,7 +2915,9 @@ do_handle_call({Selector, Args}, From, State) ->
                 log_dispatch_complete(State, NewState, Selector, sync, T0),
                 {reply, encode_reply_for(From, Selector, nil), NewState};
             {error, Reason, NewState} ->
-                %% Method failed, return error tuple
+                %% Method failed, return error tuple.
+                %% BT-3968: the failed dispatch's continuations are void.
+                ok = discard_pending_continuations(),
                 log_dispatch_complete(State, NewState, Selector, sync, T0),
                 {reply, encode_reply_for(From, Selector, {error, Reason}), NewState}
         end

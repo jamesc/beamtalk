@@ -3430,12 +3430,46 @@ Actor subclass: Ticker
 
 No `state:` for the timer reference, no `terminate:` cleanup needed — the link handles it.
 
+### Continuations (`continueWith:`)
+
+`self continueWith: #selector` (or `self continueWith: #sel: withArguments: #(arg)`) asks the actor to run a follow-up step **after the current message has been handled and before any other message in its mailbox**. It is OTP's `{noreply, State, {continue, Term}}` / `handle_continue/2`. Neither alternative gives this ordering: `self foo` is a direct call that runs immediately, and `Erlang erlang send: self pid msg: #foo` queues behind everything already in the mailbox.
+
+```beamtalk
+Server subclass: Connection
+  state: sock = nil
+
+  handleInfo: msg =>
+    msg match: [
+      {#ready, s} -> [
+        self.sock := s
+        self continueWith: #handleConnection   // runs before any queued #tcp message
+      ];
+      _ -> nil
+    ]
+
+  // Set up the socket here, before the first #tcp message is handled.
+  handleConnection => self.sock
+```
+
+Both methods are defined on `Actor` and answer `#ok`.
+
+- **Where it works:** any of the actor's own methods, including `initialize`, `handleInfo:`, sync methods, `!` casts, and helper methods they call. A request made in a nested self-send joins the same queue.
+- **Ordering:** several requests in one message run in request order. A continuation that requests more queues them **after** the ones already waiting. All of them run before the next mailbox message.
+- **Sync methods:** the caller gets its reply first, then the continuation runs. Its state changes are visible to the next message.
+- **Arguments:** `continueWith:` takes a unary selector. `continueWith:withArguments:` takes a `List` whose size must match the selector's arity. A non-Symbol selector raises `type_error` at the call site, and a wrong argument count raises `arity_mismatch`. Whether the actor understands the selector is checked only when the step runs.
+- **Stop wins:** if the same message also calls `self stopWith:` (in either order), the actor stops and no queued continuation runs. A continuation that itself calls `self stopWith:` stops the actor after that step, and the rest of the queue is dropped.
+- **Errors:** if the method that requested the continuations fails with an error, they are dropped, because its state rolls back. An error inside a continuation is handled exactly like an error in a `!` cast (see ADR 0134).
+- **`initialize`:** continuations requested there run before any message, and `spawn` does not return until they have finished.
+- **Starvation:** the continue chain runs before every other message, including system messages such as supervisor shutdown. A continuation that re-requests itself forever starves the mailbox, as in OTP.
+- **Only on `self`:** `actor continueWith: #x` sent from another process (sync, async or `!`) raises `invalid_continuation` in the caller.
+
 ### BEAM Mapping
 
 | Beamtalk | BEAM |
 |----------|------|
 | `Server subclass:` | gen_server with `handle_info/2` dispatch |
 | `handleInfo: msg` | `handle_info(Msg, State)` callback |
+| `self continueWith: #sel` | `{noreply, State, {continue, _}}` + `handle_continue/2` |
 | `Actor subclass:` | gen_server with `handle_info/2` ignore stub |
 | Timer `spawn_link` | Timer process linked to calling process |
 

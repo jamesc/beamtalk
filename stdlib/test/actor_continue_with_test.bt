@@ -1,0 +1,140 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3968: Actor>>continueWith: / continueWith:withArguments: — run a
+// follow-up step after the current message, before the next queued one
+// (OTP handle_continue/2).
+//
+// Fixtures: stdlib/test/fixtures/continue_with_server.bt
+//           stdlib/test/fixtures/continue_with_actor.bt
+
+TestCase subclass: ActorContinueWithTest
+
+  // === Ordering: before messages already in the mailbox ===
+  testContinuationFromHandleInfoRunsBeforeQueuedMessages =>
+    server := ContinueWithServer spawn
+    Erlang erlang send: server pid msg: #one
+    Erlang erlang send: server pid msg: #two
+    Erlang erlang send: server pid msg: #three
+    self assert: server log equals: #(#one, #continuation, #two, #three)
+    server stop
+
+  testContinuationFromCastRunsBeforeQueuedCasts =>
+    server := ContinueWithServer spawn
+    server one!
+    server two!
+    server three!
+    self assert: server log equals: #(#one, #continuation, #two, #three)
+    server stop
+
+  testContinuationFromInitializeRunsBeforeSpawnReturns =>
+    actor := ContinueWithActor spawn
+    self assert: actor log equals: #(#initialize, #afterInit)
+    actor stop
+
+  testRequestFromNestedSelfSendJoinsTheQueue =>
+    server := ContinueWithServer spawn
+    self assert: server viaHelper equals: #requested
+    self assert: server log equals: #(#continuation)
+    server stop
+
+  // === FIFO ===
+  testContinuationsRunInRequestOrder =>
+    server := ContinueWithServer spawn
+    self assert: server fifo equals: #requested
+    self assert: server log equals: #(#a, #b, #c)
+    server stop
+
+  // === Sync methods ===
+  testSyncCallerGetsReplyBeforeContinuation =>
+    server := ContinueWithServer spawn
+    self assert: server bumpLater equals: 0
+    self assert: server counter equals: 1
+    server stop
+
+  testSyncMethodThatRaisesDropsItsContinuations =>
+    server := ContinueWithServer spawn
+    self should: [server continueThenFail] raise: #user_error
+    self assert: server log equals: #()
+    self assert: server isAlive
+    server stop
+
+  // === Arguments and validation ===
+  testContinueWithArgumentsPassesThem =>
+    server := ContinueWithServer spawn
+    self assert: server addLater equals: #requested
+    self assert: server log equals: #(3)
+    server stop
+
+  testWrongArityRaisesAtCallSite =>
+    server := ContinueWithServer spawn
+    self should: [server continueWithSelector: #add:and:] raise: #arity_mismatch
+    self should: [
+      server continueWithSelector: #add:and: args: #(1)
+    ] raise: #arity_mismatch
+    self should: [
+      server continueWithSelector: #two args: #(1)
+    ] raise: #arity_mismatch
+    self assert: server log equals: #()
+    server stop
+
+  testNonSymbolSelectorRaisesAtCallSite =>
+    server := ContinueWithServer spawn
+    self should: [server continueWithSelector: 42] raise: #type_error
+    self should: [server continueWithSelector: #two args: 42] raise: #type_error
+    server stop
+
+  testContinueWithFromAnotherProcessRaises =>
+    server := ContinueWithServer spawn
+    self should: [server continueWith: #afterOne] raise: #invalid_continuation
+    self should: [
+      server continueWith: #two withArguments: #()
+    ] raise: #invalid_continuation
+    self should: [server continueWith: #afterOne!] raise: #invalid_continuation
+    self assert: server log equals: #()
+    server stop
+
+  // === Errors in a continuation take the cast path ===
+  testRaisingContinuationBehavesLikeRaisingCast =>
+    // Before BT-3958 (ADR 0134) a no-reply error is logged and the actor
+    // continues with its pre-call state; the continuation does the same.
+    server := ContinueWithServer spawn
+    server explode!
+    self assert: server counter equals: 0
+    self assert: server isAlive
+    self assert: server failLater equals: #requested
+    self assert: server counter equals: 0
+    self assert: server isAlive
+    server stop
+
+  // === Stop interaction ===
+  testStopThenContinueStopsWithoutRunningContinuation =>
+    table := Ets new: #continueStopFirst type: #set
+    server := ContinueWithServer spawnWith: #{#tableName => #continueStopFirst}
+    self assert: server stopThenContinue equals: #stillRunning
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #shutdown
+    self assert: (table at: #xRan) equals: nil
+    table delete
+
+  testContinueThenStopStopsWithoutRunningContinuation =>
+    table := Ets new: #continueStopSecond type: #set
+    server := ContinueWithServer spawnWith: #{#tableName => #continueStopSecond}
+    self assert: server continueThenStop equals: #stillRunning
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #shutdown
+    self assert: (table at: #xRan) equals: nil
+    table delete
+
+  testContinuationThatStopsDropsTheRestOfTheQueue =>
+    table := Ets new: #continueChainStop type: #set
+    server := ContinueWithServer spawnWith: #{#tableName => #continueChainStop}
+    self assert: server chainStop equals: #requested
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #stopNowRan) equals: true
+    self assert: (table at: #reason) equals: #shutdown
+    self assert: (table at: #xRan) equals: nil
+    table delete

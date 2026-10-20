@@ -127,6 +127,8 @@ Server subclass: MyThing
 | `trapExit` | Future | Process-level exit signal handling |
 | `codeChange:from:` | Future | Process-level state migration |
 
+Related lifecycle primitives added later live on `Actor`, not `Server`, because every actor is a gen_server: `stopWith:` (BT-3967, a structured exit reason) and `continueWith:` / `continueWith:withArguments:` (BT-3968, OTP `handle_continue/2` — a follow-up step that runs before the next mailbox message). See `docs/beamtalk-language-features.md` § Continuations.
+
 Features that stay on Actor (all processes need them):
 - `initialize`, `terminate:`, `pid`, `monitor`, `onExit:`, `spawn`, `stop`, `isAlive`
 

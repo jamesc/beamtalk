@@ -105,6 +105,8 @@ kind_to_class(selector_not_found) -> 'RuntimeError';
 kind_to_class(dispatch_error) -> 'RuntimeError';
 kind_to_class(callback_failed) -> 'RuntimeError';
 kind_to_class(actor_dead) -> 'RuntimeError';
+%% BT-3968: `continueWith:` outside the actor's own dispatching callback.
+kind_to_class(invalid_continuation) -> 'RuntimeError';
 kind_to_class(future_not_awaited) -> 'RuntimeError';
 kind_to_class(internal_error) -> 'RuntimeError';
 %% Classified raw-error kinds (bucket A user-input, bucket C resource/env).

@@ -1203,7 +1203,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    Self::pending_stop_wrap(docvec![
+                    Self::pending_actions_wrap(docvec![
                         "case Continue of",
                         nest(
                             INDENT,
@@ -1217,6 +1217,29 @@ impl CoreErlangGenerator {
                                     // pdict stash/restore pair to preserve
                                     // re-entrant self-send semantics.
                                     inner,
+                                ),
+                                // BT-3968: one queued `self continueWith:`
+                                // step. The rest of the queue is seeded back
+                                // first (FIFO: a request made by this step
+                                // runs after them), then the step dispatches
+                                // through the very same case as a
+                                // fire-and-forget cast — pdict stash/restore,
+                                // strip_local_temps, notify_state_change and
+                                // the shared no-reply error arms — by binding
+                                // CastSelector / CastArgs in the pattern.
+                                line(),
+                                docvec![
+                                    "<{",
+                                    leaf::atom("$bt_continue"),
+                                    ", [{CastSelector, CastArgs}|ContRest]}> when 'true' ->",
+                                ],
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in",
+                                        Self::cast_dispatch_case(&module_name),
+                                    ]
                                 ),
                                 line(),
                                 "<_> when 'true' -> {'noreply', State}",
@@ -1233,26 +1256,43 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// BT-3967: wraps a `gen_server` callback body so its return value passes
-    /// through `beamtalk_actor:apply_pending_stop/1`.
+    /// BT-3967 / BT-3968: wraps a `gen_server` callback body so its return
+    /// value passes through `beamtalk_actor:apply_pending_actions/1`.
     ///
     /// `self stopWith: reason` inside a method cannot call
-    /// `gen_server:stop/3` on its own process (`calling_self`), so the
-    /// runtime records the request in the process dictionary instead; this
-    /// wrapper is where it takes effect — after the current dispatch has
-    /// returned — by turning `{reply, R, S}` / `{noreply, S}` into
-    /// `{stop, Reason, R, S}` / `{stop, Reason, S}`. Any other return value,
-    /// and every callback with no pending request, passes through unchanged.
-    /// `clear_pending_stop/0` runs first, so only a request made by this
-    /// callback's own dispatch can take effect.
-    fn pending_stop_wrap(body: Document<'static>) -> Document<'static> {
+    /// `gen_server:stop/3` on its own process (`calling_self`), and
+    /// `self continueWith: #sel` must run only after the current callback
+    /// returns, so the runtime records both requests in the process
+    /// dictionary instead; this wrapper is where they take effect — after
+    /// the current dispatch has returned. A pending stop turns
+    /// `{reply, R, S}` / `{noreply, S}` into `{stop, Reason, R, S}` /
+    /// `{stop, Reason, S}`; otherwise pending continuations add a
+    /// `{continue, {'$bt_continue', Queue}}` action, handled by the
+    /// `'$bt_continue'` clause of the generated `handle_continue/2`. Any other
+    /// return value, and every callback with no pending request, passes
+    /// through unchanged. `clear_pending_actions/0` runs first, so only a
+    /// request made by this callback's own dispatch can take effect.
+    fn pending_actions_wrap(body: Document<'static>) -> Document<'static> {
         docvec![
-            "let _PendingStopCleared = call 'beamtalk_actor':'clear_pending_stop'() in",
+            "let _PendingActionsCleared = call 'beamtalk_actor':'clear_pending_actions'() in",
             line(),
             "let _CallbackResult =",
             nest(INDENT, docvec![line(), body]),
             line(),
-            "in call 'beamtalk_actor':'apply_pending_stop'(_CallbackResult)",
+            "in call 'beamtalk_actor':'apply_pending_actions'(_CallbackResult)",
+        ]
+    }
+
+    /// BT-3968: the `let` binding that drops the continuation queue in a
+    /// dispatch-error arm — the failed dispatch's state rolls back, so the
+    /// follow-up steps it requested against that state are void.
+    fn discard_continuations_binding() -> Document<'static> {
+        docvec![
+            "let _ContDiscarded = call ",
+            leaf::atom("beamtalk_actor"),
+            ":",
+            leaf::atom("discard_pending_continuations"),
+            "() in",
         ]
     }
 
@@ -1377,7 +1417,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    Self::pending_stop_wrap(docvec![
+                    Self::pending_actions_wrap(docvec![
                         "case Msg of",
                         nest(
                             INDENT,
@@ -1478,7 +1518,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    Self::pending_stop_wrap(docvec![
+                    Self::pending_actions_wrap(docvec![
                         "case Msg of",
                         nest(
                             INDENT,
@@ -1679,6 +1719,8 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
+                            Self::discard_continuations_binding(),
+                            line(),
                             "let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in",
                             line(),
                             "case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of",
@@ -1808,7 +1850,7 @@ impl CoreErlangGenerator {
                     INDENT,
                     docvec![
                         line(),
-                        Self::pending_stop_wrap(Self::linked_exit_intercept_doc(dispatch_body)),
+                        Self::pending_actions_wrap(Self::linked_exit_intercept_doc(dispatch_body)),
                     ]
                 ),
                 "\n",
@@ -2052,7 +2094,10 @@ fn noreply_error_arms(var_prefix: &str, selector: Document<'static>) -> Document
                     "|[]]]}~)",
                 ],
                 line(),
-                docvec!["in {", leaf::atom("noreply"), ", State}"],
+                "in ",
+                CoreErlangGenerator::discard_continuations_binding(),
+                line(),
+                docvec!["{", leaf::atom("noreply"), ", State}"],
             ],
         ),
         line(),
@@ -2108,7 +2153,10 @@ fn noreply_error_arms(var_prefix: &str, selector: Document<'static>) -> Document
                     "|[]]]}~)",
                 ],
                 line(),
-                docvec!["in {", leaf::atom("noreply"), ", State}"],
+                "in ",
+                CoreErlangGenerator::discard_continuations_binding(),
+                line(),
+                docvec!["{", leaf::atom("noreply"), ", State}"],
             ],
         ),
     ]
