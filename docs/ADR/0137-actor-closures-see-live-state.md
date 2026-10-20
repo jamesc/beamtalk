@@ -598,16 +598,24 @@ and the probe's silent answers become correct. A block that writes a field
 from another process raises at run time. Code that relied on `self foo!`
 running before the next statement should use `self foo`.
 
-## Open Questions
+## Resolved Questions
 
-1. Should a self-send away raise `actor_state_unreachable` instead of sending
-   a message? A message is the Erlang meaning; raising avoids waiting for the
-   call timeout when the carry was synchronous.
-2. Should ADR 0133's rule for escaping blocks that assign class variables get
-   the same amendment? ADR 0130 already makes those writes live at home and
-   raising away; BT-3922 rejects them at compile time.
-3. Can the compiler prove enough actor-send receivers are not `self` to skip
-   their bracket? At 6 to 7 ns against a 700 ns call it is not worth much.
+Decided by the maintainer on 2026-10-20, when the ADR was accepted.
+
+1. A self-send from a block running away from home sends a message to the
+   actor, as in Erlang. It does not raise `actor_state_unreachable`. Timer
+   callbacks such as `Timer every: 1000 do: [self tick]` keep working. A
+   synchronous send while the actor is blocked waiting on that same process
+   waits for the call timeout, which is loud.
+2. ADR 0133's compile-time rejection of an escaping block that assigns a class
+   variable (the class-variable half of BT-3922) is lifted along with the
+   field half. ADR 0130's runtime already reads and writes class variables
+   live at home and raises away, so the rejection only refused code that
+   works. Fields and class variables follow one rule.
+3. Every send that may run user code is bracketed, including sends to other
+   actors. The compiler does not try to prove a receiver is not `self`. A
+   bracket costs 6 to 7 ns against a 700 ns call; revisit only if profiling
+   shows it matters.
 
 ## References
 
