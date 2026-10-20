@@ -91,7 +91,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0062](0062-bundled-example-corpus-mcp-search-tool.md) | Bundled Example Corpus and Search Tool for MCP Server | Implemented | 2026-03-15 |
 | [0063](0063-remove-file-path-sandbox.md) | Remove File Path Sandbox | Implemented | 2026-03-16 |
 | [0064](0064-runtime-logging-control-and-observability-api.md) | Runtime Logging Control and Observability API | Implemented | 2026-03-17 |
-| [0065](0065-complete-otp-primitives-actor-lifecycle.md) | Complete OTP Primitives for Actor Lifecycle and Supervision | Implemented | 2026-03-17 |
+| [0065](0065-complete-otp-primitives-actor-lifecycle.md) | Complete OTP Primitives for Actor Lifecycle and Supervision | Implemented (error contract amended by 0134) | 2026-03-17 |
 | [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Implemented | 2026-03-18 |
 | [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Implemented | 2026-03-18 |
 | [0068](0068-parametric-types-and-protocols.md) | Parametric Types and Protocols | Accepted \| Implemented | 2026-03-20 |
@@ -160,6 +160,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0131](0131-outer-local-rebinds-as-threaded-value-preludes.md) | Outer-Local Rebinds as `ThreadedValue` Preludes in Every Context | Accepted | 2026-10-08 |
 | [0132](0132-callee-side-threaded-entry-points-for-higher-order-methods.md) | Callee-Side Threaded Entry Points for Higher-Order Methods | Superseded by 0133 | 2026-10-17 |
 | [0133](0133-scope-of-captured-variable-mutation-in-blocks.md) | Scope of Captured-Variable Mutation in Blocks | Accepted | 2026-10-18 |
+| [0134](0134-errors-in-no-reply-handlers-crash-the-actor.md) | Errors in No-Reply Handlers Crash the Actor | Accepted | 2026-10-19 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

@@ -17,38 +17,29 @@ the `bt@…` module-atom assembly helpers, `is_stdlib_module/1`, and the lossy
 %%% ============================================================================
 %%% camel_to_snake/1 — cross-language conformance fixtures
 %%%
-%%% Kept byte-identical to the Rust fixture
-%%% (MODULE_NAME_CONFORMANCE_FIXTURES in crates/beamtalk-core/src/ast/mod.rs,
-%%% asserted against `to_module_name` there) — the single Rust authority this
-%%% module mirrors. If either list changes, update both so the two
-%%% implementations stay provably in sync on the same inputs, including the
-%%% acronym case-fold collision (BEAMError/Beamerror) and the
-%%% lowercase-initial + Unicode cases that previously drifted between the
-%%% four now-deleted Erlang copies of this conversion.
+%%% Single source of truth: shared JSON corpus at
+%%% runtime/apps/beamtalk_runtime/test/fixtures/camel_to_snake_conformance.json,
+%%% also used by the Rust-side test in crates/beamtalk-core/src/ast/mod.rs
+%%% (`to_module_name_conformance_fixtures`). Adding or changing a case means
+%%% editing the JSON only — both sides pick it up automatically.
 %%% ============================================================================
 
--define(CONFORMANCE_FIXTURES, [
-    {"Counter", "counter"},
-    {"MyCounterActor", "my_counter_actor"},
-    {"HTTPRouter", "httprouter"},
-    {"BEAMError", "beamerror"},
-    {"Beamerror", "beamerror"},
-    {"myClass", "my_class"},
-    {"aB", "a_b"},
-    {"already_snake", "already_snake"},
-    {"App2", "app2"},
-    {"ABC", "abc"},
-    {"", ""},
-    {"École", "école"},
-    {"MonÉcole", "mon_école"}
-]).
-
 camel_to_snake_conformance_test_() ->
+    Cases = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "camel_to_snake_conformance.json"
+    ]),
     [
         {lists:flatten(io_lib:format("~ts -> ~ts", [Input, Expected])), fun() ->
             ?assertEqual(Expected, beamtalk_module_name:camel_to_snake(Input))
         end}
-     || {Input, Expected} <- ?CONFORMANCE_FIXTURES
+     || #{<<"input">> := InputBin, <<"expected">> := ExpectedBin} <- Cases,
+        Input <- [unicode:characters_to_list(InputBin)],
+        Expected <- [unicode:characters_to_list(ExpectedBin)]
     ].
 
 %% Regression: beamtalk_repl_loader:to_snake_case/1 (copy D) used to

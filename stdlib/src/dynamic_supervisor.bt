@@ -59,6 +59,40 @@ abstract Object subclass: DynamicSupervisor(C)
   /// ```
   class maxChildren -> Integer | Symbol => #infinity
 
+  /// How long each child gets to stop when the pool shuts it down, or nil
+  /// (the default) to use the child class's own `supervisionSpec` shutdown.
+  ///
+  /// An Integer (milliseconds), `#infinity` or `#brutalKill` (see
+  /// `ShutdownTimeout`). On `stop` (or when a parent supervisor stops the
+  /// pool) every child is sent `exit(Pid, shutdown)` at once; a child that
+  /// has not exited within this time (one deadline shared by all children)
+  /// is killed (exit reason `#killed`). `stop` waits for this, so a long
+  /// value blocks its caller that long. nil keeps the
+  /// child class's `supervisionSpec` value: 5000 ms (the OTP default) for an
+  /// actor, unless its class overrides `supervisionSpec` with `withShutdown:`,
+  /// and `#infinity` for a supervisor. Only a child that overrides `terminate:`
+  /// traps exits, so only such a child uses the time. Keep `#infinity` for a
+  /// supervisor child class: a finite value can kill it while it is still
+  /// stopping its own children (the runtime logs a warning).
+  ///
+  /// The value applies to every child of the pool: OTP's
+  /// `simple_one_for_one` keeps one child spec for all dynamic children, so
+  /// there is no per-`startChild:` override. Use a separate pool class for
+  /// children that need a different timeout.
+  ///
+  /// Any other value makes `supervise` return `Result error:`
+  /// (`#supervisor_start_failed`); a pool nested under a static `Supervisor`
+  /// instead fails that parent's start. Read each time the supervisor
+  /// (re)starts.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DynamicSupervisor(Connection) subclass: ConnectionPool
+  ///   class childClass => Connection
+  ///   class childShutdown -> Integer => 15000   // let requests finish
+  /// ```
+  class childShutdown -> ShutdownTimeout | Nil => nil
+
   /// Whether this class is a supervisor (always true for DynamicSupervisor subclasses).
   ///
   /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.

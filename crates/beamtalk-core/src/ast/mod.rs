@@ -442,43 +442,27 @@ pub fn resolve_qualified_module_name(class_name: &str, package: Option<&str>) ->
     }
 }
 
-/// Cross-language conformance fixture for `to_module_name`.
-///
-/// Kept byte-identical to the Erlang-side fixture in
-/// `runtime/apps/beamtalk_runtime/test/beamtalk_module_name_tests.erl`
-/// (`beamtalk_module_name:camel_to_snake/1`) — the single Erlang authority
-/// this Rust function is mirrored by. If either list changes, update both so
-/// the two implementations stay provably in sync on the same inputs,
-/// including the acronym case-fold collision (`BEAMError`/`Beamerror`)
-/// and the lowercase-initial + Unicode cases that are easy to drift on
-/// when re-implementing this conversion.
-#[cfg(test)]
-const MODULE_NAME_CONFORMANCE_FIXTURES: &[(&str, &str)] = &[
-    ("Counter", "counter"),
-    ("MyCounterActor", "my_counter_actor"),
-    ("HTTPRouter", "httprouter"),
-    ("BEAMError", "beamerror"),
-    ("Beamerror", "beamerror"),
-    ("myClass", "my_class"),
-    ("aB", "a_b"),
-    ("already_snake", "already_snake"),
-    ("App2", "app2"),
-    ("ABC", "abc"),
-    ("", ""),
-    ("École", "école"),
-    ("MonÉcole", "mon_école"),
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn to_module_name_conformance_fixtures() {
-        for (input, expected) in MODULE_NAME_CONFORMANCE_FIXTURES {
+        // Single source of truth: the shared JSON corpus also used by the
+        // Erlang-side `beamtalk_module_name_tests:camel_to_snake_conformance_test_/0`.
+        let corpus_path = beamtalk_workspace::cargo_workspace_root!()
+            .join("runtime/apps/beamtalk_runtime/test/fixtures/camel_to_snake_conformance.json");
+        let raw = std::fs::read_to_string(&corpus_path)
+            .unwrap_or_else(|e| panic!("read {corpus_path:?}: {e}"));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("camel_to_snake_conformance.json is a JSON array");
+        assert!(!cases.is_empty());
+        for case in &cases {
+            let input = case["input"].as_str().expect("case.input");
+            let expected = case["expected"].as_str().expect("case.expected");
             assert_eq!(
                 to_module_name(input),
-                *expected,
+                expected,
                 "to_module_name({input:?}) mismatch"
             );
         }

@@ -183,6 +183,14 @@
 - Fix: a shadowed typed parameter kept the bare operator BIF — `trusted_param_types` now drops parameters whose names are rebound in the method body (BT-3921, #4387)
 - Fix: `respondsTo:` on a value type now answers `true` for `ProtoObject`'s selectors, matching actors (BT-3919, #4387)
 - **Verifier check: `FoldLocalsNotCarried`** — the `ThreadedIr` verifier now rejects a fold body that does not return its accumulator, catching an internal codegen invariant violation at verify time instead of producing wrong answers at runtime (BT-3863, #4370)
+- **Writing-block collection messages guard against user overrides** — `collect:`, `select:`, `anySatisfy:`, and other collection messages with a state-writing block now raise `stateful_block_dispatch` when the receiver's class overrides the selector with a non-stdlib method, instead of silently running the fold. A receiver that doesn't respond raises `does_not_understand` (BT-3916, #4419)
+- **Destructuring and `match:` failures raise structured `#pattern_mismatch`** — tuple/array/literal destructuring mismatches and `match:` no-arm fallbacks now raise `#pattern_mismatch` (with the value in details) instead of raw `internal_error`. Map destructure still raises `#key_error` (BT-3943, #4420)
+- **Compiler warns on cross-kind comparison arguments** — `<`, `>`, `<=`, `>=` on Character, String and Symbol receivers now produce a static warning when the argument's type is a different kind. Documented the BEAM term-order fallback behaviour for cross-kind comparisons (BT-3928, #4418)
+- **User packages can `uses:` stdlib protocols (Enumerable, Comparable)** — a user package can now write `uses: Enumerable` or `uses: Comparable` without declaring a dependency on the stdlib; the stdlib's provision-bearing protocols are the last-tier fallback of `uses:` resolution. A package's own same-named protocol takes precedence; a dependency's namesake is reachable via `dep@Name` (ADR 0127, BT-3915, #4385)
+- Fix: a block literal sent a `value`-family selector of the wrong arity (e.g. `[t := t + 1] value: 1`) now raises `#arity_mismatch` at runtime instead of a spurious compile error about outer-local writes (BT-3884, #4411)
+- Fix: `self <collection selector>: [block]` in a class method with a captured-local-writing block now reports the proper escaping-block diagnostic instead of crashing with raw `calling_self` (BT-3935, #4408)
+- Three shapes that previously silently gave wrong answers are now compile errors (ADR 0133 Phase 3; BT-3909, #4383): (1) actor/REPL `groupBy:` whose block binds a local at positions where the result isn't unpacked, (2) assignment inside a conditional arm in a `whileTrue:` condition block, (3) REPL `match:` arm writing an outer local
+- **Forwarded stateful blocks through actor self-sends now raise `stateful_block_dispatch`** — a non-literal block forwarded via an actor self-send to a collection message now raises `stateful_block_dispatch` instead of silently losing state changes. An actor `self`/`super` collection-message send whose block assigns a captured local is now a compile error (ADR 0133 Phase 2; BT-3908, #4400)
 
 ### Runtime
 
@@ -190,6 +198,7 @@
 
 - Fix class-process deadlock in `live_class_entries` — two class processes could deadlock when each called `gen_server:call(OtherPid, class_name)` while handling a call. Class identity (`class_name`, `module_name`, `superclass`) is now read from ETS metadata (`class_name_safe/1`, `module_name_safe/1`, `superclass_safe/1`), so a class process never makes a blocking call into another class process while handling a call. Fixes flaky `ProcessNavigationTest` timeout (BT-3820, #4284, #4288)
 - Fix class-object dispatch `not_found` fallthrough and `resolve_class_object` making 5s `gen_server:call`s into the class process for class name/module resolution — these now read from ETS metadata (BT-3820, #4284)
+- Fix `removeFromSystem` raising "Failed to delete module" on programmatic `ClassBuilder` classes that have no loaded BEAM module — `code:delete` is now skipped for unloaded modules (BT-3895, #4409)
 
 - **`^xs do: [...]` inside a closure in class and value-type methods now compiles (ADR 0131, BT-3813)** — a `^` whose value is a local-threading `do:` or keyed `do:` inside a plain closure (a `detect:ifNone:` handler, a sort block, etc.) in a class or value-type method was a compile error since `do:` became a producer; it is now lowered correctly and the `^` carries the value, not the raw carrier tuple. Actor methods keep the error (#4334).
 - **A keyword `whileTrue:`/`whileFalse:` whose condition writes an outer local is now a compile error (ADR 0131 §6, BT-3782)** — the condition block of a keyword `whileTrue:` / `whileFalse:` that writes a local of the enclosing method previously compiled but silently dropped the write on every iteration. It is now rejected with `Tier2BlockNoReturnChannel`. The full codegen fix (a `ThreadedIr` producer for loop conditions) is tracked in BT-3743 (#4303).
@@ -219,6 +228,10 @@
 - ADR 0132: mark Tier 2 funs so `call_threaded/3` decides the tier before applying (BT-3885, #4373)
 - ADR 0132 Phase 1c post-merge review fixes for the threaded class entry (BT-3890, #4372)
 - ADR 0133 Phase 1: decide and pin what a `uses: Enumerable` class does with a Tier 2 block (BT-3903, #4380)
+- ADR 0133 Phase 3: arms as frames, detect producers in actors, loop-condition frame — actor `detect:`/`detect:ifNone:` now work as loop-body producers and loop-condition closures nest correctly in conditionals (BT-3911, #4423)
+- ADR 0133 Phase 2: remove the opaque-callable fold (ADR 0128) and the stored-block `value` producer (I5) — superseded infrastructure removed from codegen and the runtime dispatch path (BT-3908, #4400)
+- ADR 0133 Phase 2: remove the runtime floor (`send_threaded/4`, `call_threaded/3`, tier2 metadata, threaded lookups) — defunct Tier 2 threaded dispatch removed; modules compiled before the change still load (BT-3907, #4396)
+- Type annotations now apply the same `uses:` shadowing rule as provision resolution, so `x :: Enumerable` resolves consistently when a dependency defines a namesake protocol (BT-3941, #4421)
 
 ### Tooling
 
@@ -228,8 +241,15 @@
 - Fix: `install.sh --nightly` no longer makes a GitHub API call — downloads the nightly archive directly, avoiding API rate limits that caused spurious "No nightly release found" errors in CI. The latest-release lookup now sends `GITHUB_TOKEN`/`GH_TOKEN` when set and retries up to 3 times (#4375)
 - **`just test-learn` validates learning-doc fixtures in CI** — every code block in the learning docs is now compiled during CI; eight stale examples (bare `=` equality, `Object subclass:` with `state:`, `Result` FFI returns, etc.) were fixed (BT-3927, #4393)
 - CI now uses `cargo-nextest` for test execution, per-crate `opt-level` for build speed, and a gated corpus tier (`just test-corpus`) that runs only when compiler crates are touched (#4360)
+- LSP now resolves dependency protocol shadowing consistently with `beamtalk lint` — dependency `ProtocolInfo`s are stamped with their package, so a same-named stdlib protocol is not clobbered (BT-3946, #4424)
+- `beamtalk lint` correctly routes provision diagnostics for `uses: dep@Name` when a dependency defines a protocol with the same name as a stdlib protocol (BT-3944, #4422)
+- **`beamtalk test-docs` runs chapter-embedded `TestCase` blocks** — `TestCase subclass:` blocks embedded in learning chapters are now compiled and run by `beamtalk test-docs` (the chapter text is the single source of truth; `<!-- btskip -->` excludes illustrative sketches). Deleted 35 hand-kept fixture copies (BT-3932, #4414)
 
 ### Standard Library
+
+- **`Exception>>reason` exposes the raw Erlang error term (BT-3954)** — `Exception>>reason` returns the underlying Erlang error term (or `nil`) on FFI-wrapped exceptions, allowing handlers to match on the raw term instead of string-comparing `e message` (#4431)
+- **`DynamicSupervisor maxChildren` limit (BT-3964)** — `DynamicSupervisor` gains a `maxChildren` class method to set a child count limit; `startChild` returns `#max_children` when the limit is reached (#4430)
+- `should:raise:` now classifies exceptions with the same normalisation `on:do:` uses — `should: [...] raise: #key_error` matches raw `{badkey, _}` exceptions consistently instead of requiring `#internal_error` (BT-3930, #4410)
 
 - **`Dictionary at:ifPresent:` and `at:ifPresent:ifAbsent:` (BT-3824)** — two new methods on `Dictionary`: `at:ifPresent:` evaluates a one-parameter block with the value when the key exists (answers `nil` otherwise), and `at:ifPresent:ifAbsent:` evaluates the present-handler or absent-handler. Both are local-threading producers like `at:ifAbsent:`, lowered inline behind a runtime `Dictionary` check; a non-`Dictionary` receiver raises `type_error` (#4319)
 

@@ -320,7 +320,12 @@ fn write_justfile(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> 
 }
 
 fn write_ci_workflow(path: &Utf8Path, name: &str) -> Result<()> {
-    let content = include_str!("../../templates/ci.yml").replace("{{project_name}}", name);
+    // Target the newest supported OTP major: the nightly toolchain is built
+    // on it, so its .beam files may not load on older majors.
+    let otp_major = beamtalk_cli::otp_support::window().max_major.to_string();
+    let content = include_str!("../../templates/ci.yml")
+        .replace("{{project_name}}", name)
+        .replace("{{otp_major}}", &otp_major);
     fs::write(
         path.join(".github").join("workflows").join("ci.yml"),
         content,
@@ -593,6 +598,12 @@ mod tests {
 
         let content = fs::read_to_string(ci_path).unwrap();
         assert!(content.contains("erlef/setup-beam"));
+        let otp_major = beamtalk_cli::otp_support::window().max_major;
+        assert!(
+            content.contains(&format!("otp-version: \"{otp_major}\"")),
+            "CI workflow should target the newest supported OTP major"
+        );
+        assert!(!content.contains("{{"), "no unsubstituted placeholders");
         assert!(content.contains("beamtalk.dev/install.sh"));
         assert!(
             content.contains("Copyright 2026 test_ci_wf authors"),

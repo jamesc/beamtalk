@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3965 fixture: a Bt3965SlowStopper whose own `class supervisionSpec`
+// gives it only 50 ms to stop — used to check that a pool's
+// `childShutdown` of nil keeps this value, and that a set `childShutdown`
+// overrides it. See stdlib/test/supervision_shutdown_test.bt.
+
+Bt3965SlowStopper subclass: Bt3965CappedStopper
+
+  class supervisionSpec -> SupervisionSpec =>
+    ((SupervisionSpec new withActorClass: self) withRestart: self supervisionPolicy) withShutdown: 50

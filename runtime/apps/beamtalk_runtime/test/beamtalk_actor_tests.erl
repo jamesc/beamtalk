@@ -4226,3 +4226,120 @@ bt3596_default_handle_info_still_ignores_unknown_messages_test() ->
     %% message that isn't a linked 'EXIT' must be untouched.
     State = #{value => 0},
     ?assertEqual({noreply, State}, beamtalk_actor:handle_info(some_unknown_message, State)).
+
+%%% BT-3967: stopWith: / deferred self-stop
+
+%% Self-stop requests are only deferred inside a dispatching callback, which
+%% is marked by the stashed '$bt_actor_state'. Run Fun as if inside one, and
+%% always clean both pdict keys so a failing assertion cannot leak a pending
+%% stop into later tests.
+in_dispatch(Fun) ->
+    put('$bt_actor_state', #{value => 0}),
+    try
+        Fun()
+    after
+        erase('$bt_actor_state'),
+        beamtalk_actor:clear_pending_stop()
+    end.
+
+bt3967_apply_pending_stop_passes_through_without_request_test() ->
+    State = #{value => 0},
+    ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_stop({noreply, State})),
+    ?assertEqual({reply, 1, State}, beamtalk_actor:apply_pending_stop({reply, 1, State})).
+
+bt3967_self_stop_with_is_deferred_until_callback_returns_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        Reason = {shutdown, peer_closed},
+        %% A stop of the calling process itself must not call gen_server:stop
+        %% (calling_self) — it is recorded and answered with ok.
+        ?assertEqual(ok, beamtalk_actor:sync_send(self(), 'stopWith:', [Reason])),
+        ?assertEqual(
+            {stop, Reason, reply_value, State},
+            beamtalk_actor:apply_pending_stop({reply, reply_value, State})
+        ),
+        %% The request is consumed.
+        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_stop({noreply, State}))
+    end).
+
+bt3967_self_stop_noreply_becomes_stop_normal_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        ok = beamtalk_actor:sync_send(self(), stop, []),
+        ?assertEqual({stop, normal, State}, beamtalk_actor:apply_pending_stop({noreply, State}))
+    end).
+
+bt3967_first_stop_request_wins_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        ok = beamtalk_actor:sync_send(self(), 'stopWith:', [first]),
+        ok = beamtalk_actor:sync_send(self(), 'stopWith:', [second]),
+        ?assertEqual({stop, first, State}, beamtalk_actor:apply_pending_stop({noreply, State}))
+    end).
+
+bt3967_existing_stop_return_wins_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        ok = beamtalk_actor:sync_send(self(), 'stopWith:', [requested]),
+        ?assertEqual(
+            {stop, init_failed, State},
+            beamtalk_actor:apply_pending_stop({stop, init_failed, State})
+        ),
+        %% Still consumed, so it cannot leak into a later callback.
+        ?assertEqual({noreply, State}, beamtalk_actor:apply_pending_stop({noreply, State}))
+    end).
+
+bt3967_intrinsic_dispatch_routes_self_stop_test() ->
+    in_dispatch(fun() ->
+        State = #{value => 0},
+        Self = #beamtalk_object{class = 'Counter', class_mod = undefined, pid = self()},
+        ?assertEqual(ok, beamtalk_actor:dispatch(actorStopWith, [{shutdown, x}], Self)),
+        ?assertEqual(
+            {stop, {shutdown, x}, State}, beamtalk_actor:apply_pending_stop({noreply, State})
+        )
+    end).
+
+bt3967_unknown_intrinsic_raises_test() ->
+    Self = #beamtalk_object{class = 'Counter', class_mod = undefined, pid = self()},
+    ?assertError(_, beamtalk_actor:dispatch(actorNoSuchThing, [], Self)).
+
+bt3967_external_stop_with_dead_actor_is_ok_test() ->
+    Pid = spawn(fun() -> ok end),
+    Ref = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', Ref, process, Pid, _} -> ok
+    end,
+    ?assertEqual(ok, beamtalk_actor:sync_send(Pid, 'stopWith:', [{shutdown, gone}])).
+
+bt3967_stop_with_timeout_rejects_bad_timeout_test() ->
+    Pid = spawn(fun() -> ok end),
+    ?assertError(_, beamtalk_actor:sync_send(Pid, 'stopWith:timeout:', [normal, -5])).
+
+bt3967_self_stop_outside_dispatch_is_not_silently_dropped_test() ->
+    %% With no dispatch in progress nothing would consume a deferred request,
+    %% so a self-stop must fail visibly (gen_server:stop/3's calling_self)
+    %% rather than answer ok and never stop.
+    ?assertError(_, beamtalk_actor:sync_send(self(), 'stopWith:', [normal])),
+    ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_stop({noreply, #{}})).
+
+bt3967_clear_pending_stop_discards_stale_request_test() ->
+    in_dispatch(fun() ->
+        ok = beamtalk_actor:sync_send(self(), 'stopWith:', [stale]),
+        ok = beamtalk_actor:clear_pending_stop(),
+        ?assertEqual({noreply, #{}}, beamtalk_actor:apply_pending_stop({noreply, #{}}))
+    end).
+
+%% Every `@intrinsic "actor..."` body in stdlib/src/actor.bt must have a
+%% send-site selector in beamtalk_actor:intrinsic_selector/1, or a self-send
+%% of it from inside an actor method would raise does_not_understand.
+bt3967_every_actor_intrinsic_is_mapped_test() ->
+    Root = filename:join(lists:duplicate(4, "..")),
+    ActorBt = filename:join([filename:dirname(?FILE), Root, "stdlib", "src", "actor.bt"]),
+    {ok, Src} = file:read_file(ActorBt),
+    {match, Matches} = re:run(
+        Src, <<"@intrinsic \"(actor[A-Za-z]+)\"">>, [global, {capture, all_but_first, binary}]
+    ),
+    Intrinsics = [binary_to_atom(Name) || [Name] <- Matches],
+    ?assert(lists:member(actorStopWith, Intrinsics)),
+    Unmapped = [I || I <- Intrinsics, beamtalk_actor:intrinsic_selector(I) =:= undefined],
+    ?assertEqual([], Unmapped).
