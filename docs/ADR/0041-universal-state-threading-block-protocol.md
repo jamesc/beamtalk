@@ -145,6 +145,8 @@ end
 
 The wrapper captures the enclosing `CurrentStateAcc` so that stateful blocks can read their captured variables. However, **mutations made inside the block are discarded** — the updated `_State` is not propagated back to the Beamtalk caller. The compiler should emit a warning when a stateful block is passed to an Erlang call site, since mutations will be silently dropped.
 
+> **Superseded for literal blocks (ADR 0133, BT-3917):** a block *literal* that assigns a captured local, written as an argument of an `Erlang <module> ...` send, is now a compile error (an escaping block) rather than a warning. The wrapper and its warning remain only for a stateful block that reaches an Erlang call by a route the compiler cannot see.
+
 Conversely, when Erlang funs are received by Beamtalk HOMs, they are wrapped to conform to the protocol. This marshalling happens at the language boundary, preserving ADR 0028's interop contract.
 
 ### Interaction with Gradual Typing (ADR 0025)

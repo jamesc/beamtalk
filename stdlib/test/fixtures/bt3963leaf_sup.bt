@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3963 (ADR 0135 §2): inherits `strategy` and `childSpecs` from a user
+// supervisor class and extends the stdlib default with `super`.
+
+Bt3963BaseSup subclass: Bt3963LeafSup
+
+  maxRestarts => super maxRestarts + 1

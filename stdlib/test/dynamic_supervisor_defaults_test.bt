@@ -1,9 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-1222: Tests for DynamicSupervisor class-side defaults and subclass override.
+// BT-1222: Tests for DynamicSupervisor configuration defaults and subclass
+// override. Since ADR 0135 §2 the configuration is instance-side, so it is read
+// from a running pool.
 //
-// Fixtures: stdlib/test/fixtures/test_dynamic_supervisor_custom.bt
+// Fixtures: stdlib/test/fixtures/test_dynamic_supervisor_custom.bt,
+//           stdlib/test/fixtures/bt3965default_pool.bt
 
 TestCase subclass: DynamicSupervisorDefaultsTest
 
@@ -13,22 +16,25 @@ TestCase subclass: DynamicSupervisorDefaultsTest
   // shared supervisor out from under this one.
   class serial -> Boolean => true
 
-  // === DynamicSupervisor class-side defaults ===
-  testDynamicSupervisorMaxRestartsDefault =>
-    self assert: DynamicSupervisor maxRestarts equals: 10
-
-  testDynamicSupervisorRestartWindowDefault =>
-    self assert: DynamicSupervisor restartWindow equals: 60
+  // === DynamicSupervisor instance-side defaults ===
+  testDynamicSupervisorDefaults =>
+    pool := Bt3965DefaultPool supervise unwrap
+    self assert: pool maxRestarts equals: 10
+    self assert: pool restartWindow equals: 60
+    self assert: pool maxChildren equals: #infinity
+    self assert: pool childShutdown equals: nil
+    self assert: pool childClass equals: Bt3965CappedStopper
+    [pool stop] on: Error do: [:e | nil]
 
   testDynamicSupervisorIsSupervisorTrue =>
     self assert: DynamicSupervisor isSupervisor equals: true
 
   // === DynamicSupervisor subclass can override defaults ===
-  testDynamicSupervisorSubclassOverridesMaxRestarts =>
-    self assert: TestDynamicSupervisorCustom maxRestarts equals: 5
-
-  testDynamicSupervisorSubclassOverridesRestartWindow =>
-    self assert: TestDynamicSupervisorCustom restartWindow equals: 120
+  testDynamicSupervisorSubclassOverridesDefaults =>
+    pool := TestDynamicSupervisorCustom supervise unwrap
+    self assert: pool maxRestarts equals: 5
+    self assert: pool restartWindow equals: 120
+    [pool stop] on: Error do: [:e | nil]
 
   testDynamicSupervisorSubclassIsSupervisorTrue =>
     self assert: TestDynamicSupervisorCustom isSupervisor equals: true

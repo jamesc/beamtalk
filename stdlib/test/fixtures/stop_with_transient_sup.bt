@@ -6,6 +6,6 @@
 
 Supervisor subclass: StopWithTransientSup
 
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
 
-  class children -> List => #(StopWithTransientActor)
+  childSpecs -> List => #(StopWithTransientActor)

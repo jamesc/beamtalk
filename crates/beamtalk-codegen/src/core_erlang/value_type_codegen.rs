@@ -1879,7 +1879,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    fn generate_value_type_method(
+    pub(super) fn generate_value_type_method(
         &mut self,
         method: &MethodDefinition,
         class_def: &ClassDefinition,
@@ -4432,7 +4432,7 @@ impl CoreErlangGenerator {
     ///
     /// For user-defined classes in package mode, uses `bt@{package}@{snake_case}`
     /// prefix.
-    fn superclass_module_name(&self, superclass: &str) -> Option<String> {
+    pub(super) fn superclass_module_name(&self, superclass: &str) -> Option<String> {
         if superclass == "none" {
             return None;
         }
@@ -4726,7 +4726,7 @@ impl CoreErlangGenerator {
     ///
     /// Each arm routes to the module-level function for that method, unwrapping
     /// `{Result, State}` tuples for NLR-capable methods.
-    fn generate_dispatch_method_branches(
+    pub(super) fn generate_dispatch_method_branches(
         &self,
         class: &ClassDefinition,
         mod_name: &str,
@@ -4973,7 +4973,7 @@ impl CoreErlangGenerator {
     /// Uses try-catch to convert exceptions from dispatch/3 (e.g., `does_not_understand`
     /// calling `erlang:error`) into `{error, Error, State}` tuples expected by the
     /// dispatch service.
-    fn generate_dispatch_4_wrapper(mod_name: &str) -> Document<'static> {
+    pub(super) fn generate_dispatch_4_wrapper(mod_name: &str) -> Document<'static> {
         docvec![
             "    try call ",
             leaf::atom(mod_name.to_string()),

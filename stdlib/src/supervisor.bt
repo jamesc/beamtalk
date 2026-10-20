@@ -6,17 +6,43 @@ type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne
 /// Supervisor — Abstract base class for static OTP supervision trees.
 ///
 /// Subclass `Supervisor` to define a static supervision tree: one whose
-/// children are known at startup. Override `class children` to return
-/// the list of child classes (or `SupervisionSpec` values for per-child
+/// children are known at startup. Override `childSpecs` to return the list
+/// of child classes (or `SupervisionSpec` values for per-child
 /// configuration). All other configuration methods have sensible defaults
 /// that can be selectively overridden.
 ///
-/// See ADR 0059 for the full design.
+/// ## Configuration runs inside the supervisor's `init`
+///
+/// Configuration (`childSpecs`, `strategy`, `maxRestarts`, `restartWindow`)
+/// is instance-side (ADR 0135 §2): the runtime sends each setting to the
+/// supervisor being started, from inside its own OTP `init/1`. So `self` is
+/// that supervisor and `self args` its start args (`nil` for `supervise`).
+/// Two rules follow:
+///
+/// - **Do not send messages to `self`** from a configuration method
+///   (`self count`, `self which: X`): the supervisor is still starting, and
+///   the start fails with `#supervisor_start_failed`. Reading `self args` and
+///   passing `self` *as a value* (e.g. in a child's args) are fine.
+/// - **Do not send to the supervisor's own class** (`self class helper`,
+///   `MySup settings`) from configuration while `supervise` is starting it:
+///   `supervise` currently runs in that class's process (until BT-3962), so
+///   the send waits on the busy class and times out. Pass values in through
+///   start args, or nest the supervisor under another one.
+/// - **Never synchronously call a supervisor from code it is waiting on**:
+///   its configuration methods, those of its nested supervisor children, or
+///   the `initialize` of a `withName:`/`withClassMethod:` actor child. A call
+///   to an ancestor from there hangs during start, every OTP restart and
+///   every `DynamicSupervisor startChild:`.
+///
+/// Each setting is a separate send, so put expensive work (reading files,
+/// say) in `childSpecs` only.
+///
+/// See ADR 0059 and ADR 0135 for the full design.
 ///
 /// ## Examples
 /// ```beamtalk
 /// Supervisor subclass: WebApp
-///   class children => #(DatabasePool HTTPRouter MetricsCollector)
+///   childSpecs => #(DatabasePool HTTPRouter MetricsCollector)
 ///
 /// app := (WebApp supervise) unwrap
 /// app count   // => 3
@@ -27,61 +53,12 @@ type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne
 /// @see SupervisionSpec (for per-child configuration)
 abstract Object subclass: Supervisor
 
-  // === Class-side configuration (override in concrete subclasses) ===
-
-  /// OTP supervisor restart strategy.
-  ///
-  /// Valid values: `#oneForOne`, `#oneForAll`, `#restForOne`.
-  /// Default: `#oneForOne`.
-  class strategy -> SupervisionStrategy => #oneForOne
-
-  /// Maximum number of restarts within `restartWindow` seconds.
-  ///
-  /// If this rate is exceeded, the supervisor itself shuts down.
-  class maxRestarts -> Integer => 10
-
-  /// Time window in seconds for the `maxRestarts` rate limit.
-  class restartWindow -> Integer => 60
+  // === Class-side ===
 
   /// Whether this class is a supervisor (always true for Supervisor subclasses).
   ///
   /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.
   class isSupervisor -> Boolean => true
-
-  /// Return the list of child classes (or SupervisionSpec values) for this supervisor.
-  ///
-  /// Must be overridden by concrete subclasses. Raises SubclassResponsibility otherwise.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Supervisor subclass: WebApp
-  ///   class children => #(DatabasePool HTTPRouter)
-  /// ```
-  class children -> List => self subclassResponsibility
-
-  /// Lifecycle hook called after all children have started.
-  ///
-  /// Override to perform post-start wiring (e.g., discovering siblings
-  /// via `which:` or injecting dependencies). Runs in the caller's
-  /// process, so `which:` and other supervisor calls will not deadlock.
-  ///
-  /// Fires exactly once, at the initial `supervise` call — it does
-  /// **not** re-fire on OTP-driven child restarts (including
-  /// `restForOne` cascades), since those start each child directly
-  /// from its child spec and never re-enter this dispatch path. A
-  /// dependency reference that must survive a restart needs named
-  /// actor registration (see ADR 0079) instead of one-shot wiring here.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Supervisor subclass: App
-  ///   class children => #(Store, Engine)
-  ///   class initialize: sup =>
-  ///     engine := (sup which: Engine) unwrap
-  ///     store := (sup which: Store) unwrap
-  ///     engine connectStore: store
-  /// ```
-  class initialize: _supervisor => nil
 
   // === Class-side lifecycle ===
 
@@ -101,6 +78,76 @@ abstract Object subclass: Supervisor
 
   /// Return the running supervisor instance, or nil if not started.
   class current -> Self | Nil => (Erlang beamtalk_supervisor) current: self
+
+  // === Instance-side configuration (override in concrete subclasses) ===
+  //
+  // Read from the supervisor being started, inside its `init/1` (ADR 0135).
+
+  /// Return the list of child classes (or SupervisionSpec values) for this supervisor.
+  ///
+  /// Must be overridden by concrete subclasses. Raises SubclassResponsibility otherwise.
+  /// Runs inside the supervisor's own `init`: use `self args` for start args
+  /// and pass `self` as a value if a child needs its parent, but do not send
+  /// messages to `self` (see the class comment).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Supervisor subclass: WebApp
+  ///   childSpecs => #(DatabasePool HTTPRouter)
+  /// ```
+  childSpecs -> List => self subclassResponsibility
+
+  /// OTP supervisor restart strategy.
+  ///
+  /// Valid values: `#oneForOne`, `#oneForAll`, `#restForOne`.
+  /// Default: `#oneForOne`.
+  strategy -> SupervisionStrategy => #oneForOne
+
+  /// Maximum number of restarts within `restartWindow` seconds.
+  ///
+  /// If this rate is exceeded, the supervisor itself shuts down.
+  maxRestarts -> Integer => 10
+
+  /// Time window in seconds for the `maxRestarts` rate limit.
+  restartWindow -> Integer => 60
+
+  /// The start args this supervisor was started with: `nil` for `supervise`.
+  ///
+  /// OTP restarts replay the same args, so a restarted supervisor recomputes
+  /// the same configuration. Readable from the configuration methods (inside
+  /// `init`) and from outside; raises with kind `#stale_handle` when the
+  /// supervisor is no longer running.
+  args -> Dynamic => self argsResult unwrap
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped `args/1` call.
+  internal argsResult => (Erlang beamtalk_supervisor) args: self
+
+  /// Lifecycle hook called after all children have started.
+  ///
+  /// Override to perform post-start wiring (e.g., discovering siblings
+  /// via `which:` or injecting dependencies). `self` is the new supervisor.
+  /// Runs in the caller's process after the supervisor has finished
+  /// starting, so `which:` and other messages to `self` work here (unlike
+  /// in the configuration methods). If it raises, the supervisor is stopped
+  /// and the start fails.
+  ///
+  /// Fires exactly once, at the initial `supervise` call — it does
+  /// **not** re-fire on OTP-driven child restarts (including
+  /// `restForOne` cascades), since those start each child directly
+  /// from its child spec and never re-enter this dispatch path. A
+  /// dependency reference that must survive a restart needs named
+  /// actor registration (see ADR 0079) instead of one-shot wiring here.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Supervisor subclass: App
+  ///   childSpecs => #(Store, Engine)
+  ///   initialize =>
+  ///     engine := (self which: Engine) unwrap
+  ///     store := (self which: Store) unwrap
+  ///     engine connectStore: store
+  /// ```
+  initialize -> Nil => nil
 
   // === Instance-side inspection ===
 

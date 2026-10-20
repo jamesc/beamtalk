@@ -5,8 +5,8 @@
 
 DynamicSupervisor(Counter) subclass: TestDynamicSupervisorCustom
 
-  class childClass => Counter
+  childClass => Counter
 
-  class maxRestarts -> Integer => 5
+  maxRestarts -> Integer => 5
 
-  class restartWindow -> Integer => 120
+  restartWindow -> Integer => 120

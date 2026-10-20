@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3964: DynamicSupervisor class maxChildren limit.
+// BT-3964: DynamicSupervisor maxChildren limit (instance-side since ADR 0135).
 //
 // Fixtures: stdlib/test/fixtures/test_dynamic_supervisor_capped.bt,
 //           stdlib/test/fixtures/test_dynamic_supervisor_bad_cap.bt
@@ -19,11 +19,9 @@ TestCase subclass: DynamicSupervisorMaxChildrenTest
     pool := TestDynamicSupervisorCapped current
     pool isNil ifFalse: [[pool stop] on: Error do: [:e | nil]]
 
-  testMaxChildrenDefaultsToInfinity =>
-    self assert: DynamicSupervisor maxChildren equals: #infinity
-
   testSubclassOverridesMaxChildren =>
-    self assert: TestDynamicSupervisorCapped maxChildren equals: 2
+    pool := TestDynamicSupervisorCapped supervise unwrap
+    self assert: pool maxChildren equals: 2
 
   testStartChildFailsAtLimitAndRecoversAfterTerminate =>
     pool := (TestDynamicSupervisorCapped supervise) unwrap

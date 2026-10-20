@@ -21,12 +21,12 @@
 //!   compiler lowers the block in place: as the direct argument (or receiver,
 //!   for `value` and the loops) of a control construct or a compiler-known
 //!   collection message ([`crate::state_threading_selectors`], the one list,
-//!   which [`threading_constructs_note`] also reads), or as an Erlang FFI
-//!   argument (ADR 0041 §Erlang Interop Boundary: lossy by design, codegen's
-//!   `generate_erlang_interop_wrapper` warns). A block literal that does so
-//!   and **escapes** (is stored in a local, returned, stored in a field or
-//!   class variable, placed in a collection literal, passed to any other
-//!   method, a cascade message included, or sent a message other than
+//!   which [`threading_constructs_note`] also reads). A block literal that
+//!   does so and **escapes** (is stored in a local, returned, stored in a
+//!   field or class variable, placed in a collection literal, passed to any
+//!   other method, a cascade message included, passed as an Erlang FFI
+//!   argument (BT-3917: Erlang calls it as a plain fun and drops the write;
+//!   ADR 0041 §Erlang Interop Boundary), or sent a message other than
 //!   `value`) is reported at the assignment, naming the shape ([`Escape`]),
 //!   in every context, the REPL root included (BT-3858). Reads of captured
 //!   variables and `^` inside an escaping block are unaffected.
@@ -1322,6 +1322,9 @@ enum Escape {
     /// An argument of this class-side selector, which runs in the class's
     /// process (not a direct-called `class sealed` method, ADR 0129 Phase 0b).
     ClassMethod(EcoString),
+    /// An argument of an Erlang FFI send (`Erlang <module> <selector>`): the
+    /// block is handed to Erlang as a plain fun (BT-3917).
+    Ffi(EcoString, EcoString),
     /// An argument or the receiver of a cascade message: a cascade sends every
     /// message through ordinary dispatch.
     Cascade(EcoString),
@@ -1359,6 +1362,9 @@ impl Escape {
             ),
             Self::ClassMethod(selector) => {
                 format!("passed to a class method (`{selector}`); it would run in another process")
+            }
+            Self::Ffi(module, selector) => {
+                format!("passed to Erlang `{module}` `{selector}`, which calls it as a plain fun")
             }
             Self::Cascade(selector) => format!(
                 "sent in a cascade (`{selector}`), which the compiler does not thread it through"
@@ -1404,6 +1410,12 @@ impl Escape {
                      `{name} := ... {selector} [... {name} + 1]`"
                 )
             }
+            Self::Ffi(..) => format!(
+                "the Erlang function cannot hand `{name}` back from a fun it calls: fold on the \
+                 Beamtalk collection (`{name} := xs inject: {name} into: [:acc :e | acc + e]`), \
+                 or return the new value from the block and use the Erlang call's result \
+                 (`rs := Erlang lists map: [:e | ... {name} + e] with: xs`)"
+            ),
             Self::Receiver(selector) => format!(
                 "return the new value from the block and assign it where it is called: \
                  `{name} := [... {name} + 1] {selector}`"
@@ -1944,7 +1956,8 @@ impl<'d> Walker<'d> {
                     self.operand(t, Position::LiteralElement);
                 }
             }
-            Expression::ArrayLiteral { elements, .. } => {
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
                 for e in elements {
                     self.operand(e, Position::LiteralElement);
                 }
@@ -2442,8 +2455,16 @@ impl<'d> Walker<'d> {
         dispatched: bool,
     ) {
         let sel = selector.name();
-        if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some() {
-            // ADR 0041 §Erlang Interop Boundary: lossy by design (warned by codegen).
+        if let Some(module) = crate::ffi_receiver::erlang_module_of_receiver(receiver) {
+            // BT-3917: a block literal in an FFI argument position is handed to
+            // Erlang, which calls it as a plain fun, so a write to a captured
+            // local is dropped: it escapes (ADR 0133, ADR 0041).
+            let escape = Escape::Ffi(EcoString::from(module), sel.clone());
+            for arg in arguments {
+                for block in value_blocks(arg) {
+                    self.report_literal(block, &escape);
+                }
+            }
             return;
         }
         // EXEMPTION (§1 construct): a bare `[...]` argument of an inlined

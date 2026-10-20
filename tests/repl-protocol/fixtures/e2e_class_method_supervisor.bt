@@ -7,7 +7,7 @@
 
 Supervisor subclass: E2EClassMethodSupervisor
 
-  class children -> List =>
+  childSpecs -> List =>
     spec := E2EClassMethodActor supervisionSpec
     spec := spec withClassMethod: #create:value:
     spec := spec withArgs: #(#test, 99)

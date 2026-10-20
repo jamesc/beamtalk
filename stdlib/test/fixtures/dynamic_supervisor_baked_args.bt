@@ -7,4 +7,4 @@
 
 DynamicSupervisor(BakedArgsCounter) subclass: DynamicSupervisorBakedArgs
 
-  class childClass => BakedArgsCounter
+  childClass => BakedArgsCounter

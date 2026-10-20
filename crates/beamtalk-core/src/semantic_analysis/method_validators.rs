@@ -319,6 +319,7 @@ pub(crate) fn validate_immutable_mutation(
         Expression::Literal(Literal::Symbol(_), _) => "Symbol literal",
         Expression::Literal(Literal::Character(_), _) => "Character literal",
         Expression::Literal(Literal::List(_), _) | Expression::ListLiteral { .. } => "List literal",
+        Expression::TupleLiteral { .. } => "Tuple literal",
         Expression::Identifier(id) if matches!(id.name.as_str(), "true" | "false") => {
             "Boolean literal"
         }

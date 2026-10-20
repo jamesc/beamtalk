@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3963 (ADR 0135 §2): a static supervisor whose `childSpecs` depends on its
+// start args. `supervise` starts it with `nil` args, so it gets one worker.
+
+Supervisor subclass: Bt3963ArgsSup
+
+  childSpecs => self args isNil ifTrue: [#(Bt3963Worker)] ifFalse: [#()]

@@ -201,7 +201,9 @@ fn is_effect_free(expr: &Expression) -> bool {
         Expression::MapLiteral { pairs, .. } => pairs
             .iter()
             .all(|p| is_effect_free(&p.key) && is_effect_free(&p.value)),
-        Expression::ArrayLiteral { elements, .. } => elements.iter().all(is_effect_free),
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            elements.iter().all(is_effect_free)
+        }
         Expression::ListLiteral { elements, tail, .. } => {
             elements.iter().all(is_effect_free) && tail.as_ref().is_none_or(|t| is_effect_free(t))
         }
@@ -260,6 +262,7 @@ fn effect_free_label(expr: &Expression) -> &'static str {
         Expression::ClassReference { .. } => "class reference",
         Expression::MapLiteral { .. } => "map literal",
         Expression::ArrayLiteral { .. } => "array literal",
+        Expression::TupleLiteral { .. } => "tuple literal",
         Expression::ListLiteral { .. } => "list literal",
         _ => "pure expression",
     }
@@ -328,7 +331,7 @@ fn walk_expr_for_effect_free(expr: &Expression, diagnostics: &mut Vec<Diagnostic
                 walk_expr_for_effect_free(t, diagnostics);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 walk_expr_for_effect_free(elem, diagnostics);
             }

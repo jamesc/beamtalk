@@ -184,9 +184,9 @@ fn write_application_sources(path: &Utf8Path, name: &str) -> Result<()> {
 /// `beamtalk run` starts this automatically as an OTP application.
 Supervisor subclass: {sup_name}
 
-  class strategy -> Symbol => #oneForOne
+  strategy -> Symbol => #oneForOne
 
-  class children => #()
+  childSpecs => #()
 "
     );
     fs::write(
@@ -530,7 +530,7 @@ mod tests {
 
         let content = fs::read_to_string(sup_path).unwrap();
         assert!(content.contains("Supervisor subclass: MyAppAppSup"));
-        assert!(content.contains("class children"));
+        assert!(content.contains("childSpecs"));
     }
 
     #[test]

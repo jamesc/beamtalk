@@ -87,8 +87,8 @@ pub fn expression_contains_block(expr: &Expression) -> bool {
 /// Recursively walks an expression tree in pre-order, calling `f` on every node.
 ///
 /// The visitor is called on the current node **before** recursing into its children.
-/// All nineteen `Expression` variants are handled — including `ArrayLiteral`,
-/// which was missing from several hand-rolled walkers.
+/// Every `Expression` variant is handled — including `ArrayLiteral`, which
+/// was once missing from several hand-rolled walkers, and `TupleLiteral`.
 ///
 /// Unlike [`crate::ast::visitor::Visitor`], this walker **descends into nested
 /// [`crate::ast::Block`] bodies** — see that module's comparison table, which
@@ -167,7 +167,7 @@ where
                 walk_expression(t, f);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 walk_expression(elem, f);
             }
@@ -268,7 +268,7 @@ where
                 walk_expression_mut(t, f);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 walk_expression_mut(elem, f);
             }

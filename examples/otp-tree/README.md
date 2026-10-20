@@ -179,11 +179,11 @@ methods:
 
 ```beamtalk
 Supervisor subclass: AppSupervisor
-  class strategy -> Symbol => #oneForOne
-  class children => #(EventLogger, WorkerPool)
+  strategy -> Symbol => #oneForOne
+  childSpecs => #(EventLogger, WorkerPool)
 ```
 
-`class children` returns a list of classes.  The Beamtalk runtime reads each
+`childSpecs` returns a list of classes.  The Beamtalk runtime reads each
 class's `supervisionPolicy` to build the OTP child spec.  `EventLogger`
 declares `#permanent`; `WorkerPool` is a `DynamicSupervisor` (treated as
 `#permanent` automatically).
@@ -192,7 +192,7 @@ declares `#permanent`; `WorkerPool` is a `DynamicSupervisor` (treated as
 
 ```beamtalk
 DynamicSupervisor(TaskWorker) subclass: WorkerPool
-  class childClass => TaskWorker
+  childClass => TaskWorker
 ```
 
 Children are added at runtime with `pool startChild`.  The supervisor watches

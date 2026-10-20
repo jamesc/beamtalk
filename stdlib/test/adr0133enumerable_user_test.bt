@@ -17,8 +17,9 @@
 // would be bypassed by the fold, so the send raises
 // `stateful_block_dispatch`, and a receiver that does not respond to the
 // selector raises `does_not_understand`, as the pure path does. Never a
-// dropped write and never a silent wrong answer. (A block laundered through
-// Erlang FFI is outside this decision, BT-3917.)
+// dropped write and never a silent wrong answer. (A block literal that assigns
+// a captured local and is passed as an Erlang FFI argument is a compile-time
+// escaping-block error, ADR 0133 / BT-3917.)
 //
 // Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any,
 // object_own_any,actor_own_any,own_each,own_inject,own_select,ext_inject,ext_plain,ext_with_all,own_species,own_with_all,stdlib_with_all,stdlib,stdlib_actor,stdlib_own_any,user}.bt. `Ets` is the stdlib's own

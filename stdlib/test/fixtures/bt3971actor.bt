@@ -1,19 +1,19 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3971: an Erlang FFI argument block that writes a captured local (`t`) is
-// a Tier 2 body. Ending it in `[n := 3. n] value` is a compile error (it
-// answered the raw `{Value, State}` tuple; see the codegen corpus
-// `tier2_block_local_corpus.rs`). These neighbours answer right and are pinned.
+// BT-3971: an Erlang FFI argument block that writes a captured local was a
+// Tier 2 body, and ending it in `[n := 3. n] value` answered the raw
+// `{Value, State}` tuple (a compile error since BT-3971; see the codegen corpus
+// `tier2_block_local_corpus.rs`). Since BT-3917 a writing block literal in an
+// FFI argument is itself a compile error (ADR 0133), so these neighbours are
+// plain funs that write nothing; they answer right and are pinned.
 
 Actor subclass: Bt3971Actor
   state: hits = 0
 
   assigned =>
-    t := 0
     (Erlang lists)
       map: [:x |
-        t := t + 1
         r := [
           n := 3
           n
@@ -23,10 +23,8 @@ Actor subclass: Bt3971Actor
       with: #(1)
 
   notLast =>
-    t := 0
     (Erlang lists)
       map: [:x |
-        t := t + 1
         [
           n := 3
           n
@@ -35,20 +33,11 @@ Actor subclass: Bt3971Actor
       ]
       with: #(1)
 
-  pureValue =>
-    t := 0
-    (Erlang lists)
-      map: [:x |
-        t := t + 1
-        [3] value
-      ]
-      with: #(1)
+  pureValue => (Erlang lists) map: [:x | [3] value] with: #(1)
 
   inArm =>
-    t := 0
     (Erlang lists)
       map: [:x |
-        t := t + 1
         (self.hits =:= 0)
           ifTrue: [
             [

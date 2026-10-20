@@ -223,7 +223,7 @@ Both hooks are optional — actors without them work normally.
 ```beamtalk
 Server subclass: Connection
   handleInfo: msg =>
-    msg == #tcp_closed ifTrue: [self stopWith: (Tuple withAll: #(#shutdown, #peer_closed))]
+    msg == #tcp_closed ifTrue: [self stopWith: {#shutdown, #peer_closed}]
 
   terminate: reason =>
     reason =:= #normal ifTrue: [^nil]
@@ -322,7 +322,7 @@ Object subclass: Json
 
 // Abstract extension point — designed for subclassing
 abstract Object subclass: Supervisor
-  class children => self subclassResponsibility
+  childSpecs => self subclassResponsibility
 ```
 
 ### Sendability Tiers (ADR 0103)
@@ -911,7 +911,7 @@ MathUtils fibonacci: 10    // => 55
 Common uses:
 - **Factory methods:** `Counter spawn`, `Point x: 3 y: 4` (auto-generated from `field:` declarations)
 - **FFI namespaces:** `File readAll: path`, `Json parse: str` — class methods wrapping Erlang modules
-- **Supervisor configuration:** `class children`, `class strategy` — pure metadata for OTP init
+- **Supervisor lifecycle:** `class supervise`, `class current` (configuration such as `childSpecs` and `strategy` is instance-side, ADR 0135)
 - **Singleton access:** `class current` — return the singleton instance (see `classState:` below)
 
 **`classState:`** declares mutable class-level state — shared across all instances and accessible from class methods. Used for singletons:
@@ -1284,6 +1284,41 @@ pair at: 2                  // inferred Integer
 A non-literal index (`pair at: i`) or an out-of-range literal falls back to
 `Dynamic` — no false-positive warning. An untyped `tuple()` spec (unknown
 arity) stays bare `Tuple`, so `at:` on it remains `Dynamic` as before.
+
+### Tuple Literals (ADR 0136)
+
+`{e1, e2, ...}` builds a raw Erlang tuple (class `Tuple`). It is the expression
+form of the `{a, b}` tuple pattern, and the value is exactly the Erlang term:
+symbols and `true`/`false`/`nil` are atoms, so `{#active, false}` is Erlang's
+`{active, false}`. This makes FFI option lists read like the Erlang docs:
+
+```beamtalk
+(Erlang gen_tcp) listen: port with: #(#binary, {#active, false}, {#reuseaddr, true}, {#backlog, 1024})
+
+pair := {#backlog, opts at: #backlog}   // elements are keyword-level expressions
+{#ok, 1} =:= (Tuple withAll: #(#ok, 1)) // => true
+{#a, 1} at: 2                           // => 1 (inferred Integer)
+single := {#ok}                          // 1-tuple
+empty := {}                              // 0-tuple
+opts := #({#local, path}, {#nodelay, true},)  // trailing comma is allowed
+```
+
+- Elements are separated by `,` — Smalltalk's `{a. b}` brace-array form is a
+  syntax error (`.` separates statements). A cascade or assignment inside an
+  element needs parentheses, as in a list.
+- At the start of a statement, `{a, b} := x` is still a destructuring
+  assignment; `{a, b} size` is an expression. `{a, b} := {b, a}` swaps.
+- A tuple literal infers the positional type `Tuple(T1, …, Tn)`, so `at:` with a
+  literal index is typed (see above). `{}` infers as bare `Tuple`.
+- **`{#ok, x}` is a `Tuple`, not a `Result`.** FFI `ok`/`error` conversion
+  (ADR 0076) applies only to values *returned* from Erlang; arguments pass
+  through unchanged. Use `Result ok:` / `Result error:` to build a `Result`.
+- To interpolate a tuple literal in a string, add a space: `"pair: { {a, b} }"`.
+  `"{{...}}"` is rejected as a mistaken literal-brace escape.
+- Tuple literals are not supported inside `when:` guards (nor are list literals).
+- Caveat: a tuple whose first element is a runtime tag atom (`#beamtalk_object`,
+  `#beamtalk_supervisor`) is misclassified by the runtime's class lookup. This
+  is not new — `Tuple withAll:` behaves the same.
 
 ### FFI Type Stub Files (ADR 0075 Phase 2)
 
@@ -2880,10 +2915,11 @@ processItems =>
 | `self forEach: [:o \| t := t + o]` | `` `t` is assigned in a block passed to `forEach:`, which is not a construct the compiler threads it through `` |
 | `self do: [:x \| t := t + x]` (in an actor) | `` `t` is assigned in a block passed to `self do:`, which runs the actor's own `do:` method rather than the collection loop the compiler threads it through `` |
 | `Logger onEvent: [:e \| seen := seen + 1]` | `` `seen` is assigned in a block passed to a class method (`onEvent:`); it would run in another process `` |
+| `Erlang lists foreach: [:e \| t := t + e] with: xs` | `` `t` is assigned in a block passed to Erlang `lists` `foreach:with:`, which calls it as a plain fun `` |
 | `#([t := t + 1])` | `` `t` is assigned in a block placed in a collection literal `` |
 | `xs collect: [:x \| [t := t + x]]` | `` `t` is assigned in a block answered by the block of a collection operation `` |
 
-A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). An Erlang FFI argument is exempt: it is lossy by design and codegen warns (ADR 0041 §Erlang Interop Boundary). The same holds for object state: a block that assigns `self.field` (an actor or value-type field, or a class variable in a class method) and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; an actor field write through a `sealed` method of the same class, ADR 0132's BT-1140 path, is no longer accepted). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
+A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). A block literal that assigns a captured local and is passed as an Erlang FFI argument (`Erlang lists foreach: [:e \| t := t + e] with: xs`) is the same compile error (BT-3917): Erlang calls it as a plain fun and the write would be dropped. Return the value from the block and use the call's result instead (ADR 0041 §Erlang Interop Boundary); a block that only reads captured variables is fine. The same holds for object state: a block that assigns `self.field` (an actor or value-type field, or a class variable in a class method) and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; an actor field write through a `sealed` method of the same class, ADR 0132's BT-1140 path, is no longer accepted). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
 
 These lookup handlers are lowered inline, behind a runtime check that the receiver is a `Dictionary`: a handler that writes an outer local sent to anything else (an `Ets`, a value-type instance with its own `at:ifAbsent:`, a user class) raises a structured `type_error` instead of dropping the write. A receiver statically known not to be a `Dictionary` (`self`/`super` outside one, or an inferred type that is a known other class such as `Ets`) keeps the compile error. In a closure that is not inlined (a stored block, a block passed to another method) the enclosing block escapes, and in the REPL the handler is still a compile error.
 
@@ -3313,7 +3349,7 @@ The write made inside the protected block is discarded when the error crosses th
 | `class_state_read_only` | Code that runs against a read-only snapshot writes a class variable. See below. |
 | `abi_mismatch` | The loader refuses a compiled class module built with a different class-variable calling convention. See below. |
 
-**Runtime-owned out-of-process calls read a snapshot.** Supervisor definition (`class children` and the other `static_init`/`dynamic_init` selectors, the `withClassMethod:` factory), a class's `initialize:` hook, and `performLocally:withArguments:` run a class method outside the class process. They read the class variables as of the last completed invocation (a snapshot), and a *write* there raises `class_state_read_only`. When the caller is the class process itself, mid-invocation, they read and write the live variables. A supervisor factory or `performLocally:` method that used to assign a class variable (the assignment was dropped, or for `class children` crashed supervisor startup) now raises; assign the variable from a normal class-side message instead.
+**Runtime-owned out-of-process calls read a snapshot.** Supervisor definition (the instance-side configuration methods `static_init`/`dynamic_init` read, ADR 0135, and the `withClassMethod:` factory) and `performLocally:withArguments:` run outside the class process. They read the class variables as of the last completed invocation (a snapshot), and a *write* there raises `class_state_read_only`. When the caller is the class process itself, mid-invocation, they read and write the live variables. A supervisor factory or `performLocally:` method that used to assign a class variable (the assignment was dropped, or for supervisor configuration crashed supervisor startup) now raises; assign the variable from a normal class-side message instead.
 
 **Class-module ABI.** Every compiled class module records its class-variable calling convention as `class_var_abi` in `__beamtalk_meta/0`. The loader (class registration, hot reload, and the release upgrade preflight) refuses a module whose `class_var_abi` is missing or differs from the running runtime's, including every module compiled before ADR 0130, with a structured `abi_mismatch` error that names the module and says to recompile. Hot upgrades across the release that changed the convention are not supported: restart the node and recompile every package.
 
@@ -3447,13 +3483,13 @@ Beamtalk provides declarative OTP supervision trees via `Supervisor subclass:` a
 
 ### Static Supervisor
 
-Subclass `Supervisor` and override `class children` to return a list of actor classes (or `SupervisionSpec` values for per-child configuration). The supervisor starts all children at startup using OTP `one_for_one` strategy by default.
+Subclass `Supervisor` and override `childSpecs` to return a list of actor classes (or `SupervisionSpec` values for per-child configuration). The supervisor starts all children at startup using OTP `one_for_one` strategy by default.
 
-> **Important:** `class children`, `class strategy`, `class maxRestarts`, and `class restartWindow` are called during supervisor startup from the OTP `init/1` callback — before the class gen_server is available. These methods must be **pure** (return literal values only). Do not send messages to `self`, call other class methods via dispatch, or read class variables from within these methods.
+> **Important:** supervisor configuration (`childSpecs`, `strategy`, `maxRestarts`, `restartWindow`; `childClass`, `maxChildren`, `childShutdown` on `DynamicSupervisor`) is **instance-side** ([ADR 0135](ADR/0135-supervisor-instances-and-start-arguments.md)). The runtime sends each setting to the supervisor being started, from inside its own OTP `init/1`: `self` is that supervisor and `self args` its start args. Reading `self args` and passing `self` as a value are fine; **sending a message to `self`** (`self count`, `self which: X`) fails the start with `#supervisor_start_failed` and a hint, because the supervisor is still starting. See [Instance configuration and start args](#instance-configuration-and-start-args-adr-0135).
 
 ```beamtalk
 Supervisor subclass: WebApp
-  class children => #(DatabasePool HTTPRouter MetricsCollector)
+  childSpecs => #(DatabasePool HTTPRouter MetricsCollector)
 ```
 
 Start the supervisor with `supervise`. It registers under its class name so it can be found from anywhere. `supervise` and `terminate:` both return `Result` values ([ADR 0080](ADR/0080-supervisor-lifecycle-result.md)) — use `unwrap` at boot / in the REPL, or `ifOk:ifError:` / `andThen:` for recoverable flows:
@@ -3494,22 +3530,82 @@ WebApp current                            // => nil
 
 `terminate:` is **idempotent** — terminating a child that is already gone returns `Result ok: nil`, not an error (see [idempotent-startup convention](#supervisor-idempotent-startup-convention-adr-0080) below).
 
-### Class-Side Configuration Defaults
+### Configuration Defaults
 
-Override these class methods in your subclass to customise restart behaviour:
+Override these instance methods in your subclass to customise restart behaviour:
 
 | Method | Default | Description |
 |--------|---------|-------------|
-| `class strategy` | `#oneForOne` | OTP restart strategy (`#oneForOne`, `#oneForAll`, `#restForOne`) |
-| `class maxRestarts` | `10` | Max restarts before supervisor gives up |
-| `class restartWindow` | `60` | Time window (seconds) for `maxRestarts` |
+| `childSpecs` | (required) | The children of a static `Supervisor` |
+| `strategy` | `#oneForOne` | OTP restart strategy (`#oneForOne`, `#oneForAll`, `#restForOne`) |
+| `maxRestarts` | `10` | Max restarts before supervisor gives up |
+| `restartWindow` | `60` | Time window (seconds) for `maxRestarts` |
+| `childClass` | (required) | The child class of a `DynamicSupervisor` |
+| `maxChildren` | `#infinity` | `DynamicSupervisor` child limit |
+| `childShutdown` | `nil` | `DynamicSupervisor` child shutdown timeout |
+| `initialize` | no-op | Hook run once after a top-level start, in the caller |
+| `args` | — | The start args (`nil` for `supervise`); not overridden |
 
 ```beamtalk
 Supervisor subclass: CriticalApp
-  class children => #(Database Cache)
-  class strategy => #oneForAll       // restart all if any child crashes
-  class maxRestarts => 3             // give up after 3 crashes in 60 seconds
+  childSpecs => #(Database Cache)
+  strategy => #oneForAll       // restart all if any child crashes
+  maxRestarts => 3             // give up after 3 crashes in 60 seconds
 ```
+
+<a id="instance-configuration-and-start-args-adr-0135"></a>
+
+### Instance configuration and start args (ADR 0135)
+
+Configuration is a property of a running supervisor, so it lives on the instance side and is read **from the supervisor being started**, inside its OTP `init/1`. `self` is that supervisor's handle and `self args` its start args, so the same class can be configured differently per instance. `supervise` starts with `nil` args; a supervisor started as a `DynamicSupervisor` child with `startChild: args` gets `args`. OTP restarts replay the same args, so a restarted supervisor recomputes the same configuration. `sup args` also works from outside (it raises `#stale_handle` for a stopped supervisor).
+
+```beamtalk
+DynamicSupervisor(Handler) subclass: ConnectionSupervisor
+  childClass => self args at: #handler
+  maxChildren => self args at: #numConnections
+  childShutdown => self args at: #shutdownTimeout
+
+DynamicSupervisor(ConnectionSupervisor) subclass: ServerPools
+  childClass => ConnectionSupervisor
+
+pools := ServerPools supervise unwrap
+small := (pools startChild: #{#handler => Echo, #numConnections => 10, #shutdownTimeout => 5000}) unwrap
+small maxChildren        // => 10
+(small args at: #handler) // => Echo
+```
+
+Rules for configuration methods:
+
+- **Do not send messages to `self`.** They run inside the supervisor's own `init/1`; a message to the supervisor is a call to itself, which OTP rejects (`calling_self`). The start fails with `#supervisor_start_failed` and the hint "configuration methods run inside the supervisor's init; use `self args` and return specs, do not send messages to `self`". Passing `self` *as a value* (for example in a child's args, so the child can reach its parent) is the intended use.
+- **Never synchronously call a supervisor from code it is waiting on**: its configuration methods, those of its nested supervisor children, or the `initialize` of a `withName:`/`withClassMethod:` actor child. The supervisor is blocked in that child's start function during the initial start, every OTP restart and every `startChild:`, so a call to it or an ancestor hangs. The compiler cannot check this.
+- **Do not send messages to the supervisor's own class from configuration while `supervise` is starting it.** `supervise` currently runs inside that class's process (until BT-3962), so a class-side send such as `MySup settings` waits on the busy class process and times out. Pass values in through start args, or nest the supervisor under another one. Sends to *other* classes are fine.
+- **Each setting is a separate send**, so expensive work (reading files, say) belongs in `childSpecs` only.
+- **Arg lifetime:** args are replayed on every restart, so any pid or handle in them must outlive the child (an ancestor's handle does; a caller's pid or a socket does not).
+- A configuration method that raises, or returns an invalid value (`maxChildren`, `childShutdown`), fails the start once with `#supervisor_start_failed` (or fails the parent's start for a nested supervisor), carrying the error's hint.
+
+The post-start hook is the instance-side `initialize` (it was `class initialize: sup`). It runs once per top-level start, in the caller's process after the supervisor has started, so `self` is the supervisor and messages to it work. If it raises, the supervisor is stopped and the start fails. Only `class supervisionPolicy` stays class-side. The old class-side forms (`class children`, `class strategy`, …, `class initialize:`) are compile errors with a fix-it: drop `class`, rename `class children` to `childSpecs`, and use `self` for `sup` in `initialize`.
+
+**For Erlang/Elixir developers.** Every OTP concept has a direct counterpart (rows marked † arrive with BT-3962 and BT-3966):
+
+| OTP / Elixir | Beamtalk |
+|---|---|
+| `supervisor:start_link(Mod, Args)` | `MySup spawnWith: args` † (`spawn` passes `nil`); today: a `DynamicSupervisor` child started with `startChild: args` |
+| `supervisor:start_link({local, N}, Mod, Args)` | `MySup spawnWith: args as: #n` † |
+| `whereis(N)` | `MySup named: #n` † |
+| `Mod:init(Args)` | the configuration methods, reading `self args` |
+| `{ok, {#{strategy, intensity, period}, Children}}` | `strategy`, `maxRestarts`, `restartWindow`, `childSpecs` |
+| `self()` inside `init/1` | `self` inside those methods |
+| child spec map; Elixir `{Mod, Arg}` | `Mod supervisionSpec withId: … withArgs: …` |
+| `simple_one_for_one` + template | `DynamicSupervisor` + `childClass` |
+| Elixir `max_children`; child `shutdown` | `maxChildren`; `childShutdown`, `withShutdown:` |
+| `which_children`, `terminate_child`, `restart_child`, `delete_child` | `whichChildren`, `terminateChild:`, `restartChild:`, `deleteChild:` † |
+| "never call yourself from `init`" | the same rule; OTP's `calling_self` becomes `#supervisor_start_failed` with a hint |
+
+Three deliberate differences:
+
+1. `init/1` is split into one method per setting, so a subclass overrides `strategy` alone and inherits the rest. Each method is a separate send, so expensive work belongs in `childSpecs` only, not repeated in several settings.
+2. `supervise` (idempotent "ensure it is running") has no OTP counterpart; it serves REPL re-evaluation and the `[application]` boot path.
+3. `initialize` runs after start in the caller, where an Erlang programmer would put code after `start_link` returns.
 
 ### Actor Supervision Policy
 
@@ -3532,7 +3628,7 @@ Use `SupervisionSpec` when you need to override a child's restart policy, provid
 
 ```beamtalk
 Supervisor subclass: WebApp
-  class children =>
+  childSpecs =>
     #(DatabasePool
       HTTPRouter supervisionSpec withRestart: #transient
       (MetricsCollector supervisionSpec withId: #metrics withArgs: #{#port => 9090}))
@@ -3549,17 +3645,17 @@ Use `withName:` (and the `withName:withRestart:` / `withName:withArgs:` / `withN
 
 ```beamtalk
 Supervisor subclass: WebApp
-  class children =>
+  childSpecs =>
     #((Counter supervisionSpec withName: #counter withRestart: #permanent))
 ```
 
 ### Dynamic Supervisor
 
-Subclass `DynamicSupervisor` to manage pools of actors started at runtime. Override `class childClass` to declare which actor class the pool manages.
+Subclass `DynamicSupervisor` to manage pools of actors started at runtime. Override `childClass` to declare which actor class the pool manages.
 
 ```beamtalk
 DynamicSupervisor(Worker) subclass: WorkerPool
-  class childClass => Worker
+  childClass => Worker
 ```
 
 ```beamtalk
@@ -3591,12 +3687,12 @@ pool stop
 WorkerPool current                  // => nil
 ```
 
-**Capping the pool with `maxChildren`.** Override `class maxChildren` (default `#infinity`) to bound the number of live children — the Beamtalk equivalent of Elixir `DynamicSupervisor`'s `max_children`. Once the pool holds that many children (`count`, plus any child whose automatic restart is pending), `startChild`, `startChild:` and `startChild:name:` return `Result error:` with kind `#max_children` (the error's details carry the limit) instead of starting a child; terminating a child frees a slot. Automatic restarts of existing children are never refused. The value must be a non-negative Integer or `#infinity` — anything else makes `supervise` return `Result error:` with kind `#supervisor_start_failed` (or, for a pool nested under a static `Supervisor`, fails the parent's start) — and is read each time the supervisor (re)starts.
+**Capping the pool with `maxChildren`.** Override `maxChildren` (default `#infinity`) to bound the number of live children — the Beamtalk equivalent of Elixir `DynamicSupervisor`'s `max_children`. Once the pool holds that many children (`count`, plus any child whose automatic restart is pending), `startChild`, `startChild:` and `startChild:name:` return `Result error:` with kind `#max_children` (the error's details carry the limit) instead of starting a child; terminating a child frees a slot. Automatic restarts of existing children are never refused. The value must be a non-negative Integer or `#infinity` — anything else makes `supervise` return `Result error:` with kind `#supervisor_start_failed` (or, for a pool nested under a static `Supervisor`, fails the parent's start) — and is read from the instance each time the supervisor (re)starts, so it may depend on `self args`.
 
 ```beamtalk
 DynamicSupervisor(Worker) subclass: ConnectionPool
-  class childClass => Worker
-  class maxChildren -> Integer => 2
+  childClass => Worker
+  maxChildren -> Integer => 2
 
 pool := (ConnectionPool supervise) unwrap
 w := pool startChild unwrap        // => Actor(Worker, _)
@@ -3608,12 +3704,12 @@ pool startChild isOk               // => true
 
 The limit is checked by the calling process just before the start, so it is exact when a single process starts children (e.g. one acceptor per pool) — concurrent starters racing past the check can briefly overshoot it by up to the number of racers.
 
-**Graceful child shutdown with `childShutdown`.** Override `class childShutdown` to set how long each child gets to stop when the pool is stopped (by `stop`, or by a parent supervisor) — a pool-wide analogue of the `shutdown:` option Elixir `DynamicSupervisor` takes per child. It takes the same `ShutdownTimeout` values as `SupervisionSpec withShutdown:` (an Integer in milliseconds, `#infinity` or `#brutalKill`). The default, `nil`, keeps the child class's own `supervisionSpec` value: 5000ms (the OTP default) for an actor, or `#infinity` for a supervisor. A child that overrides `terminate:` gets the full time to finish; one that overruns is killed (`onExit:` reason `#killed`). All children are told to stop at once and share one deadline. Keep `#infinity` for a supervisor child class: a finite value can kill it while it is still stopping its own children (the runtime logs a warning). The value applies to every child of the pool — OTP's `simple_one_for_one` keeps a single child spec for all dynamic children, so there is no per-`startChild:` override; use a separate pool class for children that need a different timeout. An invalid value makes `supervise` return `Result error:` with kind `#supervisor_start_failed`.
+**Graceful child shutdown with `childShutdown`.** Override `childShutdown` to set how long each child gets to stop when the pool is stopped (by `stop`, or by a parent supervisor) — a pool-wide analogue of the `shutdown:` option Elixir `DynamicSupervisor` takes per child. It takes the same `ShutdownTimeout` values as `SupervisionSpec withShutdown:` (an Integer in milliseconds, `#infinity` or `#brutalKill`). The default, `nil`, keeps the child class's own `supervisionSpec` value: 5000ms (the OTP default) for an actor, or `#infinity` for a supervisor. A child that overrides `terminate:` gets the full time to finish; one that overruns is killed (`onExit:` reason `#killed`). All children are told to stop at once and share one deadline. Keep `#infinity` for a supervisor child class: a finite value can kill it while it is still stopping its own children (the runtime logs a warning). The value applies to every child of the pool — OTP's `simple_one_for_one` keeps a single child spec for all dynamic children, so there is no per-`startChild:` override; the value is per pool instance, so compute it from `self args` (or use a separate pool class) for children that need a different timeout. An invalid value makes `supervise` return `Result error:` with kind `#supervisor_start_failed`.
 
 ```beamtalk
 DynamicSupervisor(Connection) subclass: ConnectionPool
-  class childClass => Connection
-  class childShutdown -> Integer => 15000   // let in-flight requests finish
+  childClass => Connection
+  childShutdown -> Integer => 15000   // let in-flight requests finish
 ```
 
 **Automatic restart replays per-child args.** OTP tracks the exact args each dynamically-started child was started with. A child started via `startChild: args` that later crashes under a `#permanent` or `#transient` restart policy comes back with those same args, not blank defaults. A child started via the no-arg `startChild` restarts the same way. Restart re-runs `init/1` from scratch — it does not resume the child's prior runtime state.
@@ -3622,7 +3718,7 @@ DynamicSupervisor(Connection) subclass: ConnectionPool
 
 ```beamtalk
 DynamicSupervisor(Monitor) subclass: CheckRegistry
-  class childClass => Monitor
+  childClass => Monitor
 
 pool := (CheckRegistry supervise) unwrap
 m := (pool startChild: #{#check => "db"} name: #dbCheck) unwrap
@@ -3640,11 +3736,11 @@ current isAlive                                // => true
 
 ### Nested Supervisors
 
-Supervisors can be nested — include another supervisor class in `children`:
+Supervisors can be nested — include another supervisor class in `childSpecs`:
 
 ```beamtalk
 Supervisor subclass: AppRoot
-  class children => #(DatabaseSupervisor WebTierSupervisor MetricsSupervisor)
+  childSpecs => #(DatabaseSupervisor WebTierSupervisor MetricsSupervisor)
 ```
 
 Nested supervisor children are identified by `isSupervisor => true` and started via OTP `start_link/0`, ensuring they are correctly linked into the supervision tree. The outer supervisor shuts down inner supervisors (and all their children) gracefully on `stop`.
@@ -3737,13 +3833,15 @@ See [ADR 0080](ADR/0080-supervisor-lifecycle-result.md) §Migration Path for the
 |----------|------|
 | `Supervisor subclass:` | `-behaviour(supervisor)` with `one_for_one` |
 | `DynamicSupervisor(C) subclass:` | `-behaviour(supervisor)` with `simple_one_for_one` |
-| `supervise` | `supervisor:start_link({local, Module}, Module, [])` |
+| `supervise` | `supervisor:start_link({local, Module}, Module, nil)` |
 | `current` | `whereis(Module)` |
 | `count` | `supervisor:count_children/1` (active count) |
 | `children` | `supervisor:which_children/1` (running child ids) |
 | `which: Class` | find child by module in `which_children` result |
 | `withShutdown:` | `shutdown` field in child spec (default 5000ms workers, infinity supervisors; `#brutalKill` → `brutal_kill`) |
-| `class childShutdown` | `shutdown` field of the `simple_one_for_one` child spec |
+| `childShutdown` | `shutdown` field of the `simple_one_for_one` child spec |
+| configuration methods | `Module:init(Args)`, run in the supervisor process |
+| `args` | the `Args` passed to `init/1` |
 | `stop` | `gen_server:stop/1` |
 
 ### Actor Named Registration (ADR 0079)
@@ -3903,39 +4001,39 @@ The asymmetry is deliberate: `named:` returns a Result because name-absence is a
 
 #### Before named registration
 
-The pre-ADR pattern uses a supervisor-local lookup (`which:`) and an `initialize:` hook to re-wire dependencies after each restart:
+The pre-ADR pattern uses a supervisor-local lookup (`which:`) and an `initialize` hook to re-wire dependencies after each restart:
 
 ```beamtalk
 typed Supervisor subclass: ExduraSupervisor
-  class strategy -> SupervisionStrategy => #restForOne
-  class children -> List(SupervisionSpec) =>
+  strategy -> SupervisionStrategy => #restForOne
+  childSpecs -> List(SupervisionSpec) =>
     storeSpec := EventStore supervisionSpec withRestart: #permanent
     poolSpec := ActivityWorkerPool supervisionSpec withRestart: #permanent
     engineSpec := WorkflowEngine supervisionSpec withRestart: #permanent
     #(storeSpec, poolSpec, engineSpec)
 
-  // Re-runs after every restart to rebuild cached pids.
-  class initialize: sup :: Supervisor -> Nil =>
-    store := (sup which: EventStore) unwrap
-    pool := (sup which: ActivityWorkerPool) unwrap
-    engine := (sup which: WorkflowEngine) unwrap
+  // Runs after the initial start to cache pids (not after restarts).
+  initialize -> Nil =>
+    store := (self which: EventStore) unwrap
+    pool := (self which: ActivityWorkerPool) unwrap
+    engine := (self which: WorkflowEngine) unwrap
     engine initWithStore: store pool: pool
     nil
 ```
 
 #### After named registration
 
-Naming each child eliminates the `initialize:` hook, and the supervisor strategy is freed from the rewire-on-restart constraint:
+Naming each child eliminates the `initialize` hook, and the supervisor strategy is freed from the rewire-on-restart constraint:
 
 ```beamtalk
 typed Supervisor subclass: ExduraSupervisor
-  class strategy -> SupervisionStrategy => #oneForOne
-  class children -> List(SupervisionSpec) => #(
+  strategy -> SupervisionStrategy => #oneForOne
+  childSpecs -> List(SupervisionSpec) => #(
     EventStore supervisionSpec withName: #eventStore withRestart: #permanent,
     ActivityWorkerPool supervisionSpec withName: #workerPool withRestart: #permanent,
     WorkflowEngine supervisionSpec withName: #workflowEngine withRestart: #permanent
   )
-  // No initialize: hook — WorkflowEngine looks up its dependencies by name.
+  // No initialize hook — WorkflowEngine looks up its dependencies by name.
 ```
 
 `WorkflowEngine` now calls `(Actor named: #eventStore) unwrap` at use-time — automatically picking up the current pid across restarts — and cross-tree consumers (HTTP handlers, REPL workspaces, tests) can reach supervised actors directly without routing through the supervisor.
@@ -4112,7 +4210,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Literal character | `$a` | Exact character match |
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
-| Tuple | `{a, b}` | Destructure tuple in assignment and match arms |
+| Tuple | `{a, b}` | Destructure tuple in assignment and match arms (`{a, b}` is also a tuple literal expression — see Tuple Literals) |
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
@@ -4234,7 +4332,7 @@ The `...identifier` syntax in array destructuring captures remaining elements:
 
 The rest element must be the last in the pattern. Rest patterns are supported in destructuring assignment only — they are not yet supported in `match:` arms.
 
-> **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. `collect:` with pattern blocks is not yet supported.
+> **Note:** Tuple destructuring works in both assignment (`{x, y} := expr`) and `match:` arms. A tuple pattern may end with a trailing comma (`{x, y,} := expr`), like the tuple literal it mirrors. `collect:` with pattern blocks is not yet supported.
 
 ### Value of a Destructuring Assignment (BT-3889)
 

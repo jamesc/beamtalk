@@ -356,15 +356,14 @@ fn expect_above_second_provided_method_suppresses_on_lint_and_build_bt_3671() {
 /// `beamtalk lint` requires `@expect dead_assignment` to suppress a
 /// real `DeadAssignment` diagnostic — without the pragma, lint fails.
 ///
-/// The block passed to an Erlang function assigns the captured outer local
-/// `x`, which the interop boundary loses (an Erlang FFI argument is exempt
-/// from the ADR 0133 escaping-block compile error, which `beamtalk build`
-/// must not hit; a stored block is that error since BT-3902), so the
-/// dead-block-assignment lint pass (`beamtalk-lint`'s
-/// `DeadBlockAssignmentPass`) flags the reassignment — the same shape as the
-/// pass's own `assignment_in_ffi_block_warns` unit test, wrapped in a class
-/// method so it goes through the full CLI pipeline instead of the pass in
-/// isolation.
+/// The block statement `[x := 2]` is discarded (an arm statement that is not
+/// the arm's value) and assigns the captured outer local `x`, so the write is
+/// dead. It is not an ADR 0133 escaping-block compile error (`beamtalk build`
+/// must not hit one; a stored block, or one passed as an Erlang FFI argument,
+/// is that error since BT-3902 and BT-3917), so the dead-block-assignment lint
+/// pass (`beamtalk-lint`'s `DeadBlockAssignmentPass`) flags the reassignment,
+/// wrapped in a class method so it goes through the full CLI pipeline instead
+/// of the pass in isolation.
 #[test]
 fn dead_assignment_lint_fires_without_expect_bt_3384() {
     let project = cli_common::fixture_project();
@@ -377,7 +376,7 @@ fn dead_assignment_lint_fires_without_expect_bt_3384() {
          \n\
          \x20\x20demo =>\n\
          \x20\x20\x20\x20x := 1\n\
-         \x20\x20\x20\x20(Erlang lists) map: [:e | x := 2. e] with: #(1)\n\
+         \x20\x20\x20\x20true ifTrue: [[x := 2]. 0] ifFalse: [nil]\n\
          \x20\x20\x20\x20x\n",
     )
     .unwrap();
@@ -416,7 +415,7 @@ fn expect_dead_assignment_not_stale_across_lint_build_and_test_bt_3384() {
          \x20\x20@expect dead_assignment\n\
          \x20\x20demo =>\n\
          \x20\x20\x20\x20x := 1\n\
-         \x20\x20\x20\x20(Erlang lists) map: [:e | x := 2. e] with: #(1)\n\
+         \x20\x20\x20\x20true ifTrue: [[x := 2]. 0] ifFalse: [nil]\n\
          \x20\x20\x20\x20x\n",
     )
     .unwrap();
