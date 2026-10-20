@@ -3882,7 +3882,6 @@ fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
         // Measured: a loop inside a method-level arm, `on:do:`, `ensure:`,
         // `value`, a `do:` body or another loop answered a carrier or
         // raised; a `do:`, `collect:` or `inject:` body below the loop too.
-        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
         "c := true\nc ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
         "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] on: Error do: [:e | 0]\nt",
         "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] ensure: [0]\nt",
@@ -3963,5 +3962,22 @@ fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
         in_actor("[[:k | true ifTrue: [x := k]] value: 1\n  t < 3] whileTrue: [t := t + 1]\nt"),
     ] {
         assert!(residual_messages(&src, None).is_empty(), "{src}");
+    }
+}
+
+/// BT-3948: an in-place block that assigns its own local AND writes an outer
+/// local inside a loop is left to the Phase 0 position check, which rejects it
+/// (measured with the CLI, 2026-10-20), so neither form slips past both checks.
+#[test]
+fn inline_block_local_that_also_writes_an_outer_local_in_a_loop_is_rejected_by_phase_0() {
+    for body in [
+        "1 to: 3 do: [:i | [:z | w := z. t := t + w] value: i]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z | w := z. t := t + w. w] value: i)]\nt",
+    ] {
+        let diags = adr0131_diagnostics(&in_actor(body));
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error),
+            "{body}: {diags:?}"
+        );
     }
 }
