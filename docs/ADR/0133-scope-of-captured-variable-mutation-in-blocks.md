@@ -232,6 +232,31 @@ The run-time side keeps one structured error for the cases the compiler
 cannot see (a block laundered through FFI, a `perform:`): the existing
 `stateful_block_dispatch`, which already says "the block was not run".
 
+**Amendment (BT-3936): a self-send in a closure that changes actor state.**
+A block that assigns nothing can still contain `self record: x`, where
+`record:` writes a field. When that block is a real closure (a block passed to
+the actor's own method, or stored), the send dispatches against the `State`
+the closure captured at creation, and the callee's new `State` has nowhere to
+go: the closure answers one value. This is not an escaping-block assignment, so
+the compile-time rule above does not see it. It is a run-time check in the one
+place an actor self-send dispatch is generated (`dispatch_codegen.rs`; every
+form: threaded, discarding, sealed), active only inside a closure
+(`block_depth > 0`). It compares the callee's returned `State` with the
+`State` it was dispatched against using `=:=` (pointer identity first, so the
+read-only case is cheap). Equal answers normally; different raises
+`#beamtalk_error{kind = stateful_block_dispatch}` carrying the selector and the
+hint "A self-send inside a block changed actor state, but the block cannot
+return it; return the value and assign it in the method instead". No
+threading is reintroduced and no surrounding lowering changes. A literal block
+the compiler inlines into the method (`self.items do: [...]`) is not a closure
+and still threads `State`, so its self-sends keep their changes.
+
+Value types and class methods do not need the check: a `Value` method cannot
+assign a slot, so a self-send never changes anything to lose, and a class
+method has no `State` (class variables are written in place, ADR 0130). Not
+covered: a user-defined binary selector sent to `self`, which is not compiled
+as a self-dispatch at all and drops the change at method level too (BT-3985).
+
 ## Prior Art
 
 **Smalltalk-80 and Cog.** Smalltalk-80 blocks were not real closures: a block
