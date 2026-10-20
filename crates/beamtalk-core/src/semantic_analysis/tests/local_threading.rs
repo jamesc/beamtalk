@@ -3784,15 +3784,17 @@ fn residual_repl_match_arm_write_is_the_match_arm_error() {
 
 /// PIN-BUG BT-3947 (closes BT-3948): in an actor method, a literal block
 /// applied in place (`[:z | ...] value: i`) that assigns a local of its own,
-/// inside a `to:do:`/`whileTrue:`/`timesRepeat:` body that rebinds an outer
-/// local and touches no state, emitted an unbound `StateAcc` (`erlc` rejected
-/// the module). BT-3948 makes it a compile error; BT-3947 gives closure bodies
-/// a frame of their own, deletes the `InlineBlockLocalInDirectLoop` row and
-/// flips these to accepted (the repro then answers 6). Class and value-type
-/// methods, `do:`/`collect:` bodies, stateful loops and blocks that assign no
-/// local were always right and stay accepted.
+/// in a `to:do:`/`whileTrue:`/`timesRepeat:` body that rebinds an outer
+/// local, below a conditional arm of such a body, or in a loop condition,
+/// emitted an unbound `StateAcc` (`erlc` rejected the module) or answered a
+/// `{Value, Locals}` carrier. BT-3948 makes it a compile error; BT-3947 gives
+/// closure bodies a frame of their own, deletes the `InlineBlockLocalInLoop`
+/// row and flips these to accepted (the repro then answers 6). Class and
+/// value-type methods, `do:`/`collect:` bodies, stateful loops, blocks that
+/// assign no local and `r := [..] value: i` of a fresh local inside an arm
+/// were measured right and stay accepted.
 #[test]
-fn residual_inline_block_local_in_direct_loop_is_an_error_in_actors() {
+fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
     // The BT-3948 repro, in the language's newline syntax.
     let body = "1 to: 3 do: [:i |\n  t := t + ([:z |\n    w := 0\n    z > 0 ifTrue: [w := z]\n    w] value: i)]\nt";
     let messages = residual_messages(&in_actor(body), None);
@@ -3814,6 +3816,19 @@ fn residual_inline_block_local_in_direct_loop_is_an_error_in_actors() {
         "1 to: 3 do: [:i |\n  t := t + 1\n  r := [:z | w := z. w] value: i\n  r]\nt",
         "[t < 3] whileTrue: [t := t + ([:z | w := z. w] value: 1)]\nt",
         "3 timesRepeat: [t := t + ([:z | w := z. w] value: 1)]\nt",
+        // Below a conditional arm (BEAM-measured wrong or erlc failure).
+        "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i | c and: [([:z | w := z. w] value: i) > 0]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "c := true\n[t < 3] whileTrue: [t := t + 1\n  c and: [([:z | w := z. w] value: 1) > 0]]\nt",
+        // In a loop condition, whatever the body does.
+        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) > 5] whileFalse: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := 5]\nt",
+        "[t < 3 and: [([:z | w := z. w] value: t) > 0]] whileTrue: [t := t + 1]\nt",
+        "[t < 3 ifTrue: [([:z | w := z. w] value: t) > 0] ifFalse: [false]] whileTrue: [t := t + 1]\nt",
     ] {
         let messages = residual_messages(&in_actor(body), None);
         assert_eq!(messages.len(), 1, "{body}: {messages:?}");
@@ -3834,6 +3849,24 @@ fn residual_inline_block_local_in_direct_loop_is_an_error_in_actors() {
         ),
         in_actor("1 to: 2 do: [:j | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt"),
         in_actor("t := t + ([:z | w := z. w] value: 2)\nt"),
+        // `r := [..] value: i` of a fresh local in an arm answers right in
+        // every arm family and loop kind (BEAM-measured).
+        in_actor(
+            "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [r := [:z | w := z. w] value: i\n    t := t + r]]\nt",
+        ),
+        in_actor(
+            "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [r := [:z | w := z. w] value: i\n  t := t + r]]]\nt",
+        ),
+        in_actor(
+            "c := true\n3 timesRepeat: [c and: [r := [:z | w := z. w] value: 2\n  t := t + r\n  true]]\nt",
+        ),
+        in_actor(
+            "c := true\n[t < 9] whileTrue: [c ifNotNil: [:u | r := [:z | w := z. w] value: 2\n  t := t + r + 1]]\nt",
+        ),
+        // A write to a state-touching loop and a nested loop were right.
+        in_actor(
+            "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+        ),
     ] {
         assert!(residual_messages(&src, None).is_empty(), "{src}");
     }

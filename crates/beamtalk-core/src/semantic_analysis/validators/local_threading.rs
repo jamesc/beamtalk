@@ -962,15 +962,20 @@ pub(crate) enum Residual {
     /// as a value-position assignment, and draws this error since BT-3909.
     MatchArmWrite,
     /// BT-3948: an actor `[:z | ...] value: x` (a literal block applied in
-    /// place) whose body assigns a local of its own, as an operand of a
-    /// statement of a `to:do:`/`whileTrue:`/`timesRepeat:` body that rebinds
-    /// an outer local (a "direct" frame) and touches no state. The loop frame
-    /// carries its locals as parameters and has no `StateAcc`, but the block
-    /// body is lowered as a state-threading scope that puts its local into
-    /// one, so `erlc` rejects the module (unbound `StateAcc`). Class and
-    /// value-type methods, `do:`/`collect:` bodies and loops that touch state
-    /// lower it right.
-    InlineBlockLocalInDirectLoop,
+    /// place) whose body assigns a local of its own, in a loop whose frame
+    /// carries its locals as parameters (no `StateAcc`) while the block body
+    /// is lowered as a state-threading scope. Measured on a BEAM, every one
+    /// of these either fails `erlc` (unbound `StateAcc`) or answers a
+    /// `{Value, Locals}` carrier instead of the value: the send in a
+    /// `whileTrue:`/`whileFalse:` condition (any arm below it included); in
+    /// a `to:do:`/`timesRepeat:`/`whileTrue:` body that rebinds an outer
+    /// local, directly in the body; and, in any such body, below one or more
+    /// conditional arms unless it is the whole value of an assignment to a
+    /// local first bound there (`r := [..] value: i` inside the arm, which
+    /// answers right in every arm family and loop kind). A loop body that
+    /// touches state, `do:`/`collect:` bodies, and class and value-type
+    /// methods answer right.
+    InlineBlockLocalInLoop,
 }
 
 /// One [`RESIDUAL_DENY_SET`] row: `shape` is an error in `contexts`.
@@ -990,9 +995,8 @@ struct ResidualDenied {
 /// `cond`/`fresh` and `groupBy` lines of `adr0131_statement_probes.tsv` and
 /// the REPL `match` line; the `residual_*` tests in
 /// `semantic_analysis/tests/local_threading.rs` pin each repro. BT-3911
-/// deletes the `LoopConditionArmWrite` and `MatchArmWrite` rows, BT-3912 the
-/// `GroupByValue` row, BT-3947 the `MatchArmWrite` and
-/// `InlineBlockLocalInDirectLoop` rows.
+/// deletes the `LoopConditionArmWrite` row, BT-3912 the `GroupByValue` row,
+/// BT-3947 the `MatchArmWrite` and `InlineBlockLocalInLoop` rows.
 const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
     ResidualDenied {
         shape: Residual::GroupByValue,
@@ -1011,7 +1015,7 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
     },
     // Closure bodies need a frame identity of their own (BT-3947 item 2).
     ResidualDenied {
-        shape: Residual::InlineBlockLocalInDirectLoop,
+        shape: Residual::InlineBlockLocalInLoop,
         contexts: &[Actor],
         issue: "BT-3948",
         fixed_by: "BT-3947",
@@ -1536,6 +1540,9 @@ struct Walker<'d> {
     /// current statement's [`loop_body_producer_sites`] — and `None` for any
     /// other block (an arm, a handler, a protected body, a closure).
     frame_sites: Vec<Option<FrameSites>>,
+    /// Whether the local being assigned by the assignment whose value is
+    /// being walked was not bound before it ([`Residual::InlineBlockLocalInLoop`]).
+    assign_target_fresh: bool,
     /// Set by a send's walk just before it descends into a block operand that
     /// is a threaded frame body; consumed by [`Walker::block`].
     pending_frame_body: Option<FrameBody>,
@@ -1580,6 +1587,7 @@ impl<'d> Walker<'d> {
             containers: Vec::new(),
             group_by_assign_blocks: Vec::new(),
             pending_group_by_assign_block: false,
+            assign_target_fresh: false,
             last_statements: Vec::new(),
             outer_stateful: false,
             direct_blocks: Vec::new(),
@@ -1779,7 +1787,10 @@ impl<'d> Walker<'d> {
             Expression::Parenthesized { expression, .. } => self.expr(expression, position),
             Expression::Assignment { target, value, .. } => match target.as_ref() {
                 Expression::Identifier(id) => {
+                    let fresh = !self.is_bound(&id.name);
+                    let outer = std::mem::replace(&mut self.assign_target_fresh, fresh);
                     self.operand(value, Position::AssignValue { nested });
+                    self.assign_target_fresh = outer;
                     self.define(&id.name);
                     self.note_block_binding(&id.name, value);
                 }
@@ -2600,24 +2611,36 @@ impl<'d> Walker<'d> {
         {
             self.check_group_by_value(expr, block, position);
         }
-        self.check_inline_block_local_in_direct_loop(expr);
+        self.check_inline_block_local_in_loop(expr, position);
     }
 
-    /// [`Residual::InlineBlockLocalInDirectLoop`] (BT-3948): see the shape's
+    /// [`Residual::InlineBlockLocalInLoop`] (BT-3948): see the shape's
     /// documentation. The block writes no outer local (the Phase 0 check's
     /// business); it assigns a local of its own or one of its parameters,
-    /// anywhere in its body.
-    fn check_inline_block_local_in_direct_loop(&mut self, expr: &Expression) {
-        let Some(row) = residual_denied(Residual::InlineBlockLocalInDirectLoop, self.context)
-        else {
+    /// anywhere in its body. The enclosing blocks are a loop body or
+    /// condition, then only conditional arms (nested loops and `do:` bodies
+    /// were measured right and stay accepted).
+    fn check_inline_block_local_in_loop(&mut self, expr: &Expression, position: Position) {
+        let Some(row) = residual_denied(Residual::InlineBlockLocalInLoop, self.context) else {
             return;
         };
-        let in_direct_loop = matches!(
-            self.containers.as_slice(),
-            [Container::LoopBody | Container::CountedLoopBody]
-        ) && self.direct_blocks.as_slice() == [true]
+        let Some((first, arms)) = self.containers.split_first() else {
+            return;
+        };
+        let in_loop = matches!(first, Container::LoopBody | Container::CountedLoopBody)
+            && arms.iter().all(|c| *c == Container::Arm)
             && !self.outer_stateful;
-        if !in_direct_loop {
+        // A loop condition is not a frame body (`frame_sites` is `None`).
+        let in_condition = self.frame_sites.first().is_some_and(Option::is_none);
+        let denied = in_loop
+            && if in_condition {
+                true
+            } else if arms.is_empty() {
+                self.direct_blocks.first() == Some(&true)
+            } else {
+                !(matches!(position, Position::AssignValue { .. }) && self.assign_target_fresh)
+            };
+        if !denied {
             return;
         }
         let Some(construct) = local_threading_construct(expr)
@@ -2635,6 +2658,12 @@ impl<'d> Walker<'d> {
         let mut local: Option<(EcoString, Span)> = None;
         for stmt in &block.body {
             crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                // A condition frame handles a local first bound in an arm of
+                // the block (BT-3911, `condIfTrue`...): only an assignment
+                // that is a statement of the block itself fails there.
+                if in_condition && !std::ptr::eq(e, &raw const stmt.expression) {
+                    return;
+                }
                 if let Expression::Assignment { target, .. } = e {
                     if let Expression::Identifier(id) = target.as_ref() {
                         if local.is_none()
@@ -2652,9 +2681,8 @@ impl<'d> Walker<'d> {
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
-                    "a block evaluated in place assigns its local `{name}` inside a loop body \
-                     that rebinds an outer local, which an actor method does not lower yet \
-                     ({issue}, until {fixed_by})",
+                    "a block evaluated in place assigns its local `{name}` inside a loop, \
+                     which an actor method does not lower yet ({issue}, until {fixed_by})",
                     issue = row.issue,
                     fixed_by = row.fixed_by,
                 ),
