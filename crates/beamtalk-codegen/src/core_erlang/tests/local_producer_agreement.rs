@@ -66,6 +66,8 @@ pub(super) const CONSTRUCTS: &[&str] = &[
     "#(1, 2) detect: [:x | t := t + 1. x > 1]",
     "[s < 2] whileFalse: [s := s + 1. t := t + 1]",
     "1 to: 5 by: 2 do: [:i | t := t + i]",
+    // BT-3912 (closes BT-3897): `groupBy:` is a fold producer.
+    "#(1, 2) groupBy: [:x | t := t + x. x > 1]",
 ];
 
 pub(super) const POSITIONS: &[&str] = &[

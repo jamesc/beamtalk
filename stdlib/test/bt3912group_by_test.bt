@@ -1,0 +1,104 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3897): an actor `groupBy:` whose block binds a local is a producer
+// like every other fold: its `{Map, StateAcc}` carrier is unpacked wherever it
+// sits, so the value is the grouped dictionary in every position (it was the raw
+// carrier tuple outside the few that unpacked it). See
+// stdlib/test/fixtures/bt3912group_by.bt.
+
+TestCase subclass: Bt3912GroupByTest
+
+  testReceiver =>
+    self assert: (Bt3912GroupBy spawn receiver) equals: #(3)
+
+  testFieldBlock =>
+    self assert: (Bt3912GroupBy spawn fieldBlock) equals: #(3)
+
+  testCollectBody =>
+    self assert: (Bt3912GroupBy spawn collectBody) equals: #(3)
+
+  testReturnedInDo =>
+    self assert: (Bt3912GroupBy spawn returnedInDo) equals: #(3)
+
+  testReturnedMap =>
+    self assert: ((Bt3912GroupBy spawn returnedMap) at: true) equals: #(3)
+
+  testWhileAssign =>
+    self assert: (Bt3912GroupBy spawn whileAssign) equals: #(3)
+
+  testToDoAssign =>
+    self assert: (Bt3912GroupBy spawn toDoAssign) equals: #(3)
+
+  testTimesRepeatAssign =>
+    self assert: (Bt3912GroupBy spawn timesRepeatAssign) equals: #(3)
+
+  testAnySatisfyAssign =>
+    self assert: (Bt3912GroupBy spawn anySatisfyAssign) equals: #(3)
+
+  testAllSatisfyAssign =>
+    self assert: (Bt3912GroupBy spawn allSatisfyAssign) equals: #(3)
+
+  testDetectAssign =>
+    self assert: (Bt3912GroupBy spawn detectAssign) equals: #(3)
+
+  testSelectAssign =>
+    self assert: (Bt3912GroupBy spawn selectAssign) equals: #(3)
+
+  testIfNilAssign =>
+    self assert: (Bt3912GroupBy spawn ifNilAssign) equals: #(3)
+
+  testIfTrueFalseAssign =>
+    self assert: (Bt3912GroupBy spawn ifTrueFalseAssign) equals: #(3)
+
+  testAndAssign =>
+    self assert: (Bt3912GroupBy spawn andAssign) equals: #(3)
+
+  testOrAssign =>
+    self assert: (Bt3912GroupBy spawn orAssign) equals: #(3)
+
+  testAtIfAbsentAssign =>
+    self assert: (Bt3912GroupBy spawn atIfAbsentAssign) equals: #(3)
+
+  testTryDoAssign =>
+    self assert: (Bt3912GroupBy spawn tryDoAssign) equals: #(3)
+
+  testOnDoHandlerAssign =>
+    self assert: (Bt3912GroupBy spawn onDoHandlerAssign) equals: #(3)
+
+  testKeysAndValuesDoAssign =>
+    self assert: (Bt3912GroupBy spawn keysAndValuesDoAssign) equals: #(3)
+
+  testEachWithIndexAssign =>
+    self assert: (Bt3912GroupBy spawn eachWithIndexAssign) equals: #(3)
+
+  testBlockValueAssign =>
+    self assert: (Bt3912GroupBy spawn blockValueAssign) equals: #(3)
+
+  testNestedArmInDo =>
+    self assert: (Bt3912GroupBy spawn nestedArmInDo) equals: #(3)
+
+  testArmInLoop =>
+    self assert: (Bt3912GroupBy spawn armInLoop) equals: #(3)
+
+  testRebindsOuter =>
+    self assert: (Bt3912GroupBy spawn rebindsOuter) equals: #[#(3), 4]
+
+  testClassRebindsOuter =>
+    self assert: Bt3912GroupByClass rebindsOuter equals: #[#(3), 4]
+
+  testValueRebindsOuter =>
+    self assert: (Bt3912GroupByValue new) rebindsOuter equals: #[#(3), 4]
+
+  testClassAssignedRebinds =>
+    self assert: Bt3912GroupByClass assignedRebinds equals: #[#(3), 4]
+
+  testValueAssignedRebinds =>
+    self assert: (Bt3912GroupByValue new) assignedRebinds equals: #[#(3), 4]
+
+  testClassOwnLocal =>
+    self assert: Bt3912GroupByClass ownLocal equals: #(3)
+
+  testValueOwnLocal =>
+    self assert: (Bt3912GroupByValue new) ownLocal equals: #(3)
+

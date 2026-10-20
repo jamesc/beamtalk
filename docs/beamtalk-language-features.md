@@ -4368,7 +4368,7 @@ swap => {a, b} := self pair       // answers the pair, not nil
 // => #(#(1, 2), #(3, 2))
 ```
 
-A destructure that ends a predicate block (`select:`, `detect:`, `allSatisfy:` and the like) passes its right-hand side, a list, tuple or map, as the predicate, so it raises like any other non-boolean predicate. In an actor method or at the REPL, a `groupBy:` whose block binds a local is lowered as a fold whose raw result is the value unless the `groupBy:` is a statement at the method-body level or a non-final statement of a block, `^` or a field store at the method-body level, or the value of a local assignment at the method-body level or directly inside exactly one of an `ifTrue:` arm, an `on:do:` protected body, an `ensure:` cleanup block, a `do:`, `collect:` or `inject:into:` block, or a `detect:ifNone:` handler (not nested in another block) (at the REPL, only a statement or assignment at the top level of the input), so anywhere else it is a compile error until the fold is lowered as a frame ([BT-3897](https://linear.app/beamtalk/issue/BT-3897)).
+A destructure that ends a predicate block (`select:`, `detect:`, `allSatisfy:` and the like) passes its right-hand side, a list, tuple or map, as the predicate, so it raises like any other non-boolean predicate. A `groupBy:` is a fold like `collect:` ([BT-3897](https://linear.app/beamtalk/issue/BT-3897), lowered by BT-3912): in an actor method or at the REPL its block may bind a local, write a field or send to `self`, and the grouped dictionary is the value wherever the `groupBy:` sits.
 
 The REPL displays the same value. Destructuring is not an expression, so it cannot appear as an operand (`r := ({a, b} := pair)` is a compile error).
 

@@ -19,7 +19,7 @@ statement	enumeration	value	194	0	0
 statement	evaluated-block	actor	76	0	0
 statement	evaluated-block	class	76	0	0
 statement	evaluated-block	value	76	0	0
-statement	group-by	actor	0	1	0
+statement	group-by	actor	1	0	0
 statement	group-by	class	1	0	0
 statement	group-by	value	1	0	0
 statement	keyed-do	actor	94	0	0
@@ -34,7 +34,6 @@ statement	satisfy	value	94	0	0
 statement-group	loop-condition	other	actor	6
 statement-group	loop-condition	other	class	6
 statement-group	loop-condition	other	value	6
-statement-group	method-body	group-by	actor	1
 operand	arg	actor	57	41	0	16	38	3
 operand	arg	class	57	57	0	0	57	0
 operand	arg	value	57	57	0	0	57	0

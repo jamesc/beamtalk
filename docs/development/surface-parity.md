@@ -816,21 +816,18 @@ reports the same message at the same span. No operation is surface-specific.
   every other such send raises). A parenthesized block (`([t := t + 1])
   value: 1`) is a block value, not a literal, and keeps its ADR 0133
   escaping-block error.
-- **Residuals made loud (ADR 0133 Phase 3, BT-3909).** Three shapes that
-  crashed or answered wrong without a diagnostic are compile errors
+- **Residuals made loud (ADR 0133 Phase 3, BT-3909).** Shapes that crashed or
+  answered wrong without a diagnostic were compile errors
   (`UnmigratedLocalThreading`, `RESIDUAL_DENY_SET` in `local_threading.rs`) in
-  every context where they were measured wrong, with the same message on
-  every surface: an actor or REPL `groupBy:` whose block binds a local (or,
-  in an actor, writes a field or sends to `self`) anywhere its result is not
-  unpacked (BT-3897: it answered the raw `{Map, StateAcc}` tuple; at the REPL
-  only a top-level statement or assignment unpacks it); an assignment inside
-  a conditional arm in a `whileTrue:`/`whileFalse:` condition block in a
-  class, value-type or actor method (BT-3891: `erlc` failed with an unbound
-  `StateAcc`; the REPL answers right and is unchanged). BT-3912 lowers the
-  `match:` arm that writes an outer local (BT-3947: each arm is a `BranchArm`
-  frame, in methods and at the REPL alike; what stays an error is a `match:`
-  that is not a producer where it sits) and the `groupBy:` row;
-  BT-3911 lowered the loop-condition one.
+  every context where they were measured wrong, with the same message on every
+  surface. BT-3911 lowered the assignment inside a conditional arm in a
+  `whileTrue:`/`whileFalse:` condition block (BT-3891). BT-3912 lowers the
+  actor or REPL `groupBy:` whose block binds a local (BT-3897: `groupBy:` is a
+  fold producer like `collect:`, so its carrier is unpacked wherever it sits)
+  and the `match:` arm that writes an outer local (BT-3947: each arm is a
+  `BranchArm` frame, in methods and at the REPL alike); what stays an error is a
+  `match:` that is not a producer where it sits (a write in a guard, a `match:`
+  that is the subject of another).
 - The REPL sees only the current input, but a block that assigns a captured
   binding is rejected where it is stored (ADR 0133, BT-3902), so no input can
   hand a later one a writing block to send `value`.

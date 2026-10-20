@@ -452,7 +452,7 @@ pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
         (
             "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
             | "reject:" | "count:" | "detect:" | "keysAndValuesDo:" | "doWithKey:" | "anySatisfy:"
-            | "allSatisfy:" | "eachWithIndex:",
+            | "allSatisfy:" | "eachWithIndex:" | "groupBy:",
             1,
         )
         | ("detect:ifNone:" | "do:separatedBy:", 2) => Some(0),

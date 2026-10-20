@@ -1,0 +1,130 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3897): an actor `groupBy:` whose block binds a local is a producer
+// like every other fold: its `{Map, StateAcc}` carrier is unpacked wherever it
+// sits, so the value is the grouped dictionary in every position (it was the raw
+// carrier tuple outside the few that unpacked it). Asserted in
+// stdlib/test/bt3912group_by_test.bt.
+
+Actor subclass: Bt3912GroupBy
+  state: n = 0
+  state: groups = nil
+
+  receiver =>
+    (#(1, 3) groupBy: [:x | k := x > 2. k]) at: true
+
+  fieldBlock =>
+    (#(1, 3) groupBy: [:x | self.n := self.n + 1. x > 2]) at: true
+
+  collectBody =>
+    (#(1) collect: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]]) first at: true
+
+  returnedInDo =>
+    #(1) do: [:z | ^(#(1, 3) groupBy: [:x | k := x > 2. k]) at: true]
+    nil
+
+  returnedMap =>
+    #(1) do: [:z | ^#(1, 3) groupBy: [:x | k := x > 2. k]]
+    nil
+
+  whileAssign =>
+    r := Dictionary new
+    [r isEmpty] whileTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]
+    r at: true
+
+  toDoAssign =>
+    r := Dictionary new
+    1 to: 1 do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]
+    r at: true
+
+  timesRepeatAssign =>
+    r := Dictionary new
+    1 timesRepeat: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]
+    r at: true
+
+  anySatisfyAssign =>
+    r := Dictionary new
+    #(1) anySatisfy: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]
+    r at: true
+
+  allSatisfyAssign =>
+    r := Dictionary new
+    #(1) allSatisfy: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]
+    r at: true
+
+  detectAssign =>
+    r := Dictionary new
+    #(1) detect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]
+    r at: true
+
+  selectAssign =>
+    r := Dictionary new
+    #(1) select: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]
+    r at: true
+
+  ifNilAssign =>
+    r := Dictionary new
+    nil ifNil: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]
+    r at: true
+
+  ifTrueFalseAssign =>
+    r := Dictionary new
+    (self.n =:= 0) ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]] ifFalse: [nil]
+    r at: true
+
+  andAssign =>
+    r := Dictionary new
+    (self.n =:= 0) and: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]
+    r at: true
+
+  orAssign =>
+    r := Dictionary new
+    (self.n =:= 1) or: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]
+    r at: true
+
+  atIfAbsentAssign =>
+    r := Dictionary new
+    #{#a => 1} at: #k ifAbsent: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]
+    r at: true
+
+  tryDoAssign =>
+    r := Dictionary new
+    Result tryDo: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]
+    r at: true
+
+  onDoHandlerAssign =>
+    r := Dictionary new
+    [Error signal: "x"] on: Error do: [:e | r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]
+    r at: true
+
+  keysAndValuesDoAssign =>
+    r := Dictionary new
+    #{#a => 1} keysAndValuesDo: [:kk :v | r := #(1, 3) groupBy: [:x | k := x > 2. k]]
+    r at: true
+
+  eachWithIndexAssign =>
+    r := Dictionary new
+    #(1) eachWithIndex: [:z :j | r := #(1, 3) groupBy: [:x | k := x > 2. k]]
+    r at: true
+
+  blockValueAssign =>
+    r := Dictionary new
+    [r := #(1, 3) groupBy: [:x | k := x > 2. k]] value
+    r at: true
+
+  nestedArmInDo =>
+    r := Dictionary new
+    (self.n =:= 0) ifTrue: [#(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]]
+    r at: true
+
+  armInLoop =>
+    r := Dictionary new
+    1 to: 1 do: [:z | (self.n =:= 0) ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]]
+    r at: true
+
+  rebindsOuter =>
+    t := 0
+    r := #(1, 3) groupBy: [:x | t := t + x. x > 2]
+    #[r at: true, t]
+

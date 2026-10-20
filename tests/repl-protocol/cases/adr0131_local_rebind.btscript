@@ -874,9 +874,9 @@ t
 // ===========================================================================
 //
 // A `groupBy:` whose block binds a local is lowered as the threaded fold at
-// the REPL, and only a top-level statement or assignment unpacks its result
-// (BT-3897); anywhere else it is a compile error until BT-3912 lowers the fold
-// body as a frame.
+// the REPL. It is a fold producer like `collect:` (BT-3912, closing BT-3897), so
+// its `{Map, Bindings}` carrier is unpacked wherever it sits: it answered the
+// raw carrier outside a top-level statement or assignment before.
 
 groups := #(1, 3) groupBy: [:x | gbKey := x > 2. gbKey]
 // => #{false => #(1), true => #(3)}
@@ -884,10 +884,11 @@ groups := #(1, 3) groupBy: [:x | gbKey := x > 2. gbKey]
 groups at: true
 // => [3]
 
-// PIN-BUG BT-3912 (closes BT-3897): answered the raw carrier tuple (`Type
-// error in 'at:' on Tuple`). Correct answer: #(3).
 (#(1, 3) groupBy: [:x | gbKey2 := x > 2. gbKey2]) at: true
-// => ERROR: `groupBy:` binds a local, writes a field or sends to `self` in its block, but as the receiver of a message in a top-level expression
+// => [3]
+
+gbSize := (#(1, 3) groupBy: [:x | gbKey3 := x > 2. gbKey3]) size
+// => 2
 
 // A local bound inside a conditional arm in a `whileTrue:` condition failed
 // `erlc` in class, value-type and actor methods (BT-3891, a compile error
