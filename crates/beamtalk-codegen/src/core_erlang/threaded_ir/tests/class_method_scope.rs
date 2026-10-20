@@ -61,6 +61,64 @@ fn instance_scope_is_unconstrained_by_the_class_method_invariant() {
     assert_eq!(verify(&ir), Vec::new());
 }
 
+/// BT-3999: `[self done] whileTrue: [nil]` in a value-type (or `TestCase`)
+/// method took the locals-less `StateAcc` shape and seeded it from the actor
+/// `State`, which a value-type method has no binding for.
+#[test]
+fn value_type_rejects_locals_less_state_acc_loop() {
+    let ir = locals_less_state_acc_loop(StateAccFallbackReason::NoThreadedLocals);
+    assert_eq!(
+        verify_in_scope(&ir, ScopeKind::ValueType),
+        vec![VerifyError::ActorStateInClassMethod {
+            defect: ClassMethodDefect::StateAccLoopWithoutLocals,
+            at: span(),
+        }]
+    );
+}
+
+/// A value-type loop that threads no local but carries the method's own
+/// `SelfVt` family packs a fresh `maps:new()`: it has a seed. A `Letrec` loop
+/// carries the family as a trailing (`Gensym`-seeded) loop parameter.
+#[test]
+fn value_type_accepts_locals_less_state_acc_loop_carrying_self() {
+    let mut ir = locals_less_state_acc_loop(StateAccFallbackReason::NoThreadedLocals);
+    let ThreadedStmt::ConditionalLoop {
+        produces, frame, ..
+    } = &mut ir[0]
+    else {
+        unreachable!("the fixture is one ConditionalLoop");
+    };
+    let frame = *frame;
+    produces.push(VersionedVar::new(
+        VersionPrefix::Gensym("SelfLoop".to_string()),
+        0,
+        frame,
+    ));
+    assert_eq!(verify_in_scope(&ir, ScopeKind::ValueType), Vec::new());
+    // A class method threads no family: the loop is still rejected there.
+    assert_eq!(verify_in_scope(&ir, ScopeKind::ClassMethod).len(), 1);
+}
+
+/// A fold carries `SelfVt` through its accumulator; its body binds `Self`.
+#[test]
+fn value_type_accepts_locals_less_state_acc_fold_binding_self() {
+    let frame = FrameId::new(1);
+    let ir = vec![ThreadedStmt::Threaded {
+        mode: ThreadingMode::StateAcc(StateAccFallbackReason::NoThreadedLocals),
+        frame,
+        threads: Vec::new(),
+        body: vec![ThreadedStmt::Bind {
+            target: self_var(1, frame),
+            source: self_var(0, frame),
+            op: BindOp::Direct(ValueRef::Literal("'ok'")),
+            span: span(),
+        }],
+        produces: vec![VersionedVar::new(VersionPrefix::State, 0, frame)],
+        span: span(),
+    }];
+    assert_eq!(verify_in_scope(&ir, ScopeKind::ValueType), Vec::new());
+}
+
 #[test]
 fn class_method_rejects_state_family_bind() {
     let frame = FrameId::ROOT;

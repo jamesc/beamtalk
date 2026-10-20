@@ -1,0 +1,99 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3999: a `whileTrue:`/`whileFalse:` whose condition sends to `self` and
+// whose body writes no outer local failed `erlc` with `unbound variable
+// 'State'` in a plain-object, value-type or `TestCase` method. The condition's
+// self-send selected the loop's `StateAcc` lowering, which (carrying no local
+// and no family) was seeded from an actor `State` those methods do not have.
+// Every row of the issue's matrix, in a `TestCase` method (this class), a
+// value-type method (the scope an `Object subclass:` instance method compiles
+// in; an `Object` subclass is not instantiable) and an `Actor` method. The
+// codegen corpus (`while_condition_carrier_corpus.rs`) covers `Object` and
+// class-side methods through `erlc`.
+// Fixtures: fixtures/bt3999while_self_send_{value,actor}.bt.
+
+TestCase subclass: Bt3999WhileSelfSendConditionTest
+  field: f = 0
+
+  done => false
+
+  yes => true
+
+  isAlive: n => n > 0
+
+  isOne => self.f =:= 1
+
+  // --- TestCase methods ---
+  testEmptyBody =>
+    [self done] whileTrue: [nil]
+    self assert: true
+
+  testKeywordCondition =>
+    [self isAlive: 0] whileTrue: [nil]
+    self assert: true
+
+  testLocalArgument =>
+    n := 0
+    [self isAlive: n] whileTrue: [Timer sleep: 10]
+    self assert: n equals: 0
+
+  testAndTrue =>
+    n := 0
+    [(self isAlive: n) and: [true]] whileTrue: [Timer sleep: 10]
+    self assert: n equals: 0
+
+  testAndDeadline =>
+    n := 0
+    deadline := Time nowMs + 50
+    [
+      (self isAlive: n) and: [Time nowMs < deadline]
+    ] whileTrue: [Timer sleep: 10]
+    self assert: n equals: 0
+
+  testPollsUntilDeadline =>
+    deadline := Time nowMs + 30
+    [(self yes) and: [Time nowMs < deadline]] whileTrue: [Timer sleep: 5]
+    self assert: Time nowMs >= deadline
+
+  testWhileFalse =>
+    deadline := Time nowMs + 30
+    [
+      (self isAlive: 0) or: [Time nowMs >= deadline]
+    ] whileFalse: [Timer sleep: 5]
+    self assert: Time nowMs >= deadline
+
+  // A method that also writes a field threads `Self`, but this loop does not.
+  // The condition's self-send must see `Self` after the write, or it never
+  // stops.
+  testFieldWritingMethod =>
+    self.f := 1
+    [self isOne] whileFalse: [nil]
+    self assert: self.f equals: 1
+
+  // The control: the body writes a local, so the loop threads it.
+  testBodyWritesLocal =>
+    n := 3
+    [self isAlive: n] whileTrue: [n := n - 1]
+    self assert: n equals: 0
+
+  // --- Value methods ---
+  testValueRows =>
+    o := Bt3999WhileSelfSendValue new
+    self assert: o emptyBody equals: #ok
+    self assert: o keywordCondition equals: #ok
+    self assert: o localArgument equals: #ok
+    self assert: o andTrue equals: #ok
+    self assert: o andDeadline equals: #ok
+    self assert: o pollsUntilDeadline
+    self assert: o whileFalseUntilDeadline
+
+  // --- Actor methods ---
+  testActorRows =>
+    a := Bt3999WhileSelfSendActor spawn
+    self assert: a emptyBody equals: #ok
+    self assert: a keywordCondition equals: #ok
+    self assert: a localArgument equals: #ok
+    self assert: a andTrue equals: #ok
+    self assert: a andDeadline equals: #ok
+    self assert: a statefulCondition equals: 3
