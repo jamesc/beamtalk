@@ -2961,6 +2961,11 @@ impl Parser {
 
     /// Whether a `}` closes the current nesting level before an enclosing
     /// `]`/`)` or `Eof` (error-recovery lookahead only).
+    ///
+    /// Inherent ambiguity: that `}` may belong to an *enclosing* `{`/`#{`
+    /// rather than the unclosed tuple — in `#{#k => {1, 2\n #j => 3}` the
+    /// tuple claims the map's `}`, and the map then reports its own missing
+    /// `}`. Only diagnostic quality is affected, never valid code.
     fn tuple_close_brace_ahead(&self) -> bool {
         let mut depth: usize = 0;
         let mut offset = 0;
