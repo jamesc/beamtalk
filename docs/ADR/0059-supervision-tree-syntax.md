@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-03-07)
 
+**Amended by [ADR 0135](0135-supervisor-instances-and-start-arguments.md) (2026-10-20):** supervisor configuration moves from class-side methods (`class children`, `class strategy`, `class childClass`, …) to instance-side methods read from the supervisor being started (`childSpecs`, `strategy`, `childClass`, …; `self args` holds the start args), `class initialize: sup` becomes instance-side `initialize`, and "one instance per class; define two classes for two topologies" is replaced by the `spawn` family (`spawn`, `spawnWith:`, `spawnAs:`, `spawnWith:as:`, `named:`). The per-setting design of this ADR is kept.
+
 ## Context
 
 ### The Problem
