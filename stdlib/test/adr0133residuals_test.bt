@@ -44,3 +44,51 @@ TestCase subclass: Adr0133ResidualsTest
 
   testFieldWriting =>
     self assert: Adr0133ResidualsActor spawn fieldWriting equals: #(#(3), 3)
+
+  testAssignedLocalInDo =>
+    self assert: Adr0133ResidualsActor spawn assignedLocalInDo equals: #(3)
+
+  testAssignedReadInDo =>
+    self assert: Adr0133ResidualsActor spawn assignedReadInDo equals: #(3)
+
+  testAssignedLocalInArm =>
+    self assert: (Adr0133ResidualsActor spawn assignedLocalInArm: true) equals: #(3)
+
+  testAssignedReadInArm =>
+    self assert: (Adr0133ResidualsActor spawn assignedReadInArm: true) equals: #(3)
+
+  testAssignedLocalInOnDo =>
+    self assert: Adr0133ResidualsActor spawn assignedLocalInOnDo equals: #(3)
+
+  testAssignedReadInOnDo =>
+    self assert: Adr0133ResidualsActor spawn assignedReadInOnDo equals: #(3)
+
+  testAssignedLocalInEnsure =>
+    self assert: Adr0133ResidualsActor spawn assignedLocalInEnsure equals: #(3)
+
+  testAssignedReadInEnsure =>
+    self assert: Adr0133ResidualsActor spawn assignedReadInEnsure equals: #(3)
+
+  testAssignedLocalInCollect =>
+    self assert: Adr0133ResidualsActor spawn assignedLocalInCollect equals: #(3)
+
+  testAssignedReadInCollect =>
+    self assert: Adr0133ResidualsActor spawn assignedReadInCollect equals: #(3)
+
+  testAssignedLocalInInject =>
+    self assert: Adr0133ResidualsActor spawn assignedLocalInInject equals: #(3)
+
+  testAssignedReadInInject =>
+    self assert: Adr0133ResidualsActor spawn assignedReadInInject equals: #(3)
+
+  testAssignedLocalInIfNone =>
+    self assert: Adr0133ResidualsActor spawn assignedLocalInIfNone equals: #(3)
+
+  testAssignedReadInIfNone =>
+    self assert: Adr0133ResidualsActor spawn assignedReadInIfNone equals: #(3)
+
+  testStatementInDo =>
+    self assert: Adr0133ResidualsActor spawn statementInDo equals: 1
+
+  testStatementInTimesRepeat =>
+    self assert: Adr0133ResidualsActor spawn statementInTimesRepeat equals: 7

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3968 fixture: a plain Actor whose `initialize` requests a continuation
-// with `self continueWith:` — it runs before any message, and `spawn` waits
-// for it. See stdlib/test/actor_continue_with_test.bt.
+// with `self continueWith:` — it runs before any message (after `spawn` has
+// returned, BT-3992). See stdlib/test/actor_continue_with_test.bt.
 
 Actor subclass: ContinueWithActor
   state: log = #()

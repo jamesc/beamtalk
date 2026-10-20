@@ -283,7 +283,7 @@ pub fn write_rel_and_boot_script(
         staged_ebins,
     );
 
-    let output = Command::new("erl")
+    let output = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-noinput")
         .arg("-eval")
@@ -597,7 +597,7 @@ pub(crate) fn absolutize(path: &Utf8Path) -> Result<Utf8PathBuf> {
 ///
 /// Returns an error if `erl` cannot be spawned or exits non-zero.
 pub fn discover_erts_info() -> Result<(Utf8PathBuf, String)> {
-    let output = Command::new("erl")
+    let output = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-noinput")
         .arg("-eval")
@@ -766,7 +766,7 @@ pub fn strip_release_beams(release_dir: &Utf8Path) -> Result<()> {
          halt(0).",
         dir = escape_erlang_string(&to_forward_slash(release_dir_abs.as_str())),
     );
-    let output = Command::new("erl")
+    let output = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-noinput")
         .arg("-eval")
@@ -840,7 +840,7 @@ pub fn make_tarball(
         rel_file_no_ext = escape_erlang_string(&to_forward_slash(rel_file_no_ext.as_str())),
         tar_out_dir = escape_erlang_string(&to_forward_slash(tar_out_dir.as_str())),
     );
-    let output = Command::new("erl")
+    let output = beamtalk_workspace::erl_command()
         .arg("-noshell")
         .arg("-noinput")
         .arg("-eval")
@@ -1131,7 +1131,7 @@ pub fn write_shapes_json(
     // `extract_shapes/2`) are for the modules that get *loaded and
     // registered* during extraction; this `-pa` is for the extractor module
     // itself, needed before the eval string can even start running.
-    let mut cmd = Command::new("erl");
+    let mut cmd = beamtalk_workspace::erl_command();
     cmd.arg("-noshell").arg("-noinput");
     for dir in runtime_lib_dirs {
         cmd.arg("-pa").arg(dir.as_std_path());

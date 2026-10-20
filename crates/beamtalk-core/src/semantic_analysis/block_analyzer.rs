@@ -69,12 +69,12 @@ impl Analyser {
                     // Tier 2 state threading — the actor State IS the StateAcc, so
                     // field reads/writes inside the block propagate back to the caller.
                     //
-                    // Field assignments in blocks stored into an instance
-                    // field (`self.field := [block]`) are also supported —
-                    // every `self.field value(:...)` call site runtime-discriminates
-                    // Tier 1 vs Tier 2 (generalizing the `is_function/2`
-                    // precedent from Erlang FFI interop to Beamtalk-level block
-                    // calls), regardless of which method performs the call.
+                    // A block that writes a field and is stored into an
+                    // instance field (`self.field := [block]`) is not flagged
+                    // here: the ADR 0133 escaping-block validator
+                    // (`validators/local_threading.rs`, BT-3922) rejects it, so
+                    // codegen never sees one (BT-3986 removed its runtime
+                    // Tier 1/Tier 2 discrimination).
                     //
                     // Error: Field assignment in blocks stored into a *local
                     // variable* remains flagged here — codegen's
@@ -131,9 +131,8 @@ impl Analyser {
                     // that key, so the runtime fallback silently returns the value the
                     // variable had at block-*definition* time forever, and the stray key
                     // then leaks into the actor's persistent gen_server state once the call
-                    // site merges the returned state back in. Unlike a field mutation (made
-                    // cross-method-safe via runtime is_function/2 discrimination),
-                    // a captured local has no cross-method-visible home to thread through, so
+                    // site merges the returned state back in. A captured local has no
+                    // cross-method-visible home to thread through, so
                     // this is flagged the same way a field-write-plus-captured-local mix
                     // already is above (`has_captured_local_mutations`) — just for the
                     // captured-local-only case that arm never reaches.

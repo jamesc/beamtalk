@@ -3486,7 +3486,7 @@ Both methods are defined on `Actor` and answer `#ok`.
 - **Arguments:** `continueWith:` takes a unary selector. `continueWith:withArguments:` takes a `List` whose size must match the selector's arity. A non-Symbol selector raises `type_error` at the call site, and a wrong argument count raises `arity_mismatch`. Whether the actor understands the selector is checked only when the step runs.
 - **Stop wins:** if the same message also calls `self stopWith:` (in either order), the actor stops and no queued continuation runs. A continuation that itself calls `self stopWith:` stops the actor after that step, and the rest of the queue is dropped.
 - **Errors:** if the method that requested the continuations fails with an error, the continuations it requested are dropped. An error inside a continuation is handled exactly like an error in a `!` cast (see ADR 0134): its own requests are dropped, but steps queued behind it by earlier messages still run.
-- **`initialize`:** continuations requested there run before any message, and `spawn` does not return until they have finished. They count against `spawn`'s 5-second initialization timeout: if `initialize` plus its continuation chain takes longer, `spawn` fails with a timeout and the actor is killed. Move slow setup into a message the actor sends itself instead.
+- **`initialize`:** a continuation requested in `initialize` runs after `spawn` returns, before any later message (OTP `{continue, _}` after `init/1`). Startup ends when `initialize` returns: `spawn`, `spawnWith:` and supervisor child starts do not wait for the continuation chain, and only `initialize` itself counts against the 5-second initialization timeout. An error in such a continuation does not fail the spawn; it is handled like any other continuation error. This is where slow setup, or a supervised child's first call to its parent, belongs.
 - **Starvation:** the continue chain runs before every other message, including system messages such as supervisor shutdown. A continuation that re-requests itself forever starves the mailbox, as in OTP.
 - **Only on `self`:** `actor continueWith: #x` sent from another process (sync, async or `!`) raises `invalid_continuation` in the caller.
 
@@ -3544,7 +3544,7 @@ Inspect and manage children:
 
 ```beamtalk
 app count                                 // => 3  (number of running children)
-app children                              // => ["DatabasePool","HTTPRouter","MetricsCollector"]  (child ids)
+app children                              // => the 3 running child objects, in declaration order
 (app which: DatabasePool) unwrap           // => Actor(DatabasePool, _)  (running child instance)
 (app terminate: HTTPRouter) unwrap        // gracefully stop a single child; Result(Nil, Error)
 app stop                                  // stop the supervisor and all children (unchanged — Nil)
@@ -3554,6 +3554,43 @@ WebApp current                            // => nil
 ```
 
 `terminate:` is **idempotent** — terminating a child that is already gone returns `Result ok: nil`, not an error (see [idempotent-startup convention](#supervisor-idempotent-startup-convention-adr-0080) below).
+
+`which:` and `terminate:` find a child by its class, including one declared `withId:`. When several children share the class, both return `Result error:` with kind `#ambiguous_child` (and `terminate:` terminates nothing); use the by-id API below then.
+
+**By id (BT-3966).** Every child spec has an OTP id: the class name by default, or the `withId:` value (a Symbol or an Integer). These methods work on any supervisor instance — the `supervise` singleton, a `spawn`/`spawnWith:` instance, or a nested supervisor reached through `childWithId:` or `children`:
+
+```beamtalk
+Supervisor subclass: ServerSupervisor
+  strategy => #restForOne
+  childSpecs => #(
+    (Listener supervisionSpec withId: #listener withRestart: #permanent),
+    (AcceptorPoolSupervisor supervisionSpec withId: #acceptorPool withRestart: #permanent))
+
+server := ServerSupervisor spawn
+server whichChildren collect: [:c | c id]       // => #(#listener, #acceptorPool)
+listener := (server childWithId: #listener) unwrap
+(server terminateChild: #acceptorPool) unwrap   // suspend
+(server restartChild: #acceptorPool) unwrap     // resume => the new AcceptorPoolSupervisor
+(server terminateChild: #acceptorPool) unwrap
+(server deleteChild: #acceptorPool) unwrap      // drop the spec for good
+```
+
+| Method | Returns | Errors |
+|--------|---------|--------|
+| `children` | `List(Object)`: the running children, in declaration order | raises `#stale_handle` |
+| `whichChildren` | `List(SupervisorChild)`: one per spec, in declaration order, incl. restarting/stopped | raises `#stale_handle` |
+| `childWithId: id` | `Result`: the running child, or `ok: nil` if the spec's child is restarting/stopped | `#child_not_found`, `#type_error`, `#stale_handle` |
+| `terminateChild: id` | `Result ok: nil`; idempotent for an unknown or already-gone id | `#terminate_failed`, `#type_error`, `#stale_handle` |
+| `restartChild: id` | `Result`: the newly started child | `#child_not_found`, `#child_running`, `#child_start_failed`, `#type_error`, `#stale_handle` |
+| `deleteChild: id` | `Result ok: nil` | `#child_not_found`, `#child_running`, `#type_error`, `#stale_handle` |
+
+A `SupervisorChild` is a value with `id`, `child` (nil unless running), `status` (`#running`, `#restarting` or `#stopped`), `type` (`#worker` or `#supervisor`) and `childClass` (nil for a non-Beamtalk module), plus `isRunning` and `isSupervisor`.
+
+> **`restartChild:` needs a `#permanent` or `#transient` child.** The default restart policy is `#temporary`, and OTP removes a temporary child's spec as soon as it terminates, so `restartChild:` on it returns `#child_not_found` (and `terminateChild:` on it again returns `ok: nil`). Declare `withRestart: #permanent` on children you suspend and resume.
+
+**Breaking (BT-3966):** `Supervisor>>children` used to return the child ids as Symbols. It now returns the running child objects, the same as `DynamicSupervisor>>children`; use `whichChildren collect: [:c | c id]` for the ids.
+
+`DynamicSupervisor` has `children -> List(C)`: its live children (restarting ones left out, order unspecified). It copies the whole child list out of the supervisor in one message, O(n) in the number of children, so use it for bulk operations (drain, broadcast) and `startChild:name:` + `ChildClass named:` to find one child. `simple_one_for_one` children have no ids, so `DynamicSupervisor` has no `whichChildren`/`childWithId:`/`restartChild:`/`deleteChild:`; its `terminateChild:` takes the child object.
 
 ### Configuration Defaults
 
@@ -3678,7 +3715,7 @@ pool children    // => #(1, 2, 3)
 
 A bare supervisor class in `childSpecs` means `X supervisionSpec`, so it is an **anonymous** child: two parents that nest the same bare class run side by side, and `InnerSup current` does not find a nested instance (use `parent which: InnerSup`). A `DynamicSupervisor` whose child class is a supervisor starts a new anonymous child per `startChild` / `startChild: args`, and `startChild: args name: n` registers it.
 
-**The parent handle and the hang rule.** Passing `self` in a child's args (`#parent => self` above) is how a child reaches its parent; replaying it on restart is safe because a child never outlives its parent. **Never synchronously call a supervisor from code it is waiting on**: its configuration methods and those of its nested supervisor children (a call to an ancestor there hangs; a call to `self` fails fast), and the `initialize` of a `withName:`/`withClassMethod:` actor child (a call back stalls 5 s, then fails the start). This holds during the initial start, every OTP restart and every `DynamicSupervisor startChild:`. An unnamed actor child's `initialize` runs after its start returns, so a call to the parent from there merely waits until the parent has started its remaining children (bounded by the 5 s call timeout, which a large tree can exceed).
+**The parent handle and the hang rule.** Passing `self` in a child's args (`#parent => self` above) is how a child reaches its parent; replaying it on restart is safe because a child never outlives its parent. **Never synchronously call a supervisor from code it is waiting on**: its configuration methods and those of its nested supervisor children (a call to an ancestor there hangs; a call to `self` fails fast), and the `initialize` of a `withName:`/`withClassMethod:` actor child (a call back stalls 5 s, then fails the start). This holds during the initial start, every OTP restart and every `DynamicSupervisor startChild:`. A continuation the child requests in `initialize` (`self continueWith:`) runs after its start has returned, so that is the place for a child's first call to its parent. An unnamed actor child's `initialize` runs after its start returns, so a call to the parent from there merely waits until the parent has started its remaining children (bounded by the 5 s call timeout, which a large tree can exceed).
 
 ### Actor Supervision Policy
 
@@ -4424,7 +4461,13 @@ swap => {a, b} := self pair       // answers the pair, not nil
 // => #(#(1, 2), #(3, 2))
 ```
 
-A destructure that ends a predicate block (`select:`, `detect:`, `allSatisfy:` and the like) passes its right-hand side, a list, tuple or map, as the predicate, so it raises like any other non-boolean predicate. In an actor method or at the REPL, a `groupBy:` whose block binds a local is lowered as a fold whose raw result is the value unless the `groupBy:` is a statement at the method-body level or a non-final statement of a block, `^` or a field store at the method-body level, or the value of a local assignment at the method-body level or directly inside exactly one of an `ifTrue:` arm, an `on:do:` protected body, an `ensure:` cleanup block, a `do:`, `collect:` or `inject:into:` block, or a `detect:ifNone:` handler (not nested in another block) (at the REPL, only a statement or assignment at the top level of the input), so anywhere else it is a compile error until the fold is lowered as a frame ([BT-3897](https://linear.app/beamtalk/issue/BT-3897)).
+A destructure that ends a predicate block (`select:`, `detect:`, `allSatisfy:` and the like) passes its right-hand side, a list, tuple or map, as the predicate, so it raises like any other non-boolean predicate. In an actor method or at the REPL, a `groupBy:` whose block binds a local is lowered as a fold whose raw result is the value, except in these positions (anywhere else it is a compile error until the fold is lowered as a frame, [BT-3897](https://linear.app/beamtalk/issue/BT-3897)):
+
+- a statement at the method-body level;
+- a non-final statement directly in a `do:` or `timesRepeat:` body (not nested in another block);
+- `^` or a field store at the method-body level;
+- the value of a local assignment at the method-body level, or directly inside exactly one of an `ifTrue:` arm, an `on:do:` protected body, an `ensure:` cleanup block, a `do:`, `collect:` or `inject:into:` block, or a `detect:ifNone:` handler (not nested in another block);
+- at the REPL, only a statement or assignment at the top level of the input.
 
 In an actor method, an evaluated block literal (`[...] value`, `[:k | ...] value: x`) that binds a local, writes a field or sends to `self` answers its value only at some positions; elsewhere the value would be the raw `{Value, State}` pair, so it is a compile error ([BT-3981](https://linear.app/beamtalk/issue/BT-3981), until the block is lowered as a frame, [BT-3947](https://linear.app/beamtalk/issue/BT-3947)). It answers at a method-body statement, assignment (`r := [...] value`) or `^`, and inside an `ifTrue:` arm, a `collect:` block, a `match:` arm or a `whileTrue:` block; directly in a stored block, an Erlang FFI argument block or a block passed to a method it does not (assign it to a local in the method body, or compute it in a method of its own). As an operand (a receiver, an argument, a cascade part, `([...] value)` in parentheses) it never does. A `do:`, `to:do:` or `timesRepeat:` body accepts the evaluated block only as its last statement (or assigned to a local). In the body of a `do:`, collection operation or loop that writes an outer local, only `outer := [...] value` (the one outer local it writes) and a conditional arm answer; any other statement there is a compile error. A block of a conditional, collection or loop selector the compiler has no measured case for (`or:`, `at:ifAbsent:`, `reject:`, `anySatisfy:`, `whileFalse:`, `keysAndValuesDo:`, ...) is judged as a plain block, so the evaluated block as its last statement or assigned there is a compile error too. Class and value-type methods answer the value everywhere.
 

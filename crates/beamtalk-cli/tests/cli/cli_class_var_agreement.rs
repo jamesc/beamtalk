@@ -149,7 +149,7 @@ fn preflight() {
                     Check('bt@stdlib@test_case', new, 0), \
                     io:format(\"PREFLIGHT_DONE~n\"), \
                     halt().";
-        let out = std::process::Command::new("erl")
+        let out = beamtalk_workspace::erl_command()
             .arg("-noshell")
             .args(repl_startup::beam_pa_args(&paths))
             .args(["-eval", eval])

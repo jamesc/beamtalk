@@ -60,6 +60,12 @@ functions that call OTP APIs from the caller's process context.
     configured_flags/1,
     warn_removed_class_side_config/2,
     whichChildren/1,
+    childInfos/1,
+    childWithId/2,
+    terminateChildId/2,
+    restartChild/2,
+    deleteChild/2,
+    dynamicChildren/1,
     whichChild/2,
     terminateChild/2,
     'terminateChild:class:'/2,
@@ -87,12 +93,35 @@ functions that call OTP APIs from the caller's process context.
 ]).
 
 -ifdef(TEST).
--export([check_max_children/2, to_otp_shutdown/3, to_otp_strategy/1, start_failed_error/4]).
+-export([
+    check_max_children/2,
+    to_otp_shutdown/3,
+    to_otp_strategy/1,
+    start_failed_error/4,
+    supervisor_child_entry/2,
+    supervisor_child_entries/1
+]).
 -endif.
 
 -include("beamtalk.hrl").
 -include("beamtalk_supervisor_config.hrl").
 -include_lib("kernel/include/logger.hrl").
+
+%% One `supervisor:which_children/1` entry.
+-type which_child() :: {
+    term(), pid() | restarting | undefined, worker | supervisor, [module()] | dynamic
+}.
+%% A `SupervisorChild` value (BT-3966, `stdlib/src/supervisor_child.bt`). The
+%% exact `'$beamtalk_class'` field lets the type checker infer FFI results as
+%% `SupervisorChild` (see `beamtalk_process_navigation`'s `node_map()`).
+-type supervisor_child() :: #{
+    '$beamtalk_class' := 'SupervisorChild',
+    id := term(),
+    child := beamtalk_object() | pid() | nil,
+    status := running | restarting | stopped,
+    type := worker | supervisor,
+    childClass := beamtalk_object() | nil
+}.
 
 %% ETS table name for the OTP application root supervisor registry.
 %% Stores `{root, SupervisorTuple}` where SupervisorTuple is a
@@ -1149,27 +1178,182 @@ current(Self) ->
     end.
 
 -doc """
-Return the child ids of currently-running children.
+Return the live child objects of the running children, in declaration order.
 
-Called from `children` on Supervisor instances.
-Returns `{ok, [Id]}` with a list of child ids: class name atoms by default,
-or the custom id (a Symbol or, ADR 0135 §3, an Integer) set with `withId:` in
-`SupervisionSpec`. Dead or restarting children are excluded. Returns
-`{error, BtError}` with `kind = stale_handle` when the supervisor process is
-dead.
+Called from `children` on Supervisor instances (BT-3966: it used to return
+the child ids). Each running child is wrapped like `which:` wraps it: a
+`{beamtalk_supervisor, ...}` handle for a supervisor child, a
+`{beamtalk_object, ...}` for an actor, the bare pid for a child whose module
+is not a Beamtalk class. Restarting and stopped children are left out (see
+`childInfos/1` for every spec). Returns `{error, BtError}` with
+`kind = stale_handle` when the supervisor process is dead.
 """.
--spec whichChildren(term()) -> {ok, [atom() | integer()]} | {error, #beamtalk_error{}}.
+-spec whichChildren(term()) -> {ok, [beamtalk_object() | pid()]} | {error, #beamtalk_error{}}.
 whichChildren(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
     with_live_supervisor(ClassName, children, fun() ->
-        Ids = [
-            Id
-         || {Id, ChildPid, _, _} <- supervisor:which_children(Pid),
-            Id =/= undefined,
-            is_pid(ChildPid)
-        ],
-        {ok, Ids}
+        %% Running entries only, wrapped directly: no `SupervisorChild` maps
+        %% (and no `childClass` lookups) are built for `children`.
+        Running = [E || {_Id, P, _T, _M} = E <- supervisor:which_children(Pid), is_pid(P)],
+        ModClasses = module_classes(Running),
+        {ok,
+            lists:reverse([
+                child_object(ChildClass, Module, P)
+             || {_Id, P, _T, Mods} <- Running,
+                {ChildClass, Module} <- [entry_class(Mods, ModClasses)]
+            ])}
+    end).
+
+-doc """
+Return one `SupervisorChild` value per child spec, in declaration order
+(BT-3966). Backs `Supervisor>>whichChildren`.
+
+Includes children that OTP is restarting (`status => restarting`) and ones
+that were terminated but whose spec is still held (`status => stopped`), both
+with `child => nil`; it never raises on them. Returns `{error, BtError}` with
+`kind = stale_handle` when the supervisor process is dead.
+""".
+-spec childInfos(term()) -> {ok, [supervisor_child()]} | {error, #beamtalk_error{}}.
+childInfos(Self) ->
+    Pid = element(4, Self),
+    ClassName = element(2, Self),
+    with_live_supervisor(ClassName, whichChildren, fun() ->
+        {ok, supervisor_child_entries(supervisor:which_children(Pid))}
+    end).
+
+-doc """
+Return the running child with the given OTP child id (BT-3966). Backs
+`Supervisor>>childWithId:`.
+
+`{ok, Child}` for a running child; `{ok, nil}` when the id names a spec whose
+child is restarting or stopped (the `which:` convention);
+`{error, #beamtalk_error{kind = child_not_found}}` (details `#{id => Id}`)
+when no spec has that id; `type_error` for an id that is neither a Symbol nor
+an Integer; `stale_handle` when the supervisor process is dead.
+""".
+-spec childWithId(term(), atom() | integer()) ->
+    {ok, beamtalk_object() | pid() | nil} | {error, #beamtalk_error{}}.
+childWithId(Self, Id) ->
+    Pid = element(4, Self),
+    SupClass = element(2, Self),
+    Selector = 'childWithId:',
+    with_child_id(SupClass, Selector, Id, fun() ->
+        case lists:keyfind(Id, 1, supervisor:which_children(Pid)) of
+            false ->
+                {error, child_not_found_error(SupClass, Selector, Id)};
+            {_Id, ChildPid, _Type, Mods} when is_pid(ChildPid) ->
+                {ClassName, Module} = class_for_modules(Mods),
+                {ok, child_object(ClassName, Module, ChildPid)};
+            _NotRunning ->
+                {ok, nil}
+        end
+    end).
+
+-doc """
+Terminate the child with the given OTP child id (BT-3966). Backs
+`Supervisor>>terminateChild:`.
+
+`{ok, nil}` on success, and also when no spec has that id (idempotent,
+ADR 0080: a terminated `#temporary` child's spec is gone, which cannot be
+told apart from an unknown id). `terminate_failed` for any other OTP error,
+`type_error` for an id that is neither a Symbol nor an Integer,
+`stale_handle` when the supervisor process is dead.
+""".
+-spec terminateChildId(term(), atom() | integer()) -> {ok, nil} | {error, #beamtalk_error{}}.
+terminateChildId(Self, Id) ->
+    Pid = element(4, Self),
+    SupClass = element(2, Self),
+    with_child_id(SupClass, 'terminateChild:', Id, fun() ->
+        handle_terminate_child_result(
+            SupClass, #{child => Id}, supervisor:terminate_child(Pid, Id)
+        )
+    end).
+
+-doc """
+Restart a terminated child by its OTP child id (BT-3966). Backs
+`Supervisor>>restartChild:`.
+
+Returns `{ok, Child}` with the newly started child (`{ok, nil}` when its start
+function returned `ignore`). Errors: `child_not_found` (details `#{id => Id}`)
+when no spec has that id, which includes any terminated `#temporary` child
+(OTP deletes its spec when it exits); `child_running` (details
+`#{id => Id, status => running | restarting}`) when the child is running or
+being restarted; `child_start_failed` for a failing start; `type_error`,
+`stale_handle` as for `childWithId/2`.
+""".
+-spec restartChild(term(), atom() | integer()) ->
+    {ok, beamtalk_object() | pid() | nil} | {error, #beamtalk_error{}}.
+restartChild(Self, Id) ->
+    Pid = element(4, Self),
+    SupClass = element(2, Self),
+    Selector = 'restartChild:',
+    with_child_id(SupClass, Selector, Id, fun() ->
+        case supervisor:restart_child(Pid, Id) of
+            {ok, ChildPid} ->
+                {ok, restarted_child(Pid, Id, ChildPid)};
+            {ok, ChildPid, _Info} ->
+                {ok, restarted_child(Pid, Id, ChildPid)};
+            {error, not_found} ->
+                {error, child_not_found_error(SupClass, Selector, Id)};
+            {error, running} ->
+                {error, child_running_error(SupClass, Selector, Id, running)};
+            {error, restarting} ->
+                {error, child_running_error(SupClass, Selector, Id, restarting)};
+            {error, Reason} ->
+                {error, start_failed_error(child_start_failed, SupClass, Selector, Reason)}
+        end
+    end).
+
+-doc """
+Delete the spec of a terminated child by its OTP child id (BT-3966). Backs
+`Supervisor>>deleteChild:`.
+
+`{ok, nil}` on success. Errors: `child_not_found` (details `#{id => Id}`),
+`child_running` when the child is still running or restarting (terminate it
+first), `type_error`, `stale_handle` as for `childWithId/2`.
+""".
+-spec deleteChild(term(), atom() | integer()) -> {ok, nil} | {error, #beamtalk_error{}}.
+deleteChild(Self, Id) ->
+    Pid = element(4, Self),
+    SupClass = element(2, Self),
+    Selector = 'deleteChild:',
+    with_child_id(SupClass, Selector, Id, fun() ->
+        case supervisor:delete_child(Pid, Id) of
+            ok -> {ok, nil};
+            {error, not_found} -> {error, child_not_found_error(SupClass, Selector, Id)};
+            {error, running} -> {error, child_running_error(SupClass, Selector, Id, running)};
+            {error, restarting} -> {error, child_running_error(SupClass, Selector, Id, restarting)};
+            {error, Reason} -> {error, delete_failed_error(SupClass, Selector, Reason)}
+        end
+    end).
+
+-doc """
+Return the live children of a DynamicSupervisor as objects of its child class
+(BT-3966). Backs `DynamicSupervisor>>children`.
+
+Copies the whole child list out of the supervisor in one message (O(n)), so
+it is meant for bulk operations; restarting children are left out and the
+order is unspecified. The child class comes from `pool_child_class/1`, the
+lookup `startChild/1` uses. Returns `{error, BtError}` with
+`kind = stale_handle` when the supervisor process is dead.
+""".
+-spec dynamicChildren(term()) -> {ok, [beamtalk_object()]} | {error, #beamtalk_error{}}.
+dynamicChildren(Self) ->
+    SupPid = element(4, Self),
+    SupClass = element(2, Self),
+    with_live_supervisor(SupClass, children, fun() ->
+        case [P || {_Id, P, _Type, _Mods} <- supervisor:which_children(SupPid), is_pid(P)] of
+            [] ->
+                %% No live child: nothing to wrap, so no child class lookup
+                %% (a pool started without a recorded child class would
+                %% otherwise report `child_class_unknown`).
+                {ok, []};
+            Pids ->
+                with_pool_child_class(Self, children, fun(ChildClass, ChildModule) ->
+                    {ok, [wrap_child(ChildClass, ChildModule, P) || P <- Pids]}
+                end)
+        end
     end).
 
 -doc """
@@ -1182,8 +1366,12 @@ so that custom ids set via `withId:` in SupervisionSpec still resolve correctly.
 
 Returns `{ok, {beamtalk_supervisor, ...}}` for supervisor subclasses or
 `{ok, {beamtalk_object, ...}}` for worker children; `{ok, nil}` when no
-running child matches. Returns `{error, BtError}` with `kind = stale_handle`
-when the supervisor process is dead.
+spec matches or the one matching child is not running. When several specs
+match the class (BT-3966), returns
+`{error, #beamtalk_error{kind = ambiguous_child}}` with the matching ids in
+`details` (`#{ids => [Id]}`): use `childWithId:` then. Returns
+`{error, BtError}` with `kind = stale_handle` when the supervisor process is
+dead.
 """.
 -spec whichChild(term(), Class :: beamtalk_object()) ->
     {ok, tuple() | nil} | {error, #beamtalk_error{}}.
@@ -1192,29 +1380,30 @@ whichChild(Self, ClassArg) ->
     ClassName = element(2, Self),
     ChildModule = element(3, ClassArg),
     ChildClassPid = element(4, ClassArg),
-    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
     with_live_supervisor(ClassName, 'which:', fun() ->
-        Children = supervisor:which_children(SupPid),
-        case
-            lists:search(
-                fun({_Id, CPid, _, Mods}) ->
-                    is_pid(CPid) andalso lists:member(ChildModule, Mods)
-                end,
-                Children
-            )
-        of
-            {value, {_Id, ChildPid, _, _}} ->
+        case children_for_module(supervisor:which_children(SupPid), ChildModule) of
+            [] ->
+                {ok, nil};
+            [{_Id, ChildPid, _, _}] when is_pid(ChildPid) ->
+                ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
                 {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
-            false ->
-                {ok, nil}
+            [_NotRunning] ->
+                {ok, nil};
+            Matches ->
+                {error, ambiguous_child_error(ClassName, 'which:', Matches)}
         end
     end).
 
 -doc """
 Terminate a supervised child.
 
-For Supervisor (static): Arg is a class object — terminates child by its
-class name, which is the OTP child id.
+For Supervisor (static): Arg is a class object. The child id is resolved by
+matching the class's module against the children's modules, the way
+`whichChild/2` does, so a child declared `withId:` is found too (BT-3966: it
+used to assume the id was the class name, so such a child was never
+terminated). No match → `{ok, nil}` (idempotent); several matches →
+`{error, #beamtalk_error{kind = ambiguous_child}}` with the ids in `details`,
+and nothing is terminated.
 
 For DynamicSupervisor (dynamic): Arg is an actor or supervisor instance —
 terminates child by its process pid (simple_one_for_one semantics).
@@ -1258,22 +1447,41 @@ terminateChild(Self, Arg) ->
     try
         case beamtalk_class_registry:is_class_object(Arg) of
             true ->
-                %% Supervisor case: terminate by class name (the default child id)
-                ChildClassPid = element(4, Arg),
-                ChildId = beamtalk_object_class:class_name_safe(ChildClassPid),
-                handle_terminate_child_result(
-                    SupClass,
-                    #{child => ChildId},
-                    supervisor:terminate_child(SupPid, ChildId)
-                );
-            false ->
+                %% Supervisor case: resolve the child id by module (BT-3966).
+                ChildModule = element(3, Arg),
+                case children_for_module(supervisor:which_children(SupPid), ChildModule) of
+                    [] ->
+                        {ok, nil};
+                    [{ChildId, _, _, _}] ->
+                        handle_terminate_child_result(
+                            SupClass,
+                            #{child => ChildId},
+                            supervisor:terminate_child(SupPid, ChildId)
+                        );
+                    Matches ->
+                        {error, ambiguous_child_error(SupClass, 'terminate:', Matches)}
+                end;
+            false when is_tuple(Arg), tuple_size(Arg) >= 4, is_pid(element(4, Arg)) ->
                 %% DynamicSupervisor case: terminate by child process pid
                 ChildPid = element(4, Arg),
                 handle_terminate_child_result(
                     SupClass,
                     #{child_pid => ChildPid},
                     supervisor:terminate_child(SupPid, ChildPid)
-                )
+                );
+            false ->
+                %% Not a child object (e.g. a Symbol id sent to a
+                %% DynamicSupervisor, whose children have no ids, BT-3966).
+                {error,
+                    beamtalk_error:with_details(
+                        beamtalk_error:new(
+                            type_error,
+                            SupClass,
+                            'terminateChild:',
+                            <<"Pass the child object to terminate">>
+                        ),
+                        #{child => Arg}
+                    )}
         end
     catch
         exit:{noproc, _} ->
@@ -1330,6 +1538,179 @@ handle_terminate_child_result(SupClass, _LogCtx, {error, Reason}) ->
             'terminateChild:',
             iolist_to_binary(io_lib:format("~p", [Reason]))
         )}.
+
+%%% ============================================================================
+%%% Child introspection by id (BT-3966)
+%%% ============================================================================
+
+-doc """
+Map `supervisor:which_children/1` output to `SupervisorChild` values in
+declaration order. OTP lists a static supervisor's children newest first, so
+the list is reversed. Module-to-class resolution reads the class metadata
+table once for the whole list.
+""".
+-spec supervisor_child_entries([which_child()]) -> [supervisor_child()].
+supervisor_child_entries(Children) ->
+    ModClasses = module_classes(Children),
+    lists:reverse([supervisor_child_entry(Entry, ModClasses) || Entry <- Children]).
+
+-doc """
+Map one `supervisor:which_children/1` entry to a `SupervisorChild` value
+(the tagged map behind `stdlib/src/supervisor_child.bt`). A pid gives
+`status => running` and the wrapped child object; `restarting` gives
+`status => restarting`, anything else (`undefined`) `status => stopped`, both
+with `child => nil`. `ModClasses` maps child modules to Beamtalk class names
+(`module_classes/1`); a module with no class gives `childClass => nil` and,
+when running, the bare pid as `child`. Never raises.
+""".
+-spec supervisor_child_entry(which_child(), #{module() => atom()}) -> supervisor_child().
+supervisor_child_entry({Id, PidOrStatus, Type, Mods}, ModClasses) ->
+    {ClassName, ChildModule} = entry_class(Mods, ModClasses),
+    {Status, Child} =
+        case PidOrStatus of
+            ChildPid when is_pid(ChildPid) ->
+                {running, child_object(ClassName, ChildModule, ChildPid)};
+            restarting ->
+                {restarting, nil};
+            _ ->
+                {stopped, nil}
+        end,
+    #{
+        '$beamtalk_class' => 'SupervisorChild',
+        id => Id,
+        child => Child,
+        status => Status,
+        type => Type,
+        childClass => child_class_object(ClassName)
+    }.
+
+%% `{ClassName | nil, Module | nil}` for one child's modules: the single-child
+%% counterpart of `module_classes/1` + `entry_class/2`.
+-spec class_for_modules([module()] | dynamic) -> {atom() | nil, module() | nil}.
+class_for_modules(Mods) ->
+    entry_class(Mods, beamtalk_class_registry:module_to_class_map()).
+
+%% Module -> Beamtalk class name map for resolving many entries' modules: one
+%% read of the class metadata table (`module_to_class_map/0`), not one per
+%% child, and none when there are no entries.
+-spec module_classes([which_child()]) -> #{module() => atom()}.
+module_classes([]) ->
+    #{};
+module_classes(_Children) ->
+    beamtalk_class_registry:module_to_class_map().
+
+-spec entry_class([module()] | dynamic, #{module() => atom()}) ->
+    {atom() | nil, module() | nil}.
+entry_class([Module | _], ModClasses) when is_atom(Module) ->
+    {maps:get(Module, ModClasses, nil), Module};
+entry_class(_Mods, _ModClasses) ->
+    {nil, nil}.
+
+-spec child_object(atom() | nil, module() | nil, pid()) -> beamtalk_object() | pid().
+child_object(nil, _Module, ChildPid) -> ChildPid;
+child_object(ClassName, Module, ChildPid) -> wrap_child(ClassName, Module, ChildPid).
+
+-spec child_class_object(atom() | nil) -> beamtalk_object() | nil.
+child_class_object(nil) ->
+    nil;
+child_class_object(ClassName) ->
+    case beamtalk_class_registry:resolve_class_object(ClassName) of
+        undefined -> nil;
+        ClassObj -> ClassObj
+    end.
+
+%% The `which_children` entries whose modules include `Module`, in any state.
+-spec children_for_module([which_child()], module()) -> [which_child()].
+%% A `simple_one_for_one` child has no id (`undefined`) and cannot be addressed
+%% by id, so it never matches: `terminate:`/`which:` by class on a
+%% DynamicSupervisor find nothing rather than an `undefined` id per child.
+children_for_module(Children, Module) ->
+    [
+        Entry
+     || {Id, _P, _T, Mods} = Entry <- Children,
+        Id =/= undefined,
+        is_list(Mods),
+        lists:member(Module, Mods)
+    ].
+
+%% The child object for a pid `supervisor:restart_child/2` just returned.
+-spec restarted_child(pid(), atom() | integer(), pid() | undefined) ->
+    beamtalk_object() | pid() | nil.
+restarted_child(SupPid, Id, ChildPid) when is_pid(ChildPid) ->
+    %% `get_childspec/2` reads one spec, not the whole child list.
+    case supervisor:get_childspec(SupPid, Id) of
+        {ok, #{modules := Mods}} ->
+            {ClassName, Module} = class_for_modules(Mods),
+            child_object(ClassName, Module, ChildPid);
+        _ ->
+            ChildPid
+    end;
+restarted_child(_SupPid, _Id, _NoPid) ->
+    nil.
+
+%% Validate a child id (a Symbol or an Integer, ADR 0135 §3) and run `Fun`
+%% against the live supervisor.
+-spec with_child_id(atom(), atom(), term(), fun(() -> Result)) ->
+    Result | {error, #beamtalk_error{}}
+when
+    Result :: term().
+with_child_id(SupClass, Selector, Id, Fun) when is_atom(Id); is_integer(Id) ->
+    with_live_supervisor(SupClass, Selector, Fun);
+with_child_id(SupClass, Selector, Id, _Fun) ->
+    Error = beamtalk_error:new(
+        type_error,
+        SupClass,
+        Selector,
+        <<"A child id is a Symbol or an Integer">>
+    ),
+    {error, beamtalk_error:with_details(Error, #{id => Id})}.
+
+-spec child_not_found_error(atom(), atom(), atom() | integer()) -> #beamtalk_error{}.
+child_not_found_error(SupClass, Selector, Id) ->
+    Error0 = beamtalk_error:new(child_not_found, SupClass, Selector),
+    Error1 = beamtalk_error:with_message(
+        Error0, iolist_to_binary(io_lib:format("No child with id ~p", [Id]))
+    ),
+    beamtalk_error:with_details(Error1, #{id => Id}).
+
+-spec child_running_error(atom(), atom(), atom() | integer(), running | restarting) ->
+    #beamtalk_error{}.
+child_running_error(SupClass, Selector, Id, Status) ->
+    Error0 = beamtalk_error:new(
+        child_running,
+        SupClass,
+        Selector,
+        <<"Terminate the child with terminateChild: first">>
+    ),
+    Error1 = beamtalk_error:with_message(
+        Error0, iolist_to_binary(io_lib:format("Child ~p is ~s", [Id, Status]))
+    ),
+    beamtalk_error:with_details(Error1, #{id => Id, status => Status}).
+
+-spec ambiguous_child_error(atom(), atom(), [which_child()]) -> #beamtalk_error{}.
+ambiguous_child_error(SupClass, Selector, Matches) ->
+    %% Declaration order, as `whichChildren` lists them.
+    Ids = lists:reverse([Id || {Id, _, _, _} <- Matches]),
+    Error0 = beamtalk_error:new(
+        ambiguous_child,
+        SupClass,
+        Selector,
+        <<"Several children share this class; use childWithId: / terminateChild: with an id">>
+    ),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary(io_lib:format("Several children share this class: ~p", [Ids]))
+    ),
+    beamtalk_error:with_details(Error1, #{ids => Ids}).
+
+-spec delete_failed_error(atom(), atom(), term()) -> #beamtalk_error{}.
+delete_failed_error(SupClass, Selector, Reason) ->
+    beamtalk_error:new(
+        delete_failed,
+        SupClass,
+        Selector,
+        iolist_to_binary(io_lib:format("~p", [Reason]))
+    ).
 
 -doc """
 Start a new child with default args under a DynamicSupervisor.

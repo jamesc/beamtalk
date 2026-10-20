@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3966: three children of one actor class told apart by id (#permanent),
+// plus one #temporary child of the same class.
+
+Supervisor subclass: Bt3966PoolSup
+
+  childSpecs =>
+    #((Bt3966Worker supervisionSpec withId: #a1 withRestart: #permanent), (Bt3966Worker supervisionSpec withId: #a2 withRestart: #permanent), (Bt3966Worker supervisionSpec withId: #a3 withRestart: #permanent), (Bt3966Worker supervisionSpec withId: #t1 withRestart: #temporary))

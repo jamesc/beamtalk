@@ -1940,7 +1940,7 @@ fn build_beam_test_command(
     pa_args: &[std::ffi::OsString],
     eval_cmd: &str,
 ) -> std::process::Command {
-    let mut cmd = std::process::Command::new("erl");
+    let mut cmd = beamtalk_workspace::erl_command();
     cmd.arg("-noshell")
         .arg("-pa")
         .arg(util::to_forward_slash(pipeline.build_dir.as_str()));

@@ -46,8 +46,12 @@ app2 := (E2EAppSupervisor supervise) unwrap
 app count
 // => 1
 
-// children returns the list of child ids (Counter class name atom by default)
-app children
+// children returns the running child objects (BT-3966)
+app children size
+// => 1
+
+// whichChildren lists every child spec; ids are the class name by default
+app whichChildren collect: [:c | c id]
 // => ["Counter"]
 
 // which: returns the running child actor instance (wrapped in Result)
@@ -190,7 +194,7 @@ wsSup := Workspace startSupervisor: E2EAppSupervisor
 wsSup count
 // => 1
 
-wsSup children
+wsSup whichChildren collect: [:c | c id]
 // => ["Counter"]
 
 // supervisors lists all user-attached supervisors
