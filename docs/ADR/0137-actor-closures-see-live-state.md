@@ -166,8 +166,8 @@ intrinsics come from the one table codegen already uses to emit them: the
 `@primitive` pragmas) that carry a new `no_user_code` mark. The mark means
 the primitive can never dispatch to user code for any argument, and it is set
 in the stdlib source next to the pragma. A primitive that is pure only for
-some argument types (`,` for strings) stays unmarked, and codegen exempts it
-only in the type-known branch it already emits for that case. A binding with a block-typed parameter
+some argument types (`,` for strings) stays unmarked. Codegen exempts such a
+call only where the type checker shows every argument is a `String`. A binding with a block-typed parameter
 cannot carry it, and `build-stdlib` rejects the combination. The emitter and
 the verifier read the same mark, so there is no second list to keep in step.
 An unmarked primitive is bracketed, which costs 6 to 7 ns and is never wrong.
