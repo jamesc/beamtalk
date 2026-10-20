@@ -43,14 +43,15 @@ use super::threaded_ir::{
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 
-/// Hint on the `stateful_block_dispatch` error a self-send inside a closure
-/// raises when the callee changed actor state (BT-3936).
-const CLOSURE_SELF_SEND_STATE_CHANGE_HINT: &str = "A self-send inside a block changed actor state, but the block cannot return it; return the value and assign it in the method instead";
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector, WellKnownSelector};
 use beamtalk_core::source_analysis::Span;
+
+/// Hint on the `stateful_block_dispatch` error a self-send inside a closure
+/// raises when the callee changed actor state (BT-3936).
+const CLOSURE_SELF_SEND_STATE_CHANGE_HINT: &str = "A self-send inside a block changed actor state, but the block cannot return it; return the value and assign it in the method instead";
 
 /// One `generate_message_send` dispatch strategy: `Some(doc)` claims the
 /// send, `None` defers to the next entry in [`HANDLERS`].
@@ -1743,10 +1744,13 @@ impl CoreErlangGenerator {
     }
 
     /// BT-3936 (ADR 0133 § Error examples): the reply body of a self-send
-    /// dispatch that is compiled inside a closure (`block_depth > 0`: a Tier 1
-    /// `fun`, or a Tier 2 `fun` that takes `StateAcc`). The callee's returned
+    /// dispatch that is compiled inside a closure (`block_depth > 0`) that is a Tier 1 `fun`. The callee's returned
     /// `State` has nowhere to go from there: the closure answers one value,
     /// and the surrounding method's `State` is not the closure's to rebind.
+    /// A Tier 2 `fun` is exempt (`closure_drops_state` is false): it takes
+    /// `StateAcc` and returns `{Result, StateAccN}`, so it carries the change
+    /// back to its caller (and a consumer that cannot take it back already
+    /// raises `stateful_block_dispatch`).
     /// So the callee's returned state (`reply_state`) is compared (`=:=`, which
     /// shortcuts on identity) with the state the send was dispatched against
     /// (`dispatched_state`): equal answers `ok_doc` as before, different
@@ -1762,7 +1766,10 @@ impl CoreErlangGenerator {
         selector_atom: &str,
         ok_doc: Document<'static>,
     ) -> Document<'static> {
-        if self.block_depth == 0 || self.context != CodeGenContext::Actor {
+        if self.block_depth == 0
+            || !self.closure_drops_state
+            || self.context != CodeGenContext::Actor
+        {
             return ok_doc;
         }
         let class_name = self.class_name();
@@ -1771,6 +1778,13 @@ impl CoreErlangGenerator {
             &class_name,
             CLOSURE_SELF_SEND_STATE_CHANGE_HINT,
         );
+        // The fast path is plain `=:=` (identity first). A different map is
+        // compared again with the codegen-internal `__local__<name>` threading
+        // keys stripped (`beamtalk_actor:strip_local_temps/1`, the same helper
+        // the gen_server boundary uses): a read-only callee that rebinds a local
+        // through a conditional / `on:do:` / `ensure:` changes only those keys,
+        // which are not actor state.
+        let ok_slow = ok_doc.clone();
         docvec![
             "case call 'erlang':'=:='(",
             leaf::var(reply_state.to_string()),
@@ -1778,9 +1792,16 @@ impl CoreErlangGenerator {
             leaf::var(dispatched_state.to_string()),
             ") of <'true'> when 'true' -> ",
             ok_doc,
+            " <'false'> when 'true' -> case call 'erlang':'=:='(",
+            "call 'beamtalk_actor':'strip_local_temps'(",
+            leaf::var(reply_state.to_string()),
+            "), call 'beamtalk_actor':'strip_local_temps'(",
+            leaf::var(dispatched_state.to_string()),
+            ")) of <'true'> when 'true' -> ",
+            ok_slow,
             " <'false'> when 'true' -> ",
             error_doc,
-            " end",
+            " end end",
         ]
     }
 

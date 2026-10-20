@@ -186,6 +186,20 @@ TestCase subclass: ClosureSelfSendMatrixTest
     a := ClosureSelfSendMatrix spawn
     self assert: (a branchBinaryReadOnly) notNil
 
+  testOpenReadOnlyLocalCalleesAnswer =>
+    a := ClosureSelfSendMatrix spawn
+    self assert: a localCondInClosure equals: #(0, 2, 3)
+    self assert: a localOnDoInClosure equals: #(1, 2, 3)
+    self assert: a localEnsureInClosure equals: #(1, 2, 3)
+    self assert: a localCondTwiceInClosure equals: #(0, 3, 4)
+    self assert: a enclosingLocalInClosure equals: 7
+
+  testOpenCaughtByOnDoIsSwallowed =>
+    a := ClosureSelfSendMatrix spawn
+    a caughtInClosure
+    self assert: a total equals: 0
+    self assert: ((a caughtInClosureSelector) printString includesSubstring: "stateful_block_dispatch") equals: true
+
   testOpenInlinedLoopAndBranchThread =>
     a := ClosureSelfSendMatrix spawn
     self assert: a inlineDoKeyword equals: 6
@@ -367,6 +381,20 @@ TestCase subclass: ClosureSelfSendMatrixTest
   testSealedBranchBinaryReadOnlyAnswers =>
     a := ClosureSelfSendMatrixSealed spawn
     self assert: (a branchBinaryReadOnly) notNil
+
+  testSealedReadOnlyLocalCalleesAnswer =>
+    a := ClosureSelfSendMatrixSealed spawn
+    self assert: a localCondInClosure equals: #(0, 2, 3)
+    self assert: a localOnDoInClosure equals: #(1, 2, 3)
+    self assert: a localEnsureInClosure equals: #(1, 2, 3)
+    self assert: a localCondTwiceInClosure equals: #(0, 3, 4)
+    self assert: a enclosingLocalInClosure equals: 7
+
+  testSealedCaughtByOnDoIsSwallowed =>
+    a := ClosureSelfSendMatrixSealed spawn
+    a caughtInClosure
+    self assert: a total equals: 0
+    self assert: ((a caughtInClosureSelector) printString includesSubstring: "stateful_block_dispatch") equals: true
 
   testSealedInlinedLoopAndBranchThread =>
     a := ClosureSelfSendMatrixSealed spawn

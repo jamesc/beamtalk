@@ -129,3 +129,39 @@ fn value_types_and_class_methods_have_no_guard() {
         guards("Actor subclass: C\n  state: total = 0\n")
     );
 }
+
+#[test]
+fn a_tier2_closure_carries_state_back_so_its_self_sends_are_not_guarded() {
+    // `fwd:`'s block parameter is a promoted Tier 2 position (`promote` passes
+    // it a field-writing block), so the block `sums` passes is a Tier 2 `fun`
+    // (`StateAcc` in, `{Result, StateAccN}` out): the self-send's new `State` is
+    // returned to the caller, so the guard (which exists for closures that
+    // cannot hand it back) must not fire. A consumer that cannot take the state
+    // back raises `stateful_block_dispatch` itself.
+    let tier2 = |body: &str| {
+        format!(
+            "Actor subclass: P
+  state: groups = #(#(1, 2), #(3))
+  state: hits = 0
+  sealed fwd: block => self.groups collect: block
+  peek: x => self.hits + x
+  promote => self fwd: [:xs | self.hits := self.hits + 1. xs]
+  sums => self fwd: [:xs | {body}]
+"
+        )
+    };
+    assert_eq!(
+        guards(&tier2("self peek: 1")),
+        guards(&tier2("1")),
+        "a Tier 2 closure carries State back; no guard"
+    );
+    // The same self-send in a plain Tier 1 closure is guarded.
+    let tier1 = "Actor subclass: P
+  state: total = 0
+  each: blk => #(1, 2) collect: blk
+  peek: x => self.total + x
+  run => self each: [:x | self peek: x]
+";
+    let tier1_baseline = tier1.replace("[:x | self peek: x]", "[:x | x]");
+    assert!(guards(tier1) > guards(&tier1_baseline));
+}

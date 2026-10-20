@@ -241,15 +241,26 @@ go: the closure answers one value. This is not an escaping-block assignment, so
 the compile-time rule above does not see it. It is a run-time check in the one
 place an actor self-send dispatch is generated (`dispatch_codegen.rs`; every
 form: threaded, discarding, sealed), active only inside a closure
-(`block_depth > 0`). It compares the callee's returned `State` with the
+(a Tier 1 closure). It compares the callee's returned `State` with the
 `State` it was dispatched against using `=:=` (pointer identity first, so the
-read-only case is cheap). Equal answers normally; different raises
+read-only case is cheap). A different map is compared once more with the
+codegen-internal `__local__<name>` threading keys stripped
+(`beamtalk_actor:strip_local_temps/1`, the helper the gen_server boundary
+uses), because a read-only callee that rebinds a local through a conditional,
+`on:do:` or `ensure:` changes only those keys. Equal answers normally; different raises
 `#beamtalk_error{kind = stateful_block_dispatch}` carrying the selector and the
 hint "A self-send inside a block changed actor state, but the block cannot
 return it; return the value and assign it in the method instead". No
 threading is reintroduced and no surrounding lowering changes. A literal block
 the compiler inlines into the method (`self.items do: [...]`) is not a closure
-and still threads `State`, so its self-sends keep their changes.
+and still threads `State`, so its self-sends keep their changes. A Tier 2
+closure (`StateAcc` in, `{Result, StateAccN}` out) carries `State` back to its
+caller, so it is exempt; a consumer that cannot take that state back already
+raises `stateful_block_dispatch` itself.
+
+The error is an ordinary `Error`: an `on: Error do:` written inside the closure
+around the self-send catches it. That is the user's explicit choice to catch
+every `Error`, and the error stays catchable rather than being made special.
 
 Value types and class methods do not need the check: a `Value` method cannot
 assign a slot, so a self-send never changes anything to lose, and a class

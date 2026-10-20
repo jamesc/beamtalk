@@ -156,6 +156,10 @@ pub struct CoreErlangGenerator {
     /// `safe_dispatch` directly, because the block may execute in a different
     /// process (e.g. Timer callback, cross-actor callback).
     pub(in crate::core_erlang) block_depth: usize,
+    /// BT-3936: whether the innermost enclosing closure (`block_depth > 0`) is a
+    /// Tier 1 `fun`, which cannot hand the actor `State` back. A Tier 2 `fun`
+    /// returns `{Result, StateAccN}`, so it does carry it (false).
+    pub(in crate::core_erlang) closure_drops_state: bool,
     /// ADR 0130 §5: the Core Erlang variable holding the class-variable
     /// capture of the innermost enclosing block literal that reads a class
     /// variable (`beamtalk_class_vars:capture/2` bound at its creation), or
@@ -449,6 +453,7 @@ impl CoreErlangGenerator {
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
+            closure_drops_state: false,
             class_var_capture: None,
             class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,
