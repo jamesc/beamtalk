@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3968 fixture: a plain Actor whose `initialize` requests a continuation
+// with `self continueWith:` — it runs before any message, and `spawn` waits
+// for it. See stdlib/test/actor_continue_with_test.bt.
+
+Actor subclass: ContinueWithActor
+  state: log = #()
+
+  initialize =>
+    self.log := self.log add: #initialize
+    self continueWith: #afterInit
+
+  afterInit => self.log := self.log add: #afterInit
+
+  log => self.log

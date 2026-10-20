@@ -721,8 +721,8 @@ Object subclass: Actor
   ///
   /// ## Examples
   /// ```beamtalk
-  /// worker stopWith: #normal                                   // => #ok
-  /// self stopWith: (Tuple withAll: #(#shutdown, #peer_closed)) // => #ok
+  /// worker stopWith: #normal                  // => #ok
+  /// self stopWith: {#shutdown, #peer_closed}  // => #ok
   /// ```
   sealed stopWith: reason :: Object -> Symbol => @intrinsic "actorStopWith"
 
@@ -739,6 +739,45 @@ Object subclass: Actor
   /// ```
   sealed stopWith: reason :: Object timeout: timeout :: Timeout -> Symbol =>
     @intrinsic "actorStopWithTimeout"
+
+  /// Run `selector` on this actor after the current message has been
+  /// handled, before any other queued message (OTP `handle_continue/2`).
+  ///
+  /// Only valid as `self continueWith: #sel` inside one of the actor's own
+  /// methods (including `initialize`, `handleInfo:` and helpers they call).
+  /// `selector` must be a unary Symbol. The step runs after the current
+  /// method returns — a sync caller gets its reply first — and before the
+  /// next message in the mailbox. Several requests run in request order; a
+  /// continuation that requests more queues them after the ones already
+  /// waiting. Errors in a continuation are handled like errors in a `!` cast.
+  ///
+  /// A pending `stopWith:` in the same method wins: the actor stops and no
+  /// queued continuation runs. If the method fails with an error, its
+  /// continuations are dropped. Continuations requested by `initialize` run
+  /// before `spawn` returns and count against its 5-second initialization
+  /// timeout. A continuation that keeps re-requesting itself
+  /// starves the mailbox, as in OTP. Sent from another process, raises
+  /// `invalid_continuation`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self continueWith: #handleConnection   // => #ok
+  /// ```
+  sealed continueWith: selector :: Symbol -> Symbol =>
+    @intrinsic "actorContinueWith"
+
+  /// Run `selector` with `args` on this actor after the current message has
+  /// been handled, before any other queued message (OTP `handle_continue/2`).
+  ///
+  /// Same semantics as `continueWith:`; `args size` must equal the
+  /// selector's arity, or this raises at the call site.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self continueWith: #flushIfFull: withArguments: #(100)   // => #ok
+  /// ```
+  sealed continueWith: selector :: Symbol withArguments: args :: List -> Symbol =>
+    @intrinsic "actorContinueWithArgs"
 
   /// Forcefully kill this actor (exit(Pid, kill)).
   ///

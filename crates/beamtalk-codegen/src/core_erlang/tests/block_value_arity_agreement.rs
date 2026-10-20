@@ -201,15 +201,13 @@ const POSITIONS: &[&str] = &[
 ];
 
 /// The messages of the analyser's errors about a local write in `src`: the
-/// Phase 0 check, the ADR 0133 escaping-block check and the value-position
-/// assignment check.
+/// Phase 0 check and the ADR 0133 escaping-block check.
 fn write_errors(src: &str) -> Vec<String> {
     errors_in(
         src,
         &[
             DiagnosticCategory::UnmigratedLocalThreading,
             DiagnosticCategory::Tier2BlockNoReturnChannel,
-            DiagnosticCategory::ValuePositionLocalAssignment,
         ],
     )
 }

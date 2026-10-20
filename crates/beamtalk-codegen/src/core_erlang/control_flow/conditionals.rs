@@ -2139,8 +2139,10 @@ impl CoreErlangGenerator {
         block: &Block,
     ) -> Result<(Document<'static>, usize)> {
         let body = super::super::util::collect_body_exprs(&block.body);
-        self.with_repl_arm_producer_sites(&body, |this| {
-            this.generate_conditional_arm_statements(block, None)
+        self.with_repl_arm_rebind_frame(|this| {
+            this.with_repl_arm_producer_sites(&body, |this| {
+                this.generate_conditional_arm_statements(block, None)
+            })
         })
     }
 
@@ -3077,7 +3079,7 @@ impl CoreErlangGenerator {
         let wrapper = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
             frame,
-            threads: Vec::new(),
+            threads: self.registered_state_acc_threads(frame),
             body: stmts,
             produces,
             span,

@@ -693,7 +693,10 @@ impl CoreErlangGenerator {
                 this.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
             })
         } else {
-            self.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
+            // BT-3910: it still has value-position local assignments to lower.
+            self.with_value_assign_sites(body, |this| {
+                this.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
+            })
         }
     }
 
@@ -3352,7 +3355,14 @@ impl CoreErlangGenerator {
             // receiver's sub-tree (`((self recordOnce: x) and: [y])
             // ifTrue: [...]`) — the same probe `compile_conditional_receiver`
             // threads ahead with, so the two cannot disagree.
-            if self.conditional_receiver_needs_threading(receiver) {
+            //
+            // BT-3910: a receiver holding a value-position local assignment is
+            // sequenced ahead by `threaded_expression`
+            // (`conditional_receiver_assignment_operand`), so its `LocalRebind`
+            // reaches the statement sequence instead of a closed tuple document.
+            if self.conditional_receiver_needs_threading(receiver)
+                && self.contained_local_assignment_targets(receiver).is_empty()
+            {
                 return true;
             }
             for arg in arguments {

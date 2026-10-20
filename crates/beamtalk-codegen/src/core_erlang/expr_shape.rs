@@ -399,7 +399,10 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
         "asType:"
         // Identity
         | "yourself"
-    ) {
+    ) || name.as_str() == super::intrinsics::PERFORM_WITH_ARGS_TIMEOUT
+    {
+        // `perform:withArguments:timeout:` — intercepted by name in
+        // `try_generate_protoobject_message` (BT-3968).
         return false;
     }
     true

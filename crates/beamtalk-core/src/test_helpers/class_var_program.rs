@@ -110,6 +110,13 @@ impl Shapes {
     /// whose arm's nested loop writes an arm-local).
     pub const BLOCK_LOCAL: Shapes = Shapes(1 << 18);
 
+    /// BT-3910 (ADR 0131 §1): a [`Stmt::Touch`] spelled as a local assignment in
+    /// value position ([`Stmt::TouchValue`]): a receiver, an operand, a
+    /// collection-literal element or a conditional's receiver. The
+    /// interpretation is the statement form's: the write is immediate, whatever
+    /// the position.
+    pub const VALUE_ASSIGN: Shapes = Shapes(1 << 19);
+
     /// No shapes: straight-line writes and arithmetic only.
     pub const NONE: Shapes = Shapes(0);
 
@@ -146,7 +153,7 @@ impl Shapes {
     }
 
     /// Every named shape, for [`Shapes::names`] and [`Shapes::parse`].
-    const NAMED: [(&'static str, Shapes); 19] = [
+    const NAMED: [(&'static str, Shapes); 20] = [
         ("do", Shapes::LOOP_DO),
         ("fold", Shapes::LOOP_FOLD),
         ("to_do", Shapes::LOOP_TO_DO),
@@ -166,6 +173,7 @@ impl Shapes {
         ("local_touch", Shapes::LOCAL_TOUCH),
         ("nested_loops", Shapes::NESTED_LOOPS),
         ("block_local", Shapes::BLOCK_LOCAL),
+        ("value_assign", Shapes::VALUE_ASSIGN),
     ];
 
     /// The names of the shapes in `self`.
@@ -357,6 +365,22 @@ pub enum Stmt {
     /// [`Expr::TouchSum`]. With [`Shapes::BLOCK_LOCAL`] it also bumps a local
     /// a block introduced, from inside a loop or fold nested in that block.
     Touch(String),
+    /// BT-3910: [`Stmt::Touch`] spelled as a local assignment in value position
+    /// ([`TouchSpelling`]). Interpreted exactly as `Touch`.
+    TouchValue(String, TouchSpelling),
+}
+
+/// Where a [`Stmt::TouchValue`] puts its `name := name + 1` assignment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TouchSpelling {
+    /// The receiver of a unary send: `(n := n + 1) printString`.
+    Receiver,
+    /// An argument of a keyword send: `0 max: (n := n + 1)`.
+    Operand,
+    /// An element of an array literal: `#[0, (n := n + 1)] size`.
+    Element,
+    /// The receiver of a conditional: `(n := n + 1) > 0 ifTrue: [nil]`.
+    Conditional,
 }
 
 /// The method-level local [`Stmt::Touch`] bumps.
@@ -591,7 +615,7 @@ impl<'p> Machine<'p> {
                 return Err(Ctl::Ret(v));
             }
             Stmt::Raise => return Err(Ctl::Err),
-            Stmt::Touch(name) => {
+            Stmt::Touch(name) | Stmt::TouchValue(name, _) => {
                 let c = Self::lookup_int(env, name);
                 let slot = env
                     .iter_mut()
@@ -1049,7 +1073,7 @@ impl Gen {
     fn stmts(&mut self, c: &mut Ctx, n: i64) -> Vec<Stmt> {
         let mut out = Vec::new();
         if c.in_block && !c.no_touch && self.shapes.has(Shapes::LOCAL_TOUCH) {
-            out.push(Stmt::Touch(TOUCH_LOCAL.to_string()));
+            out.push(self.touch(TOUCH_LOCAL.to_string()));
         }
         if self.shapes.has(Shapes::BLOCK_LOCAL)
             && !c.no_touch
@@ -1057,12 +1081,28 @@ impl Gen {
             && self.rng.chance(60)
         {
             let i = self.rng.index(c.rebindable.len());
-            out.push(Stmt::Touch(c.rebindable[i].clone()));
+            out.push(self.touch(c.rebindable[i].clone()));
         }
         for _ in 0..n {
             out.push(self.stmt(c));
         }
         out
+    }
+
+    /// A [`Stmt::Touch`] of `name`; with [`Shapes::VALUE_ASSIGN`] often spelled as
+    /// a local assignment in value position ([`Stmt::TouchValue`]).
+    fn touch(&mut self, name: String) -> Stmt {
+        if self.shapes.has(Shapes::VALUE_ASSIGN) && self.rng.chance(60) {
+            let spelling = match self.rng.range(0, 3) {
+                0 => TouchSpelling::Receiver,
+                1 => TouchSpelling::Operand,
+                2 => TouchSpelling::Element,
+                _ => TouchSpelling::Conditional,
+            };
+            Stmt::TouchValue(name, spelling)
+        } else {
+            Stmt::Touch(name)
+        }
     }
 
     fn arm(&mut self, c: &Ctx) -> Vec<Stmt> {
@@ -1514,6 +1554,14 @@ impl ShapeWalk {
             Stmt::Raise => self.mark(Shapes::RAISE),
             Stmt::Touch(name) if name == TOUCH_LOCAL => self.mark(Shapes::LOCAL_TOUCH),
             Stmt::Touch(_) => self.mark(Shapes::BLOCK_LOCAL),
+            Stmt::TouchValue(name, _) => {
+                self.mark(Shapes::VALUE_ASSIGN);
+                self.mark(if name == TOUCH_LOCAL {
+                    Shapes::LOCAL_TOUCH
+                } else {
+                    Shapes::BLOCK_LOCAL
+                });
+            }
         }
     }
 
@@ -1694,6 +1742,15 @@ fn stmt_src(s: &Stmt) -> String {
         Stmt::Return(e) => format!("^{}", expr_src(e, false)),
         Stmt::Raise => "Error signal: \"boom\"".to_string(),
         Stmt::Touch(n) => format!("{n} := {n} + 1"),
+        Stmt::TouchValue(n, spelling) => {
+            let assign = format!("({n} := {n} + 1)");
+            match spelling {
+                TouchSpelling::Receiver => format!("{assign} printString"),
+                TouchSpelling::Operand => format!("0 max: {assign}"),
+                TouchSpelling::Element => format!("#[0, {assign}] size"),
+                TouchSpelling::Conditional => format!("{assign} > 0 ifTrue: [nil]"),
+            }
+        }
     }
 }
 

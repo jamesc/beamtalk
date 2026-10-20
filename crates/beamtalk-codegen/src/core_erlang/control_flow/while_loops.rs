@@ -287,18 +287,31 @@ impl CoreErlangGenerator {
         let unpack_docs = plan.generate_unpack_at_iteration_start(self);
 
         // Generate condition inside branch context
+        // BT-3910: the condition closure is a frame of its own. When the
+        // condition has state effects it hands back `{Bool, FinalStateAcc}`, so
+        // a value-position assignment in it `Put`s into the loop's own map: the
+        // loop's frame (threads and all). Otherwise the closure hands back only
+        // its boolean and threads nothing (ADR 0133, BT-3911).
         let cond_doc = self.with_branch_context(|this| {
-            if let Expression::Block(cond_block) = condition {
-                if cond_effects {
-                    this.generate_stateful_while_condition(cond_block)
-                } else {
-                    this.generate_block_body(cond_block)
-                }
-            } else if cond_effects {
-                this.generate_stateful_while_condition_tail(condition)
+            let frame = this.current_branch_frame();
+            let rebind = if cond_effects {
+                plan.rebind_frame(frame)
             } else {
-                this.generate_expression(condition)
-            }
+                ThreadingPlan::condition_rebind_frame(frame)
+            };
+            this.with_rebind_frame(rebind, |this| {
+                if let Expression::Block(cond_block) = condition {
+                    if cond_effects {
+                        this.generate_stateful_while_condition(cond_block)
+                    } else {
+                        this.generate_block_body(cond_block)
+                    }
+                } else if cond_effects {
+                    this.generate_stateful_while_condition_tail(condition)
+                } else {
+                    this.generate_expression(condition)
+                }
+            })
         })?;
 
         // Condition application and true/false arm headers
@@ -557,11 +570,10 @@ impl CoreErlangGenerator {
     fn generate_loop_condition_body(
         &mut self,
         condition: &Expression,
-        plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
         self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
-            this.with_rebind_frame(plan.condition_rebind_frame(frame), |this| {
+            this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
                 if let Expression::Block(cond_block) = condition {
                     this.generate_block_body(cond_block)
                 } else {
@@ -655,7 +667,7 @@ impl CoreErlangGenerator {
 
         // The condition closure captures the current vars from scope.
         // We pass only the params (not StateAcc) since there is no StateAcc.
-        let cond_body_doc = self.generate_loop_condition_body(condition, plan)?;
+        let cond_body_doc = self.generate_loop_condition_body(condition)?;
         let condition_stmt = ThreadedStmt::Statement(
             docvec![
                 "let ",
@@ -1013,13 +1025,14 @@ impl CoreErlangGenerator {
             let prev_hybrid = this.loop_mode.in_hybrid_loop;
             this.loop_mode.in_hybrid_loop = true;
             let frame = this.current_branch_frame();
-            let result = this.with_rebind_frame(plan.condition_rebind_frame(frame), |this| {
-                if let Expression::Block(cond_block) = condition {
-                    this.generate_block_body(cond_block)
-                } else {
-                    this.generate_expression(condition)
-                }
-            });
+            let result =
+                this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
+                    if let Expression::Block(cond_block) = condition {
+                        this.generate_block_body(cond_block)
+                    } else {
+                        this.generate_expression(condition)
+                    }
+                });
             this.loop_mode.in_hybrid_loop = prev_hybrid;
             result
         });

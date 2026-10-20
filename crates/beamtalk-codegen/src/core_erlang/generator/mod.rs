@@ -156,6 +156,10 @@ pub struct CoreErlangGenerator {
     /// `safe_dispatch` directly, because the block may execute in a different
     /// process (e.g. Timer callback, cross-actor callback).
     pub(in crate::core_erlang) block_depth: usize,
+    /// BT-3936: whether the innermost enclosing closure (`block_depth > 0`) is a
+    /// Tier 1 `fun`, which cannot hand the actor `State` back. A Tier 2 `fun`
+    /// returns `{Result, StateAccN}`, so it does carry it (false).
+    pub(in crate::core_erlang) closure_drops_state: bool,
     /// ADR 0130 §5: the Core Erlang variable holding the class-variable
     /// capture of the innermost enclosing block literal that reads a class
     /// variable (`beamtalk_class_vars:capture/2` bound at its creation), or
@@ -246,6 +250,16 @@ pub struct CoreErlangGenerator {
     /// the method body splices. Set by the method-body lowerings
     /// (`with_local_producer_sites`) and empty everywhere else.
     pub(in crate::core_erlang) local_producer_sites:
+        std::collections::HashSet<beamtalk_core::source_analysis::Span>,
+    /// BT-3910 (ADR 0131 §1): the spans of the value-position local
+    /// assignments of the body being lowered (`beamtalk_core`'s
+    /// `value_position_assignment_spans`), the producers `threaded_expression`
+    /// lowers as a `LocalRebind` of the enclosing frame. Per body, not per
+    /// module: a `Span` has no file id, and a `uses:` provision keeps the spans
+    /// of the protocol's file, so spans of two bodies may coincide. Installed by
+    /// `with_local_producer_sites` at a method body (restored after), and set
+    /// once for a REPL input; empty elsewhere.
+    pub(in crate::core_erlang) value_assign_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
     /// BT-3827: the body-block span of the one fold a value-type consumer is
     /// compiling right now AND will unpack the `Self` slot of
@@ -449,6 +463,7 @@ impl CoreErlangGenerator {
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
+            closure_drops_state: false,
             class_var_capture: None,
             class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,
@@ -461,6 +476,7 @@ impl CoreErlangGenerator {
             current_class_var_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
             local_producer_sites: std::collections::HashSet::new(),
+            value_assign_sites: std::collections::HashSet::new(),
             fold_self_slot_consumer: None,
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),

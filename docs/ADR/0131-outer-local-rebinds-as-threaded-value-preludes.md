@@ -23,6 +23,7 @@ Accepted (2026-10-08)
 | 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:'tryDo:'/2` + conformance fixture; codegen arity choice | S | [#4289](https://github.com/jamesc/beamtalk/pull/4289) |
 | 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; flip every pin (the allow-set diagnostic is kept: 552 of 733 measured statement shapes still drop writes with it bypassed; see BT-3841) | S | [#4299](https://github.com/jamesc/beamtalk/pull/4299) |
 | 5b | [BT-3752](https://linear.app/beamtalk/issue/BT-3752) | Docs, build-time measurement, known limitations | S | this PR |
+| follow-up | [BT-3910](https://linear.app/beamtalk/issue/BT-3910) (spec: [BT-3860](https://linear.app/beamtalk/issue/BT-3860)) | A local assignment in value position is a producer (§1, §1a, §2 `CarrierSlot::Whole`, §4 `UnthreadedLocalAssignment`); retire the BT-3864 `ValuePositionLocalAssignment` stopgap; `^t := e` is legal, with the `dead_returned_assignment` lint | M | this PR |
 | follow-up | [BT-3841](https://linear.app/beamtalk/issue/BT-3841) | Retire the Phase 0 position diagnostic (`DENY_SET`/`ALLOW_SET`); ADR Status to Implemented | L | open |
 
 Dependency order: 3744 → 3745 → {3746, 3747} → 3748 → 3749 → 3738 → 3817 → 3750 → 3751 → 3752.
@@ -49,7 +50,9 @@ What remains, in priority order, verified against the code on `main` at the time
 9. **[BT-3834](https://linear.app/beamtalk/issue/BT-3834)** (Done): a counted loop whose body holds a non-producer conditional with a nested loop writing an arm-local panicked the debug verifier with `StateAccLoopWithoutLocals`. A loop or fold that carries nothing now lowers as a plain loop (§2, BT-3834 amendment).
 10. **[BT-3842](https://linear.app/beamtalk/issue/BT-3842)**: Phase 5a review nits (a shared block-scope helper for `arms_lower_as_producer` and `OuterWriteWalker`; a non-`Result` `tryDo:` falls through to a generic internal error).
 
-Two scope notes. `Result tryDo:` is a producer only for a literal `Result` receiver; any other receiver keeps its dynamic send and a writing block is a compile error (§5 implementation note). The `MethodBody` IR node has no production builder: it exists, is verified and rendered, but the non-REPL method root is still the implicit frame (`RebindFrame::implicit_root`) and the REPL root does not construct one either.
+11. **[BT-3860](https://linear.app/beamtalk/issue/BT-3860) / [BT-3910](https://linear.app/beamtalk/issue/BT-3910)** (Done): a local assignment in value position is a producer (§1 amendment). Like BT-3841, it was part of the bar for moving the ADR's Status to Implemented. The BT-3864 stopgap error (`ValuePositionLocalAssignment`) is retired by it.
+
+Two scope notes. `Result tryDo:` is a producer only for a literal `Result` receiver; any other receiver keeps its dynamic send and a writing block is a compile error (§5 implementation note). The non-REPL method root is still the implicit frame (`RebindFrame::implicit_root`); the REPL root's `MethodBody` node is built only for a prelude that holds a value-position assignment's `LocalRebind` (BT-3910, §2 amendment).
 
 ### Build-time measurement
 
@@ -351,6 +354,55 @@ own `threads` does not list.
 A construct whose threaded set is empty is not a producer, and nothing
 changes for it.
 
+**Amendment (BT-3860, BT-3910): a local assignment in value position is a
+producer.** A local assignment whose value is used by the expression around
+it is a producer: an operand, a receiver (including a conditional's or a
+cascade's), an argument, a collection-literal or interpolated element, the
+value of another assignment or of `^`, or a `match:` arm value. Examples:
+`x := (t := t + 1) + 1`, `#[t, (t := 7), t]`, `(t := t + 1) > 0 ifTrue: [...]`.
+It is the local counterpart of the BT-3803 field-assignment producer. Unlike
+the other §1 producers it builds no `{Value, StateAcc}` tuple: the assigned
+value *is* the carrier. Its prelude is the value's own prelude, then `let V =
+<value>` (a `ConstructTuple` threading the one local), then one
+`LocalRebind { local: t, carrier: V, slot: CarrierSlot::Whole }` lowered by
+the enclosing frame (§2's table). It answers `V`. A statement-position
+assignment is unchanged: it keeps its existing lowering and is not a
+producer. Neither is an assignment inside a block literal used as a value,
+since that assignment is a statement of the block. Which assignments are
+value-position is one rule, `value_position_local_assignments` in
+`beamtalk-core`'s `block_facts` (a parenthesised statement counts as a
+statement where the body's lowering binds it: before the last statement of a
+value-type or actor method body, in an inlined arm, and as the last statement
+of a method body, whose value nothing reads a local after), computed once per
+method body (or REPL input) as `value_position_assignment_spans`; every producer gate
+(`subexpr_needs_prelude`, the loop-body and method-root statement gates, the
+actor `classify_body_expr`'s conditional-receiver probe, the REPL assembler)
+reads that set. A conditional (producer or not) whose receiver holds one
+sequences the receiver ahead (`conditional_receiver_assignment_operand`), so
+the `LocalRebind` reaches the caller's frame instead of a closed document.
+Before this amendment the shape was rejected by the Phase 0
+`ValuePositionLocalAssignment` error (BT-3864, this ADR's Alternative C
+applied to this shape); that error is deleted.
+
+`^t := e` is legal (maintainer decision, 2026-10-17), with one exception. It
+is ordinary Smalltalk, and nothing runs after the return that could read `t`
+except an `ensure:` cleanup that encloses the `^`. Codegen does not deliver the
+new value to that cleanup: the `^` is a throw, and the cleanup runs from the
+`catch` arm over the entry `StateAcc` with no `LocalRebind` of the protected
+body's writes. The same holds for the statement form `t := t + 1. ^t`
+(measured on a BEAM in class, value-type and actor methods: the cleanup
+reads the old `t`, silently). So a `^` out of the protected block of an
+`ensure:` (at any depth) whose cleanup reads a local that block writes stays a
+compile error (`UnmigratedLocalThreading`, BT-3947 lowers it), reported by
+the one recognizer in `validators/local_threading.rs`
+(`report_nlr_out_of_ensure`) with the hint to keep the `^` out of the protected
+block; `dead_returned_assignment` asks the compiler and stays silent inside
+that error's span. An `on:do:`
+protected body has no such position: a `^` passes through its catch untouched,
+no handler runs, and nothing reads `t` afterwards. Everywhere else the write is
+dead, and the `beamtalk-lint` rule `dead_returned_assignment` warns and
+suggests `^e`, including the non-local form `[:k | ^t := e]`.
+
 ### 1a. Sequencing: a local read before a sibling rebinds it
 
 ADR 0118 §3's sequencing rule binds every earlier sibling that is "not a
@@ -374,6 +426,13 @@ reads local `x` by its post-rebind identity when a `LocalRebind` for `x`
 sits in a *later* sibling's prelude. The shape is added to the probe and
 to the `local_touch` corpus generator (a `Touch` on the left of a binary
 op whose right operand is a protected block).
+
+**Amendment (BT-3910): the value-position assignment is a sibling rebind.**
+The sibling-snapshot rule counts the new producer: a value-position `t := e`
+puts `t` in its expression's reachable set (`reachable_threaded_locals`), so in
+`#[t, (t := 7), t]` the first `t` is snapshot before the rebind and the third
+reads the new identity. The answer is `#[0, 7, 7]`, as in Pharo.
+`LocalReadAfterSiblingRebind` covers it unchanged.
 
 ### 2. `LocalRebind` is lowered by its frame
 
@@ -552,6 +611,25 @@ rebound inside a loop nested in that block), which with `local_touch` off
 reproduces both the BT-3834 and the BT-3848 panics on the pre-BT-3848 analysis
 without this gate and none with it.
 
+**Amendment (BT-3910): `CarrierSlot::Whole`.** `CarrierSlot` gains `Whole`:
+`<read>` is the carrier itself, with no `element`/`maps:get`. Every row of the
+table above applies as written. Examples: `Let` + `bind_var` at a non-REPL
+`MethodBody`; `Put("t", V)` into the bindings map at the REPL `MethodBody`;
+`Put("__local__t", V)` in a `StateAcc` loop, handler or `BranchArm` frame when
+`t` is a member; a `Gensym` chain entry in `DirectParams`/`TupleAcc`/`Hybrid`
+frames. In an actor frame no `State` family `Bind` precedes it, because the
+assignment carries no family.
+
+**Amendment (BT-3910): the REPL threads its bindings in every frame.** In a REPL
+input the map a frame runs over is the bindings map itself, so the REPL root,
+a REPL arm and a `StateAcc` loop or fold body thread *every* binding: `t` is a
+member whatever the frame's recorded set, which is empty or partial because the
+REPL threads its loops through the map rather than through `__local__` keys.
+The one rule is `RebindFrame::with_repl_binding`, read by the producer and by
+the verifier (`ScopeKind::Repl`) alike. A value-position assignment at the REPL
+root is verified as an explicit `MethodBody` node (the REPL's first production
+one); a REPL arm is registered as a rebind frame of its branch.
+
 ### 3. Families are taken from context, not hard-coded
 
 `inline_control_flow_producer` and the conditional builders take their
@@ -587,6 +665,18 @@ Each check fails on a repro before the fix:
   nested `do:` write-back, which today are guarded only by a hand-written
   BUnit fixture.
 - **`VerifyError::LocalReadAfterSiblingRebind`** (§1a).
+- **`VerifyError::UnthreadedLocalAssignment { local, span }`** (BT-3910). An
+  identifier-target assignment whose value is consumed must be lowered as the
+  value-position producer. The `Expression::Assignment` arm of
+  `generate_expression` that emitted only the value is gone as a lowering; any
+  path that still reaches it for a consumed local assignment reports this error
+  through `report_threaded_ir_verify_errors`. Fails on every row of the BT-3860
+  repro table when the producer gate is disabled
+  (`tests/local_assignment_producer.rs`); the `dropped_assignment_probe`
+  agreement tests are the corpus proof, recording zero hits over the generated
+  corpus in methods and in the REPL (eval and trace), and the class-variable
+  corpus generator's `value_assign` shape (`Shapes::VALUE_ASSIGN`) runs the same
+  rewrite on a BEAM.
 - **`ActorStateInClassMethod`** (BT-3725), extended to `ScopeKind::ValueType`.
   Fails on o3/o12 and s2 in value-type methods.
 - **`StateEffectEscapesExpression`** (ADR 0118 §5), already defined, now also
@@ -605,7 +695,7 @@ Each check fails on a repro before the fix:
   `fold_locals_carried_corpus.rs` runs under the same fault for the
   `collect:`, `inject:into:` and satisfy folds.
 
-`report_threaded_ir_verify_errors` reports all six. Nothing gets a new
+`report_threaded_ir_verify_errors` reports all seven. Nothing gets a new
 `debug_assert!`.
 
 ### 5. `Result tryDo:` is a catch-boundary construct

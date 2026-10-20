@@ -47,7 +47,7 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, WriteKind, block_literal_of_other_arity, conditional_arm_blocks,
+    RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity, conditional_arm_blocks,
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
     exception_producer_writes, group_by_fold_threads, inline_block_threads,
     is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
@@ -55,7 +55,7 @@ use crate::semantic_analysis::block_facts::{
     loop_body_producer_sites, operand_producer_writes, outer_local_writes, outer_state_writes,
     producer_body_block, receiver_statically_not_dictionary, repl_arm_producer_sites,
     repl_evaluated_block, repl_operand_sites, repl_producer_writes, root_producer_writes,
-    sequenced_operand_sites, value_blocks, value_position_local_assignments,
+    sequenced_operand_sites, value_blocks,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -1084,6 +1084,10 @@ fn group_by_value_unpacked(
 /// build, an `internal:` error in a release build), an `erlc` unbound
 /// `StateAcc` or a runtime error.
 ///
+/// Acceptance is positive: a site with any construct block of a selector
+/// outside [`EVALUATED_BLOCK_MEASURED_SELECTORS`] anywhere between it and the
+/// method body is rejected, whatever its position.
+///
 /// Rejected: the last statement or an assignment directly in a plain block (a
 /// stored block, an Erlang FFI argument, a block passed to a method; a
 /// conditional arm inside such a block is still an arm), `^` inside a block, a
@@ -1095,6 +1099,7 @@ fn evaluated_block_value_unpacked(position: Position, site: &EvaluatedBlockSite)
         depth,
         parenthesized,
         inner,
+        chain_measured,
         fold_writes,
         assign_target,
         evaluated_nesting,
@@ -1103,6 +1108,12 @@ fn evaluated_block_value_unpacked(position: Position, site: &EvaluatedBlockSite)
     let (depth, last) = (*depth, *last);
     // Measured up to four evaluated blocks deep (three around the site).
     if *parenthesized || *evaluated_nesting > 3 {
+        return false;
+    }
+    // Positive acceptance: every construct block between the site and the
+    // method body must be of a selector with a measured cell, whatever the
+    // position (including `outer := [...] value` and the fold rule below).
+    if !*chain_measured {
         return false;
     }
     // A `do:`, `collect:` or loop body that writes an outer local is a fold
@@ -1189,6 +1200,9 @@ struct EvaluatedBlockSite {
     parenthesized: bool,
     /// The role of the innermost enclosing block.
     inner: Option<Container>,
+    /// Whether every enclosing construct block is of a selector in
+    /// [`EVALUATED_BLOCK_MEASURED_SELECTORS`].
+    chain_measured: bool,
     /// The outer locals written by the enclosing fold-like blocks (`do:`, a
     /// collection operation, a loop or counted loop), with no conditional arm
     /// between them and the site; empty when there is none.
@@ -1369,61 +1383,84 @@ fn check_body(
     walker.scope.push(params.into_iter().collect());
     walker.body(body);
     walker.finish();
-    report_value_position_assignments(context, body, diagnostics);
+    report_nlr_out_of_ensure(context, body, diagnostics);
 }
 
-/// ADR 0131 stopgap (BT-3864): a local assignment in value position
-/// ([`value_position_local_assignments`]) compiles to its value only and never
-/// rebinds the local (BT-3860), so it is an error in every context, the REPL
-/// included. An assignment a `match:`-arm error already reports
-/// ([`Walker::report_match_arm_writes`]) is not reported twice.
-fn report_value_position_assignments(
+/// BT-3910 / BT-3947: a non-local return out of the protected block of an
+/// `ensure:` whose cleanup reads a local the protected block writes stays a
+/// compile error for now. The `^` is a throw; the cleanup runs from the `catch`
+/// arm over the entry `StateAcc`, with no `LocalRebind` of the protected body's
+/// writes, so the cleanup would read the old value (the correct answer is the
+/// new one). It makes no difference whether the write is the returned value
+/// (`^t := e`) or a statement before the `^` (`t := t + 1. ^t`), whether the
+/// `^` sits directly in the protected block or in a block nested in it, or
+/// whether the write is a statement or a value. Without a `^` in the protected
+/// block, or with a cleanup that does not read what it writes, the write is
+/// seen (ADR 0131 §1). An `on:do:` protected body has no such position: a `^`
+/// passes through its catch untouched and no handler runs.
+///
+/// The one recognizer of this rule: `beamtalk lint`'s `dead_returned_assignment`
+/// skips a `^t := e` inside the span of this error rather than re-deriving it.
+fn report_nlr_out_of_ensure(
     context: MethodContext,
     body: &[ExpressionStatement],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for found in value_position_local_assignments(body, context.root_method_kind()) {
-        // One diagnostic per assignment: an assignment a `match:`-arm error or
-        // the ADR 0133 escaping-block error (reported at the assignment)
-        // already reports is not reported again.
-        let reported = diagnostics.iter().any(|d| {
-            d.span == found.span
-                && d.severity == crate::source_analysis::Severity::Error
-                && matches!(
-                    d.category,
-                    Some(
-                        DiagnosticCategory::UnmigratedLocalThreading
-                            | DiagnosticCategory::Tier2BlockNoReturnChannel
+    for stmt in body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } = e
+                && parts.len() == 1
+                && parts[0].keyword == "ensure:"
+                && let Expression::Block(protected) = receiver.as_ref()
+                && let [Expression::Block(cleanup)] = arguments.as_slice()
+                && let Some(name) = nlr_dropped_local(protected, cleanup)
+            {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "a non-local return (`^`) out of an `ensure:` protected block that \
+                             writes `{name}` is not supported yet in {context}: the cleanup \
+                             would not see the new `{name}` (BT-3947)"
+                        ),
+                        protected.span,
                     )
-                )
+                    .with_hint(format!(
+                        "assign `{name}` and return after the `ensure:`, or keep the `^` out of \
+                         the protected block"
+                    ))
+                    .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+                );
+            }
         });
-        if reported {
-            continue;
-        }
-        let name = &found.name;
-        diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "assignment to local `{name}` is used as a value in {context}, \
-                     but it would not rebind `{name}` (BT-3860)"
-                ),
-                found.span,
-            )
-            .with_hint(if found.returned {
-                format!(
-                    "return the value directly: `^expr` instead of `^{name} := expr` \
-                     (or assign `{name}` in its own statement first if something still \
-                     reads it, e.g. an `ensure:` cleanup)"
-                )
-            } else {
-                format!(
-                    "move the assignment into its own statement before this one, \
-                     then use `{name}` here"
-                )
-            })
-            .with_category(DiagnosticCategory::ValuePositionLocalAssignment),
-        );
     }
+}
+
+/// The local `protected` writes and `cleanup` reads, when `protected` holds a
+/// `^` (see [`report_nlr_out_of_ensure`]), in name order.
+fn nlr_dropped_local(protected: &Block, cleanup: &Block) -> Option<String> {
+    let mut has_nlr = false;
+    for stmt in &protected.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            has_nlr |= matches!(e, Expression::Return { .. });
+        });
+    }
+    if !has_nlr {
+        return None;
+    }
+    // The writes that reach the protected block's frame, nested loop, fold and
+    // conditional bodies included (ADR 0131 threads those back out, and the `^`
+    // drops them too): the one outer-local-writes recognizer, with the locals
+    // the cleanup reads as the bound-outside set.
+    let read = analyze_block(cleanup).local_reads;
+    outer_local_writes(protected, &|n| read.contains(n))
+        .into_iter()
+        .map(|w| w.name.to_string())
+        .min()
 }
 
 /// BT-3823: whether `expr` is an evaluated block in the REPL sense
@@ -2860,13 +2897,8 @@ impl<'d> Walker<'d> {
         let site = EvaluatedBlockSite {
             depth: self.depth,
             parenthesized,
-            // A construct block of a selector with no measured cell is judged
-            // as a plain block (its last statement and assignments leak).
-            inner: if self.unmeasured_blocks.last().copied().unwrap_or(false) {
-                Some(Container::Other)
-            } else {
-                self.containers.last().copied()
-            },
+            inner: self.containers.last().copied(),
+            chain_measured: !self.unmeasured_blocks.iter().any(|u| *u),
             fold_writes,
             assign_target: self.assign_target.clone(),
             evaluated_nesting: self
