@@ -28,19 +28,6 @@ Actor subclass: Bt3939Tier2InlinedActor
       ]
       with: #(1)
 
-  evalValue =>
-    xs := #(1, 2)
-    (Erlang lists)
-      map: [:x |
-        r := [
-          n := 0
-          xs do: [:y | n := n + y]
-          n
-        ] value
-        r
-      ]
-      with: #(1)
-
   nested: flag =>
     xs := #(1, 2)
     (Erlang lists)

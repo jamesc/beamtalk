@@ -325,8 +325,7 @@ TestCase subclass: TypePatternMatchTest
 
   // BT-2870: a live supervisor reference is also a plain Erlang tuple
   // structurally, but must not match `x :: Tuple` — `wrap_tuple_test`
-  // excludes the reserved 'beamtalk_supervisor'/'beamtalk_supervisor_new'
-  // tags. Runtime counterpart to the codegen string-contains assertion in
+  // excludes the reserved 'beamtalk_supervisor' tag. Runtime counterpart to the codegen string-contains assertion in
   // control_flow.rs's
   // test_match_type_pattern_tuple_excludes_actor_reference_shape.
   testSupervisorReferenceDoesNotMatchTuplePattern =>

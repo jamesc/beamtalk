@@ -61,6 +61,8 @@ start(_StartType, _StartArgs) ->
     %% the runtime so it works in REPL, run, service and release alike.
     beamtalk_supervisor:ensure_root_table(),
     beamtalk_supervisor:ensure_init_gate_table(),
+    %% BT-3994: `supervise`'s start lock (owned here so it outlives callers).
+    beamtalk_fifo_lock:ensure_table(),
 
     %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
     beamtalk_protocol_registry:init(),

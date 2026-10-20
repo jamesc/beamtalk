@@ -162,6 +162,10 @@ class_bump(ClassSelf) ->
 - **Callers of `beamtalk_class_dispatch:class_self_dispatch/4` and `class_self_dispatch_local/4`** pass `(Name, Selector, Args, ReceiverTag)`. The arity is unchanged but the old third argument (`ClassVars`) is gone; a stale caller fails with `badarg` or `function_clause`.
 - A hand-written Erlang class module with no `__beamtalk_meta/0` is outside the loader's `class_var_abi` check, so this rule is its only guard: a module built for the old convention is not refused, it just misbehaves.
 
+### Actor state (ADR 0137)
+
+While an actor callback runs, the actor state map lives in one cell owned by `beamtalk_actor_state`: `install/1` and `uninstall/1` bracket a callback, `take/0` yields the new state on a normal exit, and `adapt/1` converts a `{reply, R, NewState}` result (native methods, ADR 0066 extension funs, `dispatch/4`) into the cell. Never touch `'$bt_actor_state'` with `erlang:get/put/erase` yourself; a block writing a field away from its actor's process raises `actor_state_unreachable`.
+
 **Module map.** `beamtalk_class_vars` is the leaf that owns the key and every access; it calls neither `beamtalk_object_class` nor `beamtalk_behaviour_intrinsics`. Around it:
 
 | Module | Owns |

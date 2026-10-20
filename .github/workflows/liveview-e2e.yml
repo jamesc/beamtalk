@@ -54,7 +54,10 @@ permissions:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04 on 2026-10-20 and Playwright's
+    # chromium does not support it yet ("Playwright does not support chromium
+    # on ubuntu26.04-x64"). Move back to ubuntu-latest once it does.
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

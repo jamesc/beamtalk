@@ -411,8 +411,8 @@ fn test_match_type_pattern_tuple_excludes_actor_reference_shape() {
 
 #[test]
 fn test_match_type_pattern_supervisor_subclass_uses_tuple_tag_check_and_compiles() {
-    // a live Supervisor reference is `{'beamtalk_supervisor' |
-    // 'beamtalk_supervisor_new', ClassAtom, ModuleAtom, Pid}` — a 4-tuple,
+    // a live Supervisor reference is `{'beamtalk_supervisor', ClassAtom,
+    // ModuleAtom, Pid}` — a 4-tuple,
     // not a map, and tagged differently from an actor reference
     // (`'beamtalk_object'`). Naively reusing the tagged-map strategy would
     // silently never match a live supervisor. Verifies both the generated
@@ -442,11 +442,6 @@ fn test_match_type_pattern_supervisor_subclass_uses_tuple_tag_check_and_compiles
         "Supervisor-class type pattern should check the 'beamtalk_supervisor' tag. Got:\n{code}"
     );
     assert!(
-        code.contains("'beamtalk_supervisor_new'"),
-        "Supervisor-class type pattern should also accept the transient \
-         'beamtalk_supervisor_new' tag. Got:\n{code}"
-    );
-    assert!(
         code.contains("'WebApp'"),
         "Supervisor-class type pattern should match the class name atom. Got:\n{code}"
     );
@@ -457,7 +452,7 @@ fn test_match_type_pattern_supervisor_subclass_uses_tuple_tag_check_and_compiles
 #[test]
 fn test_match_type_pattern_dynamic_supervisor_subclass_uses_tuple_tag_check_and_compiles() {
     // `DynamicSupervisor` subclasses use the same
-    // `'beamtalk_supervisor'`/`'beamtalk_supervisor_new'` tuple shape as
+    // `'beamtalk_supervisor'` tuple shape as
     // `Supervisor` subclasses — verifies the dispatch also routes a
     // `DynamicSupervisor(C)` subclass through the supervisor strategy.
     // See the Supervisor test above for why `Foo` (the class whose method
