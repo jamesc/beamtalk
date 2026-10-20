@@ -236,7 +236,23 @@ Adopted: Smalltalk's class-side creation messages (the `spawn` family, with keyw
 
 - **Newcomer.** `spawn` on a supervisor does what `spawn` on an actor does, including not linking to the caller. Configuration is ordinary instance methods, `self args` is the input, and `self` is this supervisor. Leftover class-side configuration is a compile error that names the fix.
 - **Smalltalk developer.** Class-side factory messages, same protocol family as `Actor`; nothing declarative added to the class body.
-- **Erlang/BEAM developer.** Maps 1:1 onto `start_link/2` vs `/3` and `init(Args)`; the parent handle is `self()` in `init/1`, with the usual "don't call yourself from init" rule. Supervisors as children with args are the `{Mod, start_link, [Args]}` they already write.
+- **Erlang/BEAM developer.** Every OTP concept has a direct counterpart:
+
+  | OTP / Elixir | Beamtalk (this ADR, BT-3966) |
+  |---|---|
+  | `supervisor:start_link(Mod, Args)` | `MySup spawnWith: args` (`spawn` passes `nil`) |
+  | `supervisor:start_link({local, N}, Mod, Args)` | `MySup spawnWith: args as: #n` |
+  | `whereis(N)` | `MySup named: #n` |
+  | `Mod:init(Args)` | the configuration methods, reading `self args` |
+  | `{ok, {#{strategy, intensity, period}, Children}}` | `strategy`, `maxRestarts`, `restartWindow`, `childSpecs` |
+  | `self()` inside `init/1` | `self` inside those methods |
+  | child spec map; Elixir `{Mod, Arg}` | `Mod supervisionSpec withId: … withArgs: …` |
+  | `simple_one_for_one` + template | `DynamicSupervisor` + `childClass` |
+  | Elixir `max_children`; child `shutdown` | `maxChildren`; `childShutdown`, `withShutdown:` |
+  | `which_children`, `terminate_child`, `restart_child`, `delete_child` | `whichChildren`, `terminateChild:`, `restartChild:`, `deleteChild:` (BT-3966) |
+  | "never call yourself from `init`" | the same rule; OTP's `calling_self` becomes `#supervisor_start_failed` with a hint |
+
+  Three deliberate differences. `init/1` is split into one method per setting, so a subclass overrides `strategy` alone and inherits the rest; each method is a separate send, so expensive work (reading files, say) belongs in `childSpecs` only, not repeated in several settings. `supervise` (idempotent "ensure it is running") has no OTP counterpart; it serves REPL re-evaluation and the `[application]` boot path. `initialize` runs after start in the caller, where an Erlang programmer would put code after `start_link` returns.
 - **Operator.** Anonymous instances show up in `Node current supervisors` by pid and class through the `beamtalk_supervisor_instances` `pg` group. Nothing about `[application]` roots or top-level `current` changes; a nested bare supervisor is no longer `current`. Hot reload: as ADR 0059 noted, a reloaded supervisor class does not change live child sets; with N instances there are N to restart. Documented, not solved here.
 - **Tooling developer.** `default_root_pids/0` gains the `pg` group. `supervisionSpec` on supervisor classes, instance-side configuration methods and `withId: Integer` are the surface changes visible to the LSP; the type checker no longer flags `spawnWith:` keys on supervisor classes.
 
