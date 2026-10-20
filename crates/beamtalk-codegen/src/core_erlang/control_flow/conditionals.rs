@@ -592,9 +592,7 @@ impl CoreErlangGenerator {
         if self.is_repl_mode() {
             return false;
         }
-        // BT-3912: a plain closure body is a root-like frame (a `MethodBody`
-        // whose scratch is the method's, not a loop's or arm's `StateAcc`).
-        if frame == FrameId::ROOT || self.closure_frame == Some(frame) {
+        if frame == FrameId::ROOT {
             return !self.eligible_families().contains(&VersionPrefix::State);
         }
         self.rebind_frames.get(&frame).is_some_and(|rebind| {

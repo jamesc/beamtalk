@@ -297,7 +297,7 @@ impl CoreErlangGenerator {
             let rebind = if cond_effects {
                 plan.rebind_frame(frame)
             } else {
-                ThreadingPlan::condition_rebind_frame(frame)
+                ThreadingPlan::closure_rebind_frame(frame)
             };
             this.with_rebind_frame(rebind, |this| {
                 if let Expression::Block(cond_block) = condition {
@@ -579,7 +579,7 @@ impl CoreErlangGenerator {
     /// Addendum 2/13, was deleted).
     ///
     /// ADR 0133 Phase 3 (BT-3911, closes BT-3891): the condition closure is a
-    /// frame of its own ([`ThreadingPlan::condition_rebind_frame`]), so a
+    /// frame of its own ([`ThreadingPlan::closure_rebind_frame`]), so a
     /// conditional nested in it is lowered against the closure's scratch map
     /// (private: the closure has no `StateAcc` to continue), not the
     /// enclosing frame's.
@@ -589,7 +589,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
-            this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
+            this.with_rebind_frame(ThreadingPlan::closure_rebind_frame(frame), |this| {
                 if let Expression::Block(cond_block) = condition {
                     this.generate_block_body(cond_block)
                 } else {
@@ -1042,7 +1042,7 @@ impl CoreErlangGenerator {
             this.loop_mode.in_hybrid_loop = true;
             let frame = this.current_branch_frame();
             let result =
-                this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
+                this.with_rebind_frame(ThreadingPlan::closure_rebind_frame(frame), |this| {
                     if let Expression::Block(cond_block) = condition {
                         this.generate_block_body(cond_block)
                     } else {

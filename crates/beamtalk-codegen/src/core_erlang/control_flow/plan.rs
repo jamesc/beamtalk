@@ -656,7 +656,10 @@ impl ThreadingPlan {
     /// condition closure (frame `frame`) is lowered in when it is not part of
     /// the loop's own `StateAcc` frame: the loop's mode, threading nothing
     /// (the closure is called once per iteration and hands back only its
-    /// boolean, so no outer local leaves it).
+    /// boolean, so no outer local leaves it). BT-3912: also the frame of every
+    /// other plain closure body (`with_closure_body_frame`): a closed `fun`
+    /// that hands back only its value, so it has no `StateAcc` to continue and
+    /// extends no `State` chain.
     ///
     /// The frame is a `DirectParams` one whatever the loop's own mode: with
     /// nothing threaded every write is a plain `Let` rebind that dies with the
@@ -664,7 +667,7 @@ impl ThreadingPlan {
     /// frame runs over the bindings map, so [`RebindFrame::with_repl_binding`]
     /// makes every binding a member and a write `Put`s into a map the closure
     /// never hands back (a step no document can carry, and the write is lost).
-    pub(in crate::core_erlang) fn condition_rebind_frame(frame: FrameId) -> RebindFrame {
+    pub(in crate::core_erlang) fn closure_rebind_frame(frame: FrameId) -> RebindFrame {
         RebindFrame {
             frame,
             kind: RebindFrameKind::Loop(ThreadingMode::DirectParams),

@@ -66,6 +66,7 @@
 //! of that function is for an unrelated purpose (conditionals/exception-handling/match-arm
 //! classification), never a second recheck of the same Actor-body-mutation question.
 
+use super::control_flow::ThreadingPlan;
 use super::threaded_ir::{
     self, BindOp, CarrierSlot, FrameId, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
     ThreadedLocalSlot, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
@@ -699,11 +700,7 @@ impl CoreErlangGenerator {
         }
         self.branch_frame_counter += 1;
         let frame = FrameId::new(self.branch_frame_counter);
-        let rebind = RebindFrame {
-            frame,
-            kind: RebindFrameKind::MethodBody,
-            threads: Vec::new(),
-        };
+        let rebind = ThreadingPlan::closure_rebind_frame(frame);
         let saved = self.closure_frame.replace(frame);
         // (The value-position assignments of the body are already in the set
         // the method body installed: it descends into block literals with the
