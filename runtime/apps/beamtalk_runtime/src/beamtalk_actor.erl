@@ -595,6 +595,8 @@ await_initialize(Pid, MonRef) ->
 -spec await_initialize_sys(pid(), reference(), fun((pid()) -> term())) ->
     ok | {error, term()}.
 await_initialize_sys(Pid, MonRef, SysCall) ->
+    %% bt-catcher-audit: not-applicable-no-block - SysCall is a local fun
+    %% wrapping a sys:get_state/replace_state call, never a Beamtalk block
     try SysCall(Pid) of
         _State ->
             erlang:demonitor(MonRef, [flush]),
