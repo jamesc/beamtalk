@@ -98,7 +98,10 @@ sync_send_emits_stop_event_test_() ->
                             {telemetry_event, [beamtalk, actor, dispatch, stop], Measurements,
                                 Metadata} ->
                                 ?assert(maps:is_key(duration, Measurements)),
-                                ?assert(maps:get(duration, Measurements) > 0),
+                                %% `>= 0`, not `> 0`: Windows' monotonic
+                                %% clock has 1ms resolution, so a fast
+                                %% dispatch measures 0 there (BT-3980).
+                                ?assert(maps:get(duration, Measurements) >= 0),
                                 ?assertEqual(Pid, maps:get(pid, Metadata)),
                                 ?assertEqual('Counter', maps:get(class, Metadata)),
                                 ?assertEqual(getValue, maps:get(selector, Metadata)),
@@ -566,8 +569,10 @@ multiple_modes_aggregate_test_() ->
                     GetStats = maps:get(<<"getValue">>, Methods),
                     ?assertEqual(1, maps:get(<<"calls">>, GetStats)),
 
-                    %% Duration should be > 0
-                    ?assert(maps:get(<<"total_duration_ns">>, GetStats) > 0)
+                    %% Duration is recorded. `>= 0`, not `> 0`: Windows'
+                    %% monotonic clock has 1ms resolution, so a single fast
+                    %% call can measure 0 there (BT-3980).
+                    ?assert(maps:get(<<"total_duration_ns">>, GetStats) >= 0)
                 after
                     gen_server:stop(Pid)
                 end

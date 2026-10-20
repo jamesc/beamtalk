@@ -84,10 +84,13 @@ span_emits_stop_event_with_duration_test() ->
             %% Verify the stop event was received
             receive
                 {telemetry_event, Measurements, RecvMeta} ->
-                    %% Duration must be present and positive
+                    %% Duration must be present and non-negative.
+                    %% `>= 0`, not `> 0`: Windows' monotonic clock has 1ms
+                    %% resolution, so a sub-millisecond span measures 0 there
+                    %% (BT-3980).
                     Duration = maps:get(duration, Measurements),
                     ?assert(is_integer(Duration)),
-                    ?assert(Duration > 0),
+                    ?assert(Duration >= 0),
                     %% Monotonic time should be present
                     ?assert(maps:is_key(monotonic_time, Measurements)),
                     %% Our metadata should be preserved
@@ -202,7 +205,9 @@ handler_increments_counters_test() ->
             %% Verify counters
             ?assertEqual(5, counters:get(CounterRef, 1)),
             TotalDuration = counters:get(CounterRef, 2),
-            ?assert(TotalDuration > 0)
+            %% `>= 0`, not `> 0`: Windows' monotonic clock has 1ms resolution,
+            %% so five sub-millisecond spans can total 0 there (BT-3980).
+            ?assert(TotalDuration >= 0)
         after
             gen_server:stop(Pid)
         end
