@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3963 (ADR 0135 §2): a configuration method that sends a message to its
+// own supervisor, which is still inside its `init`. The start must fail with
+// `#supervisor_start_failed` and the "do not send messages to `self`" hint.
+
+Supervisor subclass: Bt3963CallsSelfSup
+
+  childSpecs => self count > 0 ifTrue: [#()] ifFalse: [#(Bt3963Worker)]

@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3407: root supervisor that nests ClassStateSupApp, so ClassStateSupApp's
+// class process is free while its configuration runs. See
+// stdlib/test/fixtures/class_state_sup_app.bt.
+
+Supervisor subclass: ClassStateSupRoot
+
+  childSpecs => #(ClassStateSupApp)

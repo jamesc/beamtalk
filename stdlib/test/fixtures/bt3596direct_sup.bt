@@ -7,9 +7,9 @@
 
 Supervisor subclass: Bt3596DirectSup
 
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
 
-  class children -> List =>
+  childSpecs -> List =>
     victimSpec := Bt3596DirectVictim supervisionSpec withArgs: #{
       #tableName => #bt3596Direct
     }

@@ -458,7 +458,7 @@ Beamtalk provides declarative OTP supervision via `Supervisor subclass:` and `Dy
 
 ```
 Supervisor subclass: WebApp
-  class children => #(Database, HttpServer, WorkerPool)
+  childSpecs => #(Database, HttpServer, WorkerPool)
 ```
 
 ---

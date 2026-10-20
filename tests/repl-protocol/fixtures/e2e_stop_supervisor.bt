@@ -7,4 +7,4 @@
 
 Supervisor subclass: E2EStopSupervisor
 
-  class children -> List => #()
+  childSpecs -> List => #()

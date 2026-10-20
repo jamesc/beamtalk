@@ -22,16 +22,23 @@ This chapter covers:
 ## Static supervisors
 
 A static supervisor knows its children at start-up time. Subclass `Supervisor`
-and override `class children` to return the list of actor classes to supervise:
+and override `childSpecs` to return the list of actor classes to supervise.
+Configuration (`childSpecs`, `strategy`, …) is instance-side: it is read from
+the supervisor being started, so the tests below start one to look at it.
 
 ```beamtalk
 TestCase subclass: Ch17StaticSupervisor
 
+  // `supervise` starts the one registered CounterApp, so don't overlap.
+  class serial -> Boolean => true
+
   testSupervisorClass =>
     // Supervisor subclass: defines a supervision tree.
-    // class children => returns the list of actors to supervise.
-    self assert: CounterApp strategy equals: #oneForOne
-    self assert: CounterApp children size equals: 1
+    // childSpecs => returns the list of actors to supervise.
+    sup := CounterApp supervise unwrap
+    self assert: sup strategy equals: #oneForOne
+    self assert: sup childSpecs size equals: 1
+    sup stop
 
   testSupervisorIsSupervisorFlag =>
     self assert: CounterApp isSupervisor
@@ -49,10 +56,12 @@ Actor subclass: Counter
   value => self.value
 
 Supervisor subclass: CounterApp
-  class children => #[Counter supervisionSpec]
+  childSpecs =>
+    spec := Counter supervisionSpec
+    #(spec)
 ```
 
-`class children` returns an array of `SupervisionSpec` values.
+`childSpecs` returns a list of `SupervisionSpec` values (or actor classes).
 The simplest spec is `SomeActorClass supervisionSpec`, which uses
 the actor's default restart policy (`#temporary`).
 
@@ -123,7 +132,7 @@ Actor subclass: PersistentWorker
 
 ## Restart strategies
 
-Override `class strategy` on your supervisor to change the strategy:
+Override `strategy` on your supervisor to change the strategy:
 
 | Strategy | Meaning |
 |----------|---------|
@@ -134,8 +143,12 @@ Override `class strategy` on your supervisor to change the strategy:
 ```beamtalk
 TestCase subclass: Ch17Strategies
 
+  class serial -> Boolean => true
+
   testDefaultStrategyIsOneForOne =>
-    self assert: CounterApp strategy equals: #oneForOne
+    sup := CounterApp supervise unwrap
+    self assert: sup strategy equals: #oneForOne
+    sup stop
 ```
 
 ## Dynamic supervisors
@@ -144,7 +157,7 @@ A `DynamicSupervisor` starts with no children. You add children at
 runtime as demand requires. This is ideal for per-request or per-connection
 workers.
 
-Subclass `DynamicSupervisor` and override `class childClass`:
+Subclass `DynamicSupervisor` and override `childClass`:
 
 ```beamtalk
 TestCase subclass: Ch17DynamicSupervisor
@@ -153,16 +166,18 @@ TestCase subclass: Ch17DynamicSupervisor
     // DynamicSupervisor subclasses are also supervisors
     self assert: WorkerPool isSupervisor
 
-  testDynamicSupervisorHasNoStaticChildren =>
-    // Dynamic supervisors don't define class children
-    self assert: WorkerPool childClass equals: Counter
+  testDynamicSupervisorChildClass =>
+    // Dynamic supervisors declare a childClass instead of childSpecs
+    pool := WorkerPool supervise unwrap
+    self assert: pool childClass equals: Counter
+    pool stop
 ```
 
 A `WorkerPool` is defined like this:
 
 ```beamtalk
 DynamicSupervisor(Counter) subclass: WorkerPool
-  class childClass => Counter
+  childClass => Counter
 ```
 
 At runtime, call `startChild` / `startChild:` on a running supervisor
@@ -181,13 +196,18 @@ instance to add workers:
 ```beamtalk
 TestCase subclass: Ch17Lifecycle
 
+  class serial -> Boolean => true
+
   testSupervisorClassMethods =>
     // supervise — starts the supervisor as an OTP process
     // current  — retrieves a running supervisor
     // isSupervisor — true for all Supervisor subclasses
     self assert: CounterApp isSupervisor
-    self assert: CounterApp strategy equals: #oneForOne
-    self assert: (CounterApp children size) equals: 1
+    sup := CounterApp supervise unwrap
+    self assert: CounterApp current equals: sup
+    self assert: sup strategy equals: #oneForOne
+    self assert: (sup childSpecs size) equals: 1
+    sup stop
 ```
 
 Key class-side API:
@@ -197,8 +217,6 @@ Key class-side API:
 | `MyApp supervise` | supervisor pid | Start the supervision tree |
 | `MyApp current` | supervisor pid | Get the running instance |
 | `MyApp isSupervisor` | Boolean | Always `true` for supervisors |
-| `MyApp strategy` | Symbol | Restart strategy |
-| `MyApp children` | Array | Static child specs |
 
 Key instance-side API:
 
@@ -208,6 +226,9 @@ Key instance-side API:
 | `sup which: Counter` | Find a specific child |
 | `sup terminate: Counter` | Stop a specific child |
 | `sup count` | Count running children |
+| `sup strategy` | Restart strategy (configuration, overridable) |
+| `sup childSpecs` | Static child specs (configuration, overridable) |
+| `sup args` | Start args (`nil` for `supervise`) |
 | `sup stop` | Shut down the supervisor and all children |
 
 ## Graceful shutdown timeout
@@ -226,8 +247,8 @@ Static supervision tree:
 
 ```beamtalk
 Supervisor subclass: MyApp
-  class strategy => #oneForOne          // optional, default
-  class children => #[
+  strategy => #oneForOne          // optional, default
+  childSpecs => #[
     SomeActor supervisionSpec,
     OtherActor supervisionSpec withRestart: #permanent
   ]
@@ -237,7 +258,7 @@ Dynamic supervision tree:
 
 ```beamtalk
 DynamicSupervisor(Counter) subclass: WorkerPool
-  class childClass => Counter
+  childClass => Counter
 
 // pool := WorkerPool supervise
 // pool startChild        // spawn a new Counter

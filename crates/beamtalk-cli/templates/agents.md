@@ -101,7 +101,7 @@ Object subclass: MathUtil
 ```beamtalk
 // Supervisor: an OTP supervision tree; children start in order.
 Supervisor subclass: AppSup
-  class children => #(Counter)
+  childSpecs => #(Counter)
 ```
 
 Choosing:

@@ -7,6 +7,6 @@
 
 DynamicSupervisor(Bt3965SlowStopper) subclass: Bt3965ImpatientPool
 
-  class childClass => Bt3965SlowStopper
+  childClass => Bt3965SlowStopper
 
-  class childShutdown -> Integer => 50
+  childShutdown -> Integer => 50

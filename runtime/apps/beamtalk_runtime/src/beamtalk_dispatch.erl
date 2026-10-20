@@ -437,7 +437,11 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                     %% That delegation makes the per-node probe report `true` as soon as
                     %% it reaches `Supervisor`/`DynamicSupervisor` — the walk never
                     %% actually visits a node named `'Object'` for an unoverridden
-                    %% supervisor, it stops one level short. So an unoverridden
+                    %% supervisor, it stops one level short. (A user supervisor
+                    %% subclass's module does export `has_method_local/1` since
+                    %% ADR 0135, but it answers only the class's own selectors and
+                    %% extensions, so the walk passes it for `printString` and
+                    %% still stops at the stdlib base.) So an unoverridden
                     %% supervisor's MethodOwner is `'Supervisor'` or
                     %% `'DynamicSupervisor'`, never `'Object'` — without this branch,
                     %% `aSupervisor printString` would fall through to the compiled

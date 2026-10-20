@@ -147,13 +147,18 @@ fn test_static_supervisor_init_delegates_to_static_init() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    // init/1 must delegate to beamtalk_supervisor:static_init/2 to avoid a gen_server
+    // init/1 must delegate to beamtalk_supervisor:static_init/3 to avoid a gen_server
     // deadlock: the class gen_server is blocked waiting for supervisor:start_link to return,
-    // so calling class_send from init/1 would deadlock.
-    // Match the exact call shape to verify argument order (module atom first, class atom second).
+    // so calling class_send from init/1 would deadlock. ADR 0135: the start args are
+    // forwarded so the configuration methods can read `self args`.
+    // Match the exact call shape to verify argument order (module, class, args).
     assert!(
-        code.contains("call 'beamtalk_supervisor':'static_init'('bt@webapp', 'WebApp')"),
-        "init/1 must delegate to beamtalk_supervisor:static_init/2 with module and class atoms. Got:\n{code}"
+        code.contains("'init'/1 = fun (Args) ->"),
+        "init/1 must bind its start args. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_supervisor':'static_init'('bt@webapp', 'WebApp', Args)"),
+        "init/1 must delegate to beamtalk_supervisor:static_init/3 with module, class and args. Got:\n{code}"
     );
     // Must NOT contain direct class_send calls — those would deadlock.
     assert!(
@@ -215,23 +220,44 @@ fn test_dynamic_supervisor_init_delegates_to_dynamic_init() {
     let module = make_dynamic_supervisor_module();
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");
-    // simple_one_for_one is set inside beamtalk_supervisor:dynamic_init/2 (runtime),
+    // simple_one_for_one is set inside beamtalk_supervisor:dynamic_init/3 (runtime),
     // not in the generated init/1. Verify the delegation with correct argument order.
     assert!(
-        code.contains("call 'beamtalk_supervisor':'dynamic_init'('bt@workerpool', 'WorkerPool')"),
-        "Dynamic supervisor init/1 must delegate to beamtalk_supervisor:dynamic_init/2 with module and class atoms. Got:\n{code}"
+        code.contains(
+            "call 'beamtalk_supervisor':'dynamic_init'('bt@workerpool', 'WorkerPool', Args)"
+        ),
+        "Dynamic supervisor init/1 must delegate to beamtalk_supervisor:dynamic_init/3 with module, class and args. Got:\n{code}"
     );
 }
 
 #[test]
-fn test_dynamic_supervisor_init_fetches_child_class() {
-    let module = make_dynamic_supervisor_module();
-    let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
-        .expect("codegen should succeed");
-    assert!(
-        code.contains("'childClass'"),
-        "Dynamic supervisor init/1 must call 'childClass'. Got:\n{code}"
-    );
+fn test_supervisor_start_link_forms() {
+    // ADR 0135: start_link/0 (what `supervise` runs) registers under the module
+    // name with `nil` start args; start_link/1 starts an anonymous instance with
+    // the given args, so a parent can pass args.
+    for (module, name) in [
+        (make_static_supervisor_module(), "bt@webapp"),
+        (make_dynamic_supervisor_module(), "bt@workerpool"),
+    ] {
+        let code =
+            generate_module(&module, CodegenOptions::new(name)).expect("codegen should succeed");
+        assert!(
+            code.contains("'start_link'/0, 'start_link'/1, 'init'/1"),
+            "must export start_link/0,1. Got:\n{code}"
+        );
+        assert!(
+            code.contains(&format!(
+                "call 'supervisor':'start_link'({{'local', '{name}'}}, '{name}', 'nil')"
+            )),
+            "start_link/0 must pass nil start args. Got:\n{code}"
+        );
+        assert!(
+            code.contains(&format!(
+                "'start_link'/1 = fun (Args) ->\n    call 'supervisor':'start_link'('{name}', Args)"
+            )),
+            "start_link/1 must start an anonymous instance with Args. Got:\n{code}"
+        );
+    }
 }
 
 #[test]
@@ -250,15 +276,73 @@ fn test_dynamic_supervisor_init_does_not_fetch_children() {
 }
 
 #[test]
-fn test_dynamic_supervisor_exports_and_defines_child_class() {
-    // beamtalk_supervisor:startChild/1,2 calls SupMod:'childClass'() directly at runtime.
-    // Without this export, startChild will fail with 'undef'.
+fn test_dynamic_supervisor_does_not_emit_class_side_child_class() {
+    // ADR 0135 §2: the child class is per instance (read by dynamic_init/3 and
+    // stored in the pool's process dictionary); there is no class-side
+    // `childClass/0` for the runtime to call any more.
     let module = make_dynamic_supervisor_module();
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");
     assert!(
-        code.contains("'childClass'/0"),
-        "Dynamic supervisor must export/define 'childClass'/0 (called by beamtalk_supervisor:startChild). Got:\n{code}"
+        !code.contains("'childClass'/0"),
+        "Dynamic supervisor must not export/define 'childClass'/0. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_supervisor_instance_methods_are_compiled_with_dispatch() {
+    // ADR 0135 §2: configuration is instance-side. The supervisor module must
+    // compile the class's instance methods and export the dispatch entry points
+    // the runtime's instance dispatch probes; unknown selectors delegate to the
+    // stdlib Supervisor base, and has_method_local/1 answers only for the
+    // class's own selectors (so inherited ones keep the base as their owner).
+    let mut module = make_static_supervisor_module();
+    module.classes[0].methods.push(MethodDefinition {
+        selector: MessageSelector::Unary("childSpecs".into()),
+        parameters: vec![],
+        body: vec![bare(Expression::Literal(
+            Literal::List(vec![]),
+            Span::new(0, 0),
+        ))],
+        kind: MethodKind::Primary,
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        is_class_method: false,
+        span: Span::new(0, 0),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    });
+    let code =
+        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
+    for export in [
+        "'childSpecs'/1",
+        "'dispatch'/3",
+        "'dispatch'/4",
+        "'has_method'/1",
+        "'has_method_local'/1",
+    ] {
+        assert!(code.contains(export), "must export {export}. Got:\n{code}");
+    }
+    assert!(
+        code.contains(
+            "<'childSpecs'> when 'true' ->\n            call 'bt@webapp':'childSpecs'(Self)"
+        ),
+        "dispatch/3 must route childSpecs to its function. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'bt@stdlib@supervisor':'dispatch'(Selector, Args, Self)")
+            && code.contains("call 'beamtalk_extensions':'lookup'('WebApp', Selector)"),
+        "dispatch/3 must delegate other selectors to the Supervisor base. Got:\n{code}"
+    );
+    let local = code
+        .split("'has_method_local'/1 = fun")
+        .nth(1)
+        .expect("has_method_local/1 must be defined");
+    assert!(
+        local.contains("['childSpecs']") && local.contains("<'false'> when 'true' -> 'false'"),
+        "has_method_local/1 must answer only the class's own selectors. Got:\n{code}"
     );
 }
 
@@ -290,7 +374,8 @@ fn test_is_actor_class_returns_true_for_dynamic_supervisor_subclass() {
 
 #[test]
 fn test_static_supervisor_with_user_class_method_exports_it() {
-    // A concrete WebApp with `class children => ...` should have class_children/2 exported.
+    // A concrete WebApp with a user class method (here `class children`, which the
+    // validator rejects since ADR 0135, but codegen still compiles) exports it.
     let children_method = MethodDefinition {
         selector: MessageSelector::Unary("children".into()),
         parameters: vec![],
@@ -647,39 +732,6 @@ fn test_dynamic_supervisor_cross_module_alias_reference_emits_user_type() {
     assert!(
         code.contains("'restart_strategy'"),
         "module must declare the matching named -type for the cross-module alias. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_dynamic_supervisor_child_class_calls_registry_whereis_with_class_name() {
-    // `childClass/0` is called by `beamtalk_supervisor:startChild/1,2` to resolve
-    // the child class at runtime.  The generated body must call
-    // `beamtalk_class_registry:whereis_class` with the *class* atom (not the
-    // module atom) — otherwise `startChild` silently starts the wrong child.
-    let module = make_dynamic_supervisor_module();
-    let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
-        .expect("codegen should succeed");
-    assert!(
-        code.contains("call 'beamtalk_class_registry':'whereis_class'('WorkerPool')"),
-        "childClass/0 must call beamtalk_class_registry:whereis_class with the class name atom. \
-         Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_dynamic_supervisor_child_class_body_calls_class_send_with_child_class_selector() {
-    // After resolving the class proxy, `childClass/0` must forward the
-    // `childClass` message via `beamtalk_object_class:class_send` — that is the
-    // only way to invoke a user-defined class-side method through the class
-    // gen_server.  A bare function call would bypass the gen_server and break
-    // class-variable access inside the method.
-    let module = make_dynamic_supervisor_module();
-    let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
-        .expect("codegen should succeed");
-    // The selector atom passed to class_send must be 'childClass'.
-    assert!(
-        code.contains("'beamtalk_object_class':'class_send'(SupCp, 'childClass', [])"),
-        "childClass/0 must forward selector 'childClass' to class_send. Got:\n{code}"
     );
 }
 

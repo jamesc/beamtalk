@@ -20,8 +20,8 @@ Tests cover:
 - supervisor tuple structure
 - stale-handle error translation (noproc → beamtalk_error with stale_handle kind)
 - root registry — nil, roundtrip, overwrite, clear_root
-- hierarchy walk — static_init/2, dynamic_init/2 via ETS
-- hierarchy depth limit — call_inherited_class_method_direct error
+- static_init/3, dynamic_init/3 — instance-side configuration, start args,
+  calling_self hint, validator errors (ADR 0135 §2)
 - start_child_via_class_method/4: valid return, invalid return, read-only snapshot reads, write raises class_state_read_only
   unwrap, process dictionary cleanup, child linking, supervisor restart,
   supervisor tuple return
@@ -35,7 +35,7 @@ Tests cover:
   on BOTH static and dynamic paths, {error, terminate_failed} for other
   failures, {error, stale_handle} for dead supervisor
 - startChild/1 and /2 success + error paths
-- run_initialize/1 invokes class_initialize: via hierarchy walk
+- run_initialize/1 sends instance-side initialize; a raise stops the supervisor
 - to_otp_strategy/1 oneForAll, restForOne, pass-through
 - wrap_child/3 supervisor and actor branches via whichChild
 - build_child_specs/1 nested-supervisor OTP spec
@@ -43,7 +43,7 @@ Tests cover:
 - stale_handle startChild/1 and /2 coverage
 - startChild/1,2 returns {ok, ...} / {error, #beamtalk_error{}}
 - with_live_supervisor/3 returns {error, ...} on stale handle
-- class_dispatch hook: initialize: runs only on fresh start, not already_started or error
+- class_dispatch hook: initialize runs only on fresh start, not already_started or error
 - start_child_via_class_method/4 rejects an abstract class's `self new`,
   resolved by class name rather than a fabricated process-dictionary flag
 """.
@@ -52,18 +52,6 @@ Tests cover:
 
 %% OTP supervisor callback and worker start function — required for supervisor:start_link/3.
 -export([init/1, start_worker/1]).
-
-%% Fake class methods used by the hierarchy-walk test.
-%% These are called directly by call_class_method_direct / call_inherited_class_method_direct
-%% when the test populates the module ETS table with this module as the "parent" class module.
--export([
-    class_children/1,
-    class_strategy/1,
-    class_maxRestarts/1,
-    class_restartWindow/1,
-    class_maxChildren/1,
-    class_childShutdown/1
-]).
 
 %% Fake class methods for start_child_via_class_method tests.
 %% Simulates what a compiled Beamtalk keyword class method does: start a gen_server
@@ -93,18 +81,7 @@ Tests cover:
 %% shape of `self new` inside a compiled class method body.
 -export([class_selfNew/1]).
 
-%% Fake class methods for dynamic_init and hierarchy tests.
--export([class_childClass/1]).
-
 %% Fake class-method and helper exports for added coverage tests.
--export([
-    childClass/0,
-    'class_initialize:'/2,
-    class_strategy_all/1,
-    class_strategy_rest/1,
-    class_strategy_unknown/1
-]).
-
 %% gen_server callbacks for the fake child actor used above.
 -export([handle_call/3, handle_cast/2]).
 
@@ -127,6 +104,7 @@ init({simple_one_for_one, ChildSpec, MaxChildren}) ->
     put('$beamtalk_max_children', MaxChildren),
     init({simple_one_for_one, ChildSpec});
 init({SupFlags, ChildSpecs}) ->
+    put_pending_child_class(),
     {ok, {SupFlags, ChildSpecs}};
 %% Fake child actor init — minimal gen_server for supervision tests.
 init(fake_child) ->
@@ -731,167 +709,320 @@ ensure_root_table_idempotent_test() ->
     ?assertEqual(nil, beamtalk_supervisor:get_root()).
 
 %%====================================================================
-%% Tests: hierarchy walk uses ETS, not gen_server:call
+%% Tests: instance-side configuration read in init/1 (ADR 0135 §2, BT-3963)
 %%====================================================================
 
--doc """
-Verify that static_init/2 can walk a two-level Supervisor subclass
-hierarchy when the ancestor's class methods are in a module looked up
-via ETS — without any gen_server being registered for those classes.
-
-In the old code, call_inherited_class_method_direct called
-beamtalk_object_class:module_name/1 (gen_server:call).  If the ancestor
-class gen_server is blocked inside startLink/1, that call deadlocks.
-The new code reads from beamtalk_class_metadata (ETS) instead.
-
-We simulate the deadlock scenario by populating ETS for a fake two-level
-hierarchy where NO gen_server processes are registered for either class.
-The old code would crash (gen_server:call to undefined); the new code
-resolves the module from ETS and succeeds.
-""".
-static_init_walks_hierarchy_via_ets_not_genserver_test() ->
-    %% Ensure ETS tables exist.
+%% Register a real class process for one of the fixture's class names, with
+%% the fixture as its module, answering the instance methods in `Config`.
+with_bt3963_class(ClassName, Config, Fun) ->
+    beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_metadata:new(),
-
-    %% Set up a two-level hierarchy in ETS:
-    %%   'BT1285Child' extends 'BT1285Parent' extends none
-    %% Neither has a registered class gen_server process — this simulates
-    %% the scenario where 'BT1285Parent' gen_server is blocked in startLink/1.
-    beamtalk_class_metadata:insert('BT1285Child', undefined, undefined, 'BT1285Parent', undefined),
-
-    %% Register module for 'BT1285Parent' only — 'BT1285Child' uses a module
-    %% (erlang) that does NOT export class_children/1, forcing the walk upward.
-    beamtalk_class_metadata:insert('BT1285Parent', ?MODULE, undefined, none, undefined),
-
-    %% static_init/2 takes (Module, ClassName) where Module is the child's
-    %% BEAM module.  We use 'erlang' as the child module so none of the
-    %% class_* functions are exported there — the walk must climb to 'BT1285Parent'.
-    %% 'BT1285Child' is not registered with whereis so ClassPid = undefined;
-    %% that is fine since ClassSelf is only used as a value passed to class methods.
+    ok = beamtalk_bt3963_sup_fixture:configure(Config),
+    {ok, ClassPid} = beamtalk_object_class:start_link(ClassName, #{
+        superclass => none, module => beamtalk_bt3963_sup_fixture
+    }),
+    unlink(ClassPid),
     try
-        Result = static_init_registered(static_init, erlang, 'BT1285Child'),
-        %% The walk found class_children/1, class_strategy/1, class_maxRestarts/1,
-        %% and class_restartWindow/1 in ?MODULE (this test module) via the ETS lookup.
-        %% It should succeed with zero children and one_for_one strategy.
-        ?assertMatch(
-            {ok, {#{strategy := one_for_one, intensity := 3, period := 5}, []}},
-            Result
-        )
+        Fun()
     after
-        %% Clean up ETS entries even if an assertion fails, to avoid polluting other tests.
-        beamtalk_class_metadata:delete('BT1285Child'),
-        beamtalk_class_metadata:delete('BT1285Parent')
+        gen_server:stop(ClassPid, normal, 5000),
+        beamtalk_bt3963_sup_fixture:unconfigure()
     end.
 
-dynamic_init_walks_hierarchy_via_ets_test() ->
-    %% dynamic_init/2 uses the same ETS hierarchy walk as static_init.
-    beamtalk_class_metadata:new(),
+bt3963_sup(ClassName, Pid) ->
+    {beamtalk_supervisor, ClassName, beamtalk_bt3963_sup_fixture, Pid}.
 
-    beamtalk_class_metadata:insert(
-        'BT1960DynChild', undefined, undefined, 'BT1960DynParent', undefined
-    ),
-    beamtalk_class_metadata:insert('BT1960DynParent', ?MODULE, undefined, none, undefined),
+stop_linked(Pid) ->
+    unlink(Pid),
+    gen_server:stop(Pid).
 
-    %% class_childClass returns a supervisor subclass object, so register it.
-    beamtalk_class_metadata:insert(
-        'BT1960DynChildSup', undefined, undefined, 'Supervisor', undefined
-    ),
-
-    %% dynamic_init needs class_childClass, class_maxRestarts, class_restartWindow.
-    %% class_childClass returns a class object (beamtalk_object record).
+%% Start the fixture expecting `init/1` to fail; return the exit reason.
+start_failing(Args) ->
+    Trapping = process_flag(trap_exit, true),
     try
-        erase('$beamtalk_max_children'),
-        Result = static_init_registered(dynamic_init, erlang, 'BT1960DynChild'),
-        %% BT-3964: class maxChildren (7 here) is stashed in the calling —
-        %% in production, the supervisor — process's dictionary for
-        %% startChild's capacity check. The `'$beamtalk_max_children'` key
-        %% asserted here is the one the startChild_max_children tests seed.
-        ?assertEqual(7, erase('$beamtalk_max_children')),
-        %% dynamic_init always uses simple_one_for_one strategy.
-        %% The child spec should contain a start_link entry for the supervisor child.
+        {error, Reason} = beamtalk_bt3963_sup_fixture:start_link(Args),
+        receive
+            {'EXIT', _, _} -> ok
+        after 100 -> ok
+        end,
+        Reason
+    after
+        process_flag(trap_exit, Trapping)
+    end.
+
+bt3963_static_config(Overrides) ->
+    maps:merge(
+        #{
+            kind => static,
+            childSpecs => [],
+            strategy => oneForOne,
+            maxRestarts => 10,
+            restartWindow => 60
+        },
+        Overrides
+    ).
+
+static_init_reads_config_from_instance_with_start_args_test() ->
+    Test = self(),
+    Config = bt3963_static_config(#{
+        childSpecs => fun(Self) ->
+            Test ! {configured, Self, beamtalk_supervisor:args(Self)},
+            []
+        end,
+        strategy => oneForAll,
+        maxRestarts => 4,
+        restartWindow => 9
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        {ok, Pid} = beamtalk_bt3963_sup_fixture:start_link(#{port => 80}),
+        try
+            Sup = bt3963_sup('BT3963Sup', Pid),
+            %% `self` in a configuration method is the supervisor being
+            %% started, and `self args` its start args.
+            receive
+                {configured, Self, ArgsInInit} ->
+                    ?assertEqual(Sup, Self),
+                    ?assertEqual({ok, #{port => 80}}, ArgsInInit)
+            after 2000 -> error(not_configured)
+            end,
+            ?assertEqual({ok, #{port => 80}}, beamtalk_supervisor:args(Sup)),
+            ?assertEqual(
+                {ok, #{strategy => oneForAll, maxRestarts => 4, restartWindow => 9}},
+                beamtalk_supervisor:configured_flags(Pid)
+            ),
+            ?assertEqual(
+                {oneForAll, #{maxRestarts => 4, window => 9}},
+                beamtalk_process_navigation:supervisor_config(beamtalkSupervisor, Pid)
+            )
+        after
+            stop_linked(Pid)
+        end
+    end).
+
+static_init_args_nil_for_registered_start_and_stale_after_stop_test() ->
+    with_bt3963_class('BT3963Sup', bt3963_static_config(#{}), fun() ->
+        %% start_link/0 is what `supervise` runs: registered, args nil.
+        {ok, Pid} = beamtalk_bt3963_sup_fixture:start_link(),
+        Sup = bt3963_sup('BT3963Sup', Pid),
+        ?assertEqual(Pid, whereis(beamtalk_bt3963_sup_fixture)),
+        ?assertEqual({ok, nil}, beamtalk_supervisor:args(Sup)),
+        stop_linked(Pid),
         ?assertMatch(
-            {ok, {#{strategy := simple_one_for_one, intensity := 3, period := 5}, [_ChildSpec]}},
-            Result
+            {error, #beamtalk_error{kind = stale_handle, selector = args}},
+            beamtalk_supervisor:args(Sup)
+        )
+    end).
+
+static_init_old_two_argument_form_passes_nil_args_test() ->
+    %% ADR 0125: modules compiled before ADR 0135 call static_init/2.
+    with_bt3963_class('BT3963Sup', bt3963_static_config(#{}), fun() ->
+        ?assertMatch(
+            {ok, {#{strategy := one_for_one, intensity := 10, period := 60}, []}},
+            beamtalk_supervisor:static_init(beamtalk_bt3963_sup_fixture, 'BT3963Sup')
         ),
-        %% BT-3965: class childShutdown (1234 here) replaces the template's
-        %% shutdown (`infinity` for this supervisor child class).
-        {ok, {_, [ChildSpec]}} = Result,
-        ?assertEqual(1234, maps:get(shutdown, ChildSpec))
-    after
-        beamtalk_class_metadata:delete('BT1960DynChild'),
-        beamtalk_class_metadata:delete('BT1960DynParent'),
-        beamtalk_class_metadata:delete('BT1960DynChildSup')
-    end.
+        ?assertEqual(nil, erase('$beamtalk_sup_args')),
+        erase('$beamtalk_sup_flags')
+    end).
 
-hierarchy_depth_limit_error_test() ->
-    %% Verify that call_inherited_class_method_direct raises
-    %% {supervisor_init_method_not_found, FunName} when the depth limit is exceeded.
-    %% We create a circular-ish hierarchy by having a class point to itself (via ETS).
+static_init_config_messaging_self_fails_with_hint_test() ->
+    %% A configuration method that sends to its own supervisor gets OTP's
+    %% calling_self exit; the start fails with the ADR 0135 hint.
+    Config = bt3963_static_config(#{
+        childSpecs => fun(Self) ->
+            {ok, Count} = beamtalk_supervisor:countChildren(Self),
+            [Count]
+        end
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        Reason = start_failing(nil),
+        ?assertMatch(
+            #beamtalk_error{kind = supervisor_start_failed, selector = childSpecs}, Reason
+        ),
+        #beamtalk_error{hint = Hint} = Reason,
+        ?assertNotEqual(nomatch, binary:match(Hint, <<"do not send messages to `self`">>))
+    end).
+
+static_init_config_raise_fails_start_with_structured_error_test() ->
+    Config = bt3963_static_config(#{strategy => fun(_Self) -> error(badarg) end}),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        ?assertMatch(#beamtalk_error{}, start_failing(nil))
+    end).
+
+static_init_invalid_strategy_and_intensity_fail_with_type_error_test() ->
+    lists:foreach(
+        fun({Overrides, Selector}) ->
+            with_bt3963_class('BT3963Sup', bt3963_static_config(Overrides), fun() ->
+                ?assertMatch(
+                    #beamtalk_error{kind = type_error, selector = Selector}, start_failing(nil)
+                )
+            end)
+        end,
+        [
+            {#{strategy => oneForSome}, strategy},
+            {#{maxRestarts => -1}, maxRestarts},
+            {#{restartWindow => 0}, restartWindow}
+        ]
+    ).
+
+start_failed_error_uses_cause_hint_message_or_kind_test() ->
+    WithHint = beamtalk_error:new(type_error, 'X', maxChildren, <<"the hint">>),
+    NoHint = (beamtalk_error:new(does_not_understand, 'X', childSpecs))#beamtalk_error{
+        message = <<"the message">>, hint = undefined
+    },
+    Bare = (beamtalk_error:new(boom, 'X', childSpecs))#beamtalk_error{
+        message = <<>>, hint = undefined
+    },
+    Hint = fun(Reason) ->
+        (beamtalk_supervisor:start_failed_error(supervisor_start_failed, 'Sup', supervise, Reason))#beamtalk_error.hint
+    end,
+    ?assertEqual(<<"the hint">>, Hint(WithHint)),
+    ?assertEqual(<<"the message">>, Hint(NoHint)),
+    ?assertEqual(<<"boom">>, Hint(Bare)),
+    %% A static parent reports a nested supervisor's init failure wrapped by
+    %% OTP; the nested error's hint still reaches the caller.
+    ?assertEqual(
+        <<"the hint">>, Hint({shutdown, {failed_to_start_child, 'Inner', WithHint}})
+    ),
+    ?assertMatch(
+        #beamtalk_error{details = #{cause := WithHint}},
+        beamtalk_supervisor:start_failed_error(supervisor_start_failed, 'Sup', supervise, WithHint)
+    ).
+
+static_init_two_argument_form_rejects_pre_adr_0135_module_test() ->
+    %% A module without dispatch/4 (compiled before ADR 0135) fails with a
+    %% "recompile" hint instead of an inherited subclassResponsibility.
+    Reason =
+        try beamtalk_supervisor:static_init(lists, 'BT3963Old') of
+            Other -> {no_exit, Other}
+        catch
+            exit:R -> R
+        end,
+    ?assertMatch(#beamtalk_error{kind = supervisor_start_failed}, Reason),
+    #beamtalk_error{hint = Hint} = Reason,
+    ?assertNotEqual(nomatch, binary:match(Hint, <<"recompile">>)).
+
+static_init_config_class_var_write_raises_read_only_test() ->
+    %% ADR 0130 §5: configuration still runs in a read-only snapshot region of
+    %% the supervisor's class; a class-variable write fails the start.
+    Config = bt3963_static_config(#{
+        childSpecs => fun(_Self) ->
+            ClassSelf =
+                {beamtalk_object, 'BT3963Sup class', beamtalk_bt3963_sup_fixture,
+                    beamtalk_class_registry:whereis_class('BT3963Sup')},
+            beamtalk_class_vars:put(ClassSelf, n, 1)
+        end
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        ?assertMatch(#beamtalk_error{kind = class_state_read_only}, start_failing(nil))
+    end).
+
+%% A fake class object for a supervisor child class (the nested-supervisor
+%% branch of build_child_spec/2 needs no message dispatch).
+bt3963_supervisor_child_class(Name) ->
     beamtalk_class_metadata:new(),
-
-    %% Create a hierarchy where every class points to a parent that doesn't have
-    %% the method, eventually exceeding the depth limit of 30.
-    %% A points to B, B points to A — circular, will hit depth limit.
-    %% Both modules are 'erlang' which won't have class_children.
-    beamtalk_class_metadata:insert('BT1960LoopA', erlang, undefined, 'BT1960LoopB', undefined),
-    beamtalk_class_metadata:insert('BT1960LoopB', erlang, undefined, 'BT1960LoopA', undefined),
-
-    try
-        ?assertError(
-            {supervisor_init_method_not_found, class_children},
-            static_init_registered(static_init, erlang, 'BT1960LoopA')
-        )
-    after
-        beamtalk_class_metadata:delete('BT1960LoopA'),
-        beamtalk_class_metadata:delete('BT1960LoopB')
-    end.
-
-hierarchy_method_not_found_no_parent_test() ->
-    %% When a class has no parent (not_found in hierarchy table),
-    %% the walk raises {supervisor_init_method_not_found, FunName}.
-    beamtalk_class_metadata:new(),
-
-    %% 'BT1960Orphan' has no entry in hierarchy table at all.
-    %% The module (erlang) doesn't export class_children/1.
-    try
-        ?assertError(
-            {supervisor_init_method_not_found, class_children},
-            static_init_registered(static_init, erlang, 'BT1960Orphan')
-        )
-    after
-        ok
-    end.
-
-%%====================================================================
-%% Fake class methods for the hierarchy-walk test above
-%%====================================================================
-
-class_children(_ClassSelf) ->
-    [].
-class_strategy(_ClassSelf) -> oneForOne.
-class_maxRestarts(_ClassSelf) -> 3.
-class_restartWindow(_ClassSelf) -> 5.
-class_maxChildren(_ClassSelf) -> 7.
-class_childShutdown(_ClassSelf) -> 1234.
-
-%% Fake class_childClass for dynamic_init tests.
-%% Returns a class object for a supervisor subclass so build_child_spec takes the
-%% simple path (no message dispatch needed). class_name/1 is called via gen_server,
-%% so we spawn a tiny process that responds to it. The process handles one class_name
-%% call then exits cleanly (build_child_spec only calls it once).
-class_childClass(_ClassSelf) ->
-    FakeClassPid = spawn(fun() ->
+    beamtalk_class_metadata:insert(Name, undefined, undefined, 'Supervisor', undefined),
+    ClassPid = spawn(fun Loop() ->
         receive
             {'$gen_call', From, class_name} ->
-                gen_server:reply(From, 'BT1960DynChildSup')
-        after 5000 ->
-            ok
+                gen_server:reply(From, Name),
+                Loop();
+            stop ->
+                ok
         end
     end),
-    %% Tag with " class" so is_class_object returns true.
-    %% BT1960DynChildSup inherits from Supervisor so is_supervisor returns true
-    %% and build_child_spec takes the nested-supervisor shortcut path.
-    #beamtalk_object{class = 'BT1960DynChildSup class', class_mod = ?MODULE, pid = FakeClassPid}.
+    Tag = list_to_atom(atom_to_list(Name) ++ " class"),
+    {ClassPid, #beamtalk_object{class = Tag, class_mod = bt3963_child_mod, pid = ClassPid}}.
+
+bt3963_dynamic_config(ChildClass, Overrides) ->
+    maps:merge(
+        #{
+            kind => dynamic,
+            childClass => ChildClass,
+            maxRestarts => 3,
+            restartWindow => 5,
+            maxChildren => infinity,
+            childShutdown => nil
+        },
+        Overrides
+    ).
+
+dynamic_init_reads_per_instance_config_test() ->
+    {ChildPid, ChildClass} = bt3963_supervisor_child_class('BT3963DynChildSup'),
+    Config = bt3963_dynamic_config(ChildClass, #{
+        %% Per-instance values, computed from `self args`.
+        maxChildren => fun(Self) ->
+            {ok, #{max := Max}} = beamtalk_supervisor:args(Self),
+            Max
+        end,
+        childShutdown => fun(Self) ->
+            {ok, #{shutdown := Shutdown}} = beamtalk_supervisor:args(Self),
+            Shutdown
+        end
+    }),
+    try
+        with_bt3963_class('BT3963Pool', Config, fun() ->
+            {ok, P1} = beamtalk_bt3963_sup_fixture:start_link(#{max => 7, shutdown => 1234}),
+            {ok, P2} = beamtalk_bt3963_sup_fixture:start_link(#{max => 2, shutdown => infinity}),
+            try
+                ?assertEqual(
+                    {{dictionary, '$beamtalk_max_children'}, 7},
+                    erlang:process_info(P1, {dictionary, '$beamtalk_max_children'})
+                ),
+                ?assertEqual(
+                    {{dictionary, '$beamtalk_max_children'}, 2},
+                    erlang:process_info(P2, {dictionary, '$beamtalk_max_children'})
+                ),
+                ?assertEqual(
+                    {
+                        {dictionary, '$beamtalk_child_class'},
+                        {'BT3963DynChildSup', bt3963_child_mod}
+                    },
+                    erlang:process_info(P1, {dictionary, '$beamtalk_child_class'})
+                ),
+                ?assertEqual(
+                    {ok, #{strategy => simpleOneForOne, maxRestarts => 3, restartWindow => 5}},
+                    beamtalk_supervisor:configured_flags(P1)
+                ),
+                %% childShutdown replaces the template's shutdown, per instance.
+                {ok, Spec1} = supervisor:get_childspec(P1, 'BT3963DynChildSup'),
+                ?assertEqual(1234, maps:get(shutdown, Spec1)),
+                {ok, Spec2} = supervisor:get_childspec(P2, 'BT3963DynChildSup'),
+                ?assertEqual(infinity, maps:get(shutdown, Spec2))
+            after
+                stop_linked(P1),
+                stop_linked(P2)
+            end
+        end)
+    after
+        ChildPid ! stop,
+        beamtalk_class_metadata:delete('BT3963DynChildSup')
+    end.
+
+dynamic_init_invalid_values_fail_start_with_validator_error_test() ->
+    {ChildPid, ChildClass} = bt3963_supervisor_child_class('BT3963DynChildSup2'),
+    try
+        lists:foreach(
+            fun({Overrides, Selector}) ->
+                with_bt3963_class(
+                    'BT3963Pool', bt3963_dynamic_config(ChildClass, Overrides), fun() ->
+                        ?assertMatch(
+                            #beamtalk_error{kind = type_error, selector = Selector},
+                            start_failing(nil)
+                        )
+                    end
+                )
+            end,
+            [
+                {#{maxChildren => -1}, maxChildren},
+                {#{maxChildren => lots}, maxChildren},
+                {#{childShutdown => soon}, childShutdown},
+                {#{childClass => 42}, childClass}
+            ]
+        )
+    after
+        ChildPid ! stop,
+        beamtalk_class_metadata:delete('BT3963DynChildSup2')
+    end.
 
 %%====================================================================
 %% start_child_via_class_method tests
@@ -1081,65 +1212,6 @@ start_child_via_class_method_write_raises_test() ->
     after
         beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
         cleanup_fake_class('BT3708Write', FakeClassPid)
-    end.
-
-static_init_class_children_write_raises_test() ->
-    FakeClassPid = setup_fake_class('BT3708Children'),
-    %% The fixture's `class children` always writes a class variable. (Loaded
-    %% explicitly: `erlang:function_exported/3` does not trigger a code load.)
-    {module, _} = code:ensure_loaded(beamtalk_supervisor_writing_fixture),
-    beamtalk_class_metadata:insert(
-        'BT3708Children', beamtalk_supervisor_writing_fixture, undefined, undefined, undefined
-    ),
-    beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
-    try
-        ?assertMatch(
-            #beamtalk_error{kind = class_state_read_only},
-            raised_beamtalk_error(fun() ->
-                beamtalk_supervisor:static_init(
-                    beamtalk_supervisor_writing_fixture, 'BT3708Children'
-                )
-            end)
-        ),
-        ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Children')))
-    after
-        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
-        cleanup_fake_class('BT3708Children', FakeClassPid)
-    end.
-
-static_init_reads_snapshot_without_write_test() ->
-    FakeClassPid = setup_fake_class('BT3708Static'),
-    beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
-    try
-        ?assertMatch(
-            {ok, {#{strategy := one_for_one}, []}},
-            beamtalk_supervisor:static_init(?MODULE, 'BT3708Static')
-        )
-    after
-        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
-        cleanup_fake_class('BT3708Static', FakeClassPid)
-    end.
-
-%% ADR 0130 §5: `static_init/2` and `dynamic_init/2` run their class methods in
-%% `with_snapshot/2`, which resolves the class by name; register a stand-in
-%% class process (as the real class gen_server is while its startLink/1 runs).
-static_init_registered(Init, Module, ClassName) ->
-    FakeClassPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    RegName = beamtalk_class_registry:registry_name(ClassName),
-    register(RegName, FakeClassPid),
-    try
-        beamtalk_supervisor:Init(Module, ClassName)
-    after
-        (try
-            unregister(RegName)
-        catch
-            _:_ -> ok
-        end),
-        FakeClassPid ! stop
     end.
 
 raised_beamtalk_error(Fun) ->
@@ -1440,39 +1512,6 @@ stop_terminates_children_test() ->
     ?assertEqual(false, is_process_alive(ChildPid)).
 
 %%====================================================================
-%% Tests: static_init/2 — direct module resolution
-%%====================================================================
-
-static_init_direct_module_test() ->
-    %% static_init finds class methods in the module directly
-    %% (no hierarchy walk needed) when the class module exports them.
-    beamtalk_class_metadata:new(),
-
-    %% Register a fake class pid so whereis_class resolves.
-    FakeClassPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    RegName = beamtalk_class_registry:registry_name('BT1960DirectInit'),
-    register(RegName, FakeClassPid),
-
-    try
-        Result = beamtalk_supervisor:static_init(?MODULE, 'BT1960DirectInit'),
-        ?assertMatch(
-            {ok, {#{strategy := one_for_one, intensity := 3, period := 5}, []}},
-            Result
-        )
-    after
-        (try
-            unregister(RegName)
-        catch
-            _:_ -> ok
-        end),
-        FakeClassPid ! stop
-    end.
-
-%%====================================================================
 %% Tests: supervisor tuple element access
 %%====================================================================
 
@@ -1668,13 +1707,11 @@ make_child_class_for_startchild(ChildClassName) ->
         {beamtalk_object, list_to_atom(atom_to_list(ChildClassName) ++ " class"), ?MODULE,
             ChildClassPid}}.
 
-%% A DynamicSupervisor whose childClass() returns the given class object.
-%% We build this on the fly by storing the class object in an ETS table and
-%% wiring Module:childClass/0 through a helper module.
+%% A DynamicSupervisor for startChild tests; the test records its child class
+%% with set_child_class/2.
 start_dynamic_supervisor_for_startchild() ->
     %% We reuse start_dynamic_supervisor/0 which wires ?MODULE:start_worker/1
-    %% as the dynamic child template. The test will use a SupMod that
-    %% exports childClass/0 to return a class object.
+    %% as the dynamic child template.
     start_dynamic_supervisor().
 
 %% Start a simple_one_for_one supervisor whose dynamic template is
@@ -1693,16 +1730,20 @@ start_dynamic_supervisor_with_nullary_child() ->
     {ok, SupPid} = supervisor:start_link(?MODULE, {simple_one_for_one, ChildSpec}),
     SupPid.
 
-%% We need a helper module that exports childClass/0. Use the dedicated helper.
-%% beamtalk_supervisor_test_helper does not define childClass/0 — define it
-%% inline via a dedicated child helper module? Simpler: pass ?MODULE as SupMod
-%% (works because ?MODULE:childClass() is what startChild calls on SupMod).
-childClass() ->
-    %% Return the class object stored in the ETS cell by the test.
-    case ets:lookup(beamtalk_supervisor_tests_child_cell, current) of
-        [{current, Obj}] -> Obj;
-        [] -> erlang:error(no_child_class_set)
-    end.
+%% ADR 0135: startChild/1,2,3 read a pool's child class from the pool's own
+%% process dictionary (`'$beamtalk_child_class'`, written by `dynamic_init/3`
+%% from the instance's `childClass`). These tests start plain OTP supervisors,
+%% so they record the entry themselves: `set_child_class/2` writes it into a
+%% running supervisor (sys:replace_state runs the fun in that process), and
+%% `set_child_class/1` stores it for the next supervisor this module's
+%% `init/1` starts.
+set_child_class(SupPid, Obj) ->
+    Entry = child_class_entry(Obj),
+    _ = sys:replace_state(SupPid, fun(S) ->
+        put('$beamtalk_child_class', Entry),
+        S
+    end),
+    ok.
 
 set_child_class(Obj) ->
     case ets:info(beamtalk_supervisor_tests_child_cell, id) of
@@ -1711,7 +1752,24 @@ set_child_class(Obj) ->
         _ ->
             ok
     end,
-    ets:insert(beamtalk_supervisor_tests_child_cell, {current, Obj}),
+    ets:insert(beamtalk_supervisor_tests_child_cell, {current, child_class_entry(Obj)}),
+    ok.
+
+child_class_entry(Obj) ->
+    {beamtalk_object_class:class_name_safe(element(4, Obj)), element(3, Obj)}.
+
+%% Called from this module's supervisor init/1: plant the child-class entry a
+%% test stored with set_child_class/1, as dynamic_init/3 would.
+put_pending_child_class() ->
+    case ets:info(beamtalk_supervisor_tests_child_cell, id) of
+        undefined ->
+            ok;
+        _ ->
+            case ets:take(beamtalk_supervisor_tests_child_cell, current) of
+                [{current, Entry}] -> put('$beamtalk_child_class', Entry);
+                [] -> ok
+            end
+    end,
     ok.
 
 startChild_arity1_success_test() ->
@@ -1720,7 +1778,7 @@ startChild_arity1_success_test() ->
     %% children.
     SupPid = start_dynamic_supervisor_with_nullary_child(),
     {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT1980DynWorker'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT1980DynSup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self),
@@ -1749,7 +1807,7 @@ startChild_announces_child_added_test() ->
     ),
     SupPid = start_dynamic_supervisor_with_nullary_child(),
     {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT2445DynWorker'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT2445DynSup', ?MODULE, SupPid},
         {ok, _Child} = beamtalk_supervisor:startChild(Self),
@@ -1775,7 +1833,7 @@ startChild_arity2_success_test() ->
     SupPid = start_dynamic_supervisor_for_startchild(),
     {ChildClassPid, ChildClassObj} =
         make_child_class_for_startchild('BT1980DynArgs'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT1980DynArgsSup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self, self()),
@@ -1791,82 +1849,58 @@ startChild_arity2_success_test() ->
     end.
 
 %%====================================================================
-%% run_initialize/1 — class-side initialize: lifecycle hook
+%% run_initialize/1 — instance-side initialize lifecycle hook (ADR 0135 §1)
 %%====================================================================
 
-%% Fake class_initialize: method — records that it was invoked.
-class_initialize(_ClassSelf, _SupTuple) ->
-    put(bt1980_init_called, true),
-    nil.
-
-'class_initialize:'(A, B) -> class_initialize(A, B).
-
-run_initialize_invokes_class_initialize_test() ->
-    %% run_initialize walks the class chain and calls class_initialize:
-    %% with the supervisor tuple as an extra arg.
-    beamtalk_class_metadata:new(),
-    %% Register a class pointing at this module (exports 'class_initialize:'/2).
-    ClassName = 'BT1980InitClass',
-    RegName = beamtalk_class_registry:registry_name(ClassName),
-    FakeClassPid = spawn(fun() ->
-        receive
-            stop -> ok
+run_initialize_sends_instance_initialize_test() ->
+    %% The hook is sent to the new supervisor by instance dispatch, in the
+    %% caller: `self` is the supervisor, which can be messaged.
+    Test = self(),
+    Config = bt3963_static_config(#{
+        initialize => fun(Self) ->
+            {ok, Count} = beamtalk_supervisor:countChildren(Self),
+            Test ! {initialized, Self, Count, self()},
+            nil
         end
-    end),
-    try
-        register(RegName, FakeClassPid),
-        beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined, undefined),
-        SupTuple = {beamtalk_supervisor, ClassName, ?MODULE, self()},
-        erase(bt1980_init_called),
-        Result = beamtalk_supervisor:run_initialize(SupTuple),
-        ?assertEqual(ok, Result),
-        ?assertEqual(true, get(bt1980_init_called))
-    after
-        erase(bt1980_init_called),
-        (try
-            unregister(RegName)
-        catch
-            _:_ -> ok
-        end),
-        FakeClassPid ! stop,
-        beamtalk_class_metadata:delete(ClassName)
-    end.
-
-run_initialize_write_raises_test() ->
-    %% ADR 0130 §5: `initialize:` runs in a read-only snapshot region; a class
-    %% variable write raises instead of being silently discarded.
-    beamtalk_class_metadata:new(),
-    ClassName = 'BT3708InitWrite',
-    {module, _} = code:ensure_loaded(beamtalk_supervisor_writing_fixture),
-    RegName = beamtalk_class_registry:registry_name(ClassName),
-    FakeClassPid = spawn(fun() ->
-        receive
-            stop -> ok
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        {ok, Pid} = beamtalk_bt3963_sup_fixture:start_link(nil),
+        try
+            Sup = bt3963_sup('BT3963Sup', Pid),
+            ?assertEqual(ok, beamtalk_supervisor:run_initialize(Sup)),
+            receive
+                {initialized, Self, Count, Runner} ->
+                    ?assertEqual(Sup, Self),
+                    ?assertEqual(0, Count),
+                    ?assertEqual(Test, Runner)
+            after 2000 -> error(not_initialized)
+            end
+        after
+            stop_linked(Pid)
         end
-    end),
-    try
-        register(RegName, FakeClassPid),
-        beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
-        beamtalk_class_metadata:insert(
-            ClassName, beamtalk_supervisor_writing_fixture, undefined, undefined, undefined
-        ),
-        %% BT-3720: a real, named supervisor with a running child stands in for
-        %% the one `supervise` started before the hook ran.
+    end).
+
+run_initialize_raise_stops_supervisor_test() ->
+    %% BT-3720: if `initialize` raises, the caller never receives the
+    %% supervisor, so it is stopped (name freed, child stopped) before the
+    %% error propagates.
+    Config = bt3963_static_config(#{
+        initialize => fun(_Self) ->
+            beamtalk_error:raise(beamtalk_error:new(runtime_error, 'BT3963Sup', initialize))
+        end
+    }),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
         SupName = bt3720_half_started_sup,
         SupPid = start_named_supervisor_with_worker(SupName, bt3720_child),
+        unlink(SupPid),
         {ok, WorkerPid} = wait_for_worker(),
         SupRef = erlang:monitor(process, SupPid),
         WorkerRef = erlang:monitor(process, WorkerPid),
-        SupTuple = {beamtalk_supervisor, ClassName, beamtalk_supervisor_writing_fixture, SupPid},
+        Sup = bt3963_sup('BT3963Sup', SupPid),
         ?assertMatch(
-            #beamtalk_error{kind = class_state_read_only},
-            raised_beamtalk_error(fun() -> beamtalk_supervisor:run_initialize(SupTuple) end)
+            #beamtalk_error{kind = runtime_error},
+            raised_beamtalk_error(fun() -> beamtalk_supervisor:run_initialize(Sup) end)
         ),
-        %% The read-only snapshot region erased exactly the key it planted:
-        %% nothing is left under the class's (tag-keyed) key, and no home.
-        ?assertEqual(undefined, get(beamtalk_class_vars:key(ClassName))),
-        ?assertEqual(undefined, beamtalk_class_vars_test_support:home_key()),
-        %% The supervisor is not leaked: process gone, name freed, child stopped.
         receive
             {'DOWN', SupRef, process, SupPid, _} -> ok
         after 2000 -> error(supervisor_leaked)
@@ -1876,114 +1910,26 @@ run_initialize_write_raises_test() ->
         after 2000 -> error(child_orphaned)
         end,
         ?assertEqual(undefined, whereis(SupName))
-    after
-        erase(bt1980_init_called),
-        %% A leaked snapshot must not leak into later tests in this process.
-        beamtalk_class_vars_test_support:clean(beamtalk_class_vars:key(ClassName)),
-        (try
-            unregister(RegName)
-        catch
-            _:_ -> ok
-        end),
-        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
-        FakeClassPid ! stop,
-        beamtalk_class_metadata:delete(ClassName)
-    end.
+    end).
 
 %%====================================================================
 %% to_otp_strategy/1 — all strategy variants
 %%====================================================================
 
 to_otp_strategy_oneForOne_test() ->
-    %% Exercised indirectly via static_init tests, but we also assert the
-    %% strategies land in a supervisor's SupFlags.
-    beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert(
-        'BT1980StratOne', undefined, undefined, 'BT1980StratOneParent', undefined
-    ),
-    beamtalk_class_metadata:insert('BT1980StratOneParent', ?MODULE, undefined, none, undefined),
-    try
-        {ok, {#{strategy := one_for_one}, _}} =
-            static_init_registered(static_init, erlang, 'BT1980StratOne')
-    after
-        beamtalk_class_metadata:delete('BT1980StratOne'),
-        beamtalk_class_metadata:delete('BT1980StratOneParent')
-    end.
-
-%% Helper fake class methods with non-default strategies.
-class_strategy_all(_ClassSelf) -> oneForAll.
-class_strategy_rest(_ClassSelf) -> restForOne.
-class_strategy_unknown(_ClassSelf) -> someOtherStrategy.
+    ?assertEqual(one_for_one, beamtalk_supervisor:to_otp_strategy(oneForOne)).
 
 to_otp_strategy_oneForAll_test() ->
     %% oneForAll maps to one_for_all.
-    ?assertEqual(one_for_all, apply_to_otp_strategy(oneForAll)).
+    ?assertEqual(one_for_all, beamtalk_supervisor:to_otp_strategy(oneForAll)).
 
 to_otp_strategy_restForOne_test() ->
     %% restForOne maps to rest_for_one.
-    ?assertEqual(rest_for_one, apply_to_otp_strategy(restForOne)).
+    ?assertEqual(rest_for_one, beamtalk_supervisor:to_otp_strategy(restForOne)).
 
 to_otp_strategy_unknown_passes_through_test() ->
     %% Unknown strategy passes through unchanged so OTP reports it.
-    ?assertEqual(mystery, apply_to_otp_strategy(mystery)).
-
-%% Call the private to_otp_strategy via a static_init roundtrip. Set up
-%% a hierarchy whose class_strategy returns the input and extract the
-%% resulting OTP strategy atom.
-apply_to_otp_strategy(BtStrategy) ->
-    beamtalk_class_metadata:new(),
-    Name = list_to_atom(
-        "BT1980Strat_" ++ atom_to_list(BtStrategy) ++ "_" ++
-            integer_to_list(erlang:unique_integer([positive]))
-    ),
-    Parent = list_to_atom(atom_to_list(Name) ++ "_p"),
-    beamtalk_class_metadata:insert(Name, undefined, undefined, Parent, undefined),
-    %% Install an on-demand parent module with the right class_strategy. We
-    %% compile a tiny module at runtime that exports class_strategy/1 etc.
-    ParentMod = compile_strategy_parent(BtStrategy),
-    beamtalk_class_metadata:insert(Parent, ParentMod, undefined, none, undefined),
-    try
-        {ok, {#{strategy := Strategy}, _}} =
-            static_init_registered(static_init, erlang, Name),
-        Strategy
-    after
-        beamtalk_class_metadata:delete(Name),
-        beamtalk_class_metadata:delete(Parent)
-    end.
-
-%% Compile a helper module that exports class_children, class_strategy,
-%% class_maxRestarts, class_restartWindow returning the given strategy.
-compile_strategy_parent(Strategy) ->
-    ModName = list_to_atom(
-        "bt1980_strat_parent_" ++ atom_to_list(Strategy) ++ "_" ++
-            integer_to_list(erlang:unique_integer([positive]))
-    ),
-    Src = io_lib:format(
-        "-module(~p).~n"
-        "-export([class_children/1, class_strategy/1, "
-        "class_maxRestarts/1, class_restartWindow/1]).~n"
-        "class_children(_A) -> [].~n"
-        "class_strategy(_A) -> ~p.~n"
-        "class_maxRestarts(_A) -> 3.~n"
-        "class_restartWindow(_A) -> 5.~n",
-        [ModName, Strategy]
-    ),
-    {ok, Tokens, _} = erl_scan:string(lists:flatten(Src)),
-    Forms = split_and_parse(Tokens),
-    {ok, ModName, Bin} = compile:forms(Forms, [return_errors]),
-    {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".erl", Bin),
-    ModName.
-
-split_and_parse(Tokens) ->
-    split_and_parse(Tokens, [], []).
-split_and_parse([], _Cur, Acc) ->
-    lists:reverse(Acc);
-split_and_parse([{dot, _} = Dot | Rest], Cur, Acc) ->
-    FormToks = lists:reverse([Dot | Cur]),
-    {ok, Form} = erl_parse:parse_form(FormToks),
-    split_and_parse(Rest, [], [Form | Acc]);
-split_and_parse([T | Rest], Cur, Acc) ->
-    split_and_parse(Rest, [T | Cur], Acc).
+    ?assertEqual(mystery, beamtalk_supervisor:to_otp_strategy(mystery)).
 
 %%====================================================================
 %% wrap_child/3 — via whichChild on supervisor and actor children
@@ -2288,7 +2234,7 @@ startChild_arity1_error_returns_child_start_failed_test() ->
     SupPid = start_dynamic_supervisor(),
     {ChildClassPid, ChildClassObj} =
         make_child_class_for_startchild('BT1980DynErr'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT1980DynErrSup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self),
@@ -2305,14 +2251,18 @@ startChild_arity1_error_returns_child_start_failed_test() ->
 %% BT-3964: maxChildren limit
 %%====================================================================
 
-validate_max_children_test() ->
-    ?assertEqual(infinity, beamtalk_supervisor:validate_max_children('X', infinity)),
-    ?assertEqual(0, beamtalk_supervisor:validate_max_children('X', 0)),
-    ?assertEqual(3, beamtalk_supervisor:validate_max_children('X', 3)),
-    E1 = raised_beamtalk_error(fun() -> beamtalk_supervisor:validate_max_children('X', -1) end),
-    ?assertMatch(#beamtalk_error{kind = type_error, class = 'X', selector = maxChildren}, E1),
-    E2 = raised_beamtalk_error(fun() -> beamtalk_supervisor:validate_max_children('X', lots) end),
-    ?assertMatch(#beamtalk_error{kind = type_error, details = #{value := lots}}, E2).
+check_max_children_test() ->
+    ?assertEqual({ok, infinity}, beamtalk_supervisor:check_max_children('X', infinity)),
+    ?assertEqual({ok, 0}, beamtalk_supervisor:check_max_children('X', 0)),
+    ?assertEqual({ok, 3}, beamtalk_supervisor:check_max_children('X', 3)),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = type_error, class = 'X', selector = maxChildren}},
+        beamtalk_supervisor:check_max_children('X', -1)
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = type_error, details = #{value := lots}}},
+        beamtalk_supervisor:check_max_children('X', lots)
+    ).
 
 %%====================================================================
 %% BT-3965: shutdown timeouts
@@ -2392,7 +2342,7 @@ startChild_max_children_test() ->
     %% next start succeed.
     SupPid = start_capped_dynamic_supervisor(2),
     {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT3964DynWorker'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT3964CapSup', ?MODULE, SupPid},
         {ok, C1} = beamtalk_supervisor:startChild(Self),
@@ -2415,7 +2365,7 @@ startChild_max_children_zero_test() ->
     %% maxChildren = 0 refuses every start, including startChild/2 and /3.
     SupPid = start_capped_dynamic_supervisor(0),
     {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT3964DynZero'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT3964ZeroSup', ?MODULE, SupPid},
         ?assertMatch(
@@ -2442,7 +2392,7 @@ startChild_arity1_stale_handle_test() ->
     SupPid = start_dynamic_supervisor(),
     {ChildClassPid, ChildClassObj} =
         make_child_class_for_startchild('BT1997StaleStart'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     gen_server:stop(SupPid),
     timer:sleep(20),
     try
@@ -2462,7 +2412,7 @@ startChild_arity2_stale_handle_test() ->
     SupPid = start_dynamic_supervisor(),
     {ChildClassPid, ChildClassObj} =
         make_child_class_for_startchild('BT1997StaleStart2'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     gen_server:stop(SupPid),
     timer:sleep(20),
     try
@@ -2495,7 +2445,7 @@ startChild_arity2_error_returns_child_start_failed_test() ->
     {ok, SupPid} = supervisor:start_link(?MODULE, {simple_one_for_one, ChildSpec}),
     {ChildClassPid, ChildClassObj} =
         make_child_class_for_startchild('BT1997ChildErr'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT1997ChildErrSup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self, self()),
@@ -2534,7 +2484,7 @@ with_live_supervisor_passes_through_error_test() ->
     SupPid = start_dynamic_supervisor(),
     {ChildClassPid, ChildClassObj} =
         make_child_class_for_startchild('BT1997Pass2'),
-    set_child_class(ChildClassObj),
+    set_child_class(SupPid, ChildClassObj),
     try
         Self = {beamtalk_supervisor, 'BT1997Pass2Sup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self),
@@ -2918,11 +2868,10 @@ startChild_arity2_with_dynamic_spawnWith_spec_delivers_args_test() ->
 %% Build a real simple_one_for_one supervisor whose single child template is
 %% the OTP spec `build_child_specs/2` (Mode = dynamic) would produce for a
 %% plain (#spawn) worker child pointing at test_counter — i.e. exactly what
-%% `dynamic_init/2` wires up for a live `DynamicSupervisor(Counter)`.
-%% Also registers ClassObj as the fake `?MODULE:childClass()` (via the
-%% ETS cell startChild/1,2 read through set_child_class/1), so `Self`'s
-%% module field can be ?MODULE — matching how startChild/1,2 re-derive
-%% the child class at call time via `SupMod:'childClass'()`.
+%% `dynamic_init/3` wires up for a live `DynamicSupervisor(Counter)`.
+%% Also records ClassObj as the pool's child class (set_child_class/1, planted
+%% by this module's init/1 the way dynamic_init/3 stores it), which
+%% startChild/1,2 read back through pool_child_class/1.
 bt3365_start_dynamic_supervisor(ClassObj) ->
     set_child_class(ClassObj),
     StartArray = #{
@@ -3281,7 +3230,7 @@ concurrent_supervise(HookOutcome) ->
     ClassInfo = #{
         superclass => none,
         module => Helper,
-        class_methods => #{supervise => <<>>, 'initialize:' => <<>>},
+        class_methods => #{supervise => <<>>},
         class_state => #{}
     },
     {ok, ClassPid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
