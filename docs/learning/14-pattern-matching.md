@@ -137,23 +137,23 @@ TestCase subclass: Ch14TupleDestructuring
 
   testTaggedTuple =>
     // Common Erlang pattern: {ok, Value} or {error, Reason}
-    {status, value} := Tuple withAll: #(#ok, 42)
+    {status, value} := {#ok, 42}
     self assert: status equals: #ok
     self assert: value equals: 42
 
   testLiteralPatternInFirstSlot =>
     // A literal in the pattern matches only that value:
-    {#ok, value} := Tuple withAll: #(#ok, 42)
+    {#ok, value} := {#ok, 42}
     self assert: value equals: 42
 
   testLiteralMismatchRaises =>
     // A failed destructuring raises a #pattern_mismatch error:
     self should: [
-      {#ok, _val} := Tuple withAll: #(#error, 42)
+      {#ok, _val} := {#error, 42}
     ] raise: #pattern_mismatch
 
   testWildcard =>
-    {_, b} := Tuple withAll: #(#ignore, 99)
+    {_, b} := {#ignore, 99}
     self assert: b equals: 99
 ```
 

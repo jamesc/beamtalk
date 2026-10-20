@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3962 (ADR 0135 §3): `withClassMethod:` is not supported on a supervisor
+// child, so starting this parent fails with a structured `type_error`.
+
+Supervisor subclass: Bt3962BadSpec
+
+  childSpecs => #((Bt3962Leaf supervisionSpec withClassMethod: #spawn))

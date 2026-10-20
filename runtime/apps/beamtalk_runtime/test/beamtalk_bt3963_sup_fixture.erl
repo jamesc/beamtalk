@@ -7,7 +7,7 @@
 -moduledoc """
 Stand-in for a compiled Beamtalk supervisor class module (ADR 0135 §2, BT-3963).
 
-Mirrors what `supervisor_codegen.rs` generates: `start_link/0,1` and an
+Mirrors what `supervisor_codegen.rs` generates: `start_link/0,1,2` and an
 `init/1` that forwards the start args to `beamtalk_supervisor:static_init/3`
 (or `dynamic_init/3`), plus the instance-side dispatch entry points
 (`dispatch/4`, `has_method/1`, `has_method_local/1`) through which the runtime
@@ -22,6 +22,7 @@ target for the two class names the tests use.
 -export([
     start_link/0,
     start_link/1,
+    start_link/2,
     init/1,
     dispatch/4,
     has_method/1,
@@ -57,6 +58,10 @@ start_link() ->
 -spec start_link(term()) -> {ok, pid()} | ignore | {error, term()}.
 start_link(Args) ->
     supervisor:start_link(?MODULE, Args).
+
+-spec start_link(atom(), term()) -> {ok, pid()} | ignore | {error, term()}.
+start_link(Name, Args) ->
+    supervisor:start_link({local, Name}, ?MODULE, Args).
 
 init(Args) ->
     case maps:get(kind, config()) of
