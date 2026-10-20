@@ -9,7 +9,7 @@
 
 Supervisor subclass: ClassMethodSupervisor
 
-  class children -> List =>
+  childSpecs -> List =>
     spec := ClassMethodActor supervisionSpec
     spec := spec withClassMethod: #create:value:
     spec := spec withArgs: #(#hello, 42)

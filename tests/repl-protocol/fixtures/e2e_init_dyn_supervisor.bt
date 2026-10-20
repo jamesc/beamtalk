@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E fixture: DynamicSupervisor with initialize: hook that pre-populates (BT-1542).
-// initialize: calls startChild — verifies supervisor is responsive during callback.
+// initialize calls startChild — verifies supervisor is responsive during callback.
 
 DynamicSupervisor(Counter) subclass: E2EInitDynSupervisor
 
-  class childClass => Counter
+  childClass => Counter
 
-  class initialize: sup =>
-    sup startChild unwrap
-    sup startChild unwrap
+  initialize =>
+    self startChild unwrap
+    self startChild unwrap

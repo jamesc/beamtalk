@@ -748,7 +748,7 @@ impl ProcessManager {
              \n\
              Supervisor subclass: ReleaseSmokeSup\n\
              \n\
-             \x20\x20class children => #()\n",
+             \x20\x20childSpecs => #()\n",
         )
         .expect("write src/ReleaseSmokeSup.bt");
 
@@ -2035,7 +2035,7 @@ supervisor = \"E2EOtpRootSup\"\n";
 // SPDX-License-Identifier: Apache-2.0\n\
 \n\
 Supervisor subclass: E2EOtpRootSup\n\
-  class children -> List => #()\n";
+  childSpecs -> List => #()\n";
     fs::write(src_dir.join("e2eotp_root_sup.bt"), supervisor_src)
         .expect("Failed to write supervisor source");
 

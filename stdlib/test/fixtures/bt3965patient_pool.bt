@@ -7,6 +7,6 @@
 
 DynamicSupervisor(Bt3965SlowStopper) subclass: Bt3965PatientPool
 
-  class childClass => Bt3965SlowStopper
+  childClass => Bt3965SlowStopper
 
-  class childShutdown -> Integer => 10000
+  childShutdown -> Integer => 10000

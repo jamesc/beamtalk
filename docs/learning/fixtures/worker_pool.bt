@@ -4,4 +4,4 @@
 // Fixture for docs/learning/17-otp-supervisors.md
 
 DynamicSupervisor(Counter) subclass: WorkerPool
-  class childClass => Counter
+  childClass => Counter

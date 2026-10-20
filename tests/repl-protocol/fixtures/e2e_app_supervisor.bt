@@ -6,4 +6,4 @@
 
 Supervisor subclass: E2EAppSupervisor
 
-  class children -> List => #(Counter)
+  childSpecs -> List => #(Counter)

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3963 (ADR 0135 §2): a static supervisor that overrides only `childSpecs`,
+// so every other setting is the Supervisor base class's instance-side default.
+
+Supervisor subclass: Bt3963PlainSup
+
+  childSpecs => #()

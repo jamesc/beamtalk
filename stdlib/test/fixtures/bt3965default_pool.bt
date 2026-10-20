@@ -7,4 +7,4 @@
 
 DynamicSupervisor(Bt3965CappedStopper) subclass: Bt3965DefaultPool
 
-  class childClass => Bt3965CappedStopper
+  childClass => Bt3965CappedStopper
