@@ -178,7 +178,10 @@ pub(in crate::core_erlang) enum VerifyError {
     /// ADR 0131 §3/§4 extends the rule to [`ScopeKind::ValueType`]: a
     /// value-type method has no `State` parameter either, so a method-level
     /// `State` version is the same unbound-`State` bug there (o3/o12/s2 in
-    /// value-type methods). Its own `SelfVt` family is legitimate.
+    /// value-type methods). Its own `SelfVt` family is legitimate. BT-3999
+    /// extends the locals-less loop half too: a value-type `StateAcc` loop that
+    /// carries neither a local nor `SelfVt` is seeded from the same unbound
+    /// `State` (`[self done] whileTrue: [nil]`).
     ActorStateInClassMethod { defect: ClassMethodDefect, at: Span },
 
     /// ADR 0131 §4: a [`ThreadedStmt::ConstructTuple`] whose `threads` lists
@@ -412,7 +415,8 @@ pub(in crate::core_erlang) enum ScopeKind {
 pub(in crate::core_erlang) enum ClassMethodDefect {
     /// A `StateAcc` loop whose fallback reason is
     /// [`StateAccFallbackReason::NoThreadedLocals`]: it carries nothing, so its
-    /// seed is the ambient actor `State` — unbound in a class method.
+    /// seed is the ambient actor `State` — unbound in a class method, and in a
+    /// value-type method unless the loop carries `SelfVt` (BT-3999).
     StateAccLoopWithoutLocals,
     /// A versioned `Bind` / `Return` of the actor `State` family produced at
     /// method level (outside every threading frame, where `State` is not the
@@ -666,6 +670,34 @@ fn collect_producer_consumer_counts(
             | ThreadedStmt::DiscardLocals { .. } => {}
         }
     }
+}
+
+/// Whether a locals-less `StateAcc` loop/fold node carries a storage family
+/// (BT-3999), so its seed is a fresh map rather than the ambient `State`.
+///
+/// A `Letrec` loop that threads a family passes it as a trailing loop
+/// parameter: a `produces` entry other than the `StateAcc` map's own `State`
+/// (`ThreadingPlan::capture_loop_family_params`, a `Gensym` seed). A fold
+/// carries it through its accumulator instead, and its body binds the
+/// family's versions (`carry_fold_families`): a `SelfVt` `Bind` anywhere in
+/// the body's frame nodes.
+fn carries_family(produces: &[VersionedVar], body: &[ThreadedStmt]) -> bool {
+    fn binds_self_vt(stmts: &[ThreadedStmt]) -> bool {
+        stmts.iter().any(|stmt| match stmt {
+            ThreadedStmt::Bind { target, .. } => target.prefix == VersionPrefix::SelfVt,
+            ThreadedStmt::Threaded { body, .. }
+            | ThreadedStmt::MethodBody { body, .. }
+            | ThreadedStmt::BranchArm { body, .. } => binds_self_vt(body),
+            ThreadedStmt::ConditionalLoop {
+                condition, body, ..
+            } => binds_self_vt(condition) || binds_self_vt(body),
+            _ => false,
+        })
+    }
+    produces
+        .iter()
+        .any(|v| !matches!(v.prefix, VersionPrefix::State))
+        || binds_self_vt(body)
 }
 
 /// Second pass: walks `ir` tracking the active frame/mode nesting, checking
@@ -989,14 +1021,34 @@ impl VerifyWalk<'_> {
     }
 
     /// [`VerifyError::ActorStateInClassMethod`]: a loop/fold node whose mode is
-    /// a locals-less `StateAcc` in a [`ScopeKind::ClassMethod`] scope.
-    fn check_class_method_mode(&mut self, mode: &ThreadingMode, at: Span) {
-        if self.scope == ScopeKind::ClassMethod
-            && matches!(
-                mode,
-                ThreadingMode::StateAcc(StateAccFallbackReason::NoThreadedLocals)
-            )
-        {
+    /// a locals-less `StateAcc` in a scope with no ambient carrier to seed it.
+    ///
+    /// A `StateAcc` loop that threads no local is seeded from the scope's
+    /// ambient map: the actor `State` ([`ScopeKind::Instance`]) or the REPL
+    /// bindings ([`ScopeKind::Repl`]). A [`ScopeKind::ClassMethod`] has
+    /// neither, and threads no family. A [`ScopeKind::ValueType`] method has
+    /// neither either, so there such a loop is legitimate only when it carries
+    /// the value type's own `SelfVt` family (the pack prefix then starts from a
+    /// fresh `maps:new()`, `ThreadingPlan::generate_pack_prefix`); otherwise
+    /// its seed is an unbound `State` (BT-3999: `[self done] whileTrue: [nil]`
+    /// in a value-type or `TestCase` method). See [`carries_family`].
+    fn check_class_method_mode(
+        &mut self,
+        mode: &ThreadingMode,
+        produces: &[VersionedVar],
+        body: &[ThreadedStmt],
+        at: Span,
+    ) {
+        let locals_less = matches!(
+            mode,
+            ThreadingMode::StateAcc(StateAccFallbackReason::NoThreadedLocals)
+        );
+        let no_carrier = match self.scope {
+            ScopeKind::ClassMethod => true,
+            ScopeKind::ValueType => !carries_family(produces, body),
+            ScopeKind::Instance | ScopeKind::Repl => false,
+        };
+        if locals_less && no_carrier {
             self.errors.push(VerifyError::ActorStateInClassMethod {
                 defect: ClassMethodDefect::StateAccLoopWithoutLocals,
                 at,
@@ -1045,7 +1097,7 @@ impl VerifyWalk<'_> {
                 span,
                 ..
             } => {
-                self.check_class_method_mode(mode, *span);
+                self.check_class_method_mode(mode, produces, body, *span);
                 self.frame_stack.push(*frame);
                 self.mode_stack.push(mode.clone());
                 self.in_frame(stmt, |this| this.walk(body));
@@ -1066,7 +1118,7 @@ impl VerifyWalk<'_> {
                 span,
                 ..
             } => {
-                self.check_class_method_mode(mode, *span);
+                self.check_class_method_mode(mode, produces, body, *span);
                 // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3:
                 // `ConditionalLoop` verifies almost exactly like `Threaded`
                 // — push frame/mode once, walk `condition` THEN `body` (both

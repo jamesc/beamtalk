@@ -611,6 +611,43 @@ rebound inside a loop nested in that block), which with `local_touch` off
 reproduces both the BT-3834 and the BT-3848 panics on the pre-BT-3848 analysis
 without this gate and none with it.
 
+**BT-3999 amendment: the condition gate obeys the same rule.** A
+`whileTrue:`/`whileFalse:` is also sent to its threading lowering when its
+condition has a state effect (core's `while_condition_has_state_effects`: a
+field write, a self-send, a stored-block call or an opaque-callable HOM send;
+none in a class method). That gate did not ask for a carrier, so
+`[self done] whileTrue: [nil]` in a value-type or `TestCase` method writing no
+field took a `StateAcc` plan with no locals and no family and was seeded from an
+unbound `State` (`erlc`: `unbound variable 'State'`). The condition gate is now
+the twin of the body gate (`while_condition_has_carried_effects`, behind
+`condition_has_state_effects`): a condition effect counts only when the loop
+threads a local (its set over condition and body) or the scope has a carrier
+for the condition or the body (the actor `State`, the REPL bindings, `SelfVt`).
+The invariant, per scope kind, for the versioned variable after the loop:
+
+- *Actor instance method:* unchanged. The condition's self-send threads `State`
+  through the loop's `StateAcc`; the method continues from the loop's final map.
+- *REPL input:* unchanged. The bindings map is the carrier.
+- *Value-type or `TestCase` method:* a condition self-send rebinds nothing
+  (`Self` is immutable to it). With no local and no `SelfVt` the loop is a plain
+  loop and `Self` after it is `Self` before it; with either, the loop's
+  `StateAcc` is seeded from `maps:new()` and carries them, as before.
+- *Class method:* unchanged. No condition effect counts (ADR 0130 §3).
+
+It holds wherever the loop sits (a method body, a conditional arm, an
+`on:do:`/`ensure:` block, another loop or fold body, an assignment's value, a
+send's argument), because the gate is the loop's own, not the position's. The
+statement classifier (`control_flow_has_mutations`) reads the same predicate
+with the loop's body, so the lowering and the caller that unpacks it agree. The
+verifier check is `ActorStateInClassMethod { StateAccLoopWithoutLocals }`,
+extended to `ScopeKind::ValueType` for a locals-less `StateAcc` loop or fold
+that carries no family; it fails on the repro before the fix. The proof is
+`while_condition_carrier_corpus.rs`: condition x body x position x loop x
+method context (1,600 cases failed before the fix), and programs drawn from
+`arb_program`, which now generates `whileTrue:`/`whileFalse:` loops with
+self-send conditions (63 of 256 failed before the fix, in the value-type and
+`TestCase` scopes).
+
 **Amendment (BT-3910): `CarrierSlot::Whole`.** `CarrierSlot` gains `Whole`:
 `<read>` is the carrier itself, with no `element`/`maps:get`. Every row of the
 table above applies as written. Examples: `Let` + `bind_var` at a non-REPL
