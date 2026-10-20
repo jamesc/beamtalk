@@ -1,0 +1,114 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3985 (ADR 0133): `super` sends inside a closure, same shape as the
+// self-send matrix. The inherited callee writes `total`; inside a real closure
+// the send raises `stateful_block_dispatch`; a literal block inlined into the
+// method is not a State-threading position for `super` either, so it raises too.
+
+ClosureSelfSendSuperBase subclass: ClosureSelfSendSuperMatrix
+
+  each: blk => self.items collect: blk
+
+  superBumpAtMethodLevel =>
+    super bump: 5
+    self.total
+
+  superBinaryAtMethodLevel =>
+    super + 5
+    self.total
+
+  collectSuperUnaryChanging => self.items collect: [:x | super bump]
+
+  collectSuperUnaryReadOnly => self.items collect: [:x | super peek]
+
+  collectSuperKeywordChanging => self.items collect: [:x | super bump: x]
+
+  collectSuperKeywordReadOnly => self.items collect: [:x | super peek: x]
+
+  collectSuperBinaryChanging => self.items collect: [:x | super + x]
+
+  collectSuperBinaryReadOnly => self.items collect: [:x | super - x]
+
+  userHomSuperUnaryChanging => self each: [:x | super bump]
+
+  userHomSuperUnaryReadOnly => self each: [:x | super peek]
+
+  userHomSuperKeywordChanging => self each: [:x | super bump: x]
+
+  userHomSuperKeywordReadOnly => self each: [:x | super peek: x]
+
+  userHomSuperBinaryChanging => self each: [:x | super + x]
+
+  userHomSuperBinaryReadOnly => self each: [:x | super - x]
+
+  storedSuperUnaryChanging =>
+    blk := [:x | super bump]
+    self.items collect: blk
+
+  storedSuperUnaryReadOnly =>
+    blk := [:x | super peek]
+    self.items collect: blk
+
+  storedSuperKeywordChanging =>
+    blk := [:x | super bump: x]
+    self.items collect: blk
+
+  storedSuperKeywordReadOnly =>
+    blk := [:x | super peek: x]
+    self.items collect: blk
+
+  storedSuperBinaryChanging =>
+    blk := [:x | super + x]
+    self.items collect: blk
+
+  storedSuperBinaryReadOnly =>
+    blk := [:x | super - x]
+    self.items collect: blk
+
+  nestedSuperUnaryChanging =>
+    self.items collect: [:x | #(1) collect: [:y | super bump]]
+
+  nestedSuperUnaryReadOnly =>
+    self.items collect: [:x | #(1) collect: [:y | super peek]]
+
+  nestedSuperKeywordChanging =>
+    self.items collect: [:x | #(1) collect: [:y | super bump: x]]
+
+  nestedSuperKeywordReadOnly =>
+    self.items collect: [:x | #(1) collect: [:y | super peek: x]]
+
+  nestedSuperBinaryChanging =>
+    self.items collect: [:x | #(1) collect: [:y | super + x]]
+
+  nestedSuperBinaryReadOnly =>
+    self.items collect: [:x | #(1) collect: [:y | super - x]]
+
+  branchSuperUnaryChanging =>
+    self.items collect: [:x | x > 0 ifTrue: [super bump] ifFalse: [0]]
+
+  branchSuperUnaryReadOnly =>
+    self.items collect: [:x | x > 0 ifTrue: [super peek] ifFalse: [0]]
+
+  branchSuperKeywordChanging =>
+    self.items collect: [:x | x > 0 ifTrue: [super bump: x] ifFalse: [0]]
+
+  branchSuperKeywordReadOnly =>
+    self.items collect: [:x | x > 0 ifTrue: [super peek: x] ifFalse: [0]]
+
+  branchSuperBinaryChanging =>
+    self.items collect: [:x | x > 0 ifTrue: [super + x] ifFalse: [0]]
+
+  branchSuperBinaryReadOnly =>
+    self.items collect: [:x | x > 0 ifTrue: [super - x] ifFalse: [0]]
+
+  inlineDoSuper =>
+    self.items do: [:x | super bump: x]
+    self.total
+
+  inlineBranchSuper =>
+    self.items isEmpty ifFalse: [super bump: 5]
+    self.total
+
+  caughtSuperInClosure =>
+    self each: [:x | [super bump] on: Error do: [:e | e kind]]
