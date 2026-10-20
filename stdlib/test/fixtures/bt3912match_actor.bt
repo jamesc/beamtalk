@@ -82,6 +82,21 @@ Actor subclass: Bt3912MatchActor
     x match: [1 -> (#(1, 2) do: [:e | t := t + e]); _ -> 0]
     t
 
+  plainArm: x =>
+    t := 0
+    x match: [1 -> t := 5; _ -> t := 9]
+    t
+
+  valueArm: x =>
+    t := 0
+    r := x match: [1 -> ([t := t + 1. 2] value); _ -> 0]
+    #[r, t]
+
+  lastInLoop: xs =>
+    t := 0
+    xs do: [:e | e > 1 ifTrue: [e match: [2 -> (t := t + 100); _ -> (t := t + 1000)]]]
+    t
+
   readWrite: x =>
     t := 10
     x match: [1 -> (t := t * 2); _ -> (t := t + 1)]

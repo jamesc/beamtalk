@@ -52,10 +52,11 @@ use crate::semantic_analysis::block_facts::{
     exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
     local_threading_construct, lookup_arm_blocks, loop_body_producer_sites, match_arm_block,
-    match_producer_writes, operand_producer_writes, outer_local_writes, outer_state_writes,
-    producer_body_block, receiver_statically_not_dictionary, repl_arm_producer_sites,
-    repl_evaluated_block, repl_operand_sites, repl_producer_writes, root_producer_writes,
-    sequenced_operand_sites, value_blocks,
+    match_arm_body_writes, match_arms, match_guard_writes, match_producer_writes,
+    operand_producer_writes, outer_local_writes, outer_state_writes, producer_body_block,
+    receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
+    repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
+    value_blocks,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -957,9 +958,12 @@ pub(crate) enum Residual {
     /// methods answer the map.
     GroupByValue,
     /// BT-3875: a `match:` arm (body or guard) that writes an outer local
-    /// drops the write. BT-3817 made it this error in methods; the REPL
-    /// answered the stale value until BT-3864 rejected the arm's assignment
-    /// as a value-position assignment, and draws this error since BT-3909.
+    /// drops the write unless the `match:` is a local-threading producer where
+    /// it sits. BT-3947 (BT-3912) lowers one that is, with each arm a
+    /// `BranchArm` frame ([`match_producer_writes`], and at the REPL
+    /// `is_repl_arm_construct`); what stays this error is a `match:` that is
+    /// not a producer there: a guard that writes, or a `match:` at no producer
+    /// site (the subject of another `match:`).
     MatchArmWrite,
 }
 
@@ -980,8 +984,10 @@ struct ResidualDenied {
 /// `cond`/`fresh` and `groupBy` lines of `adr0131_statement_probes.tsv` and
 /// the REPL `match` line; the `residual_*` tests in
 /// `semantic_analysis/tests/local_threading.rs` pin each repro. BT-3911
-/// deletes the `LoopConditionArmWrite` and `MatchArmWrite` rows, BT-3912 the
-/// `GroupByValue` row.
+/// deleted the `LoopConditionArmWrite` row, BT-3912 the `GroupByValue` row. The
+/// `MatchArmWrite` row (BT-3947, BT-3912) is narrowed to the `match:`s that are
+/// not producers where they sit; BT-3913 retires it with the other position
+/// rows.
 const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
     ResidualDenied {
         shape: Residual::GroupByValue,
@@ -991,12 +997,13 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
     },
     // Class, value-type and actor methods since BT-3817; the REPL since
     // BT-3909 (maintainer-approved REPL output change: the same input drew
-    // the BT-3864 value-position error before).
+    // the BT-3864 value-position error before). BT-3947 (BT-3912) lowers a
+    // `match:` that is a producer; this is the rest.
     ResidualDenied {
         shape: Residual::MatchArmWrite,
         contexts: &[Class, ValueType, Actor, Repl],
         issue: "BT-3875",
-        fixed_by: "BT-3947",
+        fixed_by: "BT-3913",
     },
 ];
 
@@ -2074,6 +2081,9 @@ impl<'d> Walker<'d> {
     /// at the method root (an operand site or a statement) or at a site of the
     /// frame it is nested in. The REPL keeps its own lowering.
     fn is_match_producer(&self, expr: &Expression, position: Position) -> bool {
+        if self.context == Repl {
+            return self.is_repl_arm_construct(expr, position);
+        }
         let Some(kind) = self.root_method_kind() else {
             return false;
         };
@@ -2108,14 +2118,23 @@ impl<'d> Walker<'d> {
         if lookup_arm_blocks(inner).is_some() {
             return false;
         }
+        // BT-3947: a `match:` whose arm bodies write a binding (no guard does)
+        // is a REPL construct too, one arm per `match:` arm.
+        let match_writes = match_arms(inner).map(|arms| {
+            match_guard_writes(arms, &|name| self.is_bound(name)).is_empty()
+                && !match_arm_body_writes(arms, &|name| self.is_bound(name)).is_empty()
+        });
         if conditional_arm_blocks(inner).is_none()
             && exception_arm_blocks(inner).is_none()
             && !is_repl_evaluated_block(inner)
+            && match_writes.is_none()
         {
             return false;
         }
-        let writes = local_threading_construct(inner).is_some_and(|c| {
-            !construct_outer_local_writes(&c, &|name| self.is_bound(name)).is_empty()
+        let writes = match_writes.unwrap_or_else(|| {
+            local_threading_construct(inner).is_some_and(|c| {
+                !construct_outer_local_writes(&c, &|name| self.is_bound(name)).is_empty()
+            })
         });
         if !writes {
             return false;
@@ -2716,12 +2735,11 @@ impl<'d> Walker<'d> {
         );
     }
 
-    /// A `match:` arm that assigns an outer local. The arm is an expression,
-    /// not a block, so no construct threads its write back to the method
-    /// (BT-3817): compiling it would drop the write silently. BT-3823 kept this
-    /// error rather than lowering `match:` as a producer: that needs a `match:`
-    /// family in the shared producer rule and a frame per arm in codegen's
-    /// `match_lowering`, which is BT-3875. The contexts are the
+    /// A `match:` arm that assigns an outer local, in a `match:` that is not a
+    /// local-threading producer where it sits ([`Walker::is_match_producer`]:
+    /// BT-3947 lowers one that is, each arm a `BranchArm` frame). No construct
+    /// threads such a write back to the method (BT-3817): compiling it would
+    /// drop the write silently. The contexts are the
     /// [`Residual::MatchArmWrite`] row's: the REPL was exempt (its arm
     /// assignment drew only the value-position error, BT-3864) until BT-3909
     /// gave it the same error as a method, pinned in

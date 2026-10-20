@@ -3777,23 +3777,36 @@ fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
     assert!(residual_messages(input, Some(&["f"])).is_empty(), "{input}");
 }
 
-/// PIN-BUG BT-3947 (closes BT-3875): a REPL `match:` arm that writes an
-/// outer local draws the same `match:` arm error as a method (BT-3817), not
-/// the value-position error it drew before BT-3909 (maintainer-approved REPL
-/// output change), and only that one. BT-3947 lowers `match:` arms as frames,
-/// deletes the `MatchArmWrite` row and flips this to accepted.
+/// BT-3947 (closes BT-3875): a REPL `match:` arm that writes an outer local is a
+/// REPL construct (each arm inlined over the bindings map), so it is accepted at
+/// a statement, an assignment's value or an operand site, as a method's is. The
+/// `match:` arm error (BT-3909, maintainer-approved REPL output change) is left
+/// for a `match:` that is not a producer there: a write in a guard, or a
+/// `match:` that is the subject of another.
 #[test]
-fn residual_repl_match_arm_write_is_the_match_arm_error() {
-    let input = "r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]\n";
-    let messages = residual_messages(input, Some(&["t"]));
-    assert_eq!(
-        messages,
-        vec![
-            "a `match:` arm writes outer local `t`, but `match:` cannot return the write"
-                .to_string();
-            2
-        ]
-    );
+fn residual_repl_match_arm_write_is_accepted_where_it_is_a_producer() {
+    for input in [
+        "r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]\n",
+        "3 match: [1 -> (t := 5); _ -> (t := t + 9)]\n",
+        "r := 1 + (3 match: [1 -> (t := 5); _ -> 0])\n",
+        "true ifTrue: [3 match: [1 -> (t := 5); _ -> 0]]\n",
+        "3 match: [1 -> (4 match: [4 -> (t := 5); _ -> 0]); _ -> 0]\n",
+    ] {
+        let messages = residual_messages(input, Some(&["t"]));
+        assert!(messages.is_empty(), "{input}: {messages:?}");
+    }
+    for input in [
+        "3 match: [x when: [(t := 5) > 0] -> 1; _ -> 0]\n",
+        "(3 match: [1 -> (t := 5); _ -> 0]) match: [_ -> 1]\n",
+    ] {
+        let messages = residual_messages(input, Some(&["t"]));
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("a `match:` arm writes outer local `t`")),
+            "{input}: {messages:?}"
+        );
+    }
     // An arm binding a local of its own is not an outer write; it is still
     // the value-position error.
     let messages = residual_messages("r := 3 match: [_ -> (z := 5)]\n", Some(&[]));

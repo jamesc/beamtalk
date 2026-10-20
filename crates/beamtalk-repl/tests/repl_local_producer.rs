@@ -62,6 +62,14 @@ const INPUTS: &[&str] = &[
     "r := (s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]\nr",
     "nil ifNil: [t := t + 1]",
     "r := nil ifNil: [t := t + 1. 1]\nr",
+    // BT-3947 (closes BT-3875): a `match:` whose arm writes a binding is a REPL
+    // construct, each arm inlined over the bindings map, as a statement, an
+    // assignment's value and an operand.
+    "s match: [0 -> (t := t + 1); _ -> 0]",
+    "s match: [0 -> (t := t + 1); _ -> 0]\nt",
+    "r := s match: [0 -> (t := t + 1); _ -> (u := u + 1)]\n#[r, t, u]",
+    "r := 1 + (s match: [0 -> (t := t + 1); _ -> 0])",
+    "r := 1 + (s match: [n -> (t := t + n)])\n#[r, t]",
     // No producer: the statement keeps the assembler's lowering.
     "#(1, 2) do: [:x | t := t + x]",
     "r := #(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",

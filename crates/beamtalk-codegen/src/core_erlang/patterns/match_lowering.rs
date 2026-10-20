@@ -323,13 +323,17 @@ impl CoreErlangGenerator {
             .iter()
             .any(|family| MATCH_ARM_FAMILIES.contains(family));
         arms.iter().any(|arm| {
+            // BT-3947 (closes BT-3875): at the REPL an arm that writes a binding
+            // threads the bindings map, like a REPL conditional's arm.
+            let repl_binding_write = self.repl_match_arm_writes_bindings(&arm.body);
             // BT-3489: a `self.field := ...` arm body. Before this, nothing
             // here matched it, so `generate_match` left `base_state` as
             // `None` and the arm compiled through plain `expression_doc`,
             // whose field-write binding (`State1`) is scoped to
             // that one `case` arm — yet the code after the `match:` referenced
             // it unconditionally, so `erlc` rejected the module outright.
-            (carries_family_write && self.is_field_assignment(arm.body.unwrap_parens()))
+            repl_binding_write
+                || (carries_family_write && self.is_field_assignment(arm.body.unwrap_parens()))
                 || (is_actor
                     && (self.is_tier2_value_call(&arm.body)
                         || self.control_flow_has_mutations(&arm.body)
@@ -344,6 +348,21 @@ impl CoreErlangGenerator {
                         // `expression_doc` compile.
                         || self.conditional_receiver_needs_threading(&arm.body)))
         })
+    }
+
+    /// BT-3947: whether the arm body `body` of a REPL `match:` writes a REPL
+    /// binding, a nested construct's included: the arm is then inlined over the
+    /// bindings map (`generate_repl_arm_inline`). Never outside the REPL.
+    fn repl_match_arm_writes_bindings(&self, body: &Expression) -> bool {
+        if !self.is_repl_mode() {
+            return false;
+        }
+        let block = Block::new(
+            Vec::new(),
+            vec![ExpressionStatement::bare(body.unwrap_parens().clone())],
+            body.span(),
+        );
+        self.repl_blocks_write_bindings(&[&block])
     }
 
     /// [`Self::generate_match`]'s value-type-instance rejection detector:
@@ -545,7 +564,10 @@ impl CoreErlangGenerator {
         // BT-3493, which fixes it in the classifier (covering all three
         // constructs at once) and can then widen this condition.
         let bare_body = body.unwrap_parens();
-        if self.conditional_receiver_needs_threading(body) || self.is_field_assignment(bare_body) {
+        if self.conditional_receiver_needs_threading(body)
+            || self.is_field_assignment(bare_body)
+            || self.repl_match_arm_writes_bindings(body)
+        {
             let synthetic_block = Block::new(
                 Vec::new(),
                 vec![ExpressionStatement::bare(bare_body.clone())],

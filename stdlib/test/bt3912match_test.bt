@@ -86,6 +86,21 @@ TestCase subclass: Bt3912MatchTest
   testArmLoop1 =>
     self assert: #[(Bt3912MatchClass armLoop: 2), ((Bt3912MatchValue new) armLoop: 2), ((Bt3912MatchActor spawn) armLoop: 2)] equals: #[0, 0, 0]
 
+  testPlainArm0 =>
+    self assert: #[(Bt3912MatchClass plainArm: 1), ((Bt3912MatchValue new) plainArm: 1), ((Bt3912MatchActor spawn) plainArm: 1)] equals: #[5, 5, 5]
+
+  testPlainArm1 =>
+    self assert: #[(Bt3912MatchClass plainArm: 2), ((Bt3912MatchValue new) plainArm: 2), ((Bt3912MatchActor spawn) plainArm: 2)] equals: #[9, 9, 9]
+
+  testValueArm0 =>
+    self assert: #[(Bt3912MatchClass valueArm: 1), ((Bt3912MatchValue new) valueArm: 1), ((Bt3912MatchActor spawn) valueArm: 1)] equals: #[#[2, 1], #[2, 1], #[2, 1]]
+
+  testValueArm1 =>
+    self assert: #[(Bt3912MatchClass valueArm: 2), ((Bt3912MatchValue new) valueArm: 2), ((Bt3912MatchActor spawn) valueArm: 2)] equals: #[#[0, 0], #[0, 0], #[0, 0]]
+
+  testLastInLoop0 =>
+    self assert: #[(Bt3912MatchClass lastInLoop: #(1, 2, 3)), ((Bt3912MatchValue new) lastInLoop: #(1, 2, 3)), ((Bt3912MatchActor spawn) lastInLoop: #(1, 2, 3))] equals: #[1100, 1100, 1100]
+
   testReadWrite0 =>
     self assert: #[(Bt3912MatchClass readWrite: 1), ((Bt3912MatchValue new) readWrite: 1), ((Bt3912MatchActor spawn) readWrite: 1)] equals: #[20, 20, 20]
 

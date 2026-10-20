@@ -818,25 +818,56 @@ t
 // `match:` arms (BT-3817, BT-3823, BT-3909)
 // ===========================================================================
 //
-// A `match:` arm is an expression, not a block: no construct threads a write
-// in it back. Class, value-type and actor methods reject one with a structured
-// error (BT-3817); the REPL was exempt from that error, dropped the write
-// silently until BT-3864 made an assignment used as a value (here the arm's
-// value) a compile error everywhere, and since BT-3909 (ADR 0133's
-// `RESIDUAL_DENY_SET`, maintainer-approved REPL output change) draws the same
-// `match:` arm error as a method.
+// A `match:` arm is an expression, not a block, but it is the same frame a
+// conditional's block is (BT-3947, closing BT-3875): a `match:` whose arm writes
+// a binding is a REPL construct, each arm inlined over the bindings map, so the
+// write comes back. (It was a structured error before: BT-3817 in methods, since
+// BT-3909 in the REPL.)
 
 t := 0
 // => 0
 
-// PIN-BUG BT-3947 (closes BT-3875): makes `match:` arms producers. Correct
-// answer: 9.
 r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]
-// => ERROR: a `match:` arm writes outer local `t`, but `match:` cannot return the write
+// => 9
 
-// PIN-BUG BT-3947: correct answer 9.
 t
+// => 9
+
+2 match: [1 -> (t := 5); _ -> (t := t + 9)]
+// => 18
+
+t
+// => 18
+
+r := 1 + (1 match: [1 -> (t := 100); _ -> 0])
+// => 101
+
+t
+// => 100
+
+2 match: [1 -> (t := 5); _ -> 0]
 // => 0
+
+t
+// => 100
+
+1 match: [1 -> (2 match: [2 -> (t := 7); _ -> (t := 8)]); _ -> 0]
+// => 7
+
+t
+// => 7
+
+true ifTrue: [1 match: [1 -> (t := 50); _ -> 0]]
+// => 50
+
+t
+// => 50
+
+5 match: [n -> (t := t + n)]
+// => 55
+
+t
+// => 55
 
 // ===========================================================================
 // ADR 0133 Phase 3 residuals (BT-3909)

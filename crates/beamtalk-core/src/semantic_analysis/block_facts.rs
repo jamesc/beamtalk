@@ -2623,6 +2623,15 @@ pub fn repl_producer_writes(
     bound_outside: &dyn Fn(&str) -> bool,
 ) -> Option<Vec<OuterLocalWrite>> {
     let inner = expr.unwrap_parens();
+    // BT-3947: a `match:` whose arms write a binding (no guard does) adopts the
+    // bindings map like a REPL conditional.
+    if let Some(arms) = match_arms(inner) {
+        if !match_guard_writes(arms, bound_outside).is_empty() {
+            return None;
+        }
+        let writes = match_arm_body_writes(arms, bound_outside);
+        return (!writes.is_empty()).then_some(writes);
+    }
     let construct = local_threading_construct(inner)?;
     match construct.family {
         LocalThreadingFamily::Lookup => None,
@@ -2721,7 +2730,7 @@ pub fn repl_arm_producer_sites(stmt: &Expression) -> Vec<&Expression> {
         }
     }
     let mut sites = sequenced_operand_sites(stmt);
-    if local_threading_construct(inner).is_some() {
+    if local_threading_construct(inner).is_some() || match_arms(inner).is_some() {
         sites.push(inner);
     }
     sites
