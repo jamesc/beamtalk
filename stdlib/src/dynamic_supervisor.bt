@@ -208,7 +208,10 @@ abstract Object subclass: DynamicSupervisor(C)
   /// Override to perform post-start setup (e.g., pre-populating workers
   /// via `startChild`). `self` is the new pool. Runs in the caller's
   /// process after the pool has finished starting, so messages to `self`
-  /// work here. If it raises, the pool is stopped and the start fails.
+  /// work here. If it raises, the pool is stopped and the start fails, as
+  /// for `Supervisor>>initialize`: `spawn`/`spawnWith:` re-raise, while
+  /// `supervise`, `spawnAs:` and `spawnWith:as:` answer `Result error:`
+  /// (`#supervisor_start_failed`).
   ///
   /// Fires exactly once per top-level start (`supervise` or a spawn-family
   /// message), not for a nested pool (ADR 0135 §1). It does
