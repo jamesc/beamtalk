@@ -2943,6 +2943,10 @@ with_live_supervisor(Self, Selector, Fun) ->
 
 %% The process an OTP call failure names (`{Reason, {M, F, [Target | _]}}`,
 %% as `gen_server:call` and `proc_lib:stop` exit), or `none` for a bare reason.
+%% A target-less shape (bare `noproc`/`timeout`/`noconnection`, an `erpc`
+%% error) is assumed to be the supervisor's own: today only `gen_server:stop/1`
+%% raises one inside `with_live_supervisor/3`. A `Fun` that makes its own
+%% target-less call (an `erpc` to another node, say) must catch it itself.
 -spec call_target(term()) -> {ok, term()} | none.
 call_target({_Reason, {M, F, [Target | _]}}) when is_atom(M), is_atom(F) -> {ok, Target};
 call_target(_Reason) -> none.
