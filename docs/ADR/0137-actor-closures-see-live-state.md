@@ -109,9 +109,12 @@ receives a block or calls a user method. The last group includes the
 `Timer`, and collection primitives such as `includes:` that send `=` to
 elements. A call needs no bracket only in two cases. One is a construct the
 compiler lowers in place (`ifTrue:`, an inlined `do:`, `whileTrue:`, …), which
-is not a call at all. The other is an intrinsic or primitive that takes no
-block argument and calls no user method, such as integer arithmetic, string
-concatenation or `size` on a list. For a binary operator on a receiver of
+is not a call at all. The other is an intrinsic or primitive that can never
+dispatch to user code, whatever its arguments are. Integer arithmetic and
+`size` on a list qualify. String concatenation with `,` does not in general:
+given a non-string argument it calls that argument's `printString`, which can
+be a user method. It is exempt only where the compiler knows every argument is
+a primitive string, and is bracketed otherwise. For a binary operator on a receiver of
 unknown type, `operators.rs` already emits a guard whose `'true'` branch is the
 bare BIF and whose `'false'` branch is the message send; the bracket goes in
 the `'false'` branch only, so `count + 1` on an integer pays nothing. A send
@@ -160,8 +163,11 @@ built it from one of two existing sources. Inlined constructs come from
 intrinsics come from the one table codegen already uses to emit them: the
 `'true'` branch of the operator guard in `operators.rs`, and the entries of
 `PrimitiveBindingTable` (`primitive_bindings.rs`, built from the stdlib's
-`@primitive` pragmas) that carry a new `no_user_code` mark. The mark is set in
-the stdlib source next to the pragma. A binding with a block-typed parameter
+`@primitive` pragmas) that carry a new `no_user_code` mark. The mark means
+the primitive can never dispatch to user code for any argument, and it is set
+in the stdlib source next to the pragma. A primitive that is pure only for
+some argument types (`,` for strings) stays unmarked, and codegen exempts it
+only in the type-known branch it already emits for that case. A binding with a block-typed parameter
 cannot carry it, and `build-stdlib` rejects the combination. The emitter and
 the verifier read the same mark, so there is no second list to keep in step.
 An unmarked primitive is bracketed, which costs 6 to 7 ns and is never wrong.
@@ -256,17 +262,22 @@ current version before the `$bt_nlr` throw and loads after the catch, so the
 actor NLR 4-tuple `{'$bt_nlr', Tok, Val, State}` loses its `State` slot.
 
 Inside an `ensure:` protected body, every field write also stores to the
-cell (write-through), and the cleanup reads the cell. The protected body
-still threads `State` as usual, so the only extra cost is one `put` per field
-write, and only inside `ensure:` protected bodies. What the cleanup sees:
+cell (write-through), and the cleanup reads the cell. Entering an `ensure:`
+also stores the current `State` to the cell, so writes the method made before
+the `ensure:` and never synced are in the cell even when the body writes
+nothing. The protected body still threads `State` as usual. The extra cost is
+one `put` per `ensure:` entry and one per field write inside an `ensure:`
+protected body. What the cleanup sees:
 
-- On a normal exit, every write the protected body made.
-- On a `^`, every write the protected body made. The `^` also stores before
-  its throw.
-- On an exception raised in the protected body itself, every write the body
-  made before the raise, because each one was written through.
-- On an exception raised by a bracketed callee, every write the body made, and
-  the callee's writes up to the callee's last store. A callee stores before
+- On a normal exit, every write the method made before the `ensure:` and
+  every write the protected body made.
+- On a `^`, the same. The `^` also stores before its throw.
+- On an exception raised in the protected body itself, every write made
+  before the `ensure:` and every write the body made before the raise, because
+  each one was stored.
+- On an exception raised by a bracketed callee, every write made before the
+  `ensure:` and every write the body made, plus the callee's writes up to the
+  callee's last store. A callee stores before
   each call it brackets and at its normal exit. Writes it made after its last
   store and before raising were held only in its threaded locals, and the
   cleanup does not see them. The same holds for nested callees.
@@ -529,7 +540,8 @@ per self-cast to keep a behaviour that loses writes today.
   (ADR 0125).
 - The `State` family and the actor frame mode stay, so this deletes less
   codegen than the per-access cell would.
-- Inside an `ensure:` protected body, every field write also does a `put`.
+- Every `ensure:` entry, and every field write inside an `ensure:` protected
+  body, also does a `put`.
 - If a bracketed callee raises, an `ensure:` cleanup does not see the writes
   that callee made after its last store.
 - A method-level `self foo!` now runs after the current message.
@@ -561,7 +573,8 @@ methods and ADR 0066 instance-side extension funs that return
 Closure field access goes through the helpers, and field-reading block
 literals bind the capture. `OnDoCatch` stores its pre-region version under
 `CatchWithoutStateRestore`. `^` stores before the throw. Field writes inside
-an `ensure:` protected body write through. The `no_user_code` mark goes on
+an `ensure:` protected body write through, and entering an `ensure:` stores.
+The `no_user_code` mark goes on
 `PrimitiveBindingTable` entries, set from the stdlib pragmas and checked by
 `build-stdlib`. `self foo!` lowers to a cast. Bump the module ABI marker.
 
