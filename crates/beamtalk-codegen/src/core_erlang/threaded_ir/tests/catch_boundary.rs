@@ -25,6 +25,7 @@ fn vars() -> OnDoCatchVars {
         ex_class_var: v("ExClass1"),
         snapshot_var: ErlangVar::new("ExClass1Snap"),
         filter_fallback_var: v("ExClass1NoMatch"),
+        live_state: None,
     }
 }
 
@@ -305,4 +306,108 @@ fn a_filter_closed_without_its_handler_fails() {
 #[test]
 fn a_well_formed_catch_boundary_closes_its_filter() {
     assert!(!filter_defect(&[node(well_formed())]));
+}
+
+// ── BT-3952: the live-state half of the rollback ─────────────────────────
+
+fn live_vars() -> OnDoCatchVars {
+    OnDoCatchVars {
+        live_state: Some("StateAcc".to_string()),
+        ..vars()
+    }
+}
+
+fn live_node(vars: OnDoCatchVars, steps: Vec<CatchStep>) -> ThreadedStmt {
+    ThreadedStmt::OnDoCatch {
+        vars: Box::new(vars),
+        entry: Some(CatchEntry::ClassVarSnapshot),
+        try_region: TryRegion {
+            body: beamtalk_cerl_doc::Document::Str("apply Block1 () "),
+            result_var: "Result1".to_string(),
+        },
+        clauses: vec![
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple3),
+            CatchClause::NonNlr { steps },
+        ],
+        span: span(),
+    }
+}
+
+fn live_steps(state: &str) -> Vec<CatchStep> {
+    let mut steps = restore_steps("ExClass1Snap");
+    steps.insert(
+        1,
+        CatchStep::LiveStateRestore {
+            state: state.to_string(),
+        },
+    );
+    steps
+}
+
+/// The obligation is stated by the node, not guessed from its steps: a boundary
+/// that threads the actor `State` through its arms must republish it.
+#[test]
+fn a_threaded_catch_boundary_without_the_live_state_restore_fails() {
+    let ir = [live_node(live_vars(), restore_steps("ExClass1Snap"))];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::CatchWithoutLiveStateRestore { at: span() }]
+    );
+}
+
+#[test]
+fn a_threaded_catch_boundary_with_the_live_state_restore_verifies_clean() {
+    let ir = [live_node(live_vars(), live_steps("StateAcc"))];
+    assert_eq!(verify(&ir), Vec::new());
+}
+
+#[test]
+fn the_live_state_restore_follows_the_class_var_restore_before_anything_else_runs() {
+    let ir = [live_node(live_vars(), live_steps("StateAcc"))];
+    let text = lower_and_render(&ir).to_pretty_string();
+    let restore = text
+        .find("'beamtalk_class_vars':'restore'")
+        .expect("class-var restore");
+    let publish = text
+        .find("'beamtalk_actor':'publish_state'(Self, StateAcc)")
+        .expect("live-state restore");
+    let wrap = text.find("'ensure_wrapped'").expect("exception wrapped");
+    assert!(restore < publish && publish < wrap, "{text}");
+}
+
+#[test]
+fn a_live_state_restore_of_another_state_fails() {
+    let ir = [live_node(live_vars(), live_steps("StateAcc9"))];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::CatchWithoutLiveStateRestore { at: span() }]
+    );
+}
+
+#[test]
+fn a_live_state_restore_after_the_filter_opens_fails() {
+    // Ordered after the wrap, so a declined exception would run on the stale value.
+    let mut steps = restore_steps("ExClass1Snap");
+    steps.insert(
+        2,
+        CatchStep::LiveStateRestore {
+            state: "StateAcc".to_string(),
+        },
+    );
+    let ir = [live_node(live_vars(), steps)];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::CatchWithoutLiveStateRestore { at: span() }]
+    );
+}
+
+#[test]
+fn a_live_state_restore_on_a_boundary_that_threads_no_actor_state_fails() {
+    // A class method or a private scratch map has no actor `State` to publish.
+    let ir = [live_node(vars(), live_steps("StateAcc"))];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::CatchWithoutLiveStateRestore { at: span() }]
+    );
 }

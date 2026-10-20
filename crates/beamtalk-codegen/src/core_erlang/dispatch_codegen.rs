@@ -2139,6 +2139,7 @@ impl CoreErlangGenerator {
             let current_state = self.current_state_var();
             let val_code = self.expression_doc(&arguments[1])?;
             let new_state = self.next_state_var();
+            let new_state_name = new_state.clone();
 
             let doc = docvec![
                 "let ",
@@ -2158,6 +2159,7 @@ impl CoreErlangGenerator {
                 ", ",
                 leaf::var(current_state),
                 ") in ",
+                self.publish_state_doc_if_actor(&new_state_name),
             ];
 
             return Ok((doc, val_var));
@@ -2191,6 +2193,7 @@ impl CoreErlangGenerator {
             let name_code = self.expression_doc(&arguments[0])?;
             let current_state = self.current_state_var();
             let new_state = self.next_state_var();
+            let new_state_name = new_state.clone();
 
             let doc = docvec![
                 "let ",
@@ -2204,6 +2207,7 @@ impl CoreErlangGenerator {
                 ", ",
                 leaf::var(current_state),
                 ") in ",
+                self.publish_state_doc_if_actor(&new_state_name),
             ];
 
             return Ok((doc, "Self".to_string()));

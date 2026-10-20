@@ -56,7 +56,7 @@ use super::super::threaded_ir::{
     self, BindOp, FrameId, RebindFrame, RebindFrameKind, ThreadedStmt, ThreadedValue,
     ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, live_state};
 use super::StateAccFallbackReason;
 use super::analysis::ThreadedFamilies;
 use super::family_slots::{self, FamilyVersionStep};
@@ -1753,6 +1753,14 @@ impl CoreErlangGenerator {
             op: BindOp::Direct(ValueRef::Var(val_var.clone())),
             span,
         });
+        // BT-3952: the rebound parameter is the only copy of the field's new
+        // value inside the loop, so publish it for a closure that runs at home.
+        if self.publishes_actor_field_writes() {
+            stmts.push(ThreadedStmt::Statement(
+                live_state::publish_field_doc(field, &val_var),
+                span,
+            ));
+        }
         Ok(val_var)
     }
 
@@ -2539,6 +2547,7 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
+                        stmts.extend(self.publish_current_state_stmt(span));
                         if is_last {
                             last_result = Some(ValueRef::Var(val_var));
                         }
@@ -2580,6 +2589,7 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
+                        stmts.extend(self.publish_current_state_stmt(span));
                         if is_last {
                             last_result = Some(ValueRef::Var("Self".to_string()));
                         }
@@ -2641,6 +2651,7 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
+                        stmts.extend(self.publish_current_state_stmt(span));
                         self.push_control_flow_threaded_var_rereads(
                             &arguments[1],
                             span,

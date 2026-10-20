@@ -1,0 +1,128 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3952 (ADR 0133 amendment): a closure reading `self.field` at home reads
+// the actor's live state. Fixture: `fixtures/live_field_probe.bt`.
+
+TestCase subclass: LiveFieldReadTest
+
+  testStraightLine =>
+    probe := LiveFieldProbe spawn
+    self assert: probe straightLine equals: 5
+
+  testConditionalArm =>
+    probe := LiveFieldProbe spawn
+    self assert: (probe inConditional: true) equals: 7
+    self assert: (probe inConditional: false) equals: 7
+
+  testCountedLoop =>
+    probe := LiveFieldProbe spawn
+    self assert: probe inCountedLoop equals: 6
+
+  testWhileLoop =>
+    probe := LiveFieldProbe spawn
+    self assert: probe inWhileLoop equals: 6
+
+  testDoFold =>
+    probe := LiveFieldProbe spawn
+    self assert: probe inFold equals: 6
+
+  testInjectFold =>
+    probe := LiveFieldProbe spawn
+    self assert: probe inInject equals: 6
+
+  testOpenSelfSend =>
+    probe := LiveFieldProbe spawn
+    self assert: probe inSelfSend equals: 1
+
+  testSealedSelfSend =>
+    probe := LiveFieldProbe spawn
+    self assert: probe inSealedSelfSend equals: 10
+
+  testOnDoBody =>
+    probe := LiveFieldProbe spawn
+    self assert: probe inOnDoBody equals: 9
+
+  testOnDoHandler =>
+    probe := LiveFieldProbe spawn
+    self assert: probe inOnDoHandler equals: 11
+
+  testEnsure =>
+    probe := LiveFieldProbe spawn
+    self assert: probe inEnsure equals: 5
+
+  // A closure at home agrees with a direct read at the same point, whichever
+  // way a failed try body treats its writes.
+  testClosureAgreesWithDirectReadAfterFailedTryBody =>
+    probe := LiveFieldProbe spawn
+    self assert: probe afterFailedTryBody equals: true
+
+  testCreatedInLoop =>
+    probe := LiveFieldProbe spawn
+    self assert: probe createdInLoop equals: #(3, 3, 3)
+
+  testNestedClosure =>
+    probe := LiveFieldProbe spawn
+    self assert: probe nested equals: 8
+
+  testThroughSealedMethod =>
+    probe := LiveFieldProbe spawn
+    self assert: probe throughSealedMethod equals: 101
+
+  testClosureReadsLocalAndField =>
+    probe := LiveFieldProbe spawn
+    self assert: (probe readsLocalAndField: 1) equals: 21
+
+  testClosureAgreesWithDirectReadAfterFailedEnsureInOnDo =>
+    probe := LiveFieldProbe spawn
+    self assert: probe afterFailedEnsureInOnDo equals: true
+
+  testClosureRunInsideCountedLoop =>
+    probe := LiveFieldProbe spawn
+    self assert: probe runInsideCountedLoop equals: 30
+
+  testClosureRunInsideWhileLoop =>
+    probe := LiveFieldProbe spawn
+    self assert: probe runInsideWhileLoop equals: 15
+
+  testClosureRunInsideFold =>
+    probe := LiveFieldProbe spawn
+    self assert: probe runInsideFold equals: 6
+
+  testCollectionOperationClosure =>
+    probe := LiveFieldProbe spawn
+    self assert: probe collectReadsAfterWrite equals: #(4, 5, 6)
+
+  testBareFieldRead =>
+    probe := LiveFieldProbe spawn
+    self assert: probe bareRead equals: 6
+
+  testClosureAgreesWithDirectReadAfterFailedSelfSend =>
+    probe := LiveFieldProbe spawn
+    self assert: probe afterFailedSelfSend equals: true
+    self assert: probe afterFailedSelfSendWithHandlerWrite equals: true
+    self assert: probe afterFailedSealedSelfSend equals: true
+
+  testStoredClosureRunByLaterInvocationReadsLiveState =>
+    probe := LiveFieldProbe spawn
+    probe storeReader
+    probe setTotal: 3
+    self assert: probe runStoredReader equals: 3
+    probe bump
+    self assert: probe runStoredReader equals: 4
+
+  // Away from home the closure keeps the snapshot it was created with.
+  testClosureRunByAnotherProcessReadsSnapshot =>
+    probe := LiveFieldProbe spawn
+    probe setTotal: 1
+    block := probe makeReader
+    probe setTotal: 2
+    self assert: block value equals: 1
+
+  testClosureRunByAnotherActorReadsSnapshot =>
+    probe := LiveFieldProbe spawn
+    relay := LiveFieldRelay spawn
+    probe setTotal: 1
+    block := probe makeReader
+    probe setTotal: 2
+    self assert: (relay run: block) equals: 1

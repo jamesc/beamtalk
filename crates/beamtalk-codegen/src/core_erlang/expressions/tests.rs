@@ -104,7 +104,8 @@ fn test_field_assignment_closed_actor_threads_state() {
     let output = closed_write(&mut generator, &value);
     assert_eq!(
         output,
-        "let _Val1 = 42 in let State1 = call 'maps':'put'('count', _Val1, State) in _Val1"
+        "let _Val1 = 42 in let State1 = call 'maps':'put'('count', _Val1, State) in \
+         do call 'beamtalk_actor':'publish_state'(Self, State1) _Val1"
     );
 }
 

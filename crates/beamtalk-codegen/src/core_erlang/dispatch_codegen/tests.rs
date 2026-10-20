@@ -708,7 +708,8 @@ fn test_field_assignment_open_actor_threads_state() {
     let output = doc.to_pretty_string();
     assert_eq!(
         output,
-        "let _Val1 = 42 in let State1 = call 'maps':'put'('count', _Val1, State) in "
+        "let _Val1 = 42 in let State1 = call 'maps':'put'('count', _Val1, State) in \
+         do call 'beamtalk_actor':'publish_state'(Self, State1) "
     );
     assert_eq!(val_var, "_Val1");
 }

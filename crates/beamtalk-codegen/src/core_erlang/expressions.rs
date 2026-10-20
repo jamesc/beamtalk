@@ -326,7 +326,7 @@ impl CoreErlangGenerator {
                 } else {
                     // In hybrid mode, check if this is a read-only field
                     // accessed implicitly (bare name without self. prefix).
-                    if self.loop_mode.in_hybrid_loop {
+                    if self.loop_mode.in_hybrid_loop && !self.reads_live_actor_state() {
                         if let Some(param_var) = self
                             .loop_mode
                             .hybrid_readonly_field_params
@@ -393,6 +393,15 @@ impl CoreErlangGenerator {
                             leaf::atom(id.name.to_string()),
                             ") ",
                             "end",
+                        ])
+                    } else if self.reads_live_actor_state() {
+                        // BT-3952: a bare field name read in a closure body.
+                        Ok(docvec![
+                            "call 'maps':'get'(",
+                            leaf::atom(id.name.to_string()),
+                            ", ",
+                            super::live_state::live_state_doc(&state_var),
+                            ")",
                         ])
                     } else {
                         Ok(docvec![
@@ -671,7 +680,9 @@ impl CoreErlangGenerator {
                 // iteration. A `late` field is never pre-extracted this way (loop_mode.rs
                 // withholds it from `hybrid_readonly_field_params`, ADR 0124 §4b), so this
                 // never fires for one — the guarded read below runs instead, per-iteration.
-                if self.loop_mode.in_hybrid_loop {
+                // A closure body is not the loop: its read goes through the
+                // live-state path below (BT-3952).
+                if self.loop_mode.in_hybrid_loop && !self.reads_live_actor_state() {
                     if let Some(param_var) = self
                         .loop_mode
                         .hybrid_readonly_field_params
@@ -691,6 +702,29 @@ impl CoreErlangGenerator {
                     super::CodeGenContext::Actor => self.current_field_read_state_var(),
                     super::CodeGenContext::Repl => "State".to_string(),
                 };
+                // BT-3952: a closure body reads the actor's live state when it
+                // runs at home, not the `State` captured when it was created.
+                if self.reads_live_actor_state() {
+                    let live = super::live_state::live_state_doc(&state_var);
+                    if is_late {
+                        let declared_type = self
+                            .class_hierarchy
+                            .as_ref()
+                            .and_then(|h| h.state_field_type(&class_name, field.name.as_str()));
+                        return Ok(self.generate_late_field_read(
+                            field.name.as_str(),
+                            live,
+                            declared_type,
+                        ));
+                    }
+                    return Ok(docvec![
+                        "call 'maps':'get'(",
+                        leaf::atom(field.name.to_string()),
+                        ", ",
+                        live,
+                        ")",
+                    ]);
+                }
                 if is_late {
                     let declared_type = self
                         .class_hierarchy

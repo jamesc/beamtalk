@@ -1274,6 +1274,12 @@ pub(in crate::core_erlang) struct OnDoCatchVars {
     /// The pattern variable of the exhaustive fallback clause that closes the
     /// class filter's `case` ([`CatchStep::FilterMiss`]).
     pub filter_fallback_var: String,
+    /// BT-3952: the actor `State` variable the catch republishes as the
+    /// invocation's live state ([`CatchStep::LiveStateRestore`]), or `None`
+    /// where the boundary threads no actor `State` (a class method, a value
+    /// type, the closure-based `on:do:`, a private scratch map). Typed in the
+    /// node so the verifier can require the step exactly when this is set.
+    pub live_state: Option<String>,
 }
 
 /// The two `$bt_nlr` throw shapes a compiled catch passes through.
@@ -1318,6 +1324,14 @@ pub(in crate::core_erlang) enum CatchClause {
 pub(in crate::core_erlang) enum CatchStep {
     /// `do beamtalk_class_vars:restore(Snap)` — must come first.
     ClassVarRestore { snapshot: ErlangVar },
+    /// BT-3952: `do beamtalk_actor:publish_state(Self, State)` — the live-state
+    /// half of the catch's rollback. The protected region's field writes were
+    /// published as they happened, but the catch continues with the `State` the
+    /// region *entered* with (a raise answers the entry map), so the invocation's
+    /// live state is put back to that value before anything else can read it.
+    /// Must directly follow [`CatchStep::ClassVarRestore`], and is present
+    /// exactly when [`OnDoCatchVars::live_state`] is set.
+    LiveStateRestore { state: String },
     /// Wrap the raw `{Type, Error, Stack}` as an exception object.
     WrapException,
     /// `matches_class` and the opening of its `'true'` arm. Must be followed

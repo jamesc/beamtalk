@@ -128,6 +128,10 @@ pub(super) mod fault {
         /// lowered with the scratch-map `Put` every assignment used to get,
         /// whatever the frame carries (`ArmLocalPutNotCarried`).
         PutUncarriedLocal,
+        /// BT-3952: a threaded `on:do:` catch boundary omits the step that
+        /// republishes its entry `State` as the invocation's live state
+        /// (`CatchWithoutLiveStateRestore`).
+        SkipLiveStateRestore,
     }
 
     thread_local! {

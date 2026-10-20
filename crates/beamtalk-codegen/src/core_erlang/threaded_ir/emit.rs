@@ -6,11 +6,11 @@
 //! three narrow accessors, never through a raw field or an AST-directed
 //! emission path. Depends only on [`super::ir`]; nothing here verifies IR.
 
-use super::super::{CoreErlangGenerator, NlrBoundary};
+use super::super::{CoreErlangGenerator, NlrBoundary, live_state};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter,
-    NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode, TryRegion, ValueRef,
-    VersionPrefix, VersionedVar,
+    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FrameId,
+    LOCAL_STATE_KEY_PREFIX, LoopCounter, NlrThrowShape, OnDoCatchVars, RebindLowering,
+    ThreadedStmt, ThreadingMode, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -66,6 +66,23 @@ impl<'g> RenderCtx<'g> {
     /// allocator (naming stays centralized, never re-derived).
     fn fresh_temp_var(&mut self, base: &str) -> String {
         self.generator.fresh_temp_var(base)
+    }
+
+    /// BT-3952: whether a `Put` of `field` that mints `target` is a write of
+    /// an actor's own field, and so must publish the new `State` as the
+    /// invocation's live state (`beamtalk_actor:publish_state/2`) for a
+    /// closure that runs at home to read.
+    ///
+    /// The one place this is decided: every actor field write, whichever
+    /// scope lowered it (method body, conditional arm, loop or fold body,
+    /// `on:do:` arm, Tier 2 block body), renders through `render_bind`'s
+    /// `Put` arm, so a scope kind cannot skip it. A threaded local lives under
+    /// a `__local__` key of the same map and is not a field; a class method
+    /// or value type has no actor `State`.
+    fn publishes_live_state(&self, target: &VersionedVar, field: &str) -> bool {
+        self.generator.publishes_actor_field_writes()
+            && matches!(target.prefix, VersionPrefix::State)
+            && !field.starts_with(LOCAL_STATE_KEY_PREFIX)
     }
 
     /// Resolves `var`'s render-time name, honoring loop context for
@@ -517,6 +534,7 @@ fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static
         CatchStep::ClassVarRestore { snapshot } => {
             CoreErlangGenerator::class_var_restore_doc(snapshot)
         }
+        CatchStep::LiveStateRestore { state } => live_state::publish_state_doc(state),
         CatchStep::WrapException => docvec![
             "let ",
             leaf::var(vars.built_stack_var.clone()),
@@ -1024,17 +1042,25 @@ fn render_bind(
     let target_name = ctx.resolve_prefix(target);
     let source_name = ctx.resolve_prefix(source);
     match op {
-        BindOp::Put { field, value } => docvec![
-            "let ",
-            leaf::var(target_name),
-            " = call 'maps':'put'(",
-            leaf::atom(field.clone()),
-            ", ",
-            render_value(value, ctx),
-            ", ",
-            leaf::var(source_name),
-            ") in ",
-        ],
+        BindOp::Put { field, value } => {
+            let publish = if ctx.publishes_live_state(target, field) {
+                live_state::publish_state_doc(&target_name)
+            } else {
+                Document::Nil
+            };
+            docvec![
+                "let ",
+                leaf::var(target_name),
+                " = call 'maps':'put'(",
+                leaf::atom(field.clone()),
+                ", ",
+                render_value(value, ctx),
+                ", ",
+                leaf::var(source_name),
+                ") in ",
+                publish,
+            ]
+        }
         BindOp::Unpack { field } => docvec![
             "let ",
             leaf::var(target_name),

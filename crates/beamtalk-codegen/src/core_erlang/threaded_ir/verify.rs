@@ -163,6 +163,16 @@ pub(in crate::core_erlang) enum VerifyError {
     /// in any nesting position closes its filter, so the check is per node.
     CatchFilterNotClosed { at: Span },
 
+    /// BT-3952: a compiled `on:do:` that threads the actor `State` through its
+    /// arms ([`OnDoCatchVars::live_state`] set) does not republish that entry
+    /// `State` as the invocation's live state, as the step directly after the
+    /// class-variable restore ([`CatchStep::LiveStateRestore`]); or the step is
+    /// present on a node that threads no actor `State`. Without it the failed
+    /// try body's field writes, published as they happened, outlive the rollback
+    /// the catch performs on `State`, and a closure that runs at home after the
+    /// `on:do:` reads a value no direct `self.field` read can see.
+    CatchWithoutLiveStateRestore { at: Span },
+
     /// BT-3725 (the verifier backing for the BT-3694 fix): a
     /// [`ScopeKind::ClassMethod`] scope opens a `StateAcc` loop that carries no
     /// threaded local, or threads the actor `State` / value-type `Self` family.
@@ -1161,6 +1171,10 @@ impl VerifyWalk<'_> {
                     self.errors
                         .push(VerifyError::CatchFilterNotClosed { at: *span });
                 }
+                if !catch_live_state_restored(vars, clauses) {
+                    self.errors
+                        .push(VerifyError::CatchWithoutLiveStateRestore { at: *span });
+                }
             }
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
@@ -1241,6 +1255,36 @@ fn check_catch_restore(
         }
         _ => Some(CatchRestoreDefect::RestoreNotFirst),
     }
+}
+
+/// BT-3952: whether every non-NLR clause of a [`ThreadedStmt::OnDoCatch`]
+/// carries [`CatchStep::LiveStateRestore`] of the node's
+/// [`OnDoCatchVars::live_state`] directly after the class-variable restore, and
+/// carries none when the node threads no actor `State`.
+fn catch_live_state_restored(vars: &OnDoCatchVars, clauses: &[CatchClause]) -> bool {
+    clauses.iter().all(|clause| match clause {
+        CatchClause::NlrPassThrough(_) => true,
+        CatchClause::NonNlr { steps } => {
+            let restored = steps.iter().position(
+                |step| matches!(step, CatchStep::LiveStateRestore { state } if Some(state) == vars.live_state.as_ref()),
+            );
+            let any = steps
+                .iter()
+                .any(|step| matches!(step, CatchStep::LiveStateRestore { .. }));
+            match &vars.live_state {
+                None => !any,
+                Some(_) => {
+                    restored == Some(1)
+                        && matches!(steps.first(), Some(CatchStep::ClassVarRestore { .. }))
+                        && steps
+                            .iter()
+                            .filter(|s| matches!(s, CatchStep::LiveStateRestore { .. }))
+                            .count()
+                            == 1
+                }
+            }
+        }
+    })
 }
 
 /// Whether the non-NLR clause of a [`ThreadedStmt::OnDoCatch`] closes the class

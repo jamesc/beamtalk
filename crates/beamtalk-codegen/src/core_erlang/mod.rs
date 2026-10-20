@@ -134,6 +134,7 @@ mod field_types;
 mod gen_server;
 pub(in crate::core_erlang) mod generator;
 mod intrinsics;
+mod live_state;
 mod method_frame;
 mod nlr;
 mod operators;

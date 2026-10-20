@@ -210,6 +210,7 @@ mod gen_server;
 mod group_by_fold_gate_agreement;
 mod hybrid_field_rebind_corpus;
 mod late_reconcile_conformance;
+mod live_state_publication_corpus;
 mod local_producer_agreement;
 mod local_producer_agreement_conditional;
 mod local_producer_agreement_exception;

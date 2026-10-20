@@ -152,16 +152,15 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: pool pureSort equals: #(4, 3, 2, 1)
     self assert: pool pureIfNone equals: 7
 
-  // PIN-BUG BT-3952: should be 4. The handler `[self.total]` is created
-  // before the fold runs and reads `self.total` as it was then (0), but
-  // it is called at home, after the fold bumped the field four times. It
-  // answered 4 while a field-writing caller promoted this position to
-  // Tier 2 (the ADR 0128 fold); that promotion needed a block ADR 0133
-  // now rejects (BT-3922), so the handler is a plain closure. Flip to
-  // `equals: 4` when BT-3952 is fixed.
-  testPureIfNoneAfterFoldPinBug =>
+  // BT-3952: the handler `[self.total]` is created before the fold runs, but
+  // it is called at home (the same actor, inside its own method), after the
+  // fold bumped the field four times, so it reads the live state: 4. It
+  // answered 4 while a field-writing caller promoted this position to Tier 2
+  // (the ADR 0128 fold), then 0 once ADR 0133 (BT-3922) removed that promotion
+  // and left the handler a plain closure over the `State` it was created with.
+  testPureIfNoneAfterFold =>
     pool := SelfSendHomFoldPool spawn
-    self assert: pool pureIfNoneAfterFold equals: 0
+    self assert: pool pureIfNoneAfterFold equals: 4
 
   // BT-3922: a block that writes `self.total` and is passed to one of these
   // HOMs is an ADR 0133 compile error (it raised `stateful_block_dispatch`

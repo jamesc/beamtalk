@@ -1,0 +1,224 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3952 (ADR 0133 amendment): a closure that reads `self.field` and runs at
+// home -- in the same actor process, inside one of its own invocations --
+// reads the actor's live state, not the `State` captured when the closure was
+// created. Each method below creates the closure BEFORE a field write that
+// one scope kind performs, then runs the closure after it. A closure run away
+// from home keeps the snapshot (see `LiveFieldRelay`).
+
+Actor subclass: LiveFieldProbe
+  state: total = 0
+  state: items = #(1, 2, 3)
+  state: reader = nil
+
+  total => self.total
+
+  setTotal: n => self.total := n
+
+  bump => self.total := self.total + 1
+
+  // The closure is handed out as a value; the test process runs it later.
+  makeReader => [self.total]
+
+  // ── scope kinds that perform the write ─────────────────────────────────
+  straightLine =>
+    block := [self.total]
+    self.total := 5
+    block value
+
+  inConditional: flag =>
+    block := [self.total]
+    flag ifTrue: [self.total := 7]
+    block value
+
+  inCountedLoop =>
+    block := [self.total]
+    1 to: 3 do: [:i | self.total := self.total + i]
+    block value
+
+  inWhileLoop =>
+    block := [self.total]
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self.total := self.total + 2
+        i := i + 1
+      ]
+    block value
+
+  inFold =>
+    block := [self.total]
+    self.items do: [:x | self.total := self.total + x]
+    block value
+
+  inInject =>
+    block := [self.total]
+    self.items
+      inject: 0
+      into: [:acc :x |
+        self.total := self.total + x
+        acc + x
+      ]
+    block value
+
+  inSelfSend =>
+    block := [self.total]
+    self bump
+    block value
+
+  inSealedSelfSend =>
+    block := [self.total]
+    self sealedBump
+    block value
+
+  sealed sealedBump => self.total := self.total + 10
+
+  inOnDoBody =>
+    block := [self.total]
+    [self.total := 9] on: Error do: [:e | nil]
+    block value
+
+  inOnDoHandler =>
+    block := [self.total]
+    [
+      self.total := 9
+      1 / 0
+    ] on: Error do: [:e | self.total := 11]
+    block value
+
+  inEnsure =>
+    block := [self.total]
+    [self.total := 4] ensure: [self.total := self.total + 1]
+    block value
+
+  // The closure agrees with a direct read, whichever way a failed try body
+  // treats its writes.
+  afterFailedTryBody =>
+    block := [self.total]
+    [
+      self.total := 9
+      1 / 0
+    ] on: Error do: [:e | nil]
+    block value =:= self.total
+
+  // A closure created inside a loop body, run after the loop.
+  createdInLoop =>
+    seen := #()
+    1
+      to: 3
+      do: [:i |
+        self.total := i
+        seen := seen add: [self.total]
+      ]
+    seen collect: [:b | b value]
+
+  // A closure nested in a closure.
+  nested =>
+    outer := [[self.total]]
+    self.total := 8
+    outer value value
+
+  // A closure passed through a sealed method of the same class, run after the
+  // sealed method changed the field (BT-3952's original shape).
+  sealed runAfterWrite: block =>
+    self.total := self.total + 100
+    block value
+
+  throughSealedMethod =>
+    self.total := 1
+    self runAfterWrite: [self.total]
+
+  // ── later invocations ───────────────────────────────────────────────────
+  // A closure stored in a field and run by a later invocation is at home
+  // again: it reads the state of that later invocation.
+  storeReader => self.reader := [self.total]
+
+  runStoredReader => self.reader value
+
+  // A closure that reads a field and a captured local.
+  readsLocalAndField: n =>
+    block := [n + self.total]
+    self.total := 20
+    block value
+
+  afterFailedEnsureInOnDo =>
+    block := [self.total]
+    [
+      [
+        self.total := 9
+        1 / 0
+      ] ensure: [nil]
+    ] on: Error do: [:e | nil]
+    block value =:= self.total
+
+  // The closure runs inside the loop that writes the field, after each write.
+  runInsideCountedLoop =>
+    block := [self.total]
+    last := 0
+    1
+      to: 3
+      do: [:i |
+        self.total := i * 10
+        last := block value
+      ]
+    last
+
+  runInsideWhileLoop =>
+    block := [self.total]
+    last := 0
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self.total := self.total + 5
+        last := block value
+        i := i + 1
+      ]
+    last
+
+  runInsideFold =>
+    block := [self.total]
+    seen := 0
+    self.items
+      do: [:x |
+        self.total := self.total + x
+        seen := block value
+      ]
+    seen
+
+  // A closure given to a collection operation that runs it per element.
+  collectReadsAfterWrite =>
+    self.total := 3
+    self.items collect: [:x | x + self.total]
+
+  // A closure that reads a bare (unqualified) field name.
+  bareRead =>
+    block := [total]
+    self.total := 6
+    block value
+
+  // A self-send that writes the field and then raises: the failed send's
+  // writes are rolled back, whichever shape the `on:do:` around it takes.
+  writeThenFail =>
+    self.total := 9
+    1 / 0
+
+  afterFailedSelfSend =>
+    block := [self.total]
+    [self writeThenFail] on: Error do: [:e | nil]
+    block value =:= self.total
+
+  afterFailedSelfSendWithHandlerWrite =>
+    block := [self.total]
+    [self writeThenFail] on: Error do: [:e | self.total := 2]
+    block value =:= self.total
+
+  afterFailedSealedSelfSend =>
+    block := [self.total]
+    [self sealedWriteThenFail] on: Error do: [:e | nil]
+    block value =:= self.total
+
+  sealed sealedWriteThenFail =>
+    self.total := 9
+    1 / 0

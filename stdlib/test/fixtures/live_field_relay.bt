@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Runs a closure it is handed. The probe's invocation is blocked in the send
+// that carried the closure here, and this actor is a different process, so the
+// closure is away from home and reads what it captured.
+Actor subclass: LiveFieldRelay
+
+  run: block => block value

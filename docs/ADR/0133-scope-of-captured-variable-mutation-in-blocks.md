@@ -511,6 +511,44 @@ code.
 
 ### Neutral
 - Reading captured variables in escaping blocks is unchanged.
+
+  > **Amendment (2026-10-20, BT-3952): an actor field read is live at home.**
+  > "Unchanged" was wrong for one captured thing: the actor's own fields. A
+  > block that escapes into the actor's own method (the case this ADR makes
+  > legal for reads) is a plain closure over the `State` it was created with, so
+  > a `self.field` read in it saw the creation-time value even when the block
+  > ran, in the same process, after a write (`pureIfNoneAfterFold` answered 0
+  > where 4 was written; it answered 4 only while the ADR 0128 fold, removed by
+  > BT-3908, promoted the position). The maintainer's decision is the one ADR
+  > 0130 §3 makes for class variables: **a block reads the actor's live state
+  > when it runs at home, and the value it captured elsewhere.** At home means
+  > the block runs in the actor's own process while an invocation is in
+  > progress: inside the method that created it, inside a method it was passed
+  > to, or in a later invocation (a closure stored in a field). Away from home
+  > (another process or actor, or outside any invocation) the snapshot read is
+  > unchanged, which is also what a synchronous carry gives (the home is blocked
+  > for the duration). The two rejected alternatives were a stale-state error
+  > (it needs a version on `State`) and documented snapshot semantics (they
+  > conflict with ADR 0130's at-home rule).
+  >
+  > *Mechanism.* The runtime already stashes the invocation's `State` under
+  > `'$bt_actor_state'` (`handle_call`/`handle_cast`, restored on exit). Every
+  > actor field write now publishes its result there
+  > (`beamtalk_actor:publish_state/2`, or `publish_field/3` for a hybrid loop
+  > that carries the field as a loop parameter), and a `self.field` read in a
+  > closure body asks `beamtalk_actor:live_state(Self, CapturedState)`, which
+  > answers the live state only when `Self` is the actor running in this
+  > process and an invocation is in progress. Inlined literal blocks (loops,
+  > conditionals, folds, `on:do:`) are not closures and keep reading the
+  > threaded `State`. A catch is a rollback boundary for the live state too: an
+  > `on:do:` that threads `State` republishes its entry `State` straight after
+  > the class-variable restore, so a failed try body's writes never outlive the
+  > rollback (`VerifyError::CatchWithoutLiveStateRestore`). The publish side is
+  > decided in one place per write lowering (`threaded_ir::render`'s `Put` arm
+  > covers every scope kind) and proved by
+  > `tests/live_state_publication_corpus.rs` over loop x container x write.
+  > Value types have no live state (their fields cannot be assigned); class
+  > methods follow ADR 0130 §3 already.
 - Non-local return from any block, escaping or not, is unchanged.
 - Actor `State`, value-type `self` and class variables keep their threading
   and their existing rules (ADR 0120, 0130).
@@ -618,7 +656,7 @@ to BT-3902.
 
 ## References
 
-- Related issues: BT-3899 (this ADR), BT-3901 (implementation Epic), BT-3865
+- Related issues: BT-3952 (live actor field reads, amendment), BT-3899 (this ADR), BT-3901 (implementation Epic), BT-3865
   (ADR 0132 Epic, cancelled), BT-3883 (ADR 0131 residuals, replaced by
   BT-3901; Phase 3 acceptance), BT-3890 and #4372 (the
   review that prompted this), BT-3841, BT-3860, BT-3891, BT-3893, BT-3894,

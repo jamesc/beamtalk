@@ -417,6 +417,9 @@ impl CoreErlangGenerator {
             snapshot_var: Self::derived_snapshot_var(&ex_class_var),
             // Derived the same way, for the same reason: no module-counter mint.
             filter_fallback_var: [ex_class_var.as_str(), "NoMatch"].concat(),
+            // Set by the one caller that threads the actor `State` through the
+            // protected arms (`generate_on_do_with_mutations`).
+            live_state: None,
             ex_class_var,
         }
     }
@@ -457,6 +460,24 @@ impl CoreErlangGenerator {
         handler: Document<'static>,
     ) -> Document<'static> {
         let snapshot = vars.snapshot_var.clone();
+        // BT-3952: the live-state half of the rollback follows the
+        // class-variable restore, so every other exception puts both back
+        // before the filter runs.
+        let mut steps = vec![CatchStep::ClassVarRestore { snapshot }];
+        #[cfg(test)]
+        let skip_live_state_restore = super::super::threaded_expr::fault::active()
+            == Some(super::super::threaded_expr::fault::LocalRebindFault::SkipLiveStateRestore);
+        #[cfg(not(test))]
+        let skip_live_state_restore = false;
+        if let Some(state) = vars.live_state.clone().filter(|_| !skip_live_state_restore) {
+            steps.push(CatchStep::LiveStateRestore { state });
+        }
+        steps.extend([
+            CatchStep::WrapException,
+            CatchStep::ClassFilter,
+            CatchStep::FilterHandler(handler),
+            CatchStep::FilterMiss,
+        ]);
         let node = ThreadedStmt::OnDoCatch {
             vars: Box::new(vars),
             entry: Some(CatchEntry::ClassVarSnapshot),
@@ -464,15 +485,7 @@ impl CoreErlangGenerator {
             clauses: vec![
                 CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
                 CatchClause::NlrPassThrough(NlrThrowShape::Tuple3),
-                CatchClause::NonNlr {
-                    steps: vec![
-                        CatchStep::ClassVarRestore { snapshot },
-                        CatchStep::WrapException,
-                        CatchStep::ClassFilter,
-                        CatchStep::FilterHandler(handler),
-                        CatchStep::FilterMiss,
-                    ],
-                },
+                CatchClause::NonNlr { steps },
             ],
             span,
         };
@@ -841,15 +854,26 @@ impl CoreErlangGenerator {
         // sits in has no `State` chain (a direct-params or tuple-acc loop body,
         // ADR 0131 §2): its body has no state effect, so the scratch map is
         // private there as in a class method.
-        let state_chain = self
-            .rebind_frames
-            .get(&self.current_frame())
-            .is_none_or(|frame| frame.kind.extends_state_chain());
-        if (self.in_actor_instance_context() && state_chain) || self.is_repl_mode() {
+        if self.exception_body_continues_actor_state() || self.is_repl_mode() {
             self.current_state_var()
         } else {
             "~{}~".to_string()
         }
+    }
+
+    /// `true` when an `on:do:` protected body threads the actor's own `State`
+    /// (an actor instance method, in a frame that extends the `State` chain),
+    /// as opposed to a private scratch map (a direct-params or tuple-acc loop
+    /// body, ADR 0131 §2, a class method or a value type). The one place the
+    /// answer is decided: [`Self::exception_body_outer_state`] continues `State`
+    /// exactly when it holds, and the catch republishes the entry `State` as the
+    /// live state (BT-3952) exactly when it holds.
+    fn exception_body_continues_actor_state(&self) -> bool {
+        let state_chain = self
+            .rebind_frames
+            .get(&self.current_frame())
+            .is_none_or(|frame| frame.kind.extends_state_chain());
+        self.in_actor_instance_context() && state_chain
     }
 
     /// Generates `on:do:` with state mutation threading.
@@ -895,7 +919,10 @@ impl CoreErlangGenerator {
 
         let ex_class_var = self.fresh_temp_var("ExClass");
         let state_after_try = self.fresh_temp_var("StateAfterTry");
-        let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
+        let mut catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
+        if self.exception_body_continues_actor_state() {
+            catch_vars.live_state = Some("StateAcc".to_string());
+        }
         let ex_obj_var = catch_vars.ex_obj_var.clone();
 
         // Bind exception class

@@ -839,6 +839,23 @@ count := 0
 10 timesRepeat: [count := count + 1]   // count => 10
 ```
 
+**A closure reads an actor's field live, at home (BT-3952).** A block that reads `self.field` and runs *at home* — in the same actor, inside one of its own method invocations (this one or a later one) — reads the field as it is when the block runs, not as it was when the block was created. This is the instance-side twin of the class-variable rule in [Class variables and blocks](#class-variables-and-blocks-adr-0130) and is recorded as an amendment to [ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md):
+
+```beamtalk
+Actor subclass: Pool
+  state: total = 0
+
+  sealed after: aBlock =>
+    self.total := self.total + 100
+    aBlock value
+
+  run =>
+    self.total := 1
+    self after: [self.total]     // => 101: the block runs at home, after the write
+```
+
+Away from home — a block returned to another process, or run by another actor — a block keeps the value it captured when it was created, as an Erlang fun does. A value type has no live state to read (its fields cannot be assigned), and a class method's block follows the class-variable rule.
+
 ### Blocks (Closures)
 
 ```beamtalk

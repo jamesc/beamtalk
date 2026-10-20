@@ -23,7 +23,7 @@
 use super::{assert_compiles_through_erlc, codegen};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-const HEADER: &str = "Actor subclass: HybridRebindProbe
+pub(super) const HEADER: &str = "Actor subclass: HybridRebindProbe
   state: n = 0
   state: m = 0
   state: k = 0
@@ -37,7 +37,7 @@ const HEADER: &str = "Actor subclass: HybridRebindProbe
 ";
 
 /// A loop whose body is `BODY` and whose index is `i`, ending in the method's value.
-const LOOPS: &[(&str, &str)] = &[
+pub(super) const LOOPS: &[(&str, &str)] = &[
     (
         "while_true",
         "    i := 0.\n    [i < 3] whileTrue: [BODY. i := i + 1].\n    self.n\n",
@@ -55,7 +55,7 @@ const LOOPS: &[(&str, &str)] = &[
 ];
 
 /// What encloses the write statement `STMT` inside the loop body.
-const CONTAINERS: &[(&str, &str)] = &[
+pub(super) const CONTAINERS: &[(&str, &str)] = &[
     ("bare", "STMT"),
     ("if_true_arm", "i > 0 ifTrue: [STMT]"),
     ("if_false_arm", "i > 5 ifFalse: [STMT]"),
@@ -76,7 +76,7 @@ const CONTAINERS: &[(&str, &str)] = &[
 ];
 
 /// The write: a hybrid field rebind with a nested field write, self-send or read around it.
-const WRITES: &[(&str, &str)] = &[
+pub(super) const WRITES: &[(&str, &str)] = &[
     ("nested_rhs", "self.m := (self.n := i)"),
     ("binary_operand_rhs", "self.m := 1 + (self.n := i)"),
     ("triple_nested_rhs", "self.k := (self.m := (self.n := i))"),

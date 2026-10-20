@@ -247,6 +247,9 @@ handle_getValue([], State) ->
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
 
+%% BT-3952: live actor state for closures that run at home
+-export([publish_state/2, publish_field/3, live_state/2]).
+
 %% BT-3967: `Actor`'s quoted `@intrinsic` bodies (`actorStop`,
 %% `actorStopWith`, ...) compile to `bt@stdlib@actor:dispatch/3`, which
 %% delegates here. Reached only when the send was not intercepted at the
@@ -1616,6 +1619,72 @@ unwrap_dispatch_result({error, {ErlType, ErrorValue}, NewState}) ->
 unwrap_dispatch_result({error, Reason, NewState}) ->
     put('$bt_actor_state', NewState),
     beamtalk_exception_handler:reraise(Reason).
+
+-doc """
+Publish the actor's current `State` as the live state of the invocation in
+progress (BT-3952, ADR 0133 amendment).
+
+Generated code calls this after every actor field write. The invocation's
+`State` is otherwise a value threaded through the compiled method, which a
+closure created earlier cannot see. `'$bt_actor_state'` is the process's
+current-invocation slot (stashed on entry by `handle_call`/`handle_cast`, erased
+or restored on exit), so publishing into it needs no entry/exit bookkeeping of
+its own: it is `undefined` outside an invocation (nothing to publish) and
+dies with the invocation.
+
+Publishes only when `Self` is the actor running in this process, so a block of
+one actor run in another process (or a plain process) never plants the
+wrong actor's state there.
+""".
+-spec publish_state(#beamtalk_object{}, map()) -> ok.
+publish_state(#beamtalk_object{pid = Pid}, State) when Pid =:= self() ->
+    case get('$bt_actor_state') of
+        undefined ->
+            ok;
+        _ ->
+            put('$bt_actor_state', State),
+            ok
+    end;
+publish_state(_Self, _State) ->
+    ok.
+
+-doc """
+Publish one field's new value (BT-3952): the field-granular twin of
+`publish_state/2`, for a write inside a loop that carries the field as a loop
+parameter, where no `State` map exists to publish. Folds the value into the
+invocation's current state.
+""".
+-spec publish_field(#beamtalk_object{}, atom(), term()) -> ok.
+publish_field(#beamtalk_object{pid = Pid}, Field, Value) when Pid =:= self() ->
+    case get('$bt_actor_state') of
+        undefined ->
+            ok;
+        Live ->
+            put('$bt_actor_state', maps:put(Field, Value, Live)),
+            ok
+    end;
+publish_field(_Self, _Field, _Value) ->
+    ok.
+
+-doc """
+The state a `self.field` read inside a closure sees (BT-3952, ADR 0133
+amendment; the instance-side twin of ADR 0130 section 5).
+
+At home -- `Self` is the actor running in this process and an invocation is in
+progress -- the closure reads the actor's live state, the latest value
+`publish_state/2` recorded (the invocation's entry state when nothing has been
+written yet). Anywhere else (the closure was carried to another process, or
+runs outside any invocation) it reads `Captured`, the `State` it was created
+with: Erlang's rule for a fun.
+""".
+-spec live_state(#beamtalk_object{} | term(), map()) -> map().
+live_state(#beamtalk_object{pid = Pid}, Captured) when Pid =:= self() ->
+    case get('$bt_actor_state') of
+        undefined -> Captured;
+        Live -> Live
+    end;
+live_state(_Self, Captured) ->
+    Captured.
 
 -doc """
 Restore pdict entries after a dispatch completes.

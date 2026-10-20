@@ -4343,3 +4343,81 @@ bt3967_every_actor_intrinsic_is_mapped_test() ->
     ?assert(lists:member(actorStopWith, Intrinsics)),
     Unmapped = [I || I <- Intrinsics, beamtalk_actor:intrinsic_selector(I) =:= undefined],
     ?assertEqual([], Unmapped).
+
+%%% BT-3952: live actor state for closures that run at home
+
+bt3952_self() ->
+    #beamtalk_object{class = 'T', class_mod = 'bt@t', pid = self()}.
+
+bt3952_foreign_self() ->
+    Pid = spawn(fun() -> ok end),
+    #beamtalk_object{class = 'T', class_mod = 'bt@t', pid = Pid}.
+
+bt3952_clean(Fun) ->
+    try
+        Fun()
+    after
+        erase('$bt_actor_state')
+    end.
+
+bt3952_live_state_is_the_captured_state_outside_an_invocation_test() ->
+    %% No invocation in progress: a closure keeps the State it was created with.
+    erase('$bt_actor_state'),
+    ?assertEqual(#{n => 1}, beamtalk_actor:live_state(bt3952_self(), #{n => 1})).
+
+bt3952_live_state_is_the_invocation_state_at_home_test() ->
+    bt3952_clean(fun() ->
+        put('$bt_actor_state', #{n => 2}),
+        ?assertEqual(#{n => 2}, beamtalk_actor:live_state(bt3952_self(), #{n => 1}))
+    end).
+
+bt3952_live_state_is_the_captured_state_for_another_actor_test() ->
+    %% A closure of another actor run in this process is away from home, even
+    %% though this process is in an invocation of its own actor.
+    bt3952_clean(fun() ->
+        put('$bt_actor_state', #{n => 2}),
+        ?assertEqual(#{n => 1}, beamtalk_actor:live_state(bt3952_foreign_self(), #{n => 1}))
+    end).
+
+bt3952_live_state_tolerates_a_non_actor_self_test() ->
+    bt3952_clean(fun() ->
+        put('$bt_actor_state', #{n => 2}),
+        ?assertEqual(#{n => 1}, beamtalk_actor:live_state(nil, #{n => 1}))
+    end).
+
+bt3952_publish_state_replaces_the_invocation_state_test() ->
+    bt3952_clean(fun() ->
+        put('$bt_actor_state', #{n => 1}),
+        ?assertEqual(ok, beamtalk_actor:publish_state(bt3952_self(), #{n => 5})),
+        ?assertEqual(#{n => 5}, get('$bt_actor_state')),
+        ?assertEqual(#{n => 5}, beamtalk_actor:live_state(bt3952_self(), #{n => 1}))
+    end).
+
+bt3952_publish_state_outside_an_invocation_plants_nothing_test() ->
+    erase('$bt_actor_state'),
+    ?assertEqual(ok, beamtalk_actor:publish_state(bt3952_self(), #{n => 5})),
+    ?assertEqual(undefined, get('$bt_actor_state')).
+
+bt3952_publish_state_for_another_actor_plants_nothing_test() ->
+    bt3952_clean(fun() ->
+        put('$bt_actor_state', #{n => 1}),
+        ?assertEqual(ok, beamtalk_actor:publish_state(bt3952_foreign_self(), #{n => 5})),
+        ?assertEqual(#{n => 1}, get('$bt_actor_state'))
+    end).
+
+bt3952_publish_field_folds_one_field_into_the_invocation_state_test() ->
+    bt3952_clean(fun() ->
+        put('$bt_actor_state', #{n => 1, m => 7}),
+        ?assertEqual(ok, beamtalk_actor:publish_field(bt3952_self(), n, 9)),
+        ?assertEqual(#{n => 9, m => 7}, get('$bt_actor_state'))
+    end).
+
+bt3952_publish_field_outside_an_invocation_or_for_another_actor_plants_nothing_test() ->
+    erase('$bt_actor_state'),
+    ?assertEqual(ok, beamtalk_actor:publish_field(bt3952_self(), n, 9)),
+    ?assertEqual(undefined, get('$bt_actor_state')),
+    bt3952_clean(fun() ->
+        put('$bt_actor_state', #{n => 1}),
+        ?assertEqual(ok, beamtalk_actor:publish_field(bt3952_foreign_self(), n, 9)),
+        ?assertEqual(#{n => 1}, get('$bt_actor_state'))
+    end).

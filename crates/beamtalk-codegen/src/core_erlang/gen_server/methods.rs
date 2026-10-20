@@ -1231,6 +1231,7 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
+                        stmts.extend(self.publish_current_state_stmt(span));
                         let field_state = self.current_state_var();
                         let mut doc_parts: Vec<Document<'static>> = Vec::new();
                         if let Some(threaded_vars) = self

@@ -244,8 +244,13 @@ fn repl_method_body_member_puts_into_the_bindings_map() {
         mint(FrameId::ROOT, "t"),
     );
     let ir = vec![build_method_body(FrameId::ROOT, threads(&["t"]), prelude)];
+    // A REPL binding is not an actor field, so it publishes no live state
+    // (BT-3952).
+    let mut generator = CoreErlangGenerator::new("__threaded_ir_render_shim");
+    generator.set_is_repl_mode(true);
+    let rendered = render(&ir, &mut RenderCtx::new(&mut generator)).to_pretty_string();
     assert_eq!(
-        render_str(&ir),
+        rendered,
         "let _CF3 = call 'm':'construct'(T) in \
          let _T1 = call 'maps':'get'('t', call 'erlang':'element'(2, _CF3)) in \
          let State1 = call 'maps':'put'('t', _T1, State) in "
