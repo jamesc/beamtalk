@@ -230,29 +230,43 @@ Adopted: Smalltalk's class-side creation messages (the `spawn` family, with keyw
 ### B: `supervise` always starts a fresh instance; `superviseAs:` registers
 - 🧑‍💻 **Newcomer:** "One verb. I never have to ask whether `supervise` gave me an old process."
 - ⚙️ **BEAM veteran:** "`start_link` never hands back an existing pid; keeping that behaviour in `supervise` keeps a surprise alive."
-- 🎨 **Language designer:** "Fewer concepts than a parallel spawn family."
+- 🎨 **Language designer:** "You are already breaking supervisor code in this ADR. Break this too and end up with one start verb instead of two."
 
 ### C: class-side `class registration => #singleton | #none`
 - 🧑‍💻 **Newcomer:** "No new messages to learn."
 - 🎩 **Smalltalk purist:** "A declarative class property, like `strategy`."
 
-### D: single `class init: args` returning a spec (Elixir style)
-- ⚙️ **BEAM veteran:** "Exactly `init/1`; one place to read the whole topology."
-- 🎨 **Language designer:** "One override point instead of seven keyword variants."
+### D: single `init: args` returning the whole spec (Elixir style)
+- ⚙️ **BEAM veteran:** "Exactly `init/1`, and honest about it: you can see you are inside `init`, so nobody expects to message the supervisor from there. Instance-side configuration methods make `self` look like an ordinary supervisor that you cannot actually talk to."
+- 🎨 **Language designer:** "One override point instead of seven methods, the whole topology readable in one place, and no special rule about which instance methods run inside `init/1`."
+
+### F: keep class-side configuration and add `…For: args` hooks (this ADR's first draft)
+- 🏭 **Operator / existing user:** "Zero migration. Some 150 class-side definitions across stdlib, docs and four packages keep compiling, and every existing tutorial stays right."
+- 🎩 **Smalltalk purist:** "Settings that describe a *kind* of supervisor (its strategy, its restart limits) are class knowledge; the instance side is for the behaviour of a running thing."
 
 ### E: a new verb (`start` / `startWith:`) instead of `spawn`
 - 🎨 **Language designer:** "No compiler carve-out: `spawn` stays an actor intrinsic and supervisors get their own word."
 - ⚙️ **BEAM veteran:** "A supervisor is started, not spawned."
 
+### G: an ancestor accessor (`self supervisor`, from `'$ancestors'`) instead of passing `self` down
+- ⚙️ **BEAM veteran:** "`proc_lib` already records the parent. It is correct after every restart with nothing replayed, and every child gets it, including ones whose specs never mention it."
+
+### H: ship the named forms (`spawnAs:`, `named:`, `withName:`) now
+- ⚙️ **BEAM veteran:** "Registered names are how you find things from observer, a remote shell or `sys:get_state`. An anonymous Catalina server is invisible to all of them."
+- 🧑‍💻 **Newcomer:** "Actors have `spawnAs:`; finding it missing on supervisors is a surprise."
+
 ### Tension points
-- The BEAM veteran's case for B is the strongest argument against the decision: `supervise` keeps returning an existing instance while `spawn` makes new ones. The counter is that `supervise` has a precise meaning ("ensure the application-level one is running", ADR 0080) that three packages and the `[application]` boot path depend on, and OTP itself has the same two behaviours under two call shapes. The decision also shrinks what B objects to: `supervise` is defined as idempotent sugar over the spawn start helper with the class's own name, on the same start path and with the same (unlinked) semantics, so the surprise B wants to remove is limited to "a second call returns the running instance", which is the point of the message.
-- E trades a compiler special case for a new word users must learn and that collides with their own code; the decision pays the carve-out once in the compiler.
-- Operators and newcomers side with the decision (no migration, familiar words). Language designers split between the decision and D.
+- **D's context argument is the strongest case against the decision.** Instance-side configuration runs in an unusual place (inside the supervisor's own `init/1`), and `self` there is a handle you can pass but not message. The decision accepts that because the failure is immediate and explained (`calling_self` → `#supervisor_start_failed` with a hint), only the configuration methods run there, and D would make every subclass rebuild the full flags-and-children value to change one setting, which is the per-setting design ADR 0059 chose deliberately. The cost is a rule users must learn; it is documented, not removed.
+- **F's zero migration is the honest price of the decision.** The decision trades a one-time, mechanical, compiler-guided migration (while every supervisor user is first-party) for one form per setting forever. F would keep two forms of every setting, a both-forms compile check and a pre-start evaluation for the life of the language. The purist's "class knowledge" point is real for `strategy` and restart limits, which rarely vary per instance; it does not hold for `childSpecs` or `childClass`, which Catalina computes per instance, and splitting the settings between the two sides would be worse than either.
+- **B is rejected on merit, not compatibility.** This ADR breaks configuration anyway, so "it would break exdura" is not the argument. The argument is that an idempotent "ensure it is running" start is useful in its own right, for re-evaluated REPL and workspace code and for the `[application]` boot path, and defining `supervise` as sugar over the same helper means it costs no second mechanism. The surprise B wants to remove shrinks to "a second call returns the running instance", which is the point of the message.
+- **G and H are deferred, not rejected.** Passing `self` covers Catalina, and an accessor can be added later without breaking anything; the same holds for the named forms, which would mirror `Actor` exactly. The `pg` group covers `Node current supervisors`; observer and remote-shell users get pids, not names, until H lands.
+- E trades a compiler special case for a new word users must learn and that collides with their own `start:` facades; the decision pays the carve-out once.
+- **Who sides with whom:** existing users and operators side with F (no migration). Newcomers and Smalltalk developers side with the decision (one form, `self` and `self args`, the same `initialize` hook as actors). BEAM veterans split between the decision and D, and want H soon.
 
 ## Alternatives Considered
 
 ### B: `supervise` starts fresh; `superviseAs:` registers
-Rejected: breaks `ExduraSupervisor supervise valueOrDo:` and every `current` call after a `supervise`, the repl-protocol `supervisor.btscript` / `supervisor_initialize.btscript` cases and `testSuperviseIsIdempotentWithCap`, and reverses ADR 0080's idempotent-startup convention a few months after it shipped. Everything B offers is available as `spawn`.
+Rejected on merit (see Tension points): an idempotent "ensure it is running" start is needed for re-evaluated REPL/workspace code and the `[application]` boot path, and as sugar over the spawn helper it adds no mechanism. Everything B offers is available as `spawn`. (It would also break `ExduraSupervisor supervise valueOrDo:`, `current` after `supervise`, the repl-protocol `supervisor.btscript` / `supervisor_initialize.btscript` cases and ADR 0080's idempotent-startup convention, but that is secondary: this ADR breaks configuration anyway.)
 
 ### C: class-side registration switch
 Rejected: a class could not be both an app root (named) and a per-test instance (anonymous), which Catalina's test suite needs; and the meaning of `supervise` would depend on a declaration elsewhere.
@@ -263,11 +277,14 @@ Rejected: ADR 0059 chose per-setting methods and documented why. Moving those me
 ### E: `start` / `startWith:` instead of `spawn`
 Rejected: it would avoid the intrinsic carve-out, but `start:` is a common user facade name (symphony, watcher, exdura, http, Catalina), and the spawn family already carries the semantics users know from `Actor` (and, later, its named forms).
 
-### Keep class-side configuration and add `…For: args` hooks
+### F: keep class-side configuration and add `…For: args` hooks
 The earlier draft of this ADR: every class-side setting gains a keyword variant (`childSpecsFor:`, `strategyFor:`, … seven in all), plus `childSpecsFor:supervisor:` for the parent handle, with delegating defaults. Rejected: two forms of every setting, a compile error for classes that define both, a pre-start check that evaluated the methods twice, and a special variant just to pass `self`. Instance-side methods give the same power with one form per setting, at the cost of a mechanical migration.
 
-### An ancestor accessor (`self supervisor`, from `'$ancestors'`) for the parent handle
-Rejected: with instance-side configuration the parent passes `self` explicitly, which is visible in the code and needs no pid-to-handle mapping. An accessor can be added later for children that were not given their parent.
+### G: an ancestor accessor (`self supervisor`, from `'$ancestors'`) for the parent handle
+Deferred: with instance-side configuration the parent passes `self` explicitly, which is visible in the code and needs no pid-to-handle mapping. An accessor can be added later, without breaking anything, for children that were not given their parent.
+
+### H: named supervisor instances now
+Deferred: no current user needs them (Catalina, exdura and watcher use anonymous instances or `supervise`). They mirror `Actor`'s `spawnAs:` / `named:` exactly and can be added on the same start helper later.
 
 ### `children:` as the configuration name
 Rejected: with BT-3966's live-children `sup children`, the same name would mean "running children" and "child specs" on the same object.
