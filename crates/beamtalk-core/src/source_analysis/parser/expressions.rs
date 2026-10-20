@@ -2967,19 +2967,11 @@ impl Parser {
         loop {
             match self.peek_at(offset) {
                 None | Some(TokenKind::Eof) => return false,
-                Some(
-                    TokenKind::LeftBrace
-                    | TokenKind::MapOpen
-                    | TokenKind::LeftBracket
-                    | TokenKind::ArrayOpen
-                    | TokenKind::LeftParen
-                    | TokenKind::ListOpen,
-                ) => depth += 1,
-                Some(TokenKind::RightBrace) if depth == 0 => return true,
-                Some(TokenKind::RightBracket | TokenKind::RightParen) if depth == 0 => {
-                    return false;
-                }
-                Some(TokenKind::RightBrace | TokenKind::RightBracket | TokenKind::RightParen) => {
+                Some(kind) if kind.is_opening_bracket() => depth += 1,
+                Some(kind) if kind.is_closing_bracket() => {
+                    if depth == 0 {
+                        return matches!(kind, TokenKind::RightBrace);
+                    }
                     depth -= 1;
                 }
                 Some(_) => {}
@@ -3005,17 +2997,11 @@ impl Parser {
             {
                 return;
             }
-            match self.current_kind() {
-                TokenKind::LeftBrace
-                | TokenKind::MapOpen
-                | TokenKind::LeftBracket
-                | TokenKind::ArrayOpen
-                | TokenKind::LeftParen
-                | TokenKind::ListOpen => depth += 1,
-                TokenKind::RightBrace | TokenKind::RightBracket | TokenKind::RightParen => {
-                    depth = depth.saturating_sub(1);
-                }
-                _ => {}
+            let kind = self.current_kind();
+            if kind.is_opening_bracket() {
+                depth += 1;
+            } else if kind.is_closing_bracket() {
+                depth = depth.saturating_sub(1);
             }
             self.advance();
         }
