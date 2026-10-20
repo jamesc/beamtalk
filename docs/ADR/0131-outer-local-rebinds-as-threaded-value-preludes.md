@@ -374,7 +374,7 @@ value-position is one rule, `value_position_local_assignments` in
 statement where the body's lowering binds it: before the last statement of a
 value-type or actor method body, in an inlined arm, and as the last statement
 of a method body, whose value nothing reads a local after), computed once per
-module as `value_position_assignment_spans`; every producer gate
+method body (or REPL input) as `value_position_assignment_spans`; every producer gate
 (`subexpr_needs_prelude`, the loop-body and method-root statement gates, the
 actor `classify_body_expr`'s conditional-receiver probe, the REPL assembler)
 reads that set. A conditional (producer or not) whose receiver holds one
@@ -384,12 +384,19 @@ Before this amendment the shape was rejected by the Phase 0
 `ValuePositionLocalAssignment` error (BT-3864, this ADR's Alternative C
 applied to this shape); that error is deleted.
 
-`^t := e` is legal (maintainer decision, 2026-10-17). It is ordinary
-Smalltalk, and correct once `t` is rebound before the return: an `ensure:`
-cleanup that reads `t` sees the new value. When nothing can read `t` after the
-return, the `beamtalk-lint` rule `dead_returned_assignment` warns that the
-write is dead and suggests `^e`, including the non-local form `[:k | ^t := e]`;
-it stays silent when an enclosing `ensure:` cleanup reads `t`.
+`^t := e` is legal (maintainer decision, 2026-10-17), with one exception. It
+is ordinary Smalltalk, and nothing runs after the return that could read `t`
+except an `ensure:` cleanup that encloses the `^`. Codegen does not deliver the
+new value to that cleanup: the `^` is a throw, and the cleanup runs from the
+`catch` arm over the entry `StateAcc` with no `LocalRebind` of the protected
+body's writes. So `^t := e` lexically inside the protected block of an
+`ensure:` (at any depth) stays a compile error (`UnmigratedLocalThreading`,
+BT-3947 lowers it), reported by the one recognizer in `validators/local_threading.rs`
+with the hint to assign first and return after the `ensure:`. An `on:do:`
+protected body has no such position: a `^` passes through its catch untouched,
+no handler runs, and nothing reads `t` afterwards. Everywhere else the write is
+dead, and the `beamtalk-lint` rule `dead_returned_assignment` warns and
+suggests `^e`, including the non-local form `[:k | ^t := e]`.
 
 ### 1a. Sequencing: a local read before a sibling rebinds it
 

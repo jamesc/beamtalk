@@ -3249,7 +3249,6 @@ fn a_value_position_local_assignment_is_accepted_in_every_context() {
         "^t := t + 1",
         "^(t := t + 1)",
         "^(t := t + 1) + 1",
-        "[^t := t + 1] ensure: [t printString]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let errors = analysis_errors(&src, &[]);
@@ -3272,6 +3271,53 @@ fn a_match_arm_write_to_an_outer_local_is_reported_once() {
         })
         .collect();
     assert_eq!(at_arm.len(), 1, "{at_arm:?}");
+}
+
+/// PIN-BUG BT-3947: `^t := e` inside the protected block of an `ensure:` is
+/// rejected (the cleanup would read the old `t`; the correct answer is the new
+/// one, `1` for `t := 0. [^t := t + 1] ensure: [Transcript show: t printString]`).
+/// BT-3947 lowers it and flips this to an acceptance test. Outside an `ensure:`
+/// protected block (including in its cleanup and in `on:do:`) `^t := e` is accepted.
+#[test]
+fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
+    for body in [
+        "[^t := t + 1] ensure: [t printString]\nt",
+        "[[^t := t + 1] on: Error do: [:e | 0]] ensure: [t printString]\nt",
+        "#(1, 2) do: [:k | [k > 1 ifTrue: [^t := k]] ensure: [t printString]]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+            assert!(
+                errors[0].message.contains("BT-3947"),
+                "{}",
+                errors[0].message
+            );
+            assert!(
+                errors[0]
+                    .hint
+                    .as_deref()
+                    .is_some_and(|h| h.contains("after the `ensure:`")),
+                "{:?}",
+                errors[0].hint
+            );
+        }
+        let errors = analysis_errors(&format!("{body}\n"), &["t"]);
+        assert!(
+            errors.iter().any(|e| e.message.contains("BT-3947")),
+            "REPL {body}: {errors:?}"
+        );
+    }
+    for body in [
+        "[0] ensure: [t printString]\n^t := t + 1",
+        "[^t := t + 1] on: Error do: [:e | t]\nt",
+        "[0] ensure: [^t := t + 1]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert!(errors.is_empty(), "{src}: {errors:?}");
+        }
+    }
 }
 
 /// BT-3910: every method of the `adr0131nested_assign_*.bt` fixtures

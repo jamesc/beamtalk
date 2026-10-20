@@ -636,9 +636,11 @@ reports the same message at the same span. No operation is surface-specific.
   rule is one predicate, `value_position_local_assignments` in
   `beamtalk-core`'s `block_facts`, proved by the `value_position_assignment_agreement`
   tests in `beamtalk-codegen` (methods) and `beamtalk-repl` (eval and trace):
-  codegen drops no such assignment. `^t := e` is legal on every surface; the
-  `dead_returned_assignment` lint (`beamtalk lint`) warns when nothing reads `t`
-  after the return.
+  codegen drops no such assignment. `^t := e` is legal on every surface except
+  inside the protected block of an `ensure:`, where it is an
+  `UnmigratedLocalThreading` error until BT-3947 (the cleanup would read the old
+  `t`); elsewhere the `dead_returned_assignment` lint (`beamtalk lint`) warns
+  that the write is dead.
 - **Narrowing (BT-3841).** The statement-position half of the temporary
   check was measured on a BEAM (`just measure-adr0131-statements`, tables
   `adr0131_statement_measured.tsv` and `adr0131_operand_measured.tsv` in

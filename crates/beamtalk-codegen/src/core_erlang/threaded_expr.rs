@@ -664,22 +664,35 @@ impl CoreErlangGenerator {
             })
             .map(Expression::span)
             .collect();
-        // BT-3910: this body's value-position local assignments (see
-        // `value_assign_sites`). A REPL input sets its own once.
-        let value_sites = (!self.is_repl_mode()).then(|| {
-            beamtalk_core::semantic_analysis::block_facts::value_position_assignment_spans(
-                body.iter().copied(),
-                self.root_method_kind(),
-            )
-        });
         let saved = std::mem::replace(&mut self.local_producer_sites, sites);
-        let saved_value_sites = value_sites
-            .map(|value_sites| std::mem::replace(&mut self.value_assign_sites, value_sites));
-        let result = f(self);
+        let result = self.with_value_assign_sites(body, f);
         self.local_producer_sites = saved;
-        if let Some(saved_value_sites) = saved_value_sites {
-            self.value_assign_sites = saved_value_sites;
+        result
+    }
+
+    /// BT-3910: runs `f` (a body's lowering) with [`Self::value_assign_sites`]
+    /// set to the value-position local assignments of `body`, judged by the kind
+    /// of body it is ([`Self::root_method_kind`]; `None` for a legacy workspace
+    /// block body), restoring the previous set afterwards. A REPL input sets its
+    /// own once, so this is a no-op there.
+    pub(super) fn with_value_assign_sites<T>(
+        &mut self,
+        body: &[&Expression],
+        f: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if self.is_repl_mode() {
+            return f(self);
         }
+        // (A legacy workspace block body is lowered like an actor method body.)
+        let sites = beamtalk_core::semantic_analysis::block_facts::value_position_assignment_spans(
+            body.iter().copied(),
+            self.root_method_kind().or(Some(
+                beamtalk_core::semantic_analysis::block_facts::RootMethodKind::Actor,
+            )),
+        );
+        let saved = std::mem::replace(&mut self.value_assign_sites, sites);
+        let result = f(self);
+        self.value_assign_sites = saved;
         result
     }
 
@@ -1458,11 +1471,10 @@ impl CoreErlangGenerator {
     /// value-position assignment in it lowers by that frame. The arm's
     /// `StateAcc` *is* the bindings map: the `StateAcc` loop row of §2's table,
     /// every binding a member (`RebindFrame::with_repl_binding`). The frame is
-    /// the current branch frame. A no-op outside the REPL.
+    /// the current branch frame. (A legacy workspace block body inlines its
+    /// `[...] value` over the same arm lowering outside the REPL; there the
+    /// frame carries nothing, so a write stays arm-local.)
     pub(super) fn with_repl_arm_rebind_frame<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
-        if !self.is_repl_mode() {
-            return f(self);
-        }
         let rebind = RebindFrame {
             frame: self.current_branch_frame(),
             kind: RebindFrameKind::Loop(threaded_ir::ThreadingMode::StateAcc(
@@ -1471,6 +1483,24 @@ impl CoreErlangGenerator {
             threads: Vec::new(),
         };
         self.with_rebind_frame(rebind, f)
+    }
+
+    /// BT-3910: the threaded set a legacy (non-`BranchArm`) arm's `Threaded`
+    /// wrapper records: that of the `StateAcc` frame registered for `frame` (a
+    /// Tier 2 stateful block body, [`Self::with_rebind_frame`]); empty for any
+    /// other arm. The verifier re-derives a rebind's shape from the node.
+    pub(super) fn registered_state_acc_threads(&self, frame: FrameId) -> Vec<String> {
+        match self.rebind_frames.get(&frame) {
+            Some(rebind)
+                if matches!(
+                    rebind.kind,
+                    RebindFrameKind::Loop(threaded_ir::ThreadingMode::StateAcc(_))
+                ) =>
+            {
+                rebind.threads.clone()
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): runs `f` (the lowering

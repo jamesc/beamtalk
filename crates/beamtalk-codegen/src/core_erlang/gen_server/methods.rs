@@ -693,7 +693,10 @@ impl CoreErlangGenerator {
                 this.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
             })
         } else {
-            self.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
+            // BT-3910: it still has value-position local assignments to lower.
+            self.with_value_assign_sites(body, |this| {
+                this.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
+            })
         }
     }
 

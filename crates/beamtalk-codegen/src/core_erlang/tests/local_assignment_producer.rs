@@ -139,3 +139,17 @@ fn a_statement_position_assignment_is_not_a_producer() {
         );
     }
 }
+
+/// A legacy module-level body (`name := [block]`, the workspace dispatch) installs
+/// the value-position sites too: the reviewer's repro `foo := [:a | t := 0. x :=
+/// (t := a) + 1. t]` answered 0 with the write dropped silently. The final `t`
+/// now reads the rebound value (the carrier of the assignment), and the module
+/// compiles through the verifier and `erlc`.
+#[test]
+fn a_legacy_module_body_lowers_a_value_position_assignment() {
+    let code = codegen("foo := [:a |\n    t := 0\n    x := (t := a) + 1\n    t\n]\n");
+    assert!(code.contains("_Assigned"), "no producer carrier in\n{code}");
+    if erlc_available() {
+        assert_compiles_through_erlc("test", &code);
+    }
+}

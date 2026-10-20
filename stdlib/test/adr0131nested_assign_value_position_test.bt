@@ -53,3 +53,10 @@ TestCase subclass: Adr0131NestedAssignValuePositionTest
 
   testInjectIf =>
     self assert: #[Adr0131NestedAssignValuePosClass injectIf, (Adr0131NestedAssignValuePosValue new) injectIf, (Adr0131NestedAssignValuePosActor spawn) injectIf] equals: #[#[2, 9, 3], #[2, 9, 3], #[2, 9, 3]]
+
+  // `^t := e` outside an `ensure:` protected block returns `e` (BT-3910).
+  testReturnedRoot =>
+    self assert: #[Adr0131NestedAssignValuePosClass returnedRoot, (Adr0131NestedAssignValuePosValue new) returnedRoot, (Adr0131NestedAssignValuePosActor spawn) returnedRoot] equals: #[7, 7, 7]
+
+  testReturnedInLoop =>
+    self assert: #[Adr0131NestedAssignValuePosClass returnedInLoop, (Adr0131NestedAssignValuePosValue new) returnedInLoop, (Adr0131NestedAssignValuePosActor spawn) returnedInLoop] equals: #[20, 20, 20]

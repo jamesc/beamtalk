@@ -6,26 +6,20 @@
 //! **DDD Context:** Compilation
 //!
 //! `^t := e` is ordinary Smalltalk and compiles (BT-3910, ADR 0131 §1): the
-//! assignment rebinds `t`, then the method returns the assigned value. The
-//! write is observable only by code that runs after the return and still sees
-//! `t`: an `ensure:` cleanup that encloses the `^` and reads `t`. When no
-//! enclosing cleanup reads `t` the write is dead, and `^e` says the same
-//! thing. This covers the non-local return from a block (`[:k | ^t := k]`)
-//! too.
+//! assignment rebinds `t`, then the method returns the assigned value. Nothing
+//! runs after the return that could read `t`, so the write is dead and `^e`
+//! says the same thing. This covers the non-local return from a block
+//! (`[:k | ^t := k]`) too.
 //!
 //! ```text
 //! // Warned — nothing reads `count` after the return
 //! next =>
 //!     ^count := count + 1
-//!
-//! // Fine — the cleanup runs after the return and reads `count`
-//! next =>
-//!     [^count := count + 1] ensure: [self log: count]
 //! ```
 //!
-//! The lint has no false positives by construction: when the cleanup is not a
-//! block literal (`[...] ensure: cleanupBlock`) it cannot be read, so the lint
-//! assumes it may read `t` and stays silent.
+//! Inside the protected block of an `ensure:` the shape is a compile error for
+//! now (BT-3947: the cleanup would read the old value), so the lint stays
+//! silent there; the compile error owns it.
 //!
 //! It is a warning, never a compile error.
 
@@ -33,30 +27,19 @@ use crate::LintPass;
 use beamtalk_core::ast::{Expression, MessageSelector, Module};
 use beamtalk_core::ast_walker::walk_expression;
 use beamtalk_core::source_analysis::{Diagnostic, Span};
-use std::collections::HashSet;
 
-/// Lint pass that flags `^t := e` whose write no enclosing `ensure:` cleanup
-/// reads.
+/// Lint pass that flags `^t := e` outside an `ensure:` protected block.
 pub(crate) struct DeadReturnedAssignmentPass;
-
-/// An `ensure:` whose protected block spans `protected` and whose cleanup
-/// mentions the locals `read`.
-struct Cleanup {
-    protected: Span,
-    /// The names the cleanup block literal mentions; `None` when the cleanup is
-    /// not a literal (it may read anything).
-    read: Option<HashSet<String>>,
-}
 
 impl LintPass for DeadReturnedAssignmentPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
         for method in module.all_methods() {
-            let mut cleanups: Vec<Cleanup> = Vec::new();
+            let mut protected: Vec<Span> = Vec::new();
             let mut returns: Vec<(String, Span)> = Vec::new();
             for stmt in &method.body {
                 walk_expression(&stmt.expression, &mut |expr| {
-                    if let Some(cleanup) = ensure_cleanup(expr) {
-                        cleanups.push(cleanup);
+                    if let Some(span) = ensure_protected_block(expr) {
+                        protected.push(span);
                     }
                     if let Expression::Return { value, .. } = expr
                         && let assignment @ Expression::Assignment { target, .. } =
@@ -68,12 +51,10 @@ impl LintPass for DeadReturnedAssignmentPass {
                 });
             }
             for (name, span) in returns {
-                let observed = cleanups.iter().any(|c| {
-                    c.protected.start() <= span.start()
-                        && span.end() <= c.protected.end()
-                        && c.read.as_ref().is_none_or(|read| read.contains(&name))
-                });
-                if !observed {
+                let owned_by_compile_error = protected
+                    .iter()
+                    .any(|p| p.start() <= span.start() && span.end() <= p.end());
+                if !owned_by_compile_error {
                     diagnostics.push(
                         Diagnostic::lint(
                             format!(
@@ -92,13 +73,11 @@ impl LintPass for DeadReturnedAssignmentPass {
     }
 }
 
-/// The cleanup of `expr` when it is `[...] ensure: [...]` with two block
-/// literals: the protected block's span and the names its cleanup mentions.
-fn ensure_cleanup(expr: &Expression) -> Option<Cleanup> {
+/// The span of the protected block of `expr` when it is `[...] ensure: ...`.
+fn ensure_protected_block(expr: &Expression) -> Option<Span> {
     let Expression::MessageSend {
         receiver,
         selector: MessageSelector::Keyword(parts),
-        arguments,
         ..
     } = expr
     else {
@@ -107,27 +86,10 @@ fn ensure_cleanup(expr: &Expression) -> Option<Cleanup> {
     if parts.len() != 1 || parts[0].keyword != "ensure:" {
         return None;
     }
-    let Expression::Block(protected) = receiver.as_ref() else {
-        return None;
-    };
-    let Some(Expression::Block(cleanup)) = arguments.first() else {
-        return Some(Cleanup {
-            protected: protected.span,
-            read: None,
-        });
-    };
-    let mut read = HashSet::new();
-    for stmt in &cleanup.body {
-        walk_expression(&stmt.expression, &mut |e| {
-            if let Expression::Identifier(id) = e {
-                read.insert(id.name.to_string());
-            }
-        });
+    match receiver.as_ref() {
+        Expression::Block(protected) => Some(protected.span),
+        _ => None,
     }
-    Some(Cleanup {
-        protected: protected.span,
-        read: Some(read),
-    })
 }
 
 #[cfg(test)]
@@ -176,20 +138,8 @@ mod tests {
     }
 
     #[test]
-    fn an_ensure_cleanup_that_reads_the_local_keeps_the_write_live() {
+    fn inside_an_ensure_protected_block_the_compile_error_owns_it() {
         let diags = lint(&in_method("[^t := t + 1] ensure: [t printString]"));
-        assert!(diags.is_empty(), "{diags:?}");
-    }
-
-    #[test]
-    fn an_ensure_cleanup_that_reads_another_local_does_not() {
-        let diags = lint(&in_method("[^t := t + 1] ensure: [Transcript show: \"x\"]"));
-        assert_eq!(diags.len(), 1, "{diags:?}");
-    }
-
-    #[test]
-    fn a_cleanup_that_is_not_a_block_literal_keeps_the_write_live() {
-        let diags = lint(&in_method("[^t := t + 1] ensure: cleanup"));
         assert!(diags.is_empty(), "{diags:?}");
     }
 
@@ -202,6 +152,12 @@ mod tests {
     #[test]
     fn a_returned_assignment_outside_the_protected_block_is_dead() {
         let diags = lint(&in_method("[0] ensure: [t printString]\n    ^t := 5"));
+        assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    #[test]
+    fn a_returned_assignment_in_an_ensure_cleanup_is_dead() {
+        let diags = lint(&in_method("[0] ensure: [^t := 5]"));
         assert_eq!(diags.len(), 1, "{diags:?}");
     }
 }

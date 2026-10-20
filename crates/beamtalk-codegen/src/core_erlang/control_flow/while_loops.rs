@@ -287,18 +287,31 @@ impl CoreErlangGenerator {
         let unpack_docs = plan.generate_unpack_at_iteration_start(self);
 
         // Generate condition inside branch context
+        // BT-3910: the condition closure is a frame of its own. When the
+        // condition has state effects it hands back `{Bool, FinalStateAcc}`, so
+        // a value-position assignment in it `Put`s into the loop's own map: the
+        // loop's frame (threads and all). Otherwise the closure hands back only
+        // its boolean and threads nothing (ADR 0133, BT-3911).
         let cond_doc = self.with_branch_context(|this| {
-            if let Expression::Block(cond_block) = condition {
-                if cond_effects {
-                    this.generate_stateful_while_condition(cond_block)
-                } else {
-                    this.generate_block_body(cond_block)
-                }
-            } else if cond_effects {
-                this.generate_stateful_while_condition_tail(condition)
+            let frame = this.current_branch_frame();
+            let rebind = if cond_effects {
+                plan.rebind_frame(frame)
             } else {
-                this.generate_expression(condition)
-            }
+                plan.condition_rebind_frame(frame)
+            };
+            this.with_rebind_frame(rebind, |this| {
+                if let Expression::Block(cond_block) = condition {
+                    if cond_effects {
+                        this.generate_stateful_while_condition(cond_block)
+                    } else {
+                        this.generate_block_body(cond_block)
+                    }
+                } else if cond_effects {
+                    this.generate_stateful_while_condition_tail(condition)
+                } else {
+                    this.generate_expression(condition)
+                }
+            })
         })?;
 
         // Condition application and true/false arm headers

@@ -110,3 +110,12 @@ Object subclass: Adr0131NestedAssignValuePosClass
         a + x
       ]
     #[t, u, r]
+
+  class returnedRoot =>
+    t := 0
+    ^t := t + 7
+
+  class returnedInLoop =>
+    t := 0
+    #(1, 2, 3) do: [:k | k > 1 ifTrue: [^t := k * 10]]
+    t

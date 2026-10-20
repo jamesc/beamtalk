@@ -96,6 +96,11 @@ const BODIES: &[&str] = &[
     "1 to: 2 do: [:k | @S]",
     "2 timesRepeat: [@S]",
     "[s < 2] whileTrue: [s := s + 1. @S]",
+    // BT-3910: a `whileTrue:`/`whileFalse:` condition block, as a statement of
+    // the condition and as its value.
+    "[@S. s < 2] whileTrue: [s := s + 1]",
+    "[s := s + 1. @S. s < 2] whileTrue: [nil]",
+    "[@S. s >= 2] whileFalse: [s := s + 1]",
     "x := #(1, 2) collect: [:k | @S. k]",
     "x := #(1, 2) inject: 0 into: [:a :k | @S. a + k]",
     "s > 0 ifFalse: [@S]",

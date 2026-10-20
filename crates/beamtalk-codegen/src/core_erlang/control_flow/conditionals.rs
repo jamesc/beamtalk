@@ -3079,7 +3079,7 @@ impl CoreErlangGenerator {
         let wrapper = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::None),
             frame,
-            threads: Vec::new(),
+            threads: self.registered_state_acc_threads(frame),
             body: stmts,
             produces,
             span,

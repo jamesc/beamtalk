@@ -361,13 +361,17 @@ impl<'a> ReplAssembler<'a> {
     /// BT-3910 (ADR 0131 §1): marks the value-position local assignments of the
     /// input `expressions` as producers, by the one rule
     /// (`value_position_assignment_spans`).
-    fn set_value_assign_sites(&mut self, expressions: &[Expression]) {
+    /// Returns the previous set, for the caller to restore.
+    fn set_value_assign_sites(
+        &mut self,
+        expressions: &[Expression],
+    ) -> std::collections::HashSet<beamtalk_core::source_analysis::Span> {
         self.generator.set_value_assign_sites(
             beamtalk_core::semantic_analysis::block_facts::value_position_assignment_spans(
                 expressions,
                 None,
             ),
-        );
+        )
     }
 
     /// Compiles `target`, an expression of the REPL input statement `stmt`
@@ -470,13 +474,14 @@ impl<'a> ReplAssembler<'a> {
         let previous_context = self.generator.context;
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
-        self.set_value_assign_sites(std::slice::from_ref(expression));
+        let previous_sites = self.set_value_assign_sites(std::slice::from_ref(expression));
 
         // Restore generator state unconditionally, then propagate error.
         let result = self.generate_eval_module_body(expression);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
         self.generator.context = previous_context;
+        self.generator.set_value_assign_sites(previous_sites);
         result
     }
 
@@ -494,7 +499,7 @@ impl<'a> ReplAssembler<'a> {
         let previous_context = self.generator.context;
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
-        self.set_value_assign_sites(expressions);
+        let previous_sites = self.set_value_assign_sites(expressions);
 
         // Restore generator state unconditionally, then propagate error.
         let result = if expressions.len() == 1 {
@@ -505,6 +510,7 @@ impl<'a> ReplAssembler<'a> {
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
         self.generator.context = previous_context;
+        self.generator.set_value_assign_sites(previous_sites);
         result
     }
 
@@ -769,13 +775,14 @@ impl<'a> ReplAssembler<'a> {
         let previous_context = self.generator.context;
         self.generator.context = CodeGenContext::Repl;
         self.generator.set_is_repl_mode(true);
-        self.set_value_assign_sites(expressions);
+        let previous_sites = self.set_value_assign_sites(expressions);
 
         // Restore generator state unconditionally, then propagate error.
         let result = self.generate_repl_multi_module_body(expressions);
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
         self.generator.context = previous_context;
+        self.generator.set_value_assign_sites(previous_sites);
         result
     }
 

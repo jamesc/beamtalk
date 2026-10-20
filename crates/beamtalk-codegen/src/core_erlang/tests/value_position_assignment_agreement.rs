@@ -22,17 +22,20 @@ use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// `body` as the body of a class, a value-type and an actor method.
-fn sources(body: &str) -> [String; 3] {
+fn sources(body: &str) -> [String; 4] {
     let mut indented = String::new();
     for line in format!("{PRELUDE}\n{body}").lines() {
         indented.push_str("    ");
         indented.push_str(line);
         indented.push('\n');
     }
+    // The legacy module-level dispatch: a top-level `name := [block]` binding.
+    let legacy = format!("foo := [:a |\n{indented}]\n");
     [
         format!("Object subclass: AgreeClass\n  class go =>\n{indented}"),
         format!("Value subclass: AgreeValue\n  go =>\n{indented}"),
         format!("Actor subclass: AgreeActor\n  state: n = 0\n\n  go =>\n{indented}"),
+        legacy,
     ]
 }
 
@@ -70,16 +73,40 @@ fn dropped(module: &Module) -> Result<HashSet<Span>, String> {
             }
             _ => None,
         })
+        .chain(legacy_block_values(module))
         .collect();
     compiled.map(|()| spans.into_iter().filter(|s| !dead.contains(s)).collect())
 }
 
+/// The last statement of each top-level `name := [block]` of `module` (a legacy
+/// workspace block body): its value, which nothing reads a local after.
+fn legacy_block_values(module: &Module) -> Vec<Span> {
+    module
+        .expressions
+        .iter()
+        .filter_map(|s| match &s.expression {
+            Expression::Assignment { value, .. } => match value.as_ref() {
+                Expression::Block(block) => match block.body.last()?.expression.unwrap_parens() {
+                    last @ Expression::Assignment { target, .. }
+                        if matches!(target.as_ref(), Expression::Identifier(_)) =>
+                    {
+                        Some(last.span())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
 /// The method contexts of [`sources`], in its order: one test each below
 /// (`per_family_tests!`, BT-3888).
-const CONTEXTS: &[&str] = &["class", "value type", "actor"];
+const CONTEXTS: &[&str] = &["class", "value type", "actor", "legacy"];
 
 /// The families of [`CONTEXTS`]: one context each.
-const CONTEXT_FAMILIES: &[std::ops::Range<usize>] = &[0..1, 1..2, 2..3];
+const CONTEXT_FAMILIES: &[std::ops::Range<usize>] = &[0..1, 1..2, 2..3, 3..4];
 
 /// The whole corpus in the method contexts named: the whole proof is the
 /// per-context tests below.
@@ -135,4 +162,5 @@ beamtalk_core::per_family_tests! {
     no_value_position_local_assignment_is_dropped_in_class_methods => 0,
     no_value_position_local_assignment_is_dropped_in_value_type_methods => 1,
     no_value_position_local_assignment_is_dropped_in_actor_methods => 2,
+    no_value_position_local_assignment_is_dropped_in_legacy_module_bodies => 3,
 }
