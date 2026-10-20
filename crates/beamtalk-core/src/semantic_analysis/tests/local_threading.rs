@@ -3538,6 +3538,92 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
     }
 }
 
+/// PIN-BUG BT-3947 (BT-3993): the throw out of an `ensure:` protected block can
+/// come from a block value created elsewhere, not only a `^` written in it.
+/// Measured on a BEAM in a class, a value type and an actor: `b := [^0]`
+/// evaluated as `[t := 1. b value] ensure: [sink record: t]`, a parameter
+/// evaluated the same way, and either passed on to a method that evaluates it,
+/// all record the old `t` (0), silently. They are rejected like the literal
+/// `^`. Conservative where the static view ends: a block reached through a call
+/// result, a collection element, or a parameter that is only forwarded is not
+/// seen. BT-3947 lowers the protected block and flips these to acceptance
+/// tests.
+#[test]
+fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
+    let rejected = [
+        // A local bound to a block holding a `^`.
+        "t := 0\nb := [^0]\n[t := 1. b value] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b value: 3] ensure: [t printString]\n9",
+        // Forwarded to a method that evaluates it.
+        "t := 0\nb := [^0]\n[t := 1. CvA ap: b] ensure: [t printString]\n9",
+    ];
+    for body in rejected {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+            assert!(
+                errors[0].message.contains("BT-3947"),
+                "{}",
+                errors[0].message
+            );
+            assert!(
+                errors[0].message.contains("may return non-locally"),
+                "{}",
+                errors[0].message
+            );
+        }
+    }
+    for src in [
+        "Object subclass: CvA\n  class doThen: blk =>\n    t := 0\n    [t := 1. blk value] ensure: [t printString]\n    5\n",
+        "Value subclass: Vt\n  doThen: blk =>\n    t := 0\n    [t := 1. blk value] ensure: [t printString]\n    5\n",
+        "Actor subclass: Ac\n  state: n = 0\n\n  doThen: blk =>\n    t := 0\n    [t := 1. blk value] ensure: [t printString]\n    5\n",
+        "Actor subclass: Ac\n  state: blk = nil\n\n  doThen =>\n    t := 0\n    [t := 1. self.blk value] ensure: [t printString]\n    5\n",
+    ] {
+        let errors = analysis_errors(src, &[]);
+        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+        assert!(
+            errors[0].message.contains("may return non-locally"),
+            "{}",
+            errors[0].message
+        );
+    }
+    // Accepted: a block without a `^`, a cleanup that does not read the write,
+    // a protected block that writes nothing the cleanup reads, `on:do:`.
+    for body in [
+        "t := 0\nb := [3]\n[t := 1. b value] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b value] ensure: [0]\n9",
+        "t := 0\nb := [^0]\n[b value] ensure: [t printString]\n9",
+        "t := 0\nb := [^0]\n[t := 1. b value] on: Error do: [:e | t]\n9",
+        "t := 0\nb := [^0]\n[b value. t := 1] ensure: [u := 2. u printString]\n9",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert!(errors.is_empty(), "{src}: {errors:?}");
+        }
+    }
+}
+
+/// BT-3993: a cleanup read counts only when the local is bound in the scope
+/// enclosing the `ensure:`; a cleanup that binds its own `x` reads that.
+#[test]
+fn an_ensure_cleanup_that_binds_its_own_local_is_not_a_stale_read() {
+    for body in [
+        "[x := 5. ^x] ensure: [x := 0. x printString]\n9",
+        "[x := 5. ^x] ensure: [x := 0. x printString]\nx",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert!(errors.is_empty(), "{src}: {errors:?}");
+        }
+    }
+    // The same shape with `x` bound before the `ensure:` is the stale read.
+    let body = "x := 1\n[x := 5. ^x] ensure: [x printString]\n9";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        let errors = analysis_errors(&src, &[]);
+        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+    }
+}
+
 /// BT-3910: every method of the `adr0131nested_assign_*.bt` fixtures
 /// (BT-3799's matrix, once inert `.pending` files) is accepted.
 #[test]

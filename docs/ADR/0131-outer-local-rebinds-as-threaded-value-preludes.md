@@ -392,12 +392,19 @@ new value to that cleanup: the `^` is a throw, and the cleanup runs from the
 body's writes. The same holds for the statement form `t := t + 1. ^t`
 (measured on a BEAM in class, value-type and actor methods: the cleanup
 reads the old `t`, silently). So a `^` out of the protected block of an
-`ensure:` (at any depth) whose cleanup reads a local that block writes stays a
+`ensure:` (written in that block or in a block literal nested in it) whose
+cleanup reads a local, bound outside the `ensure:`, that block writes stays a
 compile error (`UnmigratedLocalThreading`, BT-3947 lowers it), reported by
 the one recognizer in `validators/local_threading.rs`
 (`report_nlr_out_of_ensure`) with the hint to keep the `^` out of the protected
 block; `dead_returned_assignment` asks the compiler and stays silent inside
-that error's span. An `on:do:`
+that error's span. The throw can also come from a block value created elsewhere
+(BT-3993; measured stale in a class, a value type and an actor): the protected
+block is treated as holding a `^` when it sends a `value`-family message to a
+local bound to a block literal holding a `^`, to a field, or to a parameter the
+method evaluates, or passes such a local on as an argument. It is conservative
+only in one direction: a block reached through a call result, a collection
+element or a parameter that is merely forwarded is not seen. An `on:do:`
 protected body has no such position: a `^` passes through its catch untouched,
 no handler runs, and nothing reads `t` afterwards. Everywhere else the write is
 dead, and the `beamtalk-lint` rule `dead_returned_assignment` warns and
