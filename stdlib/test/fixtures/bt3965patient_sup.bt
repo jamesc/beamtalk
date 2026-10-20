@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3965 fixture: static supervisor whose slow-stopping child gets more
+// shutdown time than its terminate: needs. See
+// stdlib/test/supervision_shutdown_test.bt.
+
+Supervisor subclass: Bt3965PatientSup
+
+  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  class children -> List =>
+    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{
+      #tableName => #bt3965Shutdown
+    }) withShutdown: 10000
+    #(spec)

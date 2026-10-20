@@ -1,6 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// How long a supervisor waits for a child to stop before killing it.
+///
+/// - an Integer (0 to 4294967295) — milliseconds the child has, after it is sent
+///   `exit(Pid, shutdown)`, to finish; an overrunning child is killed
+///   (exit reason `#killed`)
+/// - `#infinity` — wait as long as it takes (the default for supervisor children)
+/// - `#brutalKill` — kill the child at once; `terminate:` does not run
+///
+/// Only an actor that overrides `terminate:` traps exits (BT-3596), so only
+/// such an actor uses the time; any other actor exits as soon as it is told to.
+///
+/// @see SupervisionSpec#shutdown
+/// @see DynamicSupervisor class#childShutdown
+type ShutdownTimeout = Integer | #infinity | #brutalKill
+
 /// SupervisionSpec — Value type describing how to start an actor as a supervised child.
 ///
 /// SupervisionSpec carries per-child configuration for OTP supervision trees.
@@ -48,11 +63,23 @@ typed Value subclass: SupervisionSpec
   ///
   /// nil means no args (use `spawn`); any non-nil value is passed to `spawnWith:`.
   field: args :: Object | Nil = nil
-  /// Custom shutdown timeout in milliseconds, or nil to use the computed default.
+  /// Custom shutdown timeout, or nil to use the computed default.
   ///
-  /// When nil, workers use 5000ms and supervisors use `#infinity`.
-  /// Set via `withShutdown:` to override the default for graceful drain/cleanup.
-  field: shutdown :: Integer | Nil = nil
+  /// An Integer (milliseconds, 0 to 4294967295), `#infinity` or `#brutalKill`
+  /// (see `ShutdownTimeout`). When nil, workers use 5000ms and supervisors
+  /// use `#infinity`. Set via `withShutdown:` to give a child time to drain
+  /// connections or flush state when its supervisor shuts it down: on
+  /// shutdown the child is sent `exit(Pid, shutdown)` and is killed (exit
+  /// reason `#killed`) if it has not exited within the timeout. Any other
+  /// value makes the supervisor's start fail (`supervise` returns
+  /// `Result error:` with kind `#supervisor_start_failed`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// HttpServer supervisionSpec withShutdown: 30000        // 30s to drain
+  /// Cache supervisionSpec withShutdown: #brutalKill       // no cleanup needed
+  /// ```
+  field: shutdown :: ShutdownTimeout | Nil = nil
   /// Keyword class method selector to use as the constructor.
   ///
   /// When set, the supervisor routes starts/restarts through this class method
@@ -174,7 +201,9 @@ typed Value subclass: SupervisionSpec
   /// (`beamtalk_supervisor`, Phase 2) translates into an OTP-compatible child spec
   /// before passing to `supervisor:start_link/2`.
   ///
-  /// - `shutdown`: `#infinity` for nested supervisors, `5000` (ms) for workers
+  /// - `shutdown`: the `shutdown` field when set (an Integer, `#infinity` or
+  ///   `#brutalKill`, which the runtime emits as OTP `brutal_kill`); otherwise
+  ///   `#infinity` for nested supervisors, `5000` (ms) for workers
   /// - `type`: `#supervisor` or `#worker`
   /// - `start`: `#[actorClass, startFn, startArgs]` — an intermediate Array
   ///   that the runtime translates into the MFA tuple OTP expects

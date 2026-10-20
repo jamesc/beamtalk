@@ -1,23 +1,30 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3903 (ADR 0133 Phase 1): what a user collection does with a block that
+// BT-3903 / BT-3916 (ADR 0133): what a user collection does with a block that
 // assigns a captured local, when the iteration messages come from a trait
-// (`uses:`) on top of the class's own `do:`. The decision is "honour": a
-// block literal that writes, sent with one of the compiler-known collection
-// messages (`state_threading_selectors.rs`), is lowered in place at the call
-// site as a fold over the receiver's `do:` (`beamtalk_collection:to_list/1`),
-// so the write threads whatever the receiver's class, whether its `do:`
-// forwards to a stdlib collection or walks by hand. The trait's provisions
-// themselves need no gate of their own: inside a provision, `self do:` with
-// a writing block is the same in-place fold. Never a dropped write. (A block
-// laundered through Erlang FFI is outside this decision, BT-3917.)
+// (`uses:`) on top of the class's own `do:`. A block literal that writes,
+// sent with one of the compiler-known collection messages
+// (`state_threading_selectors.rs`), is lowered in place at the call site as a
+// fold over the receiver's `do:` (`beamtalk_collection:to_list/1`). `do:`
+// itself is always folded in place. For every other selector the call site
+// first asks the receiver's class who answers it
+// (`beamtalk_collection:to_list_for_threading/2`): the stdlib's own method is
+// the fold over `do:`, so the write threads (`Ets`, the stdlib collections);
+// a method from outside the stdlib (the class's own override, or a provision
+// of a package-local trait; a provision of a stdlib trait such as `Enumerable`
+// counts as the stdlib's, by origin, not by the module it is flattened into)
+// would be bypassed by the fold, so the send raises
+// `stateful_block_dispatch`, and a receiver that does not respond to the
+// selector raises `does_not_understand`, as the pure path does. Never a
+// dropped write and never a silent wrong answer. (A block laundered through
+// Erlang FFI is outside this decision, BT-3917.)
 //
 // Fixtures: fixtures/adr0133enumerable_{walkable,forwarding,hand_walk,own_any,
-// stdlib,user}.bt. `Ets` is the stdlib's own `uses: Enumerable(V)` class;
-// `Adr0133EnumerableStdlib` is a user class that `uses:` the same stdlib
-// `Enumerable` (BT-3915), whose provisions forward to `elements` rather than
-// walking with `self do:`.
+// object_own_any,actor_own_any,own_each,own_inject,own_select,stdlib,stdlib_actor,stdlib_own_any,user}.bt. `Ets` is the stdlib's own
+// `uses: Enumerable(V)` class; `Adr0133EnumerableStdlib` is a user class that
+// `uses:` the same stdlib `Enumerable` (BT-3915), whose provisions forward to
+// `elements` rather than walking with `self do:`.
 
 TestCase subclass: Adr0133EnumerableUserTest
 
@@ -44,20 +51,32 @@ TestCase subclass: Adr0133EnumerableUserTest
     self assert: (Adr0133EnumerableUser doWrite: self forwarding) equals: 6
 
   testForwardingInjectWrite =>
-    self assert: (Adr0133EnumerableUser injectWrite: self forwarding) equals: #[6, 3]
+    self should: [
+      Adr0133EnumerableUser injectWrite: self forwarding
+    ] raise: #stateful_block_dispatch
 
   testForwardingCollectWrite =>
-    self assert: (Adr0133EnumerableUser collectWrite: self forwarding) equals: #[#(10, 20, 30), 3]
+    self should: [
+      Adr0133EnumerableUser collectWrite: self forwarding
+    ] raise: #stateful_block_dispatch
 
   testForwardingSelectWrite =>
-    self assert: (Adr0133EnumerableUser selectWrite: self forwarding) equals: #[#(2, 3), 3]
+    self should: [
+      Adr0133EnumerableUser selectWrite: self forwarding
+    ] raise: #stateful_block_dispatch
 
   testForwardingDetectWrite =>
-    self assert: (Adr0133EnumerableUser detectWrite: self forwarding) equals: #[2, 2]
-    self assert: (Adr0133EnumerableUser detectNoneWrite: self forwarding) equals: #[#none, 3]
+    self should: [
+      Adr0133EnumerableUser detectWrite: self forwarding
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser detectNoneWrite: self forwarding
+    ] raise: #stateful_block_dispatch
 
   testForwardingAnySatisfyWrite =>
-    self assert: (Adr0133EnumerableUser anySatisfyWrite: self forwarding) equals: #[true, 3]
+    self should: [
+      Adr0133EnumerableUser anySatisfyWrite: self forwarding
+    ] raise: #stateful_block_dispatch
 
   testForwardingPure =>
     self assert: (Adr0133EnumerableUser injectPure: self forwarding) equals: 6
@@ -72,20 +91,32 @@ TestCase subclass: Adr0133EnumerableUserTest
     self assert: (Adr0133EnumerableUser doWrite: self handWalk) equals: 6
 
   testHandWalkInjectWrite =>
-    self assert: (Adr0133EnumerableUser injectWrite: self handWalk) equals: #[6, 3]
+    self should: [
+      Adr0133EnumerableUser injectWrite: self handWalk
+    ] raise: #stateful_block_dispatch
 
   testHandWalkCollectWrite =>
-    self assert: (Adr0133EnumerableUser collectWrite: self handWalk) equals: #[#(10, 20, 30), 3]
+    self should: [
+      Adr0133EnumerableUser collectWrite: self handWalk
+    ] raise: #stateful_block_dispatch
 
   testHandWalkSelectWrite =>
-    self assert: (Adr0133EnumerableUser selectWrite: self handWalk) equals: #[#(2, 3), 3]
+    self should: [
+      Adr0133EnumerableUser selectWrite: self handWalk
+    ] raise: #stateful_block_dispatch
 
   testHandWalkDetectWrite =>
-    self assert: (Adr0133EnumerableUser detectWrite: self handWalk) equals: #[2, 2]
-    self assert: (Adr0133EnumerableUser detectNoneWrite: self handWalk) equals: #[#none, 3]
+    self should: [
+      Adr0133EnumerableUser detectWrite: self handWalk
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser detectNoneWrite: self handWalk
+    ] raise: #stateful_block_dispatch
 
   testHandWalkAnySatisfyWrite =>
-    self assert: (Adr0133EnumerableUser anySatisfyWrite: self handWalk) equals: #[true, 3]
+    self should: [
+      Adr0133EnumerableUser anySatisfyWrite: self handWalk
+    ] raise: #stateful_block_dispatch
 
   testHandWalkPure =>
     self assert: (Adr0133EnumerableUser injectPure: self handWalk) equals: 6
@@ -113,6 +144,91 @@ TestCase subclass: Adr0133EnumerableUserTest
     self assert: (Adr0133EnumerableUser detectNonePure: self stdlibBag) equals: #none
     self assert: (Adr0133EnumerableUser anySatisfyPure: self stdlibBag)
 
+  // BT-3916: `uses:` flattens the stdlib's provisions into this class's own
+  // module, so the guard classifies by the method's origin (the stdlib
+  // protocol), not its module: the same writing blocks fold for an actor ...
+  testStdlibEnumerableActorWrite =>
+    a := Adr0133EnumerableStdlibActor spawnWith: #{#items => #(1, 2, 3)}
+    [
+      self assert: (Adr0133EnumerableUser doWrite: a) equals: 6
+      self assert: (Adr0133EnumerableUser injectWrite: a) equals: #[6, 3]
+      self assert: (Adr0133EnumerableUser collectWrite: a) equals: #[#(10, 20, 30), 3]
+      self assert: (Adr0133EnumerableUser selectWrite: a) equals: #[#(2, 3), 3]
+      self assert: (Adr0133EnumerableUser detectWrite: a) equals: #[2, 2]
+      self assert: (Adr0133EnumerableUser detectNoneWrite: a) equals: #[#none, 3]
+      self assert: (Adr0133EnumerableUser anySatisfyWrite: a) equals: #[true, 3]
+    ] ensure: [a stop]
+
+  // --- BT-3916: the stdlib's own methods run through overridable self-sends ---
+  // The stdlib's `collect:`, `select:`, `count:`, `eachWithIndex:` and
+  // `do:separatedBy:` are `self inject:into:`, and `reject:` is `self select:`.
+  // So a class that defines any collection message outside the stdlib makes the
+  // fold over `do:` differ from the pure send: every writing send is refused
+  // (`eachWithIndex:` / `do:separatedBy:` are lowered through a synthetic
+  // `inject:into:`, but the guard asks about the selector the user sent).
+  testOwnEachWithIndexRaises =>
+    c := Adr0133EnumerableOwnEach new: #{#items => #(1, 2, 3)}
+    self should: [
+      Adr0133EnumerableUser eachWithIndexWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser separatedByWrite: c
+    ] raise: #stateful_block_dispatch
+
+  testOwnInjectRefusesEverythingThatRunsThroughIt =>
+    c := Adr0133EnumerableOwnInject new: #{#items => #(1, 2, 3)}
+    self should: [
+      Adr0133EnumerableUser injectWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser eachWithIndexWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser separatedByWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser collectWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser selectWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser countWrite: c
+    ] raise: #stateful_block_dispatch
+    // `do:` is the fold's own source and is never refused.
+    self assert: (Adr0133EnumerableUser doWrite: c) equals: 6
+
+  testOwnSelectRefusesReject =>
+    c := Adr0133EnumerableOwnSelect new: #{#items => #(1, 2, 3)}
+    self should: [
+      Adr0133EnumerableUser selectWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser rejectWrite: c
+    ] raise: #stateful_block_dispatch
+
+  // `uses: Enumerable` with no override of its own folds every message it
+  // provides (`size`, `isEmpty`, ... are not collection messages).
+  testStdlibEnumerableCountWrite =>
+    self assert: (Adr0133EnumerableUser countWrite: self stdlibBag) equals: #[2, 3]
+
+  // ... and the class's own method wins over the stdlib provision, so it is
+  // refused, and so is every other writing send, since its class now defines a
+  // collection message outside the stdlib.
+  testStdlibEnumerableOwnAnySatisfy =>
+    c := Adr0133EnumerableStdlibOwnAny new: #{#items => #(1, 2, 3)}
+    self deny: (Adr0133EnumerableUser anySatisfyPure: c)
+    self should: [
+      Adr0133EnumerableUser anySatisfyWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser injectWrite: c
+    ] raise: #stateful_block_dispatch
+    self should: [
+      Adr0133EnumerableUser collectWrite: c
+    ] raise: #stateful_block_dispatch
+    self assert: (Adr0133EnumerableUser doWrite: c) equals: 6
+
   // --- The stdlib's own `uses: Enumerable(V)` (`Ets`) ---
   testEtsWrite =>
     self
@@ -138,32 +254,61 @@ TestCase subclass: Adr0133EnumerableUserTest
       ]
 
   // --- An actor with only `do:`, from another process ---
-  // The writing form folds over the actor's `do:`; the pure form would be
-  // `does_not_understand` (it has no `inject:into:`), so only writes here.
+  // `do:` folds over the actor's own `do:`. The other messages are not
+  // defined by the actor or the stdlib's `Actor`, so the guard answers
+  // `does_not_understand`, as the pure send would.
   testActorWrite =>
     a := Adr0133EnumerableActor spawnWith: #{#items => #(1, 2, 3)}
     [
       self assert: (Adr0133EnumerableUser doWrite: a) equals: 6
-      self assert: (Adr0133EnumerableUser injectWrite: a) equals: #[6, 3]
-      self assert: (Adr0133EnumerableUser collectWrite: a) equals: #[#(10, 20, 30), 3]
-      self assert: (Adr0133EnumerableUser selectWrite: a) equals: #[#(2, 3), 3]
-      self assert: (Adr0133EnumerableUser detectWrite: a) equals: #[2, 2]
-      self assert: (Adr0133EnumerableUser anySatisfyWrite: a) equals: #[true, 3]
+      self should: [
+        Adr0133EnumerableUser injectWrite: a
+      ] raise: #does_not_understand
+      self should: [
+        Adr0133EnumerableUser collectWrite: a
+      ] raise: #does_not_understand
+      self should: [
+        Adr0133EnumerableUser selectWrite: a
+      ] raise: #does_not_understand
+      self should: [
+        Adr0133EnumerableUser detectWrite: a
+      ] raise: #does_not_understand
+      self should: [
+        Adr0133EnumerableUser anySatisfyWrite: a
+      ] raise: #does_not_understand
     ] ensure: [a stop]
 
   // BT-3918: inside the actor's own method, `self do:` with a writing block
   // is an escaping-block compile error since BT-3908
   // (`adr0133_actor_self_send_of_a_collection_message_is_an_escaping_block`).
 
-  // --- BT-3843: the class's own `anySatisfy:` ---
+  // --- BT-3843 / BT-3916: the class's own `anySatisfy:` ---
   testOwnAnySatisfyPure =>
     // The class's own method runs: it looks only at the first element.
     self deny: (Adr0133EnumerableUser anySatisfyPure: self ownAny)
 
-  testOwnAnySatisfyWritePin =>
-    // PIN (BT-3916): with a writing block the message is the fold over the
-    // receiver's `do:` (ADR 0133 § Consequences, BT-3903 note), so the
-    // class's own `anySatisfy:` does not run and the answer is the fold's.
-    // The write is never dropped. If BT-3916 adopts a receiver guard, this
-    // flips to `raise: #stateful_block_dispatch`.
-    self assert: (Adr0133EnumerableUser anySatisfyWrite: self ownAny) equals: #[true, 3]
+  testOwnAnySatisfyWriteRaises =>
+    // With a writing block the message would be the fold over the receiver's
+    // `do:`, which bypasses the class's own `anySatisfy:` (it answers a
+    // different thing), so the send is refused instead.
+    self should: [
+      Adr0133EnumerableUser anySatisfyWrite: self ownAny
+    ] raise: #stateful_block_dispatch
+
+  // The same refusal for a class object (class-side methods) and for an actor with its
+  // own `anySatisfy:` (value, class and actor receivers).
+  testClassOwnAnySatisfy =>
+    self deny: (Adr0133EnumerableUser anySatisfyPure: Adr0133EnumerableObjectOwnAny)
+    self should: [
+      Adr0133EnumerableUser anySatisfyWrite: Adr0133EnumerableObjectOwnAny
+    ] raise: #stateful_block_dispatch
+
+  testActorOwnAnySatisfy =>
+    a := Adr0133EnumerableActorOwnAny spawnWith: #{#items => #(1, 2, 3)}
+    [
+      self deny: (Adr0133EnumerableUser anySatisfyPure: a)
+      self should: [
+        Adr0133EnumerableUser anySatisfyWrite: a
+      ] raise: #stateful_block_dispatch
+      self assert: (Adr0133EnumerableUser doWrite: a) equals: 6
+    ] ensure: [a stop]

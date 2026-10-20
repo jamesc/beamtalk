@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3916 (ADR 0133): an actor collection with `do:` and its own
+// `anySatisfy:` whose semantics differ from the fold over `do:` (it looks only
+// at the first element). A writing block sent `anySatisfy:` from another
+// process is refused rather than folded over `do:`. Driven by
+// adr0133enumerable_user_test.bt.
+
+Actor subclass: Adr0133EnumerableActorOwnAny
+  state: items = #()
+
+  do: block => self.items do: block
+
+  anySatisfy: block =>
+    self.items isEmpty ifTrue: [^false]
+    block value: self.items first

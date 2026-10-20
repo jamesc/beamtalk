@@ -771,6 +771,7 @@ list-based constructors, and `stream` and `asSet` (identity override) were undoc
 | `kind` | @primitive selector | ✅ | N/A |
 | `selector` | @primitive selector | ✅ | N/A |
 | `errorClass` | @primitive selector | ✅ | N/A |
+| `reason` | @primitive selector | ✅ | N/A (raw Erlang error term, or nil) |
 | `printString` | @primitive selector | ✅ | `Exception>>printString` |
 | `stackTrace` | @primitive selector | ✅ | Returns `List(StackFrame)` |
 | `signal` | @primitive selector | ✅ | `Exception>>signal` |

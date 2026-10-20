@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3965 fixture: DynamicSupervisor with the default `childShutdown` (nil),
+// so its children keep Bt3965CappedStopper's own 50 ms. See
+// stdlib/test/supervision_shutdown_test.bt.
+
+DynamicSupervisor(Bt3965CappedStopper) subclass: Bt3965DefaultPool
+
+  class childClass => Bt3965CappedStopper

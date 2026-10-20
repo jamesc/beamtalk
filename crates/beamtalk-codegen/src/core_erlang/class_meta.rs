@@ -49,6 +49,16 @@ pub(crate) struct MetaProvenance<'a> {
     /// as `'direct_class_methods'` so the runtime never re-derives eligibility.
     /// Empty for classes with none (and for native facades).
     pub direct_class_methods: &'a [(String, String)],
+    /// BT-3916: this class's instance-side methods that are provisions of a
+    /// stdlib protocol (`uses: Enumerable`), emitted as `'stdlib_trait_methods'`
+    /// (omitted when empty). The runtime's list-op receiver guard
+    /// (`beamtalk_behaviour_intrinsics:selectorProviderFromName/2`) reads it to
+    /// classify a flattened provision by its origin rather than its module.
+    pub stdlib_trait_methods: &'a [String],
+    /// BT-3916: the class defines, outside the stdlib, a collection message the
+    /// stdlib's collection methods run through; emitted as
+    /// `'overrides_collection_selector' => 'true'` (omitted when `false`).
+    pub overrides_collection_selector: bool,
 }
 
 /// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
@@ -393,6 +403,12 @@ impl CoreErlangGenerator {
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
             Self::meta_direct_class_methods_entry(provenance.direct_class_methods),
+            Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
+            if provenance.overrides_collection_selector {
+                Document::Str(",\n      'overrides_collection_selector' => 'true'")
+            } else {
+                Document::Nil
+            },
             extra_entries,
             "\n    }~",
         ]
@@ -443,6 +459,19 @@ impl CoreErlangGenerator {
         }
         parts.push(Document::Str("}~"));
         docvec![",\n      'direct_class_methods' => ", Document::Vec(parts)]
+    }
+
+    /// BT-3916: emit `'stdlib_trait_methods' => [Selector, ...]`, the
+    /// provisions of stdlib protocols flattened into this class. Omitted when
+    /// the class has none, so only `uses: Enumerable`-style classes change.
+    fn meta_stdlib_trait_methods_entry(selectors: &[String]) -> Document<'static> {
+        if selectors.is_empty() {
+            return Document::Nil;
+        }
+        docvec![
+            ",\n      'stdlib_trait_methods' => ",
+            Self::meta_atom_list(selectors)
+        ]
     }
 
     /// ADR 0098 Phase 3: emit the `beamtalk_version` / `otp_release` provenance

@@ -1,0 +1,153 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3967: Actor>>stopWith: / stopWith:timeout: — stop an actor with a
+// chosen exit reason that reaches terminate: and onExit: unchanged.
+//
+// Fixtures: stdlib/test/fixtures/stop_with_server.bt
+//           stdlib/test/fixtures/stop_with_transient_actor.bt
+//           stdlib/test/fixtures/stop_with_transient_sup.bt
+
+TestCase subclass: ActorStopWithTest
+
+  // === Self-stop from inside the actor ===
+  testSelfStopFromHandleInfoWithTupleReason =>
+    table := Ets new: #stopWithHandleInfo type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithHandleInfo}
+    server onExit: [:reason | table at: #exitReason put: reason]
+    expected := Tuple withAll: #(#shutdown, #peer_closed)
+    Erlang erlang send: server pid msg: #close
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: expected
+    self assert: (table at: #exitReason) equals: expected
+    table delete
+
+  testSelfStopTakesEffectAfterCurrentMessage =>
+    // The caller still gets the method's reply; the stop happens after.
+    table := Ets new: #stopWithAfterReply type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithAfterReply}
+    self assert: (server stopSelfWith: #shutdown) equals: #stillRunning
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #shutdown
+    table delete
+
+  testSelfStopIsEquivalentToStopWithNormal =>
+    table := Ets new: #stopWithSelfStop type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithSelfStop}
+    self assert: server stopSelf equals: #stillRunning
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #normal
+    table delete
+
+  testSelfStopWithTimeoutIsDeferredToo =>
+    table := Ets new: #stopWithSelfTimeout type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithSelfTimeout}
+    self assert: (server stopSelfWithTimeout: #shutdown) equals: #stillRunning
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #shutdown
+    table delete
+
+  testFirstSelfStopRequestWins =>
+    table := Ets new: #stopWithTwice type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithTwice}
+    self assert: server stopTwice equals: #stillRunning
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #reason) equals: #normal
+    table delete
+
+  testSelfStopStillHappensWhenMethodThenRaises =>
+    table := Ets new: #stopWithThenFail type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithThenFail}
+    self should: [server stopThenFail] raise: #user_error
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #shutdown
+    table delete
+
+  testSelfStopFromFireAndForgetCast =>
+    table := Ets new: #stopWithCast type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithCast}
+    server stopSelfWith: #shutdown!
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: #shutdown
+    table delete
+
+  testUnrelatedInfoMessageDoesNotStop =>
+    server := StopWithServer spawn
+    Erlang erlang send: server pid msg: #tick
+    self assert: server handled equals: 1
+    self assert: server isAlive
+    server stop
+
+  // === External stop from another process ===
+  testExternalStopWithTupleReason =>
+    table := Ets new: #stopWithExternal type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithExternal}
+    server onExit: [:reason | table at: #exitReason put: reason]
+    expected := Tuple withAll: #(#shutdown, #local_closed)
+    self assert: (server stopWith: expected) equals: #ok
+    self deny: server isAlive
+    self assert: (table at: #reason) equals: expected
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #exitReason) equals: expected
+    table delete
+
+  testExternalStopWithNormalMatchesStop =>
+    table := Ets new: #stopWithNormal type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithNormal}
+    self assert: (server stopWith: #normal) equals: #ok
+    self assert: (table at: #reason) equals: #normal
+    // Idempotent, like stop.
+    self assert: (server stopWith: #normal) equals: #ok
+    table delete
+
+  testExternalStopWithTimeout =>
+    table := Ets new: #stopWithTimeout type: #set
+    server := StopWithServer spawnWith: #{#tableName => #stopWithTimeout}
+    self assert: (server stopWith: #shutdown timeout: 1000) equals: #ok
+    self assert: (table at: #reason) equals: #shutdown
+    table delete
+
+  testStopWithTimeoutRejectsBadTimeout =>
+    server := StopWithServer spawn
+    self should: [server stopWith: #normal timeout: -1] raise: #type_error
+    self assert: server isAlive
+    server stop
+
+  // === #transient supervision: clean vs crash reasons ===
+  testTransientChildNotRestartedForShutdownTuple =>
+    sup := (StopWithTransientSup supervise) unwrap
+    child :: StopWithTransientActor := (sup which: StopWithTransientActor) unwrap
+    self assert: child ping equals: #pong
+    self assert: (child stopWith: (Tuple withAll: #(#shutdown, #peer_closed))) equals: #ok
+    Timer sleep: 50
+    self assert: (sup which: StopWithTransientActor) unwrap equals: nil
+    sup stop
+
+  testTransientChildNotRestartedForNormal =>
+    sup := (StopWithTransientSup supervise) unwrap
+    child :: StopWithTransientActor := (sup which: StopWithTransientActor) unwrap
+    self assert: (child stopWith: #normal) equals: #ok
+    Timer sleep: 50
+    self assert: (sup which: StopWithTransientActor) unwrap equals: nil
+    sup stop
+
+  testTransientChildRestartedForErrorReason =>
+    sup := (StopWithTransientSup supervise) unwrap
+    child :: StopWithTransientActor := (sup which: StopWithTransientActor) unwrap
+    self assert: (child stopWith: #boom) equals: #ok
+    self deny: child isAlive
+    restarted := nil
+    50
+      timesRepeat: [
+        restarted := (sup which: StopWithTransientActor) unwrap
+        (restarted isNil or: [restarted =:= child]) ifTrue: [Timer sleep: 10]
+      ]
+    self deny: restarted isNil
+    self deny: restarted =:= child
+    sup stop
