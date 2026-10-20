@@ -1939,8 +1939,8 @@ fn test_cast_send_to_non_self_keyword_receiver_uses_dispatch_cast() {
 
 #[test]
 fn test_cast_self_send_routes_to_mailbox() {
-    // `self increment!` in actor context should call safe_dispatch but
-    // discard the result and return 'ok'.
+    // `self increment!` in actor context routes through the mailbox
+    // (beamtalk_message_dispatch:cast/3), BT-3998.
     let mut generator = CoreErlangGenerator::new("test");
     // CoreErlangGenerator::new defaults to Actor context — self-sends are valid
 

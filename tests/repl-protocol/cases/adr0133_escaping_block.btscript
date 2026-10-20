@@ -109,3 +109,5 @@ t := Adr0132ReplCallee calleeDirect: [t + 1]
 // BT-3998: a send to a local bound only to `self` is a compile error.
 
 // @load-error tests/repl-protocol/fixtures/bt3998_self_alias_error.bt => `other` is `self`
+
+// @load-error tests/repl-protocol/fixtures/bt3998_self_alias_write_error.bt => `other` is `self`

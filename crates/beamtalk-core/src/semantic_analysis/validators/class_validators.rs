@@ -24,9 +24,7 @@ use crate::ast::{
 };
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
-use crate::semantic_analysis::block_facts::{
-    cascade_shared_receiver, is_self_or_super, is_self_reference, may_change_actor_state,
-};
+use crate::semantic_analysis::block_facts::{cascade_shared_receiver, may_change_actor_state};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
@@ -1303,28 +1301,28 @@ pub(crate) fn check_actor_field_mutation_in_closure(
     }
 }
 
-/// Rejects a send to a local bound only to `self` in an actor instance
-/// method, where it can answer wrong (BT-3998).
+/// Rejects a synchronous send to a local bound only to `self` in an actor
+/// instance method, where it can answer wrong or lose a write (BT-3998).
 ///
-/// `other := self. other foo` is an ordinary send, not a self-send (BT-1325):
-/// it runs against the `State` the method had when the send was made, and the
-/// callee's `State` change is not threaded back. Working shapes stay legal
-/// (`other fieldNames`, `other fieldAt: #x`, `other fieldAt: #x put: 1`
-/// followed only by alias sends). Rejected, measured on a BEAM:
+/// `other := self. other foo` is an ordinary send, not a self-send: it runs
+/// against the `State` in the process dictionary and the callee's `State` is
+/// wiped when the message ends, so a state change made through it is always
+/// lost. Rejected:
 ///
-/// 1. an alias send after a possible write earlier in the method body
-///    (`self.x := 5. other getX` answers the pre-write value; a write is a
-///    `self.field :=` or any send to `self`, as `may_change_actor_state`);
-/// 2. an alias send that may change state (anything but a read-only
-///    reflective selector, conservatively every user method) followed later by
-///    a read of `self.field` or a send to `self` (`other setX: 7. self.x`
-///    answers the old value: the write is lost).
+/// 1. any alias send that may change state: anything but a read-only
+///    reflective selector (conservatively every user method, and
+///    `fieldAt:put:`), or a cascade;
+/// 2. any alias send after an earlier possible write in the method body, in
+///    source order (`self.x := 5. other getX` answers the pre-write value).
 ///
-/// "Earlier"/"later" is source order. A local is bound only to `self` when it
-/// has at least one assignment in the method body (nested blocks included)
-/// and every assignment's value is `self`; a name that is also a method or
-/// block parameter is another variable. Value types (immutable) and class
-/// methods are not checked.
+/// Read-only reflective alias sends (`other fieldNames`) and `!` casts
+/// (`other foo!`, a real mailbox cast) stay legal. ADR 0137 (BT-4006) makes
+/// alias writes correct and lifts this. Loops and callers' earlier writes are
+/// not tracked. A local is bound only to `self` when it has at least one
+/// assignment in the method body (nested blocks included) and every
+/// assignment's value is `self`; a method parameter, or a block parameter
+/// inside its own block, of the same name is another variable. Value types
+/// (immutable) and class methods are not checked.
 pub(crate) fn check_actor_self_alias_send(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -1356,11 +1354,14 @@ fn check_method_for_self_alias_send(method: &MethodDefinition, diagnostics: &mut
     use std::collections::{HashMap, HashSet};
     // name -> whether every assignment to it binds `self`
     let mut only_self: HashMap<EcoString, bool> = HashMap::new();
-    let mut shadowed: HashSet<EcoString> = method
+    let method_params: HashSet<EcoString> = method
         .parameters
         .iter()
         .map(|p| p.name.name.clone())
         .collect();
+    // (parameter name, span of the block that declares it): a parameter
+    // shadows the name only inside its own block.
+    let mut block_params: Vec<(EcoString, Span)> = Vec::new();
     for stmt in &method.body {
         walk_expression(&stmt.expression, &mut |e| match e {
             Expression::Assignment { target, value, .. } => {
@@ -1370,7 +1371,12 @@ fn check_method_for_self_alias_send(method: &MethodDefinition, diagnostics: &mut
                 }
             }
             Expression::Block(block) => {
-                shadowed.extend(block.parameters.iter().map(|p| p.name.clone()));
+                block_params.extend(
+                    block
+                        .parameters
+                        .iter()
+                        .map(|p| (p.name.clone(), block.span)),
+                );
             }
             _ => {}
         });
@@ -1378,69 +1384,73 @@ fn check_method_for_self_alias_send(method: &MethodDefinition, diagnostics: &mut
     let self_local = |expr: &Expression| -> Option<EcoString> {
         match expr.unwrap_parens() {
             Expression::Identifier(id)
-                if only_self.get(&id.name) == Some(&true) && !shadowed.contains(&id.name) =>
+                if only_self.get(&id.name) == Some(&true)
+                    && !method_params.contains(&id.name)
+                    && !block_params.iter().any(|(n, block)| {
+                        *n == id.name
+                            && block.start() <= id.span.start()
+                            && id.span.end() <= block.end()
+                    }) =>
             {
                 Some(id.name.clone())
             }
             _ => None,
         }
     };
-    // (name, span of the send, whether it may change state), by receiver span
-    let mut alias_sends: Vec<(EcoString, Span, bool, Span)> = Vec::new();
-    // Spans of possible writes; of reads of `self.field` / sends to `self`.
+    // (name, span of the send, receiver span) of each synchronous alias send,
+    // with whether it may change state.
+    let mut alias_sends: Vec<(EcoString, Span, Span, bool)> = Vec::new();
+    // Spans of possible writes (casts are queued, not inline writes).
     let mut writes: Vec<Span> = Vec::new();
-    let mut reads: Vec<Span> = Vec::new();
-    let mut assign_targets: HashSet<Span> = HashSet::new();
     for stmt in &method.body {
         walk_expression(&stmt.expression, &mut |e| {
-            if may_change_actor_state(e) {
+            let is_cast = matches!(e, Expression::MessageSend { is_cast: true, .. });
+            if !is_cast && may_change_actor_state(e) {
                 writes.push(e.span());
             }
             match e {
-                Expression::Assignment { target, .. } => {
-                    assign_targets.insert(target.span());
-                }
                 Expression::MessageSend {
-                    receiver, selector, ..
+                    receiver,
+                    selector,
+                    is_cast: false,
+                    ..
                 } => {
                     if let Some(name) = self_local(receiver) {
                         let reflective =
                             READ_ONLY_REFLECTIVE_SELECTORS.contains(&selector.name().as_str());
-                        alias_sends.push((name, e.span(), !reflective, receiver.span()));
+                        alias_sends.push((name, e.span(), receiver.span(), !reflective));
                     }
                 }
                 Expression::Cascade { receiver, .. } => {
                     let shared = cascade_shared_receiver(receiver);
                     if let Some(name) = self_local(shared) {
-                        alias_sends.push((name, e.span(), true, shared.span()));
+                        alias_sends.push((name, e.span(), shared.span(), true));
                     }
                 }
                 _ => {}
             }
-            if is_self_send_or_field_read(e) {
-                reads.push(e.span());
-            }
         });
     }
-    reads.retain(|r| !assign_targets.contains(r));
     let mut reported: HashSet<Span> = HashSet::new();
-    for (name, span, may_change, recv) in alias_sends {
+    for (name, span, recv, may_change) in alias_sends {
         let after_write = writes.iter().any(|w| w.end() <= span.start());
-        let read_after = may_change && reads.iter().any(|r| r.start() >= span.end());
-        if !(after_write || read_after) || !reported.insert(recv) {
+        if !(may_change || after_write) || !reported.insert(recv) {
             continue;
         }
-        let why = if after_write {
-            "it runs against the state from before this method's earlier field write"
+        let why = if may_change {
+            "a state change made through it is lost when the message ends"
         } else {
-            "its field writes are lost to the later read of `self`"
+            "it runs against the state from before this method's earlier field write"
         };
         diagnostics.push(
             Diagnostic::error(
                 format!("`{name}` is `self`: a send to it is not a self-send; {why}"),
                 span,
             )
-            .with_hint(format!("send to `self` directly instead of `{name}`"))
+            .with_hint(format!(
+                "send to `self` directly instead of `{name}` (read-only reflective sends such \
+                 as `fieldNames` and `!` casts are fine)"
+            ))
             .with_category(DiagnosticCategory::Type),
         );
     }
@@ -1458,15 +1468,6 @@ const READ_ONLY_REFLECTIVE_SELECTORS: &[&str] = &[
     "isNil",
     "notNil",
 ];
-
-/// A read of `self.field`, or a send to `self` (it sees the current State).
-fn is_self_send_or_field_read(e: &Expression) -> bool {
-    match e {
-        Expression::FieldAccess { receiver, .. } => is_self_reference(receiver.unwrap_parens()),
-        Expression::MessageSend { receiver, .. } => is_self_or_super(receiver),
-        _ => false,
-    }
-}
 
 /// Builds the diagnostic for an unsafe field mutation in a block closure.
 ///
@@ -2513,42 +2514,77 @@ mod tests {
     }
 
     #[test]
-    fn actor_alias_write_then_self_read_errors() {
+    fn actor_alias_state_changing_send_errors_even_without_later_read() {
         let d = self_alias_diagnostics(
-            "Actor subclass: A\n  state: x = 0\n  setX: v => self.x := v\n  m =>\n    other := self\n    other setX: 7\n    self.x",
+            "Actor subclass: A\n  state: x = 0\n  m =>\n    other := self\n    other setX: 7",
+        );
+        assert_eq!(d.len(), 1, "{d:?}");
+        let d = self_alias_diagnostics(
+            "Actor subclass: A\n  state: x = 0\n  m =>\n    other := self\n    other fieldAt: #x put: 42",
         );
         assert_eq!(d.len(), 1, "{d:?}");
     }
 
     #[test]
-    fn actor_alias_write_then_self_send_in_block_errors() {
+    fn actor_alias_send_in_block_errors() {
         let d = self_alias_diagnostics(
-            "Actor subclass: A\n  state: x = 0\n  m =>\n    o := self\n    #(1) do: [:i | o setX: i]\n    self getX",
+            "Actor subclass: A\n  m =>\n    o := self\n    #(1) do: [:i | o setX: i]",
         );
         assert_eq!(d.len(), 1, "{d:?}");
     }
 
     #[test]
-    fn actor_alias_cascade_then_field_read_errors() {
+    fn actor_alias_cascade_errors() {
+        let d = self_alias_diagnostics("Actor subclass: A\n  m =>\n    o := self\n    o foo; bar");
+        assert_eq!(d.len(), 1, "{d:?}");
+    }
+
+    #[test]
+    fn actor_reflective_alias_send_after_write_errors() {
         let d = self_alias_diagnostics(
-            "Actor subclass: A\n  state: x = 0\n  m =>\n    o := self\n    o foo; bar\n    self.x",
+            "Actor subclass: A\n  state: x = 0\n  m =>\n    self.x := 5\n    o := self\n    o fieldAt: #x",
+        );
+        assert_eq!(d.len(), 1, "{d:?}");
+        let d = self_alias_diagnostics(
+            "Actor subclass: A\n  m =>\n    o := self\n    self bump\n    o fieldNames",
         );
         assert_eq!(d.len(), 1, "{d:?}");
     }
 
     #[test]
-    fn actor_alias_send_after_self_send_write_errors() {
-        let d = self_alias_diagnostics(
-            "Actor subclass: A\n  m =>\n    o := self\n    self bump\n    o getX",
-        );
-        assert_eq!(d.len(), 1, "{d:?}");
-    }
-
-    #[test]
-    fn actor_reflective_alias_sends_are_allowed() {
+    fn actor_read_only_reflective_alias_sends_are_allowed() {
         // BT-1325: these work and stay legal.
         let d = self_alias_diagnostics(
-            "Actor subclass: A\n  state: x = 0\n  a =>\n    o := self\n    o fieldNames\n  b =>\n    o := self\n    o fieldAt: #x\n  c =>\n    o := self\n    o fieldAt: #x put: 42\n    o fieldAt: #x\n  d =>\n    o := self\n    o getValue\n  e =>\n    o := self\n    r := o fieldNames\n    self.x := 1\n    r",
+            "Actor subclass: A\n  state: x = 0\n  a =>\n    o := self\n    o fieldNames\n  b =>\n    o := self\n    o fieldAt: #x\n  e =>\n    o := self\n    r := o fieldNames\n    self.x := 1\n    r",
+        );
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn actor_alias_cast_is_allowed() {
+        // `o foo!` is a real mailbox cast, like `self foo!`.
+        let d = self_alias_diagnostics(
+            "Actor subclass: A\n  m =>\n    o := self\n    o foo!\n    self.x := 1\n    o bar!",
+        );
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn actor_cast_is_not_a_write_for_a_later_alias_send() {
+        let d = self_alias_diagnostics(
+            "Actor subclass: A\n  m =>\n    o := self\n    self bump!\n    o fieldNames",
+        );
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn actor_block_param_shadows_only_inside_its_block() {
+        let d = self_alias_diagnostics(
+            "Actor subclass: A\n  m =>\n    #(1) do: [:o | o printString]\n    o := self\n    o bump",
+        );
+        assert_eq!(d.len(), 1, "{d:?}");
+        let d = self_alias_diagnostics(
+            "Actor subclass: A\n  m =>\n    o := self\n    #(1) do: [:o | o bump]",
         );
         assert!(d.is_empty(), "{d:?}");
     }

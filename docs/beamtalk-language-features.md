@@ -3148,14 +3148,13 @@ mailbox: `foo` runs after the current message finishes, and its field writes
 are kept. It does not run inline, so the rest of the current method does not
 see its effects.
 
-A send to a local that is bound only to `self` (`other := self. other foo`) is
-an ordinary send, not a self-send: it sees the state the method had when the
-send was made and its field writes are not kept. Read-only reflective sends
-(`other fieldNames`, `other fieldAt: #x`) and alias-only sequences work. It is
-a compile error where it would answer wrong: an alias send after a field write
-or self-send earlier in the method, or an alias send that may change state
-(any user method, `fieldAt:put:`) followed later by a read of `self.field` or a
-send to `self`. Send to `self` directly in those cases.
+A state-changing send to a local that is bound only to `self` (`other := self.
+other setX: 7`) is a compile error: it is an ordinary send, not a self-send,
+and the state change it makes is lost when the message ends. So is any send
+to such a local after an earlier field write in the same method. Read-only
+reflective sends to it (`other fieldNames`, `other fieldAt: #x`) and `!` casts
+(`other foo!`) are fine. Every user method counts as state-changing, since the
+compiler cannot tell. Send to `self` directly. ADR 0137 will lift this.
 
 ### Deadlock Prevention
 
