@@ -3846,6 +3846,9 @@ fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
         // An assignment in a nested `do:` body or closure of a condition
         // statement is not the BT-3911 cell.
         "[[:z | #(1) do: [:e | w := e]. z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        // An arm inside a `do:` body or closure is not a bare arm.
+        "[[:z | #(1) do: [:e | e > 0 ifTrue: [w := e]]] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | [:y | y > 0 ifTrue: [w := y]] value: z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
         // A state-touching body: the arm operand and `and:` shapes.
         "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
         "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c and: [([:z | w := z. w] value: i) > 0]]\nt",

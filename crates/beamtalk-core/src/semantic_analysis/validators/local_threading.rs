@@ -966,8 +966,8 @@ pub(crate) enum Residual {
     /// enclosing blocks. The loop frame carries its locals as parameters (no
     /// `StateAcc`) while the block body is lowered as a state-threading
     /// scope. Measured on a BEAM (the rows marked conservative below were
-    /// not measured failing; BT-3947 flips them with the rest), these fail `erlc` (unbound `StateAcc`),
-    /// raise, or answer a `{Value, Locals}` carrier instead of the value:
+    /// not measured failing; BT-3947 flips them with the rest), these fail
+    /// `erlc` (unbound `StateAcc`), raise, or answer a `{Value, Locals}` carrier instead of the value:
     /// the send in a `whileTrue:`/`whileFalse:` condition (also with a
     /// state-touching body, and as a statement of the condition unless the
     /// block is one statement with every assignment in an arm); in the
@@ -2661,30 +2661,35 @@ impl<'d> Walker<'d> {
             return;
         }
         let params: HashSet<&str> = block.parameters.iter().map(|p| p.name.as_str()).collect();
-        let mut nested_blocks: Vec<Span> = Vec::new();
+        // Every block literal below the applied block, and which of them are
+        // the arms of a conditional send.
+        let mut all_blocks: Vec<(Span, bool)> = Vec::new();
+        let mut arm_blocks: Vec<Span> = Vec::new();
         for stmt in &block.body {
-            // Only the literal blocks of conditional sends are arms: an
-            // assignment in a nested `do:` body or closure is unmeasured.
-            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-                if let Expression::MessageSend {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+                Expression::Block(b) => all_blocks.push((b.span, false)),
+                Expression::MessageSend {
                     selector,
                     arguments,
                     ..
-                } = e
-                {
-                    if Container::of(&selector.name(), false) == Container::Arm {
-                        for arg in arguments {
-                            if let Expression::Block(b) = arg {
-                                nested_blocks.push(b.span);
-                            }
-                        }
-                    }
+                } if Container::of(&selector.name(), false) == Container::Arm => {
+                    arm_blocks.extend(arguments.iter().filter_map(|a| match a {
+                        Expression::Block(b) => Some(b.span),
+                        _ => None,
+                    }));
                 }
+                _ => {}
             });
         }
+        for (span, is_arm) in &mut all_blocks {
+            *is_arm = arm_blocks.contains(span);
+        }
         let mut local: Option<(EcoString, Span)> = None;
-        // Whether some assignment to a local sits outside every nested block
-        // literal (a statement of the block, or an operand in one).
+        // Whether some assignment to a local is not inside only conditional
+        // arms: the BT-3911 condition cell is positive, so a statement of
+        // the block, an operand, or any `do:` body, closure, evaluated or
+        // protected block between the assignment and the applied block
+        // leaves it.
         let mut outside_arms = false;
         for stmt in &block.body {
             crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
@@ -2698,10 +2703,11 @@ impl<'d> Walker<'d> {
                     return;
                 }
                 let span = e.span();
-                if !nested_blocks
+                let mut chain = all_blocks
                     .iter()
-                    .any(|b| b.start() <= span.start() && span.end() <= b.end())
-                {
+                    .filter(|(b, _)| b.start() <= span.start() && span.end() <= b.end())
+                    .peekable();
+                if chain.peek().is_none() || chain.any(|(_, is_arm)| !is_arm) {
                     outside_arms = true;
                 }
                 if local.is_none() {
