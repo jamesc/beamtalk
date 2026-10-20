@@ -3810,6 +3810,9 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
         "arr := #[1, 2]\n#[u, w] := arr\n[u := 5. ^u] ensure: [u printString]\n9",
         // A block parameter shadowing a literal-only name is not a constant.
         "k := 3\n#(1) do: [:k | [t := 1. CvA ap: k] ensure: [t printString]]\n9",
+        // An assignment the cleanup might not run does not bind.
+        "x := 1\n[x := 5. ^x] ensure: [false ifTrue: [x := 0]. x printString]\n9",
+        "x := 1\n[x := 5. ^x] ensure: [#() do: [:k | x := 0]. x printString]\n9",
         // A parameter of an enclosing block is bound in the enclosing scope.
         "#(1, 2) do: [:x | [x := 5. ^x] ensure: [x printString]]\n9",
         "[:x | [x := 5. ^x] ensure: [x printString]] value: 1\n9",

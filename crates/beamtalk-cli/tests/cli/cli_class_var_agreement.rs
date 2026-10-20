@@ -460,9 +460,11 @@ fn headline(text: &str) -> String {
 /// message, whitespace-normalised since the diagnostic is line-wrapped. The
 /// errors of a fixture with such a rejection may also be the "Failed to compile
 /// fixture" trailer and unused-variable lints; errors of other fixtures in the
-/// batch are theirs to be judged when they are compiled alone. With `fixture`
-/// (the file the compiler stopped at) the rejection must be that fixture's own.
-fn is_loud_ensure_nlr_rejection(text: &str, fixture: Option<&str>) -> bool {
+/// batch are theirs to be judged when they are compiled alone. `case_files` are
+/// the fixtures of the program being judged (empty: any): a rejection must be in
+/// one of them, and every error in any of them must be that rejection or its
+/// trailer, so a real error in another fixture of the same program is not hidden.
+fn is_loud_ensure_nlr_rejection(text: &str, case_files: &[String]) -> bool {
     let flat = text.replace('│', " ");
     let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
     let errors: Vec<&str> = flat.split('×').skip(1).map(str::trim).collect();
@@ -482,10 +484,18 @@ fn is_loud_ensure_nlr_rejection(text: &str, fixture: Option<&str>) -> bool {
         })
         .collect();
     !files.is_empty()
-        && fixture.is_none_or(|f| files.iter().any(|p| p.ends_with(f)))
+        && (case_files.is_empty()
+            || files.iter().any(|p| {
+                case_files
+                    .iter()
+                    .any(|c| c.ends_with(p) || p.ends_with(c.as_str()))
+            }))
         && errors
             .iter()
-            .filter(|e| files.iter().any(|f| e.contains(f)))
+            .filter(|e| {
+                files.iter().any(|f| e.contains(f))
+                    || case_files.iter().any(|f| e.contains(f.as_str()))
+            })
             .all(|e| {
                 is_pin(e) || e.starts_with("Failed to compile") || e.starts_with("Unused variable")
             })
@@ -682,19 +692,27 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
                     })
                 })
                 .map(|((file, _), owner)| (file.clone(), *owner));
-            if let Some((file, owner)) = offender {
+            let files_of = |owner: usize| -> Vec<String> {
+                pkg.fixtures
+                    .iter()
+                    .zip(&pkg.fixture_owner)
+                    .filter(|(_, o)| **o == owner)
+                    .map(|((f, _), _)| f.clone())
+                    .collect()
+            };
+            if let Some((_, owner)) = offender {
                 let c = cases.iter().find(|c| c.index == owner).expect("case");
                 // PIN-BUG BT-3947 (BT-3993): the compiler's conservative,
                 // loud rejection of an `ensure:` protected block that may
                 // return non-locally is not a disagreement: the program is
                 // never compiled, so no wrong answer is produced.
-                if !is_loud_ensure_nlr_rejection(&text, Some(file.as_str())) {
+                if !is_loud_ensure_nlr_rejection(&text, &files_of(owner)) {
                     record(c, Failure::Compile(headline(&text), tail(&text)), failed);
                 }
                 let rest: Vec<&Case> = cases.iter().copied().filter(|c| c.index != owner).collect();
                 check(&rest, failed);
             } else if let [only] = cases {
-                if !is_loud_ensure_nlr_rejection(&text, None) {
+                if !is_loud_ensure_nlr_rejection(&text, &files_of(only.index)) {
                     record(only, Failure::Compile(headline(&text), tail(&text)), failed);
                 }
             } else {
@@ -707,7 +725,7 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
                 // silently; blame the batch's first case.
                 // (A half that was only the loud BT-3947 rejection is skipped,
                 // not failed.)
-                if failed.len() == before && !is_loud_ensure_nlr_rejection(&text, None) {
+                if failed.len() == before && !is_loud_ensure_nlr_rejection(&text, &[]) {
                     record(
                         cases[0],
                         Failure::Compile(

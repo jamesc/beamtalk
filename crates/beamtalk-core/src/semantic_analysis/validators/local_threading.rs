@@ -1474,37 +1474,33 @@ fn nlr_cause(protected: &Block, sources: &NlrSources) -> Option<String> {
 }
 
 /// The names `cleanup` binds itself before it reads them: its parameters, and a
-/// name whose first occurrence in the cleanup is the target of an assignment
-/// whose value does not mention it.
+/// name assigned by a top-level statement of the cleanup (executed
+/// unconditionally) whose value does not mention it, when no earlier statement
+/// mentions it. An assignment inside an arm, a loop body or any nested block
+/// literal might not run, so it does not bind.
 fn names_bound_by_cleanup_first(cleanup: &Block) -> BTreeSet<EcoString> {
-    let mut first = std::collections::BTreeMap::<EcoString, (u32, bool)>::new();
-    let mut note = |name: &EcoString, at: u32, binds: bool| {
-        let slot = first.entry(name.clone()).or_insert((at, binds));
-        if at < slot.0 {
-            *slot = (at, binds);
-        }
-    };
+    let mut own: BTreeSet<EcoString> = cleanup.parameters.iter().map(|p| p.name.clone()).collect();
+    let mut seen: BTreeSet<EcoString> = BTreeSet::new();
     for stmt in &cleanup.body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
-            Expression::Identifier(id) => note(&id.name, id.span.start(), false),
-            Expression::Assignment { target, value, .. } => {
-                if let Expression::Identifier(id) = target.as_ref() {
-                    let mut mentioned = false;
-                    crate::ast_walker::walk_expression(value, &mut |v| {
-                        mentioned |= matches!(v, Expression::Identifier(i) if i.name == id.name);
-                    });
-                    note(&id.name, id.span.start(), !mentioned);
-                }
+        let mut mentioned: BTreeSet<EcoString> = BTreeSet::new();
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::Identifier(id) = e {
+                mentioned.insert(id.name.clone());
             }
-            _ => {}
         });
+        if let Expression::Assignment { target, value, .. } = &stmt.expression
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            let mut in_value = false;
+            crate::ast_walker::walk_expression(value, &mut |v| {
+                in_value |= matches!(v, Expression::Identifier(i) if i.name == id.name);
+            });
+            if !in_value && !seen.contains(&id.name) {
+                own.insert(id.name.clone());
+            }
+        }
+        seen.extend(mentioned);
     }
-    let mut own: BTreeSet<EcoString> = first
-        .into_iter()
-        .filter(|(_, (_, binds))| *binds)
-        .map(|(n, _)| n)
-        .collect();
-    own.extend(cleanup.parameters.iter().map(|p| p.name.clone()));
     own
 }
 
