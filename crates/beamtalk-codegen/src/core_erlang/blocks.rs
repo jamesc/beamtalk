@@ -370,8 +370,11 @@ impl CoreErlangGenerator {
                 {
                     return this.generate_block_stateful_body(block, frame, &mut stmts);
                 }
+                // Generate body expressions with state threading
+                if this.is_repl_mode() {
+                    return this.generate_block_stateful_body(block, frame, &mut stmts);
+                }
                 this.with_body_producer_sites(&body, false, true, |this| {
-                    // Generate body expressions with state threading
                     this.generate_block_stateful_body(block, frame, &mut stmts)
                 })
             })?;
@@ -622,10 +625,16 @@ impl CoreErlangGenerator {
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
-            for site in self.body_producer_site_exprs(expr, false, true) {
-                let site = site.unwrap_parens();
-                if let Some(locals) = self.producer_locals_at_site(site) {
-                    producer_sites.push((site.span(), locals));
+            // (Not in the REPL: its producers adopt the bindings map, which a
+            // stored block's `StateAcc` is not, and no source reaches a Tier 2
+            // body there: a block that writes a captured binding is an ADR 0133
+            // error.)
+            if !self.is_repl_mode() {
+                for site in self.body_producer_site_exprs(expr, false, true) {
+                    let site = site.unwrap_parens();
+                    if let Some(locals) = self.producer_locals_at_site(site) {
+                        producer_sites.push((site.span(), locals));
+                    }
                 }
             }
 
