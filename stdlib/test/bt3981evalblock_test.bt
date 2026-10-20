@@ -1039,3 +1039,108 @@ TestCase subclass: Bt3981EvalblockTest
 
   testActorInjectArmAssign =>
     self assert: (Bt3981EvalblockActor spawn injectArmAssign) equals: 3
+
+  testActorWhileBodyLast =>
+    self assert: (Bt3981EvalblockActor spawn whileBodyLast) equals: 1
+
+  testActorWhileBodyNonLast =>
+    self assert: (Bt3981EvalblockActor spawn whileBodyNonLast) equals: 1
+
+  testActorWhileBodyAssigned =>
+    self assert: (Bt3981EvalblockActor spawn whileBodyAssigned) equals: 1
+
+  testActorWhileCondNonLast =>
+    self assert: (Bt3981EvalblockActor spawn whileCondNonLast) equals: 1
+
+  testActorInjectLastValue =>
+    self assert: (Bt3981EvalblockActor spawn injectLastValue) equals: 3
+
+  testActorInjectNonLastValue =>
+    self assert: (Bt3981EvalblockActor spawn injectNonLastValue) equals: 1
+
+  testActorSelectNonLastValue =>
+    self assert: (Bt3981EvalblockActor spawn selectNonLastValue) equals: 1
+
+  testActorSelectLastValue =>
+    self assert: (Bt3981EvalblockActor spawn selectLastValue) equals: 1
+
+  testActorDetectNonLastValue =>
+    self assert: (Bt3981EvalblockActor spawn detectNonLastValue) equals: 1
+
+  testActorDetectLastValue =>
+    self assert: (Bt3981EvalblockActor spawn detectLastValue) equals: 1
+
+  testActorDetectIfNoneBlock =>
+    self assert: (Bt3981EvalblockActor spawn detectIfNoneBlock) equals: 3
+
+  testActorAndArm =>
+    self assert: (Bt3981EvalblockActor spawn andArm) equals: true
+
+  testActorAndArmLast =>
+    self assert: (Bt3981EvalblockActor spawn andArmLast) equals: true
+
+  testActorIfNilArm =>
+    self assert: (Bt3981EvalblockActor spawn ifNilArm) equals: 3
+
+  testActorIfNotNilArm =>
+    self assert: (Bt3981EvalblockActor spawn ifNotNilArm) equals: 3
+
+  testActorIfTrueOnlyArm =>
+    self assert: (Bt3981EvalblockActor spawn ifTrueOnlyArm) equals: 3
+
+  testActorIfFalseArm =>
+    self assert: (Bt3981EvalblockActor spawn ifFalseArm) equals: 3
+
+  testActorNested2Statement =>
+    self assert: (Bt3981EvalblockActor spawn nested2Statement) equals: 3
+
+  testActorNested2Assigned =>
+    self assert: (Bt3981EvalblockActor spawn nested2Assigned) equals: 3
+
+  testActorNested3Statement =>
+    self assert: (Bt3981EvalblockActor spawn nested3Statement) equals: 3
+
+  testActorNested2InCollect =>
+    self assert: (Bt3981EvalblockActor spawn nested2InCollect) equals: 3
+
+  testActorStoredArmLast =>
+    self assert: (Bt3981EvalblockActor spawn storedArmLast) equals: 3
+
+  testActorStoredArmAssigned =>
+    self assert: (Bt3981EvalblockActor spawn storedArmAssigned) equals: 3
+
+  testActorFfiArmLast =>
+    self assert: (Bt3981EvalblockActor spawn ffiArmLast) equals: 3
+
+  testActorUserArmLast =>
+    self assert: (Bt3981EvalblockActor spawn userArmLast) equals: 3
+
+  testActorStoredNonLast =>
+    self assert: (Bt3981EvalblockActor spawn storedNonLast) equals: 7
+
+  testActorFfiNonLast =>
+    self assert: (Bt3981EvalblockActor spawn ffiNonLast) equals: #(7)
+
+  testActorUserNonLast =>
+    self assert: (Bt3981EvalblockActor spawn userNonLast) equals: 7
+
+  testActorDoLastStatement =>
+    self assert: (Bt3981EvalblockActor spawn doLastStatement) equals: 3
+
+  testActorCountedLastStatement =>
+    self assert: (Bt3981EvalblockActor spawn countedLastStatement) equals: 3
+
+  testActorTimesLastStatement =>
+    self assert: (Bt3981EvalblockActor spawn timesLastStatement) equals: 3
+
+  testActorProtectedNonLast =>
+    self assert: (Bt3981EvalblockActor spawn protectedNonLast) equals: 7
+
+  testActorHandlerNonLast =>
+    self assert: (Bt3981EvalblockActor spawn handlerNonLast) equals: 7
+
+  testActorCleanupNonLast =>
+    self assert: (Bt3981EvalblockActor spawn cleanupNonLast) equals: 7
+
+  testActorFoldArmNonLast =>
+    self assert: (Bt3981EvalblockActor spawn foldArmNonLast) equals: 3

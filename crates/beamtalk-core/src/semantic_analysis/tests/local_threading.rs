@@ -3870,7 +3870,8 @@ const EVALUATED_BLOCKS: &[&str] = &[
 /// `(host, position)` cells that are rejected in an actor method: the ones
 /// measured leaking the tuple on a BEAM
 /// (`stdlib/test/bt3981evalblock_test.bt` runs the others):
-/// - any argument, in every host;
+/// - any argument, in every host (a statement that is not the last of its
+///   block never leaks, except in a `do:` body, see below);
 /// - `^E` in every block (at the method body it unpacks);
 /// - `r := E`, `E` as the last statement and `[E] value`, directly in a block
 ///   that is a value (stored, FFI argument, passed to a method);
@@ -3882,6 +3883,8 @@ fn evaluated_block_leaks(host: &str, position: &str) -> bool {
         "argument" => true,
         "return" => host != "method",
         "assigned" => plain_fun,
+        // A dropped statement of a plain block answers (BT-3971's `notLast`).
+        "dropped" => false,
         "last" | "nested" => plain_fun || host == "protected",
         other => unreachable!("{other}"),
     }
@@ -3891,6 +3894,7 @@ fn evaluated_block_program(host: &str, position: &str, block: &str) -> String {
     let at = match position {
         "assigned" => format!("r := {block}\nr"),
         "last" => block.to_string(),
+        "dropped" => format!("{block}\n7"),
         "nested" => format!("[{block}] value"),
         "return" => format!("^{block}"),
         "argument" => format!("#(3) includes: {block}"),
@@ -3917,7 +3921,9 @@ const EVALUATED_BLOCK_HOSTS: &[&str] = &[
     "ffi",
     "user",
 ];
-const EVALUATED_BLOCK_POSITIONS: &[&str] = &["assigned", "last", "nested", "return", "argument"];
+const EVALUATED_BLOCK_POSITIONS: &[&str] = &[
+    "assigned", "last", "dropped", "nested", "return", "argument",
+];
 
 fn flags_bt3981(src: &str) -> bool {
     residual_messages(src, None)
@@ -4068,4 +4074,49 @@ fn evaluated_block_in_a_fold_that_writes_an_outer_local() {
             assert!(!flags_bt3981(&src), "{src}");
         }
     }
+}
+
+/// PIN-BUG BT-3947 (closes BT-3981): any enclosing fold-like block that writes
+/// an outer local rejects the evaluated block, with no conditional arm between
+/// them, not only the nearest one (conservative: the nearest-only rule left
+/// these unmeasured, and an arm is the one measured frame). The BT-3917 pins
+/// (`bt3971test.bt` `assigned`, `bt3939tier2inlined_test.bt` `evalValue`: an
+/// FFI argument block that no longer writes a captured local is a plain fun)
+/// are compile errors too.
+#[test]
+fn evaluated_block_under_any_enclosing_fold_that_writes_an_outer_local() {
+    for body in [
+        // The inner fold writes nothing; the outer one writes `r`.
+        "r := 0\n#(1) do: [:y | r := 1. #(1) do: [:z | [n := 3. n] value. 4]]\nr",
+        "r := 0\n#(1) do: [:y | r := 1. #(1) collect: [:z | q := [n := 3. n] value. q]]\nr",
+        // Through a protected body or an evaluated block.
+        "r := 0\n#(1) do: [:y | r := 1. [[n := 3. n] value. 4] on: Error do: [:e | 0]]\nr",
+        "r := 0\n#(1) do: [:y | r := 1. [[[n := 3. n] value. 4] value. 5] value]\nr",
+        "r := 0\n#(1) collect: [:y | r := 1. [[n := 3. n] value] ensure: [nil]]\nr",
+        // The bot's shapes: an inner `do:` that writes nothing, and a protected
+        // body, under an outer `do:` that writes `r`.
+        "r := 0\n#(1) do: [:z | r := 3. #(2) do: [:y | [n := 4. n] value]]\nr",
+        "r := 0\n#(1) do: [:z | r := 3. [[n := 4. n] value. 5] on: Error do: [:e | 0]]\nr",
+    ] {
+        let src = in_actor(body);
+        assert!(flags_bt3981(&src), "{src}");
+    }
+    // An arm separates the site from the fold.
+    let src =
+        in_actor("r := 0\n#(1) do: [:y | r := 1. true ifTrue: [q := [n := 3. n] value. q]]\nr");
+    assert!(!flags_bt3981(&src), "{src}");
+    // The BT-3917 pins.
+    let bt3971 = "Actor subclass: A\n  state: hits = 0\n  assigned =>\n    (Erlang lists)\n      map: [:x |\n        r := [\n          n := 3\n          n\n        ] value\n        r\n      ]\n      with: #(1)\n";
+    assert!(flags_bt3981(bt3971));
+}
+
+/// Evaluated blocks nested more than the measured four deep are rejected.
+#[test]
+fn evaluated_blocks_nested_beyond_four_deep_are_rejected() {
+    assert!(!flags_bt3981(&in_actor(
+        "[[[[n := 3. n] value] value] value] value"
+    )));
+    assert!(flags_bt3981(&in_actor(
+        "[[[[[n := 3. n] value] value] value] value] value"
+    )));
 }

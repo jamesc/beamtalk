@@ -5,13 +5,6 @@
 
 TestCase subclass: Bt3971Test
 
-  // PIN-BUG BT-3981: with the FFI block no longer a Tier 2 body (BT-3917), the
-  // assigned `r := [n := 3. n] value` in a plain-fun block of an actor method
-  // answers the leaked {Value, State} tuple instead of 3; flip to
-  // `equals: #(3)` when fixed.
-  testAssignedBlockValueAnswersTheValue =>
-    self assert: ((Bt3971Actor spawn assigned first) at: 1) equals: 3
-
   testBlockValueNotLastIsDiscarded =>
     self assert: Bt3971Actor spawn notLast equals: #(7)
 

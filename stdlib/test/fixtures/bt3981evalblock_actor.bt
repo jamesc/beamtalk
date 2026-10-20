@@ -561,3 +561,399 @@ Actor subclass: Bt3981EvalblockActor
           ifFalse: [0]
       ]
     r
+
+  // Cells for every branch of the check that accepts: loop, collection and
+  // conditional bodies, nested evaluated blocks, arms inside plain blocks and
+  // dropped statements of plain blocks.
+  whileBodyLast =>
+    self.hits := 0
+    [self.hits < 1]
+      whileTrue: [
+        self.hits := self.hits + 1
+        [
+          n := 3
+          n
+        ] value
+      ]
+    self.hits
+
+  whileBodyNonLast =>
+    self.hits := 0
+    [self.hits < 1]
+      whileTrue: [
+        [
+          n := 3
+          n
+        ] value
+        self.hits := self.hits + 1
+      ]
+    self.hits
+
+  whileBodyAssigned =>
+    self.hits := 0
+    [self.hits < 1]
+      whileTrue: [
+        q := [
+          n := 3
+          n
+        ] value
+        self.hits := self.hits + q - 2
+      ]
+    self.hits
+
+  whileCondNonLast =>
+    self.hits := 0
+    [
+      [
+        n := 3
+        n
+      ] value
+      self.hits < 1
+    ] whileTrue: [self.hits := self.hits + 1]
+    self.hits
+
+  injectLastValue =>
+    #(1)
+      inject: 0
+      into: [:a :z |
+        [
+          n := 3
+          n
+        ] value
+      ]
+
+  injectNonLastValue =>
+    #(1)
+      inject: 0
+      into: [:a :z |
+        [
+          n := 3
+          n
+        ] value
+        a + z
+      ]
+
+  selectNonLastValue =>
+    (#(1)
+      select: [:z |
+        [
+          n := 3
+          n
+        ] value
+        true
+      ]) size
+
+  selectLastValue =>
+    (#(1)
+      select: [:z |
+        [
+          n := 3
+          n =:= 3
+        ] value
+      ]) size
+
+  detectNonLastValue =>
+    #(1)
+      detect: [:z |
+        [
+          n := 3
+          n
+        ] value
+        true
+      ]
+      ifNone: [0]
+
+  detectLastValue =>
+    #(1)
+      detect: [:z |
+        [
+          n := 3
+          n =:= 3
+        ] value
+      ]
+      ifNone: [0]
+
+  detectIfNoneBlock =>
+    #(1)
+      detect: [:z | false]
+      ifNone: [
+        [
+          n := 3
+          n
+        ] value
+      ]
+
+  andArm =>
+    flag := true
+    flag
+      and: [
+        [
+          n := 3
+          n
+        ] value
+        true
+      ]
+
+  andArmLast =>
+    flag := true
+    flag
+      and: [
+        [
+          n := true
+          n
+        ] value
+      ]
+
+  ifNilArm =>
+    x := nil
+    x
+      ifNil: [
+        [
+          n := 3
+          n
+        ] value
+      ]
+
+  ifNotNilArm =>
+    x := 1
+    x
+      ifNotNil: [:v |
+        [
+          n := 3
+          n
+        ] value
+      ]
+
+  ifTrueOnlyArm =>
+    flag := true
+    flag
+      ifTrue: [
+        [
+          n := 3
+          n
+        ] value
+      ]
+
+  ifFalseArm =>
+    flag := false
+    flag
+      ifFalse: [
+        [
+          n := 3
+          n
+        ] value
+      ]
+
+  nested2Statement =>
+    [
+      [
+        [
+          n := 3
+          n
+        ] value
+      ] value
+    ] value
+
+  nested2Assigned =>
+    r := [
+      [
+        [
+          n := 3
+          n
+        ] value
+      ] value
+    ] value
+    r
+
+  nested3Statement =>
+    [
+      [
+        [
+          [
+            n := 3
+            n
+          ] value
+        ] value
+      ] value
+    ] value
+
+  nested2InCollect =>
+    (#(1)
+      collect: [:z |
+        [
+          [
+            [
+              n := 3
+              n
+            ] value
+          ] value
+        ] value
+      ]) first
+
+  storedArmLast =>
+    flag := true
+    b := [:z |
+      flag
+        ifTrue: [
+          [
+            n := 3
+            n
+          ] value
+        ]
+        ifFalse: [0]
+    ]
+    b value: 1
+
+  storedArmAssigned =>
+    flag := true
+    b := [:z |
+      flag
+        ifTrue: [
+          r := [
+            n := 3
+            n
+          ] value
+          r
+        ]
+        ifFalse: [0]
+    ]
+    b value: 1
+
+  ffiArmLast =>
+    flag := true
+    ((Erlang lists)
+      map: [:z |
+        flag
+          ifTrue: [
+            [
+              n := 3
+              n
+            ] value
+          ]
+          ifFalse: [0]
+      ]
+      with: #(1)) first
+
+  userArmLast =>
+    flag := true
+    self
+      ap: [
+        flag
+          ifTrue: [
+            [
+              n := 3
+              n
+            ] value
+          ]
+          ifFalse: [0]
+      ]
+
+  storedNonLast =>
+    b := [:z |
+      [
+        n := 3
+        n
+      ] value
+      7
+    ]
+    b value: 1
+
+  ffiNonLast =>
+    (Erlang lists)
+      map: [:z |
+        [
+          n := 3
+          n
+        ] value
+        7
+      ]
+      with: #(1)
+
+  userNonLast =>
+    self
+      ap: [
+        [
+          n := 3
+          n
+        ] value
+        7
+      ]
+
+  doLastStatement =>
+    #(1)
+      do: [:z |
+        [
+          n := 3
+          n
+        ] value
+      ]
+    3
+
+  countedLastStatement =>
+    1
+      to: 1
+      do: [:z |
+        [
+          n := 3
+          n
+        ] value
+      ]
+    3
+
+  timesLastStatement =>
+    1
+      timesRepeat: [
+        [
+          n := 3
+          n
+        ] value
+      ]
+    3
+
+  protectedNonLast =>
+    [
+      [
+        n := 3
+        n
+      ] value
+      7
+    ] on: Error do: [:e | 0]
+
+  handlerNonLast =>
+    [1 / 0]
+      on: Error
+      do: [:e |
+        [
+          n := 3
+          n
+        ] value
+        7
+      ]
+
+  cleanupNonLast =>
+    [7]
+      ensure: [
+        [
+          n := 3
+          n
+        ] value
+        nil
+      ]
+
+  foldArmNonLast =>
+    r := 0
+    flag := true
+    #(1)
+      do: [:z |
+        r := 3
+        flag
+          ifTrue: [
+            [
+              n := 4
+              n
+            ] value
+            5
+          ]
+          ifFalse: [0]
+      ]
+    r
