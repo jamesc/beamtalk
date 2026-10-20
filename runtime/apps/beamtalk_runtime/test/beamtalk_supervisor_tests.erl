@@ -220,13 +220,18 @@ start_anon_supervisor_with_specs(Specs) ->
     ],
     SupFlags = #{strategy => one_for_one, intensity => 5, period => 5},
     {ok, Pid} = supervisor:start_link(?MODULE, {SupFlags, ChildSpecs}),
-    Workers = [
+    %% Drain the readiness messages; their arrival order is NOT start order
+    %% (each comes from a different worker process), so the pids are looked
+    %% up by id.
+    [
         receive
-            {worker_ready, W} -> W
+            {worker_ready, _} -> ok
         after 1000 -> error(worker_not_ready)
         end
      || _ <- Specs
     ],
+    Children = supervisor:which_children(Pid),
+    Workers = [element(2, lists:keyfind(Id, 1, Children)) || {Id, _, _} <- Specs],
     {Pid, Workers}.
 
 %% Start a named OTP supervisor (registers under the given atom).
@@ -588,13 +593,14 @@ declaration_order_survives_one_for_all_restart_test() ->
             ],
             SupFlags = #{strategy => Strategy, intensity => 5, period => 5},
             {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, ChildSpecs}),
-            [_, W2, _] = [
+            [
                 receive
-                    {worker_ready, W} -> W
+                    {worker_ready, _} -> ok
                 after 1000 -> error(worker_not_ready)
                 end
              || _ <- ChildSpecs
             ],
+            {o2, W2, _, _} = lists:keyfind(o2, 1, supervisor:which_children(SupPid)),
             try
                 Sup = make_supervisor_tuple('BT3966Order', bt3966_order_mod, SupPid),
                 exit(W2, kill),
