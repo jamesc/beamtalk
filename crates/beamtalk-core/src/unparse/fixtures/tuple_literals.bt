@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Tuple literal expressions (ADR 0136) — canonical formatter fixture.
+///
+/// Demonstrates: pairs, nested tuples, `{}`, `{x}`, keyword-send elements,
+/// statement-start tuples, swaps, and interpolating a tuple literal.
+Object subclass: TupleLiteralExamples
+
+  /// A two-element option tuple.
+  pair => {#active, false}
+
+  /// Nested tuples.
+  nested => {#outer, {#inner, 1}}
+
+  /// Empty and single-element tuples.
+  empty => {}
+
+  single => {#ok}
+
+  /// A keyword send as an element.
+  lookup: opts => {#backlog, opts at: #backlog}
+
+  /// A tuple literal at statement start, then a swap.
+  swap =>
+    a := 1
+    b := 2
+    {a, b} size
+    {a, b} := {b, a}
+    a
+
+  /// Interpolating a tuple literal needs the spaced form.
+  describe: a => "got { {a, a} } and {a}"

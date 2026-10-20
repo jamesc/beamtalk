@@ -233,6 +233,19 @@ fn simple_language_service_find_references() {
     assert_eq!(refs.len(), 2); // Assignment and usage
 }
 
+#[test]
+fn simple_language_service_find_references_inside_tuple_literal() {
+    // ADR 0136: local-identifier references descend into tuple elements,
+    // both when the cursor is inside the tuple and when collecting uses.
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("test.bt");
+
+    service.update_file(file.clone(), "x := 42.\ny := {x, #[x]}".to_string());
+
+    assert_eq!(service.find_references(&file, Position::new(0, 0)).len(), 3);
+    assert_eq!(service.find_references(&file, Position::new(1, 6)).len(), 3);
+}
+
 // ---------------------------------------------------------------------------
 // Hover trait provenance (ADR 0127 §12, BT-3655)
 // ---------------------------------------------------------------------------

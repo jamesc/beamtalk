@@ -95,11 +95,13 @@ impl Parser {
     ///
     /// Supports optional type annotations: `x :: Type := expr`.
     fn parse_assignment(&mut self) -> Expression {
-        // Tuple destructuring: `{a, b} := expr`
-        // Tuples are not valid expressions, so we intercept `{` here before
-        // parse_cascade() would produce an error.
-        if self.check(&TokenKind::LeftBrace) {
-            return self.parse_tuple_destructure_or_error();
+        // Tuple destructuring: `{a, b} := expr`. A leading `{` is either a
+        // destructure pattern or a tuple-literal expression (`{a, b} size`);
+        // bounded lookahead to the matching `}` decides (ADR 0136). The
+        // pattern path keeps the full pattern grammar (`x :: T`, binaries,
+        // nested maps), which an expression-then-convert approach would lose.
+        if self.check(&TokenKind::LeftBrace) && self.leading_brace_is_destructure() {
+            return self.parse_tuple_destructure();
         }
 
         let expr = self.parse_cascade();
@@ -136,32 +138,23 @@ impl Parser {
         expr
     }
 
-    /// Parses a tuple destructuring assignment (`{a, b} := expr`) or reports an
-    /// error if the `{...}` is not followed by `:=`.
-    fn parse_tuple_destructure_or_error(&mut self) -> Expression {
+    /// Parses a tuple destructuring assignment (`{a, b} := expr`).
+    ///
+    /// Only reached when [`Self::leading_brace_is_destructure`] has seen `:=`
+    /// after the matching `}`, so the `:=` is expected here.
+    fn parse_tuple_destructure(&mut self) -> Expression {
         let start = self.current_token().span();
         let pattern = self.parse_tuple_pattern();
-        if self.match_token(&TokenKind::Assign) {
-            if let Err(error) = self.enter_nesting(start) {
-                return error;
-            }
-            let value = Box::new(self.parse_assignment());
-            self.leave_nesting();
-            let span = start.merge(value.span());
-            return Expression::DestructureAssignment {
-                pattern,
-                value,
-                span,
-            };
+        self.expect(&TokenKind::Assign, "Expected ':=' after tuple pattern");
+        if let Err(error) = self.enter_nesting(start) {
+            return error;
         }
-        // `{...}` not followed by `:=` — tuple literals are not expressions
-        let span = pattern.span();
-        self.diagnostics.push(Diagnostic::error(
-            "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring",
-            span,
-        ));
-        Expression::Error {
-            message: "Tuple literal used as expression".into(),
+        let value = Box::new(self.parse_assignment());
+        self.leave_nesting();
+        let span = start.merge(value.span());
+        Expression::DestructureAssignment {
+            pattern,
+            value,
             span,
         }
     }
@@ -847,6 +840,9 @@ impl Parser {
 
             // Array literal
             TokenKind::ArrayOpen => self.parse_array_literal(),
+
+            // Tuple literal: `{a, b}` (ADR 0136)
+            TokenKind::LeftBrace => self.parse_tuple_literal(),
 
             // Primitive pragma: @primitive/@intrinsic 'name' or @primitive/@intrinsic intrinsicName
             TokenKind::AtPrimitive | TokenKind::AtIntrinsic => self.parse_primitive(),
@@ -1736,6 +1732,9 @@ impl Parser {
         if !self.check(&TokenKind::RightBrace) {
             elements.push(self.parse_pattern());
             while self.match_binary_selector(",") {
+                if self.check(&TokenKind::RightBrace) {
+                    break; // trailing comma (ADR 0136)
+                }
                 elements.push(self.parse_pattern());
             }
         }
@@ -2872,6 +2871,145 @@ impl Parser {
 
         let span = start.merge(end_span);
         Expression::ArrayLiteral { elements, span }
+    }
+
+    /// Parses a tuple literal: `{expr, expr, ...}` (ADR 0136).
+    ///
+    /// Evaluates to a raw Erlang tuple (class `Tuple`). Elements are parsed
+    /// as keyword messages, like the other collection literals; a trailing
+    /// comma is allowed, and `{}` / `{x}` are valid. There is no `...`
+    /// spread form.
+    fn parse_tuple_literal(&mut self) -> Expression {
+        let start_token = self.expect(&TokenKind::LeftBrace, "Expected '{'");
+        let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
+
+        let mut elements = Vec::new();
+
+        // Handle empty tuple: {}
+        if self.check(&TokenKind::RightBrace) {
+            let end_token = self.advance();
+            let span = start.merge(end_token.span());
+            return Expression::TupleLiteral { elements, span };
+        }
+
+        loop {
+            elements.push(self.parse_keyword_message());
+
+            if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
+                self.advance(); // consume comma
+                if self.check(&TokenKind::RightBrace) {
+                    break; // trailing comma
+                }
+            } else if self.check(&TokenKind::RightBrace)
+                || self.is_at_end()
+                || self.at_tuple_recovery_boundary()
+            {
+                // A `]`/`)` belongs to an enclosing construct, and a token on
+                // a new line starts the next statement or method: leave both
+                // for the caller and report the missing `}` below.
+                break;
+            } else {
+                let bad_token = self.advance();
+                let mut diagnostic = Diagnostic::error(
+                    format!(
+                        "Expected ',' or '}}' in tuple literal, found {}",
+                        bad_token.kind()
+                    ),
+                    bad_token.span(),
+                );
+                if matches!(bad_token.kind(), TokenKind::Period) {
+                    diagnostic = diagnostic.with_hint(
+                        "tuple elements are separated by ',': write `{a, b}`, not Smalltalk's `{a. b}`",
+                    );
+                }
+                self.diagnostics.push(diagnostic);
+                self.skip_to_tuple_close();
+                break;
+            }
+        }
+
+        let end_span = if self.check(&TokenKind::RightBrace) {
+            self.advance().span()
+        } else {
+            self.diagnostics.push(Diagnostic::error(
+                "Expected '}' to close tuple literal",
+                self.current_token().span(),
+            ));
+            self.current_token().span()
+        };
+
+        let span = start.merge(end_span);
+        Expression::TupleLiteral { elements, span }
+    }
+
+    /// Whether the current token, at the tuple's own nesting level, belongs
+    /// outside the tuple: an enclosing construct's `]`/`)`, or a token on a
+    /// new line that starts the next method definition, or that no closing
+    /// `}` follows (so the tuple was left unclosed). A newline inside a
+    /// tuple that *is* closed later — a missing comma in a multi-line
+    /// literal — is not a boundary, so recovery still reaches that `}`.
+    fn at_tuple_recovery_boundary(&self) -> bool {
+        if matches!(
+            self.current_kind(),
+            TokenKind::RightBracket | TokenKind::RightParen
+        ) {
+            return true;
+        }
+        self.current_token().has_leading_newline()
+            && (self.is_at_method_definition() || !self.tuple_close_brace_ahead())
+    }
+
+    /// Whether a `}` closes the current nesting level before an enclosing
+    /// `]`/`)` or `Eof` (error-recovery lookahead only).
+    ///
+    /// Inherent ambiguity: that `}` may belong to an *enclosing* `{`/`#{`
+    /// rather than the unclosed tuple — in `#{#k => {1, 2\n #j => 3}` the
+    /// tuple claims the map's `}`, and the map then reports its own missing
+    /// `}`. Only diagnostic quality is affected, never valid code.
+    fn tuple_close_brace_ahead(&self) -> bool {
+        let mut depth: usize = 0;
+        let mut offset = 0;
+        loop {
+            match self.peek_at(offset) {
+                None | Some(TokenKind::Eof) => return false,
+                Some(kind) if kind.is_opening_bracket() => depth += 1,
+                Some(kind) if kind.is_closing_bracket() => {
+                    if depth == 0 {
+                        return matches!(kind, TokenKind::RightBrace);
+                    }
+                    depth -= 1;
+                }
+                Some(_) => {}
+            }
+            offset += 1;
+        }
+    }
+
+    /// Error recovery inside a tuple literal: skip tokens up to (not
+    /// including) this tuple's closing `}`. At the tuple's own nesting level
+    /// it also stops at a `.` and at [`Self::at_tuple_recovery_boundary`], so an unclosed
+    /// `{` never swallows later statements, sibling methods, or an enclosing
+    /// block's `]`. Nested brackets, parens and braces are skipped whole, so
+    /// a `.` inside a nested block (`{1 2, [:x | x foo. x bar]}`) does not
+    /// stop recovery.
+    fn skip_to_tuple_close(&mut self) {
+        let mut depth: usize = 0;
+        while !self.is_at_end() {
+            if depth == 0
+                && (self.check(&TokenKind::RightBrace)
+                    || self.check(&TokenKind::Period)
+                    || self.at_tuple_recovery_boundary())
+            {
+                return;
+            }
+            let kind = self.current_kind();
+            if kind.is_opening_bracket() {
+                depth += 1;
+            } else if kind.is_closing_bracket() {
+                depth = depth.saturating_sub(1);
+            }
+            self.advance();
+        }
     }
 
     /// Parses a parenthesized expression.

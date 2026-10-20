@@ -115,7 +115,8 @@ impl SourceSets {
             Expression::Parenthesized { expression, .. } => self.expr(expression),
             Expression::Return { value, .. } => self.expr(value),
             Expression::FieldAccess { receiver, .. } => self.expr(receiver),
-            Expression::ArrayLiteral { elements, .. } => {
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
                 for e in elements {
                     self.expr(e);
                 }

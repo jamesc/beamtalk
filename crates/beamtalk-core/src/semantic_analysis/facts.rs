@@ -328,7 +328,7 @@ fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
                     .as_ref()
                     .is_some_and(|t| expr_has_block_nlr(t, inside_block))
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             elements.iter().any(|e| expr_has_block_nlr(e, inside_block))
         }
         Expression::StringInterpolation { segments, .. } => segments.iter().any(|s| match s {
@@ -563,7 +563,7 @@ fn collect_expression_facts(expr: &Expression, facts: &mut SemanticFacts) {
             }
         }
 
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
                 collect_expression_facts(elem, facts);
             }
@@ -792,7 +792,7 @@ fn compute_state_effects(
             eff
         }
 
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             let mut eff = StateEffects::default();
             for elem in elements {
                 eff = eff.union(compute_state_effects(elem, in_class_method, out));

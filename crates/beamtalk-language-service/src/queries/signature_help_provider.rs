@@ -300,6 +300,11 @@ fn find_signature_in_expr(
                 )
             })
         }),
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            elements.iter().find_map(|e| {
+                find_signature_in_expr(e, offset, context, hierarchy, type_map, native_types)
+            })
+        }
         Expression::ListLiteral { elements, tail, .. } => elements
             .iter()
             .find_map(|e| {

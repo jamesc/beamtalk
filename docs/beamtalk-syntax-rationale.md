@@ -360,6 +360,19 @@ A dedicated `type` form also wins on the feature's own terms: the whole point of
 
 **Parsing cost is bounded.** `type` becomes a contextual keyword only in top-level declaration position (`type` + uppercase identifier + `=`, a three-token lookahead) — it stays a legal identifier everywhere else (`type := 5`, `foo type`, `type printString`), so no reserved word is added and no existing code can break. See ADR 0108's Decision section and Rejected B for the full steelman on both sides.
 
+### Tuple Literals: `{a, b}`, not Pharo's `{a. b}`
+
+**Pharo/Squeak:** `{a. b}` is a *dynamic Array*: the elements are statements separated by periods, and the result is an `Array`.
+
+**Beamtalk:** `{a, b}` builds a raw Erlang `Tuple` ([ADR 0136](ADR/0136-tuple-literal-expressions.md)), with comma-separated elements.
+
+**Why:**
+- `.` is Beamtalk's statement separator, and every other collection literal (`#(…)`, `#[…]`, `#{…}`) separates elements with `,`.
+- Beamtalk already has an Array literal, `#[…]`, so braces don't need to build Arrays. They build the BEAM tuple, which is what FFI option lists like `{#active, false}` need.
+- The tuple *pattern* was already `{a, b}`, so the expression and the pattern now look the same, exactly as in Erlang and Elixir.
+
+`{a. b}` is a syntax error whose hint suggests `{a, b}`.
+
 ---
 
 ## Complete Syntax Summary

@@ -55,6 +55,11 @@ const FRAGMENTS: &[&str] = &[
     "3 timesRepeat: [x := x + 1]",
     "x > 0 ifTrue: ['positive'] ifFalse: ['non-positive']",
     "#[first, ...rest] := #[1, 2, 3]",
+    // ADR 0136 tuple literals, and the statement-start destructure lookahead.
+    "{#active, false}",
+    "{a, {#b, 1},} size",
+    "{a, b} := {b, a}",
+    "x := {}",
     "sealed Object subclass: Shape",
     "Actor subclass: Wrapper native: my_mod",
     "[1] ensure: [nil]",
@@ -187,7 +192,9 @@ fn has_error_node(expr: &Expression) -> bool {
         Expression::ListLiteral { elements, tail, .. } => {
             elements.iter().any(has_error_node) || tail.as_ref().is_some_and(|t| has_error_node(t))
         }
-        Expression::ArrayLiteral { elements, .. } => elements.iter().any(has_error_node),
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
+            elements.iter().any(has_error_node)
+        }
         Expression::StringInterpolation { segments, .. } => segments.iter().any(|seg| {
             if let crate::ast::StringSegment::Interpolation(expr) = seg {
                 has_error_node(expr)

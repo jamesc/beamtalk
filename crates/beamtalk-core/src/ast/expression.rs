@@ -326,6 +326,16 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A tuple literal — a raw Erlang tuple (class `Tuple`).
+    ///
+    /// Example: `{#active, false}`, `{x}`, `{}` (ADR 0136)
+    TupleLiteral {
+        /// The elements of the tuple, in order.
+        elements: Vec<Expression>,
+        /// Source location of the entire tuple literal.
+        span: Span,
+    },
+
     /// A primitive pragma (`@primitive "selector"` or `@primitive intrinsicName`).
     ///
     /// Declares that a method body delegates to a runtime primitive or
@@ -433,6 +443,7 @@ impl Expression {
             | Self::MapLiteral { span, .. }
             | Self::ListLiteral { span, .. }
             | Self::ArrayLiteral { span, .. }
+            | Self::TupleLiteral { span, .. }
             | Self::Primitive { span, .. }
             | Self::StringInterpolation { span, .. }
             | Self::ExpectDirective { span, .. }

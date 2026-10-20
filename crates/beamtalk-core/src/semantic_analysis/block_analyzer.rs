@@ -322,7 +322,7 @@ impl Analyser {
                 }
             }
 
-            ArrayLiteral { elements, .. } => {
+            ArrayLiteral { elements, .. } | TupleLiteral { elements, .. } => {
                 for elem in elements {
                     self.collect_captures_and_mutations(elem, captures, mutations);
                 }

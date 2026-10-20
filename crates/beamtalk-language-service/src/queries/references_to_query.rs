@@ -184,7 +184,7 @@ fn collect_reference_lines(
                 collect_reference_lines(tail_expr, class_name, source, lines);
             }
         }
-        Expression::ArrayLiteral { elements, .. } => {
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for element in elements {
                 collect_reference_lines(element, class_name, source, lines);
             }
