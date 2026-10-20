@@ -157,13 +157,38 @@ pub(in crate::core_erlang) enum BodyKind {
 /// in
 /// ```
 ///
+/// `guard_selector` is the collection message the user sent and the fold stands
+/// in for (BT-3916, ADR 0133). `Some(selector)`: the non-list branch calls
+/// `beamtalk_collection:to_list_for_threading({list_var}, '{selector}')`, the
+/// receiver guard: it raises `stateful_block_dispatch` when the receiver's
+/// class resolves the selector to a method that is not the stdlib's (the fold
+/// would bypass it) and `does_not_understand` when it does not respond to it.
+/// `None`: the plain `to_list/1`, for `do:` (the fold's own source, so never
+/// guarded; this is the one place that rule lives) and for the pure inline
+/// `inject:into:` fold.
+///
 /// `list_var` is consumed. Callers that still need `safe_list_var` after this
 /// call should pass `safe_list_var.clone()` and retain the original.
-pub(super) fn list_recv_to_safe_list_doc(
+pub(in crate::core_erlang) fn list_recv_to_safe_list_doc(
     recv_code: Document<'static>,
+    guard_selector: Option<&str>,
     list_var: String,
     safe_list_var: impl Into<String>,
 ) -> Document<'static> {
+    let to_list = match guard_selector {
+        Some(selector) => docvec![
+            "call 'beamtalk_collection':'to_list_for_threading'(",
+            leaf::var(list_var.clone()),
+            ", ",
+            leaf::atom(selector),
+            ")"
+        ],
+        _ => docvec![
+            "call 'beamtalk_collection':'to_list'(",
+            leaf::var(list_var.clone()),
+            ")"
+        ],
+    };
     docvec![
         "let ",
         leaf::var(list_var.clone()),
@@ -174,10 +199,10 @@ pub(super) fn list_recv_to_safe_list_doc(
         " = case call 'erlang':'is_list'(",
         leaf::var(list_var.clone()),
         ") of <'true'> when 'true' -> ",
-        leaf::var(list_var.clone()),
-        " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
         leaf::var(list_var),
-        ") end in ",
+        " <'false'> when 'true' -> ",
+        to_list,
+        " end in ",
     ]
 }
 

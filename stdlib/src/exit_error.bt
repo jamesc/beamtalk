@@ -4,7 +4,7 @@
 /// ExitError — BEAM process exit signal.
 ///
 /// Raised when an Erlang function exits via `exit(Reason)`.
-/// The original exit reason is available in the error details.
+/// The original exit reason is available via `reason`.
 ///
 /// See: ADR 0028 §1 (Exception mapping)
 ///

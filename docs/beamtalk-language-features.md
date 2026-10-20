@@ -210,13 +210,31 @@ Actor subclass: ResourceActor
 
 | Aspect | `initialize` | `terminate:` |
 |--------|--------------|--------------|
-| Called on | `spawn` / `spawnWith:` | `stop`, supervisor shutdown (`rest_for_one`/`one_for_all` cascade, direct `terminate:`), linked exit |
+| Called on | `spawn` / `spawnWith:` | `stop`, `stopWith:`, supervisor shutdown (`rest_for_one`/`one_for_all` cascade, direct `terminate:`), linked exit |
 | Error effect | Spawn fails with `InstantiationError` | Shutdown proceeds anyway |
 | Called on `kill`? | N/A | No — `kill` bypasses `terminate:` |
 | Side effect | — | Overriding `terminate:` causes the actor to trap exits (`process_flag(trap_exit, true)`); actors without an override keep untrapped link semantics |
 | Actor state | Accessible via `self.field` | Accessible via `self.field` |
 
 Both hooks are optional — actors without them work normally.
+
+**Stopping with a reason** — `stop` stops an actor with reason `#normal`. `stopWith: reason` (and `stopWith: reason timeout: ms`) stops it with any reason you choose; `terminate:` receives exactly that reason, and so does every `onExit:` block. This lets an actor route its cleanup on *why* it stopped, OTP-style:
+
+```beamtalk
+Server subclass: Connection
+  handleInfo: msg =>
+    msg == #tcp_closed ifTrue: [self stopWith: (Tuple withAll: #(#shutdown, #peer_closed))]
+
+  terminate: reason =>
+    reason =:= #normal ifTrue: [^nil]
+    // e.g. {shutdown, peer_closed}, {shutdown, read_timeout}, or an error
+    self logClose: reason
+```
+
+- Sent to `self` from inside one of the actor's own methods, the stop takes effect **after the current message has been handled** — a pending caller still gets its reply — then the actor terminates. (The same applies to `self stop`.) From another process it is `gen_server:stop/3`: the call returns once the actor has terminated (default timeout 5 seconds), and stopping an already-stopped actor succeeds silently.
+- `#normal`, `#shutdown` and `{shutdown, term}` tuples are **clean** stops: no crash report, and a `#transient` supervised child is not restarted. Any other reason — a Symbol like `#boom`, an exception — is a **crash**: it is logged, a `#transient` child is restarted, and any process linked to the actor (its supervisor, or the spawner of a `spawnAs:` actor — plain `spawn`/`spawnWith:` do not link) receives the exit signal, as with any OTP process exit.
+- Stopping itself from `initialize` (`self stop` or `self stopWith:`) makes the `spawn` fail, since the actor is gone before it is handed back.
+- A stop requested earlier in a method still happens if the method then raises: the caller gets the error, then the actor stops.
 
 **Initialization chaining** — `initialize` methods defined on ancestors run automatically, parent-first, before the child's own `initialize`. State threads through each call so the child sees the parent's mutations. Do **not** write `super initialize` yourself — the compiler warns on redundant `super initialize` sends inside an Actor's `initialize`. After the full chain runs, any typed `state:` field without a default (on the child or any ancestor, including cross-file parents) must have been assigned, or the actor crashes with `UninitializedStateError` naming the owning class. See [ADR 0078](ADR/0078-actor-initialize-inheritance.md).
 
@@ -1176,6 +1194,19 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 [Erlang erlang error: #badarg] on: BEAMError do: [:e | e message]
 // => "badarg"
 // e is typed as BEAMError — `e message` type-checks without warnings
+```
+
+**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
+
+```beamtalk
+(Erlang string to_integer: "abc") ifError: [:e | e reason]
+// => #no_integer
+[Erlang erlang error: #econnreset] on: Exception do: [:e | e reason]
+// => #econnreset
+[#(1, "x") sum] on: TypeError do: [:e | e reason]
+// => #badarith  (classified as type_error, original term still available)
+[Error signal: "boom"] on: Error do: [:e | e reason]
+// => nil
 ```
 
 A `native:` method's wrapped error carries the Beamtalk `Class`/selector (e.g. `Type error in 'take:' on Stream`), whereas inline `(Erlang …)` FFI carries the Erlang-facing `ErlangModule` context (e.g. `Type error in 'atom_to_list' on ErlangModule`) — a documented limitation, since the proxy knows the MFA but not the calling class.
@@ -2795,7 +2826,7 @@ t := Twice twice: [t + 1]
 
 This departs from Pharo, where `Twice twice: [t := t + 1]` answers 2: it relies on a heap shared between a block and its home method, which the BEAM does not have (see `docs/beamtalk-principles.md` §4). Reads of captured variables, and `^` from any block, are unaffected. The same diagnostic is reported by `beamtalk build`, the REPL, the LSP and MCP.
 
-**Your own collection classes.** The collection messages above (`do:`, `inject:into:`, `collect:`, `select:`, `detect:ifNone:`, `anySatisfy:`, …) thread a writing block literal for any receiver that implements `do:`, including your own class or actor: the compiler runs the block in place as a fold over the receiver's `do:`, whether that `do:` forwards to an inner `List` or walks by hand, and whether the other messages are your own, a trait's provisions, or absent (ADR 0133, BT-3903). The exception is an actor's `self do:` (or `super do:`, or any of these messages) from inside its own method: that is a message to the actor's own method, so the block escapes and writing a captured local in it is a compile error (BT-3918). With a writing block these messages therefore *mean* the fold over `do:`: a class that overrides, say, `anySatisfy:` with different semantics does not run its override for a writing block (BT-3916). A block passed to a message of your own (`orders sumOf: [:o | total := ...]`) is not covered; return the value from the block instead.
+**Your own collection classes.** The collection messages above (`do:`, `inject:into:`, `collect:`, `select:`, `detect:ifNone:`, `anySatisfy:`, …) thread a writing block literal for any receiver that implements `do:`, including your own class or actor: the compiler runs the block in place as a fold over the receiver's `do:`, whether that `do:` forwards to an inner `List` or walks by hand, and whether the other messages are the stdlib's or absent (ADR 0133, BT-3903). The exception is an actor's `self do:` (or `super do:`, or any of these messages) from inside its own method: that is a message to the actor's own method, so the block escapes and writing a captured local in it is a compile error (BT-3918). Every message but `do:` is checked first, at run time, against the receiver's class, and the write threads only when the class defines no collection message of its own: the sent message must resolve to the stdlib's own method, or to a provision of a stdlib trait such as `Enumerable` (judged by where the method comes from, not by the class that `uses:` it), **and** none of the collection messages above except `do:` may be a method outside the stdlib. The stdlib's `collect:`, `select:`, `count:`, `eachWithIndex:` and `do:separatedBy:` run through `self inject:into:` (and `reject:` through `select:`), so a class with its own `inject:into:` would have that override run by the plain send but skipped by the in-place fold. Any such override in the class or a package-local trait, or an extension method for the message actually sent, makes a writing send of any of these messages raise `stateful_block_dispatch` rather than silently running the fold over `do:` in its place (known gap: an extension registered at run time that overrides a *different* collection message is not yet detected, [BT-3951](https://linear.app/beamtalk/issue/BT-3951)); a receiver that does not respond to the message raises `does_not_understand`, as the plain send does (BT-3916). To thread a write through such a class, `uses: Enumerable` (the stdlib's provisions thread), define only `do:`, or compute the value without assigning from the block. A block passed to a message of your own (`orders sumOf: [:o | total := ...]`) is not covered; return the value from the block instead.
 
 ### Field Mutations
 
@@ -3507,10 +3538,11 @@ Supervisor subclass: WebApp
       (MetricsCollector supervisionSpec withId: #metrics withArgs: #{#port => 9090}))
 ```
 
-Use `withShutdown:` to set a graceful shutdown timeout (in milliseconds) for children that need time to drain connections or flush state. The default is 5000ms for workers and `infinity` for nested supervisors.
+Use `withShutdown:` to set how long a child gets to stop when its supervisor shuts it down — for children that need time to drain connections or flush state. The value is a `ShutdownTimeout`: an Integer (milliseconds, at most 4294967295), `#infinity` (wait as long as it takes) or `#brutalKill` (kill at once; `terminate:` does not run). The default is 5000ms for workers and `#infinity` for nested supervisors. On shutdown the supervisor sends the child `exit(Pid, shutdown)`; a child that has not exited within the timeout is killed, and `onExit:` observers see the reason `#killed`. Only an actor that overrides `terminate:` traps exits, so only such an actor uses the time — any other actor exits as soon as it is told to. `stop` waits for the shutdown to finish, so a long timeout (or `#infinity`) can block the caller of `stop` that long. Any other value makes `supervise` return `Result error:` with kind `#supervisor_start_failed`.
 
 ```beamtalk
-HttpServer supervisionSpec withShutdown: 30000   // 30s graceful shutdown
+HttpServer supervisionSpec withShutdown: 30000        // 30s graceful shutdown
+SessionCache supervisionSpec withShutdown: #brutalKill // no cleanup needed
 ```
 
 Use `withName:` (and the `withName:withRestart:` / `withName:withArgs:` / `withName:withRestart:withArgs:` combinators) to have the supervisor register the child atomically under a Symbol name on each restart. Named specs emit a `#spawnAs:` / `#spawnWith:as:` startFn so re-registration happens in the same OTP call that starts the process — held `Actor named:` references survive restarts (see [ADR 0079](ADR/0079-named-actor-registration.md) and the Actor Named Registration section below). `name` and `classMethod` cannot be combined on the same spec.
@@ -3557,6 +3589,31 @@ pool count                          // => 3
 // Stop the whole pool (unchanged — Nil, let-it-crash teardown)
 pool stop
 WorkerPool current                  // => nil
+```
+
+**Capping the pool with `maxChildren`.** Override `class maxChildren` (default `#infinity`) to bound the number of live children — the Beamtalk equivalent of Elixir `DynamicSupervisor`'s `max_children`. Once the pool holds that many children (`count`, plus any child whose automatic restart is pending), `startChild`, `startChild:` and `startChild:name:` return `Result error:` with kind `#max_children` (the error's details carry the limit) instead of starting a child; terminating a child frees a slot. Automatic restarts of existing children are never refused. The value must be a non-negative Integer or `#infinity` — anything else makes `supervise` return `Result error:` with kind `#supervisor_start_failed` (or, for a pool nested under a static `Supervisor`, fails the parent's start) — and is read each time the supervisor (re)starts.
+
+```beamtalk
+DynamicSupervisor(Worker) subclass: ConnectionPool
+  class childClass => Worker
+  class maxChildren -> Integer => 2
+
+pool := (ConnectionPool supervise) unwrap
+w := pool startChild unwrap        // => Actor(Worker, _)
+pool startChild unwrap             // => Actor(Worker, _)
+pool startChild error kind         // => #max_children
+(pool terminateChild: w) unwrap    // => nil
+pool startChild isOk               // => true
+```
+
+The limit is checked by the calling process just before the start, so it is exact when a single process starts children (e.g. one acceptor per pool) — concurrent starters racing past the check can briefly overshoot it by up to the number of racers.
+
+**Graceful child shutdown with `childShutdown`.** Override `class childShutdown` to set how long each child gets to stop when the pool is stopped (by `stop`, or by a parent supervisor) — a pool-wide analogue of the `shutdown:` option Elixir `DynamicSupervisor` takes per child. It takes the same `ShutdownTimeout` values as `SupervisionSpec withShutdown:` (an Integer in milliseconds, `#infinity` or `#brutalKill`). The default, `nil`, keeps the child class's own `supervisionSpec` value: 5000ms (the OTP default) for an actor, or `#infinity` for a supervisor. A child that overrides `terminate:` gets the full time to finish; one that overruns is killed (`onExit:` reason `#killed`). All children are told to stop at once and share one deadline. Keep `#infinity` for a supervisor child class: a finite value can kill it while it is still stopping its own children (the runtime logs a warning). The value applies to every child of the pool — OTP's `simple_one_for_one` keeps a single child spec for all dynamic children, so there is no per-`startChild:` override; use a separate pool class for children that need a different timeout. An invalid value makes `supervise` return `Result error:` with kind `#supervisor_start_failed`.
+
+```beamtalk
+DynamicSupervisor(Connection) subclass: ConnectionPool
+  class childClass => Connection
+  class childShutdown -> Integer => 15000   // let in-flight requests finish
 ```
 
 **Automatic restart replays per-child args.** OTP tracks the exact args each dynamically-started child was started with. A child started via `startChild: args` that later crashes under a `#permanent` or `#transient` restart policy comes back with those same args, not blank defaults. A child started via the no-arg `startChild` restarts the same way. Restart re-runs `init/1` from scratch — it does not resume the child's prior runtime state.
@@ -3608,8 +3665,8 @@ Supervisor lifecycle methods that can fail at a startup / registry boundary retu
 | `Supervisor>>terminate: aClass` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 | `Supervisor>>which: aClass` | `-> Result(Object, Error)` | `#stale_handle` |
 | `DynamicSupervisor class>>supervise` | `-> Result(Self, Error)` | `#supervisor_start_failed`, `#stale_handle` |
-| `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#stale_handle` |
-| `DynamicSupervisor>>startChild: args name: aSymbol` | `-> Result(C, Error)` | `#child_start_failed`, `#name_registered`, `#reserved_name`, `#stale_handle` |
+| `DynamicSupervisor>>startChild` / `startChild: args` | `-> Result(C, Error)` | `#child_start_failed`, `#max_children`, `#stale_handle` |
+| `DynamicSupervisor>>startChild: args name: aSymbol` | `-> Result(C, Error)` | `#child_start_failed`, `#max_children`, `#name_registered`, `#reserved_name`, `#stale_handle` |
 | `DynamicSupervisor>>terminateChild: child` | `-> Result(Nil, Error)` | `#terminate_failed`, `#stale_handle` |
 
 `stop`, `current`, `children`, and `count` are **unchanged** — they are teardown / lookup / inspection operations over an already-valid handle and follow let-it-crash semantics (teardown) or nil-on-miss (lookup), matching the rules established in [ADR 0079](ADR/0079-named-actor-registration.md) for the parallel `Actor` surface.
@@ -3685,7 +3742,8 @@ See [ADR 0080](ADR/0080-supervisor-lifecycle-result.md) §Migration Path for the
 | `count` | `supervisor:count_children/1` (active count) |
 | `children` | `supervisor:which_children/1` (running child ids) |
 | `which: Class` | find child by module in `which_children` result |
-| `withShutdown:` | `shutdown` field in child spec (default 5000ms workers, infinity supervisors) |
+| `withShutdown:` | `shutdown` field in child spec (default 5000ms workers, infinity supervisors; `#brutalKill` → `brutal_kill`) |
+| `class childShutdown` | `shutdown` field of the `simple_one_for_one` child spec |
 | `stop` | `gen_server:stop/1` |
 
 ### Actor Named Registration (ADR 0079)

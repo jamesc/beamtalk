@@ -385,6 +385,71 @@ dispatch_error_class_test() ->
         beamtalk_exception_handler:dispatch('errorClass', [], Ex)
     ).
 
+%% BT-3954: reason exposes details.reason, nil when absent.
+dispatch_reason_nil_when_absent_test() ->
+    Ex = make_test_exception(),
+    ?assertEqual(nil, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_raw_atom_test() ->
+    Ex = beamtalk_exception_handler:ensure_wrapped(closed),
+    ?assertEqual(closed, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_raw_tuple_test() ->
+    Reason = {tls_alert, {bad_certificate, "x"}},
+    Ex = beamtalk_exception_handler:ensure_wrapped(Reason),
+    ?assertEqual(Reason, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_badkey_test() ->
+    Ex = beamtalk_exception_handler:ensure_wrapped({badkey, k}),
+    ?assertEqual({badkey, k}, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_original_reason_test() ->
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(runtime_error, 'Foo', bar),
+        #{original_class => error, original_reason => {badmatch, 1}}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual({badmatch, 1}, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_erlang_error_test() ->
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(type_error, 'ErlangModule', abs),
+        #{erlang_error => badarg, erlang_stacktrace => []}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual(badarg, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_prefers_reason_key_test() ->
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(key_error, 'ErlangModule', get),
+        #{reason => {badkey, k}, erlang_error => {badkey, k}, original_reason => other}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual({badkey, k}, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_wrapped_exception_is_nil_test() ->
+    %% A Beamtalk exception recorded as original_reason is not a raw term.
+    Inner = beamtalk_exception_handler:wrap(beamtalk_error:new(signal, 'Error')),
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(runtime_error, 'Foo', bar),
+        #{original_class => error, original_reason => Inner}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual(nil, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_value_object_is_kept_test() ->
+    %% A non-exception Beamtalk object raised as a raw term is still returned.
+    Obj = #{'$beamtalk_class' => 'Point', x => 1, y => 2},
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(runtime_error, 'ErlangModule', foo), #{reason => Obj}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual(Obj, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
+dispatch_reason_exit_test() ->
+    Ex = beamtalk_exception_handler:ensure_wrapped(exit, shutdown, []),
+    ?assertEqual(shutdown, beamtalk_exception_handler:dispatch('reason', [], Ex)).
+
 dispatch_print_string_test() ->
     Ex = make_test_exception(),
     Result = beamtalk_exception_handler:dispatch('printString', [], Ex),
@@ -452,6 +517,7 @@ has_method_hint_test() -> ?assert(beamtalk_exception_handler:has_method('hint'))
 has_method_kind_test() -> ?assert(beamtalk_exception_handler:has_method('kind')).
 has_method_selector_test() -> ?assert(beamtalk_exception_handler:has_method('selector')).
 has_method_error_class_test() -> ?assert(beamtalk_exception_handler:has_method('errorClass')).
+has_method_reason_test() -> ?assert(beamtalk_exception_handler:has_method('reason')).
 has_method_print_string_test() -> ?assert(beamtalk_exception_handler:has_method('printString')).
 has_method_stack_trace_test() -> ?assert(beamtalk_exception_handler:has_method('stackTrace')).
 has_method_class_test() -> ?assert(beamtalk_exception_handler:has_method('class')).
@@ -650,7 +716,10 @@ wrap_raw_badarith_class_is_type_error_test() ->
 wrap_raw_badkey_is_key_error_test() ->
     Inner = classify({badkey, <<"missing">>}),
     ?assertEqual(key_error, Inner#beamtalk_error.kind),
-    ?assertEqual(#{key => <<"missing">>}, Inner#beamtalk_error.details).
+    ?assertEqual(
+        #{key => <<"missing">>, reason => {badkey, <<"missing">>}},
+        Inner#beamtalk_error.details
+    ).
 
 wrap_raw_badmap_is_type_error_test() ->
     Inner = classify({badmap, 42}),

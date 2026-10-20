@@ -443,14 +443,60 @@ code.
   > `Enumerable` is built on `elements`). An actor
   > with `do:` honours writing blocks sent from another process. With a
   > writing block,
-  > these messages *mean* the fold over `do:`: a class that overrides one
-  > of them (other than `do:`) with different semantics does not run its
-  > override (BT-3843's repro, pinned; BT-3916 may replace this with a
-  > refusal). Pinned by `stdlib/test/adr0133enumerable_user_test.bt`. Two
+  > these messages *mean* the fold over `do:` only when the receiver's
+  > class resolves the message to the stdlib's own method (see the
+  > BT-3916 receiver guard below). Pinned by
+  > `stdlib/test/adr0133enumerable_user_test.bt`. Two
   > corrections to the bullet: `Enumerable` requires `elements`, not
   > `do:`; and a user package cannot yet `uses:` a stdlib protocol at all
   > (BT-3915), so the test's user collections use a package-local trait
   > over `do:`, and `Ets` stands in for a real `uses: Enumerable` class.
+
+  > **Amendment (2026-10-19, BT-3916): guard.** The "honour" above left one
+  > inconsistency: a class that overrides one of these messages (other than
+  > `do:`) with different semantics never ran its override for a writing
+  > block, and silent wrong answers are ruled out by this ADR's goals. The
+  > in-place fold now asks the receiver first
+  > (`beamtalk_collection:to_list_for_threading(Recv, Selector)`, in place of
+  > `to_list/1`; `do:` is the fold's own source and is never guarded). The
+  > selector checked is the one the user wrote: `eachWithIndex:` and
+  > `do:separatedBy:` are lowered through a synthetic `inject:into:` fold but
+  > guard under their own names. A writing block sent a compiler-known
+  > collection message other than `do:` folds over `do:` only when **no
+  > collection message is the class's own**:
+  >
+  > - The sent message must resolve to a stdlib method, judged by the
+  >   **origin of the method**, not the module it lives in (`uses:` flattens a
+  >   provision into the using class's own module, ADR 0127): a stdlib class's
+  >   method, or a provision of a **stdlib** trait such as `Enumerable`
+  >   (BT-3915). A message the class defines itself, or gets from a
+  >   package-local trait or an extension, raises `stateful_block_dispatch`.
+  > - And the class must define, outside the stdlib, **none** of the
+  >   compiler-known collection messages (every state-threading collection
+  >   selector but `do:`). The stdlib's own `collect:`, `select:`, `count:`,
+  >   `eachWithIndex:` and `do:separatedBy:` are `self inject:into:`, and
+  >   `reject:` is `self select:`; the pure send reaches an override of those,
+  >   the fold would skip it. So a class with its own `inject:into:` refuses a
+  >   writing `collect:` too, and one with its own `select:` refuses `reject:`.
+  >   The rule is deliberately the conservative one, so no table of which
+  >   message runs through which has to be kept in step with `collection.bt`.
+  >
+  > A receiver that does not respond to the message at all raises
+  > `does_not_understand`, as the pure send does. Codegen records, per class,
+  > its stdlib-trait provisions (`stdlib_trait_methods`, from
+  > `MethodInfo::origin` joined with the `(class, protocol)` pairs that
+  > resolved to the stdlib) and whether it defines a collection message
+  > outside the stdlib (`overrides_collection_selector`, from
+  > `state_threading_selectors::overridable_collection_selectors`, the
+  > compiler's one list) in `__beamtalk_meta/0`; the runtime guard reads both
+  > and holds no list of its own. The cost is accepted: a package-local
+  > trait's `inject:into:` refuses a writing block rather than answering, even
+  > when it is a faithful fold over `do:`; a class that wants the write to
+  > thread `uses:` the stdlib `Enumerable`, or computes the value without
+  > assigning from the block. `testOwnAnySatisfyWritePin` flipped to
+  > `testOwnAnySatisfyWriteRaises`. Known gap: an extension method (registered
+  > at run time) that overrides a collection message other than the one sent is
+  > not seen by the per-class flag.
 
 ### Neutral
 - Reading captured variables in escaping blocks is unchanged.
@@ -486,7 +532,7 @@ do (the block then threads through the user's `do:` only if that `do:` is
 also protocol-provided or forwards to a stdlib collection), or they refuse it
 with `stateful_block_dispatch` like any user method. Either answer is
 acceptable under this ADR; the one that is not is dropping the write.
-*Decided (BT-3903): honour; see the amendment under § Consequences.*
+*Decided (BT-3903): honour, with the BT-3916 receiver guard; see the amendments under § Consequences.*
 
 **Phase 2: removal (L).** In dependency order: the caller-side hook that was
 never emitted; `send_threaded/4`, `call_threaded/3`,

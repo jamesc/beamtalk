@@ -111,6 +111,26 @@ Object subclass: Exception
   /// ```
   errorClass -> String => @primitive
 
+  /// Return the underlying Erlang error term, or nil if none was recorded.
+  ///
+  /// Set when this exception wraps a raw Erlang `error`/`exit`/`throw`
+  /// (e.g. `badarith`, `{badkey, K}`) or the `Reason` of an `{error, Reason}`
+  /// returned from an FFI call (ADR 0076), so handlers can match on the term
+  /// itself (`#closed` vs `#econnreset`) instead of string-comparing
+  /// `message`. Exceptions raised by `Error signal:` / `self error:` record
+  /// no term and return nil; some stdlib natives (e.g. File I/O errors) also
+  /// record the underlying OTP reason. FFI results pass through
+  /// the usual boundary coercions first (an Erlang charlist reason arrives as
+  /// a String, a bare `error` return as nil).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Erlang string to_integer: "abc") error reason   // => #no_integer
+  /// [#(1, "x") sum] on: TypeError do: [:e | e reason] // => #badarith
+  /// [Error signal: "boom"] on: Error do: [:e | e reason] // => nil
+  /// ```
+  reason -> Object | Nil => @primitive
+
   // === Printing ===
 
   /// Return a developer-readable string representation of the error.

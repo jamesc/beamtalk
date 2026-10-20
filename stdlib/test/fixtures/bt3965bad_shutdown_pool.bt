@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3965 fixture: DynamicSupervisor with an invalid `childShutdown`, which
+// must make `supervise` fail cleanly. See
+// stdlib/test/supervision_shutdown_test.bt.
+
+DynamicSupervisor(Bt3965SlowStopper) subclass: Bt3965BadShutdownPool
+
+  class childClass => Bt3965SlowStopper
+
+  class childShutdown -> Symbol => #soon

@@ -86,3 +86,31 @@ Object subclass: Adr0133EnumerableUser
   class detectNonePure: bag => bag detect: [:x | x > 100] ifNone: [#none]
 
   class anySatisfyPure: bag => bag anySatisfy: [:x | x > 2]
+
+  class eachWithIndexWrite: bag =>
+    n := 0
+    bag eachWithIndex: [:x :i | n := n + i]
+    n
+
+  class separatedByWrite: bag =>
+    n := 0
+    bag do: [:x | n := n + x] separatedBy: [n := n + 100]
+    n
+
+  class countWrite: bag =>
+    n := 0
+    r := bag
+      count: [:x |
+        n := n + 1
+        x > 1
+      ]
+    #[r, n]
+
+  class rejectWrite: bag =>
+    n := 0
+    r := bag
+      reject: [:x |
+        n := n + 1
+        x > 1
+      ]
+    #[r, n]

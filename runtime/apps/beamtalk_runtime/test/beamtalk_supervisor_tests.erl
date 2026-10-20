@@ -56,7 +56,14 @@ Tests cover:
 %% Fake class methods used by the hierarchy-walk test.
 %% These are called directly by call_class_method_direct / call_inherited_class_method_direct
 %% when the test populates the module ETS table with this module as the "parent" class module.
--export([class_children/1, class_strategy/1, class_maxRestarts/1, class_restartWindow/1]).
+-export([
+    class_children/1,
+    class_strategy/1,
+    class_maxRestarts/1,
+    class_restartWindow/1,
+    class_maxChildren/1,
+    class_childShutdown/1
+]).
 
 %% Fake class methods for start_child_via_class_method tests.
 %% Simulates what a compiled Beamtalk keyword class method does: start a gen_server
@@ -113,6 +120,12 @@ Used as the supervisor callback module.
 init({simple_one_for_one, ChildSpec}) ->
     SupFlags = #{strategy => simple_one_for_one, intensity => 0, period => 1},
     {ok, {SupFlags, [ChildSpec]}};
+%% BT-3964: a dynamic supervisor carrying a maxChildren limit, stashed the way
+%% `beamtalk_supervisor:dynamic_init/2` does (dynamic_init_walks_hierarchy_via_ets_test
+%% pins that the key matches).
+init({simple_one_for_one, ChildSpec, MaxChildren}) ->
+    put('$beamtalk_max_children', MaxChildren),
+    init({simple_one_for_one, ChildSpec});
 init({SupFlags, ChildSpecs}) ->
     {ok, {SupFlags, ChildSpecs}};
 %% Fake child actor init — minimal gen_server for supervision tests.
@@ -787,13 +800,23 @@ dynamic_init_walks_hierarchy_via_ets_test() ->
     %% dynamic_init needs class_childClass, class_maxRestarts, class_restartWindow.
     %% class_childClass returns a class object (beamtalk_object record).
     try
+        erase('$beamtalk_max_children'),
         Result = static_init_registered(dynamic_init, erlang, 'BT1960DynChild'),
+        %% BT-3964: class maxChildren (7 here) is stashed in the calling —
+        %% in production, the supervisor — process's dictionary for
+        %% startChild's capacity check. The `'$beamtalk_max_children'` key
+        %% asserted here is the one the startChild_max_children tests seed.
+        ?assertEqual(7, erase('$beamtalk_max_children')),
         %% dynamic_init always uses simple_one_for_one strategy.
         %% The child spec should contain a start_link entry for the supervisor child.
         ?assertMatch(
             {ok, {#{strategy := simple_one_for_one, intensity := 3, period := 5}, [_ChildSpec]}},
             Result
-        )
+        ),
+        %% BT-3965: class childShutdown (1234 here) replaces the template's
+        %% shutdown (`infinity` for this supervisor child class).
+        {ok, {_, [ChildSpec]}} = Result,
+        ?assertEqual(1234, maps:get(shutdown, ChildSpec))
     after
         beamtalk_class_metadata:delete('BT1960DynChild'),
         beamtalk_class_metadata:delete('BT1960DynParent'),
@@ -848,6 +871,8 @@ class_children(_ClassSelf) ->
 class_strategy(_ClassSelf) -> oneForOne.
 class_maxRestarts(_ClassSelf) -> 3.
 class_restartWindow(_ClassSelf) -> 5.
+class_maxChildren(_ClassSelf) -> 7.
+class_childShutdown(_ClassSelf) -> 1234.
 
 %% Fake class_childClass for dynamic_init tests.
 %% Returns a class object for a supervisor subclass so build_child_spec takes the
@@ -2271,6 +2296,137 @@ startChild_arity1_error_returns_child_start_failed_test() ->
         {error, BtError} = Result,
         ?assertEqual('BT1980DynErrSup', BtError#beamtalk_error.class),
         ?assertEqual(startChild, BtError#beamtalk_error.selector)
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% BT-3964: maxChildren limit
+%%====================================================================
+
+validate_max_children_test() ->
+    ?assertEqual(infinity, beamtalk_supervisor:validate_max_children('X', infinity)),
+    ?assertEqual(0, beamtalk_supervisor:validate_max_children('X', 0)),
+    ?assertEqual(3, beamtalk_supervisor:validate_max_children('X', 3)),
+    E1 = raised_beamtalk_error(fun() -> beamtalk_supervisor:validate_max_children('X', -1) end),
+    ?assertMatch(#beamtalk_error{kind = type_error, class = 'X', selector = maxChildren}, E1),
+    E2 = raised_beamtalk_error(fun() -> beamtalk_supervisor:validate_max_children('X', lots) end),
+    ?assertMatch(#beamtalk_error{kind = type_error, details = #{value := lots}}, E2).
+
+%%====================================================================
+%% BT-3965: shutdown timeouts
+%%====================================================================
+
+to_otp_shutdown_test() ->
+    ?assertEqual(infinity, beamtalk_supervisor:to_otp_shutdown('X', shutdown, infinity)),
+    ?assertEqual(brutal_kill, beamtalk_supervisor:to_otp_shutdown('X', shutdown, brutalKill)),
+    ?assertEqual(0, beamtalk_supervisor:to_otp_shutdown('X', shutdown, 0)),
+    ?assertEqual(1500, beamtalk_supervisor:to_otp_shutdown('X', shutdown, 1500)),
+    ?assertEqual(
+        16#FFFFFFFF, beamtalk_supervisor:to_otp_shutdown('X', shutdown, 16#FFFFFFFF)
+    ),
+    %% Above the `receive ... after` limit a static supervisor would crash
+    %% while shutting its children down.
+    ?assertMatch(
+        #beamtalk_error{kind = type_error},
+        raised_beamtalk_error(fun() ->
+            beamtalk_supervisor:to_otp_shutdown('X', shutdown, 16#100000000)
+        end)
+    ),
+    E1 = raised_beamtalk_error(fun() ->
+        beamtalk_supervisor:to_otp_shutdown('X', childShutdown, -1)
+    end),
+    ?assertMatch(#beamtalk_error{kind = type_error, class = 'X', selector = childShutdown}, E1),
+    %% Only the Beamtalk spelling is accepted — not OTP's raw atom.
+    E2 = raised_beamtalk_error(fun() ->
+        beamtalk_supervisor:to_otp_shutdown('X', shutdown, brutal_kill)
+    end),
+    ?assertMatch(#beamtalk_error{kind = type_error, details = #{value := brutal_kill}}, E2).
+
+spec_to_otp_translates_brutal_kill_test() ->
+    %% A Beamtalk `#brutalKill` shutdown reaches OTP as `brutal_kill`.
+    ClassObj = bt1990_make_counter_class_obj(),
+    try
+        BtSpec = #{
+            id => 'TestCounter',
+            start => #{
+                '$beamtalk_class' => 'Array',
+                data => #{0 => ClassObj, 1 => spawn, 2 => []}
+            },
+            restart => temporary,
+            shutdown => brutalKill,
+            type => worker
+        },
+        ?assertMatch(#{shutdown := brutal_kill}, beamtalk_supervisor:spec_to_otp(BtSpec)),
+        ?assertMatch(
+            #{shutdown := infinity},
+            beamtalk_supervisor:spec_to_otp(BtSpec#{shutdown => infinity})
+        ),
+        Err = raised_beamtalk_error(fun() ->
+            beamtalk_supervisor:spec_to_otp(BtSpec#{shutdown => soon})
+        end),
+        ?assertMatch(
+            #beamtalk_error{kind = type_error, class = 'SupervisionSpec', selector = shutdown},
+            Err
+        )
+    after
+        bt1990_cleanup_class_obj(ClassObj)
+    end.
+
+start_capped_dynamic_supervisor(Max) ->
+    ChildSpec = #{
+        id => fake_child_template,
+        start => {?MODULE, start_link_fake_child, []},
+        restart => temporary,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => [?MODULE]
+    },
+    {ok, SupPid} = supervisor:start_link(?MODULE, {simple_one_for_one, ChildSpec, Max}),
+    SupPid.
+
+startChild_max_children_test() ->
+    %% At the limit startChild/1 returns {error, max_children} carrying the
+    %% limit in details, without starting a child; freeing a slot lets the
+    %% next start succeed.
+    SupPid = start_capped_dynamic_supervisor(2),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT3964DynWorker'),
+    set_child_class(ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT3964CapSup', ?MODULE, SupPid},
+        {ok, C1} = beamtalk_supervisor:startChild(Self),
+        {ok, _C2} = beamtalk_supervisor:startChild(Self),
+        Result = beamtalk_supervisor:startChild(Self),
+        ?assertMatch({error, #beamtalk_error{kind = max_children}}, Result),
+        {error, BtError} = Result,
+        ?assertEqual('BT3964CapSup', BtError#beamtalk_error.class),
+        ?assertEqual(startChild, BtError#beamtalk_error.selector),
+        ?assertEqual(#{max_children => 2}, BtError#beamtalk_error.details),
+        ?assertEqual({ok, 2}, beamtalk_supervisor:countChildren(Self)),
+        ok = supervisor:terminate_child(SupPid, element(4, C1)),
+        ?assertMatch({ok, _}, beamtalk_supervisor:startChild(Self))
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_max_children_zero_test() ->
+    %% maxChildren = 0 refuses every start, including startChild/2 and /3.
+    SupPid = start_capped_dynamic_supervisor(0),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT3964DynZero'),
+    set_child_class(ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT3964ZeroSup', ?MODULE, SupPid},
+        ?assertMatch(
+            {error, #beamtalk_error{kind = max_children, selector = 'startChild:'}},
+            beamtalk_supervisor:startChild(Self, self())
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = max_children, selector = 'startChild:name:'}},
+            beamtalk_supervisor:startChild(Self, self(), bt3964_never_registered)
+        ),
+        ?assertEqual(undefined, whereis(bt3964_never_registered))
     after
         ChildClassPid ! stop,
         gen_server:stop(SupPid)

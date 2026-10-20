@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3964: DynamicSupervisor with a maxChildren limit — fixture for
+// dynamic_supervisor_max_children_test.bt
+
+DynamicSupervisor(Counter) subclass: TestDynamicSupervisorCapped
+
+  class childClass => Counter
+
+  class maxChildren -> Integer => 2
