@@ -1630,6 +1630,12 @@ impl<'d> Walker<'d> {
             if self.context == Repl {
                 return None;
             }
+            // A value-type method cannot assign a slot at all: the "Cannot
+            // assign to slot" error (`class_validators.rs`) already covers the
+            // write, with the right fix.
+            if self.context == ValueType {
+                return None;
+            }
             outer_state_writes(block).into_iter().next()
         })
     }

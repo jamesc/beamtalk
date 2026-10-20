@@ -2570,7 +2570,10 @@ fn section6_escaping_block_that_writes_a_field_is_an_error() {
         "self foo: [self.n := self.n + 1]\nnil",
         "^[:x | #(1) do: [:y | self.n := y]]",
     ] {
-        for src in [in_class(body), in_value(body), in_actor(body)] {
+        // A value-type method cannot assign a slot: that error already covers
+        // the write, so §6 stays silent there.
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+        for src in [in_class(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);
             let d = diags
                 .iter()
@@ -2591,13 +2594,15 @@ fn section6_escaping_block_that_writes_a_field_is_an_error() {
 
 /// BT-3922: a block literal stored straight into a field that assigns a field
 /// (not a captured local, which is the block analyzer's BT-2809 error) is
-/// reported here, in every context.
+/// reported here in class and actor methods (a value-type method's slot
+/// assignment is the "Cannot assign to slot" error).
 #[test]
 fn section6_field_stored_literal_that_writes_a_field_is_an_error() {
     let body = "self.h := [:x | self.n := self.n + x]\nnil";
-    for src in [in_class(body), in_value(body), in_actor(body)] {
+    for src in [in_class(body), in_actor(body)] {
         assert_eq!(section6_errors(&src), 1, "{src}");
     }
+    assert_eq!(section6_errors(&in_value(body)), 0);
 }
 
 /// BT-3922: in a class method a `Dictionary` lookup handler that writes only a
@@ -2605,11 +2610,24 @@ fn section6_field_stored_literal_that_writes_a_field_is_an_error() {
 /// `stdlib/test/lookup_field_write_test.bt` proves the write survives.
 #[test]
 fn section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape() {
-    for body in [
-        "self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]\nnil",
-        "x := self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. 0]\n^x",
-        "self.cache at: 1 ifPresent: [:v | self.hits := self.hits + 1. v] ifAbsent: [self.misses := 1. nil]\nnil",
-        "^self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]",
+    for (body, actor_errors) in [
+        (
+            "self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]\nnil",
+            1,
+        ),
+        (
+            "x := self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. 0]\n^x",
+            1,
+        ),
+        // One diagnostic per writing handler.
+        (
+            "self.cache at: 1 ifPresent: [:v | self.hits := self.hits + 1. v] ifAbsent: [self.misses := 1. nil]\nnil",
+            2,
+        ),
+        (
+            "^self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]",
+            1,
+        ),
     ] {
         let src = in_class(body);
         assert_eq!(
@@ -2618,16 +2636,17 @@ fn section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape() {
             "{src}: {:?}",
             adr0131_diagnostics(&src)
         );
-        // An actor or value-type method runs the handler as a closure and the
-        // field write is dropped, so the handler is an escape there.
-        for src in [in_value(body), in_actor(body)] {
-            // One diagnostic per writing handler.
-            assert!(
-                section6_errors(&src) >= 1,
-                "{src}: {:?}",
-                adr0131_diagnostics(&src)
-            );
-        }
+        // An actor method runs the handler as a closure and the field write
+        // is dropped, so the handler is an escape there; a value-type method
+        // cannot assign a slot, and that error already covers the write.
+        let src = in_actor(body);
+        assert_eq!(
+            section6_errors(&src),
+            actor_errors,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
+        );
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
     }
 }
 
