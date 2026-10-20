@@ -1,0 +1,15 @@
+[
+  {"input": "Counter", "expected": "counter"},
+  {"input": "MyCounterActor", "expected": "my_counter_actor"},
+  {"input": "HTTPRouter", "expected": "httprouter"},
+  {"input": "BEAMError", "expected": "beamerror"},
+  {"input": "Beamerror", "expected": "beamerror"},
+  {"input": "myClass", "expected": "my_class"},
+  {"input": "aB", "expected": "a_b"},
+  {"input": "already_snake", "expected": "already_snake"},
+  {"input": "App2", "expected": "app2"},
+  {"input": "ABC", "expected": "abc"},
+  {"input": "", "expected": ""},
+  {"input": "École", "expected": "école"},
+  {"input": "MonÉcole", "expected": "mon_école"}
+]
