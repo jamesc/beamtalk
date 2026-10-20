@@ -97,6 +97,7 @@ functions that call OTP APIs from the caller's process context.
 -export([
     check_max_children/2,
     classify_call_failure/2,
+    with_live_supervisor/3,
     to_otp_shutdown/3,
     to_otp_strategy/1,
     start_failed_error/4,
@@ -2899,7 +2900,8 @@ here, so they all report the same two kinds (BT-3984):
   still be running, so this is not reported as a stale handle.
 
 The classification is `classify_call_failure/2`; any other exception
-propagates unchanged.
+propagates unchanged, as does an unreachable-node shape when the supervisor
+is local (it came from some other call `Fun` made).
 
 ## Inner fun contract
 
@@ -2920,8 +2922,15 @@ with_live_supervisor(Self, Selector, Fun) ->
     catch
         Class:Reason:Stack ->
             case classify_call_failure(Class, Reason) of
-                other -> erlang:raise(Class, Reason, Stack);
-                Unavailable -> supervisor_unavailable_error(Self, Selector, Unavailable)
+                other ->
+                    erlang:raise(Class, Reason, Stack);
+                {unreachable, _} when node(element(4, Self)) =:= node() ->
+                    %% A local supervisor's node cannot be unreachable: the
+                    %% timeout/nodedown came from some other call Fun made
+                    %% (a child class lookup, say), so it is not ours to map.
+                    erlang:raise(Class, Reason, Stack);
+                Unavailable ->
+                    supervisor_unavailable_error(Self, Selector, Unavailable)
             end
     end.
 

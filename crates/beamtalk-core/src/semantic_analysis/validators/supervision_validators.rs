@@ -722,7 +722,7 @@ mod tests {
         );
     }
 
-    /// `isAlive` and `stop` are sealed on Supervisor and DynamicSupervisor
+    /// `isAlive` and `stop` are sealed on `Supervisor` and `DynamicSupervisor`
     /// (BT-3984): the runtime answers them on a supervisor handle without a
     /// method lookup, so an override would never run and is rejected instead.
     #[test]

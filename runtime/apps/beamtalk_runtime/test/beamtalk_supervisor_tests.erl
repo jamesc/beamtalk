@@ -630,6 +630,22 @@ classify_call_failure_test() ->
         ]
     ).
 
+local_supervisor_timeout_is_not_node_down_test() ->
+    %% A timeout under a local supervisor's handle came from some other call
+    %% (the supervisor's node is this one), so it propagates unmapped.
+    Self = make_supervisor_tuple('BT3984LocalSup', bt3984_local_mod, self()),
+    Timeout = {timeout, {gen_server, call, [self(), class_name]}},
+    ?assertExit(
+        Timeout,
+        beamtalk_supervisor:with_live_supervisor(Self, count, fun() -> exit(Timeout) end)
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = stale_handle}},
+        beamtalk_supervisor:with_live_supervisor(Self, count, fun() ->
+            exit({noproc, {gen_server, call, []}})
+        end)
+    ).
+
 %% A pid on a node this VM is not connected to (`NEW_PID_EXT`).
 unreachable_remote_pid() ->
     NodeBin = atom_to_binary('bt3984_ghost@nohost', utf8),
