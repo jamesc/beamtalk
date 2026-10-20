@@ -259,8 +259,7 @@ fn escaping_block_through_an_argument_or_receiver_value_is_reported() {
 }
 
 /// One diagnostic per assignment: a value-position assignment inside an
-/// escaping block is the escaping-block error only, not also BT-3864's
-/// `ValuePositionLocalAssignment` at the same span (PR #4382 review).
+/// escaping block is the escaping-block error only (PR #4382 review).
 #[test]
 fn value_position_write_in_an_escaping_block_is_reported_once() {
     for src in [
@@ -3418,119 +3417,43 @@ fn a_tier2_call_with_a_producer_argument_in_an_arm_is_rejected_in_methods() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-3864 (ADR 0131 stopgap): a local assignment in value position
+// BT-3910 (ADR 0131 §1): a local assignment in value position is a producer
 // ---------------------------------------------------------------------------
 
-/// The `ValuePositionLocalAssignment` errors of `src`, analysed as a module
-/// (with `known_vars` for a top-level expression list).
-fn value_position_errors(src: &str, known_vars: &[&str]) -> Vec<Diagnostic> {
+/// The categorised errors of `src`, analysed as a module (with `known_vars` for
+/// a top-level expression list). (`in_value` has two classes in one module, an
+/// uncategorised error.)
+fn analysis_errors(src: &str, known_vars: &[&str]) -> Vec<Diagnostic> {
     let ctx = AnalysisContext::default().with_known_vars(known_vars);
     analyse_full(&parse_module(src), ctx)
         .diagnostics
         .into_iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::ValuePositionLocalAssignment))
+        .filter(|d| d.severity == Severity::Error && d.category.is_some())
         .collect()
 }
 
+/// A local assignment used as a value is accepted in every context, the REPL
+/// included: codegen lowers it as a `LocalRebind` of the enclosing frame (the
+/// BT-3864 stopgap error is gone), `^t := e` too.
 #[test]
-fn a_value_position_local_assignment_is_an_error_in_every_context() {
+fn a_value_position_local_assignment_is_accepted_in_every_context() {
     for body in [
         "x := (t := t + 1) + 1\n#[t, x]",
         "#[t, (t := 7), t]",
         "x := t := 7\n#[t, x]",
         "(t := t + 1) > 0 ifTrue: [x := 9]\nt",
         "#(1, 2) do: [:k | (t := t + 1) > 1 ifTrue: [x := 9]]\nt",
-    ] {
-        for src in [in_class(body), in_value(body), in_actor(body)] {
-            let errors = value_position_errors(&src, &[]);
-            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
-            let d = &errors[0];
-            assert_eq!(d.severity, Severity::Error);
-            let at = &src[d.span.start() as usize..d.span.end() as usize];
-            assert!(at.starts_with("t := "), "{src}: span covers {at:?}");
-            assert!(
-                d.message
-                    .contains("assignment to local `t` is used as a value")
-                    && d.message.contains("BT-3860"),
-                "{}",
-                d.message
-            );
-            let hint = d.hint.as_deref().unwrap_or_default();
-            assert!(hint.contains("own statement"), "{hint}");
-        }
-        // The REPL too (BT-3864: input it accepted before is rejected).
-        let errors = value_position_errors(&format!("{body}\n"), &["t", "x"]);
-        assert_eq!(errors.len(), 1, "REPL {body}: {errors:?}");
-        assert!(
-            errors[0].message.contains("in a top-level expression"),
-            "{}",
-            errors[0].message
-        );
-    }
-}
-
-#[test]
-fn statement_position_and_field_assignments_stay_accepted() {
-    for body in [
-        "t := t + 1\nt",
-        "x := t + 1\n#[t, x]",
-        "#(1, 2) do: [:k | t := t + k]\nt",
-        "x := #(1, 2) collect: [:k | t := t + k. k]\n#[t, x]",
-        "t > 0 ifTrue: [t := 1] ifFalse: [t := 2]\nt",
-        "x := [:k | t := k + 1. t] value: 1\n#[t, x]",
-    ] {
-        for src in [in_class(body), in_value(body), in_actor(body)] {
-            let errors = value_position_errors(&src, &[]);
-            assert!(errors.is_empty(), "{src}: {errors:?}");
-        }
-        let errors = value_position_errors(&format!("{body}\n"), &["t", "x"]);
-        assert!(errors.is_empty(), "REPL {body}: {errors:?}");
-    }
-    // A parenthesised statement before the end of a value-type or actor
-    // method body binds its local (BT-3830, BT-3838), and so does one before
-    // the end of a conditional arm.
-    for src in [
-        in_value("(t := t + 1)\nt"),
-        in_actor("(t := t + 1)\nt"),
-        in_class("x := t > 5 ifFalse: [(t := t + 1). 1]\nt"),
-    ] {
-        let errors = value_position_errors(&src, &[]);
-        assert!(errors.is_empty(), "{src}: {errors:?}");
-    }
-    // A field write in value position threads `State` (BT-3803's producer).
-    let src = in_actor("x := (self.n := 5) + 1\n#[self.n, x]");
-    let errors = value_position_errors(&src, &[]);
-    assert!(errors.is_empty(), "{src}: {errors:?}");
-}
-
-/// `^t := e` stays rejected: its write is observable, e.g. by an `ensure:`
-/// cleanup that runs after the return (`[^t := e] ensure: [t]`). Its hint is
-/// the rewrite that fits a return, `^e`, not a hoist. An assignment that is
-/// only part of the returned value keeps the hoist hint.
-#[test]
-fn a_returned_local_assignment_hints_at_returning_the_value() {
-    for body in [
         "^t := t + 1",
         "^(t := t + 1)",
-        "#(1, 2) do: [:k | k > 1 ifTrue: [^t := k]]\nt",
-        "[^t := t + 1] ensure: [t printString]\nt",
+        "^(t := t + 1) + 1",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
-            let errors = value_position_errors(&src, &[]);
-            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
-            let hint = errors[0].hint.as_deref().unwrap_or_default();
-            assert!(
-                hint.contains("return the value directly: `^expr` instead of `^t := expr`")
-                    && hint.contains("`ensure:` cleanup"),
-                "{src}: {hint}"
-            );
+            let errors = analysis_errors(&src, &[]);
+            assert!(errors.is_empty(), "{src}: {errors:?}");
         }
+        let errors = analysis_errors(&format!("{body}\n"), &["t", "x"]);
+        assert!(errors.is_empty(), "REPL {body}: {errors:?}");
     }
-    let src = in_class("^(t := t + 1) + 1");
-    let errors = value_position_errors(&src, &[]);
-    assert_eq!(errors.len(), 1, "{src}: {errors:?}");
-    let hint = errors[0].hint.as_deref().unwrap_or_default();
-    assert!(hint.contains("own statement"), "{hint}");
 }
 
 #[test]
@@ -3547,45 +3470,85 @@ fn a_match_arm_write_to_an_outer_local_is_reported_once() {
     assert_eq!(at_arm.len(), 1, "{at_arm:?}");
 }
 
-/// PIN-BUG BT-3860: every method of the inert
-/// `adr0131nested_assign_*_pending.bt.pending` fixtures (BT-3799's matrix) is a
-/// `ValuePositionLocalAssignment` error, and the hoisted fixtures that
-/// `adr0131nested_assign_test.bt` runs compile. BT-3860 makes the shape a
-/// producer, deletes the error and drops the `.pending` suffixes.
+/// PIN-BUG BT-3947: a `^` out of the protected block of an `ensure:` whose
+/// cleanup reads a local the block writes is rejected: the cleanup would read
+/// the old `t`, silently (measured on a BEAM in a class, a value type and an
+/// actor: `t := 0. [t := t + 1. ^t] ensure: [sink record: t]` records 0; the
+/// correct answer is 1). It is the same whether the write is the returned
+/// value (`^t := t + 1`) or a statement before the `^`, and whether the `^` is
+/// in the protected block or a block nested in it. BT-3947 lowers it and flips
+/// this to an acceptance test. Without a `^` in the protected block, with a
+/// cleanup that does not read the written local, or for `on:do:` and the
+/// cleanup itself, it is accepted.
 #[test]
-fn adr0131_nested_assign_pins() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
-    let read = |name: &str| {
-        std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
-    };
-    for context in ["class", "value", "actor"] {
-        let compiled = format!("adr0131nested_assign_{context}.bt");
-        let module = parse_module(&read(&compiled));
-        let errors: Vec<_> = analyse_full(&module, AnalysisContext::default())
-            .diagnostics
-            .into_iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert!(errors.is_empty(), "{compiled}: {errors:?}");
-
-        let pending = format!("adr0131nested_assign_{context}_pending.bt.pending");
-        let src = read(&pending);
-        let module = parse_module(&src);
-        let errors = value_position_errors(&src, &[]);
-        let class = &module.classes[0];
-        let methods: Vec<_> = class.methods.iter().chain(&class.class_methods).collect();
-        assert_eq!(methods.len(), 13, "{pending}");
-        for method in methods {
+fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
+    for body in [
+        "[^t := t + 1] ensure: [t printString]\nt",
+        "[[^t := t + 1] on: Error do: [:e | 0]] ensure: [t printString]\nt",
+        "#(1, 2) do: [:k | [k > 1 ifTrue: [^t := k]] ensure: [t printString]]\nt",
+        "[t := t + 1. ^t] ensure: [t printString]\nt",
+        "[t := t + 1. #(1) do: [:e | ^t]] ensure: [t printString]\nt",
+        "[#(1, 2) do: [:k | t := t + k]. ^t] ensure: [t printString]\nt",
+        "[[t < 3] whileTrue: [t := t + 1]. ^t] ensure: [t printString]\nt",
+        "[#(1, 2) do: [:k | ^t := k]] ensure: [t printString]\nt",
+        "[#(1, 2) collect: [:k | t := t + k]. ^t] ensure: [t printString]\nt",
+        "[#(1, 2) inject: 0 into: [:a :k | t := t + k. a]. ^t] ensure: [t printString]\nt",
+        "[1 to: 2 do: [:k | t := t + k]. ^t] ensure: [t printString]\nt",
+        "[2 timesRepeat: [t := t + 1]. ^t] ensure: [t printString]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
             assert!(
-                errors
-                    .iter()
-                    .any(|d| method.span.start() <= d.span.start()
-                        && d.span.end() <= method.span.end()),
-                "{pending}: `{}` is no longer rejected (BT-3860 fixed? drop the .pending \
-                 suffixes and this pin)",
-                method.selector.name()
+                errors[0].message.contains("BT-3947"),
+                "{}",
+                errors[0].message
+            );
+            assert!(
+                errors[0]
+                    .hint
+                    .as_deref()
+                    .is_some_and(|h| h.contains("after the `ensure:`")),
+                "{:?}",
+                errors[0].hint
             );
         }
+        let errors = analysis_errors(&format!("{body}\n"), &["t"]);
+        assert!(
+            errors.iter().any(|e| e.message.contains("BT-3947")),
+            "REPL {body}: {errors:?}"
+        );
+    }
+    for body in [
+        "[0] ensure: [t printString]\n^t := t + 1",
+        "[^t := t + 1] on: Error do: [:e | t]\nt",
+        "[0] ensure: [^t := t + 1]\nt",
+        "[t := t + 1] ensure: [t printString]\nt",
+        "[t := t + 1. ^t] ensure: [0]\nt",
+        "[^t := t + 1] ensure: [0]\nt",
+        "[t := t + 1. ^t] on: Error do: [:e | t]\nt",
+        "#(1, 2) do: [:k | [t := t + k] ensure: [t printString]]\nt",
+        "#(1, 2) do: [:k | [t := t + k. ^t] ensure: [0]]\nt",
+        "[#(1, 2) do: [:k | z := k. z printString]. ^t] ensure: [t printString]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert!(errors.is_empty(), "{src}: {errors:?}");
+        }
+    }
+}
+
+/// BT-3910: every method of the `adr0131nested_assign_*.bt` fixtures
+/// (BT-3799's matrix, once inert `.pending` files) is accepted.
+#[test]
+fn adr0131_nested_assign_fixtures_are_accepted() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
+    for context in ["class", "value", "actor"] {
+        let name = format!("adr0131nested_assign_{context}.bt");
+        let src =
+            std::fs::read_to_string(root.join(&name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let errors = analysis_errors(&src, &[]);
+        assert!(errors.is_empty(), "{name}: {errors:?}");
     }
 }
 
@@ -3835,4 +3798,150 @@ fn residual_repl_match_arm_write_is_the_match_arm_error() {
         messages.iter().all(|m| !m.contains("`match:` arm")),
         "{messages:?}"
     );
+}
+
+/// PIN-BUG BT-3947 (closes BT-3948): in an actor method, a literal block
+/// applied in place (`[:z | ...] value: i`) that assigns a local of its own,
+/// in a `to:do:`/`whileTrue:`/`timesRepeat:` body that rebinds an outer
+/// local, below a conditional arm of such a body, in a loop condition, or
+/// with the loop inside another block, emitted an unbound `StateAcc`
+/// (`erlc` rejected the module), raised, or answered a `{Value, Locals}`
+/// carrier (every row below was measured on a BEAM). BT-3948 makes it a compile error; BT-3947 gives
+/// closure bodies a frame of their own, deletes the `InlineBlockLocalInLoop`
+/// row and flips these to accepted (the repro then answers 6). Class and
+/// value-type methods, `do:`/`collect:` bodies, stateful loops, blocks that
+/// assign no local and `r := [..] value: i` of a fresh local inside an arm
+/// were measured right and stay accepted.
+#[test]
+fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
+    // The BT-3948 repro, in the language's newline syntax.
+    let body = "1 to: 3 do: [:i |\n  t := t + ([:z |\n    w := 0\n    z > 0 ifTrue: [w := z]\n    w] value: i)]\nt";
+    let messages = residual_messages(&in_actor(body), None);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("assigns its local `w`")
+            && messages[0].contains("BT-3948, until BT-3947"),
+        "{messages:?}"
+    );
+    // The siblings measured failing on a BEAM: no conditional, a parameter
+    // rebind, no parameter, two arguments, statement and assignment
+    // positions, and the other counted and condition loops.
+    for body in [
+        "1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z | z := z + 1. z] value: i)]\nt",
+        "1 to: 3 do: [:i | t := t + ([v := 1. v] value)]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z :y | v := z + y. v] value: i value: 1)]\nt",
+        "1 to: 3 do: [:i |\n  t := t + 1\n  [:z | w := z. w] value: i]\nt",
+        "1 to: 3 do: [:i |\n  t := t + 1\n  r := [:z | w := z. w] value: i\n  r]\nt",
+        "[t < 3] whileTrue: [t := t + ([:z | w := z. w] value: 1)]\nt",
+        "3 timesRepeat: [t := t + ([:z | w := z. w] value: 1)]\nt",
+        // Below a conditional arm (BEAM-measured wrong or erlc failure).
+        "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i | c and: [([:z | w := z. w] value: i) > 0]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "c := true\n[t < 3] whileTrue: [t := t + 1\n  c and: [([:z | w := z. w] value: 1) > 0]]\nt",
+        // Measured: a loop inside a method-level arm, `on:do:`, `ensure:`,
+        // `value`, a `do:` body or another loop answered a carrier or
+        // raised; a `do:`, `collect:` or `inject:` body below the loop too.
+        "c := true\nc ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] on: Error do: [:e | 0]\nt",
+        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] ensure: [0]\nt",
+        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] value\nt",
+        "#(1) do: [:e | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\nc ifTrue: [c ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "2 timesRepeat: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "1 to: 2 do: [:j | 1 to: 2 do: [:k | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
+        "q := 0\n1 to: 2 do: [:j | q := q + 1\n  1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+        "1 to: 3 do: [:i | #(1, 2) do: [:e | t := t + ([:z | w := z. w] value: e)]]\nt",
+        // Conservative rejections (not measured failing; BT-3947 flips
+        // them): a loop in a closure stored by `add:`, and one in a
+        // method-level arm with the block as a bare statement.
+        "fs := OrderedCollection new\n1 to: 3 do: [:i | fs add: [:x | [:z | w := z. w] value: x]]\nt",
+        "c := true\nc ifTrue: [1 to: 3 do: [:i | [:z | w := z. w] value: i]]\nt",
+        // An assignment in a nested `do:` body or closure of a condition
+        // statement is not the BT-3911 cell.
+        "[[:z | #(1) do: [:e | w := e]. z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        // An arm inside a `do:` body or closure is not a bare arm.
+        "[[:z | #(1) do: [:e | e > 0 ifTrue: [w := e]]] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | [:y | y > 0 ifTrue: [w := y]] value: z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        // A state-touching body: the arm operand and `and:` shapes.
+        "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+        "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c and: [([:z | w := z. w] value: i) > 0]]\nt",
+        // In a loop condition, whatever the body does.
+        "[([:z | w := z. w] value: t) < 3] whileTrue: [self.n := self.n + 1\n  t := t + 1]\nt",
+        "[([:z | z > 5 ifTrue: [z := 0]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
+        "[([:z | z > 0 ifTrue: [w := z]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | w := z. w] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[[:z | z > 0 ifTrue: [w := z]\n  z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) > 5] whileFalse: [t := t + 1]\nt",
+        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := 5]\nt",
+        "[t < 3 and: [([:z | w := z. w] value: t) > 0]] whileTrue: [t := t + 1]\nt",
+        "[t < 3 ifTrue: [([:z | w := z. w] value: t) > 0] ifFalse: [false]] whileTrue: [t := t + 1]\nt",
+    ] {
+        let messages = residual_messages(&in_actor(body), None);
+        assert_eq!(messages.len(), 1, "{body}: {messages:?}");
+        assert!(messages[0].contains("BT-3948"), "{body}: {messages:?}");
+    }
+    // The shapes that compile and answer right stay accepted: other
+    // contexts, other bodies, a loop that rebinds nothing or touches state,
+    // a block that assigns no local, and a nested loop.
+    for src in [
+        in_class("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_value("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_actor("#(1, 2, 3) do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
+        in_actor("1 to: 3 do: [:i | [:z | w := z. w] value: i]\nt"),
+        in_actor("1 to: 3 do: [:i | r := [:z | w := z. w] value: i. r]\nt"),
+        in_actor("1 to: 3 do: [:i | t := t + ([:z | z + 1] value: i)]\nt"),
+        in_actor(
+            "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
+        ),
+        in_actor("t := t + ([:z | w := z. w] value: 2)\nt"),
+        // `r := [..] value: i` of a fresh local in an arm answers right in
+        // every arm family and loop kind (BEAM-measured).
+        in_actor(
+            "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [r := [:z | w := z. w] value: i\n    t := t + r]]\nt",
+        ),
+        in_actor(
+            "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [r := [:z | w := z. w] value: i\n  t := t + r]]]\nt",
+        ),
+        in_actor(
+            "c := true\n3 timesRepeat: [c and: [r := [:z | w := z. w] value: 2\n  t := t + r\n  true]]\nt",
+        ),
+        in_actor(
+            "c := true\n[t < 9] whileTrue: [c ifNotNil: [:u | r := [:z | w := z. w] value: 2\n  t := t + r + 1]]\nt",
+        ),
+        // A state-touching body answers right directly and for a statement
+        // of an arm (BEAM-measured).
+        in_actor(
+            "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
+        ),
+        in_actor(
+            "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
+        ),
+        // The BT-3911 cell: one arm-only statement in a condition.
+        in_actor("[[:k | true ifTrue: [x := k]] value: 1\n  t < 3] whileTrue: [t := t + 1]\nt"),
+    ] {
+        assert!(residual_messages(&src, None).is_empty(), "{src}");
+    }
+}
+
+/// BT-3948: an in-place block that assigns its own local AND writes an outer
+/// local inside a loop is left to the Phase 0 position check, which rejects it
+/// (measured with the CLI, 2026-10-20), so neither form slips past both checks.
+#[test]
+fn inline_block_local_that_also_writes_an_outer_local_in_a_loop_is_rejected_by_phase_0() {
+    for body in [
+        "1 to: 3 do: [:i | [:z | w := z. t := t + w] value: i]\nt",
+        "1 to: 3 do: [:i | t := t + ([:z | w := z. t := t + w. w] value: i)]\nt",
+    ] {
+        let diags = adr0131_diagnostics(&in_actor(body));
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error)
+                && diags.iter().all(|d| !d.message.contains("BT-3948")),
+            "{body}: {diags:?}"
+        );
+    }
 }

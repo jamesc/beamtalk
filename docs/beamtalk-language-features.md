@@ -3024,24 +3024,13 @@ error: `detect:ifNone:` writes outer local `t`, but as a statement inside a cond
 
 These combinations are measured and listed in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`; they are mostly `detect:ifNone:` in an actor method at nested positions, an `ifNil:`/`and:` family member or an actor loop in an arm, and, in the REPL, a construct inside a REPL loop or fold body (`#(1, 2) do: [:x | [t := t + x] on: Error do: [:e | 0]]`, BT-3876). The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. Also still compile errors: an assignment inside a conditional arm in a `whileTrue:`/`whileFalse:` condition block in a method (`[i < n and: [x := i. x < 5]] whileTrue: [...]`, BT-3891; assign in the condition block or the loop body instead), a `^` whose value is a local-threading construct inside a plain closure in an actor method (`^xs do: [...]` inside a `detect:ifNone:` handler or sort block; class and value-type methods accept this shape), a cascade, and a conditional's receiver. This error goes away construct by construct as the remaining shapes become producers; it is a known limitation, not a language rule.
 
-**Assignments used as values.** A local assignment whose value is used by the expression around it, rather than standing as its own statement, does not rebind the local yet ([BT-3860](https://linear.app/beamtalk/issue/BT-3860)), so it is a compile error (`ValuePositionLocalAssignment`) in class, value-type and actor methods and in the REPL. That covers an operand (`x := (t := t + 1) + 1`), a collection-literal or interpolated element (`#[t, (t := 7), t]`), the value of another assignment or of `^` (`x := t := 7`, `^t := 7`), a message receiver, including a conditional's or a cascade's (`(t := t + 1) > 0 ifTrue: [...]`), and a `match:` arm, inside loop and fold bodies as well:
-
-```text
-error: assignment to local `t` is used as a value in a class method, but it would not rebind `t` (BT-3860)
-  hint: move the assignment into its own statement before this one, then use `t` here
-```
-
-The rewrite is to hoist the assignment into its own statement and use the local:
+**Assignments used as values.** A local assignment whose value is used by the expression around it, rather than standing as its own statement, rebinds the local like any other assignment ([BT-3910](https://linear.app/beamtalk/issue/BT-3910), ADR 0131 §1). That covers an operand (`x := (t := t + 1) + 1`), a collection-literal or interpolated element (`#[t, (t := 7), t]`), the value of another assignment or of `^` (`x := t := 7`, `^t := 7`), and a message receiver, including a conditional's or a cascade's (`(t := t + 1) > 0 ifTrue: [...]`), in methods, in loop and fold bodies and in the REPL alike. The value of the assignment is the assigned value, and a sibling that is read before it sees the old value:
 
 ```beamtalk
-// Rejected:  #(1, 2) do: [:x | (t := t + 1) > 1 ifTrue: [u := 9]]
-#(1, 2) do: [:x |
-  t := t + 1
-  t > 1 ifTrue: [u := 9]
-]
+#[t, (t := 7), t]    // with t = 0: #[0, 7, 7]
 ```
 
-A statement-position assignment (`t := t + 1`, also inside any block), a field assignment in any position (`r := (self.n := 5) + 1`) and an assignment inside a block literal that is itself a value (`x := [:k | t := k] value: 1`) are not affected. A parenthesised assignment statement (`(t := t + 1)`) counts as a statement only where it is followed by another statement in a value-type or actor method body, a conditional arm or a `[...] value` body; elsewhere drop the parentheses. Like the position errors above, this is a known limitation that BT-3860 removes, not a language rule.
+`^t := e` returns `e` after rebinding `t`. Nothing runs after the return that could read `t`, so the write is dead and `beamtalk lint` warns (`dead_returned_assignment`) and suggests `^e`. A `^` out of the protected block of an `ensure:` (`[^t := t + 1] ensure: [t printString]`, and equally `[t := t + 1. ^t] ensure: [t printString]`, or a `^` in a block nested in the protected block) is a compile error for now ([BT-3947](https://linear.app/beamtalk/issue/BT-3947)) when the cleanup reads a local the protected block writes: the throw skips the rebind, so the cleanup would read the old `t`. Assigning before the `ensure:` does not help if the `^` stays inside the protected block; keep the `^` out of it (assign inside, return after the `ensure:`).
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 
@@ -3466,12 +3455,46 @@ Actor subclass: Ticker
 
 No `state:` for the timer reference, no `terminate:` cleanup needed — the link handles it.
 
+### Continuations (`continueWith:`)
+
+`self continueWith: #selector` (or `self continueWith: #sel: withArguments: #(arg)`) asks the actor to run a follow-up step **after the current message has been handled and before any other message in its mailbox**. It is OTP's `{noreply, State, {continue, Term}}` / `handle_continue/2`. Neither alternative gives this ordering: `self foo` is a direct call that runs immediately, and `Erlang erlang send: self pid msg: #foo` queues behind everything already in the mailbox.
+
+```beamtalk
+Server subclass: Connection
+  state: sock = nil
+
+  handleInfo: msg =>
+    msg match: [
+      {#ready, s} -> [
+        self.sock := s
+        self continueWith: #handleConnection   // runs before any queued #tcp message
+      ];
+      _ -> nil
+    ]
+
+  // Set up the socket here, before the first #tcp message is handled.
+  handleConnection => self.sock
+```
+
+Both methods are defined on `Actor` and answer `#ok`.
+
+- **Where it works:** any of the actor's own methods, including `initialize`, `handleInfo:`, sync methods, `!` casts, and helper methods they call. A request made in a nested self-send joins the same queue.
+- **Ordering:** several requests in one message run in request order. A continuation that requests more queues them **after** the ones already waiting. All of them run before the next mailbox message.
+- **Sync methods:** the caller gets its reply first, then the continuation runs. Its state changes are visible to the next message.
+- **Arguments:** `continueWith:` takes a unary selector. `continueWith:withArguments:` takes a `List` whose size must match the selector's arity. A non-Symbol selector raises `type_error` at the call site, and a wrong argument count raises `arity_mismatch`. Whether the actor understands the selector is checked only when the step runs.
+- **Stop wins:** if the same message also calls `self stopWith:` (in either order), the actor stops and no queued continuation runs. A continuation that itself calls `self stopWith:` stops the actor after that step, and the rest of the queue is dropped.
+- **Errors:** if the method that requested the continuations fails with an error, the continuations it requested are dropped. An error inside a continuation is handled exactly like an error in a `!` cast (see ADR 0134): its own requests are dropped, but steps queued behind it by earlier messages still run.
+- **`initialize`:** continuations requested there run before any message, and `spawn` does not return until they have finished. They count against `spawn`'s 5-second initialization timeout: if `initialize` plus its continuation chain takes longer, `spawn` fails with a timeout and the actor is killed. Move slow setup into a message the actor sends itself instead.
+- **Starvation:** the continue chain runs before every other message, including system messages such as supervisor shutdown. A continuation that re-requests itself forever starves the mailbox, as in OTP.
+- **Only on `self`:** `actor continueWith: #x` sent from another process (sync, async or `!`) raises `invalid_continuation` in the caller.
+
 ### BEAM Mapping
 
 | Beamtalk | BEAM |
 |----------|------|
 | `Server subclass:` | gen_server with `handle_info/2` dispatch |
 | `handleInfo: msg` | `handle_info(Msg, State)` callback |
+| `self continueWith: #sel` | `{noreply, State, {continue, _}}` + `handle_continue/2` |
 | `Actor subclass:` | gen_server with `handle_info/2` ignore stub |
 | Timer `spawn_link` | Timer process linked to calling process |
 
@@ -4362,7 +4385,7 @@ t match: [{#ok, v} -> v; {#error, _} -> 0]
 **Pattern failures (BT-3943):** a destructuring assignment whose tuple size, literal slot or array shape does not match, and a `match:` with no matching arm, raise a structured `#pattern_mismatch` error (class `RuntimeError`, the offending value in the error details). A map destructure with a missing key raises `#key_error` instead.
 
 ```beamtalk
-[{#ok, _v} := Tuple withAll: #(#error, 42)] on: Error do: [:e | e kind]
+[{#ok, _v} := {#error, 42}] on: Error do: [:e | e kind]
 // => #pattern_mismatch
 ```
 

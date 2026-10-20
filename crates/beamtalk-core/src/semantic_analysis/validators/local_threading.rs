@@ -47,7 +47,7 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, WriteKind, block_literal_of_other_arity, conditional_arm_blocks,
+    RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity, conditional_arm_blocks,
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
     exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
@@ -55,7 +55,7 @@ use crate::semantic_analysis::block_facts::{
     operand_producer_writes, outer_local_writes, outer_state_writes, producer_body_block,
     receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
     repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
-    value_blocks, value_position_local_assignments,
+    value_blocks,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -961,6 +961,35 @@ pub(crate) enum Residual {
     /// answered the stale value until BT-3864 rejected the arm's assignment
     /// as a value-position assignment, and draws this error since BT-3909.
     MatchArmWrite,
+    /// BT-3948: an actor `[:z | ...] value: x` (a literal block applied in
+    /// place) whose body assigns a local of its own, with a loop among the
+    /// enclosing blocks. The loop frame carries its locals as parameters (no
+    /// `StateAcc`) while the block body is lowered as a state-threading
+    /// scope. Measured on a BEAM (the rows marked conservative below were
+    /// not measured failing; BT-3947 flips them with the rest), these fail
+    /// `erlc` (unbound `StateAcc`), raise, or answer a `{Value, Locals}` carrier instead of the value:
+    /// the send in a `whileTrue:`/`whileFalse:` condition (also with a
+    /// state-touching body, and as a statement of the condition unless the
+    /// block is one statement with every assignment in an arm); in the
+    /// loop's own body when it rebinds an outer local and touches no state;
+    /// below conditional arms of the body (`ifTrue:`, `and:`, `ifNil:`...)
+    /// unless it is `r := [..] value: i` of a fresh local, or a statement of
+    /// an arm in a state-touching body; and whenever the innermost loop sits
+    /// inside another block (a method-level arm, `on:do:`, `ensure:`,
+    /// `value`, a `do:` body or another loop) or has a `do:`/`collect:`/
+    /// `inject:` body below it. A loop body that touches state, `do:`/
+    /// `collect:` bodies outside a loop, and class and value-type methods
+    /// answer right. A `to:do:` directly in a non-rebinding `to:do:` also
+    /// answered right, but `timesRepeat:` outside it and a third level did
+    /// not, and the block roles do not tell them apart, so it is rejected.
+    ///
+    /// Conservative rejections (no BEAM measurement of a failure; the
+    /// anchor on the innermost loop rejects them and BT-3947 flips them): a
+    /// loop inside a closure stored by `add:` or inside a non-arm block, a
+    /// loop in a method-level arm whose block is statement-only, and a
+    /// `to:do:` in a non-rebinding `to:do:` (measured right). Every other
+    /// denied shape in the pin test was measured failing or answering wrong.
+    InlineBlockLocalInLoop,
 }
 
 /// One [`RESIDUAL_DENY_SET`] row: `shape` is an error in `contexts`.
@@ -980,8 +1009,8 @@ struct ResidualDenied {
 /// `cond`/`fresh` and `groupBy` lines of `adr0131_statement_probes.tsv` and
 /// the REPL `match` line; the `residual_*` tests in
 /// `semantic_analysis/tests/local_threading.rs` pin each repro. BT-3911
-/// deletes the `LoopConditionArmWrite` and `MatchArmWrite` rows, BT-3912 the
-/// `GroupByValue` row.
+/// deletes the `LoopConditionArmWrite` row, BT-3912 the `GroupByValue` row,
+/// BT-3947 the `MatchArmWrite` and `InlineBlockLocalInLoop` rows.
 const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
     ResidualDenied {
         shape: Residual::GroupByValue,
@@ -996,6 +1025,13 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         shape: Residual::MatchArmWrite,
         contexts: &[Class, ValueType, Actor, Repl],
         issue: "BT-3875",
+        fixed_by: "BT-3947",
+    },
+    // Closure bodies need a frame identity of their own (BT-3947 item 2).
+    ResidualDenied {
+        shape: Residual::InlineBlockLocalInLoop,
+        contexts: &[Actor],
+        issue: "BT-3948",
         fixed_by: "BT-3947",
     },
 ];
@@ -1216,61 +1252,84 @@ fn check_body(
     walker.scope.push(params.into_iter().collect());
     walker.body(body);
     walker.finish();
-    report_value_position_assignments(context, body, diagnostics);
+    report_nlr_out_of_ensure(context, body, diagnostics);
 }
 
-/// ADR 0131 stopgap (BT-3864): a local assignment in value position
-/// ([`value_position_local_assignments`]) compiles to its value only and never
-/// rebinds the local (BT-3860), so it is an error in every context, the REPL
-/// included. An assignment a `match:`-arm error already reports
-/// ([`Walker::report_match_arm_writes`]) is not reported twice.
-fn report_value_position_assignments(
+/// BT-3910 / BT-3947: a non-local return out of the protected block of an
+/// `ensure:` whose cleanup reads a local the protected block writes stays a
+/// compile error for now. The `^` is a throw; the cleanup runs from the `catch`
+/// arm over the entry `StateAcc`, with no `LocalRebind` of the protected body's
+/// writes, so the cleanup would read the old value (the correct answer is the
+/// new one). It makes no difference whether the write is the returned value
+/// (`^t := e`) or a statement before the `^` (`t := t + 1. ^t`), whether the
+/// `^` sits directly in the protected block or in a block nested in it, or
+/// whether the write is a statement or a value. Without a `^` in the protected
+/// block, or with a cleanup that does not read what it writes, the write is
+/// seen (ADR 0131 §1). An `on:do:` protected body has no such position: a `^`
+/// passes through its catch untouched and no handler runs.
+///
+/// The one recognizer of this rule: `beamtalk lint`'s `dead_returned_assignment`
+/// skips a `^t := e` inside the span of this error rather than re-deriving it.
+fn report_nlr_out_of_ensure(
     context: MethodContext,
     body: &[ExpressionStatement],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for found in value_position_local_assignments(body, context.root_method_kind()) {
-        // One diagnostic per assignment: an assignment a `match:`-arm error or
-        // the ADR 0133 escaping-block error (reported at the assignment)
-        // already reports is not reported again.
-        let reported = diagnostics.iter().any(|d| {
-            d.span == found.span
-                && d.severity == crate::source_analysis::Severity::Error
-                && matches!(
-                    d.category,
-                    Some(
-                        DiagnosticCategory::UnmigratedLocalThreading
-                            | DiagnosticCategory::Tier2BlockNoReturnChannel
+    for stmt in body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } = e
+                && parts.len() == 1
+                && parts[0].keyword == "ensure:"
+                && let Expression::Block(protected) = receiver.as_ref()
+                && let [Expression::Block(cleanup)] = arguments.as_slice()
+                && let Some(name) = nlr_dropped_local(protected, cleanup)
+            {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "a non-local return (`^`) out of an `ensure:` protected block that \
+                             writes `{name}` is not supported yet in {context}: the cleanup \
+                             would not see the new `{name}` (BT-3947)"
+                        ),
+                        protected.span,
                     )
-                )
+                    .with_hint(format!(
+                        "assign `{name}` and return after the `ensure:`, or keep the `^` out of \
+                         the protected block"
+                    ))
+                    .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+                );
+            }
         });
-        if reported {
-            continue;
-        }
-        let name = &found.name;
-        diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "assignment to local `{name}` is used as a value in {context}, \
-                     but it would not rebind `{name}` (BT-3860)"
-                ),
-                found.span,
-            )
-            .with_hint(if found.returned {
-                format!(
-                    "return the value directly: `^expr` instead of `^{name} := expr` \
-                     (or assign `{name}` in its own statement first if something still \
-                     reads it, e.g. an `ensure:` cleanup)"
-                )
-            } else {
-                format!(
-                    "move the assignment into its own statement before this one, \
-                     then use `{name}` here"
-                )
-            })
-            .with_category(DiagnosticCategory::ValuePositionLocalAssignment),
-        );
     }
+}
+
+/// The local `protected` writes and `cleanup` reads, when `protected` holds a
+/// `^` (see [`report_nlr_out_of_ensure`]), in name order.
+fn nlr_dropped_local(protected: &Block, cleanup: &Block) -> Option<String> {
+    let mut has_nlr = false;
+    for stmt in &protected.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            has_nlr |= matches!(e, Expression::Return { .. });
+        });
+    }
+    if !has_nlr {
+        return None;
+    }
+    // The writes that reach the protected block's frame, nested loop, fold and
+    // conditional bodies included (ADR 0131 threads those back out, and the `^`
+    // drops them too): the one outer-local-writes recognizer, with the locals
+    // the cleanup reads as the bound-outside set.
+    let read = analyze_block(cleanup).local_reads;
+    outer_local_writes(protected, &|n| read.contains(n))
+        .into_iter()
+        .map(|w| w.name.to_string())
+        .min()
 }
 
 /// BT-3823: whether `expr` is an evaluated block in the REPL sense
@@ -1530,6 +1589,12 @@ struct Walker<'d> {
     /// current statement's [`loop_body_producer_sites`] — and `None` for any
     /// other block (an arm, a handler, a protected body, a closure).
     frame_sites: Vec<Option<FrameSites>>,
+    /// Whether the local being assigned by the assignment whose value is
+    /// being walked was not bound before it ([`Residual::InlineBlockLocalInLoop`]).
+    assign_target_fresh: bool,
+    /// The in-place block sends already reported as
+    /// [`Residual::InlineBlockLocalInLoop`].
+    inline_local_reported: Vec<Span>,
     /// Set by a send's walk just before it descends into a block operand that
     /// is a threaded frame body; consumed by [`Walker::block`].
     pending_frame_body: Option<FrameBody>,
@@ -1574,6 +1639,8 @@ impl<'d> Walker<'d> {
             containers: Vec::new(),
             group_by_assign_blocks: Vec::new(),
             pending_group_by_assign_block: false,
+            assign_target_fresh: false,
+            inline_local_reported: Vec::new(),
             last_statements: Vec::new(),
             outer_stateful: false,
             direct_blocks: Vec::new(),
@@ -1773,7 +1840,10 @@ impl<'d> Walker<'d> {
             Expression::Parenthesized { expression, .. } => self.expr(expression, position),
             Expression::Assignment { target, value, .. } => match target.as_ref() {
                 Expression::Identifier(id) => {
+                    let fresh = !self.is_bound(&id.name);
+                    let outer = std::mem::replace(&mut self.assign_target_fresh, fresh);
                     self.operand(value, Position::AssignValue { nested });
+                    self.assign_target_fresh = outer;
                     self.define(&id.name);
                     self.note_block_binding(&id.name, value);
                 }
@@ -2603,6 +2673,148 @@ impl<'d> Walker<'d> {
         {
             self.check_group_by_value(expr, block, position);
         }
+        self.check_inline_block_local_in_loop(expr, position);
+    }
+
+    /// [`Residual::InlineBlockLocalInLoop`] (BT-3948): see the shape's
+    /// documentation for what was measured. The block writes no outer local
+    /// (the Phase 0 check's business); it assigns a local of its own or one
+    /// of its parameters, anywhere in its body. The shape is anchored on the
+    /// innermost enclosing loop block.
+    #[allow(clippy::too_many_lines)] // one measured rule per loop position, each documented
+    fn check_inline_block_local_in_loop(&mut self, expr: &Expression, position: Position) {
+        let Some(row) = residual_denied(Residual::InlineBlockLocalInLoop, self.context) else {
+            return;
+        };
+        let Some(l) = self
+            .containers
+            .iter()
+            .rposition(|c| matches!(c, Container::LoopBody | Container::CountedLoopBody))
+        else {
+            return;
+        };
+        let Some(construct) = local_threading_construct(expr)
+            .filter(|c| c.family == LocalThreadingFamily::BlockValue)
+        else {
+            return;
+        };
+        let Some(block) = construct.blocks.first().copied() else {
+            return;
+        };
+        if !self.writes_of(block).is_empty() {
+            return;
+        }
+        let params: HashSet<&str> = block.parameters.iter().map(|p| p.name.as_str()).collect();
+        // Every block literal below the applied block, and which of them are
+        // the arms of a conditional send.
+        let mut all_blocks: Vec<(Span, bool)> = Vec::new();
+        let mut arm_blocks: Vec<Span> = Vec::new();
+        for stmt in &block.body {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+                Expression::Block(b) => all_blocks.push((b.span, false)),
+                Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } if Container::of(&selector.name(), false) == Container::Arm => {
+                    arm_blocks.extend(arguments.iter().filter_map(|a| match a {
+                        Expression::Block(b) => Some(b.span),
+                        _ => None,
+                    }));
+                }
+                _ => {}
+            });
+        }
+        for (span, is_arm) in &mut all_blocks {
+            *is_arm = arm_blocks.contains(span);
+        }
+        let mut local: Option<(EcoString, Span)> = None;
+        // Whether some assignment to a local is not inside only conditional
+        // arms: the BT-3911 condition cell is positive, so a statement of
+        // the block, an operand, or any `do:` body, closure, evaluated or
+        // protected block between the assignment and the applied block
+        // leaves it.
+        let mut outside_arms = false;
+        for stmt in &block.body {
+            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+                let Expression::Assignment { target, .. } = e else {
+                    return;
+                };
+                let Expression::Identifier(id) = target.as_ref() else {
+                    return;
+                };
+                if !params.contains(id.name.as_str()) && self.is_bound(&id.name) {
+                    return;
+                }
+                let span = e.span();
+                let mut chain = all_blocks
+                    .iter()
+                    .filter(|(b, _)| b.start() <= span.start() && span.end() <= b.end())
+                    .peekable();
+                if chain.peek().is_none() || chain.any(|(_, is_arm)| !is_arm) {
+                    outside_arms = true;
+                }
+                if local.is_none() {
+                    local = Some((id.name.clone(), span));
+                }
+            });
+        }
+        let Some((name, span)) = local else {
+            return;
+        };
+        // A nested in-place block inside one already reported adds nothing.
+        if self
+            .inline_local_reported
+            .iter()
+            .any(|r| r.start() <= expr.span().start() && expr.span().end() <= r.end())
+        {
+            return;
+        }
+        let below = &self.containers[l + 1..];
+        // A loop condition is not a frame body (`frame_sites` is `None`).
+        let in_condition = self.frame_sites.get(l).is_some_and(Option::is_none);
+        let denied = if in_condition {
+            // Right only for the BT-3911 cell: a statement of the condition
+            // whose block is one statement with every assignment in an arm.
+            !(l == 0
+                && below.is_empty()
+                && position == Position::Statement
+                && block.body.len() == 1
+                && !outside_arms)
+        } else if l > 0 || !below.iter().all(|c| *c == Container::Arm) {
+            // Inside another block, or a `do:`/`collect:`/`inject:` body
+            // below the loop.
+            true
+        } else if below.is_empty() {
+            self.direct_blocks.first() == Some(&true) && !self.outer_stateful
+        } else {
+            // Below arms of the body: right for `r := [..] value: i` of a
+            // fresh local, and for a statement of an arm when the body
+            // touches state.
+            !((matches!(position, Position::AssignValue { .. }) && self.assign_target_fresh)
+                || (self.outer_stateful && position == Position::Statement))
+        };
+        if !denied {
+            return;
+        }
+        self.inline_local_reported.push(expr.span());
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "a block evaluated in place assigns its local `{name}` inside a loop, \
+                     which an actor method does not lower yet ({issue}, until {fixed_by})",
+                    issue = row.issue,
+                    fixed_by = row.fixed_by,
+                ),
+                expr.span(),
+            )
+            .with_hint(
+                "move the block's work into a method, or compute the value without \
+                 assigning a local inside the block",
+            )
+            .with_note(format!("`{name}` is assigned here"), Some(span))
+            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+        );
     }
 
     /// [`Residual::GroupByValue`] (BT-3897): an actor or REPL `groupBy:` whose

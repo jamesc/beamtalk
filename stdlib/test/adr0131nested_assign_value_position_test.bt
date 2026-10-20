@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3799 / BT-3860 (ADR 0131): a local assignment in value position (a
+// receiver, an operand, a literal element, an assignment's value) such as
+// `(t := t + 1) > 1 ifTrue: [u := 9]` must rebind `t` before anything after it
+// reads it, at the method root and in every loop or fold body, in a class,
+// value-type and actor method alike (the three columns,
+// fixtures/adr0131nested_assign_value_pos_*.bt).
+//
+// A value-position local assignment is a producer (BT-3910): the hoisted forms
+// are tested in adr0131nested_assign_test.bt, and the REPL cases are in
+// tests/repl-protocol/cases/adr0131_nested_assign.btscript.
+
+TestCase subclass: Adr0131NestedAssignValuePositionTest
+
+  testRootPlain =>
+    self assert: #[Adr0131NestedAssignValuePosClass rootPlain, (Adr0131NestedAssignValuePosValue new) rootPlain, (Adr0131NestedAssignValuePosActor spawn) rootPlain] equals: #[#[1, 2], #[1, 2], #[1, 2]]
+
+  testRootLiteral =>
+    self assert: #[Adr0131NestedAssignValuePosClass rootLiteral, (Adr0131NestedAssignValuePosValue new) rootLiteral, (Adr0131NestedAssignValuePosActor spawn) rootLiteral] equals: #[#[0, 7, 7], #[0, 7, 7], #[0, 7, 7]]
+
+  testDoPlain =>
+    self assert: #[Adr0131NestedAssignValuePosClass doPlain, (Adr0131NestedAssignValuePosValue new) doPlain, (Adr0131NestedAssignValuePosActor spawn) doPlain] equals: #[2, 2, 2]
+
+  testRootIf =>
+    self assert: #[Adr0131NestedAssignValuePosClass rootIf, (Adr0131NestedAssignValuePosValue new) rootIf, (Adr0131NestedAssignValuePosActor spawn) rootIf] equals: #[#[1, 9], #[1, 9], #[1, 9]]
+
+  // BT-3799's shape.
+  testDoIf =>
+    self assert: #[Adr0131NestedAssignValuePosClass doIf, (Adr0131NestedAssignValuePosValue new) doIf, (Adr0131NestedAssignValuePosActor spawn) doIf] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testDoIfElse =>
+    self assert: #[Adr0131NestedAssignValuePosClass doIfElse, (Adr0131NestedAssignValuePosValue new) doIfElse, (Adr0131NestedAssignValuePosActor spawn) doIfElse] equals: #[#[2, 10], #[2, 10], #[2, 10]]
+
+  testDoAnd =>
+    self assert: #[Adr0131NestedAssignValuePosClass doAnd, (Adr0131NestedAssignValuePosValue new) doAnd, (Adr0131NestedAssignValuePosActor spawn) doAnd] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testDoIfFalse =>
+    self assert: #[Adr0131NestedAssignValuePosClass doIfFalse, (Adr0131NestedAssignValuePosValue new) doIfFalse, (Adr0131NestedAssignValuePosActor spawn) doIfFalse] equals: #[#[2, 2], #[2, 2], #[2, 2]]
+
+  testToDoIf =>
+    self assert: #[Adr0131NestedAssignValuePosClass toDoIf, (Adr0131NestedAssignValuePosValue new) toDoIf, (Adr0131NestedAssignValuePosActor spawn) toDoIf] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testTimesIf =>
+    self assert: #[Adr0131NestedAssignValuePosClass timesIf, (Adr0131NestedAssignValuePosValue new) timesIf, (Adr0131NestedAssignValuePosActor spawn) timesIf] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testWhileIf =>
+    self assert: #[Adr0131NestedAssignValuePosClass whileIf, (Adr0131NestedAssignValuePosValue new) whileIf, (Adr0131NestedAssignValuePosActor spawn) whileIf] equals: #[#[2, 9], #[2, 9], #[2, 9]]
+
+  testCollectIf =>
+    self assert: #[Adr0131NestedAssignValuePosClass collectIf, (Adr0131NestedAssignValuePosValue new) collectIf, (Adr0131NestedAssignValuePosActor spawn) collectIf] equals: #[#[2, 9, #(1, 2)], #[2, 9, #(1, 2)], #[2, 9, #(1, 2)]]
+
+  testInjectIf =>
+    self assert: #[Adr0131NestedAssignValuePosClass injectIf, (Adr0131NestedAssignValuePosValue new) injectIf, (Adr0131NestedAssignValuePosActor spawn) injectIf] equals: #[#[2, 9, 3], #[2, 9, 3], #[2, 9, 3]]
+
+  // `^t := e` outside an `ensure:` protected block returns `e` (BT-3910).
+  testReturnedRoot =>
+    self assert: #[Adr0131NestedAssignValuePosClass returnedRoot, (Adr0131NestedAssignValuePosValue new) returnedRoot, (Adr0131NestedAssignValuePosActor spawn) returnedRoot] equals: #[7, 7, 7]
+
+  testReturnedInLoop =>
+    self assert: #[Adr0131NestedAssignValuePosClass returnedInLoop, (Adr0131NestedAssignValuePosValue new) returnedInLoop, (Adr0131NestedAssignValuePosActor spawn) returnedInLoop] equals: #[20, 20, 20]

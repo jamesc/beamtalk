@@ -42,11 +42,16 @@ use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector, WellKnownSelector};
 use beamtalk_core::source_analysis::Span;
+
+/// Hint on the `stateful_block_dispatch` error a self-send inside a closure
+/// raises when the callee changed actor state (BT-3936).
+const CLOSURE_SELF_SEND_STATE_CHANGE_HINT: &str = "A self-send inside a block changed actor state, but the block cannot return it; return the value and assign it in the method instead";
 
 /// One `generate_message_send` dispatch strategy: `Some(doc)` claims the
 /// send, `None` defers to the next entry in [`HANDLERS`].
@@ -1788,22 +1793,90 @@ impl CoreErlangGenerator {
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let error_clause = self.generate_self_dispatch_error_clause("SelfError", &selector_atom);
 
+        let reply_body = self.closure_self_dispatch_state_guard(
+            &state_var,
+            &current_state,
+            &selector_atom,
+            leaf::var(result_var.clone()),
+        );
         let doc = docvec![
             "case ",
             self.safe_dispatch_call_doc(selector_atom, args_doc, current_state),
             " of ",
             "<{'reply', ",
-            leaf::var(result_var.clone()),
+            leaf::var(result_var),
             ", ",
             leaf::var(state_var),
             "}> when 'true' -> ",
-            leaf::var(result_var),
+            reply_body,
             " ",
             error_clause,
             "end"
         ];
 
         Ok(doc)
+    }
+
+    /// BT-3936 (ADR 0133 § Error examples): the reply body of a self-send
+    /// dispatch that is compiled inside a closure (`block_depth > 0`) that is a Tier 1 `fun`. The callee's returned
+    /// `State` has nowhere to go from there: the closure answers one value,
+    /// and the surrounding method's `State` is not the closure's to rebind.
+    /// A Tier 2 `fun` is exempt (`closure_drops_state` is false): it takes
+    /// `StateAcc` and returns `{Result, StateAccN}`, so it carries the change
+    /// back to its caller (and a consumer that cannot take it back already
+    /// raises `stateful_block_dispatch`).
+    /// So the callee's returned state (`reply_state`) is compared (`=:=`, which
+    /// shortcuts on identity) with the state the send was dispatched against
+    /// (`dispatched_state`): equal answers `ok_doc` as before, different
+    /// raises `stateful_block_dispatch` rather than drop the change silently.
+    ///
+    /// Outside a closure the doc is `ok_doc` unchanged. This is the one place
+    /// every actor self-send dispatch form (threaded `Bind`, discarding,
+    /// sealed) shares; not a per-call-site check.
+    fn closure_self_dispatch_state_guard(
+        &mut self,
+        reply_state: &str,
+        dispatched_state: &str,
+        selector_atom: &str,
+        ok_doc: Document<'static>,
+    ) -> Document<'static> {
+        if self.block_depth == 0
+            || !self.closure_drops_state
+            || self.context != CodeGenContext::Actor
+        {
+            return ok_doc;
+        }
+        let class_name = self.class_name();
+        let error_doc = self.generate_stateful_block_dispatch_error(
+            selector_atom,
+            &class_name,
+            CLOSURE_SELF_SEND_STATE_CHANGE_HINT,
+        );
+        // The fast path is plain `=:=` (identity first). A different map is
+        // compared again with the codegen-internal `__local__<name>` threading
+        // keys stripped (`beamtalk_actor:strip_local_temps/1`, the same helper
+        // the gen_server boundary uses): a read-only callee that rebinds a local
+        // through a conditional / `on:do:` / `ensure:` changes only those keys,
+        // which are not actor state.
+        let ok_slow = ok_doc.clone();
+        docvec![
+            "case call 'erlang':'=:='(",
+            leaf::var(reply_state.to_string()),
+            ", ",
+            leaf::var(dispatched_state.to_string()),
+            ") of <'true'> when 'true' -> ",
+            ok_doc,
+            " <'false'> when 'true' -> case call 'erlang':'=:='(",
+            "call 'beamtalk_actor':'strip_local_temps'(",
+            leaf::var(reply_state.to_string()),
+            "), call 'beamtalk_actor':'strip_local_temps'(",
+            leaf::var(dispatched_state.to_string()),
+            ")) of <'true'> when 'true' -> ",
+            ok_slow,
+            " <'false'> when 'true' -> ",
+            error_doc,
+            " end end",
+        ]
     }
 
     /// ADR 0111 Addendum 5 (shape E2): the dispatch-call/
@@ -1841,6 +1914,7 @@ impl CoreErlangGenerator {
             let result_var = self.fresh_var("SDResult");
             let state_var = self.fresh_var("SDState");
             let current_state = self.current_state_var();
+            let dispatch_state = current_state.clone();
 
             // Capture arguments via bridge (ADR 0018 Phase 0)
             let args_doc = self.capture_argument_list_doc(arguments)?;
@@ -1915,6 +1989,19 @@ impl CoreErlangGenerator {
             // the `Bind`-based callers re-derive it from the version number
             // via `render_bind`.
             let _ = self.next_state_var();
+            let ok_doc = docvec![
+                "{",
+                leaf::var(result_var.clone()),
+                ", ",
+                leaf::var(state_var.clone()),
+                "}"
+            ];
+            let reply_body = self.closure_self_dispatch_state_guard(
+                &state_var,
+                &dispatch_state,
+                &selector_atom_for_error,
+                ok_doc,
+            );
             let error_clause =
                 self.generate_self_dispatch_error_clause("SDError", &selector_atom_for_error);
             let doc = docvec![
@@ -1923,11 +2010,9 @@ impl CoreErlangGenerator {
                 leaf::var(result_var.clone()),
                 ", ",
                 leaf::var(state_var.clone()),
-                "}> when 'true' -> {",
-                leaf::var(result_var),
-                ", ",
-                leaf::var(state_var),
-                "} ",
+                "}> when 'true' -> ",
+                reply_body,
+                " ",
                 error_clause,
                 "end in ",
             ];
@@ -1966,6 +2051,13 @@ impl CoreErlangGenerator {
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let error_clause = self.generate_self_dispatch_error_clause("SealedError", &selector_atom);
+        let state_var = self.fresh_var("SealedState");
+        let reply_body = self.closure_self_dispatch_state_guard(
+            &state_var,
+            &current_state,
+            &selector_atom,
+            leaf::var(result_var.clone()),
+        );
 
         let doc = docvec![
             "let ",
@@ -1985,9 +2077,11 @@ impl CoreErlangGenerator {
             leaf::var(current_state),
             ") of ",
             "<{'reply', ",
-            leaf::var(result_var.clone()),
-            ", _}> when 'true' -> ",
             leaf::var(result_var),
+            ", ",
+            leaf::var(state_var),
+            "}> when 'true' -> ",
+            reply_body,
             " ",
             error_clause,
             "end"
@@ -2020,6 +2114,13 @@ impl CoreErlangGenerator {
         // dispatch atom used at the other call sites.
         let error_clause =
             self.generate_self_dispatch_error_clause("SealedDirectError", selector_atom);
+        let state_var = self.fresh_var("SealedState");
+        let reply_body = self.closure_self_dispatch_state_guard(
+            &state_var,
+            &current_state,
+            selector_atom,
+            leaf::var(result_var.clone()),
+        );
 
         let doc = docvec![
             "let ",
@@ -2039,9 +2140,11 @@ impl CoreErlangGenerator {
             leaf::var(current_state),
             ") of ",
             "<{'reply', ",
-            leaf::var(result_var.clone()),
-            ", _}> when 'true' -> ",
             leaf::var(result_var),
+            ", ",
+            leaf::var(state_var),
+            "}> when 'true' -> ",
+            reply_body,
             " ",
             error_clause,
             "end"

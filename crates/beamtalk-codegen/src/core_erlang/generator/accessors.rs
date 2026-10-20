@@ -36,6 +36,18 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-3910 (ADR 0131 §1): sets the value-position local assignments the
+    /// generator lowers as producers
+    /// (`beamtalk_core`'s `value_position_assignment_spans` for a REPL input;
+    /// a method body installs its own, `with_local_producer_sites`).
+    /// Returns the previous set, for the caller to restore.
+    pub fn set_value_assign_sites(
+        &mut self,
+        sites: std::collections::HashSet<Span>,
+    ) -> std::collections::HashSet<Span> {
+        std::mem::replace(&mut self.value_assign_sites, sites)
+    }
+
     /// Returns `true` if REPL mode is active.
     // widened from `pub(crate)` — `beamtalk-repl` queries/sets this
     // around its own generation calls.

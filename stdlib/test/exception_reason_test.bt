@@ -35,7 +35,7 @@ TestCase subclass: ExceptionReasonTest
     self assert: result equals: #econnreset
 
   testRawErlangErrorTupleReason =>
-    term := Tuple withAll: #(#tls_alert, #bad_certificate)
+    term := {#tls_alert, #bad_certificate}
     result := [(Erlang erlang) error: term] on: Exception do: [:e | e reason]
     self assert: result equals: term
 

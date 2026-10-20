@@ -276,7 +276,7 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
   bumpWrappedDestructureIfTrue: flag -> Integer =>
     flag
       ifTrue: [
-        {a, b} := (self.pair := Tuple withAll: #(self.count + 10, self.count + 20))
+        {a, b} := (self.pair := {self.count + 10, self.count + 20})
         self.count := a + b
       ]
     self.count

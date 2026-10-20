@@ -397,10 +397,30 @@ impl CoreErlangGenerator {
         }));
         if let Some(set) = self.threaded_locals_of(expr) {
             names.extend(set.names);
-            names.sort();
-            names.dedup();
         }
+        // BT-3910: and the local a value-position assignment inside it rebinds
+        // (`#[t, (t := 7), t]`: the first `t` is read before the rebind).
+        names.extend(self.contained_local_assignment_targets(expr));
+        names.sort();
+        names.dedup();
         names
+    }
+
+    /// BT-3910: the locals the value-position local assignments inside `expr`
+    /// (itself included, outside block literals) rebind: the producers
+    /// [`Self::lower_local_assignment_producer`] lowers.
+    pub(in crate::core_erlang) fn contained_local_assignment_targets(
+        &self,
+        expr: &Expression,
+    ) -> Vec<String> {
+        if self.value_assign_sites.is_empty() {
+            return Vec::new();
+        }
+        beamtalk_core::semantic_analysis::block_facts::assignments_outside_blocks(expr)
+            .into_iter()
+            .filter(|(_, span)| self.value_assign_sites.contains(span))
+            .map(|(name, _)| name.to_string())
+            .collect()
     }
 
     /// The scope predicate every threaded-set walk uses: `name` is bound
