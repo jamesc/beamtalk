@@ -162,9 +162,10 @@ jobs:
     if: needs.check-activity.outputs.has_commits == 'true'
     # Pin to 2022: erlef/setup-beam@v1 doesn't support windows-2025 yet
     runs-on: windows-2022
-    # Full test suite + release build. Observed ~56min since the bench
-    # smoke step (BT-3886); 80 leaves ~25min headroom.
-    timeout-minutes: 80
+    # Full test suite + release build. Observed ~78min on 2026-10-20 (run
+    # 39483090844: build 14m, tests 47m, release build 15m); 100 leaves
+    # ~20min headroom.
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
