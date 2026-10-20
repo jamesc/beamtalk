@@ -126,19 +126,21 @@ Actor subclass: SelfSendHomFoldPool
   pureIfNone => self fwdIfNone: [7]
 
   // The predicate writes a field (a literal block of an inlined
-  // `detect:ifNone:`, so legal), and the `ifNone:` handler is a read-only
-  // block passed through a sealed method of the same class (BT-3952).
+  // `detect:ifNone:`, so legal). The `ifNone:` handler is passed the field
+  // value instead of reading `self.total` itself: a block that reads a field
+  // and is passed to an actor's own method would see the value from when it
+  // was made, so that is a compile error (BT-3952).
   sealed fwdIfNoneAfterFold: noneBlock =>
     self.items
       detect: [:x |
         self.total := self.total + 1
         x > 20
       ]
-      ifNone: noneBlock
+      ifNone: [noneBlock value: self.total]
 
   pureIfNoneAfterFold =>
     self.total := 0
-    self fwdIfNoneAfterFold: [self.total]
+    self fwdIfNoneAfterFold: [:seen | seen]
 
   // A block that rebinds a block-local inside an inner loop (BT-3939).
   weight: y => y * 10

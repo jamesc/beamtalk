@@ -2744,6 +2744,227 @@ fn section6_field_write_in_testcase_and_object_methods_is_an_error() {
     }
 }
 
+/// BT-3952 (ADR 0133 amendment): in an actor instance method a block that reads
+/// `self.field` and is handed to the actor's own method, stored, returned or
+/// placed in a literal sees the `State` from when it was made, so it is an
+/// error at the read. Measured on a BEAM: the self-send answers stale when the
+/// callee writes the field before running the block, the stored, returned and
+/// literal shapes when a write follows; no static rule tells the right-answering
+/// cases apart, so every one is rejected.
+#[test]
+fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
+    for body in [
+        "self foo: [self.n]\nnil",
+        "super foo: [self.n]\nnil",
+        "self foo: [:x | x + self.n]\nnil",
+        // Through a nested, non-inlined block.
+        "self foo: [self.items collect: [:x | x + self.n]]\nnil",
+        "self foo: [self.flag ifTrue: [self.n] ifFalse: [0]]\nnil",
+        "^[self.n]",
+        "self.h := [self.n]\nnil",
+        "#[[self.n]]",
+        "self do: [:x | self.n]\nnil",
+        // Bound to a local, then escaping (measured: `^b` answers stale).
+        "b := [self.n]\n^b",
+        "b := [self.n]\nself foo: b\nnil",
+        "b := [self.n]\nself.h := b\nnil",
+        "b := [self.n]\n#[b]",
+        // The reflective read is a field read too.
+        "self foo: [self fieldAt: #n]\nnil",
+        "super foo: [super fieldAt: #n]\nnil",
+        "^[self fieldAt: #n]",
+        "self.h := [self fieldAt: #n]\nnil",
+        "#[[self fieldAt: #n]]",
+        "self foo: [:k | self fieldAt: k]\nnil",
+        "b := [self fieldAt: #n]\n^b",
+        "b := [self fieldAt: #n]\nself foo: b\nnil",
+        "b := [self fieldAt: #n]\nself.n := 5\nb value",
+        "^[self fieldAt: #n; yourself]",
+        // A cascade to `self` dispatches to the actor's own method.
+        "self foo: [self.n]; yourself\nnil",
+        "super foo: [self.n]; yourself\nnil",
+        "b := [self.n]\nself foo: b; yourself\nnil",
+        // The blocks a collection operation answers leave with its result.
+        "^self.items collect: [:x | [self.n]]",
+        // A cascade to `self` may change the state.
+        "b := [self.n]\nself bump; yourself\nb value",
+        // Followed through an alias, a capture, and a rebinding that may run.
+        "b := [self.n]\nc := b\n^c",
+        // A wrapper that captures a tracked local holds its blocks.
+        "b := [self.n]\nc := [b value]\n^c",
+        "b := [self.n]\nc := [b value]\nself.n := 5\nc value",
+        // A loop condition re-runs after a body that changes the state.
+        "b := [self.n]\n[b value < 10] whileTrue: [self.n := self.n + 1]\nnil",
+        "b := [self.n]\n[b value < 10] whileFalse: [self bump]\nnil",
+        // Handed to another object after a write: it may call the block.
+        "b := [self.n]\nself.n := 1\nother foo: b\nnil",
+        "b := [self.n]\n^[b value]",
+        "b := [self.n]\nself.h := [b value]\nnil",
+        "b := [self.n]\nself foo: [b value]\nnil",
+        "b := [self.n]\nself.flag ifTrue: [b := [1]]\n^b",
+        // Called after something that may change the state (measured: a field
+        // write or a self-send between the binding and the call reads stale).
+        "b := [self.n]\nself.n := 5\nb value",
+        "b := [self.n]\nself bump\nb value",
+        "b := [self.n]\nself.flag ifTrue: [self.n := 1]\nb value",
+        // In a loop whose body may change it, before or after the call.
+        "b := [self.n]\nself.items do: [:x | self.n := x. b value]\nnil",
+        "b := [self.n]\nself.items do: [:x | b value. self.n := x]\nnil",
+        "b := [self.n]\nself.items do: [:x | self bump. b value]\nnil",
+    ] {
+        let src = in_actor(body);
+        let diags = adr0131_diagnostics(&src);
+        let d = diags
+            .iter()
+            .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
+            .unwrap_or_else(|| panic!("{src}: {diags:?}"));
+        assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
+        assert!(
+            d.message.contains("is read in a block that runs later"),
+            "{d:?}"
+        );
+        assert!(
+            ["self.", "self fieldAt:", "super fieldAt:", "b value"]
+                .iter()
+                .any(|at| src[d.span.start() as usize..].starts_with(at)),
+            "reported at the read: {src}"
+        );
+    }
+}
+
+/// BT-3952: the shapes that answer right keep compiling: a block run in place
+/// by an inlined construct, passed to a non-self receiver, passed in as a
+/// value, or in a context where a field read is not a stale `State` read.
+#[test]
+fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
+    for body in [
+        // Inlined control flow and collection messages on a non-self receiver.
+        "self.items do: [:x | self.n]\nnil",
+        "self.items detect: [:x | x > self.n] ifNone: [self.n]\nnil",
+        "self.flag ifTrue: [self.n] ifFalse: [0]\nnil",
+        "self.items collect: [:x | x + self.n]\nnil",
+        // A non-self receiver runs its own code, not this actor's.
+        "other foo: [self.n]\nnil",
+        "self.peer foo: [self.n]\nnil",
+        // The value is passed in, not read in the block.
+        "self foo: self.n\nnil",
+        "self foo: [:v | v + 1]\nnil",
+        // A block that does not read a field of `self`.
+        "self foo: [other.n]\nnil",
+        "^[:x | x + 1]",
+        // A local block run at once, before any write, answers right
+        // (measured); with nothing that may change the state in between.
+        "b := [self.n]\nb value",
+        "b := [self.n]\nself.items do: [:x | b value]\nnil",
+        "b := [self.n]\nb value\nself.n := 1\nnil",
+        // Read directly in the method body, not in a block.
+        "self foo: (self fieldAt: #n)\nnil",
+        "x := self fieldAt: #n\n^x",
+        "b := [self fieldAt: #n]\nb value",
+        "b := [self.n]\nself.items do: [:x | b value. x]\nnil",
+        // The operands run before the write or the self-send itself.
+        "b := [self.n]\nself.n := b value + 1\nnil",
+        // Handed to another object with nothing in between: like the literal.
+        "b := [self.n]\nother foo: b\nnil",
+        // A condition over a body that changes nothing.
+        "b := [self.n]\n[b value < 10] whileTrue: [self.items add: 1]\nnil",
+        "b := [self.n]\nself foo: b value\nnil",
+        // A parameter that shadows the local is another variable.
+        "b := [self.n]\nself.items do: [:b | self record: b]\nnil",
+        "b := [self.n]\nself.items do: [:b | self.h := b]\nnil",
+        // The local is rebound to a block that reads no field.
+        "b := [self.n]\nb := [1]\n^b",
+        // A class-builder method body rebinds `self` to its parameter.
+        "^#{#get => [:self | self.n]}",
+    ] {
+        let src = in_actor(body);
+        assert_eq!(
+            section6_errors(&src),
+            0,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
+        );
+    }
+    // Class methods read class variables live at home (ADR 0130 §3), and a
+    // value type's fields never change: neither can go stale.
+    for body in [
+        "self foo: [self.n]\nnil",
+        "^[self.n]",
+        "self.h := [self.n]\nnil",
+    ] {
+        assert_eq!(section6_errors(&in_class(body)), 0, "{body}");
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+    }
+}
+
+/// BT-3952: a block that sends to `self` or `super` dispatches against the
+/// `State` it captured (measured: a stored and a returned `[self total]` both
+/// answered the old value), so when it is stored, returned or placed in a
+/// literal (directly or through a local) it is an error at the send. A block
+/// passed to the actor's own method (BT-3936's runtime check covers it), run
+/// in place, or called through a local later is not.
+#[test]
+fn section6_actor_block_that_sends_to_self_and_is_stored_is_an_error() {
+    for body in [
+        "^[self total]",
+        "^[super total]",
+        "self.h := [self total]\nnil",
+        "#[[self total]]",
+        "^[:x | #(1) do: [:y | self record: y]]",
+        "b := [self total]\n^b",
+        "b := [self total]\nself.h := b\nnil",
+        "b := [self total]\n#[b]",
+        "^self.items collect: [:x | [self total]]",
+        "^[self foo; bar]",
+        // Followed through a capture and an alias.
+        "b := [self total]\n^[b value]",
+        "b := [self total]\nc := b\n^c",
+    ] {
+        let src = in_actor(body);
+        let diags = adr0131_diagnostics(&src);
+        let d = diags
+            .iter()
+            .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
+            .unwrap_or_else(|| panic!("{src}: {diags:?}"));
+        assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
+        assert!(
+            d.message.contains("is sent in a block that runs later"),
+            "{d:?}"
+        );
+        assert!(
+            ["self ", "super ", "b value"]
+                .iter()
+                .any(|at| src[d.span.start() as usize..].starts_with(at)),
+            "reported at the send: {src}"
+        );
+    }
+    for body in [
+        // Passed to the actor's own method: BT-3936's runtime check.
+        "self each: [:x | self record: x]\nnil",
+        "self each: [self total]\nnil",
+        // Run in place, or a local called later.
+        "self.items do: [:x | self record: x]\nnil",
+        "b := [self total]\nb value",
+        "b := [self total]\nself bump\nb value",
+        "b := [self total]\nself each: b\nnil",
+        // The value is computed first and captured.
+        "t := self total\n^[t]",
+    ] {
+        let src = in_actor(body);
+        assert_eq!(
+            section6_errors(&src),
+            0,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
+        );
+    }
+    // Class methods and value types are not actors.
+    for body in ["^[self total]", "self.h := [self total]\nnil"] {
+        assert_eq!(section6_errors(&in_class(body)), 0, "{body}");
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+    }
+}
+
 /// A field write in a block that the compiler lowers in place, or that never
 /// leaves the method, is not an escape.
 #[test]
@@ -2752,7 +2973,6 @@ fn section6_in_place_field_writes_are_not_escapes() {
         "#(1, 2) do: [:x | self.n := self.n + x]\nnil",
         "true ifTrue: [self.n := 1] ifFalse: [self.n := 2]\nnil",
         "[self.n := 1] value\nnil",
-        "^[:x | x + self.n]",
         // A class-builder method body takes `self` as a parameter.
         "^#{#bump => [:self | self.n := self.n + 1]}",
     ] {
@@ -2760,6 +2980,14 @@ fn section6_in_place_field_writes_are_not_escapes() {
             assert_eq!(section6_errors(&src), 0, "{src}");
         }
     }
+    // BT-3952: a returned block that only READS a field is no write, but in an
+    // actor it reads the `State` it was made with: an error there (the read
+    // rule), still none in a class method (live class variables, ADR 0130 §3)
+    // or a value type (fields never change).
+    let body = "^[:x | x + self.n]";
+    assert_eq!(section6_errors(&in_class(body)), 0);
+    assert_eq!(section6_errors(&in_value(body)), 0);
+    assert_eq!(section6_errors(&in_actor(body)), 1);
 }
 
 #[test]
