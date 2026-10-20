@@ -50,6 +50,11 @@ pub(super) enum BlockExprKind {
     SideEffect,
 }
 
+/// The marker the Tier 2 loop-rebind rejection ([`CoreErlangGenerator::reject_loop_rebind_of_body_local`])
+/// carries, which the value-position agreement corpora read to tell that
+/// pinned rejection from any other failure.
+pub(super) const TIER2_LOOP_REBIND_PIN: &str = "BT-3939, until BT-3947";
+
 impl CoreErlangGenerator {
     /// Extracts a block literal from an expression, unwrapping parentheses.
     ///
@@ -601,7 +606,7 @@ impl CoreErlangGenerator {
             feature: format!(
                 "a Tier 2 block assigns local `{local}` and rebinds it inside a loop, fold or \
                  other construct; the block would answer the value, and the state, from \
-                 before it (BT-3939, until BT-3947). An assignment to it elsewhere in the same \
+                 before it ({TIER2_LOOP_REBIND_PIN}). An assignment to it elsewhere in the same \
                  statement counts too. Compute it in a method of its own and call that \
                  from the block"
             ),

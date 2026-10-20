@@ -17,30 +17,35 @@
 //!     ^count := count + 1
 //! ```
 //!
-//! Inside the protected block of an `ensure:` the shape is a compile error for
-//! now (BT-3947: the cleanup would read the old value), so the lint stays
-//! silent there; the compile error owns it.
+//! A `^` out of the protected block of an `ensure:` whose cleanup reads a local
+//! the block writes is a compile error for now (BT-3947: the cleanup would read
+//! the old value). The lint asks the compiler ([`local_threading_diagnostics`])
+//! and stays silent inside the span of any error it reports, as
+//! `dead_block_assignment` does; the compile error owns it.
 //!
 //! It is a warning, never a compile error.
 
 use crate::LintPass;
-use beamtalk_core::ast::{Expression, MessageSelector, Module};
+use crate::hierarchy_for_lint;
+use beamtalk_core::ast::{Expression, Module};
 use beamtalk_core::ast_walker::walk_expression;
+use beamtalk_core::semantic_analysis::local_threading_diagnostics;
 use beamtalk_core::source_analysis::{Diagnostic, Span};
 
-/// Lint pass that flags `^t := e` outside an `ensure:` protected block.
+/// Lint pass that flags `^t := e` the compiler does not already reject.
 pub(crate) struct DeadReturnedAssignmentPass;
 
 impl LintPass for DeadReturnedAssignmentPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+        let hierarchy = hierarchy_for_lint(module);
+        let rejected: Vec<Span> = local_threading_diagnostics(module, &hierarchy)
+            .iter()
+            .map(|d| d.span)
+            .collect();
         for method in module.all_methods() {
-            let mut protected: Vec<Span> = Vec::new();
             let mut returns: Vec<(String, Span)> = Vec::new();
             for stmt in &method.body {
                 walk_expression(&stmt.expression, &mut |expr| {
-                    if let Some(span) = ensure_protected_block(expr) {
-                        protected.push(span);
-                    }
                     if let Expression::Return { value, .. } = expr
                         && let assignment @ Expression::Assignment { target, .. } =
                             value.unwrap_parens()
@@ -51,7 +56,7 @@ impl LintPass for DeadReturnedAssignmentPass {
                 });
             }
             for (name, span) in returns {
-                let owned_by_compile_error = protected
+                let owned_by_compile_error = rejected
                     .iter()
                     .any(|p| p.start() <= span.start() && span.end() <= p.end());
                 if !owned_by_compile_error {
@@ -70,25 +75,6 @@ impl LintPass for DeadReturnedAssignmentPass {
                 }
             }
         }
-    }
-}
-
-/// The span of the protected block of `expr` when it is `[...] ensure: ...`.
-fn ensure_protected_block(expr: &Expression) -> Option<Span> {
-    let Expression::MessageSend {
-        receiver,
-        selector: MessageSelector::Keyword(parts),
-        ..
-    } = expr
-    else {
-        return None;
-    };
-    if parts.len() != 1 || parts[0].keyword != "ensure:" {
-        return None;
-    }
-    match receiver.as_ref() {
-        Expression::Block(protected) => Some(protected.span),
-        _ => None,
     }
 }
 
@@ -152,6 +138,12 @@ mod tests {
     #[test]
     fn a_returned_assignment_outside_the_protected_block_is_dead() {
         let diags = lint(&in_method("[0] ensure: [t printString]\n    ^t := 5"));
+        assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    #[test]
+    fn a_returned_assignment_whose_cleanup_reads_nothing_is_dead() {
+        let diags = lint(&in_method("[^t := t + 1] ensure: [0]"));
         assert_eq!(diags.len(), 1, "{diags:?}");
     }
 

@@ -297,7 +297,7 @@ impl CoreErlangGenerator {
             let rebind = if cond_effects {
                 plan.rebind_frame(frame)
             } else {
-                plan.condition_rebind_frame(frame)
+                ThreadingPlan::condition_rebind_frame(frame)
             };
             this.with_rebind_frame(rebind, |this| {
                 if let Expression::Block(cond_block) = condition {
@@ -570,11 +570,10 @@ impl CoreErlangGenerator {
     fn generate_loop_condition_body(
         &mut self,
         condition: &Expression,
-        plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
         self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
-            this.with_rebind_frame(plan.condition_rebind_frame(frame), |this| {
+            this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
                 if let Expression::Block(cond_block) = condition {
                     this.generate_block_body(cond_block)
                 } else {
@@ -668,7 +667,7 @@ impl CoreErlangGenerator {
 
         // The condition closure captures the current vars from scope.
         // We pass only the params (not StateAcc) since there is no StateAcc.
-        let cond_body_doc = self.generate_loop_condition_body(condition, plan)?;
+        let cond_body_doc = self.generate_loop_condition_body(condition)?;
         let condition_stmt = ThreadedStmt::Statement(
             docvec![
                 "let ",
@@ -1026,13 +1025,14 @@ impl CoreErlangGenerator {
             let prev_hybrid = this.loop_mode.in_hybrid_loop;
             this.loop_mode.in_hybrid_loop = true;
             let frame = this.current_branch_frame();
-            let result = this.with_rebind_frame(plan.condition_rebind_frame(frame), |this| {
-                if let Expression::Block(cond_block) = condition {
-                    this.generate_block_body(cond_block)
-                } else {
-                    this.generate_expression(condition)
-                }
-            });
+            let result =
+                this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
+                    if let Expression::Block(cond_block) = condition {
+                        this.generate_block_body(cond_block)
+                    } else {
+                        this.generate_expression(condition)
+                    }
+                });
             this.loop_mode.in_hybrid_loop = prev_hybrid;
             result
         });

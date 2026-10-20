@@ -90,6 +90,8 @@ fn no_value_position_local_assignment_is_dropped_by_the_repl() {
                     Ok(dropped) => {
                         failures.push(format!("{entry}: the REPL drops {dropped:?}\n{src}"));
                     }
+                    // PIN-BUG BT-3947 (BT-3939): loud, not dropped.
+                    Err(why) if dropped_assignment_probe::is_tier2_loop_rebind_pin(&why) => {}
                     Err(why) => failures.push(format!("{entry}: fails to compile: {why}\n{src}")),
                 }
             }

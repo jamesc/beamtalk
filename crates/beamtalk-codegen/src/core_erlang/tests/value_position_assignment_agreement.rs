@@ -140,7 +140,7 @@ fn no_value_position_local_assignment_is_dropped(contexts: &[&str]) {
                 // PIN-BUG BT-3947 (BT-3939): a Tier 2 block body that assigns
                 // a local and rebinds it in a loop is a loud compile error
                 // until BT-3947 lowers the body as a frame. Loud, not dropped.
-                Err(why) if why.contains("BT-3939") => {}
+                Err(why) if dropped_assignment_probe::is_tier2_loop_rebind_pin(&why) => {}
                 Err(why) => failures.push(format!("fails to compile: {why}\n{src}")),
             }
         }

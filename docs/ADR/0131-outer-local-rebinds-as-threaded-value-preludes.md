@@ -389,10 +389,15 @@ is ordinary Smalltalk, and nothing runs after the return that could read `t`
 except an `ensure:` cleanup that encloses the `^`. Codegen does not deliver the
 new value to that cleanup: the `^` is a throw, and the cleanup runs from the
 `catch` arm over the entry `StateAcc` with no `LocalRebind` of the protected
-body's writes. So `^t := e` lexically inside the protected block of an
-`ensure:` (at any depth) stays a compile error (`UnmigratedLocalThreading`,
-BT-3947 lowers it), reported by the one recognizer in `validators/local_threading.rs`
-with the hint to assign first and return after the `ensure:`. An `on:do:`
+body's writes. The same holds for the statement form `t := t + 1. ^t`
+(measured on a BEAM in class, value-type and actor methods: the cleanup
+reads the old `t`, silently). So a `^` out of the protected block of an
+`ensure:` (at any depth) whose cleanup reads a local that block writes stays a
+compile error (`UnmigratedLocalThreading`, BT-3947 lowers it), reported by
+the one recognizer in `validators/local_threading.rs`
+(`report_nlr_out_of_ensure`) with the hint to keep the `^` out of the protected
+block; `dead_returned_assignment` asks the compiler and stays silent inside
+that error's span. An `on:do:`
 protected body has no such position: a `^` passes through its catch untouched,
 no handler runs, and nothing reads `t` afterwards. Everywhere else the write is
 dead, and the `beamtalk-lint` rule `dead_returned_assignment` warns and
