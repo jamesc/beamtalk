@@ -12,8 +12,11 @@
 
 TestCase subclass: BinaryTest
   field: bin = nil
+  field: binBytes = nil
 
-  setUp => self.bin := Binary fromBytes: #(65, 66, 67)
+  setUp =>
+    self.bin := Binary fromBytes: #(65, 66, 67)
+    self.binBytes := Binary fromBytes: #(1, 2, 3)
 
   // ═══════════════════════════════════════════════════════════════════
   // Serialization (class methods — existing)
@@ -230,12 +233,10 @@ TestCase subclass: BinaryTest
     self assert: (bin at: 3) equals: "l"
 
   testAtOutOfBoundsHigh =>
-    bin := Binary fromBytes: #(1, 2, 3)
-    self should: [bin at: 4] raise: #index_out_of_bounds
+    self should: [self.binBytes at: 4] raise: #index_out_of_bounds
 
   testAtOutOfBoundsZero =>
-    bin := Binary fromBytes: #(1, 2, 3)
-    self should: [bin at: 0] raise: #index_out_of_bounds
+    self should: [self.binBytes at: 0] raise: #index_out_of_bounds
 
   // BT-3021: indexing an empty collection is `empty_collection`, not
   // `index_out_of_bounds` — the latter is reserved for an index that misses a
@@ -267,12 +268,10 @@ TestCase subclass: BinaryTest
     self assert: (bin byteAt: 1) equals: 101
 
   testByteAtOutOfBoundsHigh =>
-    bin := Binary fromBytes: #(1, 2, 3)
-    self should: [bin byteAt: 3] raise: #index_out_of_bounds
+    self should: [self.binBytes byteAt: 3] raise: #index_out_of_bounds
 
   testByteAtOutOfBoundsNegative =>
-    bin := Binary fromBytes: #(1, 2, 3)
-    self should: [bin byteAt: -1] raise: #index_out_of_bounds
+    self should: [self.binBytes byteAt: -1] raise: #index_out_of_bounds
 
   testByteAtOnEmptyBinary =>
     bin := Binary fromBytes: #()
@@ -282,8 +281,7 @@ TestCase subclass: BinaryTest
   // byteSize — Binary-only, not overridden by String
   // ═══════════════════════════════════════════════════════════════════
   testByteSize =>
-    bin := Binary fromBytes: #(1, 2, 3)
-    self assert: bin byteSize equals: 3
+    self assert: self.binBytes byteSize equals: 3
 
   testByteSizeEmpty =>
     bin := Binary fromBytes: #()
@@ -312,22 +310,18 @@ TestCase subclass: BinaryTest
     self assert: result equals: (Binary fromBytes: #(4, 5))
 
   testPartEmptySlice =>
-    bin := Binary fromBytes: #(1, 2, 3)
-    result := bin part: 0 size: 0
+    result := self.binBytes part: 0 size: 0
     self assert: result equals: (Binary fromBytes: #())
 
   testPartFullSlice =>
-    bin := Binary fromBytes: #(1, 2, 3)
-    result := bin part: 0 size: 3
-    self assert: result equals: bin
+    result := self.binBytes part: 0 size: 3
+    self assert: result equals: self.binBytes
 
   testPartOutOfBounds =>
-    bin := Binary fromBytes: #(1, 2, 3)
-    self should: [bin part: 0 size: 10] raise: #index_out_of_bounds
+    self should: [self.binBytes part: 0 size: 10] raise: #index_out_of_bounds
 
   testPartNegativeOffset =>
-    bin := Binary fromBytes: #(1, 2, 3)
-    self should: [bin part: -1 size: 1] raise: #index_out_of_bounds
+    self should: [self.binBytes part: -1 size: 1] raise: #index_out_of_bounds
 
   // ═══════════════════════════════════════════════════════════════════
   // concat: — binary concatenation (Binary-only, not overridden)
@@ -345,14 +339,12 @@ TestCase subclass: BinaryTest
     self assert: result equals: "hi!"
 
   testConcatWithEmptyBinary =>
-    bin := Binary fromBytes: #(1, 2, 3)
     empty := Binary fromBytes: #()
-    self assert: (bin concat: empty) equals: bin
+    self assert: (self.binBytes concat: empty) equals: self.binBytes
 
   testConcatEmptyWithBinary =>
     empty := Binary fromBytes: #()
-    bin := Binary fromBytes: #(1, 2, 3)
-    self assert: (empty concat: bin) equals: bin
+    self assert: (empty concat: self.binBytes) equals: self.binBytes
 
   // ═══════════════════════════════════════════════════════════════════
   // toBytes and fromBytes: roundtrip
