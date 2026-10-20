@@ -2835,17 +2835,19 @@ impl<'d> Walker<'d> {
             .contains(&expr.unwrap_parens().span());
         // Every enclosing fold-like block (`do:`, a collection operation, a
         // loop or counted loop) that writes an outer local, with no
-        // conditional arm between it and the site (an arm is a frame of its
-        // own, measured): the union of their writes.
+        // measured conditional arm between it and the site (an arm is a frame
+        // of its own, measured; an arm of an unmeasured selector is not): the
+        // union of their writes.
         let mut fold_writes: Vec<EcoString> = Vec::new();
-        for (container, writes) in self
+        for ((container, writes), unmeasured) in self
             .containers
             .iter()
             .zip(&self.writes_outer_local_blocks)
+            .zip(&self.unmeasured_blocks)
             .rev()
         {
             match container {
-                Container::Arm => break,
+                Container::Arm if !unmeasured => break,
                 Container::DoBody
                 | Container::ListOpBody
                 | Container::LoopBody

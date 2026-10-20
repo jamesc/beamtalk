@@ -4144,9 +4144,29 @@ fn evaluated_block_in_a_block_of_an_unmeasured_selector() {
         "flag := true\nflag or: [[n := true. n] value]",
         "#(1) reject: [:z | [n := true. n] value]",
         "#(1) anySatisfy: [:z | [n := true. n] value]",
-        "i := 0\n[i >= 1] whileFalse: [i := i + 1]\n#(1) keysAndValuesDo: [:k :v | [n := 3. n] value]",
+        "i := 0\n[i >= 1] whileFalse: [i := i + 1. [n := 3. n] value]",
+        "#(1) keysAndValuesDo: [:k :v | [n := 3. n] value]",
     ] {
         let src = in_actor(body);
         assert!(flags_bt3981(&src), "{src}");
     }
+}
+
+/// An arm of an unmeasured selector does not end the walk to an enclosing fold
+/// that writes an outer local.
+#[test]
+fn an_unmeasured_arm_does_not_separate_a_site_from_its_fold() {
+    for body in [
+        "r := 0\nflag := true\n#(1) do: [:y | r := 1. flag or: [[n := true. n] value. true]]\nr",
+        "r := 0\n#(1) do: [:y | r := 1. #(1) at: 5 ifAbsent: [[n := 3. n] value. 4]]\nr",
+        "r := 0\n#(1) do: [:y | r := 1. nil ifNil: [3] ifNotNil: [:v | [n := 3. n] value. 4]]\nr",
+    ] {
+        let src = in_actor(body);
+        assert!(flags_bt3981(&src), "{src}");
+    }
+    // A measured arm still separates them.
+    let src = in_actor(
+        "r := 0\nflag := true\n#(1) do: [:y | r := 1. flag and: [[n := true. n] value. true]]\nr",
+    );
+    assert!(!flags_bt3981(&src), "{src}");
 }
