@@ -3124,8 +3124,8 @@ impl CoreErlangGenerator {
     ///
     /// The receiver is evaluated once per message rather than hoisted into a
     /// single shared binding — harmless here since a `tier2_block_params`/
-    /// `tier2_local_vars`/`self.field` receiver is always a pure variable or
-    /// field read, never an expression with side effects. Each message is
+    /// `tier2_local_vars` receiver is always a pure variable read, never an
+    /// expression with side effects. Each message is
     /// generated with the *current* threaded state (via
     /// `generate_block_value_call_stateful`, which reads
     /// `self.current_state_var()` internally), then its

@@ -334,7 +334,8 @@ impl CoreErlangGenerator {
     /// `detect_tier2_self_send` promoted for a self-send to the current
     /// method: as a passthrough at a position another call site promoted
     /// (BT-3936). (A block that writes a field is no longer promoted:
-    /// BT-3922 makes passing one to a self-send a compile error.) Its seed is the live `State`, so it reads fields
+    /// BT-3922 makes passing one to a self-send a compile error.) Its seed
+    /// is the live `State`, so it reads fields
     /// and may `^`; a block whose run changed actor state (a field write, or
     /// a self-send that changed state) returns a different map, and with the
     /// fold gone that change has no way back, so it raises
