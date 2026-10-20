@@ -3421,7 +3421,7 @@ Server subclass: PeriodicWorker
 - Defined on `Server` with a **default no-op** implementation — messages are ignored unless you override it.
 - **Error handling:** errors in `handleInfo:` are logged and the server continues (log-and-continue). A bad message does not crash the server.
 - Sending `handleInfo:` to a plain `Actor` raises `doesNotUnderstand` — only Server subclasses have this method.
-- **Lint `handleinfo-no-catch-all`** (ADR 0134): a `handleInfo:` whose body is a `match:` with no catch-all arm warns at compile time, because `match:` with no matching arm raises `#pattern_mismatch` on every message no arm names — and under ADR 0134 an error in `handleInfo:` crashes the server. Add `_ -> nil` as the last arm to ignore unexpected messages. A tuple-pattern arm (`{tag, payload}`) is not a catch-all. Configure it under `[diagnostics]` as `handleinfo-no-catch-all`; it has no dedicated `@expect` category.
+- **Lint `handleinfo-no-catch-all`** (ADR 0134): a `handleInfo:` whose body is a `match:` with no catch-all arm warns at compile time, because `match:` with no matching arm raises `#pattern_mismatch` on every message no arm names — which, once ADR 0134's crash-on-error change ships (BT-3958), crashes the server instead of being logged. Add `_ -> nil` as the last arm to ignore unexpected messages. A tuple-pattern arm (`{tag, payload}`) is not a catch-all. Configure it under `[diagnostics]` as `handleinfo-no-catch-all`; it has no dedicated `@expect` category.
 
   ```beamtalk
   handleInfo: msg =>
