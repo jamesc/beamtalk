@@ -1114,6 +1114,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // Reject sends to a local bound only to `self` in actor methods (BT-3998)
+    validators::check_actor_self_alias_send(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // Warn on redundant assignment (x := x)
     validators::check_redundant_assignment(module, &mut result.diagnostics);
     // Warn on literal boolean conditions (always true / always false)

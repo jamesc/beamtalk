@@ -105,3 +105,7 @@ t := Adr0132ReplCallee calleeDirect: [t + 1]
 // see the value from when it was made, not the one the method has set since.
 
 // @load-error tests/repl-protocol/fixtures/bt3952_stale_field_read_error.bt => `self.total` is read in a block that runs later; it would see the value from when the block was made
+
+// BT-3998: a send to a local bound only to `self` is a compile error.
+
+// @load-error tests/repl-protocol/fixtures/bt3998_self_alias_error.bt => `other` is `self`

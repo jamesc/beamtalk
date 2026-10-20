@@ -530,10 +530,7 @@ impl CoreErlangGenerator {
     ///
     /// # Dispatch Strategy
     ///
-    /// - **Self-sends in actor context** (`self someMethod!`): Calls `safe_dispatch` directly
-    ///   but discards both the result and any state update — fire-and-forget semantics
-    ///   within the same process.
-    /// - **All other sends**: Routes through `beamtalk_message_dispatch:cast/3`, which
+    /// - **All sends, including `self someMethod!`** (BT-3998): Routes through `beamtalk_message_dispatch:cast/3`, which
     ///   extracts the actor PID and calls `beamtalk_actor:cast_send/3`. Non-actor
     ///   receivers are silently ignored.
     ///
@@ -544,53 +541,11 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        // Self-sends with ! in actor context: direct dispatch, discard result.
-        // Only use direct safe_dispatch when NOT inside a block (block_depth == 0).
-        // Blocks may execute in a different process (Timer callbacks, cross-actor callbacks),
-        // so self-cast sends inside blocks must route through the actor mailbox via
-        // beamtalk_message_dispatch:cast/3 to reach the actor's gen_server process.
-        if self.context == CodeGenContext::Actor && self.block_depth == 0 {
-            if let Expression::Identifier(id) = receiver {
-                if id.name == "self" {
-                    return self.generate_self_cast_send(selector, arguments);
-                }
-            }
-        }
-
-        // Non-self cast sends (and self-casts inside blocks): route through
-        // beamtalk_message_dispatch:cast/3
+        // Every cast, including `self foo!` (BT-3998), routes through
+        // beamtalk_message_dispatch:cast/3 to the receiver's mailbox. A
+        // self-cast therefore lands after the current message (what `!`
+        // means), instead of running now and dropping its State.
         self.generate_runtime_cast(receiver, selector, arguments)
-    }
-
-    /// Generates a self-cast send in actor context.
-    ///
-    /// Calls `safe_dispatch` synchronously but discards the result (and any state
-    /// mutation from the callee). Returns `'ok'` as the expression value.
-    ///
-    /// # Generated Code
-    ///
-    /// ```erlang
-    /// let _Cast0 = call 'module':'safe_dispatch'('selector', [Args], State) in 'ok'
-    /// ```
-    fn generate_self_cast_send(
-        &mut self,
-        selector: &MessageSelector,
-        arguments: &[Expression],
-    ) -> Result<Document<'static>> {
-        let selector_atom = selector.name().to_string();
-        let discard_var = self.fresh_temp_var("Cast");
-        let current_state = self.current_state_var();
-        let args_doc = self.capture_argument_list_doc(arguments)?;
-
-        let doc = docvec![
-            "let ",
-            leaf::var(discard_var),
-            " = ",
-            self.safe_dispatch_call_doc(selector_atom, args_doc, current_state),
-            " in 'ok'",
-        ];
-
-        Ok(doc)
     }
 
     /// Generates unified runtime cast via `beamtalk_message_dispatch:cast/3`.

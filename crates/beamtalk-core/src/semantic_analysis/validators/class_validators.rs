@@ -1300,6 +1300,107 @@ pub(crate) fn check_actor_field_mutation_in_closure(
     }
 }
 
+/// Rejects a send to a local that is bound only to `self` in an actor
+/// instance method (BT-3998).
+///
+/// `other := self. other foo` compiles as an ordinary send, not a self-send:
+/// the callee runs against the `State` captured when the send was made and
+/// its `State` is not threaded back, so a field write made before the send is
+/// not seen and a write made by the callee is lost, silently. Routing it
+/// through the self-dispatch path would touch ~25 `receiver == self`
+/// recognisers in codegen alone, so the shape is an error instead.
+///
+/// A local is bound only to `self` when it has at least one assignment in the
+/// method body (nested blocks included) and every assignment's value is
+/// `self`. A name that is also a method or block parameter is a different
+/// variable and is left alone. Value types (immutable) and class methods are
+/// not checked.
+pub(crate) fn check_actor_self_alias_send(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        if hierarchy.resolve_class_kind(class.name.name.as_str()) != ClassKind::Actor {
+            continue;
+        }
+        for method in &class.methods {
+            check_method_for_self_alias_send(method, diagnostics);
+        }
+    }
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method
+            || hierarchy.resolve_class_kind(standalone.class_name.name.as_str()) != ClassKind::Actor
+        {
+            continue;
+        }
+        check_method_for_self_alias_send(&standalone.method, diagnostics);
+    }
+}
+
+fn is_plain_self(expr: &Expression) -> bool {
+    matches!(expr.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
+}
+
+fn check_method_for_self_alias_send(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
+    use std::collections::{HashMap, HashSet};
+    // name -> whether every assignment to it binds `self`
+    let mut only_self: HashMap<EcoString, bool> = HashMap::new();
+    let mut shadowed: HashSet<EcoString> = method
+        .parameters
+        .iter()
+        .map(|p| p.name.name.clone())
+        .collect();
+    for stmt in &method.body {
+        walk_expression(&stmt.expression, &mut |e| match e {
+            Expression::Assignment { target, value, .. } => {
+                if let Expression::Identifier(id) = target.as_ref() {
+                    let entry = only_self.entry(id.name.clone()).or_insert(true);
+                    *entry &= is_plain_self(value);
+                }
+            }
+            Expression::Block(block) => {
+                shadowed.extend(block.parameters.iter().map(|p| p.name.clone()));
+            }
+            _ => {}
+        });
+    }
+    let self_local = |expr: &Expression| -> Option<EcoString> {
+        match expr.unwrap_parens() {
+            Expression::Identifier(id)
+                if only_self.get(&id.name) == Some(&true) && !shadowed.contains(&id.name) =>
+            {
+                Some(id.name.clone())
+            }
+            _ => None,
+        }
+    };
+    let mut found: Vec<(EcoString, Span)> = Vec::new();
+    for stmt in &method.body {
+        walk_expression(&stmt.expression, &mut |e| match e {
+            Expression::MessageSend { receiver, .. } | Expression::Cascade { receiver, .. } => {
+                if let Some(name) = self_local(receiver) {
+                    found.push((name, receiver.span()));
+                }
+            }
+            _ => {}
+        });
+    }
+    for (name, span) in found {
+        diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "`{name}` is `self`: a send to it does not see this method's field writes, \
+                     and its own writes are lost"
+                ),
+                span,
+            )
+            .with_hint(format!("send to `self` directly instead of `{name}`"))
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+}
+
 /// Builds the diagnostic for an unsafe field mutation in a block closure.
 ///
 /// Shared by both `MessageSend` and `Cascade` branches to keep the error
@@ -2320,6 +2421,58 @@ mod tests {
         );
         assert!(diagnostics[0].severity == Severity::Error);
         assert!(diagnostics[0].message.contains("field:"));
+    }
+
+    // ── Send to a local bound only to self (BT-3998) ───────────────────────────
+
+    fn self_alias_diagnostics(src: &str) -> Vec<Diagnostic> {
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_actor_self_alias_send(&module, &hierarchy, &mut diagnostics);
+        diagnostics
+    }
+
+    #[test]
+    fn actor_send_to_self_local_errors() {
+        let d = self_alias_diagnostics(
+            "Actor subclass: A\n  state: x = 0\n  getX => self.x\n  m =>\n    self.x := 5\n    other := self\n    other getX",
+        );
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].message.contains("`other` is `self`"));
+    }
+
+    #[test]
+    fn actor_send_to_self_local_in_block_and_cascade_errors() {
+        let d = self_alias_diagnostics(
+            "Actor subclass: A\n  state: x = 0\n  m =>\n    o := self\n    #(1) do: [:i | o setX: i]\n    o foo; bar",
+        );
+        assert_eq!(d.len(), 2, "{d:?}");
+    }
+
+    #[test]
+    fn actor_local_rebound_to_other_value_is_not_flagged() {
+        let d = self_alias_diagnostics(
+            "Actor subclass: A\n  m =>\n    o := self\n    o := 3\n    o abs",
+        );
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn actor_parameter_named_like_self_local_is_not_flagged() {
+        let d = self_alias_diagnostics("Actor subclass: A\n  m: o =>\n    o foo");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn value_type_send_to_self_local_is_allowed() {
+        let d = self_alias_diagnostics(
+            "Value subclass: V\n  field: n = 3\n  getN => self.n\n  m =>\n    o := self\n    o getN",
+        );
+        assert!(d.is_empty(), "{d:?}");
     }
 
     // ── Actor field mutation in closure tests ──────────────────────────────────

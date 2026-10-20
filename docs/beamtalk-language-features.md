@@ -3143,6 +3143,15 @@ return, or argument is a parse error (`cast_in_expression_error`).
 
 Use `!` when you intentionally don't need the result and don't want to block.
 
+`self foo!` inside an actor's own method is a real cast to the actor's own
+mailbox: `foo` runs after the current message finishes, and its field writes
+are kept. It does not run inline, so the rest of the current method does not
+see its effects.
+
+A send to a local that is bound only to `self` (`other := self. other foo`) is
+a compile error: it would run against the state the method had when the send
+was made and lose the callee's writes. Send to `self` directly.
+
 ### Deadlock Prevention
 
 Because `.` sends block the caller (gen_server:call), two actors calling each other creates a deadlock. The default timeout is **5000ms**, after which a `#timeout` error is raised:

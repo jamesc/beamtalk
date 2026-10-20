@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture that triggers a compile error: an Actor method sends to a local
+// bound only to `self` (BT-3998). The send would not see the method's field
+// writes and its own writes would be lost. Used by
+// tests/repl-protocol/cases/adr0133_escaping_block.btscript via @load-error.
+
+Actor subclass: Bt3998SelfAliasError
+  state: x = 0
+
+  getX => self.x
+
+  readThroughAlias =>
+    self.x := 5
+    other := self
+    other getX
