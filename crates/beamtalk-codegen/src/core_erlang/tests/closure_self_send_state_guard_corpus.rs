@@ -10,6 +10,9 @@
 //! inside a closure: none missing (a silent drop), none extra (a spurious
 //! raise on a send that threads State normally).
 //!
+//! `super` sends (BT-3985) are checked the same way by
+//! `every_super_send_in_a_closure_is_guarded_and_no_other_is`.
+//!
 //! The behavioural side (state-changing sends raise, read-only ones answer) is
 //! `stdlib/test/closure_self_send_matrix_test.bt`.
 
@@ -22,6 +25,8 @@ const KINDS: &[(&str, &str)] = &[
     ("unary", "self peek"),
     ("keyword", "self peek: x"),
     ("keyword2", "self peek: x with: 1"),
+    // BT-3985: a binary selector sent to `self` is a self-dispatch too.
+    ("binary", "self + x"),
 ];
 
 /// Hosts that make the block a real closure: (label, template with `{B}`).
@@ -53,6 +58,7 @@ fn actor(header: &str, body: &str) -> String {
   peek => self.total
   peek: x => self.total + x
   peek: x with: y => self.total + x + y
+  + x => self.total + x
   run => {body}
 "
     )
@@ -104,7 +110,67 @@ fn every_self_send_in_a_closure_is_guarded_and_no_other_is() {
             }
         }
     }
-    assert_eq!(checked, 2 * 3 * 9);
+    assert_eq!(checked, 2 * 4 * 9);
+}
+
+/// `super` send kinds: (label, expression using `x`).
+const SUPER_KINDS: &[(&str, &str)] = &[
+    ("unary", "super peek"),
+    ("keyword", "super peek: x"),
+    ("binary", "super + x"),
+];
+
+fn super_actor(header: &str, body: &str) -> String {
+    format!(
+        "Actor subclass: Base
+  state: total = 0
+  peek => self.total
+  peek: x => self.total := self.total + x
+  + x => self.total := self.total + x
+
+{header} P
+  state: items = #(1, 2)
+  each: blk => self.items collect: blk
+  run => {body}
+"
+    )
+}
+
+#[test]
+fn every_super_send_in_a_closure_is_guarded_and_no_other_is() {
+    // The instance `super` path (`beamtalk_dispatch:super/5`) dispatches
+    // against the current State like a self-send, so inside a Tier 1 closure
+    // it carries the same guard. A method-level `super` send threads State
+    // (no guard); a `super` in a Value or class method has no State at all.
+    let mut checked = 0;
+    for header in ["Base subclass:", "sealed Base subclass:"] {
+        let baseline = guards(&super_actor(header, "1"));
+        let per_send = guards(&super_actor(header, "self each: [:x | super peek: x]")) - baseline;
+        assert!(
+            per_send >= 1,
+            "{header}: a closure super-send must be guarded"
+        );
+        for (kind, expr) in SUPER_KINDS {
+            for (host, template) in CLOSURE_HOSTS {
+                let body = template.replace("{B}", expr);
+                let n = guards(&super_actor(header, &body)) - baseline;
+                assert_eq!(
+                    n,
+                    sends(template) * per_send,
+                    "{header} {kind} in {host}: one guard per super-send inside a closure\n{body}"
+                );
+                checked += 1;
+            }
+            let body = expr.to_string();
+            let n = guards(&super_actor(header, &body)) - baseline;
+            assert_eq!(
+                n, 0,
+                "{header} {kind}: a method-level super-send threads State, no guard\n{body}"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 2 * 3 * 7);
 }
 
 #[test]

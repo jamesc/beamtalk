@@ -266,9 +266,16 @@ every `Error`, and the error stays catchable rather than being made special.
 
 Value types and class methods do not need the check: a `Value` method cannot
 assign a slot, so a self-send never changes anything to lose, and a class
-method has no `State` (class variables are written in place, ADR 0130). Not
-covered: a user-defined binary selector sent to `self`, which is not compiled
-as a self-dispatch at all and drops the change at method level too (BT-3985).
+method has no `State` (class variables are written in place, ADR 0130). A user-defined binary
+selector sent to `self` in an actor (`self + 5`) compiles through the same
+self-dispatch as a unary or keyword send (BT-3985), so it threads `State` at
+method level and meets this check in a closure; in a class method it is a
+direct class-side send. A `super` send inside a closure (the
+`beamtalk_dispatch:super/5` instance path) runs the same comparison on its
+reply. A `super` send inside a literal block the compiler would otherwise
+inline (`self.items do: [:x | super bump: x]`) is not a State-threading
+position, so a callee that changes state raises here instead of threading;
+threading it is a separate piece of work.
 
 ## Prior Art
 
