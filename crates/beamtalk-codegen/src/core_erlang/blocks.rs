@@ -529,34 +529,6 @@ impl CoreErlangGenerator {
         Ok((wrapper_doc, true))
     }
 
-    /// The names `expr` assigns (`x := ...`), not entering a block literal (a
-    /// closure's assignments are its own business). Source order, once each.
-    fn assigned_outside_closures(expr: &Expression) -> Vec<String> {
-        let mut block_spans = Vec::new();
-        beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
-            if let Expression::Block(b) = e {
-                block_spans.push(b.span);
-            }
-        });
-        let mut names: Vec<String> = Vec::new();
-        beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
-            let Expression::Assignment { target, .. } = e else {
-                return;
-            };
-            let Expression::Identifier(id) = target.as_ref() else {
-                return;
-            };
-            let at = e.span();
-            let in_block = block_spans
-                .iter()
-                .any(|b| b.start() <= at.start() && at.end() <= b.end());
-            if !in_block && !names.iter().any(|n| n == id.name.as_str()) {
-                names.push(id.name.to_string());
-            }
-        });
-        names
-    }
-
     /// BT-3939 (PIN-BUG, fixed by BT-3947's frame work): a Tier 2 block body
     /// lowers a loop or fold inside an opaque `let _ = ( ... )`, so the loop's
     /// rebind of a local the body bound (`n := 0. xs do: [:y | n := n + y]. n`)
@@ -572,7 +544,8 @@ impl CoreErlangGenerator {
     /// destructured, however first bound) and that is neither a block parameter
     /// nor a captured-mutated variable the caller seeds into `StateAcc`. A name
     /// assigned elsewhere in the same statement, even after the construct, also
-    /// counts (conservative: see `assigned_outside_closures`). `scope_depth` is the variable-scope depth at the body's entry.
+    /// counts (conservative: see `names_assigned_outside_nested_blocks`).
+    /// `scope_depth` is the variable-scope depth at the body's entry.
     fn reject_loop_rebind_of_body_local(
         &self,
         stmt: &Expression,
@@ -596,7 +569,13 @@ impl CoreErlangGenerator {
         // nor the construct's write to it. Conservatively, every name assigned
         // anywhere in the statement outside a closure counts as bound by the
         // body (an assignment *after* the construct too).
-        let assigned = Self::assigned_outside_closures(subject);
+        let assigned: Vec<String> =
+            beamtalk_core::semantic_analysis::block_facts::names_assigned_outside_nested_blocks(
+                subject,
+            )
+            .into_iter()
+            .map(|n| n.to_string())
+            .collect();
         let names = self.reachable_threaded_locals(subject, &assigned);
         let Some(local) = names.into_iter().find(|n| {
             (self.bound_since(n, scope_depth) || assigned.contains(n))

@@ -100,6 +100,9 @@ const SAME_STATEMENT_POSITIONS: &[&str] = &[
     "self note: (n := 0) with: ({c}). n",
     "self note: (n := 0); note: ({c}). n",
     "r := (n := 0) max: ({c}). n",
+    // Bound by a destructuring in the same statement.
+    "self note: ({n, m} := #(0, 0)) with: ({c}). n",
+    "r := #[({n, m} := #(0, 0)), ({c})]. n",
 ];
 
 // PIN-BUG BT-3947: answers the pre-construct `n` if it compiles.
