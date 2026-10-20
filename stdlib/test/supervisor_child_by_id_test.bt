@@ -186,6 +186,19 @@ TestCase subclass: SupervisorChildByIdTest
     self assert: pool count equals: 1
     sup stop
 
+  // === Integer ids (ADR 0135 §3) ===
+  testIntegerIdsWorkEndToEnd =>
+    p := Bt3962Pair spawn
+    self assert: (p whichChildren collect: [:c | c id]) equals: #(1, 2)
+    first := (p childWithId: 1) unwrap
+    self assert: (p children includes: first) equals: true
+    self assert: (p terminateChild: 1) isOk equals: true
+    self assert: (p childWithId: 1) unwrap equals: nil
+    fresh := (p restartChild: 1) unwrap
+    self assert: (fresh =:= first) equals: false
+    self assert: p count equals: 2
+    p stop
+
   // === stale handle ===
   testEveryMethodReportsStaleHandleAfterStop =>
     sup := Bt3966PoolSup spawn

@@ -1193,8 +1193,16 @@ whichChildren(Self) ->
     Pid = element(4, Self),
     ClassName = element(2, Self),
     with_live_supervisor(ClassName, children, fun() ->
-        Infos = supervisor_child_entries(supervisor:which_children(Pid)),
-        {ok, [Child || #{status := running, child := Child} <- Infos]}
+        %% Running entries only, wrapped directly: no `SupervisorChild` maps
+        %% (and no `childClass` lookups) are built for `children`.
+        Running = [E || {_Id, P, _T, _M} = E <- supervisor:which_children(Pid), is_pid(P)],
+        ModClasses = module_classes(Running),
+        {ok,
+            lists:reverse([
+                child_object(ChildClass, Module, P)
+             || {_Id, P, _T, Mods} <- Running,
+                {ChildClass, Module} <- [entry_class(Mods, ModClasses)]
+            ])}
     end).
 
 -doc """
@@ -1451,14 +1459,27 @@ terminateChild(Self, Arg) ->
                     Matches ->
                         {error, ambiguous_child_error(SupClass, 'terminate:', Matches)}
                 end;
-            false ->
+            false when is_tuple(Arg), tuple_size(Arg) >= 4, is_pid(element(4, Arg)) ->
                 %% DynamicSupervisor case: terminate by child process pid
                 ChildPid = element(4, Arg),
                 handle_terminate_child_result(
                     SupClass,
                     #{child_pid => ChildPid},
                     supervisor:terminate_child(SupPid, ChildPid)
-                )
+                );
+            false ->
+                %% Not a child object (e.g. a Symbol id sent to a
+                %% DynamicSupervisor, whose children have no ids, BT-3966).
+                {error,
+                    beamtalk_error:with_details(
+                        beamtalk_error:new(
+                            type_error,
+                            SupClass,
+                            'terminateChild:',
+                            <<"Pass the child object to terminate">>
+                        ),
+                        #{child => Arg}
+                    )}
         end
     catch
         exit:{noproc, _} ->
@@ -1561,9 +1582,10 @@ supervisor_child_entry({Id, PidOrStatus, Type, Mods}, ModClasses) ->
         childClass => child_class_object(ClassName)
     }.
 
-%% Module -> Beamtalk class name for the first module of each entry: one read
-%% of the class metadata table (`module_to_class_map/0`), not one per child.
--spec module_classes([which_child()]) -> #{module() => atom()}.
+%% Module -> Beamtalk class name map for resolving `Entries`' modules: one
+%% read of the class metadata table (`module_to_class_map/0`), not one per
+%% child, and none when there is nothing to resolve.
+-spec module_classes([term()]) -> #{module() => atom()}.
 module_classes([]) ->
     #{};
 module_classes(_Children) ->
@@ -1591,18 +1613,28 @@ child_class_object(ClassName) ->
 
 %% The `which_children` entries whose modules include `Module`, in any state.
 -spec children_for_module([which_child()], module()) -> [which_child()].
+%% A `simple_one_for_one` child has no id (`undefined`) and cannot be addressed
+%% by id, so it never matches: `terminate:`/`which:` by class on a
+%% DynamicSupervisor find nothing rather than an `undefined` id per child.
 children_for_module(Children, Module) ->
-    [Entry || {_Id, _P, _T, Mods} = Entry <- Children, is_list(Mods), lists:member(Module, Mods)].
+    [
+        Entry
+     || {Id, _P, _T, Mods} = Entry <- Children,
+        Id =/= undefined,
+        is_list(Mods),
+        lists:member(Module, Mods)
+    ].
 
 %% The child object for a pid `supervisor:restart_child/2` just returned.
 -spec restarted_child(pid(), atom() | integer(), pid() | undefined) ->
     beamtalk_object() | pid() | nil.
 restarted_child(SupPid, Id, ChildPid) when is_pid(ChildPid) ->
-    case lists:keyfind(Id, 1, supervisor:which_children(SupPid)) of
-        {Id, _, _, Mods} = Entry ->
-            {ClassName, Module} = entry_class(Mods, module_classes([Entry])),
+    %% `get_childspec/2` reads one spec, not the whole child list.
+    case supervisor:get_childspec(SupPid, Id) of
+        {ok, #{modules := Mods}} ->
+            {ClassName, Module} = entry_class(Mods, module_classes([Mods])),
             child_object(ClassName, Module, ChildPid);
-        false ->
+        _ ->
             ChildPid
     end;
 restarted_child(_SupPid, _Id, _NoPid) ->

@@ -320,7 +320,14 @@ abstract Object subclass: Supervisor
   /// A `#permanent` or `#transient` child keeps its spec (`#stopped` in
   /// `whichChildren`) until `restartChild:` or `deleteChild:`. Other
   /// failures give `#terminate_failed`; a non-Symbol, non-Integer id
-  /// `#type_error`; a stopped supervisor `#stale_handle`.
+  /// `#type_error`; a stopped supervisor `#stale_handle`. Because of the
+  /// idempotence, a misspelled id also answers `ok: nil`: check ids with
+  /// `childWithId:` (`#child_not_found`) where that matters.
+  ///
+  /// Never send this (or `terminate:`) from the child being terminated: the
+  /// supervisor waits for that child to stop while the child waits for the
+  /// supervisor's reply, so the call hangs until the child's shutdown
+  /// timeout kills it.
   ///
   /// ## Examples
   /// ```beamtalk

@@ -568,6 +568,78 @@ which_and_terminate_by_class_ambiguous_test() ->
         gen_server:stop(SupPid)
     end.
 
+declaration_order_survives_one_for_all_restart_test() ->
+    %% The reversal in supervisor_child_entries/1 relies on OTP keeping its
+    %% newest-first child list; a one_for_all / rest_for_one restart rebuilds
+    %% that list, so pin that the order still comes out as declared.
+    Self = self(),
+    lists:foreach(
+        fun(Strategy) ->
+            ChildSpecs = [
+                #{
+                    id => Id,
+                    start => {?MODULE, start_worker, [Self]},
+                    restart => permanent,
+                    shutdown => brutal_kill,
+                    type => worker,
+                    modules => []
+                }
+             || Id <- [o1, o2, o3]
+            ],
+            SupFlags = #{strategy => Strategy, intensity => 5, period => 5},
+            {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, ChildSpecs}),
+            [_, W2, _] = [
+                receive
+                    {worker_ready, W} -> W
+                after 1000 -> error(worker_not_ready)
+                end
+             || _ <- ChildSpecs
+            ],
+            try
+                Sup = make_supervisor_tuple('BT3966Order', bt3966_order_mod, SupPid),
+                exit(W2, kill),
+                %% one_for_all restarts all three, rest_for_one o2 and o3.
+                NRestarted =
+                    case Strategy of
+                        one_for_all -> 3;
+                        rest_for_one -> 2
+                    end,
+                [
+                    receive
+                        {worker_ready, _} -> ok
+                    after 1000 -> error(worker_not_restarted)
+                    end
+                 || _ <- lists:seq(1, NRestarted)
+                ],
+                {ok, Infos} = beamtalk_supervisor:childInfos(Sup),
+                ?assertEqual([o1, o2, o3], [Id || #{id := Id} <- Infos]),
+                {ok, Kids} = beamtalk_supervisor:whichChildren(Sup),
+                ?assertEqual(
+                    [P || {_, P, _, _} <- lists:reverse(supervisor:which_children(SupPid))],
+                    Kids
+                )
+            after
+                unlink(SupPid),
+                gen_server:stop(SupPid)
+            end
+        end,
+        [one_for_all, rest_for_one]
+    ).
+
+dynamic_terminate_child_non_child_arg_is_type_error_test() ->
+    %% A Symbol sent to DynamicSupervisor>>terminateChild: used to crash with
+    %% badarg in element/2; it is a type_error Result now.
+    SupPid = start_dynamic_supervisor(),
+    try
+        Self = make_supervisor_tuple('BT3966DynTerm', bt3966_dyn_term_mod, SupPid),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = type_error}},
+            beamtalk_supervisor:terminateChild(Self, a1)
+        )
+    after
+        gen_server:stop(SupPid)
+    end.
+
 dynamic_children_empty_test() ->
     SupPid = start_dynamic_supervisor(),
     try
@@ -2774,14 +2846,13 @@ terminate_child_static_idempotent_double_call_test() ->
     end.
 
 terminate_child_static_terminate_failed_test() ->
-    %% A non-`not_found` error from supervisor:terminate_child/2
-    %% on the static path maps to {error, #beamtalk_error{kind =
-    %% terminate_failed}}.
+    %% A non-`not_found` error from supervisor:terminate_child/2 maps to
+    %% {error, #beamtalk_error{kind = terminate_failed}}.
     %%
-    %% Trigger: call the static path (class object arg) against a
-    %% simple_one_for_one supervisor with one child of that class's module.
-    %% The child's id is `undefined`, for which OTP returns
-    %% {error, simple_one_for_one}: a genuine non-not_found failure.
+    %% Trigger: terminate by id on a simple_one_for_one supervisor, whose
+    %% children have no ids: OTP returns {error, simple_one_for_one}. The
+    %% class path no longer reaches this (BT-3966: `undefined` ids never
+    %% match a class), so it finds nothing and leaves the child running.
     {ok, SupPid} = supervisor:start_link(
         ?MODULE,
         {simple_one_for_one, #{
@@ -2793,33 +2864,22 @@ terminate_child_static_terminate_failed_test() ->
             modules => [bt1998_fail_child_mod]
         }}
     ),
-    {ok, _Child} = supervisor:start_child(SupPid, [self()]),
+    {ok, Child} = supervisor:start_child(SupPid, [self()]),
     receive
         {worker_ready, _} -> ok
     after 1000 -> error(worker_not_ready)
     end,
     Self = make_supervisor_tuple('BT1998StaticFail', bt1998_static_fail_mod, SupPid),
-    FakeClassPid = spawn(fun() ->
-        (fun Loop() ->
-            receive
-                {'$gen_call', From, class_name} ->
-                    gen_server:reply(From, some_class_name),
-                    Loop();
-                stop ->
-                    ok
-            end
-        end)()
-    end),
     try
-        ClassArg =
-            {beamtalk_object, 'BT1998StaticFailChild class', bt1998_fail_child_mod, FakeClassPid},
-        Result = beamtalk_supervisor:terminateChild(Self, ClassArg),
+        Result = beamtalk_supervisor:terminateChildId(Self, some_id),
         ?assertMatch({error, #beamtalk_error{kind = terminate_failed}}, Result),
         {error, BtError} = Result,
         ?assertEqual('BT1998StaticFail', BtError#beamtalk_error.class),
-        ?assertEqual('terminateChild:', BtError#beamtalk_error.selector)
+        ?assertEqual('terminateChild:', BtError#beamtalk_error.selector),
+        ClassArg = {beamtalk_object, 'BT1998StaticFailChild class', bt1998_fail_child_mod, self()},
+        ?assertEqual({ok, nil}, beamtalk_supervisor:terminateChild(Self, ClassArg)),
+        ?assert(is_process_alive(Child))
     after
-        FakeClassPid ! stop,
         gen_server:stop(SupPid)
     end.
 
