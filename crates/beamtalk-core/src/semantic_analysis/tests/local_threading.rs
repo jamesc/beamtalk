@@ -2865,6 +2865,69 @@ fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
     }
 }
 
+/// BT-3952: a block that sends to `self` or `super` dispatches against the
+/// `State` it captured (measured: a stored and a returned `[self total]` both
+/// answered the old value), so when it is stored, returned or placed in a
+/// literal (directly or through a local) it is an error at the send. A block
+/// passed to the actor's own method (BT-3936's runtime check covers it), run
+/// in place, or called through a local later is not.
+#[test]
+fn section6_actor_block_that_sends_to_self_and_is_stored_is_an_error() {
+    for body in [
+        "^[self total]",
+        "^[super total]",
+        "self.h := [self total]\nnil",
+        "#[[self total]]",
+        "^[:x | #(1) do: [:y | self record: y]]",
+        "b := [self total]\n^b",
+        "b := [self total]\nself.h := b\nnil",
+        "b := [self total]\n#[b]",
+    ] {
+        let src = in_actor(body);
+        let diags = adr0131_diagnostics(&src);
+        let d = diags
+            .iter()
+            .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
+            .unwrap_or_else(|| panic!("{src}: {diags:?}"));
+        assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
+        assert!(
+            d.message.contains("is sent in a block that runs later"),
+            "{d:?}"
+        );
+        assert!(
+            ["self ", "super "]
+                .iter()
+                .any(|at| src[d.span.start() as usize..].starts_with(at)),
+            "reported at the send: {src}"
+        );
+    }
+    for body in [
+        // Passed to the actor's own method: BT-3936's runtime check.
+        "self each: [:x | self record: x]\nnil",
+        "self each: [self total]\nnil",
+        // Run in place, or a local called later.
+        "self.items do: [:x | self record: x]\nnil",
+        "b := [self total]\nb value",
+        "b := [self total]\nself bump\nb value",
+        "b := [self total]\nself each: b\nnil",
+        // The value is computed first and captured.
+        "t := self total\n^[t]",
+    ] {
+        let src = in_actor(body);
+        assert_eq!(
+            section6_errors(&src),
+            0,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
+        );
+    }
+    // Class methods and value types are not actors.
+    for body in ["^[self total]", "self.h := [self total]\nnil"] {
+        assert_eq!(section6_errors(&in_class(body)), 0, "{body}");
+        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
+    }
+}
+
 /// A field write in a block that the compiler lowers in place, or that never
 /// leaves the method, is not an escape.
 #[test]

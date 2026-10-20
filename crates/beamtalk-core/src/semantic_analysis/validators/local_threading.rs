@@ -53,9 +53,10 @@ use crate::semantic_analysis::block_facts::{
     is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site,
     is_threaded_frame_body, literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
     loop_body_producer_sites, may_change_actor_state, operand_producer_writes, outer_local_writes,
-    outer_state_reads, outer_state_writes, producer_body_block, receiver_statically_not_dictionary,
-    repl_arm_producer_sites, repl_evaluated_block, repl_operand_sites, repl_producer_writes,
-    root_producer_writes, sequenced_operand_sites, value_blocks, value_position_local_assignments,
+    outer_self_send, outer_state_reads, outer_state_writes, producer_body_block,
+    receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
+    repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
+    value_blocks, value_position_local_assignments,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -2056,7 +2057,7 @@ impl<'d> Walker<'d> {
         for block in value_blocks(value) {
             if self.context == Actor
                 && self.escape_write_of(block).is_none()
-                && !outer_state_reads(block).is_empty()
+                && (!outer_state_reads(block).is_empty() || outer_self_send(block).is_some())
             {
                 self.field_reading_locals.insert(
                     name.clone(),
@@ -2884,11 +2885,54 @@ impl<'d> Walker<'d> {
     /// captured when the block was made, not the actor's current one. Whether
     /// a write intervenes before it runs cannot be told statically, so every
     /// such block is rejected, at the first read.
+    /// BT-3952: a block that sends to `self` or `super` and is *stored*
+    /// (assigned to a field, returned, placed in a literal, or bound to a
+    /// local that does one of those) dispatches against the captured `State`
+    /// when it runs. A block passed to the actor's own method is exempt
+    /// (BT-3936's runtime check covers its callee), and so is a local's later
+    /// call.
+    fn report_stale_self_send(&mut self, block: &Block, escape: &Escape) {
+        if !matches!(
+            escape,
+            Escape::StoredState | Escape::Returned | Escape::InLiteral
+        ) {
+            return;
+        }
+        let Some((selector, span)) = outer_self_send(block) else {
+            return;
+        };
+        if !self.reported_blocks.insert(block.span) {
+            return;
+        }
+        let diagnostic = Diagnostic::error(
+            format!(
+                "`self {selector}` is sent in a block that runs later; it would see the actor's \
+                 state from when the block was made"
+            ),
+            span,
+        )
+        .with_hint(
+            "compute the value first and capture it (`total := self total`, then `[total]`), \
+             or send the message after the call",
+        )
+        .with_note("the block", Some(block.span))
+        .with_note(
+            format!(
+                "the block is {}, so it may run after a later write to a field (ADR 0133)",
+                escape.fragment(self.method_selector.as_deref())
+            ),
+            None,
+        )
+        .with_category(DiagnosticCategory::Tier2BlockNoReturnChannel);
+        self.push_escaping(span, block.span, diagnostic);
+    }
+
     fn report_stale_read(&mut self, block: &Block, escape: &Escape) {
         if self.context != Actor || !escape.may_read_stale_state() {
             return;
         }
         let Some(read) = outer_state_reads(block).into_iter().next() else {
+            self.report_stale_self_send(block, escape);
             return;
         };
         if !self.reported_blocks.insert(block.span) {

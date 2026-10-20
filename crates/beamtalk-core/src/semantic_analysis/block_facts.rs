@@ -1206,6 +1206,58 @@ pub fn outer_state_writes(block: &Block) -> Vec<OuterLocalWrite> {
     walker.state_writes
 }
 
+/// The spans of the blocks nested in `block` that take a `self` parameter (a
+/// class-builder method body): inside one, `self` is that parameter, not the
+/// enclosing object. `None` when `block` itself takes one.
+fn self_rebound_spans(block: &Block) -> Option<Vec<Span>> {
+    if block.parameters.iter().any(|p| p.name == "self") {
+        return None;
+    }
+    let mut rebound = Vec::new();
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::Block(inner) = e {
+                if inner.parameters.iter().any(|p| p.name == "self") {
+                    rebound.push(inner.span);
+                }
+            }
+        });
+    }
+    Some(rebound)
+}
+
+/// ADR 0133 (BT-3952): the first message `block` sends to `self` or `super`
+/// anywhere in its body, nested blocks included: its selector and the span of
+/// the send. A self-send dispatches against the `State` the block captured
+/// when it was made, so it can answer a stale value as `self.field` can.
+pub fn outer_self_send(block: &Block) -> Option<(ecow::EcoString, Span)> {
+    let rebound = self_rebound_spans(block)?;
+    let mut found = None;
+    for stmt in &block.body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::MessageSend {
+                receiver,
+                selector,
+                span,
+                ..
+            } = e
+            {
+                let self_like = is_self_reference(receiver.unwrap_parens())
+                    || matches!(receiver.unwrap_parens(), Expression::Super(_));
+                if found.is_none()
+                    && self_like
+                    && !rebound
+                        .iter()
+                        .any(|b| b.start() <= span.start() && span.end() <= b.end())
+                {
+                    found = Some((selector.name(), *span));
+                }
+            }
+        });
+    }
+    found
+}
+
 /// The name [`outer_state_reads`] gives the reflective read `self fieldAt: k`.
 pub const REFLECTIVE_FIELD_READ: &str = "fieldAt:";
 
@@ -1216,23 +1268,15 @@ pub const REFLECTIVE_FIELD_READ: &str = "fieldAt:";
 /// assigned value is a read. The read-side twin of [`outer_state_writes`].
 pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
     let mut targets: HashSet<Span> = HashSet::new();
-    // A block with a `self` parameter (a class-builder method body) rebinds
-    // `self`: a `self.x` inside it is not the enclosing object's field.
-    let mut rebound: Vec<Span> = Vec::new();
     let mut reads: Vec<OuterLocalWrite> = Vec::new();
-    if block.parameters.iter().any(|p| p.name == "self") {
+    let Some(rebound) = self_rebound_spans(block) else {
         return reads;
-    }
+    };
     for stmt in &block.body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
             if let Expression::Assignment { target, .. } = e {
                 if let Expression::FieldAccess { span, .. } = target.as_ref() {
                     targets.insert(*span);
-                }
-            }
-            if let Expression::Block(inner) = e {
-                if inner.parameters.iter().any(|p| p.name == "self") {
-                    rebound.push(inner.span);
                 }
             }
         });

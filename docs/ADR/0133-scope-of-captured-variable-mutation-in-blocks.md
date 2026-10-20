@@ -542,7 +542,18 @@ code.
   > it sits in between) or inside a block that contains one (a loop body's
   > later iterations). `b := [self.n]. b value` with nothing in between
   > answers right and is accepted; with a write or self-send between, it
-  > measured stale (3, not the 13 written) and is an error. A class method is unaffected (class variables read live
+  > measured stale (3, not the 13 written) and is an error.
+  >
+  > The reflective read `self fieldAt: k` counts as a field read in every one
+  > of these rules. A send to `self` or `super` in a block (a getter such as
+  > `self total` dispatches against the captured `State`, measured: a stored
+  > and a returned `[self total]` both answered the old value) is a second,
+  > narrower error, reported at the send ("is sent in a block that runs
+  > later"): only when the block is stored (assigned to a field, returned,
+  > placed in a literal, or bound to a local that does one of those). A block
+  > passed directly to the actor's own method is exempt, since BT-3936's
+  > runtime check covers a state-changing callee there, and so is the later
+  > call of a local-bound block. Compute the value first and capture it. A class method is unaffected (class variables read live
   > at home, ADR 0130 §3), as is a value type (its fields never change). The
   > idiom is to pass the value in: `[:v | ...]` with the callee doing
   > `block value: self.total`. Live read may be revisited after BT-3950 if real
