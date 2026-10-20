@@ -3976,7 +3976,8 @@ fn inline_block_local_that_also_writes_an_outer_local_in_a_loop_is_rejected_by_p
     ] {
         let diags = adr0131_diagnostics(&in_actor(body));
         assert!(
-            diags.iter().any(|d| d.severity == Severity::Error),
+            diags.iter().any(|d| d.severity == Severity::Error)
+                && diags.iter().all(|d| !d.message.contains("BT-3948")),
             "{body}: {diags:?}"
         );
     }
