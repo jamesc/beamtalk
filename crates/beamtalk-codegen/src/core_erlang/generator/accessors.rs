@@ -290,6 +290,25 @@ impl CoreErlangGenerator {
         self.direct_call_eligible = Self::compute_direct_call_eligible(hierarchy, self);
     }
 
+    /// Records which classes in `hierarchy` are `Supervisor` / `DynamicSupervisor`
+    /// subclasses, so REPL expression codegen (which carries no
+    /// `class_hierarchy`) lowers `Sup spawn` / `Sup spawnWith:` to the
+    /// supervisor start helper like module codegen does (ADR 0135 §1).
+    pub fn set_supervisor_classes_from_hierarchy(
+        &mut self,
+        hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+    ) {
+        self.supervisor_classes = hierarchy
+            .classes()
+            .keys()
+            .filter(|name| {
+                hierarchy.is_supervisor_subclass(name)
+                    || hierarchy.is_dynamic_supervisor_subclass(name)
+            })
+            .map(ToString::to_string)
+            .collect();
+    }
+
     /// Returns a reference to the sealed method selectors set.
     pub(in crate::core_erlang) fn sealed_method_selectors(
         &self,

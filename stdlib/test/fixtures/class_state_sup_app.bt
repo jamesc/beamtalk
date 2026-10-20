@@ -8,9 +8,8 @@
 // Since ADR 0135 the configuration is instance-side (`childSpecs`), running
 // inside the supervisor's own `init`, and reads the class variable through a
 // class-side message (`ClassStateSupApp cfg`). That message is served by the
-// class process, which is busy while `ClassStateSupApp supervise` itself runs
-// (until BT-3962 moves `supervise` out of the class process), so the test
-// starts this supervisor nested under ClassStateSupRoot.
+// class process, which is free while `ClassStateSupApp supervise` runs: since
+// BT-3962 `supervise` starts the tree in the caller (ADR 0135 §1).
 //
 // The worker actor (`ClassStateSupWorker`) lives in its own file,
 // class_state_sup_worker.bt, since a .bt file may only declare one

@@ -16,6 +16,8 @@
 //!   (the class-named singleton `supervise` starts; its start args are `nil`)
 //! - `start_link/1` — `supervisor:start_link(?MODULE, Args)` (anonymous; lets a
 //!   parent pass start args, ADR 0135)
+//! - `start_link/2` — `supervisor:start_link({local, Name}, ?MODULE, Args)`
+//!   (a registered nested child, ADR 0135 §3)
 //! - `init/1` — forwards the start args to `beamtalk_supervisor:static_init/3`
 //!   (or `dynamic_init/3`), which reads the configuration (`childSpecs`,
 //!   `strategy`, …) by sending it to the supervisor instance being started
@@ -112,7 +114,7 @@ impl CoreErlangGenerator {
         docs.push(docvec![
             "module ",
             atom(module_name.to_string()),
-            " ['start_link'/0, 'start_link'/1, 'init'/1",
+            " ['start_link'/0, 'start_link'/1, 'start_link'/2, 'init'/1",
             instance_method_exports,
             class_method_exports,
             ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0]\n",
@@ -260,13 +262,16 @@ impl CoreErlangGenerator {
     /// `beamtalk_supervisor:current/1`; its start args are `nil`.
     /// `start_link/1` starts an anonymous instance with the given start args
     /// (ADR 0135), which `init/1` hands to the configuration methods as
-    /// `self args`.
+    /// `self args`; `start_link/2` registers it as `{local, Name}` (a nested
+    /// `withName:` child or `startChild:name:`, ADR 0135 §3).
     ///
     /// ```erlang
     /// start_link() ->
     ///     supervisor:start_link({local, 'bt@webapp'}, 'bt@webapp', nil).
     /// start_link(Args) ->
     ///     supervisor:start_link('bt@webapp', Args).
+    /// start_link(Name, Args) ->
+    ///     supervisor:start_link({local, Name}, 'bt@webapp', Args).
     /// ```
     fn generate_sup_start_link(module_name: &str) -> Document<'static> {
         docvec![
@@ -279,6 +284,11 @@ impl CoreErlangGenerator {
             "\n\n",
             "'start_link'/1 = fun (Args) ->",
             "\n    call 'supervisor':'start_link'(",
+            atom(module_name.to_string()),
+            ", Args)",
+            "\n\n",
+            "'start_link'/2 = fun (Name, Args) ->",
+            "\n    call 'supervisor':'start_link'({'local', Name}, ",
             atom(module_name.to_string()),
             ", Args)",
         ]
