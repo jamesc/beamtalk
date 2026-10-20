@@ -1,7 +1,7 @@
 # ADR 0065: Complete OTP Primitives for Actor Lifecycle and Supervision
 
 ## Status
-Implemented (2026-03-17)
+Implemented (2026-03-17). Error contract for `handleInfo:` (log-and-continue) amended by [ADR 0134](0134-errors-in-no-reply-handlers-crash-the-actor.md): errors raised in `handleInfo:` and async casts now crash the actor.
 
 ## Context
 
