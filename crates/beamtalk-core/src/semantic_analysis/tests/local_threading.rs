@@ -2779,6 +2779,21 @@ fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
         "b := [self fieldAt: #n]\n^b",
         "b := [self fieldAt: #n]\nself foo: b\nnil",
         "b := [self fieldAt: #n]\nself.n := 5\nb value",
+        "^[self fieldAt: #n; yourself]",
+        // A cascade to `self` dispatches to the actor's own method.
+        "self foo: [self.n]; yourself\nnil",
+        "super foo: [self.n]; yourself\nnil",
+        "b := [self.n]\nself foo: b; yourself\nnil",
+        // The blocks a collection operation answers leave with its result.
+        "^self.items collect: [:x | [self.n]]",
+        // A cascade to `self` may change the state.
+        "b := [self.n]\nself bump; yourself\nb value",
+        // Followed through an alias, a capture, and a rebinding that may run.
+        "b := [self.n]\nc := b\n^c",
+        "b := [self.n]\n^[b value]",
+        "b := [self.n]\nself.h := [b value]\nnil",
+        "b := [self.n]\nself foo: [b value]\nnil",
+        "b := [self.n]\nself.flag ifTrue: [b := [1]]\n^b",
         // Called after something that may change the state (measured: a field
         // write or a self-send between the binding and the call reads stale).
         "b := [self.n]\nself.n := 5\nb value",
@@ -2801,7 +2816,7 @@ fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
             "{d:?}"
         );
         assert!(
-            ["self.", "self fieldAt:", "super fieldAt:"]
+            ["self.", "self fieldAt:", "super fieldAt:", "b value"]
                 .iter()
                 .any(|at| src[d.span.start() as usize..].starts_with(at)),
             "reported at the read: {src}"
@@ -2839,6 +2854,12 @@ fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
         "x := self fieldAt: #n\n^x",
         "b := [self fieldAt: #n]\nb value",
         "b := [self.n]\nself.items do: [:x | b value. x]\nnil",
+        // The operands run before the write or the self-send itself.
+        "b := [self.n]\nself.n := b value + 1\nnil",
+        "b := [self.n]\nself foo: b value\nnil",
+        // A parameter that shadows the local is another variable.
+        "b := [self.n]\nself.items do: [:b | self record: b]\nnil",
+        "b := [self.n]\nself.items do: [:b | self.h := b]\nnil",
         // The local is rebound to a block that reads no field.
         "b := [self.n]\nb := [1]\n^b",
         // A class-builder method body rebinds `self` to its parameter.
@@ -2881,6 +2902,11 @@ fn section6_actor_block_that_sends_to_self_and_is_stored_is_an_error() {
         "b := [self total]\n^b",
         "b := [self total]\nself.h := b\nnil",
         "b := [self total]\n#[b]",
+        "^self.items collect: [:x | [self total]]",
+        "^[self foo; bar]",
+        // Followed through a capture and an alias.
+        "b := [self total]\n^[b value]",
+        "b := [self total]\nc := b\n^c",
     ] {
         let src = in_actor(body);
         let diags = adr0131_diagnostics(&src);
@@ -2894,7 +2920,7 @@ fn section6_actor_block_that_sends_to_self_and_is_stored_is_an_error() {
             "{d:?}"
         );
         assert!(
-            ["self ", "super "]
+            ["self ", "super ", "b value"]
                 .iter()
                 .any(|at| src[d.span.start() as usize..].starts_with(at)),
             "reported at the send: {src}"

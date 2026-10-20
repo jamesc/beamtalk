@@ -966,6 +966,26 @@ fn collect_pattern_bindings(
 /// must-analysis (ADR 0124 A2a) — same "is this receiver `self`" question this
 /// may-analysis already answers, imported rather than redefined (CLAUDE.md's
 /// no-duplicate-implementations rule).
+/// Whether `expr` (parentheses looked through) is `self` or `super`: the
+/// receivers whose sends run the object's own methods.
+#[must_use]
+pub(crate) fn is_self_or_super(expr: &Expression) -> bool {
+    let expr = expr.unwrap_parens();
+    is_self_reference(expr) || matches!(expr, Expression::Super(_))
+}
+
+/// The receiver a cascade sends all its messages to: the parser folds the
+/// first message into `receiver`, so it is that send's own receiver.
+#[must_use]
+pub(crate) fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
+    match receiver {
+        Expression::MessageSend {
+            receiver: shared, ..
+        } => shared,
+        other => other,
+    }
+}
+
 pub(crate) fn is_self_reference(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
@@ -1230,7 +1250,7 @@ fn self_rebound_spans(block: &Block) -> Option<Vec<Span>> {
 /// anywhere in its body, nested blocks included: its selector and the span of
 /// the send. A self-send dispatches against the `State` the block captured
 /// when it was made, so it can answer a stale value as `self.field` can.
-pub fn outer_self_send(block: &Block) -> Option<(ecow::EcoString, Span)> {
+pub fn outer_self_send(block: &Block) -> Option<(&'static str, ecow::EcoString, Span)> {
     let rebound = self_rebound_spans(block)?;
     let mut found = None;
     for stmt in &block.body {
@@ -1242,15 +1262,18 @@ pub fn outer_self_send(block: &Block) -> Option<(ecow::EcoString, Span)> {
                 ..
             } = e
             {
-                let self_like = is_self_reference(receiver.unwrap_parens())
-                    || matches!(receiver.unwrap_parens(), Expression::Super(_));
                 if found.is_none()
-                    && self_like
+                    && is_self_or_super(receiver)
                     && !rebound
                         .iter()
                         .any(|b| b.start() <= span.start() && span.end() <= b.end())
                 {
-                    found = Some((selector.name(), *span));
+                    let word = if matches!(receiver.unwrap_parens(), Expression::Super(_)) {
+                        "super"
+                    } else {
+                        "self"
+                    };
+                    found = Some((word, selector.name(), *span));
                 }
             }
         });
@@ -1258,11 +1281,8 @@ pub fn outer_self_send(block: &Block) -> Option<(ecow::EcoString, Span)> {
     found
 }
 
-/// The name [`outer_state_reads`] gives the reflective read `self fieldAt: k`.
-pub const REFLECTIVE_FIELD_READ: &str = "fieldAt:";
-
-/// ADR 0133 (BT-3952): the `self.field` reads (and `self fieldAt: k` reads,
-/// [`REFLECTIVE_FIELD_READ`]) `block` makes anywhere in its
+/// ADR 0133 (BT-3952): the `self.field` reads (and `self fieldAt: k` reads, named
+/// `self fieldAt:` or `super fieldAt:`) `block` makes anywhere in its
 /// body, nested blocks included, first read of each field. An assignment's
 /// target is a write, not a read (`outer_state_writes`); a `self.x` inside the
 /// assigned value is a read. The read-side twin of [`outer_state_writes`].
@@ -1292,19 +1312,25 @@ pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
                 ..
             } = e
             {
-                if selector.name() == REFLECTIVE_FIELD_READ
-                    && (is_self_reference(receiver.unwrap_parens())
-                        || matches!(receiver.unwrap_parens(), Expression::Super(_)))
+                if selector.name() == "fieldAt:"
+                    && is_self_or_super(receiver)
                     && !rebound
                         .iter()
                         .any(|b| b.start() <= span.start() && span.end() <= b.end())
-                    && !reads.iter().any(|r| r.name == REFLECTIVE_FIELD_READ)
                 {
-                    reads.push(OuterLocalWrite {
-                        kind: WriteKind::ObjectState,
-                        name: REFLECTIVE_FIELD_READ.into(),
-                        span: *span,
-                    });
+                    let word = if matches!(receiver.unwrap_parens(), Expression::Super(_)) {
+                        "super"
+                    } else {
+                        "self"
+                    };
+                    let name: ecow::EcoString = format!("{word} fieldAt:").into();
+                    if !reads.iter().any(|r| r.name == name) {
+                        reads.push(OuterLocalWrite {
+                            kind: WriteKind::ObjectState,
+                            name,
+                            span: *span,
+                        });
+                    }
                 }
                 return;
             }
@@ -1340,17 +1366,13 @@ pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
 /// write a field). Conservative: every self-send counts.
 #[must_use]
 pub fn may_change_actor_state(expr: &Expression) -> bool {
-    let self_like = |r: &Expression| {
-        is_self_reference(r.unwrap_parens()) || matches!(r.unwrap_parens(), Expression::Super(_))
-    };
     match expr {
         Expression::Assignment { target, .. } => matches!(
             target.as_ref(),
             Expression::FieldAccess { receiver, .. } if is_self_reference(receiver.unwrap_parens())
         ),
-        Expression::MessageSend { receiver, .. } | Expression::Cascade { receiver, .. } => {
-            self_like(receiver)
-        }
+        Expression::MessageSend { receiver, .. } => is_self_or_super(receiver),
+        Expression::Cascade { receiver, .. } => is_self_or_super(cascade_shared_receiver(receiver)),
         _ => false,
     }
 }
