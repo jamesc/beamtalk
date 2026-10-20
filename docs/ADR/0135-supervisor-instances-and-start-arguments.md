@@ -1,7 +1,7 @@
 # ADR 0135: Supervisor Instances and Start Arguments
 
 ## Status
-Proposed (2026-10-20). Extends ADR 0059 and delivers ADR 0080 § Future Work #4 ("anonymous supervisor start"). Specifies BT-3962 and BT-3963.
+Accepted (2026-10-20). Extends and amends ADR 0059 and delivers ADR 0080 § Future Work #4 ("anonymous supervisor start"). Specifies BT-3962 and BT-3963.
 
 ## Context
 
