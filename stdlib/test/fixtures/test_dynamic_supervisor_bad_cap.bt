@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3964: DynamicSupervisor with an invalid maxChildren value — fixture for
+// dynamic_supervisor_max_children_test.bt (supervise must fail).
+
+DynamicSupervisor(Counter) subclass: TestDynamicSupervisorBadCap
+
+  class childClass => Counter
+
+  class maxChildren -> Integer | Symbol => #lots

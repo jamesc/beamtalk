@@ -4,7 +4,7 @@
 /// ThrowError — BEAM non-local return.
 ///
 /// Raised when an Erlang function throws via `throw(Value)`.
-/// The original thrown value is available in the error details.
+/// The original thrown value is available via `reason`.
 ///
 /// See: ADR 0028 §1 (Exception mapping)
 ///

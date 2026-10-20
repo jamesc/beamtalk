@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3916 (ADR 0133): a class (the receiver is the class object) with class-side `do:` and its
+// own `anySatisfy:` whose semantics differ from the fold over `do:` (it looks only
+// at the first element). A writing block sent `anySatisfy:` is refused rather
+// than folded over `do:`. Driven by adr0133enumerable_user_test.bt.
+
+Object subclass: Adr0133EnumerableObjectOwnAny
+
+  class do: block =>
+    block value: 1
+    block value: 2
+    block value: 3
+    nil
+
+  class anySatisfy: block => block value: 1

@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3916 (ADR 0133): a `Collection` with `do:` and its own `eachWithIndex:` and
+// `do:separatedBy:`, whose semantics differ from the stdlib's folds (they never
+// call the block). A writing block sent either message compiles to a fold over
+// `inject:into:`, but the receiver guard checks the selector the user sent, so
+// the override is refused instead of bypassed. Driven by
+// adr0133enumerable_user_test.bt.
+
+Collection subclass: Adr0133EnumerableOwnEach
+  field: items :: List = #()
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    self.items do: block
+    nil
+
+  printString -> String => "Adr0133EnumerableOwnEach"
+
+  eachWithIndex: _block :: Block(Object, Integer, Object) -> Nil => nil
+
+  do: _block :: Block(Object, Object) separatedBy: _separatorBlock :: Block(Object) -> Nil =>
+    nil

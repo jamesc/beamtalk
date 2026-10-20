@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3954: Exception>>reason exposes the raw Erlang term an exception wraps —
+// the R of an FFI `{error, R}` (ADR 0076) or the reason of a raw Erlang
+// error: caught via on:do: — and is nil for Beamtalk-raised exceptions.
+
+TestCase subclass: ExceptionReasonTest
+
+  // --- FFI {error, R} → Result error: (wrapped Exception) ---
+  testFfiErrorAtomReason =>
+    // string:to_integer/1 returns {error, no_integer}.
+    r := Erlang string to_integer: "abc"
+    self assert: r isError
+    self assert: r error reason equals: #no_integer
+
+  testFfiErrorTupleReason =>
+    // re:compile/1 returns {error, {ErrString, Position}}.
+    r := Erlang re compile: "("
+    self assert: r isError
+    reason := r error reason
+    self assert: reason class equals: Tuple
+    self assert: reason size equals: 2
+    self assert: (reason at: 2) equals: 1
+
+  testFfiErrorReasonViaIfError =>
+    result := (Erlang string to_integer: "abc") ifError: [:e | e reason]
+    self assert: result equals: #no_integer
+
+  // --- Raw Erlang error: caught via on:do: ---
+  testRawErlangErrorAtomReason =>
+    result := [
+      (Erlang erlang) error: #econnreset
+    ] on: Exception do: [:e | e reason]
+    self assert: result equals: #econnreset
+
+  testRawErlangErrorTupleReason =>
+    term := Tuple withAll: #(#tls_alert, #bad_certificate)
+    result := [(Erlang erlang) error: term] on: Exception do: [:e | e reason]
+    self assert: result equals: term
+
+  testFfiBadargReason =>
+    // The proxy's specific badarg clause records the term as erlang_error.
+    result := [
+      (Erlang erlang) abs: #notanumber
+    ] on: TypeError do: [:e | e reason]
+    self assert: result equals: #badarg
+
+  testFfiRaisedBadargReason =>
+    result := [(Erlang erlang) error: #badarg] on: Exception do: [:e | e reason]
+    self assert: result equals: #badarg
+
+  testErlangExitReason =>
+    result := [
+      (Erlang erlang) exit: #shutdown
+    ] on: ExitError do: [:e | e reason]
+    self assert: result equals: #shutdown
+
+  testErlangThrowReason =>
+    result := [(Erlang erlang) throw: #oops] on: ThrowError do: [:e | e reason]
+    self assert: result equals: #oops
+
+  testClassifiedRawErrorKeepsReason =>
+    // Bucket-A classification still records the original term.
+    result := [#(1, "x") sum] on: TypeError do: [:e | e reason]
+    self assert: result equals: #badarith
+
+  // --- Beamtalk-raised exceptions have no raw reason ---
+  testSignalReasonIsNil =>
+    result := [Error signal: "boom"] on: Error do: [:e | e reason]
+    self assert: result isNil
+
+  testSelfErrorReasonIsNil =>
+    result := [self error: "boom"] on: Error do: [:e | e reason]
+    self assert: result isNil

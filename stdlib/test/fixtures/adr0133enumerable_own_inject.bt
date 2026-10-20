@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3916 (ADR 0133): a `Collection` with `do:` and its own `inject:into:`
+// (which ignores the elements). The stdlib's `collect:`, `select:`, `count:`,
+// `eachWithIndex:` and `do:separatedBy:` are `self inject:into:`, so the pure
+// send runs this override; a writing block folded over `do:` would skip it.
+// The receiver guard refuses every one of them. Driven by
+// adr0133enumerable_user_test.bt.
+
+Collection subclass: Adr0133EnumerableOwnInject
+  field: items :: List = #()
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    self.items do: block
+    nil
+
+  printString -> String => "Adr0133EnumerableOwnInject"
+
+  inject: initial :: Object into: _block :: Block(Object, Object, Object) -> Object =>
+    initial
