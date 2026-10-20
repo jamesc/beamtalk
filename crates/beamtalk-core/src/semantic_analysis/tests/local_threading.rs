@@ -2876,56 +2876,58 @@ fn section6_escape_in_a_repl_expression_list_is_checked() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-3817: a `match:` arm that assigns an outer local
+// BT-3817: a `match:` arm that assigns an outer local; BT-3947 (closes BT-3875)
+// lowers it
 // ---------------------------------------------------------------------------
 
+/// BT-3947: a `match:` whose arm writes an outer local is a local-threading
+/// producer (each arm a `BranchArm` frame), so it is accepted at the method root
+/// (a statement, an assignment's value, an operand, the last expression) in every
+/// context; the arms were a compile error (BT-3817) until then.
 #[test]
-fn match_arm_writing_an_outer_local_is_a_structured_error_in_every_context() {
-    let body = "#a match: [#a -> (t := t + 1); _ -> 0]\nt";
-    for src in [in_class(body), in_value(body), in_actor(body)] {
-        let diags = adr0131_diagnostics(&src);
-        let errors = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
-        assert_eq!(errors.len(), 1, "{src}: {diags:?}");
-        assert!(
-            errors[0]
-                .message
-                .contains("`match:` arm writes outer local `t`"),
-            "{}",
-            errors[0].message
-        );
+fn match_arm_writing_an_outer_local_is_a_producer_in_every_context() {
+    for body in [
+        "#a match: [#a -> (t := t + 1); _ -> 0]\nt",
+        "r := #a match: [#a -> (t := t + 1); _ -> 0]\n#[r, t]",
+        "#a match: [#a -> (t := t + 1); _ -> 0]",
+        "r := 1 + (#a match: [#a -> (t := 5); _ -> 0])\n#[r, t]",
+        "#a match: [#a -> self ap: (t := t + 1); _ -> 0]\nt",
+        "x := 3 match: [3 -> t := 7; _ -> 0]\nt",
+        // A nested `match:` is a producer in its enclosing arm's frame, and an
+        // inner arm's pattern variable shadows the outer local.
+        "#a match: [#a -> (3 match: [y -> (t := t + y)]); _ -> 0]\nt",
+        "x := 0\n#a match: [#a -> (3 match: [x -> (x := x + 1)]); _ -> 0]\nx",
+        // In a loop body and in a conditional arm.
+        "#(1, 2) do: [:e | e match: [1 -> (t := t + 1); _ -> (t := t + 10)]]\nt",
+        "true ifTrue: [#a match: [#a -> (t := t + 1); _ -> 0]]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
     }
 }
 
+/// What stays a structured error: a `match:` arm write that is not a producer
+/// here. A guard runs before any arm is chosen, in no frame of the arm's, so a
+/// write there is never threaded; and a `match:` that is the subject of another
+/// is not at a producer site.
 #[test]
-fn match_arm_write_nested_in_an_expression_is_an_error() {
-    let nested = "#a match: [#a -> self ap: (t := t + 1); _ -> 0]\nt";
-    for src in [in_class(nested), in_value(nested), in_actor(nested)] {
-        let diags = adr0131_diagnostics(&src);
-        assert_eq!(
-            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
-            1,
-            "{src}: {diags:?}"
-        );
-    }
-}
-
-#[test]
-fn nested_match_arms_are_judged_once_by_their_own_scope() {
-    // The write is reported once (by the inner arm), not once per enclosing arm.
-    let nested = "#a match: [#a -> (3 match: [y -> (t := t + y)]); _ -> 0]\nt";
-    for src in [in_class(nested), in_value(nested), in_actor(nested)] {
-        let diags = adr0131_diagnostics(&src);
-        assert_eq!(
-            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
-            1,
-            "{src}: {diags:?}"
-        );
-    }
-    // An inner arm's pattern variable shadows the outer local `x`.
-    let shadow = "x := 0\n#a match: [#a -> (3 match: [x -> (x := x + 1)]); _ -> 0]\nx";
-    for src in [in_class(shadow), in_value(shadow), in_actor(shadow)] {
-        let diags = adr0131_diagnostics(&src);
-        assert!(diags.is_empty(), "{src}: {diags:?}");
+fn match_arm_write_that_is_not_a_producer_stays_a_structured_error() {
+    for body in [
+        "#a match: [x when: [(t := t + 1) > 0] -> 1; _ -> 0]\nt",
+        "(#a match: [#a -> (t := t + 1); _ -> 0]) match: [_ -> 1]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            let errors = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.message.contains("`match:` arm writes outer local `t`")),
+                "{src}: {diags:?}"
+            );
+        }
     }
 }
 
@@ -3458,7 +3460,8 @@ fn a_value_position_local_assignment_is_accepted_in_every_context() {
 
 #[test]
 fn a_match_arm_write_to_an_outer_local_is_reported_once() {
-    let src = in_class("x := 3 match: [3 -> t := 7; _ -> 0]\nt");
+    // (A subject-position `match:` is not a producer site: one error per write.)
+    let src = in_class("x := (3 match: [3 -> t := 7; _ -> 0]) match: [_ -> 1]\nt");
     let diags = analyse_full(&parse_module(&src), AnalysisContext::default()).diagnostics;
     let at_arm: Vec<_> = diags
         .iter()

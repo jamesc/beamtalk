@@ -882,6 +882,15 @@ impl CoreErlangGenerator {
             return self.repl_producer_locals(expr);
         }
         let kind = self.root_method_kind()?;
+        // BT-3947: a `match:` is the same construct with one arm per
+        // `match:` arm, judged by core's one rule over those arms.
+        if let Some(writes) = beamtalk_core::semantic_analysis::block_facts::match_producer_writes(
+            expr,
+            &|name| self.binds_threadable_local(name),
+            kind,
+        ) {
+            return Some(Self::write_names(writes));
+        }
         let arms = conditional_arm_blocks(expr)?;
         if !conditional_arms_lower_as_producer(&arms, kind, &|name| {
             self.binds_threadable_local(name)

@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947, closes BT-3875): a `match:` arm that writes an outer local
+// is a local-threading producer: each arm is a `BranchArm` frame, so the write
+// comes back through the enclosing frame's `LocalRebind`s wherever the `match:`
+// sits (statement, last expression, an assignment's value, an operand, a loop
+// body, a conditional arm, another `match:` arm). The columns are
+// bt3912match_{class,value,actor}.bt; the expected answers are in
+// stdlib/test/bt3912match_test.bt.
+
+Value subclass: Bt3912MatchValue
+
+  stmt: x =>
+    t := 0
+    x match: [1 -> (t := 5); _ -> (t := t + 9)]
+    t
+
+  assign: x =>
+    t := 0
+    r := x match: [1 -> (t := 5); _ -> (t := t + 9)]
+    #[r, t]
+
+  last: x =>
+    t := 0
+    x match: [1 -> (t := 5); _ -> (t := t + 9)]
+
+  operand: x =>
+    t := 0
+    r := 1 + (x match: [1 -> (t := 5); _ -> 0])
+    #[r, t]
+
+  notTaken: x =>
+    t := 3
+    x match: [1 -> (t := 5); _ -> 0]
+    t
+
+  patternVar: x =>
+    t := 0
+    x match: [n -> (t := t + n)]
+    t
+
+  array: x =>
+    t := 0
+    x match: [#[a, b] -> (t := a + b); _ -> (t := 100)]
+    t
+
+  typed: x =>
+    t := 0
+    x match: [n :: Integer -> (t := n); _ -> (t := -1)]
+    t
+
+  guard: x =>
+    t := 0
+    x match: [n when: [n > 2] -> (t := n); _ -> (t := 1)]
+    t
+
+  loop: xs =>
+    t := 0
+    xs do: [:e | e match: [1 -> (t := t + 1); _ -> (t := t + 10)]]
+    t
+
+  inArm: flag x: x =>
+    t := 0
+    flag ifTrue: [x match: [1 -> (t := 5); _ -> 0]]
+    t
+
+  nested: x y: y =>
+    t := 0
+    x match: [1 -> (y match: [1 -> (t := 11); _ -> (t := 12)]); _ -> (t := 20)]
+    t
+
+  twoLocals: x =>
+    t := 0
+    u := 0
+    x match: [1 -> (t := 1); _ -> (u := 2)]
+    #[t, u]
+
+  armLoop: x =>
+    t := 0
+    x match: [1 -> (#(1, 2) do: [:e | t := t + e]); _ -> 0]
+    t
+
+  readWrite: x =>
+    t := 10
+    x match: [1 -> (t := t * 2); _ -> (t := t + 1)]
+    t

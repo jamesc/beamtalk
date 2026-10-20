@@ -51,11 +51,11 @@ use crate::semantic_analysis::block_facts::{
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
     exception_producer_writes, group_by_fold_threads, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
-    local_threading_construct, lookup_arm_blocks, loop_body_producer_sites,
-    operand_producer_writes, outer_local_writes, outer_state_writes, producer_body_block,
-    receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
-    repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
-    value_blocks,
+    local_threading_construct, lookup_arm_blocks, loop_body_producer_sites, match_arm_block,
+    match_producer_writes, operand_producer_writes, outer_local_writes, outer_state_writes,
+    producer_body_block, receiver_statically_not_dictionary, repl_arm_producer_sites,
+    repl_evaluated_block, repl_operand_sites, repl_producer_writes, root_producer_writes,
+    sequenced_operand_sites, value_blocks,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -1951,6 +1951,26 @@ impl<'d> Walker<'d> {
             Expression::FieldAccess { receiver, .. } => self.expr(receiver, Position::Receiver),
             Expression::Match { value, arms, .. } => {
                 self.operand(value, Position::MatchSubject);
+                // BT-3947 (closes BT-3875): a `match:` that is a local-threading
+                // producer here has an arm that is a `BranchArm` frame, like a
+                // conditional's block (codegen's `generate_match_producer`): its
+                // writes are threaded back and a loop or fold in an arm is a
+                // producer there.
+                if self.is_match_producer(expr, position) {
+                    for arm in arms {
+                        let block = match_arm_block(arm);
+                        self.pending_frame_body = Some(FrameBody {
+                            fold: false,
+                            arm: true,
+                        });
+                        if let Some(guard) = &arm.guard {
+                            self.operand(guard, Position::MatchArm);
+                        }
+                        self.block(&block, Container::Arm);
+                        self.pending_frame_body = None;
+                    }
+                    return;
+                }
                 for arm in arms {
                     let (ids, _) =
                         crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
@@ -2049,6 +2069,24 @@ impl<'d> Walker<'d> {
         producer.is_some() && self.arm_frame_conditional_producer(expr)
     }
 
+    /// BT-3947: whether `expr`, a `match:`, is a local-threading producer at
+    /// `position` (the `match:` counterpart of [`Self::is_arm_frame_conditional`]):
+    /// at the method root (an operand site or a statement) or at a site of the
+    /// frame it is nested in. The REPL keeps its own lowering.
+    fn is_match_producer(&self, expr: &Expression, position: Position) -> bool {
+        let Some(kind) = self.root_method_kind() else {
+            return false;
+        };
+        let bound = |name: &str| self.is_bound(name);
+        if match_producer_writes(expr, &bound, kind).is_none() {
+            return false;
+        }
+        if self.depth == 0 {
+            return self.operand_sites.contains(&expr.span()) || position == Position::Statement;
+        }
+        self.arm_frame_conditional_producer(expr)
+    }
+
     /// The [`RootMethodKind`] of the method being walked, `None` in the REPL.
     fn root_method_kind(&self) -> Option<RootMethodKind> {
         self.context.root_method_kind()
@@ -2124,7 +2162,8 @@ impl<'d> Walker<'d> {
             .is_some_and(|frame| frame.sites.contains(&expr.span()))
             && is_loop_body_producer_site(expr, &self.loop_body_context())
             && (conditional_producer_writes(expr, &bound, kind).is_some()
-                || exception_producer_writes(expr, &bound, kind).is_some())
+                || exception_producer_writes(expr, &bound, kind).is_some()
+                || match_producer_writes(expr, &bound, kind).is_some())
     }
 
     /// The Phase 0 allow-set check for a construct at `position`.

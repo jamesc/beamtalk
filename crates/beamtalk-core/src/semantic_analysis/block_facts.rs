@@ -10,8 +10,8 @@
 
 use crate::ast::well_known::WellKnownSelector;
 use crate::ast::{
-    Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodDefinition,
-    MethodKind, ParameterDefinition,
+    Block, BlockParameter, ClassDefinition, Expression, ExpressionStatement, MatchArm,
+    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition,
 };
 use crate::ast_walker::{
     SendSite, WalkEvent, cascade_sends, walk_expression_and_sends, walk_sends,
@@ -2209,7 +2209,8 @@ fn arm_statement_lowers(
         if sites.contains(&e.span())
             && (operand_producer_writes(e, arm_bound).is_some()
                 || conditional_producer_writes(e, arm_bound, kind).is_some()
-                || exception_producer_writes(e, arm_bound, kind).is_some())
+                || exception_producer_writes(e, arm_bound, kind).is_some()
+                || match_producer_writes(e, arm_bound, kind).is_some())
         {
             producers.push(e.span());
         }
@@ -2231,6 +2232,13 @@ fn arm_statement_lowers(
             if !inside_producer(e.span())
                 && !construct_outer_local_writes(&construct, arm_bound).is_empty()
             {
+                ok = false;
+            }
+        }
+        // BT-3947: a nested `match:` that writes an outer local and is not a
+        // producer here would drop the write, like any construct.
+        if let Expression::Match { arms, .. } = e {
+            if !inside_producer(e.span()) && !match_arm_body_writes(arms, arm_bound).is_empty() {
                 ok = false;
             }
         }
@@ -2362,6 +2370,166 @@ pub fn root_producer_writes(
     operand_producer_writes(expr, bound_outside)
         .or_else(|| conditional_producer_writes(expr, bound_outside, kind))
         .or_else(|| exception_producer_writes(expr, bound_outside, kind))
+        .or_else(|| match_producer_writes(expr, bound_outside, kind))
+}
+
+/// BT-3947 (closes BT-3875): the arms of the `match:` expression `expr`
+/// (parentheses peeled), or `None` for any other expression.
+///
+/// A `match:` is a local-threading construct whose arms are *expressions*, not
+/// blocks, so [`local_threading_construct`] cannot name it. Its arm is the same
+/// frame a conditional's block is, though: [`match_arm_block`] gives the arm as
+/// that one-statement block, and every rule below reads those blocks.
+#[must_use]
+pub fn match_arms(expr: &Expression) -> Option<&[MatchArm]> {
+    match expr.unwrap_parens() {
+        Expression::Match { arms, .. } => Some(arms),
+        _ => None,
+    }
+}
+
+/// BT-3947: the arm of a `match:` as a block whose one statement is the arm's
+/// body and whose parameters are the arm pattern's bindings (the names the arm
+/// binds for itself, `extract_match_arm_bindings`). The frame the arm is
+/// lowered as; spans are the arm's own, so a producer site in the body keeps
+/// its span; the block's own is the arm's.
+#[must_use]
+pub fn match_arm_block(arm: &MatchArm) -> Block {
+    let (bindings, _) = crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+    Block::new(
+        bindings
+            .into_iter()
+            .map(|id| BlockParameter::new(id.name, id.span))
+            .collect(),
+        vec![ExpressionStatement::bare(arm.body.clone())],
+        arm.span,
+    )
+}
+
+/// The outer locals the arms of a `match:` write, closed over `nested` blocks as
+/// [`threaded_block_writes`] is. The walk is the one every construct block gets
+/// ([`OuterWriteWalker`]): an arm's pattern bindings are bound inside it, and its
+/// guard is walked with it.
+fn match_arm_writes_in(
+    arms: &[MatchArm],
+    bound_outside: &dyn Fn(&str) -> bool,
+    nested: NestedBlocks,
+    with_guards: bool,
+) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside,
+        frames: Vec::new(),
+        writes: Vec::new(),
+        state_writes: Vec::new(),
+        blocks_entered: 1,
+        nested,
+    };
+    for arm in arms {
+        let (ids, _) = crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+        walker
+            .frames
+            .push(ids.into_iter().map(|id| id.name).collect());
+        if with_guards {
+            if let Some(guard) = &arm.guard {
+                walker.expr(guard);
+            }
+        }
+        walker.expr(&arm.body);
+        walker.frames.pop();
+    }
+    walker.writes
+}
+
+/// BT-3947: the outer locals the arm *bodies* of a `match:` write, closed over
+/// the nested constructs of its arms ([`threaded_block_writes`]'s rule).
+#[must_use]
+pub fn match_arm_body_writes(
+    arms: &[MatchArm],
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    match_arm_writes_in(arms, bound_outside, NestedBlocks::Producers, false)
+}
+
+/// BT-3947: the outer locals the *guards* of a `match:` write. A guard runs
+/// before its arm is chosen, in no frame of the arm's, so a write there is never
+/// threaded: it keeps the `match:` arm error.
+#[must_use]
+pub fn match_guard_writes(
+    arms: &[MatchArm],
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside,
+        frames: Vec::new(),
+        writes: Vec::new(),
+        state_writes: Vec::new(),
+        blocks_entered: 1,
+        nested: NestedBlocks::Producers,
+    };
+    for arm in arms {
+        let (ids, _) = crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+        walker
+            .frames
+            .push(ids.into_iter().map(|id| id.name).collect());
+        if let Some(guard) = &arm.guard {
+            walker.expr(guard);
+        }
+        walker.frames.pop();
+    }
+    walker.writes
+}
+
+/// BT-3947 (closes BT-3875): whether the arms of a `match:` can be lowered by the
+/// `match:` producer in a method of kind `kind`: [`conditional_arms_lower_as_producer`]'s
+/// rule over the arms as blocks ([`match_arm_block`]). Read by the Phase 0 check and
+/// by codegen's producer predicate.
+#[must_use]
+pub fn match_arms_lower_as_producer(
+    arms: &[MatchArm],
+    kind: RootMethodKind,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> bool {
+    let blocks: Vec<Block> = arms.iter().map(match_arm_block).collect();
+    let refs: Vec<&Block> = blocks.iter().collect();
+    // An arm binds its pattern variables for itself, on top of the names the
+    // scope holds: they are the block's parameters, so the shared rule sees
+    // them as the arm's own.
+    arms_lower_as_producer(&refs, kind, bound_outside, false)
+}
+
+/// BT-3947 (closes BT-3875): the threaded set of a `match:` that codegen lowers
+/// as a local-threading producer (a conditional with one arm per `match:` arm,
+/// [`conditional_producer_writes`]'s counterpart), or `None` when `expr` is not
+/// one: it has at least one arm that writes an outer local, no guard writes one,
+/// the set its arms pack (the nested constructs threaded today) is the whole set
+/// so no write is dropped, and the arms are ones the producer can lower in this
+/// kind of method ([`match_arms_lower_as_producer`]).
+#[must_use]
+pub fn match_producer_writes(
+    expr: &Expression,
+    bound_outside: &dyn Fn(&str) -> bool,
+    kind: RootMethodKind,
+) -> Option<Vec<OuterLocalWrite>> {
+    let arms = match_arms(expr)?;
+    if !match_guard_writes(arms, bound_outside).is_empty()
+        || !match_arms_lower_as_producer(arms, kind, bound_outside)
+    {
+        return None;
+    }
+    let all = match_arm_body_writes(arms, bound_outside);
+    let today = match_arm_writes_in(
+        arms,
+        bound_outside,
+        NestedBlocks::ProducersThreadedToday,
+        false,
+    );
+    let names = |writes: &[OuterLocalWrite]| {
+        let mut names: Vec<&str> = writes.iter().map(|w| w.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        names.into_iter().map(str::to_string).collect::<Vec<_>>()
+    };
+    (!all.is_empty() && names(&all) == names(&today)).then_some(all)
 }
 
 /// ADR 0131 Phase 2 (BT-3749): the sub-expressions of the method-body
@@ -2603,6 +2771,7 @@ pub fn loop_body_producer_sites(stmt: &Expression) -> Vec<&Expression> {
     if producer_body_block(inner).is_some()
         || conditional_arm_blocks(inner).is_some()
         || exception_arm_blocks(inner).is_some()
+        || match_arms(inner).is_some()
     {
         sites.push(inner);
     }

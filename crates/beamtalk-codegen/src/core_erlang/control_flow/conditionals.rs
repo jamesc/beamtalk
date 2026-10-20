@@ -51,6 +51,7 @@
 //! `State{N}` chain managed by the method body generator.
 
 use super::super::gen_server::BodyExprKind;
+use super::super::patterns::MatchThreading;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
     self, BindOp, FrameId, RebindFrame, RebindFrameKind, ThreadedStmt, ThreadedValue,
@@ -64,7 +65,8 @@ use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression, MessageSelector};
+use beamtalk_core::ast::{Block, Expression, MatchArm, MessageSelector};
+use beamtalk_core::semantic_analysis::block_facts::match_arm_block;
 use beamtalk_core::source_analysis::Span;
 
 // ─── FieldWriteSite / Closure ────────────────────────────────────
@@ -540,7 +542,7 @@ impl CoreErlangGenerator {
     /// branch context). When `param_value` is given, the block's parameter
     /// (`ifNotNil: [:v | ...]`, `at:ifPresent: [:v | ...]`) is bound to that
     /// Core Erlang variable inside the arm.
-    pub(in crate::core_erlang::control_flow) fn conditional_arm_clause(
+    pub(in crate::core_erlang) fn conditional_arm_clause(
         &mut self,
         block: &Block,
         param_value: Option<&str>,
@@ -830,6 +832,39 @@ impl CoreErlangGenerator {
 }
 
 impl CoreErlangGenerator {
+    /// BT-3947 (closes BT-3875): the [`ThreadedValue`] producer for a `match:` that
+    /// is a local-threading producer ([`CoreErlangGenerator::conditional_producer_locals`]):
+    /// a conditional with one arm per `match:` arm. The scratch map is seeded with
+    /// the locals its arms write (`seed_scratch_locals` over the arms as blocks,
+    /// [`match_arm_block`]), each arm is a `BranchArm` frame carrying them, and the
+    /// result tuple's `StateAcc` comes back through one `LocalRebind` per local,
+    /// lowered by the enclosing frame (`conditional_tuple_to_threaded_value`).
+    ///
+    /// `frame` is captured before the arms are lowered, like every conditional
+    /// producer's: the arms mint frames of their own.
+    pub(in crate::core_erlang) fn generate_match_producer(
+        &mut self,
+        value: &Expression,
+        arms: &[MatchArm],
+        span: Span,
+        tail: ProducerTail,
+    ) -> Result<ThreadedValue> {
+        let frame = self.current_frame();
+        let scratch = self.conditional_scratch(frame);
+        let blocks: Vec<Block> = arms.iter().map(match_arm_block).collect();
+        let block_refs: Vec<&Block> = blocks.iter().collect();
+        let outer_state = self.current_state_var();
+        let (seed_doc, base_state) = self.seed_scratch_locals(&block_refs, scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&block_refs, true);
+        let threading = MatchThreading {
+            base_state: &base_state,
+            arm: arm_frame.as_ref(),
+        };
+        let match_doc = self.generate_match_with(value, arms, Some(&threading))?;
+        let tuple_doc = docvec![seed_doc, match_doc];
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &block_refs, tail, true)
+    }
+
     /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
     /// ifTrue: [block]` — the expression-position counterpart of
     /// [`Self::generate_if_true_with_mutations_tuple`], whose raw tuple
@@ -1525,6 +1560,11 @@ impl CoreErlangGenerator {
         }
         if let Expression::Match { value, arms, .. } = expr {
             let span = expr.span();
+            // BT-3947: a `match:` that is a local-threading producer here has
+            // one `BranchArm` frame per arm, like a conditional's blocks.
+            if root_producer {
+                return Ok(Some(self.generate_match_producer(value, arms, span, tail)?));
+            }
             let frame = self.current_frame();
             let tuple_doc = self.generate_match(value, arms)?;
             return Ok(Some(

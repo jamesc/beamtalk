@@ -20,6 +20,7 @@
 
 use std::collections::HashSet;
 
+use super::super::control_flow::ArmFrame;
 use super::super::threaded_ir::VersionPrefix;
 use super::super::util::index_lit;
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
@@ -45,6 +46,20 @@ use beamtalk_core::source_analysis::Span;
 /// note describes — extend this list, nothing else.
 const MATCH_ARM_FAMILIES: &[VersionPrefix] = &[VersionPrefix::State];
 
+/// How the arms of one `match:` thread state: every arm hands back
+/// `{Value, StateAcc}` rooted at `base_state`. `arm` is set when the `match:` is a
+/// local-threading producer (BT-3947, [`CoreErlangGenerator::generate_match_producer`]):
+/// each arm is then a `BranchArm` frame carrying the construct's threaded locals,
+/// lowered like a conditional's block, so a write to an outer local in an arm
+/// is a `Put` into the arm's `StateAcc` that the producer's `LocalRebind`s read back.
+pub(in crate::core_erlang) struct MatchThreading<'a> {
+    /// The scratch map every arm starts from.
+    pub(in crate::core_erlang) base_state: &'a str,
+    /// The arm frame of a producer's arms; `None` for the actor `State` threading of
+    /// a `match:` whose arms only write fields or send to `self`.
+    pub(in crate::core_erlang) arm: Option<&'a ArmFrame>,
+}
+
 impl CoreErlangGenerator {
     /// Generates code for a match expression.
     ///
@@ -55,11 +70,24 @@ impl CoreErlangGenerator {
     /// chain of conditional case expressions instead of a single native case, because
     /// Beamtalk arrays are opaque tagged maps that cannot be matched structurally in
     /// Core Erlang patterns. See [`Self::generate_match_chain`].
-    #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_match(
         &mut self,
         value: &Expression,
         arms: &[MatchArm],
+    ) -> Result<Document<'static>> {
+        self.generate_match_with(value, arms, None)
+    }
+
+    /// [`Self::generate_match`] with the arms threaded by `producer` (a
+    /// local-threading producer's seeded scratch map and arm frame, BT-3947), or
+    /// by the actor-`State` rule ([`Self::match_needs_state_threading`]) when
+    /// `None`.
+    #[allow(clippy::too_many_lines)]
+    pub(in crate::core_erlang) fn generate_match_with(
+        &mut self,
+        value: &Expression,
+        arms: &[MatchArm],
+        producer: Option<&MatchThreading<'_>>,
     ) -> Result<Document<'static>> {
         if arms.is_empty() {
             return Err(CodeGenError::UnsupportedFeature {
@@ -161,14 +189,21 @@ impl CoreErlangGenerator {
         // uniform `{Value, State}` shape via `generate_match_arm_body`, so the
         // whole `match:` expression threads state exactly like `ifTrue:`/
         // `ifFalse:` mutations — see `match_needs_state_threading`.
-        let base_state = if self.match_needs_state_threading(arms) {
+        let state_threading_base = if producer.is_none() && self.match_needs_state_threading(arms) {
             Some(self.current_state_var())
         } else {
             None
         };
+        let state_threading = state_threading_base
+            .as_deref()
+            .map(|base_state| MatchThreading {
+                base_state,
+                arm: None,
+            });
+        let threading = producer.or(state_threading.as_ref());
 
         let inner_doc = if has_array_arm || has_type_arm {
-            self.generate_match_chain(&match_var, arms, base_state.as_deref())?
+            self.generate_match_chain(&match_var, arms, threading)?
         } else {
             // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
             let mut parts: Vec<Document<'static>> = Vec::new();
@@ -193,7 +228,7 @@ impl CoreErlangGenerator {
                     parts.push(Document::Str(" when 'true'"));
                 }
                 parts.push(Document::Str(" -> "));
-                let body_doc = self.generate_match_arm_body(&arm.body, base_state.as_deref())?;
+                let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
                 parts.push(body_doc);
                 self.pop_scope();
             }
@@ -422,11 +457,24 @@ impl CoreErlangGenerator {
     pub(super) fn generate_match_arm_body(
         &mut self,
         body: &Expression,
-        base_state: Option<&str>,
+        threading: Option<&MatchThreading<'_>>,
     ) -> Result<Document<'static>> {
-        let Some(base_state) = base_state else {
+        let Some(threading) = threading else {
             return self.expression_doc(body);
         };
+        // BT-3947: an arm of a producer is a `BranchArm` frame, lowered as the
+        // one-statement block a conditional's arm is: the statements of the arm
+        // (its body) are classified, threaded and closed with `{Value, StateAcc}`
+        // by the one arm lowering, whatever the body is.
+        if let Some(arm) = threading.arm {
+            let block = Block::new(
+                Vec::new(),
+                vec![ExpressionStatement::bare(body.clone())],
+                body.span(),
+            );
+            return self.conditional_arm_clause(&block, None, Some(arm), threading.base_state);
+        }
+        let base_state = threading.base_state;
         let base_state_var = leaf::var(base_state.to_string());
         if self.is_tier2_value_call(body) {
             if let Expression::MessageSend { receiver, .. } = body {
@@ -546,7 +594,7 @@ impl CoreErlangGenerator {
         &mut self,
         match_var: &str,
         arms: &[MatchArm],
-        base_state: Option<&str>,
+        threading: Option<&MatchThreading<'_>>,
     ) -> Result<Document<'static>> {
         if arms.is_empty() {
             // BT-3943: user-visible no-arm failure is a structured
@@ -564,7 +612,7 @@ impl CoreErlangGenerator {
         if let Pattern::Array { elements, .. } = &arm.pattern {
             // Generate current arm body FIRST so that state_version and temp-var counters
             // are not advanced by later arms before we codegen the current one.
-            return self.generate_array_match_arm(match_var, arm, elements, rest, base_state);
+            return self.generate_array_match_arm(match_var, arm, elements, rest, threading);
         }
 
         // ADR 0107 Phase A: `Pattern::Type` (`binding :: ClassName`)
@@ -575,7 +623,7 @@ impl CoreErlangGenerator {
         // `Value`/sealed class) needs a `maps:get` test in case-scrutinee
         // position, which is not expressible as a single Core Erlang guard.
         if let Pattern::Type { binding, class, .. } = &arm.pattern {
-            return self.generate_type_pattern(match_var, arm, binding, class, rest, base_state);
+            return self.generate_type_pattern(match_var, arm, binding, class, rest, threading);
         }
 
         // Native arm: case _Match of <pattern> when guard -> body <_FT> when 'true' -> rest end
@@ -593,11 +641,11 @@ impl CoreErlangGenerator {
         } else {
             Document::Str(" when 'true'")
         };
-        let body_doc = self.generate_match_arm_body(&arm.body, base_state)?;
+        let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
         // Rest is generated AFTER the current arm to prevent state leakage.
-        let rest_doc = self.generate_match_chain(match_var, rest, base_state)?;
+        let rest_doc = self.generate_match_chain(match_var, rest, threading)?;
 
         Ok(docvec![
             "case ",
@@ -630,7 +678,7 @@ impl CoreErlangGenerator {
         arm: &MatchArm,
         elements: &[Pattern],
         rest_arms: &[MatchArm],
-        base_state: Option<&str>,
+        threading: Option<&MatchThreading<'_>>,
     ) -> Result<Document<'static>> {
         let n = elements.len();
 
@@ -646,11 +694,11 @@ impl CoreErlangGenerator {
         } else {
             None
         };
-        let body_doc = self.generate_match_arm_body(&arm.body, base_state)?;
+        let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
         // Generate rest AFTER the current arm body to prevent state leakage.
-        let rest_doc = self.generate_match_chain(match_var, rest_arms, base_state)?;
+        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
 
         // Build body section: element extractions + optional guard check.
         // Use `case 'true' of <'true'> when GUARD ->` (Core Erlang guard position) so that

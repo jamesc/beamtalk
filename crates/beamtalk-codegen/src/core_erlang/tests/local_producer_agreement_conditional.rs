@@ -24,7 +24,8 @@ use crate::core_erlang::threaded_expr::fault::recording_producers;
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::{Expression, ExpressionStatement};
 use beamtalk_core::semantic_analysis::block_facts::{
-    RootMethodKind, conditional_arm_blocks, exception_arm_blocks, sequenced_operand_sites,
+    RootMethodKind, conditional_arm_blocks, exception_arm_blocks, match_arms,
+    sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -72,6 +73,20 @@ pub(super) const CONDITIONALS: &[&str] = &[
     "[t := t + 1. ^t] value",
     "[[t := t + 1] on: Error do: [:e | 0]] value",
     "[#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]] value",
+    // BT-3947: a `match:` is the conditional whose arms are expressions: the same
+    // site rule, producer rule and arm frame, one arm per `match:` arm.
+    "s match: [0 -> (t := t + 1); _ -> 2]",
+    "s match: [0 -> (t := 9); _ -> (t := t + 1)]",
+    "s match: [n -> (t := t + n)]",
+    "s match: [0 -> (t := t + 1); _ -> (u := u + 1)]",
+    "s match: [0 -> (#(1, 2) do: [:x | t := t + x]); _ -> 0]",
+    "s match: [0 -> (s match: [0 -> (t := t + 1); _ -> 0]); _ -> 0]",
+    "s match: [0 -> ((s < 3) ifTrue: [t := t + 1] ifFalse: [2]); _ -> 0]",
+    "s match: [#[a, b] -> (t := t + a); _ -> 0]",
+    "s match: [n :: Integer -> (t := t + n); _ -> 0]",
+    "s match: [n when: [n > 1] -> (t := t + n); _ -> 0]",
+    "s match: [0 -> ([t := t + 1. 2] value); _ -> 0]",
+    "s match: [0 -> (#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]); _ -> 0]",
     // Not producers: a literal with parameters or arguments (`value:`), and a
     // parenthesised block receiver.
     "[:v | t := t + v] value: 2",
@@ -119,6 +134,12 @@ pub(super) const ARM_FRAMES: &[&str] = &[
     "#(1, 2) do: [:k | [{s}] value]",
     "[#(1, 2) do: [:k | {s}]] value",
     "[[{s}] on: Error do: [:e | 0]] value",
+    // BT-3947: the arm frame of a `match:` producer.
+    "s match: [0 -> ({s}); _ -> 1]",
+    "s match: [_ -> ({s})]",
+    "s match: [0 -> (t := t + 1); _ -> ({s})]",
+    "(s < 3) ifTrue: [s match: [0 -> ({s}); _ -> 1]]",
+    "#(1, 2) do: [:k | s match: [0 -> ({s}); _ -> 1]]",
 ];
 
 /// Constructs used inside arm frames (a subset of [`CONSTRUCTS`] that keeps the
@@ -178,6 +199,12 @@ fn conditional_spans(body: &[ExpressionStatement]) -> HashMap<Span, Vec<Span>> {
                 out.insert(
                     Expression::span(e.unwrap_parens()),
                     arms.iter().map(|b| b.span).collect(),
+                );
+            } else if let Some(arms) = match_arms(e) {
+                // BT-3947: a `match:`'s arms, by the arm body's span.
+                out.insert(
+                    Expression::span(e.unwrap_parens()),
+                    arms.iter().map(|a| a.body.span()).collect(),
                 );
             }
         });
@@ -291,9 +318,9 @@ fn every_conditional_site_the_core_rule_accepts_is_lowered_by_the_producer() {
 /// `ifTrue:`/`ifFalse:` arms; the boolean and nil-testing arms; an arm nested
 /// in another producer; an arm in a loop or holding a conditional; an
 /// evaluated literal block's arm alone; the same nested in or around other
-/// frames.
+/// frames; a `match:` producer's arms (BT-3947).
 pub(super) const ARM_FRAME_FAMILIES: &[std::ops::Range<usize>] =
-    &[0..4, 4..8, 8..11, 11..14, 14..19, 19..23];
+    &[0..4, 4..8, 8..11, 11..14, 14..19, 19..23, 23..28];
 
 /// Both ways, for a loop, fold, conditional or exception in a statement of
 /// one family of [`ARM_FRAMES`]: the whole proof is the per-family tests
@@ -328,6 +355,7 @@ beamtalk_core::per_family_tests! {
     every_arm_frame_site_in_a_loop_or_holding_a_conditional_the_core_rule_accepts_is_lowered_by_the_producer => 3,
     every_evaluated_block_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 4,
     every_nested_evaluated_block_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 5,
+    every_match_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 6,
 }
 
 /// Actor conditionals the core rule does not name as producers (the arm writes a

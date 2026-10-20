@@ -695,7 +695,7 @@ impl CoreErlangGenerator {
     }
 
     /// The sorted, deduplicated names of `writes`.
-    fn write_names(writes: Vec<OuterLocalWrite>) -> Vec<String> {
+    pub(in crate::core_erlang) fn write_names(writes: Vec<OuterLocalWrite>) -> Vec<String> {
         let mut names: Vec<String> = writes.into_iter().map(|w| w.name.to_string()).collect();
         names.sort();
         names.dedup();
