@@ -515,6 +515,17 @@ impl CoreErlangGenerator {
         self.var_context.lookup(name)
     }
 
+    /// The current variable-scope depth ([`Self::bound_since`]'s baseline).
+    pub(in crate::core_erlang) fn scope_depth(&self) -> usize {
+        self.var_context.depth()
+    }
+
+    /// Whether `name` is bound by the scope that was innermost at `depth` or a
+    /// scope pushed since, rather than by an enclosing one.
+    pub(in crate::core_erlang) fn bound_since(&self, name: &str, depth: usize) -> bool {
+        self.var_context.is_bound_since(name, depth)
+    }
+
     /// Binds an identifier to a Core Erlang variable name in the current scope.
     // widened from `pub(crate)` — `beamtalk-repl` binds
     // `__bindings__`/workspace variable names before generating a REPL body.

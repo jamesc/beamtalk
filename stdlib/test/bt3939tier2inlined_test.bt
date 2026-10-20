@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3939: bindings inside inlined blocks of a Tier 2 body are not stale.
+// Fixture: fixtures/bt3939tier2inlined_actor.bt.
+
+TestCase subclass: Bt3939Tier2InlinedTest
+
+  testConditionalArmBindingAnswersPostLoopValue =>
+    self assert: (Bt3939Tier2InlinedActor spawn arm: true) equals: #(3)
+
+  testEvaluatedBlockBindingAnswersPostLoopValue =>
+    self assert: Bt3939Tier2InlinedActor spawn evalValue equals: #(3)
+
+  testNestedArmBindingAnswersPostLoopValue =>
+    self assert: (Bt3939Tier2InlinedActor spawn nested: true) equals: #(3)

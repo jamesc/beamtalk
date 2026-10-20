@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3939: a local bound and rebound by a loop inside an INLINED block (a
+// conditional arm, an evaluated `[...] value`) of a Tier 2 body (here the
+// block an Erlang FFI call receives, which writes the captured `t`) is lowered
+// by that inlined block's own frame, and answers the right value. The gate
+// (a compile error) is for a local the Tier 2 body itself binds; see
+// stdlib/test/bt3939tier2inlined_test.bt.
+
+Actor subclass: Bt3939Tier2InlinedActor
+  state: hits = 0
+
+  arm: flag =>
+    t := 0
+    xs := #(1, 2)
+    (Erlang lists)
+      map: [:x |
+        t := t + 1
+        flag
+          ifTrue: [
+            n := 0
+            xs do: [:y | n := n + y]
+            n
+          ]
+          ifFalse: [0]
+      ]
+      with: #(1)
+
+  evalValue =>
+    t := 0
+    xs := #(1, 2)
+    (Erlang lists)
+      map: [:x |
+        t := t + 1
+        r := [
+          n := 0
+          xs do: [:y | n := n + y]
+          n
+        ] value
+        r
+      ]
+      with: #(1)
+
+  nested: flag =>
+    t := 0
+    xs := #(1, 2)
+    (Erlang lists)
+      map: [:x |
+        t := t + 1
+        flag
+          ifTrue: [
+            flag
+              ifTrue: [
+                n := 0
+                xs do: [:y | n := n + y]
+                n
+              ]
+              ifFalse: [1]
+          ]
+          ifFalse: [0]
+      ]
+      with: #(1)
