@@ -140,6 +140,15 @@ pub struct CoreErlangGenerator {
     /// does `state_version`/`self_version`; `0` means
     /// [`threaded_ir::FrameId::ROOT`] (no branch context currently active).
     pub(in crate::core_erlang) active_branch_frame: u32,
+    /// BT-3912 (ADR 0133 Phase 3, BT-3947 cell 2): the frame of the plain
+    /// (Tier 1) closure body being lowered, when no branch context has been
+    /// entered inside it since. A closure body is a separate Core Erlang scope
+    /// whose statements are a sequence of their own, so it is a frame of its own
+    /// (a `MethodBody`-kind one: every local it rebinds is a plain `let`),
+    /// decoupled from `in_loop_body` / `active_branch_frame` (which name the
+    /// loop or arm the closure is *written* in). [`Self::current_frame`] answers
+    /// it first; entering a branch context hides it until that context exits.
+    pub(in crate::core_erlang) closure_frame: Option<super::threaded_ir::FrameId>,
     /// The generator's loop-body context — the nine fields (hybrid/direct-params
     /// mode flags, pre-extracted field
     /// variable maps) that only have meaning while compiling a loop body,
@@ -456,6 +465,7 @@ impl CoreErlangGenerator {
             in_loop_body: false,
             branch_frame_counter: 0,
             active_branch_frame: 0,
+            closure_frame: None,
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,

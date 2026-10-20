@@ -221,7 +221,7 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3841: the Tier 2 block reached the native `at:ifAbsent:`;
+// PIN-BUG BT-3913: the Tier 2 block reached the native `at:ifAbsent:`;
 // since BT-3745 it is an ADR 0131 §6 compile error. BT-3798 (ADR 0131 Phase
 // 2d) made a `Dictionary` lookup a producer in class, value-type and actor
 // methods; the REPL keeps the error (its bindings-map lowering has no lookup
@@ -229,7 +229,7 @@ t := 0
 r := #{#a => 1} at: #k ifAbsent: [t := t + 1. 0]
 // => ERROR: `t` is assigned in a block passed to `at:ifAbsent:`
 
-// PIN-BUG BT-3841: correct answer 1.
+// PIN-BUG BT-3913: correct answer 1.
 t
 // => 0
 
@@ -343,12 +343,12 @@ t
 t := 0
 // => 0
 
-// PIN-BUG BT-3841: raised `invalid argument` before BT-3753, a compile error
+// PIN-BUG BT-3913: raised `invalid argument` before BT-3753, a compile error
 // since. Correct answer: 2.
 #(1) do: [:z | [t < 2] whileTrue: [t := t + 1]]
 // => ERROR: `whileTrue:` writes outer local `t`, but as a statement inside a `do:` iteration
 
-// PIN-BUG BT-3841: correct answer 2.
+// PIN-BUG BT-3913: correct answer 2.
 t
 // => 0
 

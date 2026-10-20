@@ -45,6 +45,7 @@ pub(in crate::core_erlang) struct BodyState {
     self_version: usize,
     in_loop_body: bool,
     active_branch_frame: u32,
+    closure_frame: Option<FrameId>,
     loop_mode: LoopMode,
     precompiled_subexprs: HashMap<Span, PrecompiledSubexpr>,
     local_producer_sites: HashSet<Span>,
@@ -73,6 +74,7 @@ impl CoreErlangGenerator {
             self_version,
             in_loop_body: std::mem::take(&mut self.in_loop_body),
             active_branch_frame: std::mem::take(&mut self.active_branch_frame),
+            closure_frame: self.closure_frame.take(),
             loop_mode: std::mem::take(&mut self.loop_mode),
             precompiled_subexprs: std::mem::take(&mut self.precompiled_subexprs),
             local_producer_sites: std::mem::take(&mut self.local_producer_sites),
@@ -97,6 +99,7 @@ impl CoreErlangGenerator {
             self_version,
             in_loop_body,
             active_branch_frame,
+            closure_frame,
             loop_mode,
             precompiled_subexprs,
             local_producer_sites,
@@ -111,6 +114,7 @@ impl CoreErlangGenerator {
         self.set_self_version(self_version);
         self.in_loop_body = in_loop_body;
         self.active_branch_frame = active_branch_frame;
+        self.closure_frame = closure_frame;
         self.loop_mode = loop_mode;
         self.precompiled_subexprs = precompiled_subexprs;
         self.local_producer_sites = local_producer_sites;

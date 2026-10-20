@@ -675,6 +675,81 @@ impl CoreErlangGenerator {
         result
     }
 
+    /// BT-3912 (ADR 0133 Phase 3, BT-3947 cell 2): runs `f` (the lowering of a
+    /// plain, Tier 1 closure's body, `body` its statements) with the body as a
+    /// frame of its own: a fresh [`FrameId`] registered as a `MethodBody`-kind
+    /// [`RebindFrame`] that threads no local (so every local a producer in the
+    /// body rebinds is a plain `let`, ADR 0131 §2), [`Self::closure_frame`] set
+    /// so [`Self::current_frame`] answers it, and the body's own statements
+    /// registered as producer sites like an arm frame's
+    /// ([`Self::with_body_producer_sites`] with `arm`: the statement itself when
+    /// it is a loop, fold, conditional or exception construct, and its sequenced
+    /// operand sites). A closure is a separate Core Erlang scope: the frame it is
+    /// written in is not the one its locals are rebound in.
+    ///
+    /// Outside the REPL only: the REPL root adopts its bindings map whole
+    /// (BT-3876), so a closure there keeps its enclosing arm's frame.
+    pub(super) fn with_closure_body_frame<T>(
+        &mut self,
+        body: &[&Expression],
+        f: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if self.is_repl_mode() {
+            return f(self);
+        }
+        self.branch_frame_counter += 1;
+        let frame = FrameId::new(self.branch_frame_counter);
+        let rebind = RebindFrame {
+            frame,
+            kind: RebindFrameKind::MethodBody,
+            threads: Vec::new(),
+        };
+        let saved = self.closure_frame.replace(frame);
+        // (The value-position assignments of the body are already in the set
+        // the method body installed: it descends into block literals with the
+        // closure rule, `value_position_assignment_spans`.)
+        let out = self.with_rebind_frame(rebind, |this| {
+            this.with_body_producer_sites(body, false, true, f)
+        });
+        self.closure_frame = saved;
+        out
+    }
+
+    /// BT-3912: renders a producer `prelude` lowered in the plain closure body
+    /// frame ([`Self::closure_frame`]) to a `Document` the closure's flat
+    /// statement sequence splices, after verifying it as that frame's body (a
+    /// `MethodBody` node, like [`Self::verified_root_prelude_doc`] does at the
+    /// method root): a closure body has no `Vec<ThreadedStmt>` of its own, so
+    /// this is where its producers' rebinds are checked. Any other prelude is
+    /// rendered by [`Self::threaded_prelude_doc`].
+    pub(super) fn closure_prelude_doc(
+        &mut self,
+        prelude: &[ThreadedStmt],
+        span: Span,
+    ) -> Document<'static> {
+        let Some(frame) = self.closure_frame else {
+            return self.threaded_prelude_doc(prelude);
+        };
+        let body = threaded_ir::backfill_opaque_version_gaps(
+            prelude,
+            frame,
+            &[threaded_ir::VersionPrefix::State],
+        );
+        let wrapper = [ThreadedStmt::MethodBody {
+            frame,
+            threads: Vec::new(),
+            body,
+            span,
+        }];
+        let errors = self.verify_threaded_ir(&wrapper);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "plain closure body local-threading prelude must be well-formed",
+            span,
+        );
+        self.threaded_prelude_doc(prelude)
+    }
+
     /// BT-3910: runs `f` (a body's lowering) with [`Self::value_assign_sites`]
     /// set to the value-position local assignments of `body`, judged by the kind
     /// of body it is ([`Self::root_method_kind`]; `None` for a legacy workspace

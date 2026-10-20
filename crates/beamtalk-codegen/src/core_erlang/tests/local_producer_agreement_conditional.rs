@@ -253,21 +253,12 @@ pub(super) fn check_conditional_agreement(src: &str) -> Option<usize> {
     // And the other way: codegen lowers no conditional as a producer that the
     // core rule does not name.
     for (span, names) in &lowered {
-        // A loop or fold lowered as a producer inside an arm of a conditional
-        // the core rule does not name would be lowered by an arm frame the
-        // Phase 0 check never judged it under (it applies the legacy rows to
-        // the arm): codegen registers an arm frame only for a conditional
-        // producer.
-        for (cond, arms) in &conditionals {
-            let inside = arms
-                .iter()
-                .any(|a| a.start() <= span.start() && span.end() <= a.end());
-            assert!(
-                !inside || expected.contains_key(cond) || expected.contains_key(span),
-                "codegen lowered the construct at {span:?} as a producer in an arm of \
-                 the non-producer conditional at {cond:?}\n{src}"
-            );
-        }
+        // BT-3912 (BT-3833): a loop or fold in an arm of a conditional the core
+        // rule does not name IS lowered as a producer: the arm is a plain closure
+        // body, a frame of its own (`with_closure_body_frame`), and the loop's
+        // rebinds of the arm's own locals are `LocalRebind`s of that frame. (It
+        // used to be unpacked by the legacy single-local write-back.) Only the
+        // conditional itself must agree with the core rule.
         if conditionals.contains_key(span) {
             assert!(
                 expected.contains_key(span),

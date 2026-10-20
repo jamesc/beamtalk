@@ -488,6 +488,22 @@ impl CoreErlangGenerator {
             return Ok(Document::Str("{'true', StateAcc}"));
         };
         let mut docs: Vec<Document<'static>> = Vec::with_capacity(filtered.len());
+        // BT-3912: the condition's statements are producer sites of the loop's
+        // own frame (it runs over the loop's `StateAcc`), like a body statement.
+        self.with_body_producer_sites(&filtered, false, false, |this| {
+            this.generate_stateful_while_condition_statements(rest, tail, &mut docs)
+        })?;
+        Ok(Document::Vec(docs))
+    }
+
+    /// The statements of [`Self::generate_stateful_while_condition`], once the
+    /// condition's producer sites are registered.
+    fn generate_stateful_while_condition_statements(
+        &mut self,
+        rest: &[&Expression],
+        tail: &Expression,
+        docs: &mut Vec<Document<'static>>,
+    ) -> Result<()> {
         for expr in rest {
             if CoreErlangGenerator::is_local_var_assignment(expr) {
                 // Mirrors `lower_letrec_body`/`lower_foldl_body`'s own dispatch
@@ -511,7 +527,7 @@ impl CoreErlangGenerator {
             }
         }
         docs.push(self.generate_stateful_while_condition_tail(tail)?);
-        Ok(Document::Vec(docs))
+        Ok(())
     }
 
     /// The tail (boolean) statement of a state-effecting while condition —

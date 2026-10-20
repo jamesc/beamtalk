@@ -1235,7 +1235,7 @@ fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
     assert!(adr0131_diagnostics(&src).is_empty());
 }
 
-/// PIN-BUG BT-3841: every method in the inert `*_pending.bt.pending` probe
+/// PIN-BUG BT-3913: every method in the inert `*_pending.bt.pending` probe
 /// fixtures is rejected by an ADR 0131 diagnostic today, and no method in the
 /// compiled fixtures is. A phase of the BT-3743 epic that makes a shape
 /// compile moves it out of the pending fixture (and its test into
@@ -1760,7 +1760,7 @@ fn probe_diagnostics(context: &str, container: &str, target: &str, kind: &str) -
     }
 }
 
-/// PIN-BUG BT-3841: the statement-position probe matrix, measured on the
+/// PIN-BUG BT-3913: the statement-position probe matrix, measured on the
 /// real build (BT-3753). Every shape `adr0131_statement_probes.tsv` records
 /// as answering wrong, raising or failing to compile (`bad`) is rejected by
 /// an ADR 0131 diagnostic, and every shape it records as answering right
@@ -1818,7 +1818,7 @@ fn adr0131_statement_probe_pins() {
 /// one that does not goes back here with a `PIN-BUG` and an open issue.
 const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[];
 
-/// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
+/// PIN-BUG BT-3913: Phase 0 accepts exactly what codegen lowers correctly.
 /// `adr0131_statement_measured.tsv` records, for every class, value-type and
 /// actor cell the check once rejected, what the cell answers when compiled
 /// with the check bypassed and run on a BEAM (regenerate it with `just
@@ -1917,7 +1917,7 @@ fn operand_diagnostics(
     adr0131_diagnostics(&class_source(context, "P", &[method]))
 }
 
-/// PIN-BUG BT-3841: the operand-position half of Phase 0 (`ALLOW_SET`) is
+/// PIN-BUG BT-3913: the operand-position half of Phase 0 (`ALLOW_SET`) is
 /// sound. `adr0131_operand_measured.tsv` records what a construct answers as
 /// the value of an assignment, a receiver, an argument, a cascade part, a
 /// literal element, a `match:` subject or an interpolation, with the check
@@ -2018,7 +2018,7 @@ fn phase0_summary() -> String {
     text
 }
 
-/// PIN-BUG BT-3841: the checked-in summary of the measurement
+/// PIN-BUG BT-3913: the checked-in summary of the measurement
 /// (`adr0131_phase0_summary.tsv`) is the one the measured tables and Phase 0
 /// produce now; the family counts in the PR and the ADR are read off it.
 #[test]

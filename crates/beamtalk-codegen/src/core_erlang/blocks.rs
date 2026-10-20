@@ -42,8 +42,13 @@ pub(super) enum BlockExprKind {
     FieldAssignment,
     /// `var := expr` — local variable assignment (non-last).
     LocalAssignment,
-    /// `whileTrue:` / `whileFalse:` / `timesRepeat:` with threaded vars (non-last).
-    ControlFlowWithThreadedVars,
+    /// A construct that threads outer locals (non-last) but is not a
+    /// local-threading producer in this frame: no lowering rebinds what it
+    /// threads, so it is a compile error rather than a dropped write. The Phase
+    /// 0 check rejects every such shape before codegen (an agreement test pins
+    /// the two rules); BT-3912 deleted the single-local unpack that used to
+    /// handle it.
+    ThreadedConstructNotAProducer,
     /// Expression evaluated for side effects only — result discarded.
     SideEffect,
 }
@@ -761,7 +766,11 @@ impl CoreErlangGenerator {
         // Filter out @expect directives — they are compile-time only and generate no code.
         let body = super::util::collect_body_exprs(&block.body);
 
-        self.generate_block_body_slice(&body)
+        // BT-3912: a plain closure's body (a pure block, a fold lambda, a
+        // loop-condition closure that threads nothing) is a frame of its own, so
+        // a loop, fold, conditional or exception construct in it is a producer
+        // that rebinds the closure's locals with plain `let`s.
+        self.with_closure_body_frame(&body, |this| this.generate_block_body_slice(&body))
     }
 
     /// Generates a slice of block body expressions with proper state threading.
@@ -829,12 +838,20 @@ impl CoreErlangGenerator {
             return BlockExprKind::LocalAssignment;
         }
 
+        // BT-3912: a construct that is a local-threading producer in this frame
+        // (a plain closure body is one) is lowered by `threaded_expression`,
+        // which splices its construct tuple and rebinds every local it
+        // threads; the single-local unpack below is for what is not.
+        if self.local_producer_locals(expr).is_some() {
+            return BlockExprKind::SideEffect;
+        }
+
         if self
             .threaded_locals_of(expr)
             .and_then(ThreadedLocals::into_lowered)
             .is_some()
         {
-            return BlockExprKind::ControlFlowWithThreadedVars;
+            return BlockExprKind::ThreadedConstructNotAProducer;
         }
 
         BlockExprKind::SideEffect
@@ -860,7 +877,10 @@ impl CoreErlangGenerator {
                 // `Document` so the block body is a complete closed
                 // expression.
                 let frame = self.current_frame();
-                self.threaded_expression_doc(expr, frame)
+                let tv = self.threaded_expression(expr, frame)?;
+                let prelude_doc = self.closure_prelude_doc(&tv.prelude, expr.span());
+                let value_doc = self.threaded_value_doc(&tv.value);
+                Ok(docvec![prelude_doc, value_doc])
             }
             BlockExprKind::FieldAssignment => {
                 // Field assignment not at end: generate WITHOUT closing the value.
@@ -869,9 +889,11 @@ impl CoreErlangGenerator {
                 Ok(doc)
             }
             BlockExprKind::LocalAssignment => self.generate_block_local_assignment(expr),
-            BlockExprKind::ControlFlowWithThreadedVars => {
-                self.generate_block_control_flow_threaded(expr)
-            }
+            BlockExprKind::ThreadedConstructNotAProducer => Err(CodeGenError::Internal(
+                "ADR 0133: a construct in a block body threads outer locals but is not a \
+                 local-threading producer in its frame (the Phase 0 check rejects this)"
+                    .to_string(),
+            )),
             BlockExprKind::SideEffect => {
                 // Not an assignment or loop — generate and discard the
                 // result. ADR 0118 phase 5b: `threaded_expression`
@@ -882,7 +904,7 @@ impl CoreErlangGenerator {
                 // its own to splice into.
                 let frame = self.current_frame();
                 let tv = self.threaded_expression(expr, frame)?;
-                let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                let prelude_doc = self.closure_prelude_doc(&tv.prelude, expr.span());
                 let value_doc = self.threaded_value_doc(&tv.value);
                 Ok(docvec![prelude_doc, "let _Unit = ", value_doc, " in "])
             }
@@ -940,7 +962,7 @@ impl CoreErlangGenerator {
         }
         let frame = self.current_frame();
         let tv = self.threaded_expression(value, frame)?;
-        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+        let prelude_doc = self.closure_prelude_doc(&tv.prelude, expr.span());
         let value_doc = self.threaded_value_doc(&tv.value);
         // Now update the mapping so subsequent expressions see this binding.
         self.bind_var(var_name, &core_var);
@@ -952,68 +974,6 @@ impl CoreErlangGenerator {
             value_doc,
             " in "
         ])
-    }
-
-    /// Handle a non-last block-body statement that is a mutating control-flow
-    /// construct (`whileTrue:`/`whileFalse:`/`timesRepeat:`/loops, `ifTrue:`/
-    /// `ifFalse:`/`ifTrue:ifFalse:`/`ifNotNil:`, `on:do:`/`ensure:`, …) — one
-    /// this block's own top-level [`BlockMutationAnalysis`] doesn't classify
-    /// as captured-mutating (see [`Self::threaded_locals_of`]),
-    /// so the enclosing block still compiled as a plain (non-`StateAcc`) fun.
-    ///
-    /// Every one of these constructs' `generate_*_with_mutations`
-    /// generator returns a `{Result, StateAcc}` 2-tuple (`StateAcc` a map
-    /// keyed by [`Self::local_state_key`]) — `expr` alone is never the bare
-    /// scalar value. `element(2, ...)` + `maps:get` unpacks it the same way
-    /// the actor method-body sequencer's own "real state Bind" arm does
-    /// (`gen_server/methods.rs`); binding `core_var` directly to the raw
-    /// tuple (the pre-fix behavior) silently produced a `{Val, Map}` pair
-    /// where a scalar was expected, corrupting any later read of `var`.
-    ///
-    /// For multiple vars, we'd need to unpack more than one key — not yet
-    /// supported.
-    fn generate_block_control_flow_threaded(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<Document<'static>> {
-        let threaded_vars = self
-            .threaded_locals_of(expr)
-            .and_then(ThreadedLocals::into_lowered)
-            .expect("caller guarantees control flow with threaded vars");
-
-        if threaded_vars.len() == 1 {
-            let var = &threaded_vars[0];
-            // Get the Core Erlang variable name for this var
-            let core_var = self
-                .lookup_var(var)
-                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-            let expr_doc = self.expression_doc(expr)?;
-            let tuple_var = self.fresh_temp_var("CtrlFlowResult");
-            let state_var = self.fresh_temp_var("CtrlFlowState");
-            Ok(docvec![
-                "let ",
-                leaf::var(tuple_var.clone()),
-                " = ",
-                expr_doc,
-                " in let ",
-                leaf::var(state_var.clone()),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var),
-                ") in let ",
-                leaf::var(core_var),
-                " = call 'maps':'get'(",
-                leaf::atom(Self::local_state_key(var)),
-                ", ",
-                leaf::var(state_var),
-                ") in "
-            ])
-        } else {
-            // Multi-var case not supported yet
-            Err(CodeGenError::UnsupportedFeature {
-                feature: "Multiple threaded variables in control flow".to_string(),
-                span: Some(expr.span()),
-            })
-        }
     }
 }
 
