@@ -847,6 +847,11 @@ impl CoreErlangGenerator {
         beamtalk_core::semantic_analysis::block_facts::repl_producer_writes(expr, &|name| {
             self.binds_threadable_local(name)
         })?;
+        // BT-3947: a `match:` has no construct of its own; it adopts the
+        // bindings map like a REPL conditional.
+        if beamtalk_core::semantic_analysis::block_facts::match_arms(expr).is_some() {
+            return Some(Vec::new());
+        }
         self.threaded_locals_of(expr).map(|_| Vec::new())
     }
 
@@ -878,7 +883,9 @@ impl CoreErlangGenerator {
             // (`repl_producer_locals`). Reached here only from the inline
             // conditional lowering (`inline_control_flow_producer_with`);
             // `local_producer_locals` answers for the REPL itself.
-            conditional_arm_blocks(expr)?;
+            if beamtalk_core::semantic_analysis::block_facts::match_arms(expr).is_none() {
+                conditional_arm_blocks(expr)?;
+            }
             return self.repl_producer_locals(expr);
         }
         let kind = self.root_method_kind()?;

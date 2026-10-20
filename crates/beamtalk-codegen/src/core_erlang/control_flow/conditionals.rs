@@ -1562,7 +1562,7 @@ impl CoreErlangGenerator {
             let span = expr.span();
             // BT-3947: a `match:` that is a local-threading producer here has
             // one `BranchArm` frame per arm, like a conditional's blocks.
-            if root_producer {
+            if root_producer && !self.is_repl_mode() {
                 return Ok(Some(self.generate_match_producer(value, arms, span, tail)?));
             }
             let frame = self.current_frame();
