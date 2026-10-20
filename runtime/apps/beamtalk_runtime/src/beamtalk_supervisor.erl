@@ -2070,7 +2070,8 @@ Also on the hot path of every dynamic `spawn`-family send to any class,
 actors included (`beamtalk_class_dispatch:class_send/3`), so it walks the
 superclass chain once and stops at the first ancestor that decides the
 answer: `Supervisor`/`DynamicSupervisor` (true), or `Actor`/`Object`
-(false: neither is an ancestor of the two supervisor bases). An `Actor`
+(false: neither descends from a supervisor base, so a walk that reaches one
+has already passed any `Supervisor`/`DynamicSupervisor` in the chain). An `Actor`
 subclass is answered after one or two ETS reads instead of two walks to the
 root. A per-class cached flag was considered and rejected (BT-3994): it would
 go stale when an ancestor is redefined under a different superclass, and the
