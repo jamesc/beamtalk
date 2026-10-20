@@ -387,6 +387,11 @@ impl CoreErlangGenerator {
         let seeded_state = self.fresh_temp_var("SeededState");
         let mut chain: Document<'static> = match scratch {
             ScratchStart::Continue => leaf::var(outer_state.to_string()),
+            // A plain closure body in an actor method starts from the `State` it
+            // captured (BT-3912): its arms self-send and read fields on it.
+            ScratchStart::Fresh if self.closure_scratch_continues_state(self.current_frame()) => {
+                leaf::var(self.current_field_read_state_var())
+            }
             ScratchStart::Fresh => Document::Str("call 'maps':'new'()"),
         };
         // Fold from the last var inward so the emitted nesting reads naturally.

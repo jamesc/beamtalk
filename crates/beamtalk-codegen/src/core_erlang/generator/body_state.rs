@@ -40,6 +40,10 @@ use std::collections::{HashMap, HashSet};
 /// The per-body generator state, parked while a nested body is lowered. The
 /// default is what a body starts from: nothing inherited.
 #[derive(Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Parked generator flags are context switches, not configuration"
+)]
 pub(in crate::core_erlang) struct BodyState {
     state_version: usize,
     self_version: usize,

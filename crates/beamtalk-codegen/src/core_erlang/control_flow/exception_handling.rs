@@ -841,6 +841,9 @@ impl CoreErlangGenerator {
         // sits in has no `State` chain (a direct-params or tuple-acc loop body,
         // ADR 0131 §2): its body has no state effect, so the scratch map is
         // private there as in a class method.
+        if self.closure_scratch_continues_state(self.current_frame()) {
+            return self.current_field_read_state_var();
+        }
         let state_chain = self
             .rebind_frames
             .get(&self.current_frame())

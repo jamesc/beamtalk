@@ -712,6 +712,17 @@ impl CoreErlangGenerator {
         out
     }
 
+    /// BT-3912: whether `frame` is the plain closure body being lowered in an
+    /// actor instance method. A construct directly in it seeds its scratch map
+    /// from the `State` the closure captured, not from an empty map: its arms
+    /// may self-send or read a field, which dispatch on (and read) that state
+    /// exactly as the closure's other statements do. The scratch is still
+    /// private (the closure hands back only its value), so nothing adopts it as
+    /// the next `State` ([`Self::conditional_has_private_scratch`]).
+    pub(in crate::core_erlang) fn closure_scratch_continues_state(&self, frame: FrameId) -> bool {
+        self.closure_frame == Some(frame) && self.in_actor_instance_context()
+    }
+
     /// BT-3912: renders a producer `prelude` lowered in the plain closure body
     /// frame ([`Self::closure_frame`]) to a `Document` the closure's flat
     /// statement sequence splices, after verifying it as that frame's body (a
