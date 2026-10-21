@@ -10,10 +10,9 @@
 use super::super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::super::{CodeGenError, CoreErlangGenerator, Result};
-use crate::core_erlang::threading_analysis::ThreadedLocals;
+use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::{Document, leaf};
+use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
 
@@ -28,7 +27,7 @@ impl CoreErlangGenerator {
     /// - not in REPL mode (REPL always uses `StateAcc` for local vars)
     ///
     /// Returns `None` when the variable needs `StateAcc` threading (caller should use
-    /// `generate_local_var_assignment_in_loop` instead).
+    /// `lower_local_var_assignment_bind` instead).
     pub(super) fn try_generate_block_local_plain_let(
         &mut self,
         expr: &Expression,
@@ -48,7 +47,7 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         // Tier-2 block calls return {Result, NewStateAcc}. Fall back to
-        // generate_local_var_assignment_in_loop which already handles Tier-2 unpacking
+        // lower_local_var_assignment_bind which already handles Tier-2 unpacking
         // and StateAcc propagation correctly.
         if self.is_tier2_value_call(value) {
             return Ok(None);
@@ -63,7 +62,7 @@ impl CoreErlangGenerator {
         // and the plain `let core_var = <val_doc> in` below has no way to
         // unwrap the tuple or rethread them — it would bind `core_var` to the
         // raw tuple and silently drop every other local the RHS's block
-        // mutated. Fall back to `generate_local_var_assignment_in_loop`,
+        // mutated. Fall back to `lower_local_var_assignment_bind`,
         // which unwraps this exact shape and rebinds those
         // other locals via `push_control_flow_threaded_var_rereads`'s
         // loop-body counterpart.
@@ -101,7 +100,7 @@ impl CoreErlangGenerator {
         // (`x := self bump`), at any nesting depth, threads as a real
         // prelude via `threaded_expression` — spliced ahead of this
         // `let core_var = ... in` (mirrors
-        // `generate_local_var_assignment_in_loop`'s analogous handling, now
+        // `lower_local_var_assignment_bind`'s analogous handling, now
         // built on `ThreadedValue` rather than an open-chain side channel).
         let frame = self.current_frame();
         let tv = self.threaded_expression(value, frame)?;
@@ -215,262 +214,5 @@ impl CoreErlangGenerator {
             span,
         });
         Ok(())
-    }
-
-    /// Claude Review follow-up on PR #3727: shared by
-    /// `generate_local_var_assignment_in_loop`'s Tier 2 value-call case and
-    /// its control-flow-with-mutations case — both RHS shapes compile
-    /// (`generate_tier2_value_call_doc`/`expression_doc` respectively) to a
-    /// closed `{Value, StateAcc}` 2-tuple needing identical treatment:
-    /// unwrap element 1 into `val_var`, thread element 2 into `new_state`
-    /// via `maps:put`, then rebind any OTHER outer local `source_expr`'s own
-    /// block mutated. The rebind is a no-op for a Tier 2 call —
-    /// `threaded_locals_of` only matches the control-flow
-    /// selectors `control_flow_has_mutations` gates the other case on, never
-    /// a bare `value`/`value:` call — so folding both callers through this
-    /// one helper is structurally identical for the pre-existing Tier 2
-    /// case, though not byte-identical: `fresh_temp_var` draws from one
-    /// global counter, and this helper now mints `tuple_var`/`tuple_state_var`
-    /// *after* `value_code` is built (previously minted before), shifting the
-    /// numeric suffixes assigned to those two temps and everything
-    /// `generate_tier2_value_call_doc` mints internally — every name stays
-    /// unique, and existing tests match this shape with `\w*` wildcards.
-    ///
-    /// Extracted after a Claude Review finding on this PR: before this
-    /// helper, the control-flow-with-mutations case was a fourth
-    /// near-identical copy of this idiom (the Tier 2 case here, plus
-    /// `conditionals.rs`'s C3/C3b, which use the `ThreadedStmt`-based arm
-    /// emitter rather than this file's plain `Document` composition and so
-    /// are not folded in here) — exactly the shape of gap this PR's own P7
-    /// regression closed for the third copy.
-    fn emit_tuple_unwrap_pack_and_rebind(
-        &mut self,
-        temp_var_prefixes: (&str, &str),
-        value_code: Document<'static>,
-        val_var: &str,
-        state_key: &str,
-        new_state: &str,
-        source_expr: &Expression,
-    ) -> Document<'static> {
-        let (tuple_prefix, tuple_state_prefix) = temp_var_prefixes;
-        let tuple_var = self.fresh_temp_var(tuple_prefix);
-        let tuple_state_var = self.fresh_temp_var(tuple_state_prefix);
-        let mut docs = vec![docvec![
-            "let ",
-            leaf::var(tuple_var.clone()),
-            " = ",
-            value_code,
-            " in let ",
-            leaf::var(val_var.to_string()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(tuple_var.clone()),
-            ") in let ",
-            leaf::var(tuple_state_var.clone()),
-            " = call 'erlang':'element'(2, ",
-            leaf::var(tuple_var),
-            ") in let ",
-            leaf::var(new_state.to_string()),
-            " = call 'maps':'put'(",
-            leaf::atom(state_key.to_string()),
-            ", ",
-            leaf::var(val_var.to_string()),
-            ", ",
-            leaf::var(tuple_state_var),
-            ") in ",
-        ]];
-        if let Some(threaded_vars) = self
-            .threaded_locals_of(source_expr)
-            .and_then(ThreadedLocals::into_lowered)
-        {
-            docs.extend(self.rebind_threaded_vars_from_state(&threaded_vars, new_state));
-        }
-        Document::Vec(docs)
-    }
-
-    /// Generate a local variable assignment inside a loop body with state threading.
-    ///
-    /// Generates code like:
-    /// ```erlang
-    /// let _Val = <value> in let StateAccN = maps:put('varname', _Val, StateAcc{N-1}) in
-    /// ```
-    ///
-    /// When the RHS is a Tier 2 block call returning `{Result, NewStateAcc}`,
-    /// unpacks the tuple and uses `NewStateAcc` for `maps:put` so that mutations made
-    /// by the called block (e.g. captured variable updates) are preserved in the
-    /// threading state rather than discarded.
-    #[allow(clippy::too_many_lines)]
-    pub(super) fn generate_local_var_assignment_in_loop(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<(Document<'static>, String)> {
-        if let Expression::Assignment { target, value, .. } = expr {
-            if let Expression::Identifier(id) = target.as_ref() {
-                let val_var = self.fresh_temp_var("Val");
-
-                // In REPL mode, use the plain variable name as the key
-                // (no __local__ prefix) since there are no actor fields to collide with.
-                // This ensures reads (`maps:get('x', StateAcc)`) match writes
-                // (`maps:put('x', ..., StateAcc)`), allowing mutations to accumulate
-                // correctly across loop iterations.
-                let state_key = if self.is_repl_mode() {
-                    id.name.clone()
-                } else {
-                    Self::local_state_key(&id.name).into()
-                };
-
-                // If the RHS is a Tier 2 block call, it returns {Result, NewStateAcc}.
-                // Unpack the tuple so that:
-                //   - `Val` is bound to `Result` (not the whole tuple)
-                //   - `maps:put` uses `NewStateAcc` (preserving the block's captured mutations)
-                //     rather than the old `StateAcc` (which would discard them).
-                if self.is_tier2_value_call(value) {
-                    let value_code = self.generate_tier2_value_call_doc(value)?;
-
-                    let _ = self.next_state_var();
-                    let new_state = if self.in_loop_body {
-                        self.current_state_var()
-                    } else {
-                        super::super::util::versioned_var("State", self.state_version())
-                    };
-
-                    // Rebind the local to the freshly-written value so a later
-                    // read *within the same iteration* (`idx := idx + 1` … `x * idx`) sees
-                    // the new value instead of the stale iteration-start `maps:get` binding.
-                    // Mirrors the tuple-acc path (`generate_direct_var_update_in_loop`).
-                    self.bind_var(&id.name, &val_var);
-
-                    // Return val_var so callers (e.g. generate_conditional_branch_inline)
-                    // can use it as the branch result.
-                    let doc = self.emit_tuple_unwrap_pack_and_rebind(
-                        ("T2", "T2St"),
-                        value_code,
-                        &val_var,
-                        &state_key,
-                        &new_state,
-                        value,
-                    );
-                    return Ok((doc, val_var));
-                }
-
-                // RHS is itself control-flow-with-mutations (e.g. a
-                // mutating list-op like `collect:`/`do:`/`select:` whose
-                // block — or its own receiver — needs state threading, or a
-                // nested `ifTrue:ifFalse:`/`match:`/`on:do:` with mutations).
-                // Same `{Value, StateAcc}` 2-tuple shape as the Tier 2 case
-                // above, produced by the ordinary `expression_doc` path
-                // rather than `generate_tier2_value_call_doc` — must be
-                // unwrapped identically, instead of falling into the generic
-                // path below (which assumes a single, non-tuple value and
-                // would bind `val_var`/`maps:put` to the raw tuple itself).
-                // Mirrors `lower_local_var_assignment_bind`'s C3b case
-                // (`conditionals.rs`) — the conditional-branch-arm sibling
-                // this loop-body function has always structurally
-                // paralleled — including its rebind of any OTHER outer local
-                // the RHS's own block mutated.
-                // BT-4000: not an inline-threaded construct, which
-                // `thread_ahead` below registers already unwrapped (the plain
-                // path reads it back, as at the method root).
-                if self.control_flow_has_mutations(value) && !self.thread_ahead_unwraps(value) {
-                    let frame = self.current_frame();
-                    let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
-                    let thread_scope = self.thread_ahead(value, &mut prelude_stmts, frame)?;
-                    let prelude_doc = self.threaded_prelude_doc(&prelude_stmts);
-                    let value_code = self.expression_doc(value)?;
-                    self.finish_precompiled_scope(thread_scope)?;
-
-                    let _ = self.next_state_var();
-                    let new_state = if self.in_loop_body {
-                        self.current_state_var()
-                    } else {
-                        super::super::util::versioned_var("State", self.state_version())
-                    };
-
-                    self.bind_var(&id.name, &val_var);
-
-                    let doc = self.emit_tuple_unwrap_pack_and_rebind(
-                        ("CfTuple", "CfSt"),
-                        value_code,
-                        &val_var,
-                        &state_key,
-                        &new_state,
-                        value,
-                    );
-                    return Ok((Document::Vec(vec![prelude_doc, doc]), val_var));
-                }
-
-                // ADR 0118 phase 2b: thread every state-effecting
-                // sub-expression nested in the RHS (or the RHS itself, `v :=
-                // self bump`) ahead of `value`'s own compile — mirrors
-                // `lower_local_var_assignment_bind`'s identical `thread_ahead`
-                // step (`conditionals.rs`), the branch-arm sibling this
-                // loop-body function has always structurally paralleled.
-                // Scoped to the non-Tier2 path only, matching that sibling's
-                // own scope: a Tier2 value call already returned its own
-                // `{Result, NewStateAcc}` tuple above via a dedicated helper
-                // that never consults `precompiled_subexprs`, so
-                // pre-threading it there would double-compile (and
-                // double-dispatch) any self-send nested in its arguments.
-                let frame = self.current_frame();
-                let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
-                let thread_scope = self.thread_ahead(value, &mut prelude_stmts, frame)?;
-                let prelude_doc = self.threaded_prelude_doc(&prelude_stmts);
-
-                // Capture value expression (ADR 0018 bridge). ADR 0118 phase
-                // 5b: `thread_ahead` above already threads any
-                // class-var producer nested in `value` (at any depth) as a
-                // real prelude, so the plain compile here reads the
-                // substituted value back via `precompiled_subexprs` — no
-                // open scope reaches this point any more.
-                let value_code = self.expression_doc(value)?;
-                self.finish_precompiled_scope(thread_scope)?;
-
-                // read AFTER `thread_ahead` above, so a threaded
-                // prelude's own state-version bump (e.g. a nested self-send's
-                // dispatch `Bind`) is reflected in the `maps:put` source
-                // below — reading it any earlier would reference the
-                // pre-dispatch state.
-                let current_state =
-                    super::super::util::versioned_var("StateAcc", self.state_version());
-
-                // Increment state version for the new state
-                let _ = self.next_state_var();
-                let new_state = if self.in_loop_body {
-                    self.current_state_var()
-                } else {
-                    super::super::util::versioned_var("State", self.state_version())
-                };
-
-                // Rebind the local to the freshly-written value so a later read
-                // *within the same iteration* sees the new value rather than the stale
-                // iteration-start `maps:get` binding (the map-acc analogue of the
-                // tuple-acc rebind in `generate_direct_var_update_in_loop`).
-                self.bind_var(&id.name, &val_var);
-
-                // Return val_var so callers (e.g. generate_conditional_branch_inline)
-                // can use it as the branch result.
-                return Ok((
-                    docvec![
-                        prelude_doc,
-                        "let ",
-                        leaf::var(val_var.clone()),
-                        " = ",
-                        value_code,
-                        " in let ",
-                        leaf::var(new_state),
-                        " = call 'maps':'put'(",
-                        leaf::atom(state_key.to_string()),
-                        ", ",
-                        leaf::var(val_var.clone()),
-                        ", ",
-                        leaf::var(current_state),
-                        ") in ",
-                    ],
-                    val_var,
-                ));
-            }
-        }
-        Err(CodeGenError::Internal(
-            "generate_local_var_assignment_in_loop called on non-assignment expression".to_string(),
-        ))
     }
 }

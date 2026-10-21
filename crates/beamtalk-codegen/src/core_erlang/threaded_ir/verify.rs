@@ -377,6 +377,16 @@ pub(in crate::core_erlang) enum VerifyError {
     /// version, so the write is silently lost (`[self.n := self.n + 1. self.n
     /// < 3] whileTrue: [k := k + 1]` in a value-type method loops forever,
     /// `erlc`-clean). Applies to every loop of every scope kind.
+    ///
+    /// BT-4015: the same for a `Local` family, an outer local (in the REPL, a
+    /// binding) the condition writes. Its new value rides the `StateAcc` map
+    /// the condition closure answers, so the condition slot must hold the
+    /// [`ThreadedStmt::ConditionHandBack`] that rebinds the loop's `StateAcc`
+    /// to it. Without one the closure answers only its boolean and the write
+    /// dies with it: the loop re-reads the pre-condition value every iteration
+    /// (`[cw := cw + 1. cw < 3] whileTrue: [ck := ck + 1]` at the REPL never
+    /// ends), or a body that reads the local reads the closure's own variable
+    /// (`erlc`: unbound variable).
     ConditionFamilyNotCarried { family: VersionPrefix, at: Span },
 }
 
@@ -677,6 +687,7 @@ fn collect_producer_consumer_counts(
             | ThreadedStmt::Return(..)
             | ThreadedStmt::Statement(..)
             | ThreadedStmt::FoldAccumulator { .. }
+            | ThreadedStmt::ConditionHandBack { .. }
             | ThreadedStmt::OnDoCatch { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
@@ -720,7 +731,9 @@ fn carries_family(produces: &[VersionedVar], body: &[ThreadedStmt]) -> bool {
 /// (`condition_families`) must be handed back into the loop's frame by a
 /// top-level `Bind` in `condition` whose target is that family in `frame` and
 /// whose source is one of the loop's own `produces` seeds (the family's loop
-/// parameter, which the condition closure read). Needs no version history.
+/// parameter, which the condition closure read). A `Local` family (BT-4015)
+/// rides the condition's `StateAcc` instead, so it is carried by a top-level
+/// [`ThreadedStmt::ConditionHandBack`]. Needs no version history.
 fn condition_families_not_carried(
     condition_families: &[VersionPrefix],
     condition: &[ThreadedStmt],
@@ -728,9 +741,15 @@ fn condition_families_not_carried(
     frame: FrameId,
     at: Span,
 ) -> Vec<VerifyError> {
+    let hands_back_map = condition
+        .iter()
+        .any(|stmt| matches!(stmt, ThreadedStmt::ConditionHandBack { .. }));
     condition_families
         .iter()
         .filter(|family| {
+            if matches!(family, VersionPrefix::Local(_)) {
+                return !hands_back_map;
+            }
             !condition.iter().any(|stmt| {
                 matches!(
                     stmt,
@@ -1212,9 +1231,13 @@ impl VerifyWalk<'_> {
             // BT-3863: a `FoldAccumulator` is checked against its fold frame
             // by `verify_fold_locals_carried`, which runs on the fold body
             // before `carry_fold_families` can wrap it.
+            //
+            // BT-4015: a `ConditionHandBack` is checked against its loop's
+            // `condition_families` by `condition_families_not_carried`.
             ThreadedStmt::NlrCatch { .. }
             | ThreadedStmt::Statement(..)
             | ThreadedStmt::FoldAccumulator { .. }
+            | ThreadedStmt::ConditionHandBack { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
             // ADR 0041 §State-Carrying NLR: a `^` throw reads its slot

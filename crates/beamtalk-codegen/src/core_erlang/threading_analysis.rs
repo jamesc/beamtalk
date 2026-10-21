@@ -302,6 +302,19 @@ impl CoreErlangGenerator {
     ///
     /// `body` is the loop's literal body block when it has one; without one
     /// only the condition's own locals and carrier are consulted.
+    ///
+    /// BT-4015: a condition that writes an outer local (in the REPL, a
+    /// binding; [`Self::loop_condition_written_locals`]) is carried too: a loop
+    /// carries the union of what its condition and its body produce, and a
+    /// written local is a threaded local of the loop (or, in the REPL, a key of
+    /// the bindings map the loop always carries). In a compiled method the
+    /// Phase 0 check rejects such a write unless the condition also has a
+    /// state effect; it reaches codegen from the REPL and a legacy workspace
+    /// block body. Before, such a condition was a plain closure answering only
+    /// its boolean: the write was lost (the loop re-read the pre-loop value
+    /// forever), or a body that read it read the closure's own variable
+    /// (`erlc`: unbound variable). Like a state effect, a write counts only
+    /// when the loop has something to carry it in (BT-3999).
     pub(in crate::core_erlang) fn while_condition_has_carried_effects(
         &self,
         condition: &Expression,
@@ -310,10 +323,12 @@ impl CoreErlangGenerator {
         let Expression::Block(cond_block) = condition else {
             return false;
         };
-        if !beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
-            condition,
-            self.in_class_method(),
-        ) {
+        if !self.condition_write_is_carried(condition)
+            && !beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
+                condition,
+                self.in_class_method(),
+            )
+        {
             return false;
         }
         let threaded_locals = match body {
@@ -323,6 +338,50 @@ impl CoreErlangGenerator {
         !threaded_locals.is_empty()
             || self.loop_has_ambient_carrier(cond_block)
             || body.is_some_and(|body| self.loop_has_ambient_carrier(body))
+    }
+
+    /// BT-4015: the outer locals (in the REPL, the bindings) a
+    /// `whileTrue:`/`whileFalse:` `condition` block writes, a nested
+    /// construct's write included: ADR 0131's one recognizer
+    /// ([`Self::threaded_locals_of_blocks`]) over the condition block, its
+    /// `names` (every write the condition must hand back, whether or not
+    /// today's tuple builders pack it). Read before the condition is lowered,
+    /// so a name the condition binds is not mistaken for an outer one. Empty
+    /// for a condition that is not a literal block.
+    ///
+    /// The one rule both the loop gate
+    /// ([`Self::while_condition_has_carried_effects`]: such a condition is
+    /// carried) and the loop node's `condition_families` (what the verifier
+    /// requires carried) read.
+    pub(in crate::core_erlang) fn loop_condition_written_locals(
+        &self,
+        condition: &Expression,
+    ) -> Vec<String> {
+        let Expression::Block(cond_block) = condition else {
+            return Vec::new();
+        };
+        self.threaded_locals_of_blocks(
+            ThreadedConstruct::Inline(LocalThreadingFamily::Loop),
+            &[cond_block],
+            &[],
+        )
+        .map(|t| t.names)
+        .unwrap_or_default()
+    }
+
+    /// BT-4015: whether `condition` writes an outer local the loop must carry
+    /// ([`Self::loop_condition_written_locals`]).
+    fn condition_write_is_carried(&self, condition: &Expression) -> bool {
+        // Test-only fault injection: the pre-BT-4015 answer, so the verifier's
+        // `ConditionFamilyNotCarried` over a `Local` family is shown to fire on
+        // a real compile (`tests/while_condition_binding_corpus.rs`).
+        #[cfg(test)]
+        if super::threaded_expr::fault::active()
+            == Some(super::threaded_expr::fault::LocalRebindFault::ConditionWritesNotCarried)
+        {
+            return false;
+        }
+        !self.loop_condition_written_locals(condition).is_empty()
     }
 
     /// Whether a loop over `body` that threads no local still has a map to

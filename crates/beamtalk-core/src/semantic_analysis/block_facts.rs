@@ -1062,6 +1062,12 @@ pub fn while_condition_has_state_effects(condition: &Expression, in_class_method
 /// class methods). Such a condition write stays a compile error; pinned by the
 /// `while_condition_*` matrix in `semantic_analysis/tests/local_threading.rs`
 /// and, for the accepted shapes, `stdlib/test/bt3746stateful_while_test.bt`.
+///
+/// BT-4015: codegen now carries a condition's local write whether or not the
+/// condition has a state effect (`while_condition_has_carried_effects`, for the
+/// REPL and legacy workspace block bodies, which this check does not gate).
+/// Accepting such a write in a compiled method too would be a separate change,
+/// proven over the compiled contexts first.
 #[must_use]
 pub fn while_condition_writes_thread(
     condition: &Block,

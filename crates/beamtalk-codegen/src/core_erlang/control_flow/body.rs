@@ -834,10 +834,8 @@ impl CoreErlangGenerator {
                 } else {
                     // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
                     // `lower_letrec_local_var_assignment`'s own `StateAcc`
-                    // branch calls (`lower_local_var_assignment_bind`,
-                    // documented as byte-identical to
-                    // `generate_local_var_assignment_in_loop`'s hand-rolled
-                    // `Document`). The returned value var name is captured and
+                    // branch calls (`lower_local_var_assignment_bind`).
+                    // The returned value var name is captured and
                     // threaded through to `lower_local_assign_last_expr` (its
                     // non-tuple-acc branch, below) — BT-3521: a StateAcc-mode
                     // `FoldlCollect`/`FoldlInject`/predicate family that ends

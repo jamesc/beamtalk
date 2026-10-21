@@ -1767,22 +1767,20 @@ impl CoreErlangGenerator {
     /// ADR 0111 Addendum 5 §C2/§C3/§C4: lowers a `LocalAssignPure`/
     /// `LocalAssignTier2`/`LocalAssignControlFlow`/`LocalAssignSelfSend`
     /// conditional-branch statement to its real `Bind` sequence, appending
-    /// it to `stmts` and returning the assigned value's temp var name.
-    /// Mirrors `generate_local_var_assignment_in_loop`'s three sub-branches
-    /// exactly — same helper calls, same mint
-    /// order — but models the mutation as a [`ThreadedStmt::Bind`] instead
-    /// of a hand-rolled `maps:put` `Document` fragment. Unlike the
-    /// top-level `BodyExprKind` shapes `gen_server/methods.rs` lowers
-    /// (which route `LocalAssignSelfSend` through
-    /// `generate_self_dispatch_parts` instead), the four kinds above ALL
-    /// reach `generate_local_var_assignment_in_loop` in this body loop —
-    /// its own `is_tier2_value_call`/open-scope checks decide the actual
-    /// shape at runtime, not `classify_body_expr`'s static kind.
+    /// it to `stmts` and returning the assigned value's temp var name. The
+    /// mutation is a [`ThreadedStmt::Bind`] rather than a hand-rolled
+    /// `maps:put` `Document` fragment. Unlike the top-level `BodyExprKind`
+    /// shapes `gen_server/methods.rs` lowers (which route
+    /// `LocalAssignSelfSend` through `generate_self_dispatch_parts`
+    /// instead), the four kinds above ALL reach this one lowering — its own
+    /// `is_tier2_value_call`/open-scope checks decide the actual shape at
+    /// runtime, not `classify_body_expr`'s static kind.
     ///
-    /// This is also called directly from `expressions.rs`'s
-    /// `generate_block_stateful_body` (the Tier 2 stateful-block-body local
-    /// var assignment case) — same shape, same mint order, one fewer
-    /// hand-rolled duplicate.
+    /// The one `StateAcc` local-write lowering: a conditional branch, a
+    /// `StateAcc` loop body, a carried while condition (BT-4015, which
+    /// deleted the `Document`-returning twin it was written to mirror) and
+    /// `expressions.rs`'s `generate_block_stateful_body` (the Tier 2
+    /// stateful-block-body local var assignment case) all call it.
     #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn lower_local_var_assignment_bind(
         &mut self,
@@ -1800,7 +1798,7 @@ impl CoreErlangGenerator {
 
         let val_var = self.fresh_temp_var("Val");
         // In REPL mode, use the plain variable name as the key (no
-        // __local__ prefix) — see `generate_local_var_assignment_in_loop`.
+        // __local__ prefix), so reads and writes agree on the key.
         let state_key: String = if self.is_repl_mode() {
             id.name.to_string()
         } else {

@@ -142,6 +142,11 @@ pub(super) mod fault {
         /// in a loop body the conditional's `State` extraction reads a version
         /// the frame never binds (`UnboundVersion`).
         ReceiverPreludeInTuple,
+        /// BT-4015: a `whileTrue:`/`whileFalse:` condition's outer-local (in
+        /// the REPL, binding) write is not a carried effect, as before BT-4015,
+        /// so the condition closure answers only its boolean and the write
+        /// dies with it (`ConditionFamilyNotCarried` over a `Local` family).
+        ConditionWritesNotCarried,
     }
 
     thread_local! {

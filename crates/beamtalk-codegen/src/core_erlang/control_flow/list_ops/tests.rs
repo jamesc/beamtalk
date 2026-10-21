@@ -2835,7 +2835,7 @@ fn test_sort_with_local_mutation_uses_process_dict() {
     // sort: with a LOCAL VARIABLE mutation (not a field mutation) inside the
     // comparator block. This exercises the `is_local_var_assignment` branch in
     // generate_list_sort_with_mutations (transform_ops.rs:1998), which calls
-    // generate_local_var_assignment_in_loop instead of generate_field_assignment_open.
+    // lower_local_var_assignment_bind instead of generate_field_assignment_open.
     // The local var is threaded via maps:put with key '__local__n' (not bare 'n').
     //
     // the process-dict key is a fresh `erlang:make_ref/0` generated at the
@@ -2886,19 +2886,14 @@ fn test_nested_sort_with_mutations_uses_distinct_state_keys() {
     );
 }
 
-// ── generate_local_var_assignment_in_loop: Tier 2 and CF-mutations paths ─────
+// ── lower_local_var_assignment_bind: Tier 2 and CF-mutations paths ─────
 //
-// These cover `emit_tuple_unwrap_pack_and_rebind` (local_assign.rs:236-275) and
-// the two uncovered branches of `generate_local_var_assignment_in_loop`
-// (lines 313-382): the Tier 2 value-call path and the control-flow-with-mutations
-// path. Both are reachable only via the sort: comparator body handler
-// (transform_ops.rs:2074) or the stateful-while-condition handler
-// (while_loops.rs:511).
+// These cover the Tier 2 value-call path and the control-flow-with-mutations
+// path of `lower_local_var_assignment_bind`, through the sort: comparator body.
 
 #[test]
 fn test_sort_comparator_tier2_local_assign_unpacks_tuple() {
-    // `generate_local_var_assignment_in_loop`'s Tier 2 path (local_assign.rs:313-339)
-    // and `emit_tuple_unwrap_pack_and_rebind` (local_assign.rs:236-275).
+    // `lower_local_var_assignment_bind`'s Tier 2 path.
     //
     // `scan_class_for_tier2_blocks` finds `self sortWith:using:` called from `run`
     // with a literal block that captures and writes `count`
@@ -2910,8 +2905,7 @@ fn test_sort_comparator_tier2_local_assign_unpacks_tuple() {
     //   - is_local_var_assignment → true (Assignment with Identifier target)
     //   - is_tier2_value_call(transform value: a) → true (selector `value:`, receiver
     //     `transform` is in tier2_block_params)
-    // → Tier 2 branch calls emit_tuple_unwrap_pack_and_rebind("T2", "T2St"), which
-    //   emits element(1, ...) to extract the value and element(2, ...) to extract the
+    // → its Tier 2 branch emits element(1, ...) to extract the value and element(2, ...) to extract the
     //   new StateAcc from the {Result, NewState} tuple.
     let src = concat!(
         "Actor subclass: TierTwoSortLocal\n",
@@ -2930,12 +2924,12 @@ fn test_sort_comparator_tier2_local_assign_unpacks_tuple() {
     assert!(
         code.contains("call 'erlang':'element'(1,"),
         "Tier 2 sort: local-var assign must unpack value via element(1, ...) \
-         (emit_tuple_unwrap_pack_and_rebind). Got:\n{code}"
+         (lower_local_var_assignment_bind). Got:\n{code}"
     );
     assert!(
         code.contains("call 'erlang':'element'(2,"),
         "Tier 2 sort: local-var assign must unpack new state via element(2, ...) \
-         (emit_tuple_unwrap_pack_and_rebind). Got:\n{code}"
+         (lower_local_var_assignment_bind). Got:\n{code}"
     );
     assert!(
         code.contains("'__local__result'"),
@@ -2946,8 +2940,7 @@ fn test_sort_comparator_tier2_local_assign_unpacks_tuple() {
 
 #[test]
 fn test_sort_comparator_cf_mutations_local_assign_unpacks_tuple() {
-    // `generate_local_var_assignment_in_loop`'s control-flow-with-mutations path
-    // (local_assign.rs:357-382) and `emit_tuple_unwrap_pack_and_rebind`.
+    // `lower_local_var_assignment_bind`'s control-flow-with-mutations path.
     //
     // `result := (a > 0) ifTrue: [count := count + 1. 1] ifFalse: [0]`:
     //   - is_local_var_assignment → true (target is `result`)
@@ -2956,8 +2949,7 @@ fn test_sort_comparator_cf_mutations_local_assign_unpacks_tuple() {
     //       selector `ifTrue:ifFalse:` is a conditional selector;
     //       block [count := count + 1. 1] mutates captured outer local `count`
     //       → block_arg_needs_threading returns true
-    // → CF-mutations branch calls emit_tuple_unwrap_pack_and_rebind("CfTuple", "CfSt"),
-    //   which emits element(1, ...) / element(2, ...) to unpack the {Result, NewState}
+    // → its CF-mutations branch emits element(1, ...) / element(2, ...) to unpack the {Result, NewState}
     //   tuple returned by the inline ifTrue:ifFalse: conditional.
     let src = concat!(
         "Actor subclass: CfSortMutate\n",
@@ -2974,12 +2966,12 @@ fn test_sort_comparator_cf_mutations_local_assign_unpacks_tuple() {
     assert!(
         code.contains("call 'erlang':'element'(1,"),
         "CF-mutations sort: local-var assign must unpack value via element(1, ...) \
-         (emit_tuple_unwrap_pack_and_rebind). Got:\n{code}"
+         (lower_local_var_assignment_bind). Got:\n{code}"
     );
     assert!(
         code.contains("call 'erlang':'element'(2,"),
         "CF-mutations sort: local-var assign must unpack new state via element(2, ...) \
-         (emit_tuple_unwrap_pack_and_rebind). Got:\n{code}"
+         (lower_local_var_assignment_bind). Got:\n{code}"
     );
     assert!(
         code.contains("'__local__result'"),

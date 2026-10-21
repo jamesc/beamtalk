@@ -711,8 +711,11 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// sourced from one of the loop's own `produces` seeds; otherwise the
         /// write dies with the closure
         /// ([`VerifyError::ConditionFamilyNotCarried`](super::verify::VerifyError::ConditionFamilyNotCarried)).
-        /// The actor `State` (and REPL bindings) ride the `StateAcc` map the
-        /// condition already hands back, so they never appear here. Empty
+        /// The actor `State` rides the `StateAcc` map the condition already
+        /// hands back, so it never appears here. BT-4015: a `Local` entry per
+        /// outer local (in the REPL, binding) the condition writes; it rides
+        /// that map too, so it is carried by a
+        /// [`ConditionHandBack`](Self::ConditionHandBack) in `condition`. Empty
         /// for a counted loop, which has no condition block. Rendering
         /// ignores it.
         condition_families: Vec<VersionPrefix>,
@@ -834,6 +837,24 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     FoldAccumulator {
         carry: FoldCarry,
         value: Document<'static>,
+        span: Span,
+    },
+
+    /// BT-4015: a `whileTrue:`/`whileFalse:` condition closure's hand-back of
+    /// its writes, in a [`ConditionalLoop`](Self::ConditionalLoop)'s
+    /// `condition` slot: `let <value_var> = element(1, <pair>) in let
+    /// StateAcc = element(2, <pair>) in`, `pair` being the `{Bool, StateAcc}`
+    /// (or `{Bool, StateAcc, SelfN}`) the closure answered. The rebind of the
+    /// bare `StateAcc` is a lexical shadow of the loop parameter, not a
+    /// version step, so the body, the recursive call and the exit arm all see
+    /// the condition's map under the name they already use. Typed so the
+    /// verifier sees that the condition hands its map back: every outer local
+    /// (or REPL binding) the condition writes rides in it
+    /// ([`VerifyError::ConditionFamilyNotCarried`](super::verify::VerifyError::ConditionFamilyNotCarried)
+    /// over a `Local` family). Built by `generate_while_loop_with_mutations`.
+    ConditionHandBack {
+        pair: String,
+        value_var: String,
         span: Span,
     },
 

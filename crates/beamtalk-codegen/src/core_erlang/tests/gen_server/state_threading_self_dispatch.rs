@@ -588,7 +588,7 @@ fn bt3418_field_assign_rhs_in_loop_body_threads_nested_self_send() {
 #[test]
 fn bt3418_local_assign_rhs_in_loop_body_threads_nested_self_send_with_no_warning() {
     // ADR 0118 phase 2b: `y := 1 + (self bump)` as a `do:`
-    // loop-body statement — `generate_local_var_assignment_in_loop`'s own
+    // loop-body statement — `lower_local_var_assignment_bind`'s own
     // RHS. This is the exact shape that would otherwise silently drop
     // an order-unsafe self-send binary-op operand with only a warning;
     // `thread_ahead` sequences it ahead of the RHS's own compile via
