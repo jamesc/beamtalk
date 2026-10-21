@@ -88,6 +88,58 @@ Object subclass: SsbMain
       n: sn
     nil
 
+  // BT-4007 (ADR 0137 Phase 0 gates): `beamtalk run SsbMain adr0137`.
+  // field_loop_call: gate 1, one gen_server:call per op, a method with ten
+  // field reads and three writes, intrinsics only.
+  // sends_call: gate 2, one call per op, ten in-process sends that each
+  // update a field (ns per op / 10 = ns per bracketed send).
+  // *_self_*: gate 3, a self-send per op (loop inside one call).
+  class adr0137 =>
+    n := 200000
+    self
+      report: "field_loop_call"
+      ns: (self timeCalls: SsbFieldProbeActor spawn selector: #body n: n)
+      n: n
+    self
+      report: "sends_call"
+      ns: (self timeCalls: SsbFieldProbeActor spawn selector: #sends n: n)
+      n: n
+    self
+      report: "adr0137_open_self_top"
+      ns: (self timeTop: SsbOpenSelfProbeActor spawn n: n)
+      n: n
+    self
+      report: "adr0137_open_self_arm"
+      ns: (self timeArm: SsbOpenSelfProbeActor spawn n: n)
+      n: n
+    self
+      report: "adr0137_sealed_self_top"
+      ns: (self timeTop: SsbSealedSelfProbeActor spawn n: n)
+      n: n
+    self
+      report: "adr0137_sealed_self_arm"
+      ns: (self timeArm: SsbSealedSelfProbeActor spawn n: n)
+      n: n
+    nil
+
+  class timeCalls: a selector: sel n: n =>
+    1000 timesRepeat: [a perform: sel]
+    start := DateTime monotonicNow
+    n timesRepeat: [a perform: sel]
+    DateTime monotonicNow - start
+
+  class timeTop: a n: n =>
+    a top: 1000
+    start := DateTime monotonicNow
+    a top: n
+    DateTime monotonicNow - start
+
+  class timeArm: a n: n =>
+    a arm: 1000
+    start := DateTime monotonicNow
+    a arm: n
+    DateTime monotonicNow - start
+
   class timeSends: a n: n =>
     1000 timesRepeat: [a increment]
     start := DateTime monotonicNow

@@ -24,6 +24,7 @@
 // comment). It is a public-shaped leaf beneath two DDD contexts, only one of
 // which lives inside this crate, so the other needs genuine `pub`
 // visibility to reach it.
+pub mod adr0137_proto;
 pub mod announce_selectors;
 pub mod ast;
 // This module is `pub`, not `pub(crate)`: `for_each_expr_seq` is used by the

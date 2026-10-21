@@ -718,6 +718,20 @@ impl CoreErlangGenerator {
                         declared_type,
                     ));
                 }
+                // BT-4007 (ADR 0137 Phase 0 prototype): a Tier 1 actor closure
+                // reads the live cell at home and its creation-time `State`
+                // away.
+                if self.adr0137_in_cell_closure() {
+                    return Ok(docvec![
+                        "call 'beamtalk_actor_state_proto':'get_field'(",
+                        leaf::var(self.adr0137_self_var()),
+                        ", ",
+                        leaf::var(state_var),
+                        ", ",
+                        leaf::atom(field.name.to_string()),
+                        ")",
+                    ]);
+                }
                 return Ok(docvec![
                     "call 'maps':'get'(",
                     leaf::atom(field.name.to_string()),

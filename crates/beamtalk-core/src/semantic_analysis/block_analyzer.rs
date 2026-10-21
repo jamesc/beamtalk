@@ -103,7 +103,12 @@ impl Analyser {
                     let is_field_stored =
                         matches!(parent_context, Some(ExprContext::FieldAssignment))
                             && !has_captured_local_mutations;
-                    if matches!(context, BlockContext::Stored) && !is_field_stored {
+                    // BT-4007 (ADR 0137 Phase 0 prototype): with the flag on a stored
+                    // closure's field write goes to the live actor cell.
+                    if matches!(context, BlockContext::Stored)
+                        && !is_field_stored
+                        && !crate::adr0137_proto::adr0137_proto_enabled()
+                    {
                         self.result.diagnostics.push(Diagnostic::error(
                             format!(
                                 "cannot assign to field '{name}' inside a stored closure\n\

@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4007 (ADR 0137 Phase 0), gates 1 and 2.
+//
+// `body`: ten field reads and three writes, intrinsics only (gate 1; the
+// flagged codegen must emit the same code as the unflagged one).
+// `sends`: ten in-process sends that each update a field (gate 2; each send
+// is a SyncedCall bracket under the flag). The receiver is an Integer, so the
+// send itself is a cheap primitive and the difference between the two sides
+// is the bracket.
+
+Actor subclass: SsbFieldProbeActor
+  state: a :: Integer = 1
+  state: b :: Integer = 2
+  state: c :: Integer = 3
+
+  body =>
+    self.a := self.b + self.c - self.a
+    self.b := self.a + self.c - self.b
+    self.c := self.a + self.b - self.c - self.a
+    self.c
+
+  sends =>
+    self.a := self.b max: self.c
+    self.b := self.a min: self.c
+    self.c := self.a max: self.b
+    self.a := self.b min: self.c
+    self.b := self.a max: self.c
+    self.c := self.a min: self.b
+    self.a := self.b max: self.c
+    self.b := self.a min: self.c
+    self.c := self.a max: self.b
+    self.a := self.b min: self.c
+    self.a

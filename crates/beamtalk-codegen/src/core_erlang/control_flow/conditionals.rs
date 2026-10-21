@@ -193,6 +193,12 @@ impl CoreErlangGenerator {
             FieldWriteSite::Actor => self.state_version(),
         };
         let value_doc = self.expression_doc(value)?;
+        // BT-4007 (ADR 0137 Phase 0 prototype): in a Tier 1 actor closure under
+        // the cell model the write goes to the live cell (at home) or raises
+        // (away). The closure's own `State` version is not the actor's, so the
+        // rebind is an identity alias of the version it replaces.
+        let cell_closure_source = (site == FieldWriteSite::Actor && self.adr0137_in_cell_closure())
+            .then(|| self.current_state_var());
         let target_version = match site {
             FieldWriteSite::ValueType => {
                 self.next_self_var();
@@ -212,6 +218,32 @@ impl CoreErlangGenerator {
             site.invariant_label(closure),
             value.span(),
         );
+        if let Some(source_var) = cell_closure_source {
+            let self_var = self.adr0137_self_var();
+            let cell_put = self.fresh_temp_var("CellPut");
+            let preamble = docvec![
+                "let ",
+                leaf::var(val_var.clone()),
+                " = ",
+                value_doc,
+                " in let ",
+                leaf::var(cell_put),
+                " = call 'beamtalk_actor_state_proto':'put_field'(",
+                leaf::var(self_var),
+                ", ",
+                leaf::atom(field_name.to_string()),
+                ", ",
+                leaf::var(val_var.clone()),
+                ") in ",
+            ];
+            let bind = ThreadedStmt::Bind {
+                target: VersionedVar::new(prefix.clone(), target_version, frame),
+                source: VersionedVar::new(prefix, source_version, frame),
+                op: BindOp::Direct(ValueRef::Doc(leaf::var(source_var))),
+                span,
+            };
+            return Ok((preamble, bind, val_var));
+        }
         let preamble = docvec!["let ", leaf::var(val_var.clone()), " = ", value_doc, " in ",];
         let bind = ThreadedStmt::Bind {
             target: VersionedVar::new(prefix.clone(), target_version, frame),

@@ -523,6 +523,14 @@ fn run_matrix(matrix: Matrix, file: &str) {
         return;
     }
     let measured = table(matrix, &answers, &order);
+    // BT-4007 (ADR 0137 Phase 0): write the measured table to a file and stop,
+    // so a run with `BEAMTALK_ADR0137_PROTO` on can be diffed cell by cell
+    // against a run with it off, without touching the checked-in table.
+    if let Some(path) = std::env::var_os("ADR0137_MEASURE_DUMP") {
+        std::fs::write(&path, &measured).expect("write the dumped table");
+        eprintln!("dumped to {}", Path::new(&path).display());
+        return;
+    }
     if std::env::var_os("ADR0131_MEASURE_BLESS").is_some() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../beamtalk-core/src/semantic_analysis/tests")

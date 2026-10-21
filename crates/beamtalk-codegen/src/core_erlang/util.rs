@@ -15,10 +15,12 @@ use std::fmt::Write as _;
 use super::sequencing::PrecompiledScope;
 use super::threaded_expr::ProducerTail;
 use super::threaded_ir::{
-    FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render, render_value,
+    BindOp, FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
+    render, render_value,
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::leaf::{atom, int_lit, string_lit};
 use beamtalk_cerl_doc::{Document, join};
 use beamtalk_core::ast::{
@@ -337,6 +339,160 @@ impl CoreErlangGenerator {
         reason = "the one ordered list of producers, each branch mirrored by `subexpr_needs_prelude`"
     )]
     pub(super) fn threaded_expression(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<ThreadedValue> {
+        // BT-4007 (ADR 0137 Phase 0 prototype): with the flag on, an expression
+        // that may run user code in the method body's own `State` scope is
+        // bracketed by a store of the current `State` to the cell and a load
+        // back (the prototype's `SyncedCall`). Off, this is the plain producer.
+        let sync_site = self.adr0137_sync_site(expr, frame);
+        let store_site = !sync_site && self.adr0137_self_send_site(expr, frame);
+        let bracketed = sync_site || store_site;
+        if bracketed {
+            self.adr0137_in_bracket += 1;
+            self.adr0137_brackets += 1;
+        }
+        let tv = self.threaded_expression_core(expr, frame);
+        if bracketed {
+            self.adr0137_in_bracket -= 1;
+        }
+        let tv = tv?;
+        if sync_site {
+            return Ok(self.adr0137_synced_call(tv, expr.span(), frame));
+        }
+        if store_site {
+            return Ok(self.adr0137_store_before_self_send(tv, expr.span()));
+        }
+        Ok(tv)
+    }
+
+    /// BT-4007: a dispatching self-send in the method body's own `State`
+    /// scope. It threads `State` explicitly (the callee takes it and answers
+    /// the next one), so it needs only the store: a closure the callee runs
+    /// reads the cell, which must hold the caller's current `State`.
+    fn adr0137_self_send_site(&self, expr: &Expression, frame: FrameId) -> bool {
+        self.adr0137_cells()
+            && frame == FrameId::ROOT
+            && self.block_depth == 0
+            && !self.in_loop_body
+            && !self.loop_mode.in_hybrid_loop
+            && !self.precompiled_subexprs_contains(expr.unwrap_parens())
+            && self.is_prelude_producer(expr.unwrap_parens())
+    }
+
+    /// BT-4007: inserts `put(cell, <State the dispatch is called with>)`
+    /// directly before the dispatch `Statement` that precedes the closing
+    /// `Bind` of a self-send's prelude.
+    fn adr0137_store_before_self_send(&mut self, tv: ThreadedValue, span: Span) -> ThreadedValue {
+        let mut prelude = tv.prelude;
+        let n = prelude.len();
+        let shaped = n >= 2
+            && matches!(prelude[n - 2], ThreadedStmt::Statement(..))
+            && matches!(&prelude[n - 1], ThreadedStmt::Bind { target, .. }
+                if matches!(target.prefix, VersionPrefix::State));
+        if !shaped {
+            return ThreadedValue {
+                prelude,
+                value: tv.value,
+            };
+        }
+        let ThreadedStmt::Bind { source, .. } = &prelude[n - 1] else {
+            unreachable!("shaped above");
+        };
+        let source_version = source.version;
+        let source = super::render_state_prefix(
+            self.loop_mode.in_hybrid_loop,
+            self.in_loop_body,
+            source_version,
+        );
+        let store = ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(self.fresh_temp_var("CellStore")),
+                " = call 'erlang':'put'('$bt_actor_state', ",
+                leaf::var(source),
+                ") in ",
+            ],
+            span,
+        );
+        prelude.insert(n - 2, store);
+        ThreadedValue {
+            prelude,
+            value: tv.value,
+        }
+    }
+
+    /// BT-4007 (ADR 0137 Phase 0 prototype): whether `expr` is a site the
+    /// prototype brackets: the flag is on, this is an actor instance method's
+    /// own `State` scope (the root frame, not a closure, a loop body or a
+    /// hybrid loop), `expr` was not already sequenced ahead, and its own send
+    /// may run user code ([`adr0137_may_run_user_code`]).
+    fn adr0137_sync_site(&self, expr: &Expression, frame: FrameId) -> bool {
+        self.adr0137_cells()
+            && frame == FrameId::ROOT
+            && self.block_depth == 0
+            && !self.in_loop_body
+            && !self.loop_mode.in_hybrid_loop
+            && !self.precompiled_subexprs_contains(expr.unwrap_parens())
+            && self.adr0137_stmt_span == Some(expr.unwrap_parens().span())
+            && adr0137_may_run_user_code(expr.unwrap_parens())
+    }
+
+    /// BT-4007: wraps a plain-valued `tv` in the prototype's `SyncedCall`:
+    /// `put(cell, StateN)`, the value's evaluation bound to a temp, then
+    /// `StateN+1 = get(cell)`. A value that is already a bound variable or
+    /// literal (a self-send's reply, a sequenced temp) runs nothing here and
+    /// is left alone.
+    fn adr0137_synced_call(
+        &mut self,
+        tv: ThreadedValue,
+        span: Span,
+        frame: FrameId,
+    ) -> ThreadedValue {
+        let ValueRef::Doc(doc) = tv.value else {
+            return tv;
+        };
+        let mut prelude = tv.prelude;
+        let current = self.current_state_var();
+        prelude.push(ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(self.fresh_temp_var("CellStore")),
+                " = call 'erlang':'put'('$bt_actor_state', ",
+                leaf::var(current),
+                ") in ",
+            ],
+            span,
+        ));
+        let value_var = self.fresh_temp_var("Synced");
+        prelude.push(ThreadedStmt::Statement(
+            docvec!["let ", leaf::var(value_var.clone()), " = ", doc, " in "],
+            span,
+        ));
+        let source_version = self.state_version();
+        self.next_state_var();
+        let target_version = self.state_version();
+        prelude.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+            op: BindOp::Direct(ValueRef::Doc(docvec![
+                "call 'erlang':'get'('$bt_actor_state')"
+            ])),
+            span,
+        });
+        ThreadedValue {
+            prelude,
+            value: ValueRef::Var(value_var),
+        }
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the one ordered list of producers, each branch mirrored by `subexpr_needs_prelude`"
+    )]
+    fn threaded_expression_core(
         &mut self,
         expr: &Expression,
         frame: FrameId,
@@ -1016,6 +1172,15 @@ impl CoreErlangGenerator {
         if Self::is_trivial_subexpr(inner) {
             return false;
         }
+        // BT-4007 (ADR 0137 Phase 0 prototype): a send that may run user code
+        // is a `SyncedCall` site, so the sequencing rule binds the siblings
+        // that precede it.
+        if probe == PreludeProbe::Sequencing
+            && !self.precompiled_subexprs_contains(inner)
+            && self.adr0137_sync_site(inner, FrameId::ROOT)
+        {
+            return true;
+        }
         // ADR 0118 phase 5b: a child an ENCLOSING `sequence_children`
         // call already registered in `precompiled_subexprs` has already been
         // dispatched and its prelude already spliced into that outer call's
@@ -1677,6 +1842,96 @@ impl CoreErlangGenerator {
 /// Visibility: `pub` to allow usage in IDE queries (hover, completion, etc.)
 pub fn to_module_name(class_name: &str) -> String {
     beamtalk_core::ast::to_module_name(class_name)
+}
+
+/// BT-4007 (ADR 0137 Phase 0 prototype): whether the send `expr` itself (not
+/// its operands) may run user code in this process, the case ADR 0137 §1
+/// brackets. Conservative: a send is exempt only when it is an operator on
+/// numbers or identity, a cast, or one of a few Object-protocol selectors that
+/// never reach a user method. A construct the compiler lowers in place
+/// (`ifTrue:`, `do:`, ...) is NOT exempt here: whether it is inlined is decided
+/// later, and a conditional whose arm stays a `fun` is a call (the statement
+/// is bracketed whole, so an inlined one only costs the pair). Every other send, including a
+/// `value` on a block (a literal block's `value` compiles to a
+/// `fun` call unless an enclosing construct inlines it), a send with a block argument and a send to
+/// a value type, is bracketed. The prototype has no `no_user_code` mark on
+/// primitives (Phase 2), so a primitive that cannot run user code is still
+/// bracketed here.
+fn adr0137_may_run_user_code(expr: &Expression) -> bool {
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            selector,
+            is_cast,
+            ..
+        } => !*is_cast && adr0137_send_may_run_user_code(receiver, selector),
+        Expression::Cascade { .. } => true,
+        _ => false,
+    }
+}
+
+/// [`adr0137_may_run_user_code`] for a send given as its parts.
+fn adr0137_send_may_run_user_code(
+    receiver: &Expression,
+    selector: &beamtalk_core::ast::MessageSelector,
+) -> bool {
+    use beamtalk_core::ast::MessageSelector;
+    if matches!(receiver, Expression::Super(_)) {
+        return true;
+    }
+    match selector {
+        MessageSelector::Binary(op) => !matches!(
+            op.as_str(),
+            "+" | "-" | "*" | "/" | "<" | ">" | "<=" | ">=" | "==" | "=:=" | "=/=" | "/="
+        ),
+        other => {
+            let name = other.name();
+            !matches!(
+                name.as_str(),
+                "class" | "isNil" | "notNil" | "yourself" | "error:" | "asType:"
+            )
+        }
+    }
+}
+
+impl CoreErlangGenerator {
+    /// BT-4007 measurement (the prototype's stand-in for the
+    /// `UnbracketedUserCodeSend` check): notes a send compiled in an actor
+    /// instance method. A send that may run user code and is compiled outside
+    /// every bracket scope is recorded in `adr0137_unbracketed`.
+    pub(super) fn adr0137_note_send(
+        &mut self,
+        receiver: &Expression,
+        selector: &beamtalk_core::ast::MessageSelector,
+        span: Span,
+    ) {
+        if !self.adr0137_cells() || !adr0137_send_may_run_user_code(receiver, selector) {
+            return;
+        }
+        // A construct the compiler lowers in place is not a call (ADR 0137 §2):
+        // its body's own sends are counted where they are compiled. Selector
+        // only, so a `do:` that is a real send (a non-literal block argument)
+        // is under-counted here.
+        {
+            use beamtalk_core::state_threading_selectors::{
+                is_conditional_selector, is_exception_selector,
+                is_state_threading_keyword_selector, is_state_threading_unary_selector,
+            };
+            let name = selector.name();
+            if is_state_threading_keyword_selector(name.as_str())
+                || is_state_threading_unary_selector(name.as_str())
+                || is_conditional_selector(name.as_str())
+                || is_exception_selector(name.as_str())
+            {
+                return;
+            }
+        }
+        self.adr0137_user_sends += 1;
+        if self.adr0137_in_bracket == 0 {
+            self.adr0137_unbracketed
+                .push(format!("{}\t{}", selector.name(), span.start()));
+        }
+    }
 }
 
 #[cfg(test)]

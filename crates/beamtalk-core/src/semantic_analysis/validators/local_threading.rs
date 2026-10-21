@@ -1821,6 +1821,12 @@ impl<'d> Walker<'d> {
             {
                 return None;
             }
+            // BT-4007 (ADR 0137 Phase 0 prototype): with the flag on, an actor
+            // closure's field write goes to the live cell, so it is not an
+            // escape.
+            if self.context == Actor && crate::adr0137_proto::adr0137_proto_enabled() {
+                return None;
+            }
             outer_state_writes(block).into_iter().next()
         })
     }
@@ -3303,6 +3309,12 @@ impl<'d> Walker<'d> {
     /// intervenes before it runs cannot be told statically, so every such
     /// block is rejected, at the first read.
     fn report_stale_read(&mut self, block: &Block, escape: &Escape) {
+        // BT-4007 (ADR 0137 Phase 0 prototype): with the flag on, an actor
+        // closure reads the live cell at home, so a stored block's field read or
+        // self-send is not stale.
+        if self.context == Actor && crate::adr0137_proto::adr0137_proto_enabled() {
+            return;
+        }
         if self.context != Actor || !escape.may_read_stale_state() {
             return;
         }

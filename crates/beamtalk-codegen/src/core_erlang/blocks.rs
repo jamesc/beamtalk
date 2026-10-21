@@ -178,11 +178,13 @@ impl CoreErlangGenerator {
         // ADR 0130 §3: not in a class method, where `self.x :=` can only name a
         // class variable and is an in-place `put` that needs no threading, so a
         // block may write class variables wherever it runs.
-        if !analysis.field_writes.is_empty() && !self.in_class_method() {
+        let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
+        // BT-4007 (ADR 0137 Phase 0 prototype): with the flag on, a Tier 1 actor
+        // closure's field write goes to the live cell, so it is accepted.
+        let proto_cell_closure = captured_mutations.is_empty() && self.adr0137_cells();
+        if !analysis.field_writes.is_empty() && !self.in_class_method() && !proto_cell_closure {
             Self::validate_stored_closure(&analysis, || self.location_label(block.span))?;
         }
-
-        let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
 
         // Blocks with captured local mutations use Tier 2 stateful calling convention.
         if !captured_mutations.is_empty() {
@@ -205,6 +207,19 @@ impl CoreErlangGenerator {
         // failure at a call site with two sibling block arguments (e.g.
         // `ifOk:ifError:`), where the second block, or the code following
         // the whole call, read the leaked version.
+        // BT-4007 (ADR 0137 Phase 0 prototype): the outermost Tier 1 closure
+        // decides, where it is created, whether its field access goes through
+        // the cell: only in a synchronised method-body statement at the root
+        // frame. A closure created inside a loop body, a branch arm or an
+        // unsynchronised statement keeps its captured `State`; closures nested
+        // in it inherit the choice.
+        let outer_cell_closure = self.adr0137_cell_closure;
+        if self.block_depth == 0 {
+            self.adr0137_cell_closure = self.adr0137_stmt_synced
+                && !self.in_loop_body
+                && !self.loop_mode.in_hybrid_loop
+                && self.current_frame() == threaded_ir::FrameId::ROOT;
+        }
         let body_result = self.with_closed_fun_scope(|this| {
             // Track block nesting so self-cast sends route through the mailbox
             this.block_depth += 1;
@@ -232,6 +247,7 @@ impl CoreErlangGenerator {
         // NOT propagate an open scope to its outer context. Clear the
         // side-channel in case the body's last statement left it set.
         self.loop_mode.direct_params_do_open_chain = false;
+        self.adr0137_cell_closure = outer_cell_closure;
         let (header, body) = body_result?;
         Ok(docvec![header, body])
     }

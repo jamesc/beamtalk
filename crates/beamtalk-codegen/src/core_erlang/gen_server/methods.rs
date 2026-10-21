@@ -764,6 +764,30 @@ impl CoreErlangGenerator {
             let is_last = i == body_len - 1;
             let is_early_return = matches!(&kind, BodyExprKind::EarlyReturn);
             let span = expr.span();
+            // BT-4007 (ADR 0137 Phase 0 prototype): the statements with no state
+            // effect of their own (Pure, a pure local assignment, a field
+            // assignment) are the ones the prototype brackets, at the
+            // statement expression (the assigned value, for an assignment).
+            self.adr0137_stmt_synced = self.adr0137_cells()
+                && matches!(
+                    kind,
+                    BodyExprKind::Pure
+                        | BodyExprKind::LocalAssignPure
+                        | BodyExprKind::FieldAssignment
+                        | BodyExprKind::DispatchingSelfSend
+                );
+            self.adr0137_stmt_span = if self.adr0137_cells() {
+                match (&kind, expr) {
+                    (BodyExprKind::Pure, _) => Some(expr.unwrap_parens().span()),
+                    (
+                        BodyExprKind::LocalAssignPure | BodyExprKind::FieldAssignment,
+                        Expression::Assignment { value, .. },
+                    ) => Some(value.unwrap_parens().span()),
+                    _ => None,
+                }
+            } else {
+                None
+            };
 
             // Early return — always terminates generation regardless of position.
             // Classify the inner value to handle super/tier2/dispatch returns.
