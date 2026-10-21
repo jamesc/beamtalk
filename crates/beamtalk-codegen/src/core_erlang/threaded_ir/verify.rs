@@ -17,8 +17,8 @@ use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId,
     LOCAL_STATE_KEY_PREFIX, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
-    RebindLowering, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode, ValueRef,
-    VersionPrefix, VersionedVar,
+    RebindLowering, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
+    UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -392,6 +392,25 @@ pub(in crate::core_erlang) enum VerifyError {
     /// < 3] whileTrue: [k := k + 1]` in a value-type method loops forever,
     /// `erlc`-clean). Applies to every loop of every scope kind.
     ConditionFamilyNotCarried { family: VersionPrefix, at: Span },
+
+    /// ADR 0137 §2 (Phase 2a, BT-4020): a call that may run user code in this
+    /// process (a non-inlined `value`-family call, a send with a block
+    /// argument, a send to an in-process or unknown receiver, an Erlang FFI
+    /// call, an unmarked primitive, the dispatching branch of an operator
+    /// guard, ...) in an actor instance method was not built into a
+    /// [`ThreadedStmt::SyncedCall`], so the cell the closures and aliased
+    /// self-sends read holds an earlier `State` than the method's own and the
+    /// call's writes are lost to the method. Only reported with the
+    /// synced-calls flag on. `selector` names the send, `region` the kind of
+    /// region the lowering was in when it emitted it without a bracket (the
+    /// node that owns the fix). Reported by the generator at the send
+    /// emitter, because the sends in an unbracketed region are exactly the
+    /// ones that are not in the IR to be walked.
+    UnbracketedUserCodeSend {
+        selector: String,
+        region: UserCodeRegion,
+        at: Span,
+    },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
@@ -719,6 +738,14 @@ fn collect_producer_consumer_counts(
                     *consumers.entry(source.clone()).or_insert(0) += 1;
                 }
             }
+            // ADR 0137: a bracket steps the `State` family from `store` to
+            // `load` like a `Bind`; the store-only form consumes nothing.
+            ThreadedStmt::SyncedCall { store, load, .. } => {
+                if let Some(load) = load {
+                    *producers.entry(load.clone()).or_insert(0) += 1;
+                    *consumers.entry(store.clone()).or_insert(0) += 1;
+                }
+            }
             ThreadedStmt::NlrCatch { .. }
             | ThreadedStmt::NlrThrow { .. }
             | ThreadedStmt::Return(..)
@@ -987,7 +1014,10 @@ impl VerifyWalk<'_> {
         let mut current: Option<&VersionedVar> = None;
         for stmt in stmts {
             match stmt {
-                ThreadedStmt::Bind { target, .. } if own_state(target) => current = Some(target),
+                ThreadedStmt::Bind { target, .. }
+                | ThreadedStmt::SyncedCall {
+                    load: Some(target), ..
+                } if own_state(target) => current = Some(target),
                 ThreadedStmt::TupleAccUnpack { targets, .. } => {
                     if let Some(target) = targets.iter().rev().find(|t| own_state(t)) {
                         current = Some(target);
@@ -1264,6 +1294,20 @@ impl VerifyWalk<'_> {
             | ThreadedStmt::FoldAccumulator { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
+            // ADR 0137: the bracket reads `store` and binds `load` in the
+            // frame it sits in, exactly as the `Bind` it steps like.
+            ThreadedStmt::SyncedCall {
+                store, load, span, ..
+            } => {
+                self.check_use(store, *span);
+                if let Some(load) = load {
+                    self.check_class_method_family(load, *span);
+                    let enclosing = self.frame_stack.last().copied().unwrap_or(FrameId::ROOT);
+                    if let Some(error) = bind_frame_mismatch(load, enclosing, *span) {
+                        self.errors.push(error);
+                    }
+                }
+            }
             // ADR 0041 §State-Carrying NLR: a `^` throw reads its slot
             // versions and value like a `Return` reads its own.
             ThreadedStmt::NlrThrow {
@@ -1541,6 +1585,10 @@ impl CoreErlangGenerator {
         span: Span,
     ) {
         if errors.is_empty() {
+            return;
+        }
+        // BT-4020's count mode tallies findings instead of aborting on them.
+        if self.note_counted_verify_errors(errors, invariant_label, span) {
             return;
         }
         debug_assert!(

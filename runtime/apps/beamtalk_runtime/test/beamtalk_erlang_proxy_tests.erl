@@ -1519,3 +1519,139 @@ direct_call_tracks_hot_reload_and_purge_test() ->
         _ = code:delete(Mod),
         _ = code:purge(Mod)
     end.
+
+%%% ============================================================================
+%%% BT-4055 — an error raised by compiled Beamtalk code the callee ran (a block
+%%% passed to a `native:` method) propagates unchanged
+%%% ============================================================================
+
+%% Loads `'bt@bt4055@raiser'`, standing in for a compiled Beamtalk module:
+%% `boom/1` raises the given error reason, `count_badarg/0` counts its runs in
+%% the process dictionary and raises `badarg`.
+load_bt_raiser() ->
+    load_bt_raiser('bt@bt4055@raiser').
+
+load_bt_raiser(Mod) ->
+    {ok, Mod, Bin} = compile:forms(
+        [
+            {attribute, 1, module, Mod},
+            {attribute, 2, export, [{boom, 1}, {count_badarg, 0}]},
+            {function, 3, boom, 1, [
+                {clause, 3, [{var, 3, 'R'}], [], [
+                    {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, error}}, [{var, 3, 'R'}]}
+                ]}
+            ]},
+            {function, 4, count_badarg, 0, [
+                {clause, 4, [], [], [
+                    {call, 4, {remote, 4, {atom, 4, erlang}, {atom, 4, put}}, [
+                        {atom, 4, bt4055_runs},
+                        {op, 4, '+',
+                            {call, 4, {remote, 4, {atom, 4, erlang}, {atom, 4, get}}, [
+                                {atom, 4, bt4055_runs}
+                            ]},
+                            {integer, 4, 1}}
+                    ]},
+                    {call, 4, {remote, 4, {atom, 4, erlang}, {atom, 4, error}}, [{atom, 4, badarg}]}
+                ]}
+            ]}
+        ],
+        []
+    ),
+    _ = code:purge(Mod),
+    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".erl", Bin),
+    Mod.
+
+unload_bt_raiser(Mod) ->
+    _ = code:purge(Mod),
+    _ = code:delete(Mod),
+    _ = code:purge(Mod),
+    ok.
+
+native_call_block_error_from_beamtalk_code_is_unchanged_test() ->
+    Mod = load_bt_raiser(),
+    try
+        lists:foreach(
+            fun(Reason) ->
+                Block = fun(_) -> Mod:boom(Reason) end,
+                ?assertError(
+                    Reason,
+                    beamtalk_erlang_proxy:native_call(
+                        lists, foreach, [Block, [1]], {'Telemetry', 'span:metadata:do:'}
+                    )
+                )
+            end,
+            [badarith, function_clause, {badmatch, 1}, undef]
+        )
+    after
+        unload_bt_raiser(Mod)
+    end.
+
+native_call_block_badarg_from_beamtalk_code_is_not_retried_test() ->
+    Mod = load_bt_raiser(),
+    put(bt4055_runs, 0),
+    try
+        %% A binary argument would trigger the charlist retry, re-running the block.
+        Block = fun(_) -> Mod:count_badarg() end,
+        ?assertError(
+            badarg,
+            beamtalk_erlang_proxy:native_call(lists, foreach, [Block, [<<"x">>]], {'X', 'y:'})
+        ),
+        ?assertEqual(1, get(bt4055_runs))
+    after
+        erase(bt4055_runs),
+        unload_bt_raiser(Mod)
+    end.
+
+native_call_erlang_error_is_still_classified_test() ->
+    %% Raised by Erlang code (here a plain fun in this test module), so the FFI
+    %% classification still applies.
+    Block = fun(_) -> erlang:error(badarith) end,
+    try
+        beamtalk_erlang_proxy:native_call(lists, foreach, [Block, [1]], {'X', 'y:'}),
+        ?assert(false)
+    catch
+        error:#{error := Err} -> ?assertEqual(type_error, Err#beamtalk_error.kind)
+    end.
+
+native_call_block_error_from_repl_eval_module_is_unchanged_test() ->
+    %% REPL and inspector code compiles to `beamtalk_repl_eval_<N>` /
+    %% `beamtalk_inspector_eval_<N>`, not `bt@…`; it is Beamtalk code too.
+    lists:foreach(
+        fun(Name) ->
+            Mod = load_bt_raiser(Name),
+            try
+                Block = fun(_) -> Mod:boom(badarith) end,
+                ?assertError(
+                    badarith,
+                    beamtalk_erlang_proxy:native_call(lists, foreach, [Block, [1]], {'X', 'y:'})
+                )
+            after
+                unload_bt_raiser(Mod)
+            end
+        end,
+        %% Built by the same functions `beamtalk_repl_eval` names its modules with.
+        [
+            beamtalk_module_name:repl_eval_module(4055),
+            beamtalk_module_name:inspector_eval_module(4055)
+        ]
+    ).
+
+native_call_badarg_with_fun_arg_is_not_retried_test() ->
+    %% Even when the stack shows no Beamtalk frame, a call that was passed a fun
+    %% is never retried: the retry would run the fun again.
+    put(bt4055_runs, 0),
+    try
+        Block = fun(_) ->
+            put(bt4055_runs, get(bt4055_runs) + 1),
+            erlang:error(badarg)
+        end,
+        try
+            beamtalk_erlang_proxy:native_call(lists, foreach, [Block, [<<"x">>]], {'X', 'y:'}),
+            ?assert(false)
+        catch
+            error:#{error := Err} -> ?assertEqual(type_error, Err#beamtalk_error.kind)
+        end,
+        ?assertEqual(1, get(bt4055_runs))
+    after
+        erase(bt4055_runs)
+    end.

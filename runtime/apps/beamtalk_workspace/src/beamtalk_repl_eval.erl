@@ -173,8 +173,7 @@ do_eval(Expression, State, Subscriber) ->
     eval_result().
 do_eval_expression(Expression, State, Subscriber) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
-    % elp:fixme W0023 intentional atom creation
-    ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
+    ModuleName = beamtalk_module_name:repl_eval_module(Counter),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
 
     SessionBindings = beamtalk_repl_state:get_bindings(State),
@@ -587,8 +586,7 @@ or `{error, Reason, Output, Warnings, State}' on failure.
     | {script_exit, non_neg_integer(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval_trace(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
-    % elp:fixme W0023 intentional atom creation
-    ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
+    ModuleName = beamtalk_module_name:repl_eval_module(Counter),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
 
     SessionBindings = beamtalk_repl_state:get_bindings(State),
@@ -984,8 +982,7 @@ eval_module_name() ->
     case get('$beamtalk_inspector_eval_module') of
         undefined ->
             Unique = erlang:unique_integer([positive]),
-            % elp:fixme W0023 one recycled atom per process, not per call
-            ModuleName = list_to_atom("beamtalk_inspector_eval_" ++ integer_to_list(Unique)),
+            ModuleName = beamtalk_module_name:inspector_eval_module(Unique),
             put('$beamtalk_inspector_eval_module', ModuleName),
             ModuleName;
         ModuleName ->

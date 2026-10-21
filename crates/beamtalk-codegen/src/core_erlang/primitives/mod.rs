@@ -29,7 +29,6 @@ mod list;
 mod protocol;
 mod reflection;
 mod string;
-mod telemetry;
 mod value_types;
 
 use beamtalk_cerl_doc::Document;
@@ -104,7 +103,6 @@ const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
     ("Class", behaviour::generate_tower_bif),
     ("Metaclass", behaviour::generate_tower_bif),
     ("Protocol", protocol::generate_protocol_bif),
-    ("Telemetry", telemetry::generate_telemetry_bif),
     ("StackFrame", error_handling::generate_stack_frame_bif),
     ("Pid", actor_types::generate_pid_bif),
     ("Port", actor_types::generate_port_bif),
@@ -2376,5 +2374,106 @@ mod tests {
              quoted @primitive in the stdlib (remove them):\n  {}",
             stale.join("\n  ")
         );
+    }
+
+    /// Guard (BT-4055): the primitive-lowering `REGISTRY` holds only native
+    /// value types and compiler substrate, never a stateless service facade.
+    ///
+    /// A class-side-only facade over one Erlang module (`Telemetry`, `Digest`,
+    /// `File`, ...) belongs on `native: module` with `=> self delegate`
+    /// bodies (ADR 0101), which lower through the shared
+    /// `beamtalk_erlang_proxy:native_call/4` path. A per-class name/arity table
+    /// here duplicates the Erlang exports with nothing enforcing the match, and
+    /// grows the primitive surface ADR 0034/0037 keep minimal. If such a call
+    /// is too slow, fix `native_call` (or its lowering) once for every
+    /// `native:` class.
+    ///
+    /// The test tells the two kinds apart by where their quoted `@primitive`s
+    /// live: a value type or substrate class lowers instance-side primitives
+    /// (`Integer>>+`, `Behaviour>>name`, `Pid>>isAlive`), while a facade
+    /// declares quoted `@primitive`s on the class side only.
+    ///
+    /// The one class-side-only exception is `Protocol`, a reflection facade
+    /// over the runtime protocol registry that ADR 0101 Part 3 keeps on
+    /// `@primitive` deliberately (runtime-extensible reflection). Anything else
+    /// joining that list needs the same kind of ADR-level justification.
+    #[test]
+    fn test_registry_holds_no_service_facade() {
+        use beamtalk_core::ast::Expression;
+        use std::collections::HashMap;
+
+        /// Class-side-only registry classes ADR 0101 Part 3 keeps on `@primitive`.
+        const REFLECTION_FACADES: &[&str] = &["Protocol"];
+
+        let lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("stdlib/src");
+        if !lib_dir.exists() {
+            return;
+        }
+
+        // class name -> is a facade: it declares quoted primitives, all class-side
+        let mut classes: HashMap<String, bool> = HashMap::new();
+        let has_quoted_primitive = |methods: &[beamtalk_core::ast::MethodDefinition]| {
+            methods.iter().any(|m| {
+                m.body.iter().any(|stmt| {
+                    matches!(
+                        stmt.expression,
+                        Expression::Primitive {
+                            is_quoted: true,
+                            ..
+                        }
+                    )
+                })
+            })
+        };
+        for entry in std::fs::read_dir(&lib_dir)
+            .expect("read stdlib/src")
+            .flatten()
+        {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("bt") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read .bt file");
+            let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+            let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+            for class in &module.classes {
+                let facade = has_quoted_primitive(&class.class_methods)
+                    && !has_quoted_primitive(&class.methods);
+                classes.insert(class.name.name.to_string(), facade);
+            }
+        }
+        assert!(
+            classes.contains_key("Integer") && classes.contains_key("Protocol"),
+            "stdlib/src did not parse: the facade guard would check nothing"
+        );
+
+        let offenders: Vec<&str> = REGISTRY
+            .iter()
+            .map(|(class, _)| *class)
+            .filter(|class| !REFLECTION_FACADES.contains(class))
+            .filter(|class| classes.get(*class) == Some(&true))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "primitives::REGISTRY must hold only value types and substrate. \
+             A stateless service facade uses `native: module` with \
+             `=> self delegate` instead (ADR 0101, BT-4055). These registered \
+             classes have only class-side quoted @primitives:\n  {}",
+            offenders.join("\n  ")
+        );
+        // Keep the exception list honest: each entry must still be registered
+        // and still be class-side only, or it is masking nothing.
+        for facade in REFLECTION_FACADES {
+            assert!(
+                REGISTRY.iter().any(|(class, _)| class == facade)
+                    && classes.get(*facade) == Some(&true),
+                "REFLECTION_FACADES entry `{facade}` is stale: remove it"
+            );
+        }
     }
 }

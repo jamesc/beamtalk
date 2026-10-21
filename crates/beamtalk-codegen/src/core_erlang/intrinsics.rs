@@ -1454,6 +1454,51 @@ impl CoreErlangGenerator {
         Ok(docvec![preamble, case_doc])
     }
 
+    /// The `let <param> = <argument> in` bindings of an inlined block's
+    /// parameters, in order, each bound in the current scope.
+    ///
+    /// ADR 0137: an argument that is a call that may run user code is
+    /// bracketed in this construct's own statement sequence; the `State`
+    /// versions its brackets mint live inside the expression the caller
+    /// builds, so the caller rolls the counter back once it is complete.
+    fn bind_inline_block_value_args(
+        &mut self,
+        block: &Block,
+        arguments: &[Expression],
+    ) -> Result<Vec<Document<'static>>> {
+        let mut arg_bindings: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        for (i, param) in block.parameters.iter().enumerate() {
+            if i < arguments.len() {
+                let arg_var = self.fresh_temp_var(&param.name);
+                if self.is_sync_site(arguments[i].unwrap_parens()) {
+                    let frame = self.current_frame();
+                    let tv = self.threaded_expression(&arguments[i], frame)?;
+                    let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                    let value_doc = self.threaded_value_doc(&tv.value);
+                    arg_bindings.push(docvec![
+                        prelude_doc,
+                        "let ",
+                        leaf::var(arg_var.clone()),
+                        " = ",
+                        value_doc,
+                        " in ",
+                    ]);
+                } else {
+                    let arg_doc = self.expression_doc(&arguments[i])?;
+                    arg_bindings.push(docvec![
+                        "let ",
+                        leaf::var(arg_var.clone()),
+                        " = ",
+                        arg_doc,
+                        " in ",
+                    ]);
+                }
+                self.bind_var(&param.name, &arg_var);
+            }
+        }
+        Ok(arg_bindings)
+    }
+
     /// Generates inline code for `[block_with_mutations] value` (or `value:`).
     ///
     /// When a block literal has captured mutations (variables read AND written, like
@@ -1473,24 +1518,11 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // For value: variants, bind block parameters to argument values.
         // Use a scope for parameter bindings so they don't leak.
-        let mut arg_bindings: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         if !arguments.is_empty() {
             self.push_scope();
         }
-        for (i, param) in block.parameters.iter().enumerate() {
-            if i < arguments.len() {
-                let arg_var = self.fresh_temp_var(&param.name);
-                let arg_doc = self.expression_doc(&arguments[i])?;
-                arg_bindings.push(docvec![
-                    "let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    arg_doc,
-                    " in ",
-                ]);
-                self.bind_var(&param.name, &arg_var);
-            }
-        }
+        let version_on_entry = self.state_version();
+        let arg_bindings = self.bind_inline_block_value_args(block, arguments)?;
 
         // ValueType context: inline block body directly as sequential let-bindings.
         // No StateAcc needed — mutations are just Core Erlang variable shadowing.
@@ -1582,6 +1614,9 @@ impl CoreErlangGenerator {
 
         if !arguments.is_empty() {
             self.pop_scope();
+        }
+        if self.synced_calls_active() {
+            self.set_state_version(version_on_entry);
         }
         Ok(Document::Vec(parts))
     }

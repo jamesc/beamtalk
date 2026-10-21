@@ -78,6 +78,9 @@ pub struct CodegenOptions {
     /// `None` = read from `BEAMTALK_CODEGEN_DIAGNOSTICS` env var at generator creation.
     /// `Some(true/false)` = override the env var (used by tests).
     pub(in crate::core_erlang) codegen_diagnostics: Option<bool>,
+    /// ADR 0137 Phase 2a: overrides the `BEAMTALK_SYNCED_CALLS` environment
+    /// flag (`Some(true)` enforces, `Some(false)` is off). `None` reads it.
+    pub(in crate::core_erlang) synced_calls: Option<bool>,
     /// Test hook: record a synthetic `ThreadedIr` verifier finding after
     /// generation (see [`Self::with_injected_verifier_violation`]).
     pub(in crate::core_erlang) inject_verifier_violation: bool,
@@ -126,6 +129,7 @@ impl CodegenOptions {
             stdlib_mode: false,
             pre_class_hierarchy: Vec::new(),
             codegen_diagnostics: None,
+            synced_calls: None,
             inject_verifier_violation: false,
             beamtalk_version: None,
             otp_release: None,
@@ -172,6 +176,15 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_codegen_diagnostics(mut self, enabled: bool) -> Self {
         self.codegen_diagnostics = Some(enabled);
+        self
+    }
+
+    /// ADR 0137 Phase 2a (BT-4020): builds the cell bracket around calls that
+    /// may run user code and checks none is missing, overriding the
+    /// `BEAMTALK_SYNCED_CALLS` environment flag. Off by default.
+    #[must_use]
+    pub fn with_synced_calls(mut self, enabled: bool) -> Self {
+        self.synced_calls = Some(enabled);
         self
     }
 

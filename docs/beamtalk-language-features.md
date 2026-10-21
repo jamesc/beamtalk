@@ -3434,7 +3434,7 @@ Server subclass: PeriodicWorker
   state: count = 0
 
   initialize =>
-    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+    Timer send: #tick to: self after: 1000
 
   handleInfo: msg =>
     msg match: [
@@ -3444,10 +3444,12 @@ Server subclass: PeriodicWorker
 
   tick =>
     self.count := self.count + 1
-    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+    Timer send: #tick to: self after: 1000
 
   getValue => self.count
 ```
+
+`Timer send:to:after:` delivers the message to the server's mailbox exactly as `erlang:send/2` would, so it arrives in `handleInfo:` (see § Message Timers).
 
 A `match:` arm body is an expression, so an arm that needs more than one statement calls a method (`#tick -> self tick`). Do not write `#tick -> [ ... ]`: that arm answers the block itself without running it (a block that writes a field or sends to `self` fails to compile; see § Match Expression).
 
@@ -3501,6 +3503,42 @@ Actor subclass: Ticker
 ```
 
 No `state:` for the timer reference, no `terminate:` cleanup needed — the link handles it.
+
+### Message Timers
+
+A block timer runs its block in a separate process, so the block cannot touch the actor's state; it can only send the actor a message. When the actor is a `Server`, deliver the message directly with a **message timer** instead, and handle it in `handleInfo:`:
+
+```beamtalk
+t := Timer send: #tick to: self after: 1000          // one-shot; answers a Timer
+t := Timer send: {#readTimeout, tag} to: self after: (Duration seconds: 5)
+t := Timer send: #tick to: self every: 1000          // repeating
+t cancel                                             // => Boolean
+t isActive                                           // => Boolean
+```
+
+- `to:` takes an Actor (including a Server) or a `Pid`. The message is delivered exactly as `erlang:send/2` would deliver it: a Server receives it in `handleInfo:`, and a plain Actor ignores it.
+- The delay is Integer milliseconds or a `Duration`, as for `after:do:`, up to 4294967295 ms.
+- A one-shot message timer maps to `erlang:send_after/3`, with no extra process; `cancel` is `erlang:cancel_timer/1` and answers `true` only if the message had not been sent yet. `isActive` is `erlang:read_timer/1`. A target on another node uses a small process instead, because `send_after/3` only accepts local targets.
+- A repeating message timer runs in a small process that is **not** linked to the caller. It stops on `cancel`, or when the target dies, so a supervisor-restarted named Server does not inherit the old ticks. Ticks follow fixed deadlines and do not drift; ticks missed while the system was busy are skipped, not replayed. Because the timer is not tied to its creator, a caller that targets another process owns the Timer: keep it and `cancel` it, or it runs for as long as the target lives.
+- A timer whose target has died does nothing, as in OTP.
+- A message sent just before `cancel` may already be in the mailbox. When a stale tick matters, tag the message with a fresh `Reference new` (`{#tick, ref}`), keep the current tag in state, and ignore messages carrying an old one.
+
+```beamtalk
+Server subclass: Poller
+  state: timer = nil
+
+  initialize => self.timer := Timer send: #poll to: self every: 5000
+
+  handleInfo: msg =>
+    msg match: [
+      #poll -> self poll;
+      _ -> nil
+    ]
+
+  poll => nil
+
+  pause => self.timer cancel
+```
 
 ### Continuations (`continueWith:`)
 
@@ -6247,7 +6285,7 @@ Telemetry detach: #auditMisses
 - The runtime's own handler ids (the ones `Tracing` relies on) are reserved: `attach:` and `detach:` refuse them with `#reserved_name`.
 - Exporters (StatsD, Prometheus, OpenTelemetry) are still attached in Erlang. Attaching from Beamtalk is mainly for tests and in-image consumers.
 
-The methods call the runtime (`beamtalk_telemetry`) directly rather than through the `(Erlang telemetry)` FFI, so an emit costs about 60–100 ns more than a raw `telemetry:execute/3`, against about 13 µs for the FFI spelling.
+`Telemetry` is `native: beamtalk_telemetry`: each method is a `self delegate` pass-through to the runtime module ([`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object)), so a wrapped error names `Telemetry` and the selector. An emit costs about 0.2–0.4 µs more than a raw `telemetry:execute/3` (`docs/development/benchmarks.md`).
 
 ---
 

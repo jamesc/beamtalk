@@ -144,6 +144,26 @@ TestCase subclass: TelemetryTest
       ]
       raise: #empty_collection
 
+  // BT-4055: `span:` goes through `native_call`; `beamtalk_telemetry` opts
+  // out of its ok/error → Result coercion, so the block's value is unchanged.
+  testSpanAnswersOkSymbolUnchanged =>
+    self
+      assert: (Telemetry
+        span: #(#bt4055, #ok)
+        metadata: #{}
+        do: [#ok])
+      equals: #ok
+
+  testSpanKeepsDivideByZeroKind =>
+    self
+      should: [
+        Telemetry
+          span: #(#bt4055, #div)
+          metadata: #{}
+          do: [1 / 0]
+      ]
+      raise: #badarith
+
   testNonLocalReturnFromSpanEmitsStopNotException =>
     self recordSpan: #(#bt4025, #nlr)
     self assert: self returnFromSpan equals: 99

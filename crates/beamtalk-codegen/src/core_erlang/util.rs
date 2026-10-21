@@ -332,11 +332,26 @@ impl CoreErlangGenerator {
     /// [`CoreErlangGenerator::current_frame`] unless the call site already
     /// has its own branch frame in hand (a conditional/exception arm, which
     /// minted it via `current_branch_frame()` on entry).
+    pub(super) fn threaded_expression(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<ThreadedValue> {
+        // ADR 0137: with the flag on, a call that may run user code is bracketed.
+        if let Some(window) = self.open_sync_window(expr) {
+            let version_before = self.state_version();
+            let tv = self.threaded_expression_core(expr, frame);
+            self.close_sync_window(window);
+            return Ok(self.synced_call_value(tv?, expr, frame, version_before));
+        }
+        self.threaded_expression_core(expr, frame)
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "the one ordered list of producers, each branch mirrored by `subexpr_needs_prelude`"
     )]
-    pub(super) fn threaded_expression(
+    fn threaded_expression_core(
         &mut self,
         expr: &Expression,
         frame: FrameId,
@@ -1135,6 +1150,10 @@ impl CoreErlangGenerator {
         if self.is_prelude_producer(inner) {
             return true;
         }
+        // ADR 0137: mirrors `threaded_expression`'s bracket window.
+        if all_producers && self.is_sync_site(inner) {
+            return true;
+        }
         // BT-3803: mirrors `threaded_expression`'s field-assignment producer.
         if self.is_field_assignment(inner) {
             return true;
@@ -1264,8 +1283,8 @@ impl CoreErlangGenerator {
         let version = prelude
             .iter()
             .rev()
-            .find_map(|stmt| match stmt {
-                ThreadedStmt::Bind { target, .. }
+            .find_map(|stmt| match stmt.version_step() {
+                Some((target, _, _))
                     if target.prefix == VersionPrefix::State && target.frame == FrameId::ROOT =>
                 {
                     Some(target.version)
