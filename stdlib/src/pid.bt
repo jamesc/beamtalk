@@ -93,11 +93,7 @@ sealed typed Object subclass: Pid
   /// handler pid send: {#ready, sock, config}   // => nil
   /// ```
   sealed send: msg :: Object -> Nil =>
-    // erlang:send/2 answers `msg` itself, a term() the type checker
-    // infers as Dynamic; the value is discarded, so suppress the warning.
-    @expect type
-    (Erlang erlang) send: self with: msg
-    nil
+    (Erlang beamtalk_process_ops) send: self msg: msg
 
   // === Process Control ===
 

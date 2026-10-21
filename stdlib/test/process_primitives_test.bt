@@ -84,6 +84,18 @@ TestCase subclass: ProcessPrimitivesTest
     self assert: actor processLabel equals: {#connection, 7}
     actor stop
 
+  testProcessLabelRoundTripsResultAndCharlistShapedTerms =>
+    actor := ProcessLabelActor spawn
+    actor processLabel: #ok
+    self assert: actor processLabel equals: #ok
+    actor processLabel: {#ok, 1}
+    self assert: actor processLabel equals: {#ok, 1}
+    actor processLabel: {#error, #closed}
+    self assert: actor processLabel equals: {#error, #closed}
+    actor processLabel: #(72, 105)
+    self assert: actor processLabel equals: #(72, 105)
+    actor stop
+
   testProcessLabelLabelsTheActorNotTheCaller =>
     actor := ProcessLabelActor spawn
     actor processLabel: #worker

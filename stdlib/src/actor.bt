@@ -808,8 +808,7 @@ Object subclass: Actor
   /// self processLabel: {#catalina_connection, peer}   // => nil
   /// ```
   sealed processLabel: term :: Object -> Nil =>
-    (Erlang proc_lib) set_label: term
-    nil
+    (Erlang beamtalk_process_ops) setLabel: term
 
   /// The label set by `processLabel:`, or `nil` if none was set
   /// (`proc_lib:get_label/1`). Erlang reports "no label" as the atom
@@ -822,8 +821,7 @@ Object subclass: Actor
   /// self processLabel                    // => #worker
   /// ```
   sealed processLabel -> Object =>
-    label := (Erlang proc_lib) get_label: self pid
-    label =:= #undefined ifTrue: [nil] ifFalse: [label]
+    (Erlang beamtalk_process_ops) labelOf: self pid
 
   /// Forcefully kill this actor (exit(Pid, kill)).
   ///
