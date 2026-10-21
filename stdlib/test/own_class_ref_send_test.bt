@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4005: inside a class method, an explicit reference to the class itself
+// dispatches like `self` for every selector shape (unary, binary, keyword): a
+// direct class-side call, never a send back into the class's own gen_server.
+
+TestCase subclass: OwnClassRefSendTest
+
+  testBinaryOwnClassReferenceSend =>
+    self assert: OwnClassRefSendHost runBinary equals: 1
+    self assert: OwnClassRefSendActor runBinary equals: 101
+
+  testUnaryOwnClassReferenceSend =>
+    self assert: OwnClassRefSendHost runUnary equals: 2
+    self assert: OwnClassRefSendActor runUnary equals: 20
+
+  testKeywordOwnClassReferenceSend =>
+    self assert: OwnClassRefSendHost runKeyword equals: 7
+    self assert: OwnClassRefSendActor runKeyword equals: 7
+
+  testBinaryOwnClassReferenceSendInsideBlock =>
+    self assert: OwnClassRefSendHost runBinaryIn equals: #(1, 2)
+    self assert: OwnClassRefSendActor runBinaryIn equals: #(101, 102)
+
+  testMixedShapesNestedAsArguments =>
+    self assert: OwnClassRefSendHost runNested equals: 7

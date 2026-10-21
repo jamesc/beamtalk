@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4005: an explicit own-class reference (`C + x`, `C foo`, `C foo: x`)
+// sent from one of C's own class methods, for every selector shape; see
+// own_class_ref_send_test.bt.
+
+Object subclass: OwnClassRefSendHost
+
+  class + x => x
+
+  class twice => 2
+
+  class add: a to: b => a + b
+
+  class runBinary => OwnClassRefSendHost + 1
+
+  class runUnary => OwnClassRefSendHost twice
+
+  class runKeyword => OwnClassRefSendHost add: 3 to: 4
+
+  class runBinaryIn => #(1, 2) collect: [:x | OwnClassRefSendHost + x]
+
+  class runNested =>
+    OwnClassRefSendHost add: (OwnClassRefSendHost + 5) to: OwnClassRefSendHost twice
