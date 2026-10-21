@@ -73,3 +73,110 @@ Actor subclass: Bt4000LoopBodyConditionalReceiverActor
   foldBody =>
     #(1, 2, 3) do: [:e | (self tick) ifTrue: [self.hits := self.hits + e]]
     #[self.ticks, self.hits]
+
+  ticks => self.ticks
+
+  // A non-local return from a pure arm: the receiver's state change before it
+  // is kept.
+  nlrInLoop =>
+    3 timesRepeat: [(self tick) ifTrue: [^self.ticks]]
+    0
+
+  // The same conditional in the other frames a statement runs in.
+  armLocal =>
+    self.ticks := 1
+    (self.ticks > 0)
+      ifTrue: [
+        k := 0
+        (self tick) ifTrue: [k := 1]
+        self.hits := k
+      ]
+    #[self.ticks, self.hits]
+
+  armFieldValue =>
+    (self.ticks >= 0) ifTrue: [
+      self.hits := (self tick) ifTrue: [5] ifFalse: [7]
+    ]
+    #[self.ticks, self.hits]
+
+  onDoDestructure =>
+    [
+      #(a, b) := (self tick) ifTrue: [#(1, 2)] ifFalse: [#(3, 4)]
+      self.hits := a + b
+    ] on: Error do: [:e | 0]
+    #[self.ticks, self.hits]
+
+  ensureValue =>
+    [
+      x := (self tick) ifTrue: [1] ifFalse: [2]
+      self.hits := x
+    ] ensure: [nil]
+    #[self.ticks, self.hits]
+
+  foldDestructure =>
+    t := 0
+    #(1, 2)
+      do: [:e |
+        #(a, b) := (self tick) ifTrue: [#(1, 2)] ifFalse: [#(3, 4)]
+        t := t + a + (b - b)
+      ]
+    #[self.ticks, t]
+
+  rootLast => (self tick) ifTrue: [1] ifFalse: [self.ticks + 10]
+
+  loopAssign =>
+    t := 0
+    3
+      timesRepeat: [
+        x := (self tick) ifTrue: [1] ifFalse: [2]
+        t := t + x
+      ]
+    #[self.ticks, t]
+
+  // An assigned conditional whose arm writes a field, in an arm and in an
+  // `ensure:` body (it was unwrapped twice, a `badarg` at run time).
+  armAssignFieldArm =>
+    (self.ticks >= 0)
+      ifTrue: [
+        x := (self.ticks >= 0)
+          ifTrue: [
+            self.ticks := 5
+            1
+          ]
+          ifFalse: [2]
+        self.hits := x
+      ]
+    #[self.ticks, self.hits]
+
+  ensureAssignFieldArm =>
+    [
+      x := (self.ticks >= 0)
+        ifTrue: [
+          self.ticks := 5
+          1
+        ]
+        ifFalse: [2]
+      self.hits := x
+    ] ensure: [nil]
+    #[self.ticks, self.hits]
+
+  // The method root, and a non-literal block argument.
+  rootFieldValue =>
+    self.hits := (self tick) ifTrue: [5] ifFalse: [7]
+    #[self.ticks, self.hits]
+
+  rootDestructure =>
+    #(a, b) := (self tick) ifTrue: [#(1, 2)] ifFalse: [#(3, 4)]
+    #[self.ticks, a + b]
+
+  rootBlockArg: blk =>
+    (self tick) ifFalse: blk
+    self.ticks
+
+  loopBlockArg: blk =>
+    3 timesRepeat: [(self tick) ifFalse: blk]
+    self.ticks
+
+  armBlockArg: blk =>
+    (self.ticks >= 0) ifTrue: [(self tick) ifFalse: blk]
+    self.ticks

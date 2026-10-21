@@ -37,3 +37,58 @@ TestCase subclass: Bt4000LoopBodyConditionalReceiverTest
 
   testFoldBody =>
     self assert: Bt4000LoopBodyConditionalReceiverActor spawn foldBody equals: #[3, 5]
+
+  testNonLocalReturnFromArm =>
+    a := Bt4000LoopBodyConditionalReceiverActor spawn
+    self assert: a nlrInLoop equals: 2
+    self assert: a ticks equals: 2
+
+  testArmWritesLocal =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn armLocal equals: #[2, 1]
+
+  testArmFieldValue =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn armFieldValue equals: #[1, 7]
+
+  testOnDoDestructure =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn onDoDestructure equals: #[1, 7]
+
+  testEnsureValue =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn ensureValue equals: #[1, 2]
+
+  testFoldDestructure =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn foldDestructure equals: #[2, 4]
+
+  testRootLast =>
+    a := Bt4000LoopBodyConditionalReceiverActor spawn
+    self assert: a rootLast equals: 11
+    self assert: a ticks equals: 1
+
+  testLoopAssign =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn loopAssign equals: #[3, 4]
+
+  testArmAssignFieldArm =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn armAssignFieldArm equals: #[5, 1]
+
+  testEnsureAssignFieldArm =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn ensureAssignFieldArm equals: #[5, 1]
+
+  testRootFieldValue =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn rootFieldValue equals: #[1, 7]
+
+  testRootDestructure =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn rootDestructure equals: #[1, 7]
+
+  testRootBlockArg =>
+    self assert: (Bt4000LoopBodyConditionalReceiverActor spawn rootBlockArg: [
+      nil
+    ]) equals: 1
+
+  testLoopBlockArg =>
+    self assert: (Bt4000LoopBodyConditionalReceiverActor spawn loopBlockArg: [
+      nil
+    ]) equals: 3
+
+  testArmBlockArg =>
+    self assert: (Bt4000LoopBodyConditionalReceiverActor spawn armBlockArg: [
+      nil
+    ]) equals: 1

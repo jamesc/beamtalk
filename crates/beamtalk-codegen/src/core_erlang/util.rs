@@ -962,6 +962,16 @@ impl CoreErlangGenerator {
         self.in_actor_instance_context() && self.subexpr_needs_prelude(receiver)
     }
 
+    /// Whether `expr` is a conditional send whose receiver is sequenced ahead
+    /// of it ([`Self::conditional_receiver_is_sequenced`], BT-3910 / BT-4000).
+    pub(in crate::core_erlang) fn is_conditional_with_sequenced_receiver(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        Self::conditional_send_receiver(expr.unwrap_parens())
+            .is_some_and(|r| self.conditional_receiver_is_sequenced(r))
+    }
+
     /// The receiver of a conditional send (`ifTrue:`, `and:`, ...), the one
     /// operand the sequencing rule leaves to the conditional's own lowering.
     pub(super) fn conditional_send_receiver(expr: &Expression) -> Option<&Expression> {
@@ -1089,9 +1099,7 @@ impl CoreErlangGenerator {
         }
         // BT-3910 / BT-4000: and a conditional whose receiver's prelude is
         // spliced into the caller's frame (`conditional_receiver_operand`).
-        if Self::conditional_send_receiver(inner)
-            .is_some_and(|r| self.conditional_receiver_is_sequenced(r))
-        {
+        if self.is_conditional_with_sequenced_receiver(inner) {
             return true;
         }
         // ADR 0131 Phase 2: mirrors `threaded_expression`'s

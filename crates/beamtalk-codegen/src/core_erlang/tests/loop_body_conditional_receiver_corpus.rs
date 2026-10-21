@@ -144,6 +144,83 @@ fn loop_body_conditional_receiver_corpus_compiles() {
     );
 }
 
+/// Whether the ADR 0131/0133 Phase 0 check rejects `src` before codegen (an
+/// arm's outer-local write in an operand position no construct threads).
+fn phase0_rejects(src: &str) -> bool {
+    use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
+    use beamtalk_core::source_analysis::{DiagnosticCategory, Severity};
+    let (module, _) =
+        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
+    analyse_full(&module, AnalysisContext::default())
+        .diagnostics
+        .iter()
+        .any(|d| {
+            d.severity == Severity::Error
+                && matches!(
+                    d.category,
+                    Some(
+                        DiagnosticCategory::UnmigratedLocalThreading
+                            | DiagnosticCategory::Tier2BlockNoReturnChannel
+                    )
+                )
+        })
+}
+
+/// The conditional `C` in value position inside the body statement: an
+/// assigned local, a field write, a self-send argument, the last statement of
+/// a nested block value, and a non-local return.
+const VALUE_POSITIONS: &[&str] = &[
+    "r := C",
+    "self.f := (C) printString size",
+    "self isAlive: (C) printString size",
+    "x := 0. x := C. x",
+    "(n > 5) ifTrue: [^ C]",
+];
+
+/// BT-4000: the conditional in value position (every [`VALUE_POSITIONS`]
+/// wrapper) in every position of [`LOOPS`], over every receiver with
+/// `ifTrue:ifFalse:` and each arm write. Every row passes the debug verifier
+/// and compiles through `erlc`.
+#[test]
+fn loop_body_conditional_receiver_value_positions_compile() {
+    let mut methods = Vec::new();
+    let mut names = Vec::new();
+    for (l, lp) in LOOPS.iter().enumerate() {
+        for (r, receiver) in RECEIVERS.iter().enumerate() {
+            for (a, arm) in ARMS.iter().enumerate() {
+                let cond = format!("{receiver} ifTrue: [{arm}. 1] ifFalse: [2]");
+                for (v, wrap) in VALUE_POSITIONS.iter().enumerate() {
+                    let stmt = wrap.replace('C', &cond);
+                    let m = method("", methods.len(), &lp.replace('S', &stmt));
+                    if phase0_rejects(&format!("{HEADER}{HELPERS}{m}")) {
+                        continue;
+                    }
+                    names.push(format!("loop{l} recv{r} arm{a} value{v}"));
+                    methods.push(m);
+                }
+            }
+        }
+    }
+    assert!(
+        methods.len() >= 400,
+        "only {} rows; the corpus has thinned out",
+        methods.len()
+    );
+    let mut failures = Vec::new();
+    if !passes(&format!("{HEADER}{HELPERS}{}", methods.concat())) {
+        failures.extend(names.iter().zip(&methods).filter_map(|(name, method)| {
+            let single = format!("{HEADER}{HELPERS}{method}");
+            (!passes(&single)).then(|| format!("{name}:\n{single}"))
+        }));
+    }
+    assert!(
+        failures.is_empty(),
+        "{} value-position row(s) fail verified codegen:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
 /// BT-4000: with the receiver prelude rendered into the conditional's tuple
 /// again ([`LocalRebindFault::ReceiverPreludeInTuple`]), the verifier reports
 /// `UnboundVersion` for every row whose conditional is a statement of a

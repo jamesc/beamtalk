@@ -1626,14 +1626,16 @@ impl CoreErlangGenerator {
                         // `eval_rhs_to_temp_var` call (`expressions.rs`)
                         // compiles `value` via `expression_doc`, which
                         // substitutes the already-sequenced value.
-                        let rhs_scope =
-                            self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                        let (binding_docs, rhs_var) =
-                            self.generate_destructure_bindings_with_value(pattern, value)?;
+                        let (binding_docs, rhs_var) = self
+                            .generate_destructure_bindings_sequenced(
+                                pattern,
+                                value,
+                                threaded_ir::FrameId::ROOT,
+                                &mut stmts,
+                            )?;
                         for d in binding_docs {
                             stmts.push(ThreadedStmt::Statement(d, span));
                         }
-                        self.finish_precompiled_scope(rhs_scope)?;
                         rhs_value = Some(rhs_var);
                     }
                     if is_last {
@@ -1807,8 +1809,7 @@ impl CoreErlangGenerator {
                         // producer, so its prelude also carries one
                         // `LocalRebind` per threaded local; only the raw tuple
                         // path below re-reads its locals from the new state.
-                        let inline_conditional =
-                            self.inline_producer_construct(expr.unwrap_parens());
+                        let inline_conditional = self.thread_ahead_unwraps(expr);
                         if inline_conditional {
                             let expr_str = self.expression_doc(expr)?;
                             self.finish_precompiled_scope(scope)?;

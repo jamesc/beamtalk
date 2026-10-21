@@ -1859,10 +1859,10 @@ impl CoreErlangGenerator {
                     result_var = val_var;
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                // E4 — exempt from Bind modeling, same as C5: no state
-                // version is produced or consumed, every binding is plain.
-                let (binding_docs, rhs_var) =
-                    self.generate_destructure_bindings_with_value(pattern, value)?;
+                // E4 — the bindings are plain; the right-hand side's own
+                // prelude is threaded ahead into this body (BT-4000).
+                let (binding_docs, rhs_var) = self
+                    .generate_destructure_bindings_sequenced(pattern, value, frame, &mut stmts)?;
                 for d in binding_docs {
                     stmts.push(ThreadedStmt::Statement(d, span));
                 }

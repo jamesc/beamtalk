@@ -700,12 +700,20 @@ producer when its arms need threading, as a plain send otherwise.
 | Method-body statement | the receiver's `Bind`s are root statements (were hidden by the gap backfill) |
 | Conditional arm | a conditional statement whose receiver is sequenced goes through `threaded_expression` -> the splice (`arm_statement_is_producer`; it used to be compiled as a raw tuple the arm unpacked, with the receiver's `Bind`s inside it) |
 | `Letrec` loop body (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`) | `lower_letrec_non_assign_expr` -> `thread_ahead` -> the splice |
-| `Foldl` loop body (`do:`/...) | `lower_foldl_body_in_sites` -> `thread_ahead` -> the splice |
+| `Foldl` loop body (`do:`/...) | a value position goes through `thread_ahead` -> the splice; a conditional statement takes the fold's own `{Result, StateAcc}` unpack, whose element 2 carries the receiver's change (verified with opaque gaps, so the runtime `foldBody` row is its proof; a non-literal block argument there is BT-4017) |
 | `on:do:`/`ensure:` arm | `generate_exception_body_with_threading_inner` -> `thread_ahead` -> the splice (its last statement used to take the same raw-tuple path as the conditional arm; `arm_statement_is_producer` routes it to `thread_ahead`) |
 | Bare block, stored closure, NLR boundary | not a statement sequence of this frame (as above) |
 
-A value-type receiver that writes a field keeps its own splice (`vt_conditional_operand`,
-BT-3816); a class-method receiver produces no family version (ADR 0130).
+Every consumer that would unpack a `{Value, State}` tuple from such a conditional reads
+the value `thread_ahead` registered instead (`thread_ahead_unwraps`, the one predicate).
+This covers a local assignment's right-hand side (`lower_local_var_assignment_bind`'s C3b,
+the loop-body local paths), the method root's statement and last expression, an arm's
+field write (lowered by C1) and a destructuring statement in every body
+(`generate_destructure_bindings_sequenced`). An assigned conditional whose arm writes a
+field used to be unwrapped twice in an arm or an `ensure:` body, which raised `badarg` at
+run time. That was fixed by the same rule. A value-type receiver that writes a field keeps
+its own splice (`vt_conditional_operand`, BT-3816). A class-method receiver produces no
+family version (ADR 0130).
 
 **Verifier.** The existing `UnboundVersion` check already fails on the repro; no new
 variant was needed. `LocalRebindFault::ReceiverPreludeInTuple` restores the pre-fix
