@@ -89,7 +89,7 @@ pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId, LoopCounter, NlrThrowShape,
     OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId,
-    TryRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // The one family slot order and the `'__local__'` key prefix.

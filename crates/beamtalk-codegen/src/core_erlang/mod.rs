@@ -143,6 +143,7 @@ pub mod primitive_bindings;
 mod primitives;
 pub mod selector_mangler;
 mod sequencing;
+mod synced_call;
 mod spec_codegen;
 mod supervisor_codegen;
 mod threaded_expr;

@@ -920,6 +920,7 @@ impl ThreadingPlan {
         }
         !body_analysis.field_writes.is_empty()
             && !body_analysis.has_self_sends
+            && !body_analysis.has_synced_user_code_sends()
             && !effects.cond_has_state_effects
             && !effects.has_tier2_threaded_assign
             && !effects.has_cf_mutations

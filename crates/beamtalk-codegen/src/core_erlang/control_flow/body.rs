@@ -351,7 +351,10 @@ impl CoreErlangGenerator {
         to: &VersionedVar,
     ) {
         for stmt in stmts {
-            if let ThreadedStmt::Bind { source, .. } = stmt {
+            // ADR 0137: a bracket's store reads the seed like a `Bind`'s source.
+            if let ThreadedStmt::Bind { source, .. }
+            | ThreadedStmt::SyncedCall { store: source, .. } = stmt
+            {
                 if source == from {
                     *source = to.clone();
                     return;

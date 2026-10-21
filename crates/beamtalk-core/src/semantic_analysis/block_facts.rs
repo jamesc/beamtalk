@@ -37,6 +37,14 @@ pub struct BlockMutationAnalysis {
     pub field_writes: HashSet<String>,
     /// Whether the block contains self-sends (which may mutate actor state).
     pub has_self_sends: bool,
+    /// ADR 0137 (BT-4020): whether the block contains a send to something
+    /// other than `self` that may run user code in the calling process
+    /// ([`send_user_code`], and a binary operator that is not a bare BIF or a
+    /// numeric-literal operation), nested blocks included. Counted as a state
+    /// effect only while the synced-calls switch is on
+    /// ([`crate::synced_calls`]), because such a call is bracketed with a
+    /// store and a reload of the threaded `State`.
+    pub has_user_code_sends: bool,
     /// Selectors sent to `self` anywhere in the block, including inside
     /// nested blocks (e.g. a `do:`/`collect:` argument) — unlike `has_self_sends`,
     /// tracked by name so a caller can distinguish a self-send to a provably
@@ -60,7 +68,17 @@ impl BlockMutationAnalysis {
     /// state). A `self.field value(:...)` send is not one: a block stored in a
     /// field cannot write a field or a captured local (ADR 0133, BT-3922).
     pub fn has_state_effects(&self) -> bool {
-        !self.field_writes.is_empty() || self.has_self_sends
+        !self.field_writes.is_empty() || self.has_self_sends || self.has_synced_user_code_sends()
+    }
+
+    /// ADR 0137: whether the block holds a call that is bracketed with a
+    /// store/reload of `State` (the switch is on and the block has a send
+    /// that may run user code). Such a block cannot keep its fields in
+    /// pre-extracted loop parameters (hybrid mode): the cell must hold the
+    /// whole `State` map at the call.
+    #[must_use]
+    pub fn has_synced_user_code_sends(&self) -> bool {
+        self.has_user_code_sends && crate::synced_calls::enabled()
     }
 
     /// Whether a loop or fold over this block is lowered with mutation
@@ -709,7 +727,7 @@ fn analyze_expression(
             arguments,
             ..
         } => {
-            record_send_target(receiver, selector, analysis);
+            record_send_target(receiver, selector, arguments, analysis);
             // on:do:/ensure: run their receiver (the try/protected
             // block) inline too, in the same activation — so it needs the same
             // local_writes propagation as an inline-conditional block argument
@@ -784,6 +802,9 @@ fn analyze_expression(
             if nested_analysis.has_self_sends {
                 analysis.has_self_sends = true;
             }
+            if nested_analysis.has_user_code_sends {
+                analysis.has_user_code_sends = true;
+            }
             analysis
                 .self_send_selectors
                 .extend(nested_analysis.self_send_selectors.iter().cloned());
@@ -804,7 +825,7 @@ fn analyze_expression(
             // x`) must reach `compute_class_var_mutating_selectors`.
             analyze_expression(receiver, analysis, ctx);
             for send in cascade_sends(expr).filter(|s| s.site == SendSite::CascadeLater) {
-                record_send_target(send.receiver, send.selector, analysis);
+                record_send_target(send.receiver, send.selector, send.arguments, analysis);
                 for arg in send.arguments {
                     analyze_expression(arg, analysis, ctx);
                 }
@@ -862,6 +883,7 @@ fn analyze_expression(
 fn record_send_target(
     receiver: &Expression,
     selector: &MessageSelector,
+    arguments: &[Expression],
     analysis: &mut BlockMutationAnalysis,
 ) {
     if is_self_reference(receiver) {
@@ -869,7 +891,35 @@ fn record_send_target(
         analysis
             .self_send_selectors
             .insert(selector.name().to_string());
+    } else if send_may_run_user_code(receiver, selector, arguments) {
+        analysis.has_user_code_sends = true;
     }
+}
+
+/// ADR 0137: a conservative, syntactic answer to "may this send to something
+/// other than `self` run user code in this process" — a superset of what
+/// codegen brackets (which also knows static operand types), so a construct
+/// that holds a bracketed call is always seen as holding one here. Read off
+/// the shared selector tables ([`send_user_code`],
+/// [`crate::state_threading_selectors::structural_binary`]).
+fn send_may_run_user_code(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> bool {
+    use crate::state_threading_selectors::{SendUserCode, send_user_code, structural_binary};
+    if matches!(receiver, Expression::Super(_)) {
+        return false;
+    }
+    if let MessageSelector::Binary(op) = selector {
+        if structural_binary(op).is_some() {
+            return false;
+        }
+        let numeric_literal =
+            |e: &Expression| matches!(e.unwrap_parens(), Expression::Literal(crate::ast::Literal::Integer(..) | crate::ast::Literal::Float(..), _));
+        return !(numeric_literal(receiver) && arguments.first().is_some_and(numeric_literal));
+    }
+    send_user_code(receiver, selector, arguments) == SendUserCode::MayRun
 }
 
 /// Adds all variable names bound by `pattern` to `ctx.local_bindings` and
@@ -1123,6 +1173,9 @@ fn propagate_inline_block_writes(
         .extend(nested.field_writes.iter().cloned());
     if nested.has_self_sends {
         analysis.has_self_sends = true;
+    }
+    if nested.has_user_code_sends {
+        analysis.has_user_code_sends = true;
     }
     analysis
         .self_send_selectors

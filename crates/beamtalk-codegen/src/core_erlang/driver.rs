@@ -106,6 +106,18 @@ pub fn generate_module_with_warnings(
         generator.codegen_diagnostics_enabled = enabled;
     }
 
+    if let Some(enabled) = options.synced_calls {
+        generator.synced.mode = if enabled {
+            super::synced_call::SyncMode::Enforce
+        } else {
+            super::synced_call::SyncMode::Off
+        };
+    }
+    // The block analysis reads the same switch, so an explicit option holds for it too.
+    let _synced_calls_override = options
+        .synced_calls
+        .map(|_| beamtalk_core::synced_calls::override_mode(generator.synced.mode));
+
     // Consume the driver's already-computed analysis when supplied
     // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,
     // the class hierarchy, and inferred method return types from scratch —
@@ -318,6 +330,7 @@ pub fn generate_module_with_warnings(
         generator.generate_value_type_module(module)?
     };
 
+    generator.finish_synced_calls(module.span);
     generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);
 
     Ok(GeneratedModule {

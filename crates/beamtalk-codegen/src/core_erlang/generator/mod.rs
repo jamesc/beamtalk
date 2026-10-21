@@ -160,6 +160,9 @@ pub struct CoreErlangGenerator {
     /// Tier 1 `fun`, which cannot hand the actor `State` back. A Tier 2 `fun`
     /// returns `{Result, StateAccN}`, so it does carry it (false).
     pub(in crate::core_erlang) closure_drops_state: bool,
+    /// ADR 0137 Phase 2a (BT-4020): the cell bracket's mode and bookkeeping
+    /// (`synced_call.rs`). Inert unless the synced-calls flag is on.
+    pub(in crate::core_erlang) synced: super::synced_call::SyncedCallState,
     /// ADR 0130 §5: the Core Erlang variable holding the class-variable
     /// capture of the innermost enclosing block literal that reads a class
     /// variable (`beamtalk_class_vars:capture/2` bound at its creation), or
@@ -469,6 +472,9 @@ impl CoreErlangGenerator {
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
             closure_drops_state: false,
+            synced: super::synced_call::SyncedCallState::new(
+                beamtalk_core::synced_calls::mode(),
+            ),
             class_var_capture: None,
             class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,

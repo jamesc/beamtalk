@@ -1139,3 +1139,139 @@ mod tests {
         }
     }
 }
+
+// ─── ADR 0137 (BT-4020): which sends may run user code ──────────────────────
+
+/// ADR 0137 §1–2: whether a send, as a *call*, may run one of this actor's
+/// blocks or methods in the calling process — the classification the cell
+/// bracket (`SyncedCall`) and its verifier (`UnbracketedUserCodeSend`) key on.
+/// Derived entirely from the tables above and [`WellKnownSelector`], so there
+/// is no second list to keep in step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendUserCode {
+    /// An intrinsic that can never dispatch to user code, whatever its
+    /// arguments are (`isNil`, `class`, `hash`, `error:`, the field
+    /// reflection family, `spawn`/`await`, `asType:`, `yourself`).
+    Never,
+    /// A construct the compiler lowers in place (`ifTrue:`, `whileTrue:`, an
+    /// inlined `do:`, `on:do:`, a literal block's `value`, ...). It is not a
+    /// call; the sends in its blocks are classified where they are compiled.
+    Inlined,
+    /// Anything else: bracket it. This is the default (ADR 0137 §2): a
+    /// primitive that takes a block or can dispatch to user code for some
+    /// argument, a non-inlined `value`, `perform:`, a send to an unknown or
+    /// in-process receiver, an FFI call.
+    MayRun,
+}
+
+/// Classifies the send `receiver selector arguments`. A receiver of `self`
+/// or `super` is the caller's to judge: a compiled self-send is explicit
+/// threading, not a call into the cell.
+#[must_use]
+pub fn send_user_code(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> SendUserCode {
+    let is_block = |e: &Expression| matches!(e.unwrap_parens(), Expression::Block(_));
+    if let Some(wk) = selector.well_known() {
+        if matches!(
+            wk,
+            WellKnownSelector::Class
+                | WellKnownSelector::RespondsTo
+                | WellKnownSelector::IsNil
+                | WellKnownSelector::NotNil
+                | WellKnownSelector::Hash
+                | WellKnownSelector::Error
+                | WellKnownSelector::FieldAt
+                | WellKnownSelector::FieldAtPut
+                | WellKnownSelector::FieldNames
+                | WellKnownSelector::HasField
+                | WellKnownSelector::ClearField
+        ) {
+            return SendUserCode::Never;
+        }
+        if wk.is_block_value() {
+            return if is_block(receiver) {
+                SendUserCode::Inlined
+            } else {
+                SendUserCode::MayRun
+            };
+        }
+    }
+    let name = selector.name();
+    let name = name.as_str();
+    if matches!(
+        name,
+        "asType:" | "yourself" | "spawn" | "spawnWith:" | "await" | "awaitForever" | "await:"
+    ) {
+        return SendUserCode::Never;
+    }
+    // Collection messages: inlined as a fold when the callable is a literal block.
+    if COLLECTION_KEYWORD_SELECTORS.contains(&name) {
+        return match opaque_fold_callable_arg(name, arguments) {
+            Some(callable) if is_block(callable) => SendUserCode::Inlined,
+            // `eachWithIndex:`/`do:separatedBy:`/... take their blocks by position.
+            None if !arguments.is_empty() && arguments.iter().all(is_block) => {
+                SendUserCode::Inlined
+            }
+            _ => SendUserCode::MayRun,
+        };
+    }
+    if is_state_threading_keyword_selector(name)
+        || is_state_threading_unary_selector(name)
+        || name == "repeat"
+    {
+        // Loops and `ensure:`/`on:do:` run their receiver block in place.
+        let receiver_inlined = !(is_state_threaded_block_receiver(name)
+            || matches!(
+                name,
+                "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse" | "timesRepeat" | "repeat"
+            ))
+            || is_block(receiver);
+        let args_inlined = state_threaded_block_arg_indices(name)
+            .iter()
+            .all(|&i| arguments.get(i).is_some_and(is_block));
+        return if receiver_inlined && args_inlined {
+            SendUserCode::Inlined
+        } else {
+            SendUserCode::MayRun
+        };
+    }
+    SendUserCode::MayRun
+}
+
+// ─── Structurally lowered binary selectors (shared leaf, BT-4020) ───────────
+
+/// How the compiler lowers a binary selector structurally, i.e. without
+/// dispatching it as a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralBinary {
+    /// `>>`: method lookup (`generate_message_send`).
+    MethodLookup,
+    /// `**`: `math:pow` (`generate_power_op`).
+    Power,
+    /// `++`: list/string concatenation (`generate_concat_op`).
+    Concat,
+    /// Remainder and the equality/identity operators (ADR 0002): a bare Erlang BIF.
+    Bif(&'static str),
+}
+
+/// The one table of structurally lowered binary selectors. Both lowering sites
+/// (`generate_message_send` for `>>`, `generate_binary_op` for the rest) and
+/// [`is_structurally_lowered_binary`] key off it.
+#[must_use]
+pub fn structural_binary(op: &str) -> Option<StructuralBinary> {
+    match op {
+        ">>" => Some(StructuralBinary::MethodLookup),
+        "**" => Some(StructuralBinary::Power),
+        "++" => Some(StructuralBinary::Concat),
+        "%" => Some(StructuralBinary::Bif("rem")),
+        "==" => Some(StructuralBinary::Bif("==")),
+        "=:=" => Some(StructuralBinary::Bif("=:=")), // Strict equality (ADR 0002)
+        "/=" => Some(StructuralBinary::Bif("/=")),   // Loose inequality (ADR 0002)
+        "=/=" => Some(StructuralBinary::Bif("=/=")), // Strict inequality (ADR 0002)
+        _ => None,
+    }
+}
+

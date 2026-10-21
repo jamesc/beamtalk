@@ -58,7 +58,7 @@
 //! lowering read the same rule.
 
 use super::super::threaded_expr::ProducerTail;
-use super::super::threaded_ir::ThreadedValue;
+use super::super::threaded_ir::{ThreadedStmt, ThreadedValue};
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::conditionals::ScratchStart;
 use beamtalk_cerl_doc::Document;
@@ -133,10 +133,19 @@ impl CoreErlangGenerator {
         let span = handlers[0].span;
         let frame = self.current_frame();
         let scratch = self.conditional_scratch(frame);
-        let tuple_doc =
+        let (head, tuple_doc) =
             self.generate_lookup_tuple(receiver, &selector, key, &arms, &handlers, scratch)?;
-        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &handlers, tail, true)
-            .map(Some)
+        let mut tv =
+            self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &handlers, tail, true)?;
+        if !head.is_empty() {
+            // ADR 0137: the receiver's and the key's own preludes (a bracketed
+            // call steps `State`) belong to the producer's frame, ahead of the
+            // tuple, not inside the tuple's document where their versions die.
+            let mut prelude = head;
+            prelude.append(&mut tv.prelude);
+            tv.prelude = prelude;
+        }
+        Ok(Some(tv))
     }
 
     /// The raw `{Value, StateAcc}` case of [`Self::generate_lookup_producer`]
@@ -149,18 +158,39 @@ impl CoreErlangGenerator {
         arms: &LookupArms<'_>,
         handlers: &[&Block],
         scratch: ScratchStart,
-    ) -> Result<Document<'static>> {
+    ) -> Result<(Vec<ThreadedStmt>, Document<'static>)> {
         let frame = self.current_frame();
         // The receiver is evaluated first and its value bound before the key's
         // own prelude (an actor self-send in the key) can run.
         let recv_tv = self.threaded_expression(receiver, frame)?;
-        let recv_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
         let recv_value = self.threaded_value_doc(&recv_tv.value);
         let recv_var = self.fresh_temp_var("LookupRecv");
         let key_tv = self.threaded_expression(key, frame)?;
-        let key_preamble = self.threaded_prelude_doc(&key_tv.prelude);
         let key_value = self.threaded_value_doc(&key_tv.value);
         let key_var = self.fresh_temp_var("LookupKey");
+        // With the synced-calls flag on, a non-empty prelude is spliced into the
+        // producer's frame (see the caller) instead of rendered into the tuple.
+        let splice = self.synced_calls_active()
+            && !(recv_tv.prelude.is_empty() && key_tv.prelude.is_empty());
+        let mut head: Vec<ThreadedStmt> = Vec::new();
+        let (recv_preamble, key_preamble) = if splice {
+            head.extend(recv_tv.prelude);
+            head.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(recv_var.clone()), " = ", recv_value.clone(), " in "],
+                receiver.span(),
+            ));
+            head.extend(key_tv.prelude);
+            head.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(key_var.clone()), " = ", key_value.clone(), " in "],
+                key.span(),
+            ));
+            (Document::Nil, Document::Nil)
+        } else {
+            (
+                self.threaded_prelude_doc(&recv_tv.prelude),
+                self.threaded_prelude_doc(&key_tv.prelude),
+            )
+        };
         let found_var = self.fresh_temp_var("LookupFound");
         let outer_state = self.current_state_var();
         // Seed the construct's own locals so every handler arm, the
@@ -183,19 +213,19 @@ impl CoreErlangGenerator {
             }
             None => self.conditional_baseline_tuple(Document::Str("'nil'"), &base_state),
         };
-        Ok(docvec![
+        let (recv_let, key_let) = if splice {
+            (Document::Nil, Document::Nil)
+        } else {
+            (
+                docvec!["let ", leaf::var(recv_var.clone()), " = ", recv_value, " in "],
+                docvec!["let ", leaf::var(key_var.clone()), " = ", key_value, " in "],
+            )
+        };
+        Ok((head, docvec![
             recv_preamble,
-            "let ",
-            leaf::var(recv_var.clone()),
-            " = ",
-            recv_value,
-            " in ",
+            recv_let,
             key_preamble,
-            "let ",
-            leaf::var(key_var.clone()),
-            " = ",
-            key_value,
-            " in ",
+            key_let,
             seed_doc,
             "case call 'beamtalk_map':'lookup_for_threading'(",
             leaf::var(recv_var),
@@ -210,6 +240,6 @@ impl CoreErlangGenerator {
             " <_> when 'true' -> ",
             absent_arm,
             " end",
-        ])
+        ]))
     }
 }
