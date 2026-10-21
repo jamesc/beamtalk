@@ -229,6 +229,7 @@ mod local_rebind_verifier_corpus;
 mod loop_body_conditional_receiver_corpus;
 mod loop_body_self_send_operand_corpus;
 mod nlr;
+mod paren_transparency;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
