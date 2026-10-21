@@ -308,9 +308,17 @@ fn oracle_programs() -> Vec<(String, String, String)> {
     out
 }
 
-/// Compiles `core` with `erlc`, runs every probe of `probes` against a `Self` with
-/// `m = 7, n = 20` and answers `probe name -> printed result`. `None` without `erlc`/`erl`.
-fn run_probes(core: &str, probes: &[String]) -> Option<std::collections::HashMap<String, String>> {
+/// Compiles `core` with `erlc`, runs every probe of `probes` against the `Self` map
+/// `self_map` (an Erlang map expression, e.g. `#{m => 7, n => 20}`) and answers
+/// `probe name -> printed result`. A probe that does not answer within five seconds (a loop
+/// whose exit write was dropped) prints `timeout`. `None` without `erlc`/`erl`.
+///
+/// Shared with `while_condition_carrier_corpus.rs` (BT-4002).
+pub(super) fn run_probes(
+    core: &str,
+    probes: &[String],
+    self_map: &str,
+) -> Option<std::collections::HashMap<String, String>> {
     use std::process::Command;
     if !super::erlc_available() || Command::new("erl").arg("-version").output().is_err() {
         return None;
@@ -364,10 +372,13 @@ fn run_probes(core: &str, probes: &[String]) -> Option<std::collections::HashMap
         .collect::<Vec<_>>()
         .join(",");
     let eval = format!(
-        "Self = #{{m => {}, n => {}}}, \
-         lists:foreach(fun(F) -> R = (catch '{module}':F(Self)), io:format(\"~s ~w~n\", [F, R]) end, [{names}]), \
-         halt().",
-        START.m, START.n
+        "Self = {self_map}, \
+         lists:foreach(fun(F) -> \
+           Parent = self(), \
+           Pid = spawn(fun() -> Parent ! {{self(), (catch '{module}':F(Self))}} end), \
+           R = receive {{Pid, V}} -> V after 5000 -> exit(Pid, kill), timeout end, \
+           io:format(\"~s ~w~n\", [F, R]) end, [{names}]), \
+         halt()."
     );
     let output = Command::new("erl")
         .current_dir(dir.path())
@@ -407,7 +418,8 @@ fn generated_field_writing_folds_agree_with_the_oracle_when_run() {
     // Debug codegen: the `ThreadedIr` verifier is on and panics on any finding.
     let core = codegen(&src);
     let names: Vec<String> = programs.iter().map(|(n, _, _)| n.clone()).collect();
-    let Some(observed) = run_probes(&core, &names) else {
+    let self_map = format!("#{{m => {}, n => {}}}", START.m, START.n);
+    let Some(observed) = run_probes(&core, &names, &self_map) else {
         println!("skipping the oracle run: erlc/erl not available");
         return;
     };

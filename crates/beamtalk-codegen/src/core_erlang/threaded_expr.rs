@@ -132,6 +132,10 @@ pub(super) mod fault {
         /// answers `false`, so the assignment reaches the value-only lowering
         /// (`UnthreadedLocalAssignment`).
         NotAProducer,
+        /// BT-4002: a `Letrec` loop takes its families from its body only, as
+        /// before BT-4002, so the `Self` a `whileTrue:`/`whileFalse:` condition
+        /// writes is not carried (`ConditionFamilyNotCarried`).
+        BodyOnlyLoopFamilies,
     }
 
     thread_local! {

@@ -60,6 +60,7 @@ fn verify_silent_on_well_formed_conditional_loop_fixture() {
         threads: Vec::new(),
         counter: None,
         condition: Vec::new(),
+        condition_families: Vec::new(),
         condition_value: ValueRef::Literal("'true'"),
         continue_arm: Document::Str("<opaque condition>"),
         body: vec![ThreadedStmt::Bind {
@@ -101,6 +102,7 @@ fn verify_silent_on_conditional_loop_with_condition_prelude() {
             op: BindOp::Direct(ValueRef::Doc(Document::Str("<opaque self-send reply>"))),
             span: span(),
         }],
+        condition_families: Vec::new(),
         condition_value: ValueRef::Doc(Document::Str("<opaque bool expr>")),
         continue_arm: Document::Str("<opaque continue arm>"),
         body: vec![ThreadedStmt::Bind {
@@ -130,6 +132,7 @@ fn verify_unbound_version_conditional_loop_condition_references_unbound_version(
         threads: Vec::new(),
         counter: None,
         condition: Vec::new(),
+        condition_families: Vec::new(),
         condition_value: ValueRef::Version(VersionedVar::new(VersionPrefix::State, 1, frame)),
         continue_arm: Document::Str("<opaque continue arm>"),
         body: Vec::new(),
@@ -163,6 +166,7 @@ fn verify_unbound_version_conditional_loop_frame_flow_matches_threaded() {
         threads: Vec::new(),
         counter: None,
         condition: Vec::new(),
+        condition_families: Vec::new(),
         condition_value: ValueRef::Literal("'true'"),
         continue_arm: Document::Str("<opaque condition>"),
         body: vec![ThreadedStmt::Bind {
@@ -555,5 +559,70 @@ fn verify_bind_frames_checks_a_fragment_against_its_callers_frame() {
         verify_bind_frames(&[bind(FrameId::ROOT)], frame).len(),
         1,
         "a fragment lowered at ROOT is not in the frame of its caller"
+    );
+}
+
+// ── BT-4002: ConditionFamilyNotCarried ──────────────────────────────
+
+/// Repro B's loop as IR: `[self.n := self.n + 1. self.n < 3] whileTrue:
+/// [k := k + 1]` in a value-type method. The `StateAcc` loop threads `k`;
+/// the condition advanced `SelfVt` (`condition_families`), and `hand_back`
+/// says whether the condition slot binds the condition's `Self1` from the
+/// loop's `Self` parameter (the fix) or not (before it, `Self1` died with
+/// the condition closure).
+fn repro_b_loop(hand_back: bool) -> Vec<ThreadedStmt> {
+    let frame = FrameId::new(1);
+    let self_seed = VersionedVar::new(VersionPrefix::Gensym("Self".to_string()), 0, frame);
+    let mut condition = vec![ThreadedStmt::Statement(
+        Document::Str("let _CondPair = apply _CondFun (StateAcc) in "),
+        span(),
+    )];
+    let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, frame)];
+    if hand_back {
+        condition.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::SelfVt, 1, frame),
+            source: self_seed.clone(),
+            op: BindOp::Direct(ValueRef::Doc(Document::Str("element(3, _CondPair)"))),
+            span: span(),
+        });
+        produces.push(self_seed);
+    }
+    vec![ThreadedStmt::ConditionalLoop {
+        fn_name: "while".to_string(),
+        mode: ThreadingMode::StateAcc(StateAccFallbackReason::ConditionStateEffects),
+        frame,
+        threads: vec!["k".to_string()],
+        counter: None,
+        condition,
+        condition_families: vec![VersionPrefix::SelfVt],
+        condition_value: ValueRef::Doc(Document::Str("_CondBool")),
+        continue_arm: Document::Str("<'true'> when 'true' -> "),
+        body: Vec::new(),
+        produces,
+        outer_args: None,
+        exit_arm: Document::Str("<opaque exit>"),
+        span: span(),
+    }]
+}
+
+#[test]
+fn verify_condition_family_not_carried_on_repro_b() {
+    use crate::core_erlang::threaded_ir::verify_in_scope;
+    let errors = verify_in_scope(&repro_b_loop(false), ScopeKind::ValueType);
+    assert_eq!(
+        errors,
+        vec![VerifyError::ConditionFamilyNotCarried {
+            family: VersionPrefix::SelfVt,
+            at: span(),
+        }]
+    );
+}
+
+#[test]
+fn verify_silent_on_repro_b_when_the_condition_hands_self_back() {
+    use crate::core_erlang::threaded_ir::verify_in_scope;
+    assert_eq!(
+        verify_in_scope(&repro_b_loop(true), ScopeKind::ValueType),
+        Vec::new()
     );
 }

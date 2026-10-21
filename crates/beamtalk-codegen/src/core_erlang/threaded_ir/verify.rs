@@ -366,6 +366,18 @@ pub(in crate::core_erlang) enum VerifyError {
     /// unpacks. A throw always carries the state its boundary hands back (the
     /// scope's own single state).
     NlrThrowWithoutSlot { at: Span },
+
+    /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
+    /// `family` (its `condition_families`), but no `Bind` of that family in
+    /// the condition slot hands the condition's version back into the loop's
+    /// frame from one of the loop's own `produces` seeds. The condition is a
+    /// closure called once per iteration: a `Self{N}` it binds dies with it
+    /// unless the closure returns it and the loop carries it as a family
+    /// parameter. Every iteration then restarts from the pre-condition
+    /// version, so the write is silently lost (`[self.n := self.n + 1. self.n
+    /// < 3] whileTrue: [k := k + 1]` in a value-type method loops forever,
+    /// `erlc`-clean). Applies to every loop of every scope kind.
+    ConditionFamilyNotCarried { family: VersionPrefix, at: Span },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
@@ -701,6 +713,39 @@ fn carries_family(produces: &[VersionedVar], body: &[ThreadedStmt]) -> bool {
         .iter()
         .any(|v| !matches!(v.prefix, VersionPrefix::State))
         || binds_self_vt(body)
+}
+
+/// BT-4002, [`VerifyError::ConditionFamilyNotCarried`] over one
+/// `ConditionalLoop` (in `frame`): every family the condition advanced
+/// (`condition_families`) must be handed back into the loop's frame by a
+/// top-level `Bind` in `condition` whose target is that family in `frame` and
+/// whose source is one of the loop's own `produces` seeds (the family's loop
+/// parameter, which the condition closure read). Needs no version history.
+fn condition_families_not_carried(
+    condition_families: &[VersionPrefix],
+    condition: &[ThreadedStmt],
+    produces: &[VersionedVar],
+    frame: FrameId,
+    at: Span,
+) -> Vec<VerifyError> {
+    condition_families
+        .iter()
+        .filter(|family| {
+            !condition.iter().any(|stmt| {
+                matches!(
+                    stmt,
+                    ThreadedStmt::Bind { target, source, .. }
+                        if &target.prefix == *family
+                            && target.frame == frame
+                            && produces.contains(source)
+                )
+            })
+        })
+        .map(|family| VerifyError::ConditionFamilyNotCarried {
+            family: family.clone(),
+            at,
+        })
+        .collect()
 }
 
 /// Second pass: walks `ir` tracking the active frame/mode nesting, checking
@@ -1115,6 +1160,7 @@ impl VerifyWalk<'_> {
                 mode,
                 frame,
                 condition,
+                condition_families,
                 condition_value,
                 body,
                 produces,
@@ -1122,6 +1168,13 @@ impl VerifyWalk<'_> {
                 ..
             } => {
                 self.check_class_method_mode(mode, produces, body, *span);
+                self.errors.extend(condition_families_not_carried(
+                    condition_families,
+                    condition,
+                    produces,
+                    *frame,
+                    *span,
+                ));
                 // ADR 0111 Addendum 2, Gap 1 / ADR 0118 phase 3:
                 // `ConditionalLoop` verifies almost exactly like `Threaded`
                 // — push frame/mode once, walk `condition` THEN `body` (both

@@ -1,0 +1,83 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4002: a field write in a `whileTrue:`/`whileFalse:` condition is carried
+// into the body, the next iteration and out of the loop, in a `TestCase`
+// method (this class), a value-type method and an actor method. Before the
+// fix a value-type or `TestCase` condition's write was dropped: Repro A
+// failed to compile (an unbound `State`), Repro B compiled and never ended.
+// The codegen corpus is `while_condition_carrier_corpus.rs`.
+// Fixtures: fixtures/bt4002while_field_condition_{probe,actor}.bt.
+
+TestCase subclass: Bt4002WhileFieldConditionTest
+  field: n = 0
+  field: m = 0
+
+  // --- TestCase methods ---
+  testReproA =>
+    [
+      self.n := self.n + 1
+      self.n < 3
+    ] whileTrue: [nil]
+    self assert: self.n equals: 3
+
+  testReproB =>
+    k := 0
+    [
+      self.n := self.n + 1
+      self.n < 3
+    ] whileTrue: [k := k + 1]
+    self assert: k equals: 2
+    self assert: self.n equals: 3
+
+  testWhileFalse =>
+    k := 0
+    [
+      self.n := self.n + 1
+      self.n >= 3
+    ] whileFalse: [k := k + 1]
+    self assert: k equals: 2
+    self assert: self.n equals: 3
+
+  testBodyWritesField =>
+    [
+      self.n := self.n + 1
+      self.n < 5
+    ] whileTrue: [self.m := self.m + self.n]
+    self assert: self.n equals: 5
+    self assert: self.m equals: 10
+
+  testLocalAndField =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      self.n := self.n + t
+      self.n < 6
+    ] whileTrue: [u := u + t]
+    self assert: #[t, u, self.n] equals: #[3, 3, 6]
+
+  testPriorWrite =>
+    self.n := 10
+    k := 0
+    [
+      self.n := self.n + 1
+      self.n < 13
+    ] whileTrue: [k := k + 1]
+    self assert: #[k, self.n] equals: #[2, 13]
+
+  // --- Value methods ---
+  testValueRows =>
+    self assert: Bt4002WhileFieldConditionProbe new reproA equals: 3
+    self assert: Bt4002WhileFieldConditionProbe new reproB equals: #[2, 3]
+    self assert: Bt4002WhileFieldConditionProbe new whileFalse equals: #[2, 3]
+    self assert: Bt4002WhileFieldConditionProbe new bodyWritesField equals: #[5, 10]
+    self assert: Bt4002WhileFieldConditionProbe new localAndField equals: #[3, 3, 6]
+    self assert: Bt4002WhileFieldConditionProbe new priorWrite equals: #[2, 13]
+    self assert: Bt4002WhileFieldConditionProbe new assigned equals: #[nil, 3]
+
+  // --- Actor methods (the control, and a condition local the body reads) ---
+  testActorRows =>
+    self assert: Bt4002WhileFieldConditionActor spawn reproB equals: #[2, 3]
+    self assert: Bt4002WhileFieldConditionActor spawn localAndField equals: #[3, 3, 6]
+    self assert: Bt4002WhileFieldConditionActor spawn bodyWritesField equals: #[5, 10]

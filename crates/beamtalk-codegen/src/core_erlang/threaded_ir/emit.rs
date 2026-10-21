@@ -211,6 +211,7 @@ pub(in crate::core_erlang) fn render(
                 threads: _,
                 counter,
                 condition,
+                condition_families: _,
                 condition_value,
                 continue_arm,
                 body,
@@ -787,9 +788,13 @@ fn render_loop_skeleton(
         let final_args = if header.is_some() {
             join(
                 counter.map(|c| c.next.clone()).into_iter().chain(
-                    final_loop_arg_identities(body, produces)
-                        .iter()
-                        .map(|v| leaf::var(ctx.resolve_prefix(v))),
+                    final_loop_arg_identities(
+                        header.map_or(&[][..], |h| h.condition),
+                        body,
+                        produces,
+                    )
+                    .iter()
+                    .map(|v| leaf::var(ctx.resolve_prefix(v))),
                 ),
                 &Document::Str(", "),
             )
@@ -886,7 +891,12 @@ fn render_loop_body_statements(body: &[ThreadedStmt], ctx: &mut RenderCtx) -> Do
 /// Only scans `body`'s own top-level `Bind`s — a nested construct's `Bind`s
 /// belong to a different [`FrameId`] and can never be this loop's own
 /// rebind chain.
+///
+/// BT-4002: the chain starts in `condition`, which runs before `body` in the
+/// same frame: a condition that writes a field hands its `Self` back through a
+/// `Bind` there, and the body's chain continues from it.
 fn final_loop_arg_identities(
+    condition: &[ThreadedStmt],
     body: &[ThreadedStmt],
     produces: &[VersionedVar],
 ) -> Vec<VersionedVar> {
@@ -894,7 +904,7 @@ fn final_loop_arg_identities(
         .iter()
         .map(|seed| {
             let mut current = seed.clone();
-            while let Some(next) = body.iter().find_map(|stmt| match stmt {
+            while let Some(next) = condition.iter().chain(body).find_map(|stmt| match stmt {
                 ThreadedStmt::Bind { source, target, .. } if *source == current => {
                     Some(target.clone())
                 }
