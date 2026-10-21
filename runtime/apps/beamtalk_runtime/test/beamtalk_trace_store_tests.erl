@@ -1696,7 +1696,8 @@ actor_churn_returns_to_baseline_test_() ->
                     retired_class_entry(<<"Counter">>),
 
                 %% 1500 actors x ~3 keys each would need ~4500 slot groups
-                %% without reuse: far past the initial 1000, forcing grows.
+                %% without slot reuse: far past the initial 1000, so the
+                %% unchanged atomics size proves the slots are recycled.
                 N = 1500,
                 lists:foreach(fun(I) -> churn_one_actor(I rem 3 =:= 0) end, lists:seq(1, N)),
 
@@ -1815,6 +1816,148 @@ retired_stats_fold_correctly_test_() ->
                         #{<<"calls">> := 1, <<"errors">> := 1}, maps:get(<<"stop">>, Methods)
                     ),
                     Pid ! stop
+                end)},
+            {"a stop event reported for another pid does not retire it",
+                ?_test(begin
+                    beamtalk_trace_store:clear(),
+                    Other = spawn(fun() ->
+                        receive
+                            stop -> ok
+                        end
+                    end),
+                    beamtalk_trace_store:record_dispatch(Other, increment, 10, ok, sync, 'Counter'),
+                    beamtalk_trace_store:handle_lifecycle_event(
+                        [beamtalk, actor, lifecycle, stop],
+                        #{},
+                        #{pid => Other, class => 'Counter', reason => normal},
+                        #{}
+                    ),
+                    #{<<"methods">> := Methods} =
+                        maps:get(
+                            list_to_binary(pid_to_list(Other)),
+                            beamtalk_trace_store:get_stats(Other)
+                        ),
+                    ?assertMatch(#{<<"increment">> := #{<<"calls">> := 1}}, Methods),
+                    Other ! stop,
+                    wait_until(fun() -> beamtalk_trace_store:get_stats(Other) =:= #{} end)
                 end)}
         ]
+    end}.
+
+-doc "Spawn a process that waits for `stop`.".
+idle_process() ->
+    spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end).
+
+late_rows_after_retirement_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {"rows a caller creates after the pid was retired are retired too",
+            ?_test(begin
+                Pid = idle_process(),
+                beamtalk_trace_store:record_dispatch(Pid, first, 10, ok, sync, 'Late'),
+                Pid ! stop,
+                wait_until(fun() -> ets:info(beamtalk_agg_index, size) =:= 0 end),
+                %% Callers report dispatches for the dead pid after its DOWN
+                %% was handled, from two processes at once.
+                Parent = self(),
+                Writers = [
+                    spawn(fun() ->
+                        beamtalk_trace_store:record_dispatch(Pid, Sel, 10, ok, sync, 'Late'),
+                        Parent ! {written, self()}
+                    end)
+                 || Sel <- [foo, bar]
+                ],
+                [
+                    receive
+                        {written, W} -> ok
+                    end
+                 || W <- Writers
+                ],
+                wait_until(fun() ->
+                    [S || {_, S} <- maps:get(tables, agg_footprint())] =:= [0, 0, 0]
+                end),
+                #{<<"methods">> := Methods} = retired_class_entry(<<"Late">>),
+                ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"first">>, Methods)),
+                ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"foo">>, Methods)),
+                ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"bar">>, Methods))
+            end)}
+    end}.
+
+concurrent_retire_during_grow_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {timeout, 60,
+            ?_test(begin
+                %% 700 live actors x 2 keys = 1400 keys: past the initial
+                %% 1000, so the array grows while actors are dying.
+                N = 700,
+                Parent = self(),
+                Pids = [idle_process() || _ <- lists:seq(1, N)],
+                Writers = [
+                    spawn(fun() ->
+                        beamtalk_trace_store:record_dispatch(P, alpha, 10, ok, sync, 'Grow'),
+                        beamtalk_trace_store:record_dispatch(P, beta, 30, error, sync, 'Grow'),
+                        Parent ! {done, self()}
+                    end)
+                 || P <- Pids
+                ],
+                [
+                    receive
+                        {done, W} -> ok
+                    end
+                 || W <- Writers
+                ],
+                %% Retire them all concurrently with a writer burst of 1200
+                %% more keys, which grows the array while the gen_server and
+                %% the burst both allocate (retired rollup rows and keys).
+                [P ! stop || P <- Pids],
+                Burst = idle_process(),
+                [
+                    % elp:fixme W0023 intentional atom creation
+                    beamtalk_trace_store:record_dispatch(
+                        Burst, list_to_atom("burst_" ++ integer_to_list(I)), 1, ok, sync, 'Grow'
+                    )
+                 || I <- lists:seq(1, 1200)
+                ],
+                Burst ! stop,
+                wait_until(fun() ->
+                    [S || {_, S} <- maps:get(tables, agg_footprint())] =:= [0, 0, 0]
+                end),
+                #{<<"methods">> := #{<<"alpha">> := Alpha, <<"beta">> := Beta}} =
+                    retired_class_entry(<<"Grow">>),
+                ?assertMatch(#{<<"calls">> := N, <<"ok">> := N}, Alpha),
+                ?assertEqual(10 * N, maps:get(<<"total_duration_ns">>, Alpha)),
+                ?assertMatch(#{<<"calls">> := N, <<"errors">> := N}, Beta),
+                ?assertEqual(30 * N, maps:get(<<"total_duration_ns">>, Beta)),
+
+                %% Every slot is accounted for exactly once: on the free list
+                %% or held by a retired rollup row, never both.
+                Free = [B || {B} <- ets:tab2list(beamtalk_agg_free_slots)],
+                Held = [B || {_, _, B} <- ets:tab2list(beamtalk_agg_retired)],
+                ?assertEqual([], [B || B <- Held, lists:member(B, Free)]),
+                ?assertEqual(length(Held), length(lists:usort(Held))),
+
+                %% After clear, new keys get distinct, zeroed slots.
+                beamtalk_trace_store:clear(),
+                Live = idle_process(),
+                [
+                    beamtalk_trace_store:record_dispatch(Live, Sel, 5, ok, sync, 'Grow')
+                 || Sel <- [one, two, three]
+                ],
+                Bases = [B || {{P, _}, _, B} <- ets:tab2list(beamtalk_agg_index), P =:= Live],
+                ?assertEqual(3, length(lists:usort(Bases))),
+                #{<<"methods">> := LiveMethods} =
+                    maps:get(
+                        list_to_binary(pid_to_list(Live)), beamtalk_trace_store:get_stats(Live)
+                    ),
+                [
+                    ?assertMatch(
+                        #{<<"calls">> := 1, <<"total_duration_ns">> := 5}, maps:get(S, LiveMethods)
+                    )
+                 || S <- [<<"one">>, <<"two">>, <<"three">>]
+                ],
+                Live ! stop
+            end)}
     end}.

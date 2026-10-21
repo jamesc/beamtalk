@@ -34,13 +34,15 @@ folded into the per-{Class, Selector} retired rollup and deleted, and their
 atomics slots go on the free list for reuse. The tables and the atomics array
 then scale with live actors (plus the bounded rollup), not with actor churn.
 Two paths retire a pid: the lifecycle `stop` handler, which runs in the dying
-actor's `terminate/2`, and a monitor the gen_server arms on a pid's first
-aggregate row. The monitor also covers actors that die without `terminate/2`
-(kill, untrapped exit signal, lost remote node) and rows a caller re-creates
-after the stop event. Retiring is idempotent: rows are claimed with
+actor's `terminate/2`, and a monitor the gen_server arms whenever a pid gets a
+new aggregate row. The monitor also covers actors that die without
+`terminate/2` (kill, untrapped exit signal, lost remote node) and rows a caller
+re-creates after the stop event. Retiring is idempotent: rows are claimed with
 `ets:take/2`. A caller still mid-write to a slot as it is released can, in a
 microseconds-wide window, add one dispatch to the slot's next owner; slots are
-zeroed when allocated, not when released.
+zeroed when allocated, not when released. `clear/0` releases every slot rather
+than replacing the atomics array, so the array never shrinks: it stays at the
+peak number of live keys.
 
 ETS tables name `beamtalk_ets_heir` as heir for crash resilience and are
 reclaimed from it on restart.
@@ -424,11 +426,14 @@ handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
     %% Record trace event with mode => lifecycle, duration 0 (instantaneous)
     EventMeta = maps:without([pid, class], Metadata),
     record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop),
-    %% The stop event is the actor's last, so fold its aggregates into the
-    %% per-class rollup now instead of waiting for the monitor (BT-4066).
-    case Action of
-        stop -> safe_retire_pid(Pid);
-        _ -> ok
+    %% The stop event, emitted from the actor's own terminate/2, is its last:
+    %% fold its aggregates into the per-class rollup now instead of waiting
+    %% for the monitor (BT-4066). A stop reported by another process is left
+    %% to the monitor, so it cannot retire a live actor. Never grow the
+    %% atomics array from here: that would block terminate/2 on the gen_server.
+    case Action =:= stop andalso Pid =:= self() of
+        true -> safe_retire_pid(Pid, false);
+        false -> ok
     end,
     ok.
 
@@ -490,6 +495,7 @@ init([]) ->
 
     %% Monitors do not survive a restart; re-arm them for every actor whose
     %% rows did (via the ETS heir).
+    backfill_pid_keys(),
     Monitors = rearm_monitors(),
 
     ?LOG_INFO("Trace store started", #{}),
@@ -573,7 +579,7 @@ handle_info({'DOWN', MRef, process, Pid, _Reason}, #state{monitors = Monitors} =
             #{Pid := MRef} -> maps:remove(Pid, Monitors);
             _ -> Monitors
         end,
-    safe_retire_pid(Pid),
+    safe_retire_pid(Pid, true),
     {noreply, State#state{monitors = NewMonitors}};
 handle_info({'ETS-TRANSFER', TableName, _FromPid, _HeirData}, State) ->
     %% `beamtalk_ets_heir` handed a table back during init (ensure_ets_tables/0).
@@ -593,7 +599,17 @@ terminate(_Reason, State) ->
 code_change(OldVsn, State, Extra) ->
     %% Ensure new ETS tables (e.g. beamtalk_agg_class) exist after live upgrade.
     ensure_ets_tables(),
-    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
+    beamtalk_hot_reload:code_change(OldVsn, upgrade_state(State), Extra).
+
+-doc """
+Migrate a pre-BT-4066 state record (no `monitors` field): index the existing
+rows by pid and monitor their actors, so they are retired like new ones.
+""".
+upgrade_state({state, SweepTimer, VmStats}) ->
+    backfill_pid_keys(),
+    #state{sweep_timer = SweepTimer, vm_stats = VmStats, monitors = rearm_monitors()};
+upgrade_state(State) ->
+    State.
 
 %%====================================================================
 %% Internal: ETS table management
@@ -659,7 +675,7 @@ init_persistent_terms() ->
 -doc """
 Get or allocate atomics slots for a {Pid, Selector} pair.
 Called from the write path (calling process), not the gen_server.
-A pid's first row asks the gen_server to monitor it, so the rows are
+Every new row asks the gen_server to monitor the pid, so the rows are
 retired when the actor dies (BT-4066).
 """.
 -spec ensure_counter_slot(pid(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
@@ -669,11 +685,16 @@ ensure_counter_slot(Pid, Selector) ->
         [{_Key, AtomicsRef, SlotBase}] ->
             {AtomicsRef, SlotBase};
         [] ->
-            case allocate_counter_slot(?AGG_INDEX, Key) of
+            case allocate_counter_slot(?AGG_INDEX, Key, true) of
                 {AtomicsRef, SlotBase, new} ->
                     track_pid_key(Pid, Selector),
                     {AtomicsRef, SlotBase};
-                {AtomicsRef, SlotBase, _ExistingOrDummy} ->
+                {AtomicsRef, SlotBase, existing} ->
+                    {AtomicsRef, SlotBase};
+                {AtomicsRef, SlotBase, dummy} ->
+                    %% No row, but record_dispatch/6 may have added an
+                    %% agg_class row: still monitor the pid so it is removed.
+                    track_pid(Pid),
                     {AtomicsRef, SlotBase}
             end
     end.
@@ -681,16 +702,22 @@ ensure_counter_slot(Pid, Selector) ->
 -doc """
 Get or allocate the retired-rollup slots for a {Class, Selector} pair.
 The rollup is keyed by class, so it is bounded by classes × selectors.
+With `CanGrow` false (retiring from inside a dying actor), a rollup row that
+would need the atomics array to grow answers `defer` instead of blocking the
+actor's `terminate/2` on the gen_server.
 """.
--spec ensure_retired_slot(atom(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
-ensure_retired_slot(Class, Selector) ->
+-spec ensure_retired_slot(atom(), atom(), boolean()) ->
+    {ok, atomics:atomics_ref(), non_neg_integer()} | defer.
+ensure_retired_slot(Class, Selector, CanGrow) ->
     Key = {Class, Selector},
     case ets:lookup(?AGG_RETIRED, Key) of
         [{_Key, AtomicsRef, SlotBase}] ->
-            {AtomicsRef, SlotBase};
+            {ok, AtomicsRef, SlotBase};
         [] ->
-            {AtomicsRef, SlotBase, _} = allocate_counter_slot(?AGG_RETIRED, Key),
-            {AtomicsRef, SlotBase}
+            case allocate_counter_slot(?AGG_RETIRED, Key, CanGrow) of
+                {_AtomicsRef, _SlotBase, dummy} -> defer;
+                {AtomicsRef, SlotBase, _NewOrExisting} -> {ok, AtomicsRef, SlotBase}
+            end
     end.
 
 -doc """
@@ -702,20 +729,20 @@ reused slot still holds its previous owner's counts. The row is inserted with
 `ets:insert_new/2`: when two processes observe the same key first, the loser
 hands its slot back and uses the winner's row, so no slot leaks. Answers
 `new` when this call created the row, `existing` when it lost that race, and
-`dummy` when the atomics array could not grow (trace store down or slow); the
-dummy ref absorbs writes, because observability must never crash the actor
-being observed.
+`dummy` when the atomics array could not grow (trace store down or slow, or
+`CanGrow` is false); the dummy ref absorbs writes, because observability must
+never crash the actor being observed.
 """.
--spec allocate_counter_slot(atom(), term()) ->
+-spec allocate_counter_slot(atom(), term(), boolean()) ->
     {atomics:atomics_ref(), non_neg_integer(), new | existing | dummy}.
-allocate_counter_slot(Table, Key) ->
+allocate_counter_slot(Table, Key, CanGrow) ->
     SlotBase = take_slot(),
-    case ensure_capacity(SlotBase) of
+    case ensure_capacity(SlotBase, CanGrow) of
         {ok, AtomicsRef} ->
             reset_slot(AtomicsRef, SlotBase),
             case ets:insert_new(Table, {Key, AtomicsRef, SlotBase}) of
                 true ->
-                    {AtomicsRef, SlotBase, new};
+                    {repoint_if_grown(Table, Key, AtomicsRef, SlotBase), SlotBase, new};
                 false ->
                     release_slot(SlotBase),
                     case ets:lookup(Table, Key) of
@@ -723,7 +750,7 @@ allocate_counter_slot(Table, Key) ->
                             {WinnerRef, WinnerBase, existing};
                         [] ->
                             %% The winner's row was retired in between — retry.
-                            allocate_counter_slot(Table, Key)
+                            allocate_counter_slot(Table, Key, CanGrow)
                     end
             end;
         error ->
@@ -732,19 +759,39 @@ allocate_counter_slot(Table, Key) ->
     end.
 
 -doc """
+A grow that ran between reading the atomics ref and inserting the row may have
+copied the slot before it was reset and re-pointed every row before this one
+existed. Re-point the row at the current array, resetting the slot there too.
+Once the current ref is observed the grow's copy is complete, so the loop ends
+when no further grow intervenes.
+""".
+repoint_if_grown(Table, Key, AtomicsRef, SlotBase) ->
+    case persistent_term:get(?PT_COUNTERS) of
+        AtomicsRef ->
+            AtomicsRef;
+        CurrentRef ->
+            reset_slot(CurrentRef, SlotBase),
+            _ = ets:update_element(Table, Key, {2, CurrentRef}),
+            repoint_if_grown(Table, Key, CurrentRef, SlotBase)
+    end.
+
+-doc """
 Answer the current atomics ref once it is large enough to hold `SlotBase`'s
 slots, growing it (serialized through the gen_server) as often as needed.
+With `CanGrow` false, a slot past the end answers `error` instead.
 """.
--spec ensure_capacity(pos_integer()) -> {ok, atomics:atomics_ref()} | error.
-ensure_capacity(SlotBase) ->
+-spec ensure_capacity(pos_integer(), boolean()) -> {ok, atomics:atomics_ref()} | error.
+ensure_capacity(SlotBase, CanGrow) ->
     AtomicsRef = persistent_term:get(?PT_COUNTERS),
     #{size := AtomicsSize} = atomics:info(AtomicsRef),
-    case SlotBase + ?SLOTS_PER_KEY > AtomicsSize of
-        false ->
+    case {SlotBase + ?SLOTS_PER_KEY > AtomicsSize, CanGrow} of
+        {false, _} ->
             {ok, AtomicsRef};
-        true ->
+        {true, false} ->
+            error;
+        {true, true} ->
             case request_grow(AtomicsRef, AtomicsSize) of
-                ok -> ensure_capacity(SlotBase);
+                ok -> ensure_capacity(SlotBase, CanGrow);
                 error -> error
             end
     end.
@@ -854,11 +901,15 @@ copy_counters(OldRef, NewRef, Idx, MaxIdx) ->
     end,
     copy_counters(OldRef, NewRef, Idx + 1, MaxIdx).
 
--doc "Update all entries of a slot table to point to a new counter ref.".
+-doc """
+Re-point every row of a slot table at a new counter ref. `update_element`
+leaves a row that was retired meanwhile deleted, where a re-insert would
+resurrect it.
+""".
 update_counter_refs(Table, NewRef) ->
     ets:foldl(
-        fun({Key, _OldRef, SlotBase}, Acc) ->
-            ets:insert(Table, {Key, NewRef, SlotBase}),
+        fun({Key, _OldRef, _SlotBase}, Acc) ->
+            _ = ets:update_element(Table, Key, {2, NewRef}),
             Acc
         end,
         ok,
@@ -870,42 +921,56 @@ update_counter_refs(Table, NewRef) ->
 %%====================================================================
 
 -doc """
-Record that `Pid` owns the agg_index row for `Selector`. The first row for a
-pid asks the gen_server to monitor it. Two concurrent first rows may both
-ask; the gen_server keeps one monitor per pid.
+Record that `Pid` owns the agg_index row for `Selector`, and ask the
+gen_server to monitor `Pid`. Every new row asks, not only a pid's first:
+a row a late caller creates after the pid's `DOWN` was handled must arm a
+fresh monitor (whose immediate `DOWN` retires it). The gen_server keeps one
+monitor per pid, and a new row is rare (once per {Pid, Selector}).
 """.
 track_pid_key(Pid, Selector) ->
-    IsFirst = not ets:member(?AGG_PID_KEYS, Pid),
     true = ets:insert(?AGG_PID_KEYS, {Pid, Selector}),
-    case IsFirst of
-        true -> gen_server:cast(?MODULE, {track_pid, Pid});
-        false -> ok
-    end.
+    track_pid(Pid).
+
+track_pid(Pid) ->
+    gen_server:cast(?MODULE, {track_pid, Pid}).
 
 -doc """
-Monitor every pid that has aggregate rows (after a restart, which loses the
-previous process's monitors). A pid that died meanwhile gets an immediate
+Rebuild agg_pid_keys from agg_index, for rows written before it existed
+(a hot upgrade from a trace store without it). Idempotent: the table is a bag
+of unique {Pid, Selector} pairs.
+""".
+backfill_pid_keys() ->
+    ets:foldl(
+        fun({{Pid, Selector}, _Ref, _SlotBase}, Acc) ->
+            true = ets:insert(?AGG_PID_KEYS, {Pid, Selector}),
+            Acc
+        end,
+        ok,
+        ?AGG_INDEX
+    ).
+
+-doc """
+Monitor every pid that has aggregate rows (after a restart or upgrade, which
+loses or predates the monitors). A pid that died meanwhile gets an immediate
 `DOWN` and is retired.
 """.
 -spec rearm_monitors() -> #{pid() => reference()}.
 rearm_monitors() ->
-    ets:foldl(
-        fun
-            ({Pid, _Selector}, Acc) when is_map_key(Pid, Acc) -> Acc;
-            ({Pid, _Selector}, Acc) -> Acc#{Pid => erlang:monitor(process, Pid)}
-        end,
-        #{},
-        ?AGG_PID_KEYS
-    ).
+    Monitor = fun
+        (Pid, Acc) when is_map_key(Pid, Acc) -> Acc;
+        (Pid, Acc) -> Acc#{Pid => erlang:monitor(process, Pid)}
+    end,
+    WithKeys = ets:foldl(fun({Pid, _Selector}, Acc) -> Monitor(Pid, Acc) end, #{}, ?AGG_PID_KEYS),
+    ets:foldl(fun({Pid, _Class}, Acc) -> Monitor(Pid, Acc) end, WithKeys, ?AGG_CLASS).
 
 -doc """
 Retire `Pid`, never raising: a telemetry handler that crashes is detached,
 and the gen_server must not crash on a `DOWN` either.
 """.
--spec safe_retire_pid(pid()) -> ok.
-safe_retire_pid(Pid) ->
+-spec safe_retire_pid(pid(), boolean()) -> ok.
+safe_retire_pid(Pid, CanGrow) ->
     try
-        retire_pid(Pid)
+        retire_pid(Pid, CanGrow)
     catch
         Kind:Reason ->
             ?LOG_WARNING("Failed to retire actor aggregates", #{
@@ -919,25 +984,64 @@ Fold a dead actor's per-pid aggregates into the per-{Class, Selector} retired
 rollup, delete its rows, and release its atomics slots for reuse. Idempotent:
 each row is claimed with `ets:take/2`, so concurrent or repeated retirement
 folds every row exactly once.
-""".
--spec retire_pid(pid()) -> ok.
-retire_pid(Pid) ->
-    Class = class_for_pid(Pid),
-    lists:foreach(
-        fun({_Pid, Selector}) -> retire_key(Class, Pid, Selector) end,
-        ets:take(?AGG_PID_KEYS, Pid)
-    ),
-    ets:delete(?AGG_CLASS, Pid),
-    ok.
 
-retire_key(Class, Pid, Selector) ->
-    case ets:take(?AGG_INDEX, {Pid, Selector}) of
+With `CanGrow` false (from the dying actor's own stop handler), a row whose
+rollup slot would need the atomics array to grow is left in place for the
+monitor's `DOWN`, which retires it from the gen_server.
+""".
+-spec retire_pid(pid(), boolean()) -> ok.
+retire_pid(Pid, CanGrow) ->
+    case ets:take(?AGG_PID_KEYS, Pid) of
+        [] ->
+            %% Nothing to fold (the common second retirement, from `DOWN`
+            %% after the stop handler): skip the class lookup.
+            ets:delete(?AGG_CLASS, Pid),
+            ok;
+        Keys ->
+            Class = class_for_pid(Pid),
+            Deferred = [
+                Entry
+             || {_Pid, Selector} = Entry <- Keys,
+                retire_key(Class, Pid, Selector, CanGrow) =:= defer
+            ],
+            case Deferred of
+                [] -> ets:delete(?AGG_CLASS, Pid);
+                _ -> ets:insert(?AGG_PID_KEYS, Deferred)
+            end,
+            ok
+    end.
+
+-spec retire_key(atom(), pid(), atom(), boolean()) -> ok | defer.
+retire_key(Class, Pid, Selector, CanGrow) ->
+    Key = {Pid, Selector},
+    case ets:lookup(?AGG_INDEX, Key) of
+        [] ->
+            ok;
         [{_Key, AtomicsRef, SlotBase}] ->
             case atomics:get(AtomicsRef, SlotBase + ?SLOT_CALLS) of
                 0 ->
-                    ok;
+                    take_and_release(Key, none);
                 _ ->
-                    {RetiredRef, RetiredBase} = ensure_retired_slot(Class, Selector),
+                    case ensure_retired_slot(Class, Selector, CanGrow) of
+                        defer ->
+                            defer;
+                        {ok, RetiredRef, RetiredBase} ->
+                            take_and_release(Key, {RetiredRef, RetiredBase})
+                    end
+            end
+    end.
+
+-doc """
+Claim the row with `ets:take/2` (so exactly one retirer folds it), fold its
+counts into the rollup slot unless `none`, and release its slot.
+""".
+take_and_release(Key, Rollup) ->
+    case ets:take(?AGG_INDEX, Key) of
+        [{_Key, AtomicsRef, SlotBase}] ->
+            case Rollup of
+                none ->
+                    ok;
+                {RetiredRef, RetiredBase} ->
                     fold_slot(AtomicsRef, SlotBase, RetiredRef, RetiredBase)
             end,
             release_slot(SlotBase),
@@ -1593,21 +1697,30 @@ lookup_class_for_pid(Pid) ->
 do_clear() ->
     %% Clear trace events
     ets:delete_all_objects(?TRACE_EVENTS),
-    %% Clear agg index and class mappings
-    ets:delete_all_objects(?AGG_INDEX),
-    ets:delete_all_objects(?AGG_CLASS),
+    %% Clear the aggregates. The atomics array and slot allocator are kept:
+    %% each row's slot is claimed with ets:take/2 and released to the free
+    %% list (slots are zeroed on reuse). Resetting the allocator instead would
+    %% let a slot held by a concurrent writer or retirer be handed out twice
+    %% (BT-4066). pid_keys goes first, so a row allocated mid-clear is either
+    %% taken here or keeps both its rows.
     ets:delete_all_objects(?AGG_PID_KEYS),
-    ets:delete_all_objects(?AGG_RETIRED),
-    %% The fresh atomics array below starts the allocator over, so released
-    %% slot bases from the old array are meaningless.
-    ets:delete_all_objects(?AGG_FREE_SLOTS),
-    %% Reset atomics — create a fresh atomics ref
-    NewRef = atomics:new(?INITIAL_COUNTER_SIZE, [{signed, true}]),
-    persistent_term:put(?PT_COUNTERS, NewRef),
-    %% Reset the atomic slot allocator
-    Allocator = persistent_term:get(?PT_SLOT_ALLOCATOR),
-    atomics:put(Allocator, 1, 1),
+    ets:delete_all_objects(?AGG_CLASS),
+    take_all_and_release(?AGG_INDEX),
+    take_all_and_release(?AGG_RETIRED),
     ok.
+
+-doc "Remove every row of a slot table, releasing each claimed slot.".
+take_all_and_release(Table) ->
+    Keys = ets:foldl(fun({Key, _Ref, _SlotBase}, Acc) -> [Key | Acc] end, [], Table),
+    lists:foreach(
+        fun(Key) ->
+            case ets:take(Table, Key) of
+                [{_Key, _Ref, SlotBase}] -> release_slot(SlotBase);
+                [] -> ok
+            end
+        end,
+        Keys
+    ).
 
 %%====================================================================
 %% Internal: Lock-free CAS loops for min/max
