@@ -351,6 +351,8 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
+        // ADR 0137: note the call for the bracket check (inert unless the flag is on).
+        self.note_send(receiver, selector, arguments, false, receiver.span());
         // Special case: super message send
         // Super calls invoke the superclass implementation
         if matches!(receiver, Expression::Super(_)) {
@@ -1710,8 +1712,17 @@ impl CoreErlangGenerator {
         let (call_doc, dispatch_var) =
             self.generate_self_dispatch_call_doc_for(selector, arguments)?;
         let target_version = self.state_version();
+        // ADR 0137: a self-send that may reach `dispatch/4`'s default arm keeps its
+        // explicit `{reply, R, State}` threading and has the cell stored before it
+        // runs; built here, the one place every self-dispatch prelude is made.
+        let dispatch = self.self_dispatch_statement(
+            selector,
+            call_doc,
+            VersionedVar::new(VersionPrefix::State, source_version, frame),
+            span,
+        );
         let prelude = vec![
-            ThreadedStmt::Statement(call_doc, span),
+            dispatch,
             ThreadedStmt::Bind {
                 target: VersionedVar::new(VersionPrefix::State, target_version, frame),
                 source: VersionedVar::new(VersionPrefix::State, source_version, frame),
@@ -1773,6 +1784,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
+        self.note_self_dispatch(selector, arguments);
         // Sealed class optimization — skip safe_dispatch try/catch
         if self.is_class_sealed() {
             return self.generate_sealed_self_dispatch(selector, arguments);
@@ -1847,7 +1859,28 @@ impl CoreErlangGenerator {
         selector_atom: &str,
         ok_doc: Document<'static>,
     ) -> Document<'static> {
-        if !self.in_state_dropping_closure() {
+        let applies = self.in_state_dropping_closure();
+        self.state_guard_when(
+            applies,
+            reply_state,
+            dispatched_state,
+            selector_atom,
+            ok_doc,
+        )
+    }
+
+    /// [`Self::closure_self_dispatch_state_guard`] with the position decided by
+    /// the caller (`generate_super_send` also guards a position that became
+    /// State-threaded only because of the synced-calls flag).
+    fn state_guard_when(
+        &mut self,
+        applies: bool,
+        reply_state: &str,
+        dispatched_state: &str,
+        selector_atom: &str,
+        ok_doc: Document<'static>,
+    ) -> Document<'static> {
+        if !applies {
             return ok_doc;
         }
         let class_name = self.class_name();
@@ -2419,7 +2452,13 @@ impl CoreErlangGenerator {
         }
 
         let current_state = self.current_state_var();
-        let in_closure = self.in_state_dropping_closure();
+        // ADR 0137: with the flag on, an inlined list-op body that holds a bracketed
+        // call is State-threaded where it was a Tier 1 closure before. A `super` send
+        // there is still not a State-threading position (BT-3995), so it keeps the
+        // closure treatment (unpack the reply, raise if the callee changed state)
+        // instead of leaking the raw `{reply, R, State}` pair.
+        let in_closure = self.in_state_dropping_closure()
+            || (self.synced_calls_active() && (self.block_depth > 0 || self.in_loop_body));
         let dispatched_state = current_state.clone();
         let selector_for_guard = selector_atom.clone();
         let doc = docvec![
@@ -2433,6 +2472,8 @@ impl CoreErlangGenerator {
             leaf::atom(class_name),
             ")",
         ];
+        // ADR 0137: a `super` send that may reach the default arm is bracketed.
+        let doc = self.bracket_super_send(selector, doc, Span::default());
         if !in_closure {
             return Ok(doc);
         }
@@ -2444,7 +2485,8 @@ impl CoreErlangGenerator {
         let result_var = self.fresh_var("SuperResult");
         let state_var = self.fresh_var("SuperState");
         let error_var = self.fresh_temp_var("SuperError");
-        let reply_body = self.closure_self_dispatch_state_guard(
+        let reply_body = self.state_guard_when(
+            true,
             &state_var,
             &dispatched_state,
             &selector_for_guard,

@@ -377,7 +377,10 @@ impl CoreErlangGenerator {
         to: &VersionedVar,
     ) {
         for stmt in stmts {
-            if let ThreadedStmt::Bind { source, .. } = stmt {
+            // ADR 0137: a bracket's store reads the seed like a `Bind`'s source.
+            if let ThreadedStmt::Bind { source, .. }
+            | ThreadedStmt::SyncedCall { store: source, .. } = stmt
+            {
                 if source == from {
                     *source = to.clone();
                     return;
@@ -2100,7 +2103,16 @@ impl CoreErlangGenerator {
                     // `let _ =` before `in StateAcc`. Without this,
                     // `let Y = ... in <expr> in StateAcc` is invalid Core Erlang
                     // (the `in StateAcc` has no corresponding `let`).
-                    let threads_here = has_mutations || has_plain_lets;
+                    // ADR 0137: a map-accumulator fold (`StateAcc`) hands the map to
+                    // the next iteration whether or not this body advanced it; the
+                    // synced-calls flag can select that mode for a body whose own
+                    // statements advance nothing (a cast, an operator codegen proves
+                    // numeric), so the raw value must not become the accumulator.
+                    let threads_here = has_mutations
+                        || has_plain_lets
+                        || (self.synced_calls_active()
+                            && !plan.use_tuple_acc
+                            && !Self::fold_statement_gate_split());
                     if threads_here {
                         let doc = self.bind_closed_expr_doc(expr, "_")?;
                         stmts.push(ThreadedStmt::Statement(doc, span));

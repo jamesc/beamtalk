@@ -3345,6 +3345,16 @@ impl CoreErlangGenerator {
             return false;
         };
 
+        // ADR 0137: a loop, fold or conditional whose block operands are not
+        // literal blocks is not lowered in place (nothing can be threaded
+        // through a block the compiler cannot see): it is a call that may run
+        // user code, bracketed as one, never a construct tuple.
+        if self.synced_calls_active()
+            && self.classify_expr(expr) == crate::core_erlang::synced_call::UserCodeCall::Yes
+        {
+            return false;
+        }
+
         // Use pre-computed dispatch classification instead of re-deriving it.
         // When semantic_facts is empty (e.g. in unit tests constructed via
         // `CoreErlangGenerator::new`), `dispatch_kind` returns `Unknown`.

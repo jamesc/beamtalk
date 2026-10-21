@@ -8,7 +8,8 @@
 -moduledoc """
 EUnit tests for beamtalk_timer module.
 
-Tests class methods (after:do:, every:do:, sleep:), instance methods
+Tests class methods (after:do:, every:do:, send:to:after:, send:to:every:,
+sleep:), instance methods
 (cancel, isActive, printString), the ack-based cancel protocol,
 FFI shims (after/2, every/2, sleep/1), and error paths.
 """.
@@ -264,3 +265,256 @@ every_timer_dies_when_caller_dies_test() ->
         end,
     wait_for_exit(Wrapper, 1000),
     wait_for_exit(maps:get(pid, T), 1000).
+
+%%% ============================================================================
+%%% send:to:after: / send:to:every: — message timers (BT-4048)
+%%% ============================================================================
+
+-define(TYPE_ERROR, #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}}).
+
+send_after_to_pid_delivers_message_test() ->
+    T = beamtalk_timer:'send:to:after:'({tick, 1}, self(), 10),
+    ?assertMatch(#{'$beamtalk_class' := 'Timer', tref := _}, T),
+    receive
+        {tick, 1} -> ok
+    after 1000 -> ?assert(false, "message not delivered")
+    end,
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    ?assertNot(beamtalk_timer:cancel(T)).
+
+send_after_to_actor_object_delivers_message_test() ->
+    Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = self()},
+    _ = beamtalk_timer:'sendAfter'(tick, Obj, 5),
+    receive
+        tick -> ok
+    after 1000 -> ?assert(false, "message not delivered")
+    end.
+
+send_after_to_registered_name_test() ->
+    Name = beamtalk_timer_tests_target,
+    true = register(Name, self()),
+    try
+        Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {registered, Name}},
+        _ = beamtalk_timer:'send:to:after:'(tick, Obj, 5),
+        receive
+            tick -> ok
+        after 1000 -> ?assert(false, "message not delivered")
+        end
+    after
+        unregister(Name)
+    end.
+
+send_after_cancel_before_fire_test() ->
+    T = beamtalk_timer:'send:to:after:'(never, self(), 10000),
+    ?assert(beamtalk_timer:'isActive'(T)),
+    ?assertEqual(<<"Timer(active)">>, beamtalk_timer:'printString'(T)),
+    ?assert(beamtalk_timer:cancel(T)),
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    ?assertNot(beamtalk_timer:cancel(T)),
+    receive
+        never -> ?assert(false, "cancelled timer delivered")
+    after 50 -> ok
+    end.
+
+send_after_dead_target_is_silent_test() ->
+    Dead = spawn(fun() -> ok end),
+    wait_for_exit(Dead, 1000),
+    %% send_after/3 to a dead local pid cancels the timer at once.
+    T = beamtalk_timer:'send:to:after:'(tick, Dead, 10000),
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    ?assertNot(beamtalk_timer:cancel(T)).
+
+%% A pid on another node (never connected): send_after/3 would raise badarg,
+%% so the one-shot falls back to a cancellable process.
+send_after_remote_pid_uses_process_test() ->
+    Remote = fake_remote_pid(),
+    T = beamtalk_timer:'send:to:after:'(tick, Remote, 10000),
+    ?assertMatch(#{'$beamtalk_class' := 'Timer', pid := _}, T),
+    ?assert(beamtalk_timer:'isActive'(T)),
+    ?assert(beamtalk_timer:cancel(T)),
+    ?assertNot(beamtalk_timer:'isActive'(T)).
+
+send_after_remote_registered_uses_process_test() ->
+    Obj = #beamtalk_object{
+        class = 'Foo', class_mod = foo, pid = {registered, bt4048_far, 'bt4048@nowhere'}
+    },
+    T = beamtalk_timer:'send:to:after:'(tick, Obj, 10000),
+    ?assert(beamtalk_timer:'isActive'(T)),
+    ?assert(beamtalk_timer:cancel(T)).
+
+send_after_remote_pid_fires_test() ->
+    T = beamtalk_timer:'send:to:after:'(tick, fake_remote_pid(), 1),
+    wait_for_exit(maps:get(pid, T), 1000),
+    ?assertNot(beamtalk_timer:cancel(T)).
+
+send_after_delay_too_large_raises_test() ->
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:after:'(tick, self(), 4294967296)),
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:every:'(tick, self(), 4294967296)).
+
+%% A repeating timer to a registered name stops when the named process dies,
+%% so a restarted process under the same name does not inherit its ticks.
+send_every_registered_name_stops_when_holder_dies_test() ->
+    Name = bt4048_every_target,
+    Holder = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    true = register(Name, Holder),
+    Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {registered, Name}},
+    T = beamtalk_timer:'send:to:every:'(tick, Obj, 10),
+    Holder ! stop,
+    wait_for_exit(maps:get(pid, T), 1000).
+
+send_every_unregistered_name_stops_test() ->
+    Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {registered, bt4048_nobody}},
+    T = beamtalk_timer:'send:to:every:'(tick, Obj, 10),
+    wait_for_exit(maps:get(pid, T), 1000).
+
+send_every_does_not_drift_test() ->
+    T = beamtalk_timer:'send:to:every:'(tick, self(), 20),
+    timer:sleep(210),
+    ?assert(beamtalk_timer:cancel(T)),
+    N = count_ticks(0),
+    ?assert(N >= 6 andalso N =< 11).
+
+%% Ticks missed while the timer process is descheduled are skipped, not
+%% replayed as a burst.
+%%
+%% Synchronised on observable conditions, not guessed sleeps:
+%%   1. the first tick proves the process is inside send_loop with a deadline;
+%%   2. it is suspended until 10 of its deadlines have passed (asserted);
+%%   3. the overdue tick it sends on resume proves it is running again;
+%%   4. `status = waiting` proves it has finished sending and is blocked on
+%%      its next deadline, so the mailbox now holds everything it sent.
+%% The old burst-replay loop never reaches `waiting` until it has sent all
+%% ~10 missed ticks, so the final count is 9+ there and at most 1 here (a
+%% phase point may legitimately fall between resume and cancel).
+send_every_skips_missed_ticks_test() ->
+    Ms = 20,
+    T = beamtalk_timer:'send:to:every:'(tick, self(), Ms),
+    Pid = maps:get(pid, T),
+    receive
+        tick -> ok
+    after 1000 -> ?assert(false, "no first tick")
+    end,
+    true = erlang:suspend_process(Pid),
+    MissedUntil = erlang:monotonic_time(millisecond) + 10 * Ms,
+    wait_until(MissedUntil),
+    ?assert(erlang:monotonic_time(millisecond) >= MissedUntil),
+    %% Nothing can be sent while suspended; drop any tick sent before it.
+    flush_ticks(),
+    true = erlang:resume_process(Pid),
+    receive
+        tick -> ok
+    after 1000 -> ?assert(false, "no overdue tick after resume")
+    end,
+    wait_for_status(Pid, waiting, 5000),
+    ?assert(beamtalk_timer:cancel(T)),
+    ?assert(count_ticks(0) =< 1).
+
+%% The skip arithmetic itself, with no timing involved.
+next_deadline_test_() ->
+    [
+        %% sent on time or slightly late: the next phase point
+        ?_assertEqual(120, beamtalk_timer:next_deadline(100, 100, 20)),
+        ?_assertEqual(120, beamtalk_timer:next_deadline(100, 119, 20)),
+        %% exactly one interval late: skip one
+        ?_assertEqual(140, beamtalk_timer:next_deadline(100, 120, 20)),
+        %% ten deadlines missed: jump to the first one after Now, keeping phase
+        ?_assertEqual(320, beamtalk_timer:next_deadline(100, 305, 20)),
+        ?_assertEqual(0, (beamtalk_timer:next_deadline(100, 305, 20) - 100) rem 20),
+        %% Now before Next (clock read early): still one interval on
+        ?_assertEqual(120, beamtalk_timer:next_deadline(100, 90, 20))
+    ].
+
+%% Block until the monotonic clock reaches Deadline (ms). This is the test's
+%% precondition (deadlines must be missed), not a synchronisation guess.
+wait_until(Deadline) ->
+    case Deadline - erlang:monotonic_time(millisecond) of
+        Left when Left > 0 ->
+            receive
+            after Left -> wait_until(Deadline)
+            end;
+        _ ->
+            ok
+    end.
+
+%% Yield until Pid reports Status, failing after Timeout ms.
+wait_for_status(Pid, Status, Timeout) ->
+    wait_for_status(Pid, Status, erlang:monotonic_time(millisecond) + Timeout, poll).
+
+wait_for_status(Pid, Status, Deadline, poll) ->
+    case erlang:process_info(Pid, status) of
+        {status, Status} ->
+            ok;
+        _ ->
+            ?assert(erlang:monotonic_time(millisecond) < Deadline),
+            erlang:yield(),
+            wait_for_status(Pid, Status, Deadline, poll)
+    end.
+
+count_ticks(N) ->
+    receive
+        tick -> count_ticks(N + 1)
+    after 0 -> N
+    end.
+
+fake_remote_pid() ->
+    Node = atom_to_binary('bt4048@nowhere'),
+    binary_to_term(
+        <<131, 88, 119, (byte_size(Node)), Node/binary, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1>>
+    ).
+
+send_after_unregistered_global_is_inert_test() ->
+    Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {global, bt4048_nobody}},
+    T = beamtalk_timer:'send:to:after:'(tick, Obj, 1),
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    ?assertNot(beamtalk_timer:cancel(T)).
+
+send_after_bad_target_raises_test() ->
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:after:'(tick, 42, 10)).
+
+send_after_negative_delay_raises_test() ->
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:after:'(tick, self(), -1)).
+
+send_every_delivers_until_cancelled_test() ->
+    T = beamtalk_timer:'sendEvery'(tick, self(), 10),
+    ?assertMatch(#{'$beamtalk_class' := 'Timer', pid := _}, T),
+    lists:foreach(
+        fun(_) ->
+            receive
+                tick -> ok
+            after 1000 -> ?assert(false, "tick not delivered")
+            end
+        end,
+        [1, 2, 3]
+    ),
+    ?assert(beamtalk_timer:'isActive'(T)),
+    ?assert(beamtalk_timer:cancel(T)),
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    flush_ticks(),
+    receive
+        tick -> ?assert(false, "tick after cancel")
+    after 50 -> ok
+    end.
+
+send_every_stops_when_target_dies_test() ->
+    Target = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    T = beamtalk_timer:'send:to:every:'(tick, Target, 10),
+    Target ! stop,
+    wait_for_exit(maps:get(pid, T), 1000),
+    ?assertNot(beamtalk_timer:'isActive'(T)).
+
+send_every_zero_interval_raises_test() ->
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:every:'(tick, self(), 0)).
+
+flush_ticks() ->
+    receive
+        tick -> flush_ticks()
+    after 0 -> ok
+    end.

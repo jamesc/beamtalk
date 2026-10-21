@@ -3,8 +3,13 @@
 
 /// Timer — schedule delayed and repeating work via Erlang timer primitives.
 ///
-/// Provides one-shot delays, repeating intervals, and process sleep.
-/// Timer instances are cancellable value objects wrapping a spawned process.
+/// Provides one-shot delays, repeating intervals, message timers and process
+/// sleep. Timer instances are cancellable value objects.
+///
+/// Block timers (`after:do:`, `every:do:`) run their block in a separate
+/// process, so the block cannot touch an actor's state. Message timers
+/// (`send:to:after:`, `send:to:every:`) instead deliver a message to an actor,
+/// which a Server receives in `handleInfo:` — the shape for periodic work.
 ///
 /// Delays and intervals are Integer milliseconds or a Duration.
 ///
@@ -19,6 +24,10 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   handleScope: #node
 
   // ===== Class Methods =====
+
+  // `send:to:after:` / `send:to:every:` are inline FFI too: `self delegate`
+  // names the backing function after the first keyword, and both selectors
+  // start with `send`, so they would collide on `beamtalk_timer:send/3`.
 
   // `after:do:` stays inline FFI (not `self delegate`, ADR 0101 / BT-2731): the
   // first keyword `after` is an Erlang reserved word, so it cannot name a backing
@@ -49,6 +58,53 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   class sealed every: ms :: Integer | Duration do: block :: Block(R) -> Timer =>
     self delegate
 
+  /// Send `msg` to `target` once after `ms` (Integer milliseconds or a
+  /// Duration). Returns a cancellable Timer.
+  ///
+  /// `target` is an Actor (including a Server) or a Pid. The message is
+  /// delivered exactly as `erlang:send/2` would deliver it, so a Server
+  /// receives it in `handleInfo:`; a plain Actor ignores it. Backed by
+  /// `erlang:send_after/3`, with no extra process (a target on another node
+  /// uses a small process instead). If the target has died, the timer
+  /// silently does nothing. The delay is at most 4294967295 ms.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // inside a Server method
+  /// t := Timer send: #tick to: self after: 1000
+  /// t := Timer send: {#readTimeout, tag} to: self after: (Duration seconds: 5)
+  /// t cancel   // => true if it had not fired yet
+  /// ```
+  class sealed send: msg :: Object to: target :: Actor | Pid after: ms :: Integer | Duration -> Timer =>
+    (Erlang beamtalk_timer)
+      sendAfter: msg
+      to: target
+      delay: ms
+
+  /// Send `msg` to `target` every `ms` (Integer milliseconds or a Duration)
+  /// until cancelled. Returns a cancellable Timer.
+  ///
+  /// `target` is an Actor (including a Server) or a Pid; a Server receives
+  /// each message in `handleInfo:`. Runs in a small process that stops on
+  /// `cancel`, or when the target dies (a restarted named Server does not
+  /// inherit the ticks). Ticks follow fixed deadlines, so they do not drift;
+  /// ticks missed while the system was busy are skipped, not replayed. The
+  /// timer is not tied to its creator: when `target` is not `self`, keep the
+  /// Timer and `cancel` it, or it runs for as long as the target lives.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // inside a Server method
+  /// t := Timer send: #tick to: self every: 1000
+  /// t isActive   // => true
+  /// t cancel     // => true
+  /// ```
+  class sealed send: msg :: Object to: target :: Actor | Pid every: ms :: Integer | Duration -> Timer =>
+    (Erlang beamtalk_timer)
+      sendEvery: msg
+      to: target
+      interval: ms
+
   /// Block the current process for `ms` (Integer milliseconds or a Duration).
   ///
   /// ## Examples
@@ -61,6 +117,10 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   // ===== Instance Methods =====
 
   /// Cancel this timer. Returns true if the timer was active, false if already done.
+  /// For a one-shot timer, true means it had not fired yet; a repeating timer
+  /// stops. A message timer's message sent just before `cancel` may still be
+  /// in the target's mailbox, so tag messages with a `Reference new`
+  /// (`{#tick, ref}`) when a stale one matters.
   ///
   /// ## Examples
   /// ```beamtalk

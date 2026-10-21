@@ -1004,6 +1004,37 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         span: Span,
     },
 
+    /// ADR 0137 §1–2 (Phase 2a, BT-4020): the bracket around a call that may
+    /// run user code in this process. Stores the threaded `State` version
+    /// `store` to the actor-state cell (`beamtalk_actor_state`'s `'$bt_actor_state'`),
+    /// makes the call, then reloads the cell as the next version `load`:
+    ///
+    /// ```erlang
+    /// let _ = call 'erlang':'put'('$bt_actor_state', State3) in
+    /// let R = <call> in
+    /// let State4 = call 'erlang':'get'('$bt_actor_state') in
+    /// ```
+    ///
+    /// The one node the send emitter builds for such a call; the generator
+    /// reports [`VerifyError::UnbracketedUserCodeSend`](super::verify::VerifyError::UnbracketedUserCodeSend)
+    /// for any call that may run user code and was not built into one.
+    ///
+    /// `load` steps the `State` family exactly like a [`Bind`](Self::Bind)
+    /// from `store`, so the verifier counts it as one. `load` is `None` for
+    /// the store-only form: a call whose callee hands the next `State` back
+    /// explicitly (a self-send passing a possible block, whose `{reply, R,
+    /// State}` pair the existing `Bind` that follows already unpacks), so
+    /// there is nothing to reload and `store` is not consumed. `result` is
+    /// the variable the call's value binds to, or `None` when `call` is
+    /// already a complete `let X = ... in` statement (the self-send form).
+    SyncedCall {
+        store: VersionedVar,
+        call: Document<'static>,
+        result: Option<String>,
+        load: Option<VersionedVar>,
+        span: Span,
+    },
+
     /// ADR 0131 §2: one conditional or handler arm, as a node. `threads` is
     /// the set the arm's closer packs into its seeded `StateAcc`'s
     /// `__local__` keys (`seed_conditional_locals`'s set). Renders `body`
@@ -1016,6 +1047,70 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         threads: Vec<String>,
         body: Vec<ThreadedStmt>,
     },
+}
+
+impl ThreadedStmt {
+    /// The version step this statement performs when it is a `Bind` or a
+    /// [`SyncedCall`](Self::SyncedCall) that reloads: `(target, source, span)`.
+    /// The one place a scan for "the last `State` version a prelude produced"
+    /// reads, so a bracket's reload counts as the step it is.
+    pub(in crate::core_erlang) fn version_step(
+        &self,
+    ) -> Option<(&VersionedVar, &VersionedVar, Span)> {
+        match self {
+            Self::Bind {
+                target,
+                source,
+                span,
+                ..
+            } => Some((target, source, *span)),
+            Self::SyncedCall {
+                store,
+                load: Some(load),
+                span,
+                ..
+            } => Some((load, store, *span)),
+            _ => None,
+        }
+    }
+}
+
+// ─── ADR 0137: user-code regions ────────────────────────────────────────────
+
+/// The kind of region a lowering was in when it emitted a call that may run
+/// user code without a [`ThreadedStmt::SyncedCall`] bracket
+/// ([`VerifyError::UnbracketedUserCodeSend`](super::verify::VerifyError::UnbracketedUserCodeSend)):
+/// the `ThreadedIr` node that owns the region is the one that has to make its
+/// statements bracketable, never the individual send.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(in crate::core_erlang) enum UserCodeRegion {
+    /// The method's own flat statement sequence.
+    MethodRoot,
+    /// A conditional, `match:` or `on:do:`/`ensure:` arm (a handler or
+    /// cleanup is a `BranchArm` frame like any other arm).
+    BranchArm,
+    /// A `Letrec` loop body (`whileTrue:`, `to:do:`, `timesRepeat:`, `repeat`).
+    LetrecLoop,
+    /// A `foldl` list-op body (`do:`, `collect:`, `inject:into:`, ...).
+    FoldBody,
+    /// A Tier 2 stateful-block body.
+    Tier2Body,
+    /// Anything else (named so a count of it is visibly unexplained).
+    Other,
+}
+
+impl UserCodeRegion {
+    /// The name a count report groups by.
+    pub(in crate::core_erlang) const fn label(self) -> &'static str {
+        match self {
+            Self::MethodRoot => "method-root",
+            Self::BranchArm => "arm",
+            Self::LetrecLoop => "loop",
+            Self::FoldBody => "fold",
+            Self::Tier2Body => "tier2-body",
+            Self::Other => "other",
+        }
+    }
 }
 
 // ─── ADR 0131: LocalRebind lowering ─────────────────────────────────────────

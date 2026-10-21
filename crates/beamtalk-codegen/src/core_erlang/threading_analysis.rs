@@ -92,7 +92,8 @@ impl CoreErlangGenerator {
         let actor_state_eligible = !ThreadedFamilies::from_matches(&self.eligible_families())
             .as_slice()
             .is_empty();
-        analysis.needs_mutation_threading(root, actor_state_eligible)
+        let synced = self.synced_calls_active() && analysis.has_user_code_sends;
+        analysis.needs_mutation_threading_with(root, actor_state_eligible, synced)
     }
 
     /// Returns `true` if the block body contains list op message sends
@@ -323,7 +324,14 @@ impl CoreErlangGenerator {
         let Expression::Block(cond_block) = condition else {
             return false;
         };
-        if !self.condition_write_is_carried(condition)
+        // ADR 0137: in an actor instance method a condition holding a bracketed
+        // call threads `State` like a state effect does.
+        let synced = self.synced_calls_active()
+            && beamtalk_core::semantic_analysis::block_facts::while_condition_has_synced_user_code_sends(
+                condition,
+            );
+        if !synced
+            && !self.condition_write_is_carried(condition)
             && !beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
                 condition,
                 self.in_class_method(),
