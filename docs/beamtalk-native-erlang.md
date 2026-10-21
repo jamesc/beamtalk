@@ -114,6 +114,8 @@ The key guarantee: **a user never sees a raw Erlang error tuple at the REPL.** A
 
 `exit:`/`throw:` are deliberately **not** wrapped: process exit and foreign throws are semantically meaningful (intentional `erlang:exit/1`, `{noproc, _}` from a dead actor, control-flow throws) and must not be flattened into `#beamtalk_error{}`. So `(Erlang erlang) exit: #killed` still terminates the process with reason `killed`.
 
+**Errors from your own blocks are not the call's.** When the Erlang function runs a Beamtalk block you passed in (`Telemetry span:metadata:do:`, `File open:do:`, a fun handed to `lists:map/2`) and the block raises, the boundary leaves that error alone: it propagates with the kind it would have had outside the call (`1 / 0` is still `#badarith`, not a `type_error` on the native method), and a `badarg` from the block never triggers the charlist retry, which would run the block a second time (BT-4055). The boundary tells them apart by the stacktrace: an error raised in compiled Beamtalk code (a `bt@…` module) before the stack reaches the called module is the block's.
+
 ### Same function, both channels
 
 The return channel (`Result`) and the exception channel (`#beamtalk_error{}`) are orthogonal and mutually exclusive *per call* — a function either returns or raises — so the **same** function can use both:
