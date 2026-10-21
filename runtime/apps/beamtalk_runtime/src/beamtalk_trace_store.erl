@@ -199,7 +199,7 @@ Record a dispatch aggregate (called from telemetry handler, NOT via gen_server).
 This runs in the calling process for lock-free performance.
 Class comes from telemetry metadata — the authoritative source.
 """.
--spec record_dispatch(term(), atom(), non_neg_integer(), atom(), atom(), atom()) -> ok.
+-spec record_dispatch(term(), term(), non_neg_integer(), atom(), atom(), term()) -> ok.
 record_dispatch(Pid, Selector, _Duration, _Outcome, _Mode, Class) when
     not is_pid(Pid); not is_atom(Selector); not is_atom(Class)
 ->
