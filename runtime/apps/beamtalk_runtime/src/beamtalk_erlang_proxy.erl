@@ -559,8 +559,15 @@ Anything else is a fault inside a callee that did run, and must not be
 reported as the FFI function being missing: an `undef` from a nested call has
 another MFA on top, and a target that runs and calls `erlang:error(undef)`
 itself has its own frame on top in the integer-arity form.
+
+An empty stacktrace (e.g. `erlang:system_flag(backtrace_depth, 0)`) carries no
+evidence either way, so it counts as the target: `raise_undef_error/6` then
+reads exports and still falls back to a plain wrapped `undef` if the target
+turns out to be exported.
 """.
 -spec is_ffi_target_undef(atom(), atom(), non_neg_integer(), list()) -> boolean().
+is_ffi_target_undef(_Module, _FunName, _Arity, []) ->
+    true;
 is_ffi_target_undef(Module, FunName, Arity, [{Module, FunName, Args, _Loc} | _]) when
     is_list(Args)
 ->
