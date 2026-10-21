@@ -163,9 +163,16 @@ Entry point for direct Erlang calls.
 The codegen emits `call 'beamtalk_erlang_proxy':'direct_call'(M, F, [args])`
 for all `Erlang M fn: arg` expressions, routing through the proxy instead
 of calling `call 'M':'F'(args)` directly. This enables:
-- Export validation and actionable error messages
+- Actionable error messages for a missing module, function or arity
 - Automatic binary→charlist coercion on badarg
 - Charlist→binary result coercion for consistent string types
+
+Export validation is **lazy** (BT-4021): the happy path applies straight away
+and only reads `Module:module_info(exports)` after the apply fails with
+`error:undef` whose top stack frame is the FFI target itself (see
+`is_ffi_target_undef/4`). Reading the export list on every call cost ~5-14 µs
+per send. Nothing is cached, so hot code reload and purge stay correct: every
+call resolves against whatever code is loaded at that moment.
 
 Wrapping policy is unified across all apply paths via `apply_with_coercion/5`
 (ADR 0101 Part 2): `error:*` is converted to a structured `#beamtalk_error{}`,
@@ -174,31 +181,18 @@ behaves as expected and foreign throws stay throws.
 """.
 -spec direct_call(atom(), atom(), list()) -> term().
 direct_call(Module, FunName, Args) ->
-    Arity = length(Args),
-    case get_exports(Module) of
-        {error, not_loaded} ->
-            raise_module_not_loaded(Module, FunName);
-        {ok, Exports} ->
-            case lists:member({FunName, Arity}, Exports) of
-                true ->
-                    apply_with_coercion(Module, FunName, Args, FunName, none);
-                false ->
-                    raise_function_or_arity_error(
-                        Module, FunName, Arity, FunName, Exports
-                    )
-            end
-    end.
+    apply_with_coercion(Module, FunName, Args, FunName, none).
 
 -doc """
 Entry point for `native:` Object delegation (ADR 0101 Part 1).
 
 `native:` Object methods lower to
 `beamtalk_erlang_proxy:native_call(Mod, Fn, [Self | Args], {Class, Sel})`.
-Unlike `direct_call/3`/`validate_and_apply/4` this **skips the proactive
-`get_exports`/arity pre-check** — codegen guarantees the call shape at compile
-time, so the check is pure overhead. It still routes through the shared
-`apply_with_coercion/5`, so it gets the **same** `error:*` → `#beamtalk_error{}`
-wrapping and ADR 0076 ok/error → `Result` coercion as inline FFI.
+Like `direct_call/3`/`validate_and_apply/4` it does no export pre-check and
+routes through the shared `apply_with_coercion/5`, so it gets the **same**
+`error:*` → `#beamtalk_error{}` wrapping and ADR 0076 ok/error → `Result`
+coercion as inline FFI. The difference is the error context: a missing target
+is reported against the Beamtalk `{Class, Sel}` instead of `'ErlangModule'`.
 
 The `{Class, Sel}` context makes wrapped errors read `Stream>>take:` instead of
 the bare Erlang MFA. Crucially, `error:undef` is still caught (the compile-time
@@ -206,10 +200,10 @@ guarantee does not survive **hot code reload** — a backing function can be
 swapped between compile and call) and surfaced as a structured
 `does_not_understand` carrying `{Class, Sel}`.
 
-**Codegen-only.** This entry deliberately omits the proactive
-`get_exports`/arity pre-check that `direct_call/3` and `validate_and_apply/4`
-run, so it must only be called with the exact `{Mod, Fn, Args}` shape codegen
-emits. Hand-written code wanting export validation up front should use
+**Codegen-only.** A missing target is reported as a plain
+`does_not_understand` on `{Class, Sel}` without the missing-function vs.
+wrong-arity distinction, so call it only with the exact `{Mod, Fn, Args}` shape
+codegen emits. Hand-written code wanting those messages should use
 `direct_call/3` (or the `(Erlang module)` FFI surface) instead.
 """.
 -spec native_call(atom(), atom(), list(), {atom(), atom()}) -> term().
@@ -225,7 +219,9 @@ happy path and retrying with charlist-coerced args on `badarg`.
 Exception policy — converged across `direct_call/3`, `validate_and_apply/4`,
 and `native_call/4`:
 - `error:#beamtalk_error{}` (already wrapped) → re-raised unchanged
-- `error:undef` → structured `does_not_understand` (hot-reload TOCTOU)
+- `error:undef` for the target itself → structured `does_not_understand` /
+  `arity_mismatch` / module-not-loaded (`raise_undef_error/5`); an `undef`
+  raised *inside* the callee → `runtime_error` like any other `error:*`
 - `error:badarg` → charlist retry, else `type_error`
 - `error:function_clause` → `arity_mismatch`
 - `error:badarith` → `type_error`
@@ -337,7 +333,9 @@ Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/5`:
   (idempotent; never reclassified)
 - `error:badarg` → `OnBadarg` (charlist retry on the first pass, terminal on the
   retry pass)
-- `error:undef` → structured `does_not_understand` (hot-reload TOCTOU)
+- `error:undef` for the target → structured `does_not_understand` (missing
+  module/function/arity, including hot-reload removal); `undef` from inside the
+  callee → `runtime_error` catch-all
 - `error:function_clause` → `arity_mismatch`
 - `error:badarith` → `type_error`
 - any other `error:Reason` → `runtime_error` catch-all
@@ -375,10 +373,21 @@ classify_ffi_exception(
 ) ->
     OnBadarg(Module, FunName, Args, OrigSelector, Context, Stack);
 classify_ffi_exception(
-    error, undef, _Stack, Module, FunName, Args, OrigSelector, Context, _OnBadarg
+    error, undef, Stack, Module, FunName, Args, OrigSelector, Context, _OnBadarg
 ) ->
-    %% TOCTOU / hot code reload: function unloaded between check and apply.
-    raise_undef_error(Module, FunName, length(Args), OrigSelector, Context);
+    Arity = length(Args),
+    case is_ffi_target_undef(Module, FunName, Arity, Stack) of
+        true ->
+            %% The FFI target itself is missing: unloaded module, unknown
+            %% function, wrong arity, or a hot-reload removal since compile.
+            raise_undef_error(Module, FunName, Arity, OrigSelector, Context);
+        false ->
+            %% The target ran and *something it called* is undefined. That is
+            %% a fault inside the callee, not a missing FFI function, so wrap
+            %% it like any other error:* rather than reporting a DNU on the
+            %% target (BT-4021).
+            raise_generic_error(Module, FunName, OrigSelector, Context, undef, Stack)
+    end;
 classify_ffi_exception(
     error, function_clause, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
 ) ->
@@ -458,37 +467,23 @@ get_exports(Module) ->
     end.
 
 -doc """
-Validate function existence and arity, then apply.
+Apply with lazy validation of function existence and arity.
 
-Checks module_info(exports) before calling erlang:apply/3 to provide
-actionable error messages. No caching — hot code reload must work.
-
-Once validated, delegates to the unified `apply_with_coercion/5` so the
-`call:args:` / dispatch path shares the **same** exception policy as inline FFI
-(ADR 0101 Part 2): `error:*` wrapped, `exit:*`/`throw:*` propagated. This rolls
-back the former `exit`→`erlang_exit` / `throw`→`erlang_throw` wrapping.
+Delegates to the unified `apply_with_coercion/5` so the `call:args:` / dispatch
+path shares the **same** exception policy as inline FFI (ADR 0101 Part 2):
+`error:*` wrapped, `exit:*`/`throw:*` propagated. Like `direct_call/3`,
+`module_info(exports)` is read only after an `error:undef` on the target
+(BT-4021), to build the missing-function / wrong-arity error. No caching — hot
+code reload must work.
 """.
 -spec validate_and_apply(atom(), atom(), list(), atom()) -> term().
 validate_and_apply(Module, FunName, Args, OrigSelector) ->
-    Arity = length(Args),
-    case get_exports(Module) of
-        {error, not_loaded} ->
-            raise_module_not_loaded(Module, OrigSelector);
-        {ok, Exports} ->
-            case lists:member({FunName, Arity}, Exports) of
-                true ->
-                    apply_with_coercion(Module, FunName, Args, OrigSelector, none);
-                false ->
-                    raise_function_or_arity_error(
-                        Module, FunName, Arity, OrigSelector, Exports
-                    )
-            end
-    end.
+    apply_with_coercion(Module, FunName, Args, OrigSelector, none).
 
 -doc """
 Raise an error for missing function or wrong arity.
 
-Shared by `direct_call/3` and `validate_and_apply/4`.
+Used by `raise_undef_error/5` for inline FFI (`direct_call/3`, `validate_and_apply/4`).
 """.
 -spec raise_function_or_arity_error(atom(), atom(), non_neg_integer(), atom(), [
     {atom(), non_neg_integer()}
@@ -549,14 +544,36 @@ error_class_selector(none, OrigSelector) -> {'ErlangModule', OrigSelector};
 error_class_selector({Class, Selector}, _OrigSelector) -> {Class, Selector}.
 
 -doc """
-Raise a structured undef error (TOCTOU: function unloaded between check and apply).
+Is an `error:undef` about the FFI target `Module:FunName/Arity` itself?
+
+When `erlang:apply/3` cannot find the target (module missing or not loadable,
+function not exported, wrong arity) the top stack frame is the target MFA.
+An `undef` raised by a call *inside* the target has some other MFA on top, and
+must not be reported as the FFI function being missing.
+""".
+-spec is_ffi_target_undef(atom(), atom(), non_neg_integer(), list()) -> boolean().
+is_ffi_target_undef(Module, FunName, Arity, [{Module, FunName, ArgsOrArity, _Loc} | _]) ->
+    frame_arity(ArgsOrArity) =:= Arity;
+is_ffi_target_undef(_Module, _FunName, _Arity, _Stack) ->
+    false.
+
+-spec frame_arity(list() | non_neg_integer()) -> non_neg_integer().
+frame_arity(Args) when is_list(Args) -> length(Args);
+frame_arity(Arity) when is_integer(Arity) -> Arity.
+
+-doc """
+Raise a structured error for an FFI target that is not callable.
+
+Reached when the apply fails with `error:undef` and `is_ffi_target_undef/4`
+confirms the target itself is missing (unloaded module, unknown function, wrong
+arity, or removed by a hot reload).
 
 Pass the actual arity so the error message is accurate (not "0 arguments").
 
-For inline FFI (`Context = none`) this re-checks exports to distinguish
-"missing function" from "wrong arity". For a `native:` delegation
-(`Context = {Class, Sel}`) the pre-check was skipped by design, so surface a
-`does_not_understand` carrying the Beamtalk `{Class, Sel}` directly.
+For inline FFI (`Context = none`) this reads exports to distinguish
+"module not loaded", "missing function" and "wrong arity". For a `native:`
+delegation (`Context = {Class, Sel}`) it surfaces a `does_not_understand`
+carrying the Beamtalk `{Class, Sel}` directly.
 """.
 -spec raise_undef_error(atom(), atom(), non_neg_integer(), atom(), error_context()) -> no_return().
 raise_undef_error(Module, FunName, Arity, OrigSelector, none) ->
