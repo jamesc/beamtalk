@@ -141,11 +141,30 @@ on one is bracketed. The bracket sits where it lands, not at the call site.
 A compiled class's `dispatch/4` routes a selector to its compiled clause, to
 a native method, or to the runtime's extension lookup, and it invokes every
 native method and every extension fun through one runtime helper,
-`beamtalk_actor_state:call_foreign/3`. The helper stores `State` to the cell,
-invokes the fun with it, and answers the fun's `{reply, R, NewState}`. A
-native method or extension fun that runs a block reads the block's writes
-back from the cell before it answers; that is the one rule foreign code
-follows. The call site needs no knowledge of the target: the self-send emitter
+`beamtalk_actor_state:call_foreign/3`. The helper stores `State` (`S0`) to
+the cell and invokes the fun with it. When the fun returns
+`{reply, Result, R}`, the helper compares `S0`, the cell now (`C`) and `R`:
+
+| Cell `C` | Returned `R` | Meaning | Answer |
+|---|---|---|---|
+| `=:= S0` | `=:= S0` | nothing changed | `S0` |
+| `=/= S0` | `=:= S0` | a block wrote, the fun did not | `C` |
+| `=:= S0` | `=/= S0` | the fun wrote, no block wrote | `R` |
+| `=/= S0` | `=/= S0` | both wrote | raise |
+
+When both changed the helper never picks one. It raises:
+
+```erlang
+#beamtalk_error{kind = actor_state_conflict, class = 'Counter', selector = 'each:',
+                hint = <<"The native method each: changed Counter's state and also ran a "
+                         "block that changed it. Read the block's writes from the cell "
+                         "(beamtalk_actor_state:get/0) before answering.">>}
+```
+
+The comparison costs one `=:=` per state. BEAM maps share structure, so in the
+common unchanged case it is usually a pointer check. Foreign code that never
+runs a block, or never writes state, needs no change. The call site needs no
+knowledge of the target: the self-send emitter
 always threads, and an extension installed at run time on a selector the
 compiler saw as compiled still passes through the helper. The invariant for
 foreign targets lives in that one function.
@@ -602,9 +621,10 @@ per self-cast to keep a behaviour that loses writes today.
 ### Negative
 - Every send that may run user code pays a store and a load, about 10 ns.
 - The bracket protocol has two homes: `SyncedCall` in compiled code and
-  `call_foreign/3` for native methods and extension funs. Foreign code that
-  runs a block must read the block's writes back from the cell before it
-  answers.
+  `call_foreign/3` for native methods and extension funs.
+- A native method or extension fun that both writes state and runs a block
+  that writes state raises `actor_state_conflict` until it is rewritten to
+  read the cell.
 - Generated actor code changes, so the module ABI marker is bumped. Older
   modules are refused with `abi_mismatch`, and crossing the release needs a
   node restart (ADR 0125).
@@ -636,8 +656,8 @@ results are in Cost.
 `get`, `put`, `has`, `clear`, `capture`, `protect`, `call_foreign`), used by
 every callback wrapper in `beamtalk_actor.erl`, by `self_dispatch/2` and by
 the extension lookup. Native method clauses in `dispatch/4` call through
-`call_foreign/3`. The
-`actor_state_unreachable` error kind.
+`call_foreign/3`, which reconciles the cell with the fun's answer as in §1.
+The `actor_state_unreachable` and `actor_state_conflict` error kinds.
 
 **Phase 2a (L).** The `SyncedCall` node in `threaded_ir/` and bracket
 emission, behind a flag, from the send emitter in `dispatch_codegen.rs` and
@@ -653,7 +673,10 @@ and field writes inside its protected body write through. `OnDoCatch` stores
 its pre-region version under `CatchWithoutStateRestore`. `^` stores before
 the throw. The `no_user_code` mark goes on `PrimitiveBindingTable` entries,
 set from the stdlib pragmas and checked by `build-stdlib`. `self foo!` lowers
-to a cast. Remove the flag and bump the module ABI marker.
+to a cast. Audit the native actor methods and extension funs that both run a
+user block and change `State`, and rewrite each to read the cell, so none
+raises `actor_state_conflict`. Remove the flag and bump the module ABI
+marker.
 
 **Phase 3 (M).** Delete the table above and whatever the oracle confirms
 after Phase 2b.
@@ -698,7 +721,9 @@ Decided by the maintainer on 2026-10-20, when the ADR was accepted.
    compiled Beamtalk method keeps explicit `State` threading whatever its
    arguments, and methods keep `{reply, R, State}` (§1). A self-send that
    lands on a native method or an extension fun is bracketed by
-   `call_foreign/3`. Bracketing every self-send cost 1.35x to 1.60x on the
+   `call_foreign/3`, which takes the cell if only a block wrote, the fun's
+   answer if only the fun wrote, and raises `actor_state_conflict` if both
+   did. Bracketing every self-send cost 1.35x to 1.60x on the
    self-send itself.
 
 ## References
