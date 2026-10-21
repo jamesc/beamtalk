@@ -16,7 +16,7 @@ Server subclass: Connection
 
   onReady: s =>
     self.sock := s
-    self continueWith: #handleConnection   // runs before any queued #tcp message
+    self continueWith: #handleConnection  // runs before any queued #tcp message
 
   // Set up the socket here, before the first #tcp message is handled.
   handleConnection => self.sock

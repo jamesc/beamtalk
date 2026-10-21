@@ -65,10 +65,18 @@ TestCase subclass: LanguageFeaturesDocTest
   // BT-4024: § Match Expression. A `[ ... ]` arm body is a Block value and
   // does not run; `[ ... ] value` runs it.
   testMatchArmBlockIsAValue =>
-    r := 1 match: [1 -> [2 + 3]; _ -> [0]]
+    r := 1 match: [
+      1 -> [2 + 3];
+      _ -> [0]
+    ]
     self assert: (r isKindOf: Block)
     self assert: r value equals: 5
-    self assert: (1 match: [1 -> [2 + 3] value; _ -> 0]) equals: 5
+    self
+      assert: (1 match: [
+        1 -> [2 + 3] value;
+        _ -> 0
+      ])
+      equals: 5
 
   testBlocksClosures =>
     // Block with arguments

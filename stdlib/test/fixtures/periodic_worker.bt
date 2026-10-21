@@ -9,7 +9,10 @@ Server subclass: PeriodicWorker
   state: count = 0
 
   initialize =>
-    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+    Erlang erlang
+      send_after: 1000
+      dest: (self pid)
+      msg: #tick
 
   handleInfo: msg =>
     msg match: [
@@ -19,6 +22,9 @@ Server subclass: PeriodicWorker
 
   tick =>
     self.count := self.count + 1
-    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+    Erlang erlang
+      send_after: 1000
+      dest: (self pid)
+      msg: #tick
 
   getValue => self.count
