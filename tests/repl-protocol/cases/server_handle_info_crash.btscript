@@ -1,0 +1,132 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for crash-on-error in no-reply handlers (BT-3960 / ADR 0134)
+//
+// These tests require E2E because the behaviour spans several REPL turns of
+// a live actor lifecycle: spawn an actor, register an `onExit:` observer,
+// make the actor crash from a raw message or a `!` cast, then observe the
+// exit reason, `isAlive`, and a supervisor restarting the child with a new
+// pid. BUnit (stdlib/test/server_handle_info_test.bt,
+// stdlib/test/actor_cast_error_test.bt) covers the same semantics inside one
+// test method; this file proves them from the REPL a user actually drives.
+//
+// An error raised in `handleInfo:` or in a method sent with `!` has no
+// caller to go to, so it crashes the actor (as in OTP): `onExit:` observers
+// receive `{Exception, Stacktrace}`, and a supervisor restarts the actor.
+
+// @load tests/repl-protocol/fixtures/e2e_exit_recorder.bt
+// @load tests/repl-protocol/fixtures/e2e_failing_info_server.bt
+// @load tests/repl-protocol/fixtures/e2e_failing_cast_actor.bt
+// @load tests/repl-protocol/fixtures/e2e_failing_info_sup.bt
+
+// ===========================================================================
+// handleInfo: ERROR CRASHES THE SERVER
+// ===========================================================================
+
+infoRecorder := E2EExitRecorder spawn
+// => Actor(E2EExitRecorder, _)
+
+worker := E2EFailingInfoServer spawn
+// => Actor(E2EFailingInfoServer, _)
+
+worker onExit: [:reason | infoRecorder record: reason]
+// => _
+
+// A message the catch-all arm handles is harmless: the server keeps running.
+Erlang erlang send: worker pid msg: #hello
+// => hello
+
+worker getCount
+// => 1
+
+// A message whose arm raises crashes the server.
+Erlang erlang send: worker pid msg: #crash
+// => crash
+
+// Poll until the onExit: observer has recorded the reason. Bounded at ~1s
+// (50 iterations x 20ms) to fail fast rather than hang on wall-clock time.
+attempts := 0. [infoRecorder reason isNil and: [attempts < 50]] whileTrue: [Timer sleep: 20. attempts := attempts + 1]. attempts < 50
+// => true
+
+worker isAlive
+// => false
+
+// The exit reason is {Exception, Stacktrace}; the exception is the one raised.
+(infoRecorder reason at: 1) message
+// => deliberate handleInfo: error
+
+// ===========================================================================
+// `!` CAST ERROR CRASHES THE ACTOR
+// ===========================================================================
+
+castRecorder := E2EExitRecorder spawn
+// => Actor(E2EExitRecorder, _)
+
+runner := E2EFailingCastActor spawn
+// => Actor(E2EFailingCastActor, _)
+
+runner onExit: [:reason | castRecorder record: reason]
+// => _
+
+runner ping
+// => pong
+
+runner explode!
+// => ok
+
+attempts := 0. [castRecorder reason isNil and: [attempts < 50]] whileTrue: [Timer sleep: 20. attempts := attempts + 1]. attempts < 50
+// => true
+
+runner isAlive
+// => false
+
+(castRecorder reason at: 1) message
+// => deliberate cast error
+
+// ===========================================================================
+// SUPERVISED SERVER IS RESTARTED WITH A NEW PID
+// ===========================================================================
+
+sup := (E2EFailingInfoSup supervise) unwrap
+// => Supervisor(E2EFailingInfoSup, _)
+
+first := (sup which: E2EFailingInfoServer) unwrap
+// => Actor(E2EFailingInfoServer, _)
+
+firstPid := first pid
+// => _
+
+Erlang erlang send: firstPid msg: #crash
+// => crash
+
+// Poll until the supervisor has restarted the child under a new pid
+// (`which:` is an error while the child is between incarnations).
+attempts := 0. [((sup which: E2EFailingInfoServer) isError or: [(sup which: E2EFailingInfoServer) unwrap pid =:= firstPid]) and: [attempts < 50]] whileTrue: [Timer sleep: 20. attempts := attempts + 1]. attempts < 50
+// => true
+
+first isAlive
+// => false
+
+restarted := (sup which: E2EFailingInfoServer) unwrap
+// => Actor(E2EFailingInfoServer, _)
+
+restarted pid =:= firstPid
+// => false
+
+restarted isAlive
+// => true
+
+// The restarted server starts from fresh state.
+restarted getCount
+// => 0
+
+// Clean up
+sup stop
+// => nil
+
+infoRecorder stop
+// => ok
+
+castRecorder stop
+// => ok

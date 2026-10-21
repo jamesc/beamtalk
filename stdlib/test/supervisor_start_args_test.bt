@@ -35,6 +35,17 @@ TestCase subclass: SupervisorStartArgsTest
     e := [sup args] on: Error do: [:ex | ex]
     self assert: e kind equals: #stale_handle
 
+  // BT-3984: the sealed `isAlive`/`stop` behave the same whether the runtime
+  // answers them directly or through the method: a second `stop` is a stale
+  // handle.
+  testIsAliveAndStopOnStoppedSupervisor =>
+    sup := Bt3963ArgsSup supervise unwrap
+    self assert: sup isAlive equals: true
+    sup stop
+    self assert: sup isAlive equals: false
+    e := [sup stop] on: Error do: [:ex | ex]
+    self assert: e kind equals: #stale_handle
+
   // A configuration method that messages `self` fails the start with the hint.
   testConfigMessagingSelfFailsStart =>
     r := Bt3963CallsSelfSup supervise

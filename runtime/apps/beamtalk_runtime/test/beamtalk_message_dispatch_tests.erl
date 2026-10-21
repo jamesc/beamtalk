@@ -188,13 +188,29 @@ supervisor_stop_returns_nil_test() ->
     ?assertEqual(false, is_process_alive(SupPid)).
 
 supervisor_stop_stale_handle_test() ->
-    %% stop on a dead supervisor raises a structured runtime_error (not a raw OTP exit).
+    %% stop on a dead supervisor raises a structured stale_handle error (not a
+    %% raw OTP exit), as the stdlib `stop` does (BT-3984).
     SupPid = anon_sup(),
     gen_server:stop(SupPid),
     timer:sleep(20),
     Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
+        beamtalk_message_dispatch:send(Sup, stop, [])
+    ).
+
+supervisor_unreachable_node_test() ->
+    %% BT-3984: a handle to a supervisor on a node this VM cannot reach.
+    %% isAlive answers optimistically (no badarg from is_process_alive/1 on a
+    %% remote pid); stop raises a structured node_down, not a raw nodedown exit.
+    NodeBin = atom_to_binary('bt3984_ghost@nohost', utf8),
+    RemotePid = binary_to_term(
+        <<131, 88, 118, (byte_size(NodeBin)):16, NodeBin/binary, 1:32, 0:32, 0:32>>
+    ),
+    Sup = {beamtalk_supervisor, 'TestSup', test_mod, RemotePid},
+    ?assertEqual(true, beamtalk_message_dispatch:send(Sup, isAlive, [])),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = node_down}},
         beamtalk_message_dispatch:send(Sup, stop, [])
     ).
 

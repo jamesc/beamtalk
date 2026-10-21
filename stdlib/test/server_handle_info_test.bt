@@ -1,10 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-1457: Tests for Server handleInfo: codegen dispatch (ADR 0065)
+// BT-1457: Tests for Server handleInfo: codegen dispatch (ADR 0065).
+// BT-3958: an error raised in handleInfo: crashes the server (ADR 0134).
 //
 // Fixtures: stdlib/test/fixtures/handle_info_counter.bt
 //           stdlib/test/fixtures/failing_handle_info_server.bt
+//           stdlib/test/fixtures/failing_handle_info_sup.bt
+//           stdlib/test/fixtures/failing_plain_handle_info_server.bt
 //           stdlib/test/fixtures/plain_actor_for_info_test.bt
 
 TestCase subclass: ServerHandleInfoTest
@@ -47,19 +50,52 @@ TestCase subclass: ServerHandleInfoTest
     self assert: server isAlive
     server stop
 
-  // === Error recovery (log-and-continue) ===
-  testHandleInfoErrorDoesNotCrashServer =>
-    server := FailingHandleInfoServer spawn
+  // === Errors crash the server (ADR 0134, BT-3958) ===
+  testHandleInfoErrorCrashesServer =>
+    table := Ets new: #handleInfoCrash type: #set
+    server := FailingHandleInfoServer spawnWith: #{
+      #tableName => #handleInfoCrash
+    }
+    server onExit: [:reason | table at: #exitReason put: reason]
     Erlang erlang send: server pid msg: #crash
-    server getCount  // flush: queues behind #crash in mailbox (FIFO) before isAlive check
-    self assert: server isAlive
-    server stop
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    // gen_server exits with {Error, Stacktrace}; the error is the one raised.
+    exitReason := table at: #exitReason
+    self assert: (exitReason at: 1) message equals: "deliberate handleInfo: error"
+    // terminate: ran with the same reason.
+    self assert: (table at: #terminateReason) equals: exitReason
+    table delete
 
-  testHandleInfoErrorPreservesPreCallState =>
-    server := FailingHandleInfoServer spawn
-    Erlang erlang send: server pid msg: #increment
-    self assert: server getCount equals: 1
+  testHandleInfoErrorCrashesServerWithoutTerminateHook =>
+    // No terminate: override, so the server does not trap exits; the
+    // crash path is the same.
+    table := Ets new: #handleInfoCrashPlain type: #set
+    server := FailingPlainHandleInfoServer spawn
+    server onExit: [:reason | table at: #exitReason put: reason]
+    Erlang erlang send: server pid msg: #anything
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: ((table at: #exitReason) at: 1) message equals: "deliberate plain handleInfo: error"
+    table delete
+
+  testSupervisedServerRestartsAfterHandleInfoError =>
+    sup := (FailingHandleInfoSup supervise) unwrap
+    server :: FailingHandleInfoServer := (sup which: FailingHandleInfoServer) unwrap
     Erlang erlang send: server pid msg: #crash
-    self assert: server getCount equals: 1  // getCount queues behind #crash; ensures crash processed before isAlive
-    self assert: server isAlive
-    server stop
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    restarted := (sup which: FailingHandleInfoServer) unwrap
+    50
+      timesRepeat: [
+        (restarted isNil or: [restarted =:= server])
+          ifTrue: [
+            Timer sleep: 10
+            restarted := (sup which: FailingHandleInfoServer) unwrap
+          ]
+      ]
+    fresh :: FailingHandleInfoServer := (sup which: FailingHandleInfoServer) unwrap
+    self deny: fresh =:= server
+    self assert: fresh isAlive
+    self assert: fresh getCount equals: 0
+    sup stop

@@ -1,0 +1,202 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%%% **DDD Context:** Object System Context
+
+-module(beamtalk_actor_state_tests).
+-moduledoc "EUnit tests for beamtalk_actor_state (ADR 0137 Phase 1).".
+
+-include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
+
+self_obj() ->
+    #beamtalk_object{class = 'ActorStateTestClass', class_mod = astc, pid = self()}.
+
+foreign_obj() ->
+    #beamtalk_object{class = 'ActorStateTestClass', class_mod = astc, pid = spawn(fun() -> ok end)}.
+
+with_cell(State, Fun) ->
+    Old = beamtalk_actor_state:install(State),
+    try
+        Fun()
+    after
+        beamtalk_actor_state:uninstall(Old)
+    end.
+
+kind_of(Fun) ->
+    try
+        Fun(),
+        no_error
+    catch
+        error:#{error := #beamtalk_error{kind = Kind}} -> Kind
+    end.
+
+%%% install / take / uninstall
+
+install_take_uninstall_test() ->
+    ?assertEqual(false, beamtalk_actor_state:installed()),
+    Old = beamtalk_actor_state:install(#{a => 1}),
+    ?assertEqual(undefined, Old),
+    ?assert(beamtalk_actor_state:installed()),
+    ?assertEqual(#{a => 1}, beamtalk_actor_state:take()),
+    ok = beamtalk_actor_state:uninstall(Old),
+    ?assertEqual(false, beamtalk_actor_state:installed()).
+
+nested_install_restores_enclosing_cell_test() ->
+    with_cell(#{a => outer}, fun() ->
+        Inner = beamtalk_actor_state:install(#{a => inner}),
+        ?assertEqual(#{a => outer}, Inner),
+        ?assertEqual(#{a => inner}, beamtalk_actor_state:take()),
+        beamtalk_actor_state:uninstall(Inner),
+        ?assertEqual(#{a => outer}, beamtalk_actor_state:take())
+    end).
+
+take_without_cell_raises_test() ->
+    ?assertEqual(actor_state_unreachable, kind_of(fun beamtalk_actor_state:take/0)).
+
+%%% adapt
+
+adapt_stores_state_and_strips_it_test() ->
+    with_cell(#{a => 0}, fun() ->
+        ?assertEqual({reply, r}, beamtalk_actor_state:adapt({reply, r, #{a => 1}})),
+        ?assertEqual(#{a => 1}, beamtalk_actor_state:take()),
+        ?assertEqual(noreply, beamtalk_actor_state:adapt({noreply, #{a => 2}})),
+        ?assertEqual(#{a => 2}, beamtalk_actor_state:take()),
+        ?assertEqual({error, boom}, beamtalk_actor_state:adapt({error, boom, #{a => 3}})),
+        ?assertEqual(#{a => 3}, beamtalk_actor_state:take())
+    end).
+
+%%% access at home
+
+home_get_put_has_clear_test() ->
+    Self = self_obj(),
+    with_cell(#{x => 1}, fun() ->
+        ?assertEqual(1, beamtalk_actor_state:get(Self, x)),
+        ?assertEqual(nil, beamtalk_actor_state:get(Self, y)),
+        ok = beamtalk_actor_state:put(Self, x, 2),
+        ?assertEqual(2, beamtalk_actor_state:get(Self, x)),
+        ?assert(beamtalk_actor_state:has(Self, x)),
+        ?assertNot(beamtalk_actor_state:has(Self, y)),
+        ok = beamtalk_actor_state:clear(Self, x),
+        ?assertNot(beamtalk_actor_state:has(Self, x)),
+        ?assertEqual(#{}, beamtalk_actor_state:take())
+    end).
+
+home_ignores_capture_test() ->
+    with_cell(#{x => live}, fun() ->
+        ?assertEqual(live, beamtalk_actor_state:get(self_obj(), x, #{x => captured})),
+        ?assertEqual(#{x => live}, beamtalk_actor_state:capture(self_obj(), none))
+    end).
+
+%%% access away
+
+no_cell_is_away_test() ->
+    Self = self_obj(),
+    ?assertEqual(actor_state_unreachable, kind_of(fun() -> beamtalk_actor_state:get(Self, x) end)),
+    ?assertEqual(
+        actor_state_unreachable, kind_of(fun() -> beamtalk_actor_state:put(Self, x, 1) end)
+    ),
+    ?assertEqual(
+        actor_state_unreachable, kind_of(fun() -> beamtalk_actor_state:clear(Self, x) end)
+    ),
+    ?assertEqual(none, beamtalk_actor_state:capture(Self, none)).
+
+foreign_pid_is_away_even_with_cell_test() ->
+    with_cell(#{x => 1}, fun() ->
+        Other = foreign_obj(),
+        ?assertEqual(
+            actor_state_unreachable,
+            kind_of(fun() -> beamtalk_actor_state:put(Other, x, 2) end)
+        ),
+        ?assertEqual(captured, beamtalk_actor_state:get(Other, x, #{x => captured})),
+        ?assert(beamtalk_actor_state:has(Other, x, #{x => captured})),
+        ?assertEqual(#{x => outer}, beamtalk_actor_state:capture(Other, #{x => outer})),
+        ?assertEqual(#{x => 1}, beamtalk_actor_state:take())
+    end).
+
+away_read_without_capture_raises_test() ->
+    Other = foreign_obj(),
+    ?assertEqual(
+        actor_state_unreachable,
+        kind_of(fun() -> beamtalk_actor_state:get(Other, x, none) end)
+    ).
+
+unreachable_error_shape_test() ->
+    try
+        beamtalk_actor_state:put(self_obj(), x, 1),
+        ?assert(false)
+    catch
+        error:#{error := #beamtalk_error{kind = K, class = C, hint = H, details = D}} ->
+            ?assertEqual(actor_state_unreachable, K),
+            ?assertEqual('ActorStateTestClass', C),
+            ?assert(is_binary(H)),
+            ?assertEqual(#{field => x}, D)
+    end.
+
+%%% protect
+
+protect_restores_cell_on_exception_test() ->
+    Self = self_obj(),
+    with_cell(#{x => 0}, fun() ->
+        ?assertError(
+            boom,
+            beamtalk_actor_state:protect(fun() ->
+                beamtalk_actor_state:put(Self, x, 9),
+                error(boom)
+            end)
+        ),
+        ?assertEqual(#{x => 0}, beamtalk_actor_state:take())
+    end).
+
+protect_keeps_writes_on_normal_exit_test() ->
+    Self = self_obj(),
+    with_cell(#{x => 0}, fun() ->
+        ?assertEqual(
+            ok, beamtalk_actor_state:protect(fun() -> beamtalk_actor_state:put(Self, x, 5) end)
+        ),
+        ?assertEqual(#{x => 5}, beamtalk_actor_state:take())
+    end).
+
+protect_passes_nlr_through_test() ->
+    Self = self_obj(),
+    Nlr = {'$bt_nlr', make_ref(), v},
+    with_cell(#{x => 0}, fun() ->
+        ?assertEqual(
+            {caught, Nlr},
+            try
+                beamtalk_actor_state:protect(fun() ->
+                    beamtalk_actor_state:put(Self, x, 5),
+                    throw(Nlr)
+                end)
+            catch
+                throw:T -> {caught, T}
+            end
+        ),
+        ?assertEqual(#{x => 5}, beamtalk_actor_state:take())
+    end).
+
+%%% Callback wrapper (observable behaviour of the runtime-path actor)
+
+wrapper_installs_cell_and_erases_it_test() ->
+    ?assertEqual(false, beamtalk_actor_state:installed()),
+    State = #{
+        '$beamtalk_class' => 'Wrapped',
+        '__methods__' => #{
+            probe => fun(_Sel, [], _Self, S) -> {reply, beamtalk_actor_state:installed(), S} end,
+            bump => fun(_Sel, [], _Self, S) -> {reply, ok, S#{n => 1}} end,
+            fail => fun(_Sel, [], _Self, S) -> {error, oops, S} end
+        }
+    },
+    ?assertMatch(
+        {reply, true, _},
+        beamtalk_actor:handle_call({probe, []}, {self(), make_ref()}, State)
+    ),
+    ?assertMatch(
+        {reply, ok, #{n := 1}},
+        beamtalk_actor:handle_call({bump, []}, {self(), make_ref()}, State)
+    ),
+    {reply, {error, oops}, Kept} = beamtalk_actor:handle_call(
+        {fail, []}, {self(), make_ref()}, State
+    ),
+    ?assertEqual(State, Kept),
+    ?assertEqual(false, beamtalk_actor_state:installed()).

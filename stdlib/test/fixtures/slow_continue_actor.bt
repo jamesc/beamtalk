@@ -4,7 +4,8 @@
 // BT-3992 fixture: an Actor whose `initialize` requests a slow continuation
 // (`stepDelay` ms). `spawn` returns as soon as `initialize` has returned; the
 // continuation runs afterwards, still before any message sent after `spawn`.
-// With `failFirst`, a continuation that raises is queued first; with
+// With `failFirst`, a continuation that raises is queued first — it crashes
+// the actor after `spawn` has returned (ADR 0134), not the spawn; with
 // `stopInInit`, `initialize` also stops the actor, which fails the spawn. See
 // stdlib/test/actor_continue_with_test.bt.
 
@@ -24,7 +25,10 @@ Actor subclass: SlowContinueActor
     Timer sleep: self.stepDelay
     self.log := self.log add: #slowStep
 
-  explode => self error: "boom in initialize continuation"
+  // Waits `stepDelay` first, so a test can register onExit: in time.
+  explode =>
+    Timer sleep: self.stepDelay
+    self error: "boom in initialize continuation"
 
   mark => self.log := self.log add: #mark
 

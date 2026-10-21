@@ -108,14 +108,18 @@ abstract Object subclass: Supervisor
   /// `MySupervisor`, not the abstract `Supervisor` base). Use `unwrap` for
   /// boot-style "crash on failure" call sites, or `ifOk:ifError:` /
   /// `andThen:` for recoverable starts. Failures surface as
-  /// `Result error: #beamtalk_error{kind = supervisor_start_failed}`.
+  /// `Result error: #beamtalk_error{kind = supervisor_start_failed}`,
+  /// including an `initialize` that raises and a call that waited too long
+  /// behind a concurrent `supervise` of the same class (concurrent calls are
+  /// served in arrival order).
   class sealed supervise -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) startLink: self
 
   /// Start a new, anonymous instance of this supervisor with `nil` args.
   ///
   /// Each call starts a separate tree. Raises `#supervisor_start_failed`
-  /// when the start fails. Not `current`: look an anonymous instance up by
+  /// when the start fails; an error raised by `initialize` propagates as
+  /// is. Not `current`: look an anonymous instance up by
   /// the handle you hold, or `Node current supervisors`.
   ///
   /// ## Examples
@@ -145,7 +149,9 @@ abstract Object subclass: Supervisor
   ///
   /// `name` must come from a bounded, statically known set (ADR 0079): it is
   /// an atom. A taken name gives `Result error:` with kind
-  /// `#name_registered`; any other failure `#supervisor_start_failed`.
+  /// `#name_registered`; any other failure, including an `initialize` that
+  /// raises, `#supervisor_start_failed` (as `Actor spawnAs:` answers a
+  /// failed `initialize` in its `Result`).
   class sealed spawnAs: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_supervisor) doSpawnAs: self withName: name
 
@@ -213,7 +219,8 @@ abstract Object subclass: Supervisor
   /// OTP restarts replay the same args, so a restarted supervisor recomputes
   /// the same configuration. Readable from the configuration methods (inside
   /// `init`) and from outside; raises with kind `#stale_handle` when the
-  /// supervisor is no longer running.
+  /// supervisor is no longer running, and `#node_down` when a remote
+  /// supervisor's node cannot be reached.
   args -> Dynamic => self argsResult unwrap
 
   /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped `args/1` call.
@@ -226,7 +233,9 @@ abstract Object subclass: Supervisor
   /// Runs in the caller's process after the supervisor has finished
   /// starting, so `which:` and other messages to `self` work here (unlike
   /// in the configuration methods). If it raises, the supervisor is stopped
-  /// and the start fails.
+  /// and the start fails: `spawn` and `spawnWith:` re-raise the error,
+  /// while `supervise`, `spawnAs:` and `spawnWith:as:` answer `Result error:`
+  /// with kind `#supervisor_start_failed` (the original error is its cause).
   ///
   /// Fires exactly once per top-level start — the `supervise` call that
   /// started the instance, or each `spawn`/`spawnWith:`/`spawnAs:` — not for
@@ -407,12 +416,24 @@ abstract Object subclass: Supervisor
   internal countChildrenResult -> Result(Integer, Error) =>
     (Erlang beamtalk_supervisor) countChildren: self
 
+  /// Is this supervisor running?
+  ///
+  /// A supervisor on another node answers `true` (as an actor does); the
+  /// next call to it reports `#stale_handle` or `#node_down`. Sealed, like
+  /// `stop` (BT-3984): the runtime answers both without a method lookup.
+  ///
+  /// WARNING: check-then-act is racy; the supervisor can stop right after.
+  sealed isAlive -> Boolean => (Erlang beamtalk_supervisor) isAlive: self
+
   /// Stop this supervisor and all its children.
+  ///
+  /// Raises with kind `#stale_handle` when the supervisor is not running and
+  /// `#node_down` when its node cannot be reached. Sealed (BT-3984).
   ///
   /// BT-1997 / ADR 0080 Phase 1: `stop/1` returns a Result-shaped value;
   /// call `unwrap` at the FFI boundary to preserve the pre-migration
   /// user-facing signature.
-  stop -> Nil => self stopResult unwrap
+  sealed stop -> Nil => self stopResult unwrap
 
   /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped `stop/1`
   /// call. Keeps `stop` pure Beamtalk.

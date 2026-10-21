@@ -671,6 +671,60 @@ fails the debug verifier. `loop_body_self_send_operand_corpus.rs` proves it over
 self-send shape x body shape; `FOLD_BODY_SELF_SEND_OPERANDS` is gone from
 `field_assignment_value_position.rs`.
 
+## Amendment: a conditional's state-advancing receiver is sequenced ahead (BT-4000)
+
+`[n > 0] whileTrue: [(self done) ifTrue: [Timer sleep: 0]]` in an actor instance method
+panicked the debug verifier (`UnboundVersion State1`). The inline-control-flow producer
+compiled its receiver through `compile_conditional_receiver` and rendered the receiver's
+self-send prelude into the conditional's own tuple document, out of the frame's sight.
+At the method root the opaque-version-gap backfill hid it; in a `Letrec` loop body the
+conditional's `State` extraction read a version no `Bind` of the loop frame produced,
+and the loop's recursive call carried the pre-statement `State`, so a release build
+dropped the receiver's state change. The generated corpus showed the same failure in a
+conditional arm and an `on:do:`/`ensure:` body. Their lowering compiled such a statement
+as a raw tuple and never asked `threaded_expression` for a prelude at all.
+
+**Invariant.** A statement whose evaluation produces a `State` version binds it in the
+frame the statement runs in, before anything reads it. A conditional's receiver runs
+first and unconditionally, so in an actor instance method a receiver that advances
+`State` (a unary, keyword or binary self-send, or one as the operand of `and:`/`or:`,
+anywhere in the receiver's sequenceable sub-tree) is sequenced ahead of the conditional
+by `threaded_expression`'s receiver-prelude splice (`conditional_receiver_operand`, the
+splice BT-3910 introduced for a value-position local assignment in the receiver;
+`conditional_receiver_is_sequenced` is the one predicate). Its `Bind`s land in the
+caller's frame, and the conditional is then lowered over the sequenced receiver: as a
+producer when its arms need threading, as a plain send otherwise.
+
+| Scope | Guarantee |
+|---|---|
+| Method-body statement | the receiver's `Bind`s are root statements (were hidden by the gap backfill) |
+| Conditional arm | a conditional statement whose receiver is sequenced goes through `threaded_expression` -> the splice (`arm_statement_is_producer`; it used to be compiled as a raw tuple the arm unpacked, with the receiver's `Bind`s inside it) |
+| `Letrec` loop body (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`) | `lower_letrec_non_assign_expr` -> `thread_ahead` -> the splice |
+| `Foldl` loop body (`do:`/...) | a value position goes through `thread_ahead` -> the splice; a conditional statement takes the fold's own `{Result, StateAcc}` unpack, whose element 2 carries the receiver's change (verified with opaque gaps, so the runtime `foldBody` row is its proof; a non-literal block argument there is BT-4017) |
+| `on:do:`/`ensure:` arm | `generate_exception_body_with_threading_inner` -> `thread_ahead` -> the splice (its last statement used to take the same raw-tuple path as the conditional arm; `arm_statement_is_producer` routes it to `thread_ahead`) |
+| Bare block, stored closure, NLR boundary | not a statement sequence of this frame (as above) |
+
+Every consumer that would unpack a `{Value, State}` tuple from such a conditional reads
+the value `thread_ahead` registered instead (`thread_ahead_unwraps`, the one predicate).
+This covers a local assignment's right-hand side (`lower_local_var_assignment_bind`'s C3b,
+the loop-body local paths), the method root's statement and last expression, an arm's
+field write (lowered by C1) and a destructuring statement in every body
+(`generate_destructure_bindings_sequenced`). An assigned conditional whose arm writes a
+field used to be unwrapped twice in an arm or an `ensure:` body, which raised `badarg` at
+run time. That was fixed by the same rule. A value-type receiver that writes a field keeps
+its own splice (`vt_conditional_operand`, BT-3816). A class-method receiver produces no
+family version (ADR 0130).
+
+**Verifier.** The existing `UnboundVersion` check already fails on the repro; no new
+variant was needed. `LocalRebindFault::ReceiverPreludeInTuple` restores the pre-fix
+lowering, and `loop_body_conditional_receiver_corpus.rs` shows the verifier reports
+`UnboundVersion` for every `Letrec` row under it, then proves the fix over receiver form
+x conditional (`ifTrue:`, `ifFalse:`, `ifTrue:ifFalse:`, `ifNil:`, `and:`, `or:`) x arm
+write (none, local, field) x position (every `Letrec` loop kind, a fold body, the method
+root, a conditional arm, an `on:do:` and an `ensure:` body, a loop in an arm) x actor
+context through `erlc`; the REPL rows are
+`beamtalk-repl`'s `repl_loop_body_conditional_receiver.rs`.
+
 ## References
 - Epic: BT-3413 (issues BT-3414 – BT-3424)
 - Related issues: BT-3374, BT-3382, BT-3392, BT-3396, BT-3399, BT-3402,
