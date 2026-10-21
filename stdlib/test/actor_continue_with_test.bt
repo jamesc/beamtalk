@@ -63,13 +63,21 @@ TestCase subclass: ActorContinueWithTest
     self assert: actor log equals: #(#initialize, #slowStep)
     actor stop
 
-  testRaisingInitializeContinuationDoesNotFailSpawn =>
-    // Cast semantics: logged, its own requests dropped, later steps run.
-    actor := SlowContinueActor spawnWith: #{#failFirst => true}
+  testRaisingInitializeContinuationCrashesActorAfterSpawn =>
+    // Cast semantics (ADR 0134, BT-3958): the continuation runs after spawn
+    // has returned, so its error is not a spawn failure — it crashes the
+    // running actor, and the step queued behind it never runs.
+    table := Ets new: #continueInitRaising type: #set
+    actor := SlowContinueActor spawnWith: #{
+      #failFirst => true,
+      #stepDelay => 300
+    }
     self assert: actor isAlive
-    self assert: actor log equals: #(#initialize, #slowStep)
-    self assert: actor isAlive
-    actor stop
+    actor onExit: [:reason | table at: #exitReason put: reason]
+    100 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    self assert: ((table at: #exitReason) at: 1) message equals: "boom in initialize continuation"
+    table delete
 
   testStopInInitializeStillFailsSpawn =>
     // The ack is sent only for a successful initialize step: a stop
@@ -213,24 +221,40 @@ TestCase subclass: ActorContinueWithTest
     server stop
 
   // === Errors in a continuation take the cast path ===
-  testRaisingContinuationBehavesLikeRaisingCast =>
-    // Before BT-3958 (ADR 0134) a no-reply error is logged and the actor
-    // continues with its pre-call state; the continuation does the same.
-    server := ContinueWithServer spawn
-    server explode!
-    self assert: server counter equals: 0
-    self assert: server isAlive
+  testRaisingContinuationCrashesActorLikeRaisingCast =>
+    // ADR 0134 (BT-3958): a no-reply error crashes the actor, and a raising
+    // continuation does the same as a raising `!` cast: terminate: and
+    // onExit: see the error.
+    cast := ContinueWithServer spawn
+    castExit := Ets new: #continueCastExit type: #set
+    cast onExit: [:reason | castExit at: #exitReason put: reason]
+    cast explode!
+    50 timesRepeat: [(castExit at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: cast isAlive
+    self assert: ((castExit at: #exitReason) at: 1) message equals: "boom in continuation"
+    castExit delete
+    table := Ets new: #continueRaising type: #set
+    server := ContinueWithServer spawnWith: #{#tableName => #continueRaising}
+    server onExit: [:reason | table at: #exitReason put: reason]
     self assert: server failLater equals: #requested
-    self assert: server counter equals: 0
-    self assert: server isAlive
-    server stop
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    exitReason := table at: #exitReason
+    self assert: (exitReason at: 1) message equals: "boom in continuation"
+    self assert: (table at: #reason) equals: exitReason
+    table delete
 
-  testFailingContinuationKeepsStepsQueuedBehindIt =>
-    server := ContinueWithServer spawn
-    self assert: server failThenContinue equals: #requested
-    self assert: server log equals: #(#continuation)
-    self assert: server counter equals: 0
-    server stop
+  testFailingContinuationDropsStepsQueuedBehindIt =>
+    // The crash ends the actor, so the steps queued behind the failing one
+    // never run.
+    table := Ets new: #continueFailQueued type: #set
+    server := ContinueWithServer spawnWith: #{#tableName => #continueFailQueued}
+    self assert: server failThenMark equals: #requested
+    50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self deny: (table at: #reason) isNil
+    self assert: (table at: #xRan) equals: nil
+    table delete
 
   // === Stop interaction ===
   testStopThenContinueStopsWithoutRunningContinuation =>

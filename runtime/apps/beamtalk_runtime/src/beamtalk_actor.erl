@@ -215,12 +215,6 @@ handle_getValue([], State) ->
 %% gen_server callback returns — it becomes OTP's `{continue, _}` action.
 -define(PENDING_CONTINUE_KEY, '$bt_pending_continue').
 
-%% BT-3968: the part of the continuation queue that was already committed
-%% before the current `handle_continue/2` step ran (seeded by
-%% seed_pending_continuations/1). A failing step drops only the requests it
-%% made itself — discard_pending_continuations/0 restores this base.
--define(PENDING_CONTINUE_BASE_KEY, '$bt_pending_continue_base').
-
 %% BT-3968: the `handle_continue/2` term carrying the continuation queue.
 -define(BT_CONTINUE_TAG, '$bt_continue').
 
@@ -308,8 +302,8 @@ handle_getValue([], State) ->
 %% `self continueWith:`; clear_pending_actions/0 runs first so a request can
 %% never leak in from anywhere else. seed_pending_continuations/1 (from
 %% handle_continue) keeps an already-queued chain ahead of new requests, and
-%% discard_pending_continuations/0 (from the dispatch-error arms) drops the
-%% continuations a failed dispatch requested.
+%% discard_pending_continuations/0 (from the replying dispatch-error arms)
+%% drops the continuations a failed dispatch requested.
 -export([
     clear_pending_actions/0,
     apply_pending_actions/1,
@@ -1540,7 +1534,7 @@ sync_send(ActorPid, Selector, Args) ->
     %% inside a handle_call/handle_cast dispatch), dispatch directly to avoid
     %% gen_server:call deadlock. This catches aliased self-sends like:
     %%   other := self. other fieldNames
-    case ActorPid =:= self() andalso get('$bt_actor_state') =/= undefined of
+    case ActorPid =:= self() andalso beamtalk_actor_state:installed() of
         true ->
             self_dispatch(Selector, Args);
         false ->
@@ -1790,7 +1784,7 @@ sync_send(ActorPid, Selector, Args, Timeout) when
     Timeout =:= infinity
 ->
     %% Layer 1: Fast-path for self-sends (same as sync_send/3).
-    case ActorPid =:= self() andalso get('$bt_actor_state') =/= undefined of
+    case ActorPid =:= self() andalso beamtalk_actor_state:installed() of
         true ->
             self_dispatch(Selector, Args);
         false ->
@@ -1872,7 +1866,7 @@ raises an error exception on dispatch failure.
 """.
 -spec self_dispatch(atom(), list()) -> term().
 self_dispatch(Selector, Args) ->
-    State = get('$bt_actor_state'),
+    State = beamtalk_actor_state:take(),
     %% Compiled actors have their own safe_dispatch/3 in the generated
     %% module. Use __class_mod__ from State to call the right dispatch function.
     %% If __class_mod__ is missing (runtime-only actors), fall back to
@@ -1894,23 +1888,21 @@ Used by self_dispatch/2 to avoid repeating the put/error pattern.
 -spec unwrap_dispatch_result(
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}
 ) -> term().
-unwrap_dispatch_result({reply, Result, NewState}) ->
-    put('$bt_actor_state', NewState),
-    Result;
-unwrap_dispatch_result({noreply, NewState}) ->
-    put('$bt_actor_state', NewState),
-    nil;
-unwrap_dispatch_result({error, {ErlType, ErrorValue, Stacktrace}, NewState}) ->
-    %% safe_dispatch with stacktrace
-    put('$bt_actor_state', NewState),
-    beamtalk_exception_handler:reraise(ErlType, ErrorValue, Stacktrace);
-unwrap_dispatch_result({error, {ErlType, ErrorValue}, NewState}) ->
-    %% Backward compat: preserve exception class without stacktrace
-    put('$bt_actor_state', NewState),
-    beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
-unwrap_dispatch_result({error, Reason, NewState}) ->
-    put('$bt_actor_state', NewState),
-    beamtalk_exception_handler:reraise(Reason).
+unwrap_dispatch_result(DispatchResult) ->
+    case beamtalk_actor_state:adapt(DispatchResult) of
+        {reply, Result} ->
+            Result;
+        noreply ->
+            nil;
+        {error, {ErlType, ErrorValue, Stacktrace}} ->
+            %% safe_dispatch with stacktrace
+            beamtalk_exception_handler:reraise(ErlType, ErrorValue, Stacktrace);
+        {error, {ErlType, ErrorValue}} ->
+            %% Backward compat: preserve exception class without stacktrace
+            beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
+        {error, Reason} ->
+            beamtalk_exception_handler:reraise(Reason)
+    end.
 
 -doc """
 Restore pdict entries after a dispatch completes.
@@ -1919,10 +1911,7 @@ both the stashed actor state and the call stack.
 """.
 -spec restore_dispatch_pdict(term()) -> ok.
 restore_dispatch_pdict(OldState) ->
-    case OldState of
-        undefined -> erase('$bt_actor_state');
-        _ -> put('$bt_actor_state', OldState)
-    end,
+    ok = beamtalk_actor_state:uninstall(OldState),
     erase('$bt_call_stack'),
     ok.
 
@@ -2192,9 +2181,9 @@ stop_actor(ActorPid, Reason, Timeout) when ActorPid =:= self() ->
     %% (e.g. a hand-written native gen_server) there is nothing to consume
     %% it, so fall through and let gen_server:stop/3 fail visibly
     %% (calling_self) instead of answering ok and never stopping.
-    case get('$bt_actor_state') of
-        undefined -> stop_external(ActorPid, Reason, Timeout);
-        _ -> request_deferred_stop(Reason)
+    case beamtalk_actor_state:installed() of
+        false -> stop_external(ActorPid, Reason, Timeout);
+        true -> request_deferred_stop(Reason)
     end;
 stop_actor(ActorPid, Reason, Timeout) ->
     stop_external(ActorPid, Reason, Timeout).
@@ -2291,7 +2280,6 @@ some unwrapped path earlier.
 clear_pending_actions() ->
     _ = erase(?PENDING_STOP_KEY),
     _ = erase(?PENDING_CONTINUE_KEY),
-    _ = erase(?PENDING_CONTINUE_BASE_KEY),
     ok.
 
 -doc """
@@ -2323,7 +2311,6 @@ when
 apply_pending_actions(Result) ->
     Stop = erase(?PENDING_STOP_KEY),
     Continuations = erase(?PENDING_CONTINUE_KEY),
-    _ = erase(?PENDING_CONTINUE_BASE_KEY),
     case {Stop, Continuations} of
         {{stop, Reason}, _} -> pending_stop_result(Result, Reason);
         {undefined, [_ | _] = RevQueue} -> add_continue(Result, lists:reverse(RevQueue));
@@ -2349,9 +2336,9 @@ add_continue(Result, _Queue) ->
 BT-3968: seed the continuation queue at the start of a `handle_continue/2`
 step with the continuations still waiting behind the one about to run, so
 any request the running continuation makes is appended *after* them (FIFO).
-The seeded part is also remembered as the committed base, which survives a
-failing step (see discard_pending_continuations/0). Runs after
-clear_pending_actions/0 inside the wrapped callback.
+Runs after clear_pending_actions/0 inside the wrapped callback. A step that
+raises crashes the actor (ADR 0134), so nothing seeded here outlives a
+failing step.
 """.
 -spec seed_pending_continuations([{atom(), list()}]) -> ok.
 seed_pending_continuations([]) ->
@@ -2359,22 +2346,21 @@ seed_pending_continuations([]) ->
 seed_pending_continuations(Rest) when is_list(Rest) ->
     RevRest = lists:reverse(Rest),
     put(?PENDING_CONTINUE_KEY, RevRest),
-    put(?PENDING_CONTINUE_BASE_KEY, RevRest),
     ok.
 
 -doc """
 BT-3968: drop the continuations requested by a dispatch that failed. Called
-from the dispatch-error arms: the failed method's follow-up steps are void.
-Continuations committed by an earlier, successful dispatch (the base seeded
-by seed_pending_continuations/1) are kept and still run — like casts queued
-behind a failing cast. A pending stop is left alone and still honoured.
+from the dispatch-error arms that reply (a sync call, an async send with a
+future): the failed method's follow-up steps are void. Such a callback never
+runs inside a `handle_continue/2` step, so no earlier continuation is queued
+alongside them. A pending stop is left alone and still honoured. A failed
+dispatch with no reply channel (a cast, `handleInfo:`, a continuation step)
+crashes the actor instead (ADR 0134, see dispatch_cast/3), which drops the
+whole queue.
 """.
 -spec discard_pending_continuations() -> ok.
 discard_pending_continuations() ->
-    case get(?PENDING_CONTINUE_BASE_KEY) of
-        undefined -> _ = erase(?PENDING_CONTINUE_KEY);
-        Base -> put(?PENDING_CONTINUE_KEY, Base)
-    end,
+    _ = erase(?PENDING_CONTINUE_KEY),
     ok.
 
 -doc """
@@ -2418,7 +2404,7 @@ async_request_continuation(Pid, RequestSelector, ContSelector, ArgSpec, FuturePi
 -spec record_continuation(term(), atom(), term(), none | {args, term()}) ->
     ok | {error, #beamtalk_error{}}.
 record_continuation(Pid, RequestSelector, ContSelector, ArgSpec) ->
-    case Pid =:= self() andalso get('$bt_actor_state') =/= undefined of
+    case Pid =:= self() andalso beamtalk_actor_state:installed() of
         false ->
             {error, invalid_continuation_error(Pid, RequestSelector)};
         true ->
@@ -3021,7 +3007,8 @@ Handle asynchronous messages (cast).
 Accepts two wire formats:
   {cast, Selector, Args}       - Fire-and-forget (no future, result discarded)
   {Selector, Args, FuturePid}  - Async with future (backward-compatible)
-Errors in fire-and-forget are logged but do not crash the actor.
+An error in fire-and-forget has no caller to go to, so it crashes the
+actor (ADR 0134, BT-3958; see dispatch_cast/3).
 Errors in async-with-future are communicated via future rejection.
 """.
 -spec handle_cast(term(), map()) ->
@@ -3117,29 +3104,27 @@ dispatch_cast(Selector, Args, State) ->
     }),
     T0 = erlang:monotonic_time(microsecond),
     %% Stash State for re-entrant self-sends (Layer 1)
-    OldState = get('$bt_actor_state'),
-    put('$bt_actor_state', State),
+    OldState = beamtalk_actor_state:install(State),
     try
-        case dispatch(Selector, Args, Self, State) of
-            {reply, _Result, NewState} ->
+        case beamtalk_actor_state:adapt(dispatch(Selector, Args, Self, State)) of
+            {reply, _Result} ->
                 %% Fire-and-forget: result is discarded
+                NewState = beamtalk_actor_state:take(),
                 log_dispatch_complete(State, NewState, Selector, cast, T0),
                 {noreply, NewState};
-            {noreply, NewState} ->
+            noreply ->
+                NewState = beamtalk_actor_state:take(),
                 log_dispatch_complete(State, NewState, Selector, cast, T0),
                 {noreply, NewState};
-            {error, Reason, NewState} ->
-                %% Log error but don't crash — caller expects no reply.
-                %% BT-3968: the failed dispatch's continuations are void.
-                ok = discard_pending_continuations(),
-                T1 = erlang:monotonic_time(microsecond),
-                ?LOG_WARNING("Fire-and-forget dispatch error", #{
-                    selector => Selector,
-                    reason => Reason,
-                    duration_us => T1 - T0,
-                    domain => [beamtalk, runtime]
-                }),
-                {noreply, NewState}
+            {error, Reason} ->
+                %% BT-3958 (ADR 0134): no reply channel, so the error
+                %% crashes the actor (gen_server's crash report names the
+                %% message; terminate/2 sees the error as its reason). It is
+                %% raised as a wrapped Exception object, the same reason a
+                %% compiled actor's generated no-reply error arms raise
+                %% (`noreply_error_arms` in the codegen's
+                %% gen_server/callbacks.rs).
+                beamtalk_exception_handler:reraise(Reason)
         end
     after
         restore_dispatch_pdict(OldState)
@@ -3158,21 +3143,23 @@ dispatch_async(Selector, Args, FuturePid, State) ->
     }),
     T0 = erlang:monotonic_time(microsecond),
     %% Stash State for re-entrant self-sends (Layer 1)
-    OldState = get('$bt_actor_state'),
-    put('$bt_actor_state', State),
+    OldState = beamtalk_actor_state:install(State),
     try
-        case dispatch(Selector, Args, Self, State) of
-            {reply, Result, NewState} ->
+        case beamtalk_actor_state:adapt(dispatch(Selector, Args, Self, State)) of
+            {reply, Result} ->
                 %% Resolve the future with the result
+                NewState = beamtalk_actor_state:take(),
                 log_dispatch_complete(State, NewState, Selector, async, T0),
                 maybe_resolve_future(FuturePid, Result),
                 {noreply, NewState};
-            {noreply, NewState} ->
+            noreply ->
                 %% Method didn't return a value, resolve with nil
+                NewState = beamtalk_actor_state:take(),
                 log_dispatch_complete(State, NewState, Selector, async, T0),
                 maybe_resolve_future(FuturePid, nil),
                 {noreply, NewState};
-            {error, Reason, NewState} ->
+            {error, Reason} ->
+                NewState = beamtalk_actor_state:take(),
                 %% Method failed, reject the future.
                 %% BT-3968: the failed dispatch's continuations are void.
                 ok = discard_pending_continuations(),
@@ -3252,18 +3239,20 @@ dispatch_call(Selector, Args, From, State) ->
     T0 = erlang:monotonic_time(microsecond),
     %% Stash State in pdict so re-entrant self-sends (Layer 1)
     %% can dispatch directly without going through gen_server:call.
-    OldState = get('$bt_actor_state'),
-    put('$bt_actor_state', State),
+    OldState = beamtalk_actor_state:install(State),
     try
-        case dispatch(Selector, Args, Self, State) of
-            {reply, Result, NewState} ->
+        case beamtalk_actor_state:adapt(dispatch(Selector, Args, Self, State)) of
+            {reply, Result} ->
+                NewState = beamtalk_actor_state:take(),
                 log_dispatch_complete(State, NewState, Selector, sync, T0),
                 {reply, encode_reply_for(From, Selector, Result), NewState};
-            {noreply, NewState} ->
+            noreply ->
                 %% Method didn't return a value, return nil
+                NewState = beamtalk_actor_state:take(),
                 log_dispatch_complete(State, NewState, Selector, sync, T0),
                 {reply, encode_reply_for(From, Selector, nil), NewState};
-            {error, Reason, NewState} ->
+            {error, Reason} ->
+                NewState = beamtalk_actor_state:take(),
                 %% Method failed, return error tuple.
                 %% BT-3968: the failed dispatch's continuations are void.
                 ok = discard_pending_continuations(),

@@ -345,7 +345,7 @@ fn test_generate_message_send_binary_op_addition() {
 }
 
 #[test]
-fn test_generate_cast_send_actor_self_uses_safe_dispatch() {
+fn test_generate_cast_send_actor_self_routes_to_mailbox() {
     let mut generator = CoreErlangGenerator::new("test");
     generator.context = crate::core_erlang::CodeGenContext::Actor;
     let receiver = Expression::Identifier(Identifier::new("self", s()));
@@ -354,22 +354,15 @@ fn test_generate_cast_send_actor_self_uses_safe_dispatch() {
         .generate_cast_send(&receiver, &selector, &[])
         .unwrap();
     let output = doc.to_pretty_string();
+    // BT-3998: a self-cast is a real cast to the mailbox (lands after the
+    // current message), never an inline dispatch whose State is dropped.
     assert!(
-        output.contains("safe_dispatch"),
-        "actor self cast should use safe_dispatch. Got: {output}"
-    );
-    // BT-3692: passes the caller's `Self` to `safe_dispatch/4`, and falls back to
-    // `/3` when the receiver module (compiled by an older compiler) lacks `/4`.
-    assert!(
-        output.contains("'function_exported'(")
-            && output.contains("'safe_dispatch', 4)")
-            && output.contains("'safe_dispatch'('doIt', _SDArgs")
-            && output.contains(", Self, State)"),
-        "actor self cast should pass Self to safe_dispatch/4 with a /3 fallback. Got: {output}"
+        output.contains("'beamtalk_message_dispatch':'cast'(") && output.contains("'doIt'"),
+        "actor self cast should route through beamtalk_message_dispatch:cast. Got: {output}"
     );
     assert!(
-        output.contains("'ok'"),
-        "actor self cast should return 'ok'. Got: {output}"
+        !output.contains("safe_dispatch"),
+        "actor self cast must not dispatch inline. Got: {output}"
     );
 }
 

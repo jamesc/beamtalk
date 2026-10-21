@@ -631,10 +631,10 @@ pub enum DiagnosticCategory {
     DefiniteAssignment,
     /// Unguarded `late`-slot read reachable from `terminate:`/`handleInfo:`
     /// (ADR 0124 §4d, Implementation B6) — `terminate/2` wraps its dispatch
-    /// in `try … catch -> 'ok'` and `handleInfo:` errors are logged and
-    /// swallowed (log-and-continue), so an unguarded read that raises
+    /// in `try … catch -> 'ok'`, so an unguarded read that raises
     /// `UninitializedStateError` there lets the callback "complete" while
-    /// silently skipping whatever it was meant to do.
+    /// silently skipping whatever it was meant to do; in `handleInfo:` the
+    /// error crashes the server (ADR 0134).
     ///
     /// A sibling to [`Self::DefiniteAssignment`] rather than reusing it
     /// (ADR 0124 §4d, BT-3555): the two check different things (a

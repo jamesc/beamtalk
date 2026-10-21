@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3994: a supervisor whose instance-side `initialize` raises, so every
+// top-level start fails after the tree has started (and is then stopped).
+
+Supervisor subclass: Bt3994FailingInitSup
+
+  childSpecs => #()
+
+  initialize => Error signal: "bt3994 initialize failed"
