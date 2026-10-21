@@ -6,7 +6,7 @@
 use super::*;
 
 /// Build a minimal `Supervisor subclass: WebApp` module with `supervisor_kind = Static`.
-fn make_static_supervisor_module() -> Module {
+pub(super) fn make_static_supervisor_module() -> Module {
     let class = ClassDefinition {
         name: Identifier::new("WebApp", Span::new(0, 0)),
         superclass: Some(Identifier::new("Supervisor", Span::new(0, 0))),

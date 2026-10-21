@@ -20,6 +20,7 @@ use super::control_flow::{BodyKind, ThreadingPlan};
 use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
 use super::method_frame::{MethodBoundary, MethodFrame};
+use super::module_shell::core_module;
 use super::spec_codegen;
 use super::threaded_ir::{
     CarrierSlot, FrameId, RebindLowering, RenderCtx, ThreadedLocalSlot, ThreadedStmt,
@@ -302,7 +303,8 @@ impl CoreErlangGenerator {
         // This is `None` for `ClassKind::Object` and `ClassKind::Actor`.
         let auto_methods = compute_auto_slot_methods(class);
 
-        // Collect all function exports for the module header.
+        // The module's exports and attributes; `module_shell::core_module`
+        // (below) builds the header around them.
         let exports = Self::build_value_type_exports(
             module,
             class,
@@ -310,11 +312,8 @@ impl CoreErlangGenerator {
             has_explicit_new,
             has_explicit_new_with,
         );
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-
-        // Module header with all attributes
-        docs.push(self.build_value_type_module_header(module, class, exports));
+        let attributes = self.build_value_type_module_attributes(module, class);
+        let mut docs: Vec<Document<'static>> = vec![Document::Str("\n")];
 
         // Generate new/0 - creates instance with default field values
         if !has_explicit_new {
@@ -408,10 +407,8 @@ impl CoreErlangGenerator {
         // Generate __beamtalk_meta/0 for zero-process reflection
         docs.push(self.generate_meta_function(module, false)?);
 
-        // Module end
-        docs.push(Document::Str("end\n"));
-
-        Ok(Document::Vec(docs))
+        let (name, body) = (self.module_name.clone(), Document::Vec(docs));
+        Ok(core_module(name, exports, attributes, body))
     }
 
     /// Builds the export list for a value type module header.
@@ -485,15 +482,14 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Builds the Core Erlang `module 'Name' [...] attributes [...]` header document.
+    /// Builds the module's attribute list (the contents of `attributes [...]`).
     ///
-    /// Assembles spec attributes, type aliases, and source-path metadata into a single
-    /// module-header document, including `on_load` and `beamtalk_class` annotations.
-    fn build_value_type_module_header(
+    /// Assembles spec attributes, type aliases, and source-path metadata,
+    /// including `on_load` and `beamtalk_class` annotations.
+    fn build_value_type_module_attributes(
         &mut self,
         module: &Module,
         class: &ClassDefinition,
-        exports: Document<'static>,
     ) -> Document<'static> {
         // Generate spec attributes from type annotations
         // use the generator's cross-module-aware alias
@@ -550,14 +546,8 @@ impl CoreErlangGenerator {
         let source_path_attr = self.source_path_attr();
         let file_attr = self.file_attr();
 
-        let module_name = self.module_name.clone();
         docvec![
-            "module ",
-            leaf::atom(module_name),
-            " [",
-            exports,
-            "]\n",
-            "  attributes ['on_load' = [{'register_class', 0}]",
+            "'on_load' = [{'register_class', 0}]",
             beamtalk_class_attr,
             file_attr,
             source_path_attr,
@@ -565,8 +555,6 @@ impl CoreErlangGenerator {
             type_alias_suffix,
             export_type_suffix,
             spec_suffix,
-            "]\n",
-            "\n",
         ]
     }
 

@@ -1,9 +1,8 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 138
 expression: core_erlang
 ---
-module 'value_enumeration_ops' ['new'/0, 'new'/1, 'sumWithIndex:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
+module 'value_enumeration_ops' ['new'/0, 'new'/1, 'sumWithIndex:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'EnumerationValue', 'Value'}],
      'spec' =
@@ -172,4 +171,8 @@ module 'value_enumeration_ops' ['new'/0, 'new'/1, 'sumWithIndex:'/2, 'dispatch'/
       'direct_class_methods' => ~{}~
     }~
 
+'module_info'/0 = fun () ->
+    call 'erlang':'get_module_info'('value_enumeration_ops')
+'module_info'/1 = fun (Key) ->
+    call 'erlang':'get_module_info'('value_enumeration_ops', Key)
 end

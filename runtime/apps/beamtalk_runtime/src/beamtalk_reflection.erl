@@ -128,9 +128,9 @@ inspect_string(State) when is_map(State) ->
 -doc """
 Read the beamtalk_source file path from a compiled module's attributes.
 
-Uses erlang:get_module_info/2 BIF instead of Mod:module_info/1 because
-Beamtalk modules compiled from Core Erlang via compile:forms(_, [from_core])
-do not export module_info/0,1. The BIF works regardless of exports.
+Uses the erlang:get_module_info/2 BIF rather than Mod:module_info/1 so it
+also works for modules compiled before BT-4067, which did not export
+module_info/0,1. The BIF works regardless of exports.
 Returns nil for stdlib/bootstrap/dynamically-created classes.
 """.
 -spec source_file_from_module(atom()) -> binary() | 'nil'.

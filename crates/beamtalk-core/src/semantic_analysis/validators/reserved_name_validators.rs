@@ -100,6 +100,61 @@ pub(crate) fn check_reserved_internal_names(module: &Module, diagnostics: &mut V
     });
 }
 
+/// The BEAM's predefined module-reflection function. Codegen defines
+/// `module_info/0,1` in every generated module (BT-4067,
+/// `beamtalk_codegen::core_erlang::module_shell`), so this name is reserved.
+pub const MODULE_INFO_FUNCTION: &str = "module_info";
+
+/// Reject a unary instance selector named `module_info` (an explicit method
+/// or a field, whose accessor is one).
+///
+/// Value-type and supervisor instance methods, and `Value subclass:` field
+/// getters, compile to an exported function named after the selector, taking
+/// `Self`: a unary `module_info` would be a second `module_info/1` next to
+/// the one every generated module defines, which `erlc` rejects. The rule is
+/// applied to every class kind so a class does not change meaning when it
+/// moves between kinds.
+pub(crate) fn check_reserved_module_info(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    let instance_methods = module
+        .classes
+        .iter()
+        .flat_map(|class| class.methods.iter())
+        .chain(
+            module
+                .method_definitions
+                .iter()
+                .filter(|standalone| !standalone.is_class_method)
+                .map(|standalone| &standalone.method),
+        );
+    for method in instance_methods {
+        if method.selector.arity() == 0 && method.selector.name() == MODULE_INFO_FUNCTION {
+            push_module_info_diagnostic("method", method.span, diagnostics);
+        }
+    }
+    for field in module.classes.iter().flat_map(|class| class.state.iter()) {
+        if field.name.name == MODULE_INFO_FUNCTION {
+            push_module_info_diagnostic("field", field.name.span, diagnostics);
+        }
+    }
+}
+
+fn push_module_info_diagnostic(kind: &str, span: Span, diagnostics: &mut Vec<Diagnostic>) {
+    diagnostics.push(
+        Diagnostic::error(
+            format!(
+                "{kind} `{MODULE_INFO_FUNCTION}` collides with the `{MODULE_INFO_FUNCTION}` \
+                 function every compiled module defines"
+            ),
+            span,
+        )
+        .with_hint(
+            "Rename it. `module_info` is the BEAM's predefined module-reflection function \
+             (used by profilers, xref and cover), so the compiler reserves the name."
+                .to_string(),
+        ),
+    );
+}
+
 /// Emits a diagnostic if `id`'s name is in the reserved namespace.
 fn check_declared_name(id: &Identifier, kind: &str, diagnostics: &mut Vec<Diagnostic>) {
     check_raw_name(id.name.as_str(), id.span, kind, diagnostics);
@@ -243,6 +298,38 @@ mod tests {
             diagnostics.is_empty(),
             "unexpected diagnostics: {diagnostics:?}"
         );
+    }
+
+    fn module_info_diagnostics_for(source: &str) -> Vec<Diagnostic> {
+        let module = parse_bt(source);
+        let mut diagnostics = Vec::new();
+        check_reserved_module_info(&module, &mut diagnostics);
+        diagnostics
+    }
+
+    #[test]
+    fn rejects_unary_module_info_method_and_field() {
+        let diagnostics = module_info_diagnostics_for(
+            "Value subclass: Point\n  field: module_info = 0\n  module_info => 1\n",
+        );
+        assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.message.contains("module_info"))
+        );
+        let standalone = module_info_diagnostics_for(
+            "Object subclass: Widget\n  run => 1\n\nWidget >> module_info => 2\n",
+        );
+        assert_eq!(standalone.len(), 1, "{standalone:?}");
+    }
+
+    #[test]
+    fn allows_keyword_and_class_side_module_info() {
+        let diagnostics = module_info_diagnostics_for(
+            "Object subclass: Widget\n  module_info: x => x\n  class module_info => 1\n",
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]

@@ -465,13 +465,12 @@ run_single_structured_fail_test() ->
 %%%
 %%% A hand-written .erl module gets module_info/0,1 auto-injected by the
 %%% ordinary erlc pipeline, so the bt@tc_stub tests above never exercised
-%%% the actual bug: Beamtalk's Core Erlang codegen compiles
-%%% straight to Core Erlang via compile:forms(..., [from_core | Opts])
-%%% (CLAUDE.md), which never runs the sys_pre_expand pass that injects
-%%% module_info/0,1 — so a genuinely compiled bt@ module has no
-%%% module_info/1, and Module:module_info(exports) raised an uncaught undef
-%%% for one. Since BT-3786 the BIF-fallback path reads no module exports at
-%%% all: tests and lifecycle methods come from
+%%% the original bug: a module compiled from Core Erlang (from_core) skips
+%%% the v3_core pass that injects module_info/0,1, so before BT-4067 (when
+%%% codegen started emitting them itself) a genuinely compiled bt@ module
+%%% had no module_info/1, and Module:module_info(exports) raised an uncaught
+%%% undef for one. Since BT-3786 the BIF-fallback path reads no module
+%%% exports at all: tests and lifecycle methods come from
 %%% beamtalk_test_case:class_test_plan/1, i.e. the class hierarchy.
 %%%
 %%% BifFallbackTestCase's testPasses/testFails inherit assert:equals: from

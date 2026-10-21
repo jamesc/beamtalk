@@ -110,23 +110,23 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        // Module header
-        docs.push(docvec![
-            "module ",
-            atom(module_name.to_string()),
-            " ['start_link'/0, 'start_link'/1, 'start_link'/2, 'init'/1",
+        // Module exports and attributes (the header itself is
+        // `module_shell::core_module`'s)
+        let exports = docvec![
+            "'start_link'/0, 'start_link'/1, 'start_link'/2, 'init'/1",
             instance_method_exports,
             class_method_exports,
-            ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0]\n",
-            "  attributes ['behaviour' = ['supervisor'], 'on_load' = [{'register_class', 0}]",
+            ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0",
+        ];
+        let attributes = docvec![
+            "'behaviour' = ['supervisor'], 'on_load' = [{'register_class', 0}]",
             beamtalk_class_attr,
             file_attr,
             source_path_attr,
             alias_type_suffix,
             spec_suffix,
-            "]\n",
-            "\n",
-        ]);
+        ];
+        docs.push(Document::Str("\n"));
 
         // start_link/0, start_link/1
         docs.push(Self::generate_sup_start_link(&module_name));
@@ -151,8 +151,12 @@ impl CoreErlangGenerator {
         docs.push(self.generate_meta_function(module, false)?);
         docs.push(self.generate_register_class(module, false)?);
 
-        docs.push(Document::Str("end\n"));
-        Ok(Document::Vec(docs))
+        Ok(super::module_shell::core_module(
+            module_name.to_string(),
+            exports,
+            attributes,
+            Document::Vec(docs),
+        ))
     }
 
     /// Export entries for a supervisor's instance side: one function per

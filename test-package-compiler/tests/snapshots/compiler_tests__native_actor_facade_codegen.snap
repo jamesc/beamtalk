@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'has_method'/1, 'method_table'/0, 'class_name'/0, 'superclass'/0, 'dispatch_doWork'/1, 'dispatch_compute:'/2, 'dispatch_ping:'/2, '__beamtalk_meta'/0, 'has_method_local'/1, 'register_class'/0]
+module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'has_method'/1, 'method_table'/0, 'class_name'/0, 'superclass'/0, 'dispatch_doWork'/1, 'dispatch_compute:'/2, 'dispatch_ping:'/2, '__beamtalk_meta'/0, 'has_method_local'/1, 'register_class'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'NativeWorker', 'Actor'}]]
 
@@ -183,4 +183,8 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, 'has_metho
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
+'module_info'/0 = fun () ->
+    call 'erlang':'get_module_info'('native_actor_facade')
+'module_info'/1 = fun (Key) ->
+    call 'erlang':'get_module_info'('native_actor_facade', Key)
 end

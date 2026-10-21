@@ -1048,6 +1048,9 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // Reject user names that collide with the reserved internal `__`
     // state-key namespace (`__local__…`, `__methods__`, `__class_mod__`).
     validators::check_reserved_internal_names(module, &mut result.diagnostics);
+    // Reject a unary instance `module_info`, which would collide with the
+    // predefined `module_info/1` every generated module defines (BT-4067).
+    validators::check_reserved_module_info(module, &mut result.diagnostics);
     // Reject method declarations for the equality operators codegen
     // lowers straight to Erlang BIFs (`=:=`, `=/=`, `==`, `/=`, ADR 0002) —
     // they never dispatch, so such a method is silently dead code.
