@@ -135,29 +135,16 @@ attach_many(HandlerId, EventNames, Block) ->
 -doc """
 `Telemetry detach: handlerId` — idempotent: detaching an unknown id answers
 `nil` too. `HandlerId` must be a Symbol or a String, and the runtime's own
-handler ids (`beamtalk_trace_store`'s) are refused with `reserved_name`, so
-Beamtalk code cannot switch off trace capture by accident.
+handler ids (`beamtalk_trace_store`'s) are refused with `reserved_name` here
+and in `attach/3`/`attach_many/3`, so Beamtalk code cannot switch off trace
+capture or squat on a runtime id by accident.
 """.
 -spec detach(term()) -> nil.
 detach(HandlerId) ->
     Sel = 'detach:',
     check_handler_id(HandlerId, Sel),
-    case lists:member(HandlerId, beamtalk_trace_store:telemetry_handler_ids()) of
-        true ->
-            beamtalk_error:raise(
-                error_with_hint(
-                    reserved_name,
-                    Sel,
-                    iolist_to_binary(
-                        io_lib:format("~tp is a runtime telemetry handler and cannot be detached", [
-                            HandlerId
-                        ])
-                    )
-                )
-            );
-        false ->
-            detach_handler(HandlerId)
-    end.
+    check_not_reserved(HandlerId, Sel),
+    detach_handler(HandlerId).
 
 -doc """
 Detach any telemetry handler id, unvalidated, for the runtime's own handlers
@@ -320,6 +307,7 @@ with_span_context(Meta, Ctx) -> Meta#{telemetry_span_context => Ctx}.
 
 do_attach(HandlerId, EventNames, Block, Sel) ->
     check_handler_id(HandlerId, Sel),
+    check_not_reserved(HandlerId, Sel),
     check_block(Block, 3, Sel),
     Result =
         try
@@ -405,6 +393,26 @@ check_block(Block, 3, Sel) ->
 
 check_handler_id(Id, _Sel) when is_atom(Id); is_binary(Id) -> ok;
 check_handler_id(Id, Sel) -> type_error(Sel, <<"handlerId must be a Symbol or a String">>, Id).
+
+%% The runtime's own handler ids (`beamtalk_trace_store`'s) cannot be attached
+%% or detached from Beamtalk, so the reserved set means the same on both sides.
+check_not_reserved(HandlerId, Sel) ->
+    case lists:member(HandlerId, beamtalk_trace_store:telemetry_handler_ids()) of
+        true ->
+            beamtalk_error:raise(
+                error_with_hint(
+                    reserved_name,
+                    Sel,
+                    iolist_to_binary(
+                        io_lib:format("~tp is a runtime telemetry handler id and is reserved", [
+                            HandlerId
+                        ])
+                    )
+                )
+            );
+        false ->
+            ok
+    end.
 
 -spec type_error(atom(), binary(), term()) -> no_return().
 type_error(Sel, Hint, Got) ->

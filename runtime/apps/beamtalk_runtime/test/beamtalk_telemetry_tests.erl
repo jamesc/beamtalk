@@ -325,7 +325,21 @@ maybe_span_nlr_emits_stop() ->
 detach_rejects_bad_and_reserved_ids() ->
     ?assertEqual(type_error, kind_of(fun() -> beamtalk_telemetry:detach(42) end)),
     [
-        ?assertEqual(reserved_name, kind_of(fun() -> beamtalk_telemetry:detach(Reserved) end))
+        begin
+            ?assertEqual(reserved_name, kind_of(fun() -> beamtalk_telemetry:detach(Reserved) end)),
+            ?assertEqual(
+                reserved_name,
+                kind_of(fun() ->
+                    beamtalk_telemetry:attach(Reserved, [a], fun(_, _, _) -> ok end)
+                end)
+            ),
+            ?assertEqual(
+                reserved_name,
+                kind_of(fun() ->
+                    beamtalk_telemetry:attach_many(Reserved, [[a]], fun(_, _, _) -> ok end)
+                end)
+            )
+        end
      || Reserved <- beamtalk_trace_store:telemetry_handler_ids()
     ],
     ?assertEqual(nil, beamtalk_telemetry:detach_handler({not_a_symbol, 42})).

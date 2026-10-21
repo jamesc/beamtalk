@@ -6223,7 +6223,7 @@ Telemetry detach: #auditMisses
 - A handler is not re-entered by an emit it causes itself (for example a handler on `#(#beamtalk, #actor, #dispatch, #stop)` that sends to an actor), so it cannot recurse without bound.
 - Class variables follow [ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md): a handler running away from its home class reads the values captured when the block was created, and a write raises `class_state_unreachable`; at home, a raising handler's writes are discarded.
 - The handler block belongs to the code that created it: after redefining that class, attach the handler again.
-- `detach:` refuses the runtime's own handler ids (the ones `Tracing` relies on) with `#reserved_name`.
+- The runtime's own handler ids (the ones `Tracing` relies on) are reserved: `attach:` and `detach:` refuse them with `#reserved_name`.
 - Exporters (StatsD, Prometheus, OpenTelemetry) are still attached in Erlang. Attaching from Beamtalk is mainly for tests and in-image consumers.
 
 The methods call the runtime (`beamtalk_telemetry`) directly rather than through the `(Erlang telemetry)` FFI, so an emit costs about 60–100 ns more than a raw `telemetry:execute/3`, against about 13 µs for the FFI spelling.

@@ -205,6 +205,16 @@ TestCase subclass: TelemetryTest
       Telemetry detach: #beamtalk_trace_store_dispatch_stop
     ] raise: #reserved_name
 
+  testAttachRuntimeHandlerIdIsRefused =>
+    self
+      should: [
+        Telemetry
+          attach: #beamtalk_trace_store_dispatch_stop
+          to: #(#bt4025, #r)
+          do: [:e :m :md | nil]
+      ]
+      raise: #reserved_name
+
   testDetachedHandlerNoLongerRuns =>
     t := self.table
     (Telemetry

@@ -73,7 +73,8 @@ sealed typed Object subclass: Telemetry
   /// The block receives `[:event :measurements :metadata | ...]`.
   /// `handlerId` is a Symbol or a String. Answers `Result ok: nil`, or
   /// `Result error:` with kind `#handler_exists` when `handlerId` is
-  /// already attached.
+  /// already attached. The runtime's own handler ids (`Tracing`'s) are
+  /// reserved and raise `#reserved_name`.
   ///
   /// The handler runs **in the emitting process**, synchronously, so keep it
   /// short. If it raises, `telemetry` logs the error and detaches the handler;
