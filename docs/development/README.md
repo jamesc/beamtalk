@@ -17,6 +17,7 @@ This directory contains documentation for **contributors and AI agents** working
 | [Erlang Guidelines](erlang-guidelines.md) | Erlang/OTP patterns: code generation, BEAM interop, testing |
 | [Common Tasks](common-tasks.md) | Step-by-step guides: adding AST nodes, CLI commands, stdlib features |
 | [Testing Strategy](testing-strategy.md) | Test organization, fixtures, E2E tests, coverage requirements |
+| [Actor State Cell](actor-state-cell.md) | How ADR 0137 keeps actor closures on live state: the sync-around-calls mechanism, `call_foreign/3`, verifier rules, costs and phase detail |
 | [AGENTS.md](../../AGENTS.md) | Complete guide for AI agents contributing to the codebase |
 
 ### Language Documentation

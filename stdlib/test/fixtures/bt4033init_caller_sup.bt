@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4033: a static Supervisor whose anonymous child calls it from
+// `initialize` (breaks the ADR 0135 hang rule).
+
+Supervisor subclass: Bt4033InitCallerSup
+
+  childSpecs =>
+    #((Bt4033InitParentCaller supervisionSpec withArgs: #{#parent => self}))

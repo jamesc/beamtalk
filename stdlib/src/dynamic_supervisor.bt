@@ -115,6 +115,12 @@ abstract Object subclass: DynamicSupervisor(C)
   /// otherwise. Read once per (re)start of the pool, so it may depend on
   /// `self args`.
   ///
+  /// `startChild`, `startChild:` and `startChild:name:` return once the new
+  /// child's `initialize` has returned; one that raises fails the start
+  /// (`Result error:` with `#child_start_failed`). That `initialize` must not
+  /// call this pool or an ancestor synchronously (the pool is waiting on it):
+  /// make such calls from a `continueWith:` step.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// DynamicSupervisor(Worker) subclass: WorkerPool

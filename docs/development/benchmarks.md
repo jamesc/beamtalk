@@ -1560,3 +1560,98 @@ guarded untyped 35 / 36 ns, guarded typed (same code as bare typed) 157 / 83 ns.
 
 Decision: untyped fields (`state:`, `field:`, `classState:`, sealed or not) are always guarded; a
 `:: Integer` / `:: Float` / `:: Number` annotation is the way to get the bare BIF.
+
+## BT-4025: `Telemetry` facade emit cost
+
+`Telemetry execute:measurements:metadata:` (ADR 0069 amendment) is a `@primitive` that lowers to a
+direct call into `beamtalk_telemetry:execute/3`, which validates the arguments and calls
+`telemetry:execute/3`. The issue's target was "within about 1 µs of a raw `telemetry:execute/3`".
+The comparison point is the BT-4019 spike's spelling, `(Erlang telemetry) execute:with:with:`, which
+compiles to `beamtalk_erlang_proxy:direct_call/3` and re-reads `module_info(exports)` on every call
+(BT-4021).
+
+### Harness
+
+`runtime/perf/bench_telemetry_facade.escript`, run after `just build`:
+
+```bash
+ERL_FLAGS="+S 1" escript runtime/perf/bench_telemetry_facade.escript 31 200000
+```
+
+It boots `beamtalk_stdlib`, times four rows per batch, interleaved, and reports the median of 31
+batches of 200,000 calls. Each call emits `[bench, bt4025, event]` with a one-key measurements map and
+a one-key metadata map.
+
+| Row | What it calls |
+|---|---|
+| raw | `telemetry:execute/3` |
+| runtime | `beamtalk_telemetry:execute/3` (the `@primitive` target) |
+| facade | `bt@stdlib@telemetry:'class_execute:measurements:metadata:'/4`, which a compiled static `Telemetry execute: ...` send direct-calls (sealed, stateless, `class sealed`; ADR 0129) |
+| ffi | `beamtalk_erlang_proxy:direct_call(telemetry, execute, [...])` |
+
+### Results
+
+Apple M5 Max, OTP 28, `+S 1`, 2026-10-21. The machine was shared with other agents' builds (load
+average 23 to 72), so treat the absolute numbers as rough; the ratios held across three runs.
+
+| Row | ns/call, 0 handlers | vs raw | ns/call, 1 no-op handler | vs raw |
+|---|---|---|---|---|
+| raw | 56 | — | 85 | — |
+| runtime | 135 | +79 | 187 | +102 |
+| facade | 153 | +97 | 176 | +91 |
+| ffi | 14,049 | +13,993 | 14,950 | +14,866 |
+
+The facade costs about 60–100 ns over a raw emit: the event-name and measurement-key checks, the
+`function_exported/3` guard and one extra call. That is well inside the 1 µs target and about 90
+times cheaper than the FFI spelling. An earlier, quieter run gave +60 ns (runtime) and +81 ns
+(facade) with no handlers.
+
+**Note:** the `ffi` row was measured before BT-4021 (#4487), which removed the per-call
+`module_info(exports)` read from `direct_call/3` (see the next section); an inline FFI emit now costs
+roughly 30–60 ns more than a raw call, so the facade's advantage over the FFI spelling is now small.
+The facade is still preferred: it is typed, validates its arguments, and needs no package-level
+`telemetry` native dependency.
+
+## BT-4021: inline FFI `direct_call/3` without the per-call export check
+
+Question: every inline FFI send (`Erlang erlang monotonic_time`, `(Erlang gen_tcp) send: s with: d`, ...)
+lowers to `beamtalk_erlang_proxy:direct_call(M, F, Args)`, which read `M:module_info(exports)` and did a
+`lists:member/2` before every apply. The Catalina Phase 0 spike (BT-4019, spike 6) measured ~7-15 µs per
+inline FFI call from that check, more than a whole loopback round trip. What does the call cost once the
+export list is read only after an `error:undef` on the target?
+
+### Method
+
+`runtime/perf/beamtalk_perf_tests.erl`, `bench_ffi_direct_call/0` (`just perf`, lines `PERF: ffi/*`):
+batches of 100 calls timed with `timer:tc(..., nanosecond)`, 1000 samples after 20,000 warm-up calls, ns
+per call. The table comes from a standalone escript using the same method, run twice against the built
+runtime with the pre-BT-4021 `beamtalk_erlang_proxy` (compiled from `origin/main`) on the code path
+("before") and twice without it ("after"), so both columns share one VM build and machine state. macOS,
+Apple Silicon, OTP 28, medians.
+
+| call | before (ns) | after (ns) |
+|---|---|---|
+| `erlang:monotonic_time()` (plain call) | 32-34 | 34-35 |
+| `direct_call(erlang, monotonic_time, [])` | 14,472-14,752 | 60 |
+| `direct_call(lists, reverse, [[a]])` | 12,705-12,792 | 29-30 |
+| `direct_call(gen_tcp, module_info, [module])` | 12,100-12,135 | 37-43 |
+| `gen_tcp:module_info(exports)` (the removed per-call work) | 11,912-11,982 | 11,830-12,049 |
+
+`just perf` after the change: `ffi/plain_monotonic_time` 28 ns, `ffi/direct_call_monotonic_time` 62 ns,
+`ffi/direct_call_vs_plain` 2.2x.
+
+### Findings
+
+- The export check was the whole cost: `direct_call` was the price of one `module_info(exports)` plus
+  noise. Without it an inline FFI call costs ~30-60 ns, about 2x a plain remote call; what remains is the
+  `try` frame, the class-variable snapshot (ADR 0130) and ok/error → `Result` coercion (ADR 0076).
+- Nothing is cached, so hot reload and purge need no invalidation: each call applies against whatever
+  code is loaded. `direct_call_tracks_hot_reload_and_purge_test` reloads a module with a function added,
+  then removed, then purges it, and checks each call.
+- Error messages are built lazily from the same `module_info(exports)` read, after an `undef` whose top
+  stack frame is the FFI target, so unknown-function, wrong-arity and module-not-loaded errors are
+  unchanged. An `undef` raised inside the callee (another MFA on top) is now wrapped as the canonical
+  `runtime_error` ("Undefined function: m:f/n") instead of being misreported as the FFI target missing.
+- One intended behaviour change: with no export gate in front of the apply, a module exporting
+  `'$handle_undefined_function'/2` now handles unknown FFI calls the way it would for a plain Erlang
+  caller (the pre-check used to reject them).
