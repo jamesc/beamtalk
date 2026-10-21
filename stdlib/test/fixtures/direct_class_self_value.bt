@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4029: a sealed, stateless Value whose `class sealed` methods are
+// direct-called (ADR 0129 Phase 0b). Each method reads the class-side `self`
+// in a different way; before the fix every one of them raised `badarg`,
+// because the direct path passed `nil` as `ClassSelf`.
+
+sealed Value subclass: DirectClassSelfValue
+  field: x = 0
+
+  // Instantiation through `self` and through the own-class name.
+  class sealed viaSelfNew => self new
+
+  class sealed viaSelfNewWith => self new: #{#x => 3}
+
+  class sealed viaNameNew => DirectClassSelfValue new: #{#x => 1}
+
+  class sealed viaNameNewBare => DirectClassSelfValue new
+
+  // The keyword constructor never read `ClassSelf`; kept as the control.
+  class sealed viaKeyword => DirectClassSelfValue x: 2
+
+  // Unsealed: runs in the class process with a real `ClassSelf` (control).
+  class viaOpenSelfNew => self new
+
+  // `self` as a value, and reflection on it.
+  class sealed me => self
+
+  class sealed myClass => self class
+
+  // `self` captured by a block, and instantiation inside it.
+  class sealed viaBlock => [self new: #{#x => 4}] value
+
+  // Class-side self-sends: to a sealed sibling (static direct call that
+  // forwards `ClassSelf`), to an unsealed sibling, and to an inherited
+  // class method (runtime hierarchy walk keyed on `ClassSelf`).
+  class sealed viaSealedSibling => self viaSelfNewWith
+
+  class sealed viaOpenSibling => self viaOpenSelfNew
+
+  class sealed viaInherited => self superclass
+
+  // Unsealed, so it runs in the class process and hands its real
+  // `ClassSelf` to the direct-called sibling (the prologue's `Given` arm).
+  class viaOpenToSealed => self viaSelfNewWith
+
+  // `self` read inside a non-local return from a block.
+  class sealed firstOf: items =>
+    items do: [:e | ^self new: #{#x => e}]
+    nil
+
+  // A signalled error names the class (`ClassSelf` is the receiver).
+  class sealed raises => self error: "boom"
