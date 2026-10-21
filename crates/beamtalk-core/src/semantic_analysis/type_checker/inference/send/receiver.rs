@@ -300,6 +300,18 @@ impl TypeChecker {
                     );
                 }
             }
+            // BT-4023: `anException =:= #sym` (either order) is always false.
+            if let Some(arg) = arguments.first() {
+                self.check_exception_symbol_comparison(
+                    op,
+                    receiver,
+                    &receiver_ty,
+                    arg,
+                    arg_types.first(),
+                    span,
+                    hierarchy,
+                );
+            }
         }
 
         // If receiver is a class reference, check class-side methods.
