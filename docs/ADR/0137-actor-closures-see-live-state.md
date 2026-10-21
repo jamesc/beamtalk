@@ -7,7 +7,7 @@ exception after Phase 0, BT-4007)
 Amends ADR 0133 (an escaping block may assign `self.field`) and ADR 0041 (an
 actor's closures no longer capture `State`). ADR 0130 is the precedent and is
 unchanged. ADR 0131, ADR 0118 and the locals half of ADR 0133 are unchanged.
-ADR 0111's `ThreadedIr` gains one node and one `VerifyError`.
+ADR 0111's `ThreadedIr` gains one node and two `VerifyError`s.
 
 Tracking: BT-3996. Epic: BT-4006. Decision gate: BT-3950. Phase 0 (BT-4007,
 #4478) and Phase 1 (BT-4008, #4472) are done.
@@ -148,21 +148,34 @@ so is `peekVia:` (BT-3952). The runtime error carries the field and a hint:
                          "message instead.">>}
 ```
 
+A block passed to a class method is inside the actor only when that method
+is direct-called, which is a `class sealed` method of a sealed class without
+class variables (ADR 0129 Phase 0b). Any other class method runs in its
+class's process, so the block is away.
+
 An `actor-state-abroad` lint, modelled on `class-state-abroad`, warns at a
-block literal that writes a field and is passed to a send whose receiver is
-statically not `self`, or to `Timer`:
+block literal that reads or writes a field, or sends to `self`, and is passed
+to `Timer`, to a send whose receiver is statically another actor, or to a
+class method that is not direct-called (the lint reads the same
+`direct_class_methods` set codegen uses). A write there raises, a read sees a
+stale value, and a synchronous self-send can deadlock if the actor is
+waiting on the callee:
 
 ```beamtalk
 Actor subclass: Ticker
   state: n = 0
   bump => self.n := self.n + 1
   startLate => Timer after: 100 do: [self.n := self.n + 1]   // warning; raises in the Timer
+  startPeek => Timer after: 100 do: [self.n printNl]         // warning; prints the value at creation
   startWell => Timer after: 100 do: [self bump!]
 ```
 
 An error that escapes a message discards that message's writes, and `on:do:`
 continues with the fields as they were before its protected block, as today.
-An `ensure:` cleanup sees the writes made before it ran.
+An `ensure:` cleanup sees every write made before it ran when the protected
+block exits normally or with `^`. After an error it sees at least the fields
+as they were when the `ensure:` started plus the protected block's own
+writes.
 
 The rest of this section is how the compiler and runtime deliver the rule.
 None of it changes what a program means.
@@ -213,12 +226,15 @@ threaded `State`, and the caller reloads after it. Between callbacks the
 
 ### 2. Self-sends
 
-A self-send to a compiled Beamtalk method of this actor is not bracketed. It
-passes the current `State` as an argument and rebinds from the callee's
-answer, as today. This covers unary, binary, keyword, `super` and cascade
-sends to `self`, in sealed and open classes, with any arguments, blocks
-included. A block passed into such a send runs only when the callee
-evaluates it, and the callee brackets that evaluation with its own current
+A self-send whose selector statically resolves to a compiled Beamtalk
+method of this actor class, or of a compiled actor superclass, is not
+bracketed. It passes the current `State` as an argument and rebinds from the
+callee's answer, as today. This covers unary, binary, keyword, `super` and
+cascade sends to `self`, in sealed and open classes, with any arguments,
+blocks included. A self-send the compiler cannot resolve that way is
+bracketed at the call site like any other send. A block passed into a
+threaded self-send runs only when the callee evaluates it, and the callee
+brackets that evaluation with its own current
 `State`, which is the caller's plus whatever the callee wrote before. In
 `fire => self.cb value`, a threaded `self fire` passes the caller's `State`;
 `fire` brackets `self.cb value`; the block's writes are loaded into `fire`'s
@@ -246,35 +262,33 @@ dispatch_call(Selector, Args, From, State) ->
     end.
 ```
 
-A native method or an ADR 0066 instance-side extension fun is Erlang code
-that does not bracket and may run a block, so a self-send that lands on one
-is bracketed where it lands. A compiled class's `dispatch/4` invokes every
-native method and every extension fun through one runtime helper,
-`beamtalk_actor_state:call_foreign/3`. It stores `State` (`S0`) to the cell,
-invokes the fun with it, and when the fun returns `{reply, Result, R}`
-compares `S0`, the cell now (`C`) and `R`:
+Not every arm of `dispatch/4` leads to a compiled Beamtalk method, even for
+a selector the compiler resolved. The other arms each run Erlang code that does not bracket and may run a block, so each goes
+through one runtime helper, `beamtalk_actor_state:call_foreign/3`:
 
-| Cell `C` | Returned `R` | Meaning | Answer |
-|---|---|---|---|
-| `=:= S0` | `=:= S0` | nothing changed | `S0` |
-| `=/= S0` | `=:= S0` | a block wrote, the fun did not | `C` |
-| `=:= S0` | `=/= S0` | the fun wrote, no block wrote | `R` |
-| `=/= S0` | `=/= S0` | both wrote | raise `actor_state_conflict` |
+- a native method clause (`native:` and `self delegate`, ADR 0056);
+- an ADR 0066 instance-side extension fun, found by the default arm's
+  `beamtalk_extensions:lookup` (also when installed at run time on a
+  selector the compiler saw as compiled);
+- the default arm's hierarchy walk, `beamtalk_dispatch:super/5`, which
+  reaches inherited runtime methods on `Object` and `ProtoObject`, the
+  reflective `fieldAt:put:` among them;
+- the `doesNotUnderstand:args:` fallback.
 
-When both changed the helper never picks one:
+Phase 2a adds a test that drives every arm of a generated `dispatch/4` and
+checks that each one either is a compiled clause or calls `call_foreign/3`.
 
-```erlang
-#beamtalk_error{kind = actor_state_conflict, class = 'Counter', selector = 'each:',
-                hint = <<"The native method each: changed Counter's state and also ran a "
-                         "block that changed it. Read the block's writes from the cell "
-                         "(beamtalk_actor_state:get/0) before answering.">>}
-```
+`call_foreign/3` stores `State` to the cell, invokes the fun with it, and
+returns the fun's own `{reply, R, NewState}`. A native method or extension
+fun that runs a block must read the block's writes back from the cell
+(`beamtalk_actor_state:get/2`) before it answers; one that runs no block, or
+never writes state, needs no change. Phase 2b audits the few that run blocks.
+In debug builds `call_foreign/3` asserts that if the cell changed during the
+call, the returned `NewState` reflects the change, so a native that forgets
+fails its tests instead of dropping a write.
 
-The comparison is one `=:=` per state, usually a pointer check because BEAM
-maps share structure. Foreign code that never runs a block, or never writes
-state, needs no change. The call site needs no knowledge of the target: the
-self-send emitter always threads, and an extension installed at run time on
-a selector the compiler saw as compiled still passes through the helper.
+The helper does not reconcile the cell with the answer; Alternatives
+Considered says why.
 
 An aliased self-send (`other := self. other x`, `self` passed as an argument)
 is an ordinary send and is bracketed. `sync_send/3` sees its own pid and runs
@@ -299,7 +313,9 @@ present. Away, a field read answers the block's capture, a write raises
 `actor_state_unreachable`, and a self-send is a message to the actor's pid.
 If the actor is blocked in the call that carried the block away,
 `check_call_stack/2` raises `deadlock_detected` or the call times out, as for
-any A→B→A cycle. An actor restarted by its supervisor is a new process, so a
+any A→B→A cycle. A block passed to a class method is at home only when the
+method is direct-called (ADR 0129 Phase 0b; see The rule), because only then
+does it run in the actor's process. An actor restarted by its supervisor is a new process, so a
 block from the old process is not at home in the new one; ADR 0130 could not
 use pid equality for classes because a class keeps its identity across
 restarts.
@@ -313,6 +329,13 @@ method body would be wrong: the method's writes since its last bracket are
 only in its locals; Phase 0's two stale-read regressions were reads of the
 cell from code that held a newer version in its locals. The capture is
 consulted only away from home.
+
+A Tier 2 block (ADR 0041) can write both a captured local and a field. The
+local comes back through its `StateAcc` return channel as today; the field
+goes to the cell. After the call the caller takes locals from the returned
+`StateAccN` and fields from the cell load, never fields from `StateAccN`. A
+new `VerifyError`, `FieldReadFromStateAcc`, fails if a lowering rebinds the
+actor `State` from a Tier 2 block's `StateAcc`.
 
 The later-message case differs from an Erlang `fun`, which keeps the values
 it closed over. A Beamtalk block reads fields through its actor at home, as a
@@ -331,8 +354,9 @@ as `OnDoCatch` does for its snapshot and restore. A new `VerifyError`,
 read. `just verify-threaded-ir` runs it over the stdlib and bootstrap corpus.
 
 The default is "may run user code". A direct self-send (receiver `self` or
-`super`) is accepted whatever its arguments, because `dispatch/4` brackets a
-foreign target through `call_foreign/3`. Any other call is exempt only if the
+`super`) whose selector resolves statically to a compiled method is accepted
+whatever its arguments, because every non-compiled arm of `dispatch/4` goes
+through `call_foreign/3` (§2). Any other call is exempt only if the
 emitter built it from one of two existing sources. Inlined constructs come
 from `beamtalk-core/src/state_threading_selectors.rs` and `WellKnownSelector`
 (`beamtalk-core/src/ast/well_known.rs`) and never produce a call node. Exempt
@@ -341,8 +365,9 @@ intrinsics come from the one table codegen already uses to emit them: the
 `PrimitiveBindingTable` (`primitive_bindings.rs`, built from the stdlib's
 `@primitive` pragmas) that carry a new `no_user_code` mark. The mark means
 the primitive can never dispatch to user code for any argument, and it is set
-in the stdlib source next to the pragma. A binding with a block-typed
-parameter cannot carry it, and `build-stdlib` rejects the combination. A
+in the stdlib source next to the pragma. Every parameter of a marked binding must be a primitive type or a sealed value
+type; `build-stdlib` rejects any other parameter type, a block or an open
+class included, since either could dispatch to user code. A
 primitive that is pure only for some argument types (`,` for strings) stays
 unmarked and is exempt only where the type checker shows every argument is a
 `String`. The emitter and the verifier read the same mark, so there is no
@@ -370,16 +395,15 @@ verifier's `CatchWithoutClassVarRestore` becomes `CatchWithoutStateRestore`.
 
 Entering an `ensure:` stores the current `State` to the cell, and inside the
 protected body every field write also stores (write-through). The protected
-body still threads `State`; the cleanup reads the cell. So the cleanup sees
-every write the method made before the `ensure:` and every write the
-protected body made, on a normal exit, on a `^`, and on an exception raised in
-the protected body. On an exception raised by a bracketed callee it also sees
-the callee's writes up to the callee's last store (before a call it
-bracketed, or at a write inside its own `ensure:`), but not the writes it held
-only in its locals when it raised. Making every method store on its
-exception path would need a `try` per method, and this ADR does not add one.
-On every exception path the next catch boundary or the callback discards
-these writes anyway. This fixes the actor half of BT-3910 and BT-3993.
+body still threads `State`; the cleanup reads the cell. On a normal exit and
+on a `^` the cleanup sees every write the method made. After an error it is
+guaranteed to see the state at `ensure:` entry plus the protected body's own
+lexical writes made before the error. Writes made by a callee that then
+raised are not guaranteed: the callee may have held them only in its locals.
+Making every method store on its exception path would need a `try` per
+method, and this ADR does not add one. The next catch boundary or the
+callback discards those writes anyway. This fixes the actor half of BT-3910
+and BT-3993.
 
 Each `gen_server` callback keeps its own contract. A callback returns the
 state its method answered only when it exits normally; on an exception it
@@ -456,16 +480,25 @@ separately. End-to-end `gen_server:call` runs vary by 1% to 2% between rounds
 on identical builds, about 50 ns over ten sends, so they cannot resolve a
 10 ns difference. The in-VM figures are the ones to use.
 
+Gate 2 is accepted at 10.4 ns. The sends it adds to are sends to value types,
+collections and other objects that may run user code, each at least a
+function call plus a dispatch, and the alternative designs either rejected
+those programs or cost more on every field access. Phase 2b may skip the
+store when no field write happened since the last sync, which removes the
+store from read-only stretches; it is an optimisation, not a requirement.
+
 The gates, as Phase 0 left them:
 
 1. A method looping over ten field reads and three writes with intrinsics
    only: at most 1.05x today. Passed.
 2. A method making ten in-process sends that each update a field: at most
-   10 ns more per send than today. At the limit.
+   10 ns more per send than today. Measured 9.9 ns with `+S 1` and 10.4 ns
+   with 18 schedulers, just over the line.
 3. Open and sealed actor self-sends to compiled methods, top level and in a
    `do:` arm: the generated call site is identical to today's. Bracketing them
-   failed this gate, which is why §2 threads them. The measured cases had no
-   block argument; with one, the call site is identical by construction.
+   failed this gate, which is why §2 threads them. Phase 0 measured
+   self-sends without block arguments only; with one, the call site is the
+   same code by construction.
 4. Zero `UnbracketedUserCodeSend` over the full corpus. This is the exit
    criterion of Phase 2a. The prototype left 187 of 511 may-run-user-code
    sends in BUnit actor methods unbracketed (loop bodies, branch arms,
@@ -575,9 +608,11 @@ What they can newly hit: `actor_state_unreachable` when a block writes a field
 from another process, the `actor-state-abroad` warning that predicts it, and
 creation-time values when a block reads a field from another process. A
 `self foo` from a block run elsewhere is a real message, so it can raise
-`deadlock_detected` or time out if the actor is waiting on that process.
-`actor_state_conflict` reaches only authors of native actor methods and
-extension funs. The rules for captured locals (ADR 0133) and the BT-3948,
+`deadlock_detected` or time out if the actor is waiting on that process;
+today it silently runs against a snapshot. The lint warns on all three where
+it can see the block leave. Whether a block passed to a class method has left
+depends on the callee: a direct-called `class sealed` method keeps it inside
+the actor, any other class method takes it away. The rules for captured locals (ADR 0133) and the BT-3948,
 BT-3971, BT-3939 and BT-3981 errors are unchanged.
 
 **Newcomer.** Blocks in an actor behave like the fields they mention: an
@@ -585,7 +620,8 @@ event handler stored in a field, a sort block, a block passed to a helper
 method all see and change the actor's current state. The rules about which
 block shapes may touch fields disappear. The one new error appears when a
 block that writes a field leaves the actor, and its hint says to send the
-actor a message instead.
+actor a message instead. The lint warns before that, and also when a block
+that leaves reads a field or sends to `self`.
 
 **Smalltalk developer.** Inside the actor, blocks are Pharo blocks: they read
 and write instance variables through `self`, in any position, stored or not,
@@ -598,8 +634,8 @@ a block that leaves it sees a copy and cannot write.
 exact. The process dictionary holds the state only while a callback runs and
 only across calls into code that may run a block. A native actor method or
 extension fun that runs user blocks must read the block's writes from the cell
-before answering, or it raises `actor_state_conflict`; one that runs no
-blocks needs no change. A block reading fields in a later message is a
+before answering, and a debug-build assertion catches one that does not; one
+that runs no blocks needs no change. A block reading fields in a later message is a
 departure from `fun` capture semantics that Erlang developers should know.
 
 **Production operator.** `sys:get_state/1`, `sys:replace_state/2`, hot code
@@ -657,7 +693,7 @@ it uses a block or not.
 
 | Cohort | Strongest argument |
 |---|---|
-| Language designer | "One kind of self-send and one calling convention. No `call_foreign/3`, no conflict error." |
+| Language designer | "One kind of self-send and one calling convention. No `call_foreign/3`." |
 | Erlang developer | "Native methods never need to reason about the cell." |
 
 This was the ADR as accepted on 2026-10-20: methods take `State` from the
@@ -668,29 +704,61 @@ and the NLR `State` slot are deleted. **Why not.** Phase 0 measured 1.35x to
 for open and sealed actors, top level and in a `do:` arm. Plain self-sends are
 the most common call in actor code, and the deletions do not pay for that.
 
+### Message away (Alternative A)
+
+Away from home, a field read or write becomes a synchronous message to the
+actor (`self.n` is `self n`, `self.n := v` is `self n: v`), so a block reads
+the live value and can write from anywhere.
+
+| Cohort | Strongest argument |
+|---|---|
+| Newcomer | "One rule: a block always sees the actor's current fields. No snapshot to explain." |
+| Smalltalk developer | "This is what a Pharo block does: it talks to its receiver." |
+| Erlang developer | "It is just a `gen_server:call`; nothing hidden." |
+
+**Why not.** The common callback is synchronous: an actor passes a block to
+another actor's method and waits for the answer. A field access from that
+block would call back into an actor that is blocked waiting, and deadlock or
+time out. Snapshot reads answer correctly in that case, because the actor
+cannot have changed while it waits. Writes from a `Timer` are better written
+as `self bump!`, which the hint and the lint say.
+
 ### Raise on any field access away
 
 | Cohort | Strongest argument |
 |---|---|
 | Erlang developer | "A block that leaves the actor touching its fields is a bug. Fail loudly." |
+| Newcomer | "No stale value can ever surprise me." |
 
-**Why not.** A block passed to another actor's method while this actor waits
-for the answer reads a capture that is usually right, and a block handed to
-a worker actor that only reads a configuration field would raise. ADR 0130
-rejected the same option as its Alternative R.
+**Why not.** It is loud, but it breaks read-only callbacks: a block passed to
+another actor's method while this actor waits for the answer reads a capture
+that is right, and a block handed to a worker that only reads a
+configuration field would raise. ADR 0130 rejected the same option as its
+Alternative R. The lint now warns on away reads, which gives most of the
+loudness without breaking the working cases.
 
 ### Tension points
 
 Erlang developers will expect a stored block to keep the values it closed
 over; Smalltalk developers will expect it to read the fields. The ADR sides
 with Smalltalk inside the actor and with Erlang outside it. Newcomers lose
-some compile-time errors in exchange for one runtime error, which the lint
-recovers where the receiver is visible.
+some compile-time errors in exchange for one runtime error and a stale read,
+both of which the lint recovers as warnings where the block visibly leaves.
+Snapshot reads were chosen over messaging away (deadlock in synchronous
+callbacks) and over raising on reads (breaks read-only callbacks).
 
 ## Alternatives Considered
 
-The status quo, a cell for every field access, bracketing every self-send and
-raising on any access away are argued in Steelman Analysis.
+The status quo, a cell for every field access, bracketing every self-send,
+messaging the actor away (Alternative A) and raising on any access away are
+argued in Steelman Analysis.
+
+**Reconcile in `call_foreign/3`.** Compare the entry state, the cell and the
+native's answer, take whichever changed, and raise `actor_state_conflict` if
+both did. It lets native code ignore the cell. It was drafted and rejected:
+a native that retries a failed block gets the failed attempt's writes back,
+and a native that calls a compiled method of the same actor raises a false
+conflict.
 
 **A per-class switch: thread when no block touches `self`.** Use today's
 lowering for classes whose blocks never read fields or self-send, and the
@@ -727,12 +795,18 @@ the method returns.
 - Every send that may run user code pays a store and a load, about 10 ns.
 - The bracket protocol has two homes: `SyncedCall` in compiled code and
   `call_foreign/3` for native methods and extension funs.
-- A native method or extension fun that both writes state and runs a block
-  that writes state raises `actor_state_conflict` until it is rewritten to
-  read the cell.
+- A native method or extension fun that runs a block must read the block's
+  writes from the cell before answering. Only a debug-build assertion checks
+  this.
 - Some errors move from compile time to run time: a block that writes a field
-  from another process raises when it runs, and the lint sees only receivers
-  that are statically not `self`.
+  from another process raises when it runs, and the lint sees only blocks
+  passed directly to `Timer`, another actor or a non-direct class method.
+- A synchronous self-send from a block running in another actor's or class's
+  process that is serving this actor's call now raises `deadlock_detected` or
+  times out; today it silently runs against a snapshot. The lint warns on it.
+- `self foo!` has been a real cast since BT-3998 (#4463), so an error in
+  `foo` now crashes the actor under ADR 0134, where before it ran inline and
+  the caller could catch it.
 - A stored block reads the fields' current values in a later message, which
   Erlang developers will not expect from a closure.
 - Generated actor code changes, so the module ABI marker is bumped. Older
@@ -742,8 +816,8 @@ the method returns.
   convention stay, so this deletes less codegen than the per-access cell or
   bracketing every self-send would.
 - Every `ensure:` entry, and every field write inside an `ensure:` protected
-  body, also does a `put`. If a bracketed callee raises, the cleanup does not
-  see the writes that callee held only in its locals.
+  body, also does a `put`. After an error, the cleanup is guaranteed only
+  the state at `ensure:` entry plus the protected body's own writes.
 - Away from home, a `Timer` body still reads creation-time values.
 
 ### Neutral
@@ -763,29 +837,42 @@ results are in Cost.
 **Phase 1 (M, done: BT-4008, #4472).** `beamtalk_actor_state` (`install`,
 `take`, `uninstall`, `installed`, `adapt`, `get`, `put`, `has`, `clear`,
 `capture`, `protect`), used by every callback wrapper in `beamtalk_actor.erl`
-and by `self_dispatch/2`, and the `actor_state_unreachable` error kind.
+and by `self_dispatch/2`, and the `actor_state_unreachable` error kind. It
+was written for the convention before the amendment, where the callback takes
+the cell as its new state (`take/0`) and `adapt/1` stores a native's
+`NewState` into the cell.
 
-**Phase 2a (L).** `call_foreign/3` and the `actor_state_conflict` error kind;
-native method clauses in `dispatch/4` and the extension lookup call through
-it, replacing `adapt/1`'s unconditional store for those targets. The
-`SyncedCall` node in `threaded_ir/` and bracket emission, behind a flag, from
-the send emitter in `dispatch_codegen.rs` and the `'false'` branch of the
-operator guard in `operators.rs`, with §2's self-send exception. The
-`UnbracketedUserCodeSend` verifier. Drive its count to zero over the stdlib,
-BUnit, REPL and generated corpora, fixing each miss in the `ThreadedIr` node
-that owns the scope. If the count does not converge that way, stop and report
-before Phase 2b.
+**Phase 2a (L).** Align `beamtalk_actor_state`'s moduledoc and `adapt/1`
+with the amended convention: the method's `{reply, R, NewState}` is the new
+state. Add `call_foreign/3` with its debug-build assertion, and route every
+non-compiled arm of `dispatch/4` (§2) through it, with the test that drives
+every arm. Reword the `actor_state_unreachable` hint, which today says a
+block "run after the method returned" is away; a block run in a later
+message of its own actor is at home. The `SyncedCall` node in `threaded_ir/`
+and bracket emission, behind a flag, from the send emitter in
+`dispatch_codegen.rs` and the `'false'` branch of the operator guard in
+`operators.rs`, with §2's self-send exception. The `UnbracketedUserCodeSend`
+and `FieldReadFromStateAcc` verifiers, and an invariant test that no send
+`Document` is emitted outside an IR node in actor context, so a send the
+verifier cannot see fails the build too. Drive the `UnbracketedUserCodeSend`
+count to zero over the stdlib, BUnit, REPL and generated corpora, fixing each
+miss in the `ThreadedIr` node that owns the scope. If the count does not
+converge that way, stop and report before Phase 2b.
 
 **Phase 2b (L).** Closure field access and closure self-sends go through the
 cell helpers, and field-reading block literals bind the capture as in §3.
-Entering an `ensure:` stores, and field writes inside its protected body
-write through. `OnDoCatch` stores its pre-region version under
-`CatchWithoutStateRestore`. `^` stores before the throw. The `no_user_code`
-mark goes on `PrimitiveBindingTable` entries, set from the stdlib pragmas and
-checked by `build-stdlib`. Audit the native actor methods and extension funs
-that both run a user block and change `State`, and rewrite each to read the
-cell, so none raises `actor_state_conflict`. Remove the flag and bump the
-module ABI marker.
+Tier 2 blocks that write both a local and a field merge as in §3, with a
+corpus case. Entering an `ensure:` stores, and field writes inside its
+protected body write through. `OnDoCatch` stores its pre-region version
+under `CatchWithoutStateRestore`. `^` stores before the throw. The
+`no_user_code` mark goes on `PrimitiveBindingTable` entries, set from the
+stdlib pragmas and checked by `build-stdlib`. Audit the native actor methods
+and extension funs that run a user block, and make each read the block's
+writes from the cell before answering. Optionally skip the store when no
+field write happened since the last sync (Cost). The exit gate is a generated
+actor-field-closure corpus (block shape × send kind × at home or away ×
+position), compiled and run on a BEAM, with every case answering what the
+rule in this ADR says. Remove the flag and bump the module ABI marker.
 
 **Phase 3 (M).** Delete the table above and whatever the oracle confirms
 after Phase 2b. In `docs/beamtalk-language-features.md`, replace the BT-3922
@@ -794,7 +881,9 @@ the BT-3998 alias paragraph under "Explicit Async Cast", and the "MUST use !"
 note under "Timer Lifecycle" with the rule in this ADR.
 
 **Phase 4 (S).** The `actor-state-abroad` lint with
-`@expect actor_state_abroad`, the amendment notes in ADR 0133 and ADR 0041,
+`@expect actor_state_abroad`, covering field writes, field reads and
+self-sends in blocks passed to `Timer`, another actor or a non-direct class
+method (see The rule), the amendment notes in ADR 0133 and ADR 0041,
 and `docs/agents/expanded.md` § State-Threading Codegen.
 
 #4452, #4455 and #4463 landed as stopgaps because each removed a silent wrong
@@ -806,9 +895,12 @@ Compiled actors need recompiling and a node restart across the ABI change.
 Source that compiles today keeps compiling with the same meaning, except that
 an aliased self-send now sees and keeps the live state. Shapes rejected today
 compile. A block that writes a field from another process raises at run time;
-send the actor a message from it instead. Native actor methods and extension
-funs that run user blocks and also change state need to read the cell before
-answering.
+send the actor a message from it instead. A synchronous `self foo` from a
+block run in another process that is serving this actor's call raises
+`deadlock_detected` or times out instead of silently running against a
+snapshot; use `self foo!`. The lint flags both. Native actor methods and
+extension funs that run user blocks need to read the block's writes from the
+cell before answering.
 
 ## Resolved Questions
 
@@ -833,11 +925,19 @@ Decided by the maintainer on 2026-10-20, when the ADR was accepted.
 4. Decided on 2026-10-21 after Phase 0: a self-send whose target is a
    compiled Beamtalk method keeps explicit `State` threading whatever its
    arguments, and methods keep `{reply, R, State}` (§2). A self-send that
-   lands on a native method or an extension fun is bracketed by
-   `call_foreign/3`, which takes the cell if only a block wrote, the fun's
-   answer if only the fun wrote, and raises `actor_state_conflict` if both
-   did. Bracketing every self-send cost 1.35x to 1.60x on the self-send
-   itself.
+   lands anywhere else in `dispatch/4` goes through `call_foreign/3`, which
+   stores the cell and returns the fun's own answer; native code that runs a
+   block reads the block's writes from the cell. A three-way reconcile was
+   rejected (Alternatives Considered). Bracketing every self-send cost 1.35x
+   to 1.60x on the self-send itself.
+5. Decided on 2026-10-21 after the adversarial review: away from home a block
+   keeps snapshot semantics (reads see creation-time values, writes raise
+   `actor_state_unreachable`, `self foo` is an ordinary message). Messaging
+   the actor for every away access (Alternative A) deadlocks the common
+   synchronous callback, and raising on every away access breaks read-only
+   callbacks. The `actor-state-abroad` lint warns on away reads and away
+   self-sends as well as writes, so the stale-read and deadlock cases are
+   visible at compile time where the block visibly leaves.
 
 ## References
 
