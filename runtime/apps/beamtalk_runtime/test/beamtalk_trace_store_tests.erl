@@ -1660,9 +1660,9 @@ wait_until(Fun, Tries) ->
 
 -doc """
 Start a real Counter actor, send it one message, then end it: a normal
-`gen_server:stop` (runs `terminate/2`, so the lifecycle `stop` handler retires
-it) or, when `Kill` is true, an untrapped `kill` (no `terminate/2`, so only the
-trace store's monitor can retire it).
+`gen_server:stop` (runs `terminate/2`, emitting the lifecycle `stop` event)
+or, when `Kill` is true, an untrapped `kill` (no `terminate/2`). Either way the
+trace store's monitor retires it.
 """.
 churn_one_actor(Kill) ->
     {ok, Pid} = test_counter:start(0),
@@ -1786,7 +1786,7 @@ retired_stats_fold_correctly_test_() ->
                     ?assertEqual(100, maps:get(<<"min_duration_ns">>, Inc2)),
                     ?assertEqual(1, ets:info(beamtalk_agg_retired, size))
                 end)},
-            {"the lifecycle stop handler retires the actor synchronously",
+            {"a stop event does not retire a live actor; its exit does",
                 ?_test(begin
                     beamtalk_trace_store:clear(),
                     Self = self(),
@@ -1800,46 +1800,28 @@ retired_stats_fold_correctly_test_() ->
                             #{pid => self(), class => 'Counter', reason => badarg},
                             #{}
                         ),
-                        Self ! {stopped, beamtalk_trace_store:get_stats(self())},
+                        Self ! stop_emitted,
                         receive
                             stop -> ok
                         end
                     end),
                     receive
-                        {stopped, PidStats} -> ?assertEqual(#{}, PidStats)
+                        stop_emitted -> ok
                     after 5000 -> ?assert(false)
                     end,
+                    %% Still alive: its per-pid stats stay until it exits.
+                    PidKey = list_to_binary(pid_to_list(Pid)),
+                    #{PidKey := #{<<"methods">> := LiveMethods}} =
+                        beamtalk_trace_store:get_stats(Pid),
+                    ?assertMatch(#{<<"increment">> := #{<<"calls">> := 1}}, LiveMethods),
+                    Pid ! stop,
+                    wait_until(fun() -> beamtalk_trace_store:get_stats(Pid) =:= #{} end),
                     #{<<"methods">> := Methods} = retired_class_entry(<<"Counter">>),
                     ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"increment">>, Methods)),
                     %% The crash shows up as an error on the rolled-up `stop`.
                     ?assertMatch(
                         #{<<"calls">> := 1, <<"errors">> := 1}, maps:get(<<"stop">>, Methods)
-                    ),
-                    Pid ! stop
-                end)},
-            {"a stop event reported for another pid does not retire it",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    Other = spawn(fun() ->
-                        receive
-                            stop -> ok
-                        end
-                    end),
-                    beamtalk_trace_store:record_dispatch(Other, increment, 10, ok, sync, 'Counter'),
-                    beamtalk_trace_store:handle_lifecycle_event(
-                        [beamtalk, actor, lifecycle, stop],
-                        #{},
-                        #{pid => Other, class => 'Counter', reason => normal},
-                        #{}
-                    ),
-                    #{<<"methods">> := Methods} =
-                        maps:get(
-                            list_to_binary(pid_to_list(Other)),
-                            beamtalk_trace_store:get_stats(Other)
-                        ),
-                    ?assertMatch(#{<<"increment">> := #{<<"calls">> := 1}}, Methods),
-                    Other ! stop,
-                    wait_until(fun() -> beamtalk_trace_store:get_stats(Other) =:= #{} end)
+                    )
                 end)}
         ]
     end}.
