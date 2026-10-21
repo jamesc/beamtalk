@@ -26,8 +26,10 @@ ETS read.
   not track, such as whether a module is loaded). A hit that fails it is
   recomputed and the entry overwritten.
 * `inherits_from/2` — cached `beamtalk_class_registry:inherits_from/2`,
-  the shared hierarchy helper (e.g. the Exception check on the Value send
-  path; class-reference / `isKindOf:` checks can reuse it).
+  the shared hierarchy helper for standalone hierarchy checks (BT-4065:
+  class references, `isKindOf:`, `Result`). The Value send path does not
+  call it: it memoises its Exception bit as part of its own
+  `{tagged_class_dispatch, Class}` entry, so one hit answers everything.
 
 Keys are caller-chosen terms; namespace them with a leading tag
 (`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`).

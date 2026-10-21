@@ -273,8 +273,8 @@ calls_during(Patterns, Fun) ->
         Parent ! {result, self(), catch Fun()}
     end),
     lists:foreach(fun(P) -> erlang:trace_pattern(P, true, [local]) end, Patterns),
-    %% Always remove the global trace pattern, even on a timeout, so it never
-    %% leaks into (and slows down) the rest of the EUnit run, and never leave
+    %% Always remove the local trace patterns, even on a timeout, so they never
+    %% leak into (and slows down) the rest of the EUnit run, and never leave
     %% the (unlinked, unmonitored) worker behind: if erlang:trace/3 fails it
     %% never receives `go`, and on worker_timeout it is still running. On the
     %% success path it has already exited, so the kill is a no-op.
