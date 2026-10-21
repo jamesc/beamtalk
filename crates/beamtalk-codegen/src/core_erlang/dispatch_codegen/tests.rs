@@ -820,3 +820,68 @@ fn test_field_assignment_open_hybrid_renders_nested_rebind_before_outer() {
     let m_rebind = output.find("MField").expect("outer rebind rendered");
     assert!(n_rebind < m_rebind, "nested write first. Got: {output}");
 }
+
+// ─── BT-4005: an own-class reference is the dispatching self ────
+
+/// `binary_send_dispatches_to_self` is the one predicate that sends a binary
+/// selector down `generate_message_send`'s `HANDLERS` path: bare `self` in an
+/// actor instance method or a class method, and an unqualified own-class
+/// reference in a class method — never another class, a package-qualified
+/// reference, an own-class reference outside a class method, or a
+/// structurally lowered operator.
+#[test]
+fn binary_send_dispatches_to_self_admits_an_own_class_reference() {
+    use crate::core_erlang::CodeGenContext;
+    use crate::core_erlang::expr_shape::{ShapeCtx, binary_send_dispatches_to_self};
+    use std::collections::HashSet;
+
+    let empty = HashSet::new();
+    let ctx = |context, in_class_method| ShapeCtx {
+        context,
+        in_class_method,
+        class_var_names: &empty,
+        class_method_selectors: &empty,
+        class_name: "C".to_string(),
+        self_var_bound: false,
+    };
+    let class_ref = |name: &str, package: Option<&str>| Expression::ClassReference {
+        name: Identifier::new(name, s()),
+        package: package.map(|p| Identifier::new(p, s())),
+        span: s(),
+    };
+    let self_id = Expression::Identifier(Identifier::new("self", s()));
+    let own = class_ref("C", None);
+
+    let class_side = ctx(CodeGenContext::ValueType, true);
+    assert!(binary_send_dispatches_to_self(&class_side, &own, "+"));
+    assert!(binary_send_dispatches_to_self(&class_side, &own, "<"));
+    assert!(binary_send_dispatches_to_self(&class_side, &self_id, "+"));
+    assert!(!binary_send_dispatches_to_self(&class_side, &own, "=="));
+    assert!(!binary_send_dispatches_to_self(&class_side, &own, ">>"));
+    assert!(!binary_send_dispatches_to_self(
+        &class_side,
+        &class_ref("D", None),
+        "+"
+    ));
+    assert!(!binary_send_dispatches_to_self(
+        &class_side,
+        &class_ref("C", Some("pkg")),
+        "+"
+    ));
+
+    let actor_instance = ctx(CodeGenContext::Actor, false);
+    assert!(binary_send_dispatches_to_self(
+        &actor_instance,
+        &self_id,
+        "+"
+    ));
+    assert!(!binary_send_dispatches_to_self(&actor_instance, &own, "+"));
+
+    let value_instance = ctx(CodeGenContext::ValueType, false);
+    assert!(!binary_send_dispatches_to_self(
+        &value_instance,
+        &self_id,
+        "+"
+    ));
+    assert!(!binary_send_dispatches_to_self(&value_instance, &own, "+"));
+}

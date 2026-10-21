@@ -74,6 +74,27 @@ sealed typed Object subclass: Pid
   /// ```
   node -> Node => (Erlang beamtalk_node) ofPid: self
 
+  // === Messaging ===
+
+  /// Send `msg` to this process as a plain Erlang message (`erlang:send/2`).
+  ///
+  /// This is not a Beamtalk message send. `actor foo:` calls a method and
+  /// `actor foo!` casts one; `pid send: msg` puts `msg` in the process's
+  /// mailbox as a raw term, which a `Server` receives in `handleInfo:`.
+  /// It is asynchronous and never fails: sending to a dead process is a
+  /// silent no-op. Always returns `nil`.
+  ///
+  /// It lives on `Pid` only, not on `Actor`, so it never collides with a
+  /// user-defined `send:` method; reach it through `actor pid`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self pid send: #accept                     // => nil
+  /// handler pid send: {#ready, sock, config}   // => nil
+  /// ```
+  sealed send: msg :: Object -> Nil =>
+    (Erlang beamtalk_process_ops) send: self msg: msg
+
   // === Process Control ===
 
   /// Test if the process referred to by this pid is alive.

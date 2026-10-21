@@ -119,8 +119,8 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   /// Cancel this timer. Returns true if the timer was active, false if already done.
   /// For a one-shot timer, true means it had not fired yet; a repeating timer
   /// stops. A message timer's message sent just before `cancel` may still be
-  /// in the target's mailbox, so tag messages (`{#tick, ref}`) when a stale
-  /// one matters.
+  /// in the target's mailbox, so tag messages with a `Reference new`
+  /// (`{#tick, ref}`) when a stale one matters.
   ///
   /// ## Examples
   /// ```beamtalk
