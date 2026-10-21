@@ -8,7 +8,9 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples, and the `register_class/0` on-load function.
 
-use super::super::method_frame::{MethodBoundary, MethodFrame};
+use super::super::method_frame::{
+    CLASS_SELF_VAR, DIRECT_CLASS_SELF_PARAM, MethodBoundary, MethodFrame,
+};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::sequencing::PrecompiledScope;
 use super::super::{
@@ -2211,12 +2213,31 @@ impl CoreErlangGenerator {
                 frame.class_method_body_doc(method, nlr_token_var.as_deref())?
             };
 
+            // BT-4029: a direct-called method (ADR 0129 Phase 0b) can be
+            // entered with `ClassSelf = nil` (a static `Cls sel` from another
+            // class, or the runtime's dynamic `lookup_direct_call`), so when
+            // its body reads `ClassSelf` at all (`self`, `self new`, `spawn`,
+            // a class-side self-send, `self error:`, ...) the parameter is
+            // renamed and `ClassSelf` rebound to the real class object first.
+            // A direct-called method always names its parameter
+            // `_DirectClassSelf`, which is what it forwards to direct-called
+            // siblings (`sibling_class_self_arg`).
+            let (class_self_param, body_doc) = if !frame.current_class_method_is_direct_called() {
+                (CLASS_SELF_VAR, body_doc)
+            } else if Self::doc_mentions_var(&body_doc, CLASS_SELF_VAR) {
+                let prologue = frame.direct_class_self_prologue_doc();
+                (DIRECT_CLASS_SELF_PARAM, docvec![prologue, body_doc])
+            } else {
+                (DIRECT_CLASS_SELF_PARAM, body_doc)
+            };
+
             // Build function header with params (Document pieces, not format! —
             // Core Erlang fragments must use the Document API, ADR 0089).
             let doc = docvec![
                 "\n",
                 fname(safe_class_method_fn_name(&selector_name), arity),
-                " = fun (ClassSelf",
+                " = fun (",
+                leaf::var(class_self_param),
                 Self::class_method_params_suffix_doc(&param_vars),
                 ") ->",
                 nest(INDENT, docvec![line(), body_doc,]),
@@ -2549,6 +2570,68 @@ impl CoreErlangGenerator {
     /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces
     /// (never `format!` — Core Erlang fragments must use the Document API,
     /// ADR 0089). Empty when there are no user parameters.
+    /// BT-4029: the prologue of a direct-called class method whose body reads
+    /// `ClassSelf`. The method was entered with [`DIRECT_CLASS_SELF_PARAM`],
+    /// which is `nil` on the direct path and the real class object when a
+    /// sibling class method forwards its own; either way `ClassSelf` becomes
+    /// the class object. The class is sealed, so the receiver is statically
+    /// this class: `resolve_class_object/1` builds the same
+    /// `#beamtalk_object{}` the class process would pass (deadlock-safe from
+    /// inside the class process, BT-3820), and a class that is not loaded
+    /// raises the usual `class_not_found`.
+    ///
+    /// ```erlang
+    /// let ClassSelf = case _DirectClassSelf of
+    ///   <'nil'> when 'true' ->
+    ///     case call 'beamtalk_class_registry':'resolve_class_object'('Pt') of
+    ///       <'undefined'> when 'true' -> %% class_not_found
+    ///       <Resolved> when 'true' -> Resolved
+    ///     end
+    ///   <Given> when 'true' -> Given
+    /// end in
+    /// ```
+    pub(in crate::core_erlang) fn direct_class_self_prologue_doc(&mut self) -> Document<'static> {
+        let class_name = self.class_name();
+        let resolved_var = self.fresh_temp_var("ResolvedClassSelf");
+        let given_var = self.fresh_temp_var("GivenClassSelf");
+        let not_found = self.class_not_found_error_doc(&class_name);
+        docvec![
+            "let ",
+            leaf::var(CLASS_SELF_VAR),
+            " = case ",
+            leaf::var(DIRECT_CLASS_SELF_PARAM),
+            " of <'nil'> when 'true' -> ",
+            "case call 'beamtalk_class_registry':'resolve_class_object'(",
+            leaf::atom(class_name),
+            ") of ",
+            not_found,
+            "<",
+            leaf::var(resolved_var.clone()),
+            "> when 'true' -> ",
+            leaf::var(resolved_var),
+            " end <",
+            leaf::var(given_var.clone()),
+            "> when 'true' -> ",
+            leaf::var(given_var),
+            " end in",
+            line(),
+        ]
+    }
+
+    /// Whether the rendered `doc` references Core Erlang variable `var` as a
+    /// whole token (not as a prefix or suffix of a longer name). A match
+    /// inside a string or atom literal is a harmless false positive: it only
+    /// adds an unneeded prologue.
+    fn doc_mentions_var(doc: &Document<'static>, var: &str) -> bool {
+        let text = doc.to_pretty_string();
+        let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '@';
+        text.match_indices(var).any(|(at, _)| {
+            let before = text[..at].chars().next_back();
+            let after = text[at + var.len()..].chars().next();
+            !before.is_some_and(is_name_char) && !after.is_some_and(is_name_char)
+        })
+    }
+
     fn class_method_params_suffix_doc(param_vars: &[String]) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::new();
         for var in param_vars {
