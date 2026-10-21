@@ -288,3 +288,476 @@ fn bt4000_repros_compile() {
         assert!(passes(&src), "{src}");
     }
 }
+
+// ─── BT-4017: every fold kind, and a non-literal block argument ─────────────
+//
+// `#(1, 2) do: [:e | (self done) ifTrue: blk]` raised `badarg` at run time:
+// the fold body classified the conditional as a construct answering
+// `{Result, StateAcc}` and unpacked `element(2, ...)` of it, but with a
+// non-literal block argument the conditional compiles to a plain `ifTrue:`
+// send. The fold body now lowers every statement `thread_ahead` registers
+// unwrapped (`thread_ahead_unwraps`) through `thread_ahead`, as the other
+// frames do (`fold_statement_threads_ahead`).
+//
+// The verifier cannot see this bug: the shape of a run-time value is not in
+// the IR, the fold body's raw-tuple unpack is an opaque statement, and `erlc`
+// accepts `element(2, X)` of any `X`. The proof is a codegen-shape check
+// ([`fold_raw_tuple_unpacks`]) over the generated corpus, shown to catch the
+// pre-fix routing ([`LocalRebindFault::FoldRawTupleUnpack`]), plus the runtime
+// rows in `stdlib/test/bt4017fold_body_block_arg_test.bt`.
+
+/// Every fold kind, with the conditional statement `{S}` as the body's last
+/// statement (the kind's value) and before the kind's own tail.
+const FOLDS: &[&str] = &[
+    "#(1, 2) do: [:e | {S}]",
+    "#(1, 2) do: [:e | {S}. e]",
+    "#{#a => 1} keysAndValuesDo: [:k :w | {S}]",
+    "#(1, 2) collect: [:e | {S}]",
+    "#(1, 2) collect: [:e | {S}. e]",
+    "#(1, 2) inject: 0 into: [:a :e | {S}]",
+    "#(1, 2) inject: 0 into: [:a :e | {S}. a + e]",
+    "#(1, 2) select: [:e | {S}]",
+    "#(1, 2) reject: [:e | {S}. true]",
+    "#(1, 2) anySatisfy: [:e | {S}]",
+    "#(1, 2) allSatisfy: [:e | {S}. true]",
+    "#(1, 2) detect: [:e | {S}]",
+    "#(1, 2) detect: [:e | {S}. false] ifNone: [0]",
+    "#(1, 2) count: [:e | {S}]",
+    "#(1, 2) takeWhile: [:e | {S}]",
+    "#(1, 2) dropWhile: [:e | {S}. false]",
+    "#(1, 2) partition: [:e | {S}]",
+    "#(1, 2) groupBy: [:e | {S}]",
+    "#(2, 1) sort: [:a :b | {S}. a < b]",
+];
+
+/// Conditionals over a receiver `{R}` with a non-literal block argument (the
+/// method's `blk` parameter), alone and next to a literal arm. (A literal arm
+/// that writes a field next to a non-literal one is not inlined, so it is
+/// `FieldAssignmentInUnsupportedBlock`, a compile error.)
+const BLOCK_ARG_CONDITIONALS: &[&str] = &[
+    "{R} ifTrue: blk",
+    "{R} ifFalse: blk",
+    "{R} ifTrue: blk ifFalse: blk",
+    "{R} ifTrue: [0] ifFalse: blk",
+    "{R} ifNil: blk",
+    "{R} and: blk",
+    "{R} or: blk",
+];
+
+/// The fold-body statements, each with whether the pre-BT-4017 fold body
+/// routed it to the raw-tuple unpack: every non-literal-block conditional
+/// (it did), and every literal-arm conditional whose arm writes a field (it
+/// did; element 2 of that producer's tuple was right) or a local (it did not:
+/// a local-threading producer already went through `thread_ahead`).
+/// BT-4000's fold row covered `do:` only.
+fn fold_statements() -> Vec<(String, bool)> {
+    let mut out: Vec<(String, bool)> = BLOCK_ARG_CONDITIONALS
+        .iter()
+        .map(|c| ((*c).to_string(), true))
+        .collect();
+    for cond in CONDITIONALS {
+        out.push((cond.replace("{B}", ARMS[1]), false));
+        out.push((cond.replace("{B}", ARMS[2]), true));
+    }
+    out
+}
+
+fn block_arg_method(prelude: &str, i: usize, body: &str) -> String {
+    format!("  probe{i}: blk =>\n{prelude}    n := 3\n    {body}\n    n\n")
+}
+
+/// Fold-body statements this change also reroutes that have no sequenced
+/// receiver: an inline-threaded conditional over a plain receiver whose arm
+/// writes a field, and a `match:` whose arm does. The pre-BT-4017 fold body
+/// sent them to the raw-tuple unpack too (correct there: they are
+/// producers whose element 2 is the new state); they now go through
+/// `thread_ahead` like every other `thread_ahead_unwraps` statement.
+const PLAIN_RECEIVER_STATEMENTS: &[&str] = &[
+    "(n > 0) ifTrue: [self.f := self.f + 1]",
+    "(n > 0) ifTrue: [self.f := self.f + 1] ifFalse: [nil]",
+    "(n > 0) and: [self.f := self.f + 1. true]",
+    "n match: [3 -> self.f := self.f + 1; _ -> 0]",
+];
+
+/// `(name, method body)` rows: every fold kind x receiver x fold statement,
+/// and every other frame of [`LOOPS`] x receiver x non-literal-block
+/// conditional (BT-4000 fixed those; pinned here so they stay fixed).
+fn block_arg_rows() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let statements = fold_statements();
+    for (l, fold) in FOLDS.iter().enumerate() {
+        for (r, receiver) in RECEIVERS.iter().enumerate() {
+            for (s, (stmt, raw_pre_fix)) in statements.iter().enumerate() {
+                let tag = if *raw_pre_fix { "raw" } else { "producer" };
+                out.push((
+                    format!("fold{l} recv{r} stmt{s} {tag}"),
+                    fold.replace("{S}", &stmt.replace("{R}", receiver)),
+                ));
+            }
+        }
+        for (s, stmt) in PLAIN_RECEIVER_STATEMENTS.iter().enumerate() {
+            out.push((format!("fold{l} plain{s} raw"), fold.replace("{S}", stmt)));
+        }
+    }
+    for (l, lp) in LOOPS.iter().enumerate() {
+        for (r, receiver) in RECEIVERS.iter().enumerate() {
+            for (c, cond) in BLOCK_ARG_CONDITIONALS.iter().enumerate() {
+                out.push((
+                    format!("loop{l} recv{r} blockarg{c}"),
+                    lp.replace("{S}", &cond.replace("{R}", receiver)),
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// The codegen-shape check: how many raw `{Value, StateAcc}` unpacks of a
+/// statement (`lower_foldl_body`'s `CondResult` tuple) `code` holds. A
+/// conditional with a sequenced receiver is never one (BT-4017), so for every
+/// row of [`block_arg_rows`] this is zero.
+fn fold_raw_tuple_unpacks(code: &str) -> usize {
+    code.matches("_CondResult").count()
+}
+
+/// The rows Phase 0 accepts, as `(name, single-method source)`, each checked
+/// to be well-formed.
+fn block_arg_sources(prelude: &str) -> Vec<(String, String)> {
+    block_arg_rows()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, (name, body))| {
+            let src = format!("{HEADER}{HELPERS}{}", block_arg_method(prelude, i, &body));
+            assert_parses(&src);
+            (!phase0_rejects(&src)).then_some((name, src))
+        })
+        .collect()
+}
+
+/// BT-4017: every row passes the debug verifier, compiles through `erlc`, and
+/// holds no raw-tuple unpack of its conditional (one module per context;
+/// bisected to the failing rows on failure).
+#[test]
+fn fold_body_block_arg_corpus_compiles_without_a_raw_tuple_unpack() {
+    let mut failures = Vec::new();
+    for (ctx, prelude) in PRELUDES {
+        let rows = block_arg_sources(prelude);
+        assert!(
+            rows.len() >= 1500,
+            "only {} rows; the corpus has thinned out",
+            rows.len()
+        );
+        let methods: Vec<String> = rows
+            .iter()
+            .map(|(_, src)| src[HEADER.len() + HELPERS.len()..].to_string())
+            .collect();
+        let module = format!("{HEADER}{HELPERS}{}", methods.concat());
+        let whole = catch_unwind(AssertUnwindSafe(|| codegen(&module)));
+        if let Ok(code) = &whole
+            && fold_raw_tuple_unpacks(code) == 0
+            && passes(&module)
+        {
+            continue;
+        }
+        failures.extend(rows.iter().filter_map(|(name, src)| {
+            let ok = catch_unwind(AssertUnwindSafe(|| codegen(src)))
+                .is_ok_and(|code| fold_raw_tuple_unpacks(&code) == 0)
+                && passes(src);
+            (!ok).then(|| format!("{ctx} / {name}:\n{src}"))
+        }));
+    }
+    assert!(
+        failures.is_empty(),
+        "{} block-argument row(s) fail verified codegen or hold a raw-tuple unpack:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
+/// BT-4017: with the fold body's pre-fix routing restored
+/// ([`LocalRebindFault::FoldRawTupleUnpack`]), every fold row the pre-fix
+/// routing sent to the raw-tuple unpack is one again, which the codegen-shape
+/// check reports, while the verifier stays silent: the reason the proof is a
+/// shape check and a runtime test rather than a `VerifyError`.
+#[cfg(debug_assertions)]
+#[test]
+fn fold_body_block_arg_corpus_reports_the_pre_fix_routing() {
+    use crate::core_erlang::threaded_expr::fault;
+    let mut missed = Vec::new();
+    let rows: Vec<_> = block_arg_sources("")
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("fold") && name.ends_with(" raw"))
+        .collect();
+    assert!(rows.len() >= 900, "only {} rows", rows.len());
+    for (name, src) in rows {
+        if let Some(report) =
+            super::verifier_report(&src, Some(LocalRebindFault::FoldRawTupleUnpack))
+        {
+            missed.push(format!("{name}: the verifier saw it ({report})\n{src}"));
+            continue;
+        }
+        let code = fault::with(LocalRebindFault::FoldRawTupleUnpack, || codegen(&src));
+        if fold_raw_tuple_unpacks(&code) == 0 {
+            missed.push(format!("{name}: no raw-tuple unpack\n{src}"));
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "{} row(s) where the pre-fix routing is not as described:\n{}",
+        missed.len(),
+        missed.join("\n")
+    );
+}
+
+/// The issue's repro (BT-4017), with a silent verifier, through `erlc` and
+/// without a raw-tuple unpack.
+#[test]
+fn bt4017_repro_compiles() {
+    let src = "Actor subclass: Nonlit\n  state: f = 0\n  done =>\n    self.f := self.f + 1\n    true\n  fold: blk =>\n    #(1, 2) do: [:e | (self done) ifTrue: blk]\n    self.f\n";
+    assert_eq!(super::verifier_report(src, None), None, "{src}");
+    assert_eq!(fold_raw_tuple_unpacks(&codegen(src)), 0, "{src}");
+    assert!(passes(src), "{src}");
+}
+
+// ─── BT-4017: the fold-body rows in every other scope kind ──────────────────
+//
+// `fold_statement_threads_ahead` is not actor-only: in a value-type method
+// (`SelfVt` arm writes), a `TestCase` method, and a class method (class
+// variables are written in place, ADR 0130) a fold body statement for which
+// `thread_ahead_unwraps` holds (an inline-threaded conditional or `match:`, an
+// `on:do:`/`ensure:` or `[...] value` producer) is rerouted too. The same rows
+// run there, with the same checks.
+
+/// A non-actor method context: the class header (with a field or class
+/// variable `f`), its helpers, whether methods are class-side, and a statement
+/// prefixed to each method.
+struct ScopeContext {
+    name: &'static str,
+    header: &'static str,
+    helpers: &'static str,
+    class_side: bool,
+    prelude: &'static str,
+}
+
+const INSTANCE_HELPERS: &str = "  done => false
+  isAlive: k => k > 0
+  + k => k > 0
+";
+
+const CLASS_HELPERS: &str = "  class done => false
+  class isAlive: k => k > 0
+  class + k => k > 0
+";
+
+const SCOPE_CONTEXTS: &[ScopeContext] = &[
+    ScopeContext {
+        name: "value_field",
+        header: "Value subclass: FoldScopeProbe\n  field: f = 0\n",
+        helpers: INSTANCE_HELPERS,
+        class_side: false,
+        prelude: "",
+    },
+    ScopeContext {
+        name: "value_field_write",
+        header: "Value subclass: FoldScopeProbe\n  field: f = 0\n",
+        helpers: INSTANCE_HELPERS,
+        class_side: false,
+        prelude: "    self.f := 1\n",
+    },
+    ScopeContext {
+        name: "test_case",
+        header: "TestCase subclass: FoldScopeProbe\n  field: f = 0\n",
+        helpers: INSTANCE_HELPERS,
+        class_side: false,
+        prelude: "",
+    },
+    ScopeContext {
+        name: "test_case_field_write",
+        header: "TestCase subclass: FoldScopeProbe\n  field: f = 0\n",
+        helpers: INSTANCE_HELPERS,
+        class_side: false,
+        prelude: "    self.f := 1\n",
+    },
+    ScopeContext {
+        name: "object_class_side",
+        header: "Object subclass: FoldScopeProbe\n  classState: f = 0\n",
+        helpers: CLASS_HELPERS,
+        class_side: true,
+        prelude: "",
+    },
+    ScopeContext {
+        name: "actor_class_side",
+        header: "Actor subclass: FoldScopeProbe\n  classState: f = 0\n",
+        helpers: CLASS_HELPERS,
+        class_side: true,
+        prelude: "",
+    },
+];
+
+/// Fold-body statements that are `thread_ahead_unwraps` producers outside an
+/// actor too: an `on:do:`/`ensure:` body and an evaluated literal block that
+/// write the field (the `SelfVt` family in a value type).
+const SCOPE_PRODUCER_STATEMENTS: &[&str] = &[
+    "[self.f := self.f + 1] on: Error do: [:err | 0]",
+    "[self.f := self.f + 1] ensure: [nil]",
+    "[self.f := self.f + 1] value",
+];
+
+/// How one row of a non-actor scope compiles.
+enum ScopeCodegen {
+    /// Codegen succeeded; the generated module.
+    Compiles(String),
+    /// The Phase 0 check, or codegen with a structured (non-internal) error,
+    /// rejects the program: a language rule, not a lowering failure.
+    Rejected,
+}
+
+/// Compiles one program (debug: the verifier panics on a finding); `Err` with
+/// the panic or internal error.
+fn scope_codegen(src: &str) -> Result<ScopeCodegen, String> {
+    if phase0_rejects(src) {
+        return Ok(ScopeCodegen::Rejected);
+    }
+    let (module, _) =
+        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
+    let compiled = catch_unwind(AssertUnwindSafe(|| {
+        crate::core_erlang::generate_module(
+            &module,
+            crate::core_erlang::CodegenOptions::new("test"),
+        )
+    }));
+    match compiled {
+        Ok(Ok(code)) => Ok(ScopeCodegen::Compiles(code)),
+        Ok(Err(crate::core_erlang::CodeGenError::Internal(msg))) => Err(msg),
+        Ok(Err(_)) => Ok(ScopeCodegen::Rejected),
+        Err(payload) => Err(payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
+            .unwrap_or_default()),
+    }
+}
+
+/// `(name, method body)`: every fold frame x (the actor corpus's fold
+/// statements over every receiver, the plain-receiver / `match:` statements,
+/// and [`SCOPE_PRODUCER_STATEMENTS`]).
+fn scope_rows() -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = block_arg_rows()
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("fold"))
+        .collect();
+    for (l, fold) in FOLDS.iter().enumerate() {
+        for (s, stmt) in SCOPE_PRODUCER_STATEMENTS.iter().enumerate() {
+            out.push((format!("fold{l} producer{s}"), fold.replace("{S}", stmt)));
+        }
+    }
+    out
+}
+
+fn scope_method(ctx: &ScopeContext, i: usize, body: &str) -> String {
+    let side = if ctx.class_side { "class " } else { "" };
+    format!(
+        "  {side}probe{i}: blk =>\n{}    n := 3\n    {body}\n    n\n",
+        ctx.prelude
+    )
+}
+
+/// BT-4017: in every non-actor scope kind, every fold row passes the debug
+/// verifier, compiles through `erlc` and holds no raw-tuple unpack, except a
+/// row writing the field `f` inside the fold body in a value-type or `TestCase`
+/// method, which a language rule rejects with a structured error (class-side,
+/// `f` is a class variable written in place, and every row compiles).
+/// (One `erlc` module per context; bisected to the failing rows on failure.)
+#[test]
+fn fold_body_statements_in_every_scope_compile_without_a_raw_tuple_unpack() {
+    let rows = scope_rows();
+    let field_write_rows = rows
+        .iter()
+        .filter(|(_, body)| body.contains("self.f :="))
+        .count();
+    // Guard against the corpus thinning out: exact per-context accounting
+    // below only proves the rows that exist, so pin a floor on the row set
+    // and on the rows every context must compile (1938 / 1235 today).
+    assert!(
+        rows.len() >= 1500,
+        "scope corpus shrank to {} rows; expected >= 1500",
+        rows.len()
+    );
+    assert!(
+        rows.len() - field_write_rows >= 1000,
+        "only {} of {} scope rows are non-field-write rows; expected >= 1000",
+        rows.len() - field_write_rows,
+        rows.len()
+    );
+    let mut failures = Vec::new();
+    let mut counts = Vec::new();
+    for ctx in SCOPE_CONTEXTS {
+        let mut compiled = Vec::new();
+        let mut rejected = 0usize;
+        for (i, (name, body)) in rows.iter().enumerate() {
+            let m = scope_method(ctx, i, body);
+            let src = format!("{}{}{m}", ctx.header, ctx.helpers);
+            assert_parses(&src);
+            match scope_codegen(&src) {
+                // Only a field write nested in the fold body of an instance
+                // method is refused by a language rule (a value type's slots
+                // are immutable; a `TestCase` field write in a nested block
+                // has no channel back). Class-side, `f` is a class variable
+                // written in place, so every row must compile.
+                Ok(ScopeCodegen::Rejected) if !ctx.class_side && body.contains("self.f :=") => {
+                    rejected += 1;
+                }
+                Ok(ScopeCodegen::Rejected) => {
+                    failures.push(format!("{} / {name}: rejected\n{src}", ctx.name));
+                }
+                Ok(ScopeCodegen::Compiles(code)) => {
+                    if fold_raw_tuple_unpacks(&code) == 0 {
+                        compiled.push((name, m, src));
+                    } else {
+                        failures.push(format!("{} / {name}: raw-tuple unpack\n{src}", ctx.name));
+                    }
+                }
+                Err(e) => failures.push(format!("{} / {name}: {e}\n{src}", ctx.name)),
+            }
+        }
+        counts.push(format!(
+            "{}: {} compile, {rejected} rejected",
+            ctx.name,
+            compiled.len()
+        ));
+        // Exact accounting: every row either compiles or is one of the
+        // rejected field-write rows, and an instance context rejects all of
+        // them (none slips through to compile), a class-side context none.
+        let expected_rejected = if ctx.class_side { 0 } else { field_write_rows };
+        if compiled.len() + rejected != rows.len() || rejected != expected_rejected {
+            failures.push(format!(
+                "{}: {} compile + {rejected} rejected of {} rows; expected {} compile + \
+                 {expected_rejected} rejected",
+                ctx.name,
+                compiled.len(),
+                rows.len(),
+                rows.len() - expected_rejected
+            ));
+        }
+        let methods: String = compiled.iter().map(|(_, m, _)| m.as_str()).collect();
+        if !passes(&format!("{}{}{methods}", ctx.header, ctx.helpers)) {
+            failures.extend(
+                compiled
+                    .iter()
+                    .filter(|(_, _, src)| !passes(src))
+                    .map(|(name, _, src)| format!("{} / {name}: erlc\n{src}", ctx.name)),
+            );
+        }
+    }
+    println!(
+        "BT-4017 scope rows ({} per context): {}",
+        rows.len(),
+        counts.join("; ")
+    );
+    assert!(
+        failures.is_empty(),
+        "{} fold row(s) fail in a non-actor scope:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}

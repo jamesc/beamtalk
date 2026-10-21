@@ -1,0 +1,187 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4017: a fold body statement that is a conditional whose receiver is a
+// self-send and whose block argument is not a literal. It used to raise
+// `badarg`: the fold body unpacked `element(2, ...)` of the plain `ifTrue:`
+// send's value. One method per fold kind; each answers what the fold computed
+// and whether the receiver's state change ran on every iteration.
+// See stdlib/test/bt4017fold_body_block_arg_test.bt.
+
+Actor subclass: Bt4017FoldBodyBlockArgActor
+  state: ticks = 0
+  state: f = 0
+
+  // The issue's repro helper: advances `f`, answers true.
+  done =>
+    self.f := self.f + 1
+    true
+
+  // Advances `ticks`; answers true from the second call on.
+  tick =>
+    self.ticks := self.ticks + 1
+    self.ticks > 1
+
+  // The issue's repro.
+  fold: blk =>
+    #(1, 2) do: [:e | (self done) ifTrue: blk]
+    self.f
+
+  doLast: blk =>
+    #(1, 2, 3) do: [:e | (self tick) ifTrue: blk]
+    self.ticks
+
+  doBeforeTail: blk =>
+    t := 0
+    #(1, 2, 3)
+      do: [:e |
+        (self tick) ifFalse: blk
+        t := t + e
+      ]
+    #[t, self.ticks]
+
+  keysAndValuesDoRow: blk =>
+    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | (self tick) ifTrue: blk]
+    self.ticks
+
+  collectLast: blk =>
+    r := #(1, 2, 3) collect: [:e | (self tick) ifTrue: blk ifFalse: blk]
+    #[r last, self.ticks]
+
+  collectMixed: blk =>
+    r := #(1, 2, 3) collect: [:e | (self tick) ifTrue: [0] ifFalse: blk]
+    #[r first, r last, self.ticks]
+
+  // Literal arms that write a field: the inline-threaded producer, now also
+  // lowered through `thread_ahead` in the fold body.
+  collectFieldArm =>
+    r := #(1, 2, 3) collect: [:e |
+      (self tick) ifTrue: [self.f := self.f + e] ifFalse: [0]
+    ]
+    #[r last, self.f, self.ticks]
+
+  // A plain receiver with a field-writing arm, and a `match:` whose arm
+  // writes a field: also lowered through `thread_ahead` now.
+  collectPlainArm =>
+    r := #(1, 2, 3) collect: [:e |
+      (e > 1) ifTrue: [self.f := self.f + e] ifFalse: [0]
+    ]
+    #[r last, self.f]
+
+  doMatch =>
+    #(1, 2, 3)
+      do: [:e |
+        e match: [
+          2 -> self.f := self.f + 10;
+          _ -> 0
+        ]
+      ]
+    self.f
+
+  selectFieldArm =>
+    r := #(1, 2, 3)
+      select: [:e |
+        (self tick)
+          ifTrue: [
+            self.f := self.f + 1
+            true
+          ]
+          ifFalse: [false]
+      ]
+    #[r size, self.f, self.ticks]
+
+  injectLast: blk =>
+    r := #(1, 2, 3) inject: 0 into: [:a :e |
+      (self tick) ifTrue: blk ifFalse: blk
+    ]
+    #[r, self.ticks]
+
+  injectBeforeTail: blk =>
+    r := #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        (self tick) ifTrue: blk
+        a + e
+      ]
+    #[r, self.ticks]
+
+  selectRow: blk =>
+    r := #(1, 2, 3)
+      select: [:e |
+        (self tick) ifTrue: blk
+        e > 1
+      ]
+    #[r size, self.ticks]
+
+  rejectRow: blk =>
+    r := #(1, 2, 3)
+      reject: [:e |
+        (self tick) ifFalse: blk
+        e =:= 2
+      ]
+    #[r size, self.ticks]
+
+  anySatisfyRow: blk =>
+    r := #(1, 2, 3) anySatisfy: [:e | (self tick) and: blk]
+    #[r, self.ticks >= 2]
+
+  allSatisfyRow: blk =>
+    r := #(1, 2, 3) allSatisfy: [:e | (self tick) or: blk]
+    #[r, self.ticks]
+
+  detectRow: blk =>
+    r := #(1, 2, 3) detect: [:e | (self tick) and: blk]
+    #[r, self.ticks >= 2]
+
+  detectIfNone: blk =>
+    r := #(1, 2, 3)
+      detect: [:e |
+        (self tick) ifTrue: blk
+        false
+      ]
+      ifNone: [0]
+    #[r, self.ticks]
+
+  countRow: blk =>
+    r := #(1, 2, 3) count: [:e | (self tick) and: blk]
+    #[r, self.ticks]
+
+  takeWhileRow: blk =>
+    r := #(1, 2, 3)
+      takeWhile: [:e |
+        (self tick) ifTrue: blk
+        e < 3
+      ]
+    #[r size, self.ticks >= 2]
+
+  dropWhileRow: blk =>
+    r := #(1, 2, 3)
+      dropWhile: [:e |
+        (self tick) ifTrue: blk
+        e < 2
+      ]
+    #[r size, self.ticks >= 2]
+
+  partitionRow: blk =>
+    #(1, 2, 3)
+      partition: [:e |
+        (self tick) ifTrue: blk
+        e > 1
+      ]
+    self.ticks
+
+  groupByRow: blk =>
+    #(1, 2, 3)
+      groupBy: [:e |
+        (self tick) ifTrue: blk
+        e > 1
+      ]
+    self.ticks
+
+  sortRow: blk =>
+    r := #(3, 1, 2)
+      sort: [:a :b |
+        (self tick) ifTrue: blk
+        a < b
+      ]
+    #[r first, self.ticks > 0]

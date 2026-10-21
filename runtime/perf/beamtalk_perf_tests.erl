@@ -157,7 +157,8 @@ all_benchmarks() ->
     bench_block_threading(),
     bench_method_threading(),
     bench_self_send_override(),
-    bench_class_self_dispatch().
+    bench_class_self_dispatch(),
+    bench_ffi_direct_call().
 
 %% --- 1. Raw message send/receive (baseline) ---
 
@@ -495,6 +496,42 @@ report_ns(Name, #{median := Median, mean := Mean, min := Min,
     io:format(standard_error,
         "PERF: ~s ~bns (mean: ~.1fns, min: ~bns, max: ~bns, p95: ~bns, p99: ~bns, n: ~b)~n",
         [Name, Median, float(Mean), Min, Max, P95, P99, N]).
+
+%% --- BT-4021: inline FFI `direct_call/3` overhead ---
+%%
+%% Every inline FFI send (`Erlang erlang monotonic_time`,
+%% `(Erlang gen_tcp) send: s with: d`, ...) lowers to
+%% `beamtalk_erlang_proxy:direct_call(M, F, Args)`. Before BT-4021 it read
+%% `M:module_info(exports)` on every call (~5-14 us); now the export list is
+%% read only after an `undef`. Reported in ns/call (batched like the hires
+%% benchmark) next to the plain call, plus the ratio the issue's acceptance
+%% criterion targets (~2x). `gen_tcp:module_info(exports)` is the per-call cost
+%% that was removed, kept here as the reference point.
+
+bench_ffi_direct_call() ->
+    _ = code:ensure_loaded(gen_tcp),
+    Plain = ffi_batch_ns(fun() -> erlang:monotonic_time() end),
+    Direct = ffi_batch_ns(fun() ->
+        beamtalk_erlang_proxy:direct_call(erlang, monotonic_time, [])
+    end),
+    Exports = ffi_batch_ns(fun() -> gen_tcp:module_info(exports) end),
+    report_ns("ffi/plain_monotonic_time", Plain, ?HIRES_ITERATIONS),
+    report_ns("ffi/direct_call_monotonic_time", Direct, ?HIRES_ITERATIONS),
+    report_ns("ffi/gen_tcp_module_info_exports", Exports, ?HIRES_ITERATIONS),
+    io:format(standard_error,
+        "PERF: ffi/direct_call_vs_plain ~.3fx~n",
+        [maps:get(median, Direct) / max(maps:get(median, Plain), 1)]).
+
+-doc "Time `Fun` in batches of ?HIRES_BATCH; stats are ns per call.".
+ffi_batch_ns(Fun) ->
+    lists:foreach(fun(_) -> Fun() end, lists:seq(1, ?HIRES_WARMUP * ?HIRES_BATCH)),
+    stats(lists:map(fun(_) ->
+        {T, _} = timer:tc(fun() -> ffi_repeat(Fun, ?HIRES_BATCH) end, nanosecond),
+        T div ?HIRES_BATCH
+    end, lists:seq(1, ?HIRES_ITERATIONS))).
+
+ffi_repeat(_Fun, 0) -> ok;
+ffi_repeat(Fun, N) -> Fun(), ffi_repeat(Fun, N - 1).
 
 %% --- 7. Concurrent callers test ---
 %%

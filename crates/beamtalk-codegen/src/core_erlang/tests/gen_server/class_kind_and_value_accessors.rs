@@ -1016,7 +1016,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
 
     // Must call the class-side keyword constructor from within class_withName:
     assert!(
-        code.contains("call 'bt@scheme_symbol':'class_symName:'(ClassSelf,"),
+        code.contains("call 'bt@scheme_symbol':'class_symName:'('nil',"),
         "class_withName: should dispatch to class_symName: constructor. Got:\n{code}"
     );
     // The class_withName: body must not call the instance getter (symName/1) passing n as self.

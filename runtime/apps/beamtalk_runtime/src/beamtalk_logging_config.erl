@@ -171,19 +171,12 @@ flush_transcript() ->
 %% Naming this union (rather than bare `atom()`) documents the real return set
 %% for Dialyzer and readers.
 %%
-%% NOTE: this union contains the atom `error`, which `beamtalk_spec_reader`'s
-%% ADR-0076 ok/error Result recognition (`classify_union_branches/4`) intercepts
-%% as a bare error branch. As a result the spec reader emits
-%% `Result(Dynamic, Nil) | Symbol` for `logLevel/0` rather than the singleton
-%% union it produces for `error`-free enumerations like `logFormat/0`
-%% (`text | json` -> `#text | #json`). The user-facing `Logger logLevel`
-%% return type is therefore carried by the source annotation in
-%% `beamtalk.bt` (compiled into `generated_builtins.rs`), which every
-%% consumer of the getter sees; it is a subtype of the inferred
-%% `... | Symbol`, so the getter still type-checks. Tightening the
-%% direct-FFI-call inference for `ok`/`error`-bearing atom unions is deferred to
-%% pending ADR-0076 Result semantics work. `map_type_singleton_union_*`
-%% tests lock in both behaviours.
+%% NOTE: this union contains the atom `error`, but it also has atoms beyond
+%% `ok`/`error`, so `beamtalk_spec_reader:map_union/2` treats it as a genuine
+%% enumeration (`has_non_result_atom/1`) and emits the singleton union
+%% `#emergency | ... | #none` rather than applying ADR-0076 ok/error Result
+%% recognition. `map_type_singleton_union_with_error_atom_is_singleton_test`
+%% locks that in.
 -spec logLevel() ->
     emergency | alert | critical | error | warning | notice | info | debug | all | none.
 logLevel() ->

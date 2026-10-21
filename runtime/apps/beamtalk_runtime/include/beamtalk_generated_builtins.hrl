@@ -112,6 +112,7 @@
     'System',
     'SystemAnnouncer',
     'SystemNavigation',
+    'Telemetry',
     'TestCase',
     'TestResult',
     'TestRunner',

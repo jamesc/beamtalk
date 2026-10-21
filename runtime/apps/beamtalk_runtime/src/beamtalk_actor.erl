@@ -119,8 +119,9 @@ restart mechanism, not a bug. Its own `self`-send risk (a class method's
 right after the spawn succeeds — see
 `beamtalk_class_instantiation:do_class_self_named_spawn/6`. A plain
 (non-`withClassMethod:`) unnamed `Supervisor child` — real OTP supervision
-via `beamtalk_supervisor:spec_to_otp/1` calling `Module:start_link/1`
-directly — links to the supervisor without ever going through
+via `beamtalk_supervisor:spec_to_otp/1`, whose start MFA calls
+`beamtalk_supervisor:start_actor_child/2` → `safe_spawn_linked/2`
+(BT-4033) — links to the supervisor without ever going through
 `safe_spawn/2`, so it was never part of this bug.
 
 `SupervisionSpec withClassMethod:`
@@ -224,8 +225,9 @@ handle_getValue([], State) ->
 %% the `initialize` step of handle_continue/2.
 -define(BT_INIT_ACK_KEY, '$bt_init_ack').
 
-%% BT-3992: how long a starter waits for `initialize` to finish.
--define(BT_INITIALIZE_TIMEOUT, 5000).
+%% BT-3992: how long a starter waits for `initialize` to finish —
+%% `?BT_INITIALIZE_TIMEOUT` lives in beamtalk.hrl (BT-4033: shared with
+%% `beamtalk_supervisor`'s init-timeout hint).
 
 %% BT-3968: the continuation-request selectors (`Actor>>continueWith:` /
 %% `continueWith:withArguments:`).
@@ -244,6 +246,8 @@ handle_getValue([], State) ->
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
 -export([await_initialize/1, await_initialize/2, await_initialize/3, safe_spawn/2]).
+%% BT-4033: the awaited linked start of an anonymous supervised actor child.
+-export([safe_spawn_linked/2]).
 
 %% BT-3992: named spawns that must not leave the actor linked to the caller.
 -export([spawn_named_for_caller/4, spawn_named_unlinked/3]).
@@ -823,13 +827,24 @@ safe_spawn(Module, InitArgs) ->
     end.
 
 -doc """
-Spawn an actor **linked**, with
-trap_exit + initialize synchronization, for the one `safe_spawn/2` case that
-needs the link — a `withClassMethod:` supervisor child's factory calling
-plain `self spawn`/`self spawnWith:` (see `safe_spawn/2`'s doc). Shares the
-trap_exit dance with `safe_spawn_named/5` via `start_link_and_await/1`.
+Spawn an actor **linked** to the caller, with trap_exit + initialize
+synchronization: answers `{ok, Pid}` once the actor's `initialize` has
+returned (not the continuations it requested), or `{error, Reason}` when it
+failed or timed out — never `ignore`.
+
+The start of every anonymous supervised actor child (BT-4033): a static
+`Supervisor` child's and a `DynamicSupervisor` pool child's start MFA goes
+through `beamtalk_supervisor:start_actor_child/2,3`, which calls this, so a
+failing `initialize` fails the supervisor's start or `startChild`, as OTP
+`init/1` returning `{stop, Reason}` does. It is also the `safe_spawn/2` case
+that needs the link — a `withClassMethod:` supervisor child's factory
+calling plain `self spawn`/`self spawnWith:` (see `safe_spawn/2`'s doc).
+Shares the trap_exit dance with `safe_spawn_named/5` via
+`start_link_and_await/3`. `InitArgs` that are not a map (a hand-written
+gen_server's own start args) carry no init-ack target and fall back to the
+sys-based wait (`await_initialize/3`).
 """.
--spec safe_spawn_linked(module(), map()) -> {ok, pid()} | {error, term()}.
+-spec safe_spawn_linked(module(), term()) -> {ok, pid()} | {error, term()}.
 safe_spawn_linked(Module, InitArgs) ->
     start_link_and_await(
         fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, linked
@@ -1248,7 +1263,7 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
     %% actor death during message processing. The watcher monitors both the
     %% actor and future processes: if the actor dies before the future is
     %% resolved, the watcher rejects the future with a structured error.
-    maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
+    beamtalk_telemetry:maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
         case beamtalk_pid:is_alive(ActorPid) of
             true ->
                 PropCtx = get_propagated_ctx(),
@@ -1335,7 +1350,7 @@ cast_send(ActorPid, Selector, Args) ->
     %% Measures dispatch-to-mailbox time for cast sends.
     Class = lookup_class(ActorPid),
     Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => cast},
-    maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
+    beamtalk_telemetry:maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
         case beamtalk_pid:is_alive(ActorPid) of
             true ->
                 PropCtx = get_propagated_ctx(),
@@ -1556,7 +1571,7 @@ sync_send_remote(ActorPid, Selector, Args) ->
     Class = lookup_class(ActorPid),
     Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
     try
-        maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
+        beamtalk_telemetry:maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
             case beamtalk_pid:is_alive(ActorPid) of
                 true ->
                     %% Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}.
@@ -1791,7 +1806,7 @@ sync_send(ActorPid, Selector, Args, Timeout) when
             Class = lookup_class(ActorPid),
             Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
             try
-                maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
+                beamtalk_telemetry:maybe_span([beamtalk, actor, dispatch], Metadata, fun() ->
                     case beamtalk_pid:is_alive(ActorPid) of
                         true ->
                             PropCtx = get_sync_propagated_ctx(),
@@ -2590,41 +2605,12 @@ delegate_error(ClassName) ->
     Error#beamtalk_error{message = <<"delegate called on a non-native Actor">>}.
 
 -doc """
-Wrap a function in telemetry:span/3 if telemetry is available, else run directly.
-BUnit tests don't load telemetry, so we must gracefully degrade.
-When tracing is enabled, generates a span_id and sets trace_id
-(root span if none exists) in the process dictionary for causal linking.
-""".
--spec maybe_span(list(), map(), fun(() -> {term(), map()})) -> term().
-maybe_span(EventPrefix, Metadata, Fun) ->
-    %% Generate causal trace IDs when tracing is enabled.
-    %% Only incurs atomics cost (~10ns) when trace capture is active.
-    case beamtalk_trace_store:is_enabled() of
-        true ->
-            SpanId = beamtalk_trace_store:next_span_id(),
-            %% If no trace_id exists, this is a root span
-            case get('$beamtalk_trace_id') of
-                undefined ->
-                    put('$beamtalk_trace_id', SpanId),
-                    put('$beamtalk_span_id', SpanId);
-                _ExistingTraceId ->
-                    put('$beamtalk_span_id', SpanId)
-            end;
-        false ->
-            ok
-    end,
-    case erlang:function_exported(telemetry, span, 3) of
-        true ->
-            telemetry:span(EventPrefix, Metadata, Fun);
-        false ->
-            {Result, _UpdatedMeta} = Fun(),
-            Result
-    end.
-
--doc """
-Emit a telemetry:execute/3 event if telemetry is available.
-Used for lifecycle events (start, stop, kill) which are instantaneous —
-no duration/span needed. Gracefully degrades when telemetry is not loaded.
+Emit an actor lifecycle telemetry event (`[beamtalk, actor, lifecycle, _]`)
+and mirror `start`/`stop` into ActorSpawned/ActorStopped announcements.
+Called from compiled actor `init/1`/`terminate/2` and the runtime's own
+spawn/stop/kill paths. The telemetry emit itself is
+`beamtalk_telemetry:emit/3` (BT-4025); this function only adds the
+actor-specific announcement.
 """.
 -spec maybe_execute_telemetry(list(), map(), map()) -> ok.
 maybe_execute_telemetry(EventName, Measurements, Metadata) ->
@@ -2636,12 +2622,7 @@ maybe_execute_telemetry(EventName, Measurements, Metadata) ->
     %% without a codegen change (ADR 0069 §4: a spawn can produce both a telemetry
     %% counter and an announcement). Best-effort and fault-isolated.
     maybe_announce_lifecycle(EventName, Metadata),
-    case erlang:function_exported(telemetry, execute, 3) of
-        true ->
-            telemetry:execute(EventName, Measurements, Metadata);
-        false ->
-            ok
-    end.
+    beamtalk_telemetry:emit(EventName, Measurements, Metadata).
 
 -doc """
 Resolve actor class name via beamtalk_object_instances reverse lookup.
@@ -3396,7 +3377,7 @@ log_wire_cast_rejected(Selector, Error) ->
         error => Error,
         domain => [beamtalk, runtime, dist]
     }),
-    maybe_execute_telemetry([beamtalk, dist, wire_rejected], #{count => 1}, #{
+    beamtalk_telemetry:emit([beamtalk, dist, wire_rejected], #{count => 1}, #{
         selector => Selector, error => Error
     }).
 

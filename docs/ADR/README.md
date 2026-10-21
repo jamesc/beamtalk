@@ -95,7 +95,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Implemented | 2026-03-18 |
 | [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Implemented | 2026-03-18 |
 | [0068](0068-parametric-types-and-protocols.md) | Parametric Types and Protocols | Accepted \| Implemented | 2026-03-20 |
-| [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Accepted \| Implemented | 2026-03-21 |
+| [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Accepted \| Implemented (amended 2026-10-21: `Telemetry` application events, BT-4025) | 2026-03-21 |
 | [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Implemented | 2026-03-24 |
 | [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Implemented | 2026-03-28 |
 | [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Implemented | 2026-03-29 |

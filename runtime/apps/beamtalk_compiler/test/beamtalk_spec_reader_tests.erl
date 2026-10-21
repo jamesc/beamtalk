@@ -441,7 +441,7 @@ map_type_singleton_union_with_error_atom_is_singleton_test() ->
 %% bare ok/error semantics are preserved (`has_non_result_atom/1` is false).
 map_type_bare_ok_error_stays_result_test() ->
     ?assertEqual(
-        <<"Result(Nil, Nil)">>,
+        <<"Result(Nil, Exception)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [{atom, 0, ok}, {atom, 0, error}]}
         )
@@ -452,7 +452,7 @@ map_type_bare_ok_error_stays_result_test() ->
 %% because a tuple branch makes `singleton_union_members/1` reject the union.
 map_type_result_tuples_with_atom_stays_result_test() ->
     ?assertEqual(
-        <<"Result(Integer, Symbol) | Symbol">>,
+        <<"Result(Integer, Exception) | Symbol">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, integer, []}]},
@@ -517,10 +517,10 @@ map_type_singleton_union_excludes_boolean_test() ->
 %%% Union types — ok/error Result recognition (ADR 0076 Phase 2)
 %%% ---------------------------------------------------------------
 
-%% {ok, binary()} | {error, posix()} → Result(String | Binary, Symbol)
+%% {ok, binary()} | {error, posix()} → Result(String | Binary, Exception)
 map_type_result_ok_error_test() ->
     ?assertEqual(
-        <<"Result(String | Binary, Symbol)">>,
+        <<"Result(String | Binary, Exception)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -529,10 +529,10 @@ map_type_result_ok_error_test() ->
         )
     ).
 
-%% {ok, pid()} | {error, term()} → Result(Pid) (Dynamic err is elided)
+%% {ok, pid()} | {error, term()} → Result(Pid, Exception)
 map_type_result_pid_dynamic_test() ->
     ?assertEqual(
-        <<"Result(Pid)">>,
+        <<"Result(Pid, Exception)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, pid, []}]},
@@ -541,10 +541,48 @@ map_type_result_pid_dynamic_test() ->
         )
     ).
 
-%% ok | {error, E} → Result(Nil, E) (bare ok in union)
+%% BT-4023: the error side of an FFI Result is an Exception class whatever the
+%% spec's reason type is — a narrow atom enumeration, a single atom, or term().
+%% The FFI boundary wraps every error reason in an Exception (ADR 0101), so the
+%% reason's own type never reaches the Result's error type argument. The one
+%% refinement: a `#beamtalk_error{}` reason is typed `Error`.
+map_type_result_error_side_is_always_exception_test_() ->
+    Ok = {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
+    Err = fun(R) -> {type, 0, tuple, [{atom, 0, error}, R]} end,
+    BtError = {type, 0, record, [{atom, 0, beamtalk_error}]},
+    Cases = [
+        {"atom()", {atom, 0, ok}, Err({type, 0, atom, []}), <<"Result(Nil, Exception)">>},
+        {"term()", Ok, Err({type, 0, term, []}), <<"Result(String | Binary, Exception)">>},
+        {"singleton", {atom, 0, ok}, Err({atom, 0, already_exists}), <<"Result(Nil, Exception)">>},
+        {"enum", {atom, 0, ok}, Err({type, 0, union, [{atom, 0, closed}, {atom, 0, timeout}]}),
+            <<"Result(Nil, Exception)">>},
+        %% `#beamtalk_error{}` wraps to its kind's class, always an Error subclass.
+        {"#beamtalk_error{}", Ok, Err(BtError), <<"Result(String | Binary, Error)">>}
+    ],
+    [
+        {Name,
+            ?_assertEqual(
+                Expected,
+                beamtalk_spec_reader:map_type({type, 0, union, [OkB, ErrB]})
+            )}
+     || {Name, OkB, ErrB, Expected} <- Cases
+    ] ++
+        [
+            %% A `#beamtalk_error{}` branch alongside a raw-reason branch could
+            %% wrap to any Exception class, so it stays `Exception`.
+            {"#beamtalk_error{} | atom()",
+                ?_assertEqual(
+                    <<"Result(String | Binary, Exception)">>,
+                    beamtalk_spec_reader:map_type(
+                        {type, 0, union, [Ok, Err(BtError), Err({type, 0, atom, []})]}
+                    )
+                )}
+        ].
+
+%% ok | {error, E} → Result(Nil, Exception) (bare ok in union)
 map_type_result_bare_ok_test() ->
     ?assertEqual(
-        <<"Result(Nil, Symbol)">>,
+        <<"Result(Nil, Exception)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {atom, 0, ok},
@@ -553,11 +591,11 @@ map_type_result_bare_ok_test() ->
         )
     ).
 
-%% {ok, T} without error branch → Result(T) (Dynamic err is elided)
+%% {ok, T} without error branch → Result(T, Exception)
 map_type_result_ok_only_test() ->
     %% {ok, T} | other — ok branch present, no error branch
     ?assertEqual(
-        <<"Result(String | Binary) | Integer">>,
+        <<"Result(String | Binary, Exception) | Integer">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -569,7 +607,7 @@ map_type_result_ok_only_test() ->
 %% {ok, T} as the sole branch in a union with no error branch
 map_type_result_ok_only_pure_test() ->
     ?assertEqual(
-        <<"Result(String | Binary)">>,
+        <<"Result(String | Binary, Exception)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]}
@@ -577,11 +615,11 @@ map_type_result_ok_only_pure_test() ->
         )
     ).
 
-%% {error, E} without ok branch → Result(Dynamic, E)
+%% {error, E} without ok branch → Result(Dynamic, Exception)
 map_type_result_error_only_test() ->
     %% {error, E} | other — error branch present, no ok branch
     ?assertEqual(
-        <<"Result(Dynamic, Symbol) | Integer">>,
+        <<"Result(Dynamic, Exception) | Integer">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]},
@@ -593,7 +631,7 @@ map_type_result_error_only_test() ->
 %% {error, E} as the sole branch in a union with no ok branch
 map_type_result_error_only_pure_test() ->
     ?assertEqual(
-        <<"Result(Dynamic, Symbol)">>,
+        <<"Result(Dynamic, Exception)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]}
@@ -601,10 +639,10 @@ map_type_result_error_only_pure_test() ->
         )
     ).
 
-%% {ok, T} | {error, E} | Other → Result(T, E) | Other
+%% {ok, T} | {error, E} | Other → Result(T, Exception) | Other
 map_type_result_three_branch_test() ->
     ?assertEqual(
-        <<"Result(String | Binary, Symbol) | Integer">>,
+        <<"Result(String | Binary, Exception) | Integer">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -622,7 +660,7 @@ map_type_result_term_unchanged_test() ->
 %% Bare error atom in union
 map_type_result_bare_error_test() ->
     ?assertEqual(
-        <<"Result(String | Binary, Nil)">>,
+        <<"Result(String | Binary, Exception)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {type, 0, tuple, [{atom, 0, ok}, {type, 0, binary, []}]},
@@ -634,7 +672,7 @@ map_type_result_bare_error_test() ->
 %% Both bare ok and bare error
 map_type_result_both_bare_test() ->
     ?assertEqual(
-        <<"Result(Nil, Nil)">>,
+        <<"Result(Nil, Exception)">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {atom, 0, ok},
@@ -647,7 +685,7 @@ map_type_result_both_bare_test() ->
 %%% Real OTP module verification (ADR 0076 Phase 2)
 %%% ---------------------------------------------------------------
 
-%% file:read_file/1 → Result(String, ...) return type
+%% file:read_file/1 → Result(String | Binary, Exception) return type
 verify_file_read_file_result_test() ->
     BeamFile = code:which(file),
     ?assertNotEqual(non_existing, BeamFile),
@@ -662,7 +700,7 @@ verify_file_read_file_result_test() ->
     [Spec | _] = ReadFileSpecs,
     RetType = maps:get(return_type, Spec),
     %% Should start with "Result(" — the ok type is String | Binary from binary()
-    ?assertMatch(<<"Result(String | Binary,", _/binary>>, RetType).
+    ?assertEqual(<<"Result(String | Binary, Exception)">>, RetType).
 
 %% os:putenv/2 params — `VarName :: env_var_name()` resolves to
 %% `nonempty_string()` and `Value :: env_var_value()` resolves to `string()`
@@ -724,14 +762,10 @@ verify_timer_send_after_result_test() ->
     ?assert(length(SendAfterSpecs) > 0),
     [Spec | _] = SendAfterSpecs,
     RetType = maps:get(return_type, Spec),
-    %% The formatter emits one of two shapes: bare `Result` (when both ok
-    %% and err resolve to Dynamic) or `Result(...)` (closing parenthesis).
+    %% The formatter always emits `Result(<OkType>, Exception)` (BT-4023).
     %% Anything else — e.g. `ResultFoo` — should fail.
-    ?assert(
-        RetType =:= <<"Result">> orelse
-            (binary:match(RetType, <<"Result(">>) =:= {0, 7} andalso
-                binary:last(RetType) =:= $))
-    ).
+    ?assertMatch(<<"Result(", _/binary>>, RetType),
+    ?assertEqual(<<", Exception)">>, binary:part(RetType, byte_size(RetType), -12)).
 
 %% application:start/1 → Result(Nil, ...) (bare ok in union)
 verify_application_start_result_test() ->
@@ -747,15 +781,8 @@ verify_application_start_result_test() ->
     ?assert(length(StartSpecs) > 0),
     [Spec | _] = StartSpecs,
     RetType = maps:get(return_type, Spec),
-    %% The formatter elides `, Dynamic` from the err position, so the only
-    %% two valid shapes here are `Result(Nil)` and `Result(Nil, <ErrType>)`.
-    %% Reject malformed values like `Result(NilThing` by checking the
-    %% delimiter explicitly.
-    ?assert(
-        RetType =:= <<"Result(Nil)">> orelse
-            (binary:match(RetType, <<"Result(Nil, ">>) =:= {0, 12} andalso
-                binary:last(RetType) =:= $))
-    ).
+    %% The error side of an FFI Result is always Exception (BT-4023).
+    ?assertEqual(<<"Result(Nil, Exception)">>, RetType).
 
 %%% ---------------------------------------------------------------
 %%% Bounded fun with ok/error union (constraint resolution into Result)
@@ -798,30 +825,27 @@ bounded_fun_result_with_constraints_test() ->
     [Spec] = Result,
     ?assertEqual(<<"read_file">>, maps:get(name, Spec)),
     %% The union's type variables (Binary, Reason) must be resolved via constraints
-    %% before Result recognition, yielding Result(String | Binary, Symbol)
-    ?assertEqual(<<"Result(String | Binary, Symbol)">>, maps:get(return_type, Spec)).
+    %% before Result recognition, yielding Result(String | Binary, Exception)
+    ?assertEqual(<<"Result(String | Binary, Exception)">>, maps:get(return_type, Spec)).
 
 %%% ---------------------------------------------------------------
 %%% map_return_type/1 — lone (non-union) ok/error return specs (ADR 0121, BT-3498)
 %%% ---------------------------------------------------------------
 
-%% A lone `-> ok.` return spec infers Result(Nil): OkTypes = [nil], ErrTypes = [],
-%% so resolve_ok_type/1 = "Nil" and resolve_err_type/1 = "Dynamic" (elided by
-%% format_result_type/2's Dynamic-error shorthand).
+%% A lone `-> ok.` return spec infers Result(Nil, Exception): OkTypes = [nil],
+%% so resolve_ok_type/1 = "Nil"; the error side is always Exception (BT-4023).
 map_return_type_bare_ok_test() ->
     ?assertEqual(
-        <<"Result(Nil)">>,
+        <<"Result(Nil, Exception)">>,
         beamtalk_spec_reader:map_return_type({atom, 0, ok})
     ).
 
-%% A lone `-> error.` return spec infers Result(Dynamic, Nil): OkTypes = [],
-%% ErrTypes = [nil], so resolve_ok_type/1 = "Dynamic" and resolve_err_type/1 =
-%% "Nil". format_result_type/2 only shortens a Dynamic *error* side, not a
-%% Dynamic *ok* side, so this is NOT symmetric with the bare-ok case above —
-%% it formats as the full two-argument Result(Dynamic, Nil).
+%% A lone `-> error.` return spec infers Result(Dynamic, Exception): OkTypes = [],
+%% so resolve_ok_type/1 = "Dynamic"; the runtime wraps the bare `error`'s nil
+%% reason in an Exception, so the error side is Exception (BT-4023).
 map_return_type_bare_error_test() ->
     ?assertEqual(
-        <<"Result(Dynamic, Nil)">>,
+        <<"Result(Dynamic, Exception)">>,
         beamtalk_spec_reader:map_return_type({atom, 0, error})
     ).
 
@@ -830,7 +854,7 @@ map_return_type_bare_error_test() ->
 %% handling, only the lone-atom case.
 map_return_type_union_test() ->
     ?assertEqual(
-        <<"Result(Nil, Symbol)">>,
+        <<"Result(Nil, Exception)">>,
         beamtalk_spec_reader:map_return_type(
             {type, 0, union, [
                 {atom, 0, ok}, {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]}
@@ -843,7 +867,7 @@ map_return_type_other_test() ->
     ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_return_type({type, 0, integer, []})).
 
 %% beamtalk_actor:unregister/1's actual spec shape — a bare, non-union
-%% `-> ok.` return — now infers Result(Nil) end-to-end via
+%% `-> ok.` return — now infers Result(Nil, Exception) end-to-end via
 %% extract_specs_from_forms/1, not just via the map_return_type/1 unit.
 extract_specs_bare_ok_return_test() ->
     Forms = [
@@ -858,7 +882,7 @@ extract_specs_bare_ok_return_test() ->
     ],
     [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
     ?assertEqual(<<"unregister">>, maps:get(name, Spec)),
-    ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
+    ?assertEqual(<<"Result(Nil, Exception)">>, maps:get(return_type, Spec)).
 
 %% A lone, non-union bare-atom return spec on a bounded_fun clause (`when`
 %% clause present for an unrelated param constraint) also gets Result
@@ -884,7 +908,7 @@ bounded_fun_bare_ok_return_test() ->
             ]}}
     ],
     [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
-    ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
+    ?assertEqual(<<"Result(Nil, Exception)">>, maps:get(return_type, Spec)).
 
 %% A return type that is itself a constrained type variable resolving to a
 %% lone `ok`/`error` atom also gets ADR-0121 Result recognition — simulates
@@ -917,7 +941,7 @@ bounded_fun_constrained_var_bare_ok_return_test() ->
             ]}}
     ],
     [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
-    ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
+    ?assertEqual(<<"Result(Nil, Exception)">>, maps:get(return_type, Spec)).
 
 %% Critical regression guard: `resolve_type_with_constraints/2` is shared
 %% between return-type resolution (redirected to `resolve_return_type_with_
@@ -959,7 +983,7 @@ bounded_fun_literal_ok_param_stays_symbol_test() ->
 %% bypassed Result recognition entirely and mapped to Symbol. BT-3507.
 map_return_type_annotated_bare_ok_test() ->
     ?assertEqual(
-        <<"Result(Nil)">>,
+        <<"Result(Nil, Exception)">>,
         beamtalk_spec_reader:map_return_type(
             {ann_type, 0, [{var, 0, 'Result'}, {atom, 0, ok}]}
         )
@@ -967,7 +991,7 @@ map_return_type_annotated_bare_ok_test() ->
 
 map_return_type_annotated_bare_error_test() ->
     ?assertEqual(
-        <<"Result(Dynamic, Nil)">>,
+        <<"Result(Dynamic, Exception)">>,
         beamtalk_spec_reader:map_return_type(
             {ann_type, 0, [{var, 0, 'Result'}, {atom, 0, error}]}
         )
@@ -988,7 +1012,7 @@ extract_specs_annotated_bare_ok_return_test() ->
     ],
     [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
     ?assertEqual(<<"f">>, maps:get(name, Spec)),
-    ?assertEqual(<<"Result(Nil)">>, maps:get(return_type, Spec)).
+    ?assertEqual(<<"Result(Nil, Exception)">>, maps:get(return_type, Spec)).
 
 %%% ---------------------------------------------------------------
 %%% extract_param_names/1 — parameter name extraction
@@ -1554,7 +1578,7 @@ resolve_user_type_union_test() ->
     put(beamtalk_type_depth, 0),
     try
         ?assertEqual(
-            <<"Result(String | Binary, Symbol)">>,
+            <<"Result(String | Binary, Exception)">>,
             beamtalk_spec_reader:map_type({user_type, 0, my_result, []})
         )
     after
@@ -1627,7 +1651,7 @@ resolve_remote_type_posix_test() ->
     ?assert(length(ReadFileSpecs) > 0),
     [Spec | _] = ReadFileSpecs,
     %% posix() in error branch should resolve to Symbol (since posix() = atom())
-    ?assertEqual(<<"Result(String | Binary, Symbol)">>, maps:get(return_type, Spec)).
+    ?assertEqual(<<"Result(String | Binary, Exception)">>, maps:get(return_type, Spec)).
 
 %% Remote type resolution: disk_log error types resolve.
 resolve_remote_type_disk_log_test() ->
@@ -1651,7 +1675,7 @@ resolve_remote_type_disk_log_test() ->
             %% (`{error, Reason}` shapes), so the Tuple branches are parametric.
             %% The `string()`-typed element widens to `String | List`.
             ?assertEqual(
-                <<"Result(Nil, Symbol | Tuple(Symbol, Dynamic) | Tuple(Symbol, String | List, Dynamic))">>,
+                <<"Result(Nil, Exception)">>,
                 RetType
             )
     end.
