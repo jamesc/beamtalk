@@ -15,7 +15,7 @@
 ///   state: count = 0
 ///   handleInfo: msg =>
 ///     msg match: [
-///       #tick -> [self.count := self.count + 1];
+///       #tick -> self.count := self.count + 1;
 ///       _ -> nil
 ///     ]
 /// ```
@@ -38,8 +38,11 @@ abstract Actor subclass: Server
   /// ```beamtalk
   /// handleInfo: msg =>
   ///   msg match: [
-  ///     #tick -> [self doWork];
+  ///     #tick -> self doWork;
   ///     _ -> nil
   ///   ]
   /// ```
+  ///
+  /// An arm body is an expression: `#tick -> [self doWork]` answers the
+  /// block without running it. Call a method from the arm instead.
   handleInfo: _msg => nil

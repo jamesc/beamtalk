@@ -41,14 +41,17 @@ Server subclass: EchoConnection
 
   handleInfo: msg =>
     msg match: [
-      {#tcp, s, data} -> [
-        self process: data.                                    // raises on bad input
-        (Erlang inet) setopts: s with: #(Tuple withAll: #(#active, #once))
-      ];
-      {#tcp_closed, _} -> [self stop];
+      {#tcp, s, data} -> self onData: data socket: s;
+      {#tcp_closed, _} -> self stop;
       _ -> nil
     ]
+
+  onData: data socket: s =>
+    self process: data                                         // raises on bad input
+    (Erlang inet) setopts: s with: #(Tuple withAll: #(#active, #once))
 ```
+
+> **Note (BT-4024):** the examples here were corrected after acceptance. A `match:` arm body of the form `pattern -> [ ... ]` is a Block value that never runs (and fails to compile when it writes a field), so multi-statement arms now call a method.
 
 If `process:` raises, today the actor survives with its pre-call state — but the socket's `{active, once}` was consumed by the message that arrived and is never re-armed. The connection hangs forever: no close, no crash report, no supervisor restart, nothing for the operator to see beyond one `warning` line. The same shape applies to any `Server` that drives an external resource from `handleInfo:`: a GenStage-style producer that stops producing, a monitor that never re-monitors, a timer loop that never re-schedules.
 
@@ -92,12 +95,13 @@ Server subclass: PeriodicWorker
 
   handleInfo: msg =>
     msg match: [
-      #tick -> [
-        self.count := self.count + 1.
-        Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
-      ];
+      #tick -> self tick;
       _ -> nil
     ]
+
+  tick =>
+    self.count := self.count + 1
+    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
 ```
 
 Nothing changes for this class: unknown messages hit `_ -> nil`. If `self.count + 1` could raise, the worker would now crash and be restarted by its supervisor, instead of silently never scheduling the next tick.
@@ -106,7 +110,7 @@ Nothing changes for this class: unknown messages hit `_ -> nil`. If `self.count 
 Server subclass: Fragile
   handleInfo: msg =>
     msg match: [
-      #tick -> [self tick]
+      #tick -> self tick
     ]
 // ⚠ Warning (handleinfo-no-catch-all): `handleInfo:` matches on `msg` with no
 //   catch-all arm; any other message will raise `#pattern_mismatch` and crash

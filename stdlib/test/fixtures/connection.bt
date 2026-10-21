@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4024: the § Continuations (`continueWith:`) example from
+// docs/beamtalk-language-features.md. The `{#ready, s}` arm calls a method
+// rather than holding a `[ ... ]` block, which would be a value that never runs.
+
+Server subclass: Connection
+  state: sock = nil
+
+  handleInfo: msg =>
+    msg match: [
+      {#ready, s} -> self onReady: s;
+      _ -> nil
+    ]
+
+  onReady: s =>
+    self.sock := s
+    self continueWith: #handleConnection   // runs before any queued #tcp message
+
+  // Set up the socket here, before the first #tcp message is handled.
+  handleConnection => self.sock

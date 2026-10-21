@@ -3431,15 +3431,18 @@ Server subclass: PeriodicWorker
 
   handleInfo: msg =>
     msg match: [
-      #tick -> [
-        self.count := self.count + 1.
-        Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
-      ];
+      #tick -> self tick;
       _ -> nil
     ]
 
+  tick =>
+    self.count := self.count + 1
+    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+
   getValue => self.count
 ```
+
+A `match:` arm body is an expression, so an arm that needs more than one statement calls a method (`#tick -> self tick`). Do not write `#tick -> [ ... ]`: that arm answers the block itself without running it (a block that writes a field or sends to `self` fails to compile; see § Match Expression).
 
 ### handleInfo: Semantics
 
@@ -3501,12 +3504,13 @@ Server subclass: Connection
 
   handleInfo: msg =>
     msg match: [
-      {#ready, s} -> [
-        self.sock := s
-        self continueWith: #handleConnection   // runs before any queued #tcp message
-      ];
+      {#ready, s} -> self onReady: s;
       _ -> nil
     ]
+
+  onReady: s =>
+    self.sock := s
+    self continueWith: #handleConnection   // runs before any queued #tcp message
 
   // Set up the socket here, before the first #tcp message is handled.
   handleConnection => self.sock
@@ -4338,6 +4342,8 @@ x match: [
 ]
 // => 2
 ```
+
+**An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is a compile error; one that does neither compiles without a warning and silently never runs. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`).
 
 **Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
 

@@ -86,18 +86,20 @@ Server subclass: PeriodicWorker
 
   handleInfo: msg =>
     msg match: [
-      #tick -> [
-        self.count := self.count + 1.
-        Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
-      ];
-      {#DOWN, _ref, #process, _pid, reason} -> [
-        Logger info: "Monitored process exited: " ++ reason displayString
-      ];
+      #tick -> self tick;
+      {#DOWN, _ref, #process, _pid, reason} ->
+        Logger info: "Monitored process exited: " ++ reason displayString;
       _ -> nil
     ]
 
+  tick =>
+    self.count := self.count + 1
+    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+
   getValue => self.count
 ```
+
+> **Note (BT-4024):** the examples here were corrected after acceptance. A `match:` arm body of the form `pattern -> [ ... ]` is a Block value that never runs (and fails to compile when it writes a field), so multi-statement arms now call a method.
 
 `handleInfo:` is defined on `Server` with a default no-op implementation (`handleInfo: msg => nil`). Actor does not define it. This means:
 - Server subclasses can override `handleInfo:` to handle raw messages

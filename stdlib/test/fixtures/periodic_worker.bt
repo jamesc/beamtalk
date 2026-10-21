@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4024: the § Defining a Server example from
+// docs/beamtalk-language-features.md. The `#tick` arm calls a method rather
+// than holding a `[ ... ]` block, which would be a value that never runs.
+
+Server subclass: PeriodicWorker
+  state: count = 0
+
+  initialize =>
+    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+
+  handleInfo: msg =>
+    msg match: [
+      #tick -> self tick;
+      _ -> nil
+    ]
+
+  tick =>
+    self.count := self.count + 1
+    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+
+  getValue => self.count
