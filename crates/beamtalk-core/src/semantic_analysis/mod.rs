@@ -1194,6 +1194,16 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
 
+    // Warn on a `handleInfo:` whose body is a `match:` with no catch-all arm
+    // (ADR 0134, BT-3959): an unmatched stray message raises
+    // `#pattern_mismatch` and, since errors in `handleInfo:` crash the
+    // server, takes it down.
+    validators::check_handle_info_catch_all(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+
     // Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 

@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for handle_info_catch_all_test.bt — ADR 0134 (BT-3959): a
+// `handleInfo:` written as a `match:` with no catch-all arm warns
+// (`handleinfo-no-catch-all`): any message no arm matches raises
+// `#pattern_mismatch`. `@expect all` acknowledges the diagnostic this
+// fixture deliberately triggers — there is no dedicated `@expect` category
+// for it by design (the fix is a `_ -> nil` arm, not a suppression). If the
+// lint stopped firing, the `@expect` would go stale and fail the build.
+
+Server subclass: HandleInfoMatchNoCatchAllServer
+  state: count = 0
+
+  handleInfo: msg =>
+    @expect all
+    msg match: [
+      {#add, n} -> self.count := self.count + n;
+      #reset -> self.count := 0
+    ]
+
+  count => self.count

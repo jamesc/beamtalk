@@ -646,6 +646,13 @@ pub enum DiagnosticCategory {
     /// `DefiniteAssignment`, no `@expect` category suppresses this one by
     /// design — the exemption is the `hasField:` guard, not an annotation.
     UnguardedLateRead,
+    /// A `handleInfo:` whose body is a `match:` with no catch-all arm
+    /// (ADR 0134, BT-3959): errors in `handleInfo:` crash the server, and a
+    /// `match:` with no matching arm raises `#pattern_mismatch`, so any
+    /// message the author did not anticipate crashes it. The fix is a
+    /// `_ -> nil` arm. No `@expect` category suppresses this one by design
+    /// (the catch-all arm is the fix); `@expect all` still covers it.
+    HandleInfoNoCatchAll,
     /// A block literal that reads or writes a class variable of its home
     /// class is used where it will run outside an invocation of that class
     /// (ADR 0130 §5): a reading block handed to an asynchronous send, stored

@@ -3446,6 +3446,15 @@ Server subclass: PeriodicWorker
 - Defined on `Server` with a **default no-op** implementation — messages are ignored unless you override it.
 - **Error handling:** an error raised in `handleInfo:` crashes the server, as in OTP (ADR 0134): `terminate:` runs with the error as its reason, `onExit:` observers receive it, a crash report is logged, and a supervisor applies its restart policy. Unmatched messages are still harmless: the default `handleInfo:` ignores everything, and a `match:` over the message should end with a `_ -> nil` arm so an unexpected message does not raise `#pattern_mismatch`.
 - Sending `handleInfo:` to a plain `Actor` raises `doesNotUnderstand` — only Server subclasses have this method.
+- **Lint `handleinfo-no-catch-all`** (ADR 0134): a `handleInfo:` whose body is a `match:` with no catch-all arm warns at compile time, because `match:` with no matching arm raises `#pattern_mismatch` on every message no arm names — which, once ADR 0134's crash-on-error change ships (BT-3958), crashes the server instead of being logged. Add `_ -> nil` as the last arm to ignore unexpected messages. A tuple-pattern arm (`{tag, payload}`) is not a catch-all. Configure it under `[diagnostics]` as `handleinfo-no-catch-all`; it has no dedicated `@expect` category.
+
+  ```beamtalk
+  handleInfo: msg =>
+    msg match: [
+      {#tick, n} -> self.count := self.count + n;
+      _ -> nil
+    ]
+  ```
 
 ### Migration: Actor to Server
 
