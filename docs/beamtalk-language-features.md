@@ -3431,7 +3431,7 @@ Server subclass: PeriodicWorker
   state: count = 0
 
   initialize =>
-    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+    Timer send: #tick to: self after: 1000
 
   handleInfo: msg =>
     msg match: [
@@ -3441,10 +3441,12 @@ Server subclass: PeriodicWorker
 
   tick =>
     self.count := self.count + 1
-    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+    Timer send: #tick to: self after: 1000
 
   getValue => self.count
 ```
+
+`Timer send:to:after:` delivers the message to the server's mailbox exactly as `erlang:send/2` would, so it arrives in `handleInfo:` (see § Message Timers).
 
 A `match:` arm body is an expression, so an arm that needs more than one statement calls a method (`#tick -> self tick`). Do not write `#tick -> [ ... ]`: that arm answers the block itself without running it (a block that writes a field or sends to `self` fails to compile; see § Match Expression).
 
@@ -3497,6 +3499,41 @@ Actor subclass: Ticker
 ```
 
 No `state:` for the timer reference, no `terminate:` cleanup needed — the link handles it.
+
+### Message Timers
+
+A block timer runs its block in a separate process, so the block cannot touch the actor's state; it can only send the actor a message. When the actor is a `Server`, deliver the message directly with a **message timer** instead, and handle it in `handleInfo:`:
+
+```beamtalk
+t := Timer send: #tick to: self after: 1000          // one-shot; answers a Timer
+t := Timer send: {#readTimeout, tag} to: self after: (Duration seconds: 5)
+t := Timer send: #tick to: self every: 1000          // repeating
+t cancel                                             // => Boolean
+t isActive                                           // => Boolean
+```
+
+- `to:` takes an Actor (including a Server) or a `Pid`. The message is delivered exactly as `erlang:send/2` would deliver it: a Server receives it in `handleInfo:`.
+- The delay is Integer milliseconds or a `Duration`, as for `after:do:`.
+- A one-shot message timer maps to `erlang:send_after/3`, with no extra process; `cancel` is `erlang:cancel_timer/1` and answers `true` only if the message had not been sent yet. `isActive` is `erlang:read_timer/1`.
+- A repeating message timer runs in a small process that is **not** linked to the caller; it stops on `cancel`, or when the target dies.
+- A timer whose target has died does nothing, as in OTP.
+
+```beamtalk
+Server subclass: Poller
+  state: timer = nil
+
+  initialize => self.timer := Timer send: #poll to: self every: 5000
+
+  handleInfo: msg =>
+    msg match: [
+      #poll -> self poll;
+      _ -> nil
+    ]
+
+  poll => nil
+
+  pause => self.timer cancel
+```
 
 ### Continuations (`continueWith:`)
 

@@ -276,6 +276,7 @@
 
 ### Standard Library
 
+- **Message timers: `Timer send:to:after:` and `Timer send:to:every:` (BT-4048)** — deliver a message to an Actor, a Server or a `Pid` after a delay or at an interval (Integer milliseconds or a `Duration`), exactly as `erlang:send/2` would, so a Server receives it in `handleInfo:`. Both answer a `Timer`, and `cancel` / `isActive` work on them as on block timers: a one-shot message timer is backed by `erlang:send_after/3` (no extra process; `cancel` answers `true` only if the message had not been sent), a repeating one by a small unlinked process that stops on `cancel` or when its target dies. A dead target is a silent no-op. This replaces raw `Erlang erlang send_after: ... dest: (self pid) msg: ...` calls; the `PeriodicWorker` example in the language docs now uses it.
 - **`Exception>>reason` exposes the raw Erlang error term (BT-3954)** — `Exception>>reason` returns the underlying Erlang error term (or `nil`) on FFI-wrapped exceptions, allowing handlers to match on the raw term instead of string-comparing `e message` (#4431)
 - **`DynamicSupervisor maxChildren` limit (BT-3964)** — `DynamicSupervisor` gains a `maxChildren` class method to set a child count limit; `startChild` returns `#max_children` when the limit is reached (#4430)
 - `should:raise:` now classifies exceptions with the same normalisation `on:do:` uses — `should: [...] raise: #key_error` matches raw `{badkey, _}` exceptions consistently instead of requiring `#internal_error` (BT-3930, #4410)

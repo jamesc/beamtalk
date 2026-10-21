@@ -8,7 +8,8 @@
 -moduledoc """
 EUnit tests for beamtalk_timer module.
 
-Tests class methods (after:do:, every:do:, sleep:), instance methods
+Tests class methods (after:do:, every:do:, send:to:after:, send:to:every:,
+sleep:), instance methods
 (cancel, isActive, printString), the ack-based cancel protocol,
 FFI shims (after/2, every/2, sleep/1), and error paths.
 """.
@@ -264,3 +265,113 @@ every_timer_dies_when_caller_dies_test() ->
         end,
     wait_for_exit(Wrapper, 1000),
     wait_for_exit(maps:get(pid, T), 1000).
+
+%%% ============================================================================
+%%% send:to:after: / send:to:every: — message timers (BT-4048)
+%%% ============================================================================
+
+-define(TYPE_ERROR, #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}}).
+
+send_after_to_pid_delivers_message_test() ->
+    T = beamtalk_timer:'send:to:after:'({tick, 1}, self(), 10),
+    ?assertMatch(#{'$beamtalk_class' := 'Timer', tref := _}, T),
+    receive
+        {tick, 1} -> ok
+    after 1000 -> ?assert(false, "message not delivered")
+    end,
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    ?assertNot(beamtalk_timer:cancel(T)).
+
+send_after_to_actor_object_delivers_message_test() ->
+    Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = self()},
+    _ = beamtalk_timer:'sendAfter'(tick, Obj, 5),
+    receive
+        tick -> ok
+    after 1000 -> ?assert(false, "message not delivered")
+    end.
+
+send_after_to_registered_name_test() ->
+    Name = beamtalk_timer_tests_target,
+    true = register(Name, self()),
+    try
+        Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {registered, Name}},
+        _ = beamtalk_timer:'send:to:after:'(tick, Obj, 5),
+        receive
+            tick -> ok
+        after 1000 -> ?assert(false, "message not delivered")
+        end
+    after
+        unregister(Name)
+    end.
+
+send_after_cancel_before_fire_test() ->
+    T = beamtalk_timer:'send:to:after:'(never, self(), 10000),
+    ?assert(beamtalk_timer:'isActive'(T)),
+    ?assertEqual(<<"Timer(active)">>, beamtalk_timer:'printString'(T)),
+    ?assert(beamtalk_timer:cancel(T)),
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    ?assertNot(beamtalk_timer:cancel(T)),
+    receive
+        never -> ?assert(false, "cancelled timer delivered")
+    after 50 -> ok
+    end.
+
+send_after_dead_target_is_silent_test() ->
+    Dead = spawn(fun() -> ok end),
+    wait_for_exit(Dead, 1000),
+    T = beamtalk_timer:'send:to:after:'(tick, Dead, 1),
+    timer:sleep(20),
+    ?assertNot(beamtalk_timer:'isActive'(T)).
+
+send_after_unregistered_global_is_inert_test() ->
+    Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {global, bt4048_nobody}},
+    T = beamtalk_timer:'send:to:after:'(tick, Obj, 1),
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    ?assertNot(beamtalk_timer:cancel(T)).
+
+send_after_bad_target_raises_test() ->
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:after:'(tick, 42, 10)).
+
+send_after_negative_delay_raises_test() ->
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:after:'(tick, self(), -1)).
+
+send_every_delivers_until_cancelled_test() ->
+    T = beamtalk_timer:'sendEvery'(tick, self(), 10),
+    ?assertMatch(#{'$beamtalk_class' := 'Timer', pid := _}, T),
+    lists:foreach(
+        fun(_) ->
+            receive
+                tick -> ok
+            after 1000 -> ?assert(false, "tick not delivered")
+            end
+        end,
+        [1, 2, 3]
+    ),
+    ?assert(beamtalk_timer:'isActive'(T)),
+    ?assert(beamtalk_timer:cancel(T)),
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    flush_ticks(),
+    receive
+        tick -> ?assert(false, "tick after cancel")
+    after 50 -> ok
+    end.
+
+send_every_stops_when_target_dies_test() ->
+    Target = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    T = beamtalk_timer:'send:to:every:'(tick, Target, 10),
+    Target ! stop,
+    wait_for_exit(maps:get(pid, T), 1000),
+    ?assertNot(beamtalk_timer:'isActive'(T)).
+
+send_every_zero_interval_raises_test() ->
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:every:'(tick, self(), 0)).
+
+flush_ticks() ->
+    receive
+        tick -> flush_ticks()
+    after 0 -> ok
+    end.
