@@ -1629,7 +1629,11 @@ native_call_block_error_from_repl_eval_module_is_unchanged_test() ->
                 unload_bt_raiser(Mod)
             end
         end,
-        ['beamtalk_repl_eval_4055', 'beamtalk_inspector_eval_4055']
+        %% Built by the same functions `beamtalk_repl_eval` names its modules with.
+        [
+            beamtalk_module_name:repl_eval_module(4055),
+            beamtalk_module_name:inspector_eval_module(4055)
+        ]
     ).
 
 native_call_badarg_with_fun_arg_is_not_retried_test() ->

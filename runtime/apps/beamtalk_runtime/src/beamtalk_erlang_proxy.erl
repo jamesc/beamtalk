@@ -272,9 +272,10 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
 -doc """
 Auto-coerce binary args to charlists and retry once on `badarg`.
 
-No retry when an argument is a fun: re-running the call would re-run that
-code (a Beamtalk block's side effects would happen twice), so the `badarg` is
-raised as a `type_error` instead (BT-4055).
+No retry when a direct argument is a fun: re-running the call would re-run
+that code (a Beamtalk block's side effects would happen twice), so the
+`badarg` is raised as a `type_error` instead (BT-4055). Funs nested inside a
+list, map or tuple argument are not detected.
 
 Many Erlang functions (os:cmd/1, file:read_file/1, …) expect charlists but
 Beamtalk strings are binaries. Applies the same unified catch policy on the
@@ -631,7 +632,8 @@ applies. A stacktrace with neither is classified as before.
 Best effort: a tail call out of Beamtalk code into a raising Erlang function, or
 a raise more than `backtrace_depth` frames below the block, hides the Beamtalk
 frame, and the error is then classified as the call's. `maybe_retry_badarg/7`
-does not rely on this: it never retries a call that was passed a fun.
+does not rely on this: it never retries a call with a fun as a direct
+argument. A fun nested inside a list, map or tuple argument is not detected.
 """.
 -spec raised_in_beamtalk_code(atom(), list()) -> boolean().
 raised_in_beamtalk_code(_Target, []) ->
@@ -641,22 +643,10 @@ raised_in_beamtalk_code(Target, [{Target, _, _, _} | _]) ->
 raised_in_beamtalk_code(_Target, [{?MODULE, _, _, _} | _]) ->
     false;
 raised_in_beamtalk_code(Target, [{Module, _, _, _} | Rest]) ->
-    case is_compiled_beamtalk_module(atom_to_binary(Module, utf8)) of
+    case beamtalk_module_name:is_compiled_beamtalk_module(Module) of
         true -> true;
         false -> raised_in_beamtalk_code(Target, Rest)
     end.
-
-%% Modules the Beamtalk compiler emits: classes (`bt@…`) and the per-evaluation
-%% modules for REPL and inspector code (`beamtalk_repl_eval_<N>`,
-%% `beamtalk_inspector_eval_<N>`, see `beamtalk_repl_eval`).
--spec is_compiled_beamtalk_module(binary()) -> boolean().
-is_compiled_beamtalk_module(<<"bt@", _/binary>>) ->
-    true;
-is_compiled_beamtalk_module(<<"beamtalk_repl_eval_", D, _/binary>>) when D >= $0, D =< $9 -> true;
-is_compiled_beamtalk_module(<<"beamtalk_inspector_eval_", D, _/binary>>) when D >= $0, D =< $9 ->
-    true;
-is_compiled_beamtalk_module(_) ->
-    false.
 
 -doc """
 Raise a structured error for an FFI target that is not callable.
