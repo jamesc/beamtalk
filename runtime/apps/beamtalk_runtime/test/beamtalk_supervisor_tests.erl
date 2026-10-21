@@ -3496,7 +3496,8 @@ spec_to_otp_spawnAs_translates_to_beamtalk_actor_spawnAs_test() ->
     %% ADR 0079: `SupervisionSpec withName:` emits a Beamtalk
     %% childSpec with startFn = #spawnAs: and startArgs = #(Name). The
     %% supervisor runtime must translate that into the MFA
-    %% `{beamtalk_actor, spawnAs, [Name, Module]}` so OTP restart re-
+    %% `{beamtalk_supervisor, start_actor_child, [Module, #{}, {local, Name}]}`
+    %% (BT-4033: the awaited start, through `beamtalk_actor:spawnAs/3`) so OTP restart re-
     %% registers the name atomically. We construct the dispatchable
     %% Beamtalk spec by hand (equivalent to what Supervisor childSpec
     %% returns) and run it through build_child_specs/1.
@@ -3529,7 +3530,10 @@ spec_to_otp_spawnAs_translates_to_beamtalk_actor_spawnAs_test() ->
         ChildSpecList = bt1990_build_from_bt_spec(BtSpec),
         [OtpSpec] = ChildSpecList,
         ?assertMatch(
-            #{start := {beamtalk_actor, 'spawnAs', [Name, test_counter]}},
+            #{
+                start :=
+                    {beamtalk_supervisor, start_actor_child, [test_counter, #{}, {local, Name}]}
+            },
             OtpSpec
         )
     after
@@ -3539,7 +3543,7 @@ spec_to_otp_spawnAs_translates_to_beamtalk_actor_spawnAs_test() ->
 spec_to_otp_spawnWithAs_translates_to_beamtalk_actor_spawnAs_arity3_test() ->
     %% Mirror of the above for the `#spawnWith:as:` path — startArgs are
     %% `#(args, name)` → Erlang list `[Args, Name]`, translated to
-    %% `{beamtalk_actor, spawnAs, [Name, Module, Args]}`.
+    %% `{beamtalk_supervisor, start_actor_child, [Module, Args, {local, Name}]}`.
     Name = bt1990_spec_spawnwithas,
     bt1990_cleanup_name(Name),
     ClassObj = bt1990_make_counter_class_obj(),
@@ -3558,7 +3562,12 @@ spec_to_otp_spawnWithAs_translates_to_beamtalk_actor_spawnAs_arity3_test() ->
         },
         [OtpSpec] = bt1990_build_from_bt_spec(BtSpec),
         ?assertMatch(
-            #{start := {beamtalk_actor, 'spawnAs', [Name, test_counter, InitArgs]}},
+            #{
+                start :=
+                    {beamtalk_supervisor, start_actor_child, [
+                        test_counter, InitArgs, {local, Name}
+                    ]}
+            },
             OtpSpec
         )
     after
@@ -3597,11 +3606,14 @@ spec_to_otp_dynamic_spawn_uses_zero_static_arg_mfa_test() ->
             #{start := {beamtalk_supervisor, start_dynamic_child, [test_counter, #{}]}},
             OtpSpec
         ),
-        %% Mode defaults to `static` (spec_to_otp/1) and stays on the
-        %% original shape used by static Supervisor children, which start
-        %% once at supervisor-init time and never have extra args appended.
+        %% Mode defaults to `static` (spec_to_otp/1): a baked arg, since static
+        %% Supervisor children start once at supervisor-init time and never
+        %% have extra args appended; the awaited start (BT-4033).
         StaticOtpSpec = beamtalk_supervisor:spec_to_otp(BtSpec),
-        ?assertMatch(#{start := {test_counter, start_link, [#{}]}}, StaticOtpSpec)
+        ?assertMatch(
+            #{start := {beamtalk_supervisor, start_actor_child, [test_counter, #{}]}},
+            StaticOtpSpec
+        )
     after
         bt1990_cleanup_class_obj(ClassObj)
     end.
@@ -3635,7 +3647,10 @@ spec_to_otp_dynamic_spawnWith_uses_zero_static_arg_mfa_test() ->
         ),
         %% Mode defaults to `static` and stays on the original shape.
         StaticOtpSpec = beamtalk_supervisor:spec_to_otp(BtSpec),
-        ?assertMatch(#{start := {test_counter, start_link, [BakedArgs]}}, StaticOtpSpec)
+        ?assertMatch(
+            #{start := {beamtalk_supervisor, start_actor_child, [test_counter, BakedArgs]}},
+            StaticOtpSpec
+        )
     after
         bt1990_cleanup_class_obj(ClassObj)
     end.
@@ -4235,4 +4250,93 @@ stray_waiter_rows_do_not_hold_gate_test() ->
         application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
         ets:delete(beamtalk_supervisor_init_gates, Sup),
         catch gen_event:stop(Sup)
+    end.
+
+%%====================================================================
+%% BT-4033: awaited start of supervised actor children
+%%====================================================================
+
+%% A static child whose `initialize` fails fails the supervisor's start
+%% (OTP `init/1` returning `{stop, Reason}`), instead of `start_link`
+%% answering `{ok, _}` and the child crash-looping afterwards.
+bt4033_static_child_failing_initialize_fails_supervisor_start_test() ->
+    OldTrap = process_flag(trap_exit, true),
+    ChildSpec = #{
+        id => bt4033_crash,
+        start => {beamtalk_supervisor, start_actor_child, [test_init_ack_actor, #{mode => crash}]},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [test_init_ack_actor]
+    },
+    SupFlags = #{strategy => one_for_one, intensity => 5, period => 10},
+    try
+        ?assertMatch(
+            {error, {shutdown, {failed_to_start_child, bt4033_crash, {error, function_clause}}}},
+            supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]})
+        )
+    after
+        receive
+            {'EXIT', _, _} -> ok
+        after 100 -> ok
+        end,
+        process_flag(trap_exit, OldTrap)
+    end.
+
+%% `start_actor_child/2` answers only once `initialize` has returned, and the
+%% child stays linked to the caller (the supervisor's restart mechanism).
+bt4033_start_actor_child_waits_for_initialize_and_links_test() ->
+    {ok, Pid} = beamtalk_supervisor:start_actor_child(
+        test_init_ack_actor, #{mode => slow_initialize, delay => 100}
+    ),
+    try
+        {links, Links} = erlang:process_info(self(), links),
+        ?assert(lists:member(Pid, Links)),
+        %% `initialize` has already returned: the actor answers at once.
+        ?assertMatch(#{mode := slow_initialize}, gen_server:call(Pid, get_state, 100))
+    after
+        unlink(Pid),
+        exit(Pid, kill)
+    end.
+
+%% An OTP restart whose `initialize` fails is a failed restart: it counts
+%% against the restart intensity, and the supervisor stops once that is
+%% exceeded (no endless crash loop).
+bt4033_failing_initialize_on_restart_counts_against_intensity_test() ->
+    OldTrap = process_flag(trap_exit, true),
+    Starts = counters:new(1, []),
+    ChildSpec = #{
+        id => bt4033_restart,
+        start =>
+            {beamtalk_supervisor, start_actor_child, [
+                test_init_ack_actor, #{mode => fail_after_first, starts => Starts}
+            ]},
+        restart => permanent,
+        shutdown => 5000,
+        type => worker,
+        modules => [test_init_ack_actor]
+    },
+    SupFlags = #{strategy => one_for_one, intensity => 2, period => 10},
+    {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
+    try
+        ?assertEqual(1, counters:get(Starts, 1)),
+        [{bt4033_restart, ChildPid, worker, _}] = supervisor:which_children(SupPid),
+        MonRef = erlang:monitor(process, SupPid),
+        exit(ChildPid, kill),
+        receive
+            {'DOWN', MonRef, process, SupPid, Reason} -> ?assertEqual(shutdown, Reason)
+        after 5000 -> ?assert(false)
+        end,
+        %% The kill and each failed restart count against the intensity
+        %% (2): the first start, then two restarts that fail their
+        %% `initialize`; the third restart event exceeds the intensity, so
+        %% the supervisor shuts down instead of trying again.
+        ?assertEqual(3, counters:get(Starts, 1))
+    after
+        catch exit(SupPid, kill),
+        receive
+            {'EXIT', SupPid, _} -> ok
+        after 1000 -> ok
+        end,
+        process_flag(trap_exit, OldTrap)
     end.

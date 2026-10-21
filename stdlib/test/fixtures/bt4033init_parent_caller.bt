@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4033: an actor whose `initialize` itself calls its parent supervisor
+// synchronously — the ADR 0135 hang rule: the parent is blocked waiting for
+// this `initialize`, so the call stalls until the 5 s init timeout and the
+// start fails.
+
+Actor subclass: Bt4033InitParentCaller
+  state: parent = nil
+
+  initialize => self.parent count

@@ -163,6 +163,12 @@
 %% its own literal (CLAUDE.md "No duplicate implementations").
 -define(BT_REMOTE_CALL_TIMEOUT, 5000).
 
+%% BT-3992: how long a starter (`spawn`, a supervisor starting an actor
+%% child) waits for the new actor's `initialize` to return, in ms. Shared by
+%% `beamtalk_actor`'s await and `beamtalk_supervisor`'s init-timeout hint
+%% (BT-4033), so the hint always names the real limit.
+-define(BT_INITIALIZE_TIMEOUT, 5000).
+
 %% @doc Process-dictionary key marking
 %% "this process is currently executing a `withClassMethod:` child's factory
 %% method on behalf of `beamtalk_supervisor:start_child_via_class_method/4`,
