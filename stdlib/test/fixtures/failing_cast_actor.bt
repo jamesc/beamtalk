@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3958 fixture: an Actor whose `explode` method raises. Sent as a `!`
+// cast it crashes the actor (ADR 0134); sent as a sync call the error goes
+// back to the caller and the actor carries on. See
+// stdlib/test/actor_cast_error_test.bt.
+
+Actor subclass: FailingCastActor
+  state: count = 0
+
+  bump => self.count := self.count + 1
+
+  count => self.count
+
+  explode =>
+    self.count := 99
+    self error: "deliberate cast error"
+
+  // A raw Erlang error and throw (not a Beamtalk signal) from a cast.
+  rawError => (Erlang erlang) error: #raw_boom
+
+  rawThrow => (Erlang erlang) throw: #raw_oops
+
+  // A stop requested before the method raises: the error wins.
+  stopThenExplode =>
+    self stopWith: #shutdown
+    self error: "deliberate cast error after stop"

@@ -1,10 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-1457: Server subclass that raises an error in handleInfo: (error recovery testing)
+// BT-1457 / BT-3958: Server subclass that raises an error in handleInfo:.
+// Since ADR 0134 the error crashes the server; `terminate:` records the
+// reason in the Ets table named by `tableName` (when set) so a test can see
+// it after the process is gone. See stdlib/test/server_handle_info_test.bt.
 
 Server subclass: FailingHandleInfoServer
   state: count = 0
+  state: tableName = nil
 
   handleInfo: msg =>
     msg == #crash ifTrue: [
@@ -12,3 +16,8 @@ Server subclass: FailingHandleInfoServer
     ] ifFalse: [self.count := self.count + 1]
 
   getCount => self.count
+
+  terminate: reason =>
+    self.tableName isNil ifFalse: [
+      (Ets named: self.tableName) at: #terminateReason put: reason
+    ]

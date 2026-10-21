@@ -7,13 +7,14 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! `terminate/2` wraps the `terminate:` dispatch in `try … catch -> 'ok'`
-//! (`gen_server/callbacks.rs:1560`), and `handleInfo:` errors are logged and
-//! the server continues (log-and-continue) — so an unguarded read of an
-//! unassigned `late` slot in either raises `UninitializedStateError`, but
-//! that error never surfaces as a crash: shutdown/message-handling
-//! "completes" while whatever the read was for is silently skipped. This is
-//! the real hazard in Symphony's `terminate: → stopProcess`
-//! (`docs/beamtalk-language-features.md` § `late` Slots).
+//! (`gen_server/callbacks.rs`, `generate_terminate`), so an unguarded read
+//! of an unassigned `late` slot there raises `UninitializedStateError` that
+//! never surfaces: shutdown "completes" while whatever the read was for is
+//! silently skipped. This is the real hazard in Symphony's
+//! `terminate: → stopProcess` (`docs/beamtalk-language-features.md` § `late`
+//! Slots). In `handleInfo:` the same error crashes the server (ADR 0134,
+//! BT-3958), turning an ordinary message into a crash and restart — still
+//! worth a guard, so both hooks are checked.
 //!
 //! [`check_unguarded_late_reads_in_lifecycle_hooks`] is a **per-class,
 //! syntactic** walk — no dataflow, cheap by design (ADR 0124 §4d): for every
@@ -60,8 +61,8 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::BTreeSet;
 
-/// The two lifecycle entry points ADR 0124 §4d names: both dispatch through
-/// a wrapper that swallows a raised error rather than crashing the process.
+/// The two lifecycle entry points ADR 0124 §4d names: `terminate:` swallows a
+/// raised error, `handleInfo:` crashes the server with it (ADR 0134).
 const LIFECYCLE_SELECTORS: [&str; 2] = ["terminate:", "handleInfo:"];
 
 /// Runs the ADR 0124 §4d unguarded-`late`-read check over every class in
@@ -253,10 +254,15 @@ fn strip_parens(expr: &Expression) -> &Expression {
 }
 
 fn build_diagnostic(slot: &str, entry_selector: &str, span: Span) -> Diagnostic {
+    let consequence = if entry_selector == "handleInfo:" {
+        "and an error in `handleInfo:` crashes the server (ADR 0134)"
+    } else {
+        "but `terminate:`'s dispatch swallows the error instead of crashing, so it silently \
+         skips whatever this read was for"
+    };
     let message = format!(
         "Unguarded read of `late` slot `{slot}` reachable from `{entry_selector}` — if `{slot}` \
-         is unassigned this raises `UninitializedStateError`, but `{entry_selector}`'s dispatch \
-         swallows the error instead of crashing, so it silently skips whatever this read was for"
+         is unassigned this raises `UninitializedStateError`, {consequence}"
     );
     let hint = format!("Guard the read: `(self hasField: #{slot}) ifTrue: [ ... ]`");
     Diagnostic::warning(message, span)
