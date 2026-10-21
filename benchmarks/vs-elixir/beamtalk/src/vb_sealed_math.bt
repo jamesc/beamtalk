@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// `class sealed` on a sealed, stateless class: eligible for a direct call
+// in the caller (ADR 0129 Phase 0b).
+sealed Object subclass: VbSealedMath
+
+  class sealed double: x :: Integer -> Integer => x * 2

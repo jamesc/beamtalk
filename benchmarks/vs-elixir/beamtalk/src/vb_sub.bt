@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// `base` is inherited from VbBase; `viaSelf` reaches it with a self-send.
+VbBase subclass: VbSub
+
+  viaSelf -> Integer => self base

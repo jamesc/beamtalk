@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// The same shape, not sealed: a subclass could override `x`.
+Value subclass: VbOpenPoint
+  field: x :: Integer = 0
+  field: y :: Integer = 0

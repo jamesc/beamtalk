@@ -1,0 +1,277 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// The Beamtalk half of benchmarks/vs-elixir. The harness
+// (`benchmarks/vs-elixir/harness/vs_bench.erl`) calls these class methods
+// directly (`'class_<selector>'(nil, ...)`): the class is sealed and
+// stateless, so each method runs in the caller's process, which is the
+// process the harness measures.
+//
+// Every row has the same shape:
+//
+//     last := 0
+//     n timesRepeat: [last := <operation>]
+//     last
+//
+// Assigning `last` makes the compiler inline `timesRepeat:` as a local
+// `letrec` loop that threads `last` as a loop argument, so the result of the
+// operation is live (nothing can be dropped as dead code) and the loop costs
+// what the Elixir side's `loop(i, n, ctx, last)` costs. `baseline` is the
+// loop with a constant body; the harness subtracts it from every row.
+// A `timesRepeat:` whose block assigns nothing is NOT inlined (it becomes a
+// `timesRepeat:` send with a closure), which is its own row, `loopNoAssign`.
+
+sealed Object subclass: VbBench
+
+  // === Fixtures ===
+  class point -> VbPoint => VbPoint x: 1 y: 2
+
+  class openPoint -> VbOpenPoint => VbOpenPoint x: 1 y: 2
+
+  class sub -> VbSub => VbSub new
+
+  class square -> VbSquare => VbSquare new
+
+  class counter -> VbCounter => VbCounter spawn
+
+  class adder -> Block(Integer, Integer) => [:x | x + 1]
+
+  class list100 -> List(Integer) => (1 to: 100) asList
+
+  class dict -> Dictionary(Symbol, Integer) => #{#a => 1, #b => 2, #k => 3}
+
+  class string -> String => "hello world"
+
+  // === Loop overhead ===
+  class baseline: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := 1]
+    last
+
+  // The same loop with a block that assigns nothing: not inlined.
+  class loopNoAssign: n :: Integer -> Integer =>
+    n timesRepeat: [1]
+    n
+
+  // === 1. Value getter ===
+  class getterSealed: n :: Integer p: p :: VbPoint -> Integer =>
+    last := 0
+    n timesRepeat: [last := p x]
+    last
+
+  class getterOpen: n :: Integer p: p :: VbOpenPoint -> Integer =>
+    last := 0
+    n timesRepeat: [last := p x]
+    last
+
+  class sumSealed: n :: Integer p: p :: VbPoint -> Integer =>
+    last := 0
+    n timesRepeat: [last := p sum]
+    last
+
+  // === 2. Value construction and functional update ===
+  class withX: n :: Integer p: p :: VbPoint -> VbPoint =>
+    last := p
+    n timesRepeat: [last := p withX: 3]
+    last
+
+  class construct: n :: Integer a: a :: Integer -> Object =>
+    last := nil
+    n timesRepeat: [last := VbPoint x: a y: 4]
+    last
+
+  // === 3. Class-side method: sealed (static) vs open ===
+  class classSealedMethod: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VbSealedMath double: 21]
+    last
+
+  class sealedClassMethod: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VbMath double: 21]
+    last
+
+  class openClassMethod: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VbOpenMath double: 21]
+    last
+
+  // === 4. Dynamic send, receiver of unknown static type ===
+  class dynGetter: n :: Integer o: o -> Object =>
+    last := 0
+    n timesRepeat: [last := o x]
+    last
+
+  class dynArea: n :: Integer o: o -> Object =>
+    last := 0
+    n timesRepeat: [last := o area]
+    last
+
+  class typedArea: n :: Integer s: s :: VbSquare -> Integer =>
+    last := 0
+    n timesRepeat: [last := s area]
+    last
+
+  // === 5. Inherited method ===
+  class inherited: n :: Integer s: s :: VbSub -> Integer =>
+    last := 0
+    n timesRepeat: [last := s base]
+    last
+
+  class inheritedViaSelf: n :: Integer s: s :: VbSub -> Integer =>
+    last := 0
+    n timesRepeat: [last := s viaSelf]
+    last
+
+  // Not defined by the class module: resolved by the runtime method walk.
+  class hasField: n :: Integer s: s :: VbSub -> Boolean =>
+    last := false
+    n timesRepeat: [last := s hasField: #v]
+    last
+
+  // === 6. Blocks and collection iteration (100-element List) ===
+  class blockValue: n :: Integer blk: blk :: Block(Integer, Integer) -> Integer =>
+    last := 0
+    n timesRepeat: [last := blk value: 41]
+    last
+
+  class doSum: n :: Integer list: list :: List(Integer) -> Integer =>
+    last := 0
+    n
+      timesRepeat: [
+        sum := 0
+        list do: [:e | sum := sum + e]
+        last := sum
+      ]
+    last
+
+  class doNoAssign: n :: Integer list: list :: List(Integer) -> Object =>
+    last := 0
+    n timesRepeat: [last := list do: [:e | e]]
+    last
+
+  class collect: n :: Integer list: list :: List(Integer) -> Object =>
+    last := nil
+    n timesRepeat: [last := list collect: [:e | e * 2]]
+    last
+
+  class inject: n :: Integer list: list :: List(Integer) -> Integer =>
+    last := 0
+    n timesRepeat: [last := list inject: 0 into: [:a :e | a + e]]
+    last
+
+  // === 7. Actors ===
+  class actorCall: n :: Integer c: c :: VbCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c count]
+    last
+
+  class actorUpdate: n :: Integer c: c :: VbCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c increment]
+    last
+
+  class actorProbe: n :: Integer c: c :: VbCounter -> Boolean =>
+    last := false
+    n timesRepeat: [last := c probe]
+    last
+
+  // `n` casts, then one sync call so every cast has been handled.
+  class actorCast: n :: Integer c: c :: VbCounter -> Integer =>
+    last := 0
+    n
+      timesRepeat: [
+        c increment!
+        last := 0
+      ]
+    last + c count
+
+  // === 8. Errors ===
+  class onDoNoRaise: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := [n + 1] on: Error do: [:e | 0]]
+    last
+
+  class onDoRaise: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := [Error signal: "boom"] on: Error do: [:e | 1]]
+    last
+
+  // === 9. Result ===
+  class resultOk: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := (Result ok: n) value]
+    last
+
+  class resultIsOk: n :: Integer r: r :: Result(Integer, Symbol) -> Boolean =>
+    last := false
+    n timesRepeat: [last := r isOk]
+    last
+
+  class okResult -> Result(Integer, Symbol) => Result ok: 7
+
+  // === 10. Collections and strings ===
+  class dictPut: n :: Integer d: d :: Dictionary(Symbol, Integer) -> Object =>
+    last := d
+    n timesRepeat: [last := d at: #k put: n]
+    last
+
+  class dictAt: n :: Integer d: d :: Dictionary(Symbol, Integer) -> Integer =>
+    last := 0
+    n timesRepeat: [last := d at: #k]
+    last
+
+  class listAdd: n :: Integer list: list :: List(Integer) -> Object =>
+    last := list
+    n timesRepeat: [last := list add: 7]
+    last
+
+  class listIncludes: n :: Integer list: list :: List(Integer) -> Boolean =>
+    last := false
+    n timesRepeat: [last := list includes: 50]
+    last
+
+  class stringConcat: n :: Integer s: s :: String -> String =>
+    last := s
+    n timesRepeat: [last := s ++ "!"]
+    last
+
+  // === 11. Integer arithmetic ===
+
+  // One 100-step summing loop per iteration.
+  class sumToDo: n :: Integer -> Integer =>
+    last := 0
+    n
+      timesRepeat: [
+        sum := 0
+        1 to: 100 do: [:i | sum := sum + i]
+        last := sum
+      ]
+    last
+
+  class add: n :: Integer a: a :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := a + 1]
+    last
+
+  class addUntyped: n :: Integer a: a -> Object =>
+    last := 0
+    n timesRepeat: [last := a + 1]
+    last
+
+  // A conditional whose arms assign nothing (not inlined, see loopNoAssign).
+  class ifTrueIfFalse: n :: Integer a: a :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := a > 0 ifTrue: [1] ifFalse: [2]]
+    last
+
+  // === 12. Class references and isKindOf: ===
+  class classOf: n :: Integer p: p :: VbPoint -> Object =>
+    last := nil
+    n timesRepeat: [last := p class]
+    last
+
+  class isKindOf: n :: Integer p: p :: VbPoint -> Boolean =>
+    last := false
+    n timesRepeat: [last := p isKindOf: VbPoint]
+    last
