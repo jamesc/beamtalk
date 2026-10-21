@@ -640,13 +640,11 @@ raised_in_beamtalk_code(Target, [{Target, _, _, _} | _]) ->
     false;
 raised_in_beamtalk_code(_Target, [{?MODULE, _, _, _} | _]) ->
     false;
-raised_in_beamtalk_code(Target, [{Module, _, _, _} | Rest]) when is_atom(Module) ->
+raised_in_beamtalk_code(Target, [{Module, _, _, _} | Rest]) ->
     case is_compiled_beamtalk_module(atom_to_binary(Module, utf8)) of
         true -> true;
         false -> raised_in_beamtalk_code(Target, Rest)
-    end;
-raised_in_beamtalk_code(Target, [_ | Rest]) ->
-    raised_in_beamtalk_code(Target, Rest).
+    end.
 
 %% Modules the Beamtalk compiler emits: classes (`bt@…`) and the per-evaluation
 %% modules for REPL and inspector code (`beamtalk_repl_eval_<N>`,
