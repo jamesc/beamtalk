@@ -18,6 +18,14 @@ error wrapping, and printString formatting.
 %% the charlist-retry exit/throw tests: raise `badarg` on a binary arg (to
 %% trigger the retry) then `exit`/`throw` on the charlist-coerced retry arg.
 -export([retry_then_exit/1, retry_then_throw/1, write_then_badarg/1, retry_class/0]).
+%% BT-4021 fixtures: a target that raises `undef` itself, and one whose charlist
+%% retry hits a nested `undef`.
+-export([explicit_undef_stub/1, retry_then_nested_undef/1]).
+
+explicit_undef_stub(_Arg) -> erlang:error(undef).
+
+retry_then_nested_undef(Arg) when is_binary(Arg) -> erlang:error(badarg);
+retry_then_nested_undef(Arg) when is_list(Arg) -> completely_bogus_module_xyz:missing(1).
 
 retry_then_exit(Arg) when is_binary(Arg) -> erlang:error(badarg);
 retry_then_exit(Arg) when is_list(Arg) -> exit(retry_exit_reason).
@@ -1282,6 +1290,96 @@ direct_call_unloaded_module_error_unchanged_test() ->
                     Inner#beamtalk_error.hint, <<"is not loaded. Is it on the code path?">>
                 )
             )
+    end.
+
+direct_call_explicit_undef_in_target_is_not_arity_mismatch_test() ->
+    %% The target exists and runs, then raises `undef` itself. Its own frame is on
+    %% top (integer-arity form), but it must not read as "exists but was called
+    %% with 1 arguments".
+    try
+        beamtalk_erlang_proxy:direct_call(?MODULE, explicit_undef_stub, [x]),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
+            ?assertEqual(undef, maps:get(erlang_error, Inner#beamtalk_error.details))
+    end.
+
+direct_call_retry_nested_undef_is_runtime_error_test() ->
+    %% badarg → charlist retry → nested undef: the retry pass classifies it too.
+    assert_undef_inside_callee_is_runtime_error(fun() ->
+        beamtalk_erlang_proxy:direct_call(?MODULE, retry_then_nested_undef, [<<"x">>])
+    end).
+
+dispatch_call_args_errors_unchanged_test() ->
+    %% The `call:args:` path reports its own selector with the pre-BT-4021 text.
+    Proxy = beamtalk_erlang_proxy:new(lists),
+    try
+        beamtalk_erlang_proxy:dispatch('call:args:', [reverse, {}], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Arity} ->
+            ?assertEqual(arity_mismatch, Arity#beamtalk_error.kind),
+            ?assertEqual('call:args:', Arity#beamtalk_error.selector),
+            ?assertEqual(
+                <<"lists:reverse/1, 2 exists but was called with 0 arguments">>,
+                Arity#beamtalk_error.hint
+            )
+    end,
+    try
+        beamtalk_erlang_proxy:dispatch('call:args:', [nonexistent_xyz, {1}], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Missing} ->
+            ?assertEqual(does_not_understand, Missing#beamtalk_error.kind),
+            ?assertEqual('call:args:', Missing#beamtalk_error.selector),
+            ?assertEqual(
+                #{module => lists, function => nonexistent_xyz, arity => 1},
+                Missing#beamtalk_error.details
+            )
+    end.
+
+direct_call_handle_undefined_function_test() ->
+    %% Without the export pre-check, a module's '$handle_undefined_function'/2
+    %% sees unknown calls like it would from plain Erlang. When it re-raises via
+    %% error_handler, the old missing-function error comes back.
+    Mod = bt4021_handle_undef_probe,
+    {ok, Mod, Bin} = compile:forms(
+        [
+            {attribute, 1, module, Mod},
+            {attribute, 2, export, [{'$handle_undefined_function', 2}]},
+            {function, 3, '$handle_undefined_function', 2, [
+                {clause, 3, [{atom, 3, magic}, {var, 3, 'Args'}], [], [
+                    {tuple, 3, [{atom, 3, handled}, {var, 3, 'Args'}]}
+                ]},
+                {clause, 4, [{var, 4, 'F'}, {var, 4, 'Args'}], [], [
+                    {call, 4,
+                        {remote, 4, {atom, 4, error_handler}, {atom, 4, raise_undef_exception}}, [
+                            {atom, 4, Mod}, {var, 4, 'F'}, {var, 4, 'Args'}
+                        ]}
+                ]}
+            ]}
+        ],
+        []
+    ),
+    try
+        {module, Mod} = code:load_binary(Mod, "bt4021_handle_undef_probe.erl", Bin),
+        ?assertEqual({handled, [1]}, beamtalk_erlang_proxy:direct_call(Mod, magic, [1])),
+        try
+            beamtalk_erlang_proxy:direct_call(Mod, other, [1]),
+            ?assert(false)
+        catch
+            error:#{error := Inner} ->
+                ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+                ?assertEqual(
+                    #{module => Mod, function => other, arity => 1},
+                    Inner#beamtalk_error.details
+                )
+        end
+    after
+        _ = code:purge(Mod),
+        _ = code:delete(Mod),
+        _ = code:purge(Mod)
     end.
 
 %% Load an in-memory module `Mod` exporting each `{Name, Return}` as a

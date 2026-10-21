@@ -174,6 +174,10 @@ and only reads `Module:module_info(exports)` after the apply fails with
 per send. Nothing is cached, so hot code reload and purge stay correct: every
 call resolves against whatever code is loaded at that moment.
 
+Because the apply is no longer gated on `module_info(exports)`, a module that
+exports `'$handle_undefined_function'/2` now handles unknown calls exactly as
+it would for a plain Erlang caller; the old pre-check rejected them.
+
 Wrapping policy is unified across all apply paths via `apply_with_coercion/5`
 (ADR 0101 Part 2): `error:*` is converted to a structured `#beamtalk_error{}`,
 while `exit:*` and `throw:*` propagate naturally so `Erlang erlang exit: 1`
@@ -220,7 +224,7 @@ Exception policy — converged across `direct_call/3`, `validate_and_apply/4`,
 and `native_call/4`:
 - `error:#beamtalk_error{}` (already wrapped) → re-raised unchanged
 - `error:undef` for the target itself → structured `does_not_understand` /
-  `arity_mismatch` / module-not-loaded (`raise_undef_error/5`); an `undef`
+  `arity_mismatch` / module-not-loaded (`raise_undef_error/6`); an `undef`
   raised *inside* the callee → `runtime_error` like any other `error:*`
 - `error:badarg` → charlist retry, else `type_error`
 - `error:function_clause` → `arity_mismatch`
@@ -380,7 +384,7 @@ classify_ffi_exception(
         true ->
             %% The FFI target itself is missing: unloaded module, unknown
             %% function, wrong arity, or a hot-reload removal since compile.
-            raise_undef_error(Module, FunName, Arity, OrigSelector, Context);
+            raise_undef_error(Module, FunName, Arity, OrigSelector, Context, Stack);
         false ->
             %% The target ran and *something it called* is undefined. That is
             %% a fault inside the callee, not a missing FFI function, so wrap
@@ -483,7 +487,7 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
 -doc """
 Raise an error for missing function or wrong arity.
 
-Used by `raise_undef_error/5` for inline FFI (`direct_call/3`, `validate_and_apply/4`).
+Used by `raise_undef_error/6` for inline FFI (`direct_call/3`, `validate_and_apply/4`).
 """.
 -spec raise_function_or_arity_error(atom(), atom(), non_neg_integer(), atom(), [
     {atom(), non_neg_integer()}
@@ -547,19 +551,22 @@ error_class_selector({Class, Selector}, _OrigSelector) -> {Class, Selector}.
 Is an `error:undef` about the FFI target `Module:FunName/Arity` itself?
 
 When `erlang:apply/3` cannot find the target (module missing or not loadable,
-function not exported, wrong arity) the top stack frame is the target MFA.
-An `undef` raised by a call *inside* the target has some other MFA on top, and
-must not be reported as the FFI function being missing.
+function not exported, wrong arity) the top stack frame is the target MFA with
+the **argument list** (`{M, F, Args, []}`), including when `error_handler`
+or a `'$handle_undefined_function'/2` re-raises it.
+
+Anything else is a fault inside a callee that did run, and must not be
+reported as the FFI function being missing: an `undef` from a nested call has
+another MFA on top, and a target that runs and calls `erlang:error(undef)`
+itself has its own frame on top in the integer-arity form.
 """.
 -spec is_ffi_target_undef(atom(), atom(), non_neg_integer(), list()) -> boolean().
-is_ffi_target_undef(Module, FunName, Arity, [{Module, FunName, ArgsOrArity, _Loc} | _]) ->
-    frame_arity(ArgsOrArity) =:= Arity;
+is_ffi_target_undef(Module, FunName, Arity, [{Module, FunName, Args, _Loc} | _]) when
+    is_list(Args)
+->
+    length(Args) =:= Arity;
 is_ffi_target_undef(_Module, _FunName, _Arity, _Stack) ->
     false.
-
--spec frame_arity(list() | non_neg_integer()) -> non_neg_integer().
-frame_arity(Args) when is_list(Args) -> length(Args);
-frame_arity(Arity) when is_integer(Arity) -> Arity.
 
 -doc """
 Raise a structured error for an FFI target that is not callable.
@@ -571,21 +578,30 @@ arity, or removed by a hot reload).
 Pass the actual arity so the error message is accurate (not "0 arguments").
 
 For inline FFI (`Context = none`) this reads exports to distinguish
-"module not loaded", "missing function" and "wrong arity". For a `native:`
-delegation (`Context = {Class, Sel}`) it surfaces a `does_not_understand`
-carrying the Beamtalk `{Class, Sel}` directly.
+"module not loaded", "missing function" and "wrong arity". If the target *is*
+exported by the time exports are read (a reload landed between the apply and
+this read), there is no missing function to report, so the `undef` is wrapped
+like any other `error:*` instead of a self-contradicting arity error. For a
+`native:` delegation (`Context = {Class, Sel}`) it surfaces a
+`does_not_understand` carrying the Beamtalk `{Class, Sel}` directly.
 """.
--spec raise_undef_error(atom(), atom(), non_neg_integer(), atom(), error_context()) -> no_return().
-raise_undef_error(Module, FunName, Arity, OrigSelector, none) ->
+-spec raise_undef_error(atom(), atom(), non_neg_integer(), atom(), error_context(), list()) ->
+    no_return().
+raise_undef_error(Module, FunName, Arity, OrigSelector, none, Stack) ->
     case get_exports(Module) of
         {error, not_loaded} ->
             raise_module_not_loaded(Module, OrigSelector);
         {ok, Exports} ->
-            raise_function_or_arity_error(
-                Module, FunName, Arity, OrigSelector, Exports
-            )
+            case lists:member({FunName, Arity}, Exports) of
+                true ->
+                    raise_generic_error(Module, FunName, OrigSelector, none, undef, Stack);
+                false ->
+                    raise_function_or_arity_error(
+                        Module, FunName, Arity, OrigSelector, Exports
+                    )
+            end
     end;
-raise_undef_error(Module, FunName, Arity, _OrigSelector, {Class, Selector}) ->
+raise_undef_error(Module, FunName, Arity, _OrigSelector, {Class, Selector}, _Stack) ->
     Error1 = beamtalk_error:new(does_not_understand, Class, Selector),
     Error2 = beamtalk_error:with_hint(
         Error1,
