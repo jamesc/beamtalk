@@ -35,15 +35,25 @@ main([Dir, BatchesS, RepsS]) ->
     ok = load_dispatch_stub(),
     Field = "ssb_field_probe_actor",
     Open = "ssb_open_self_probe_actor",
+    Sealed = "ssb_sealed_self_probe_actor",
     Mods = [
         {field_off, load(Dir, core(Dir, "off", Field), Field, "bt4007_field_off")},
         {field_on, load(Dir, core(Dir, "on", Field), Field, "bt4007_field_on")},
         {open_off, load(Dir, core(Dir, "off", Open), Open, "bt4007_open_off")},
         {open_on, load(Dir, core(Dir, "on", Open), Open, "bt4007_open_on")},
-        {open_hand, load(Dir, hand_lower(core(Dir, "off", Open)), Open, "bt4007_open_hand")}
+        {open_hand, load(Dir, hand_lower(core(Dir, "off", Open)), Open, "bt4007_open_hand")},
+        {sealed_off, load(Dir, core(Dir, "off", Sealed), Sealed, "bt4007_sealed_off")},
+        {sealed_on, load(Dir, core(Dir, "on", Sealed), Sealed, "bt4007_sealed_on")},
+        {sealed_hand, load(Dir, hand_lower_sealed(core(Dir, "off", Sealed)), Sealed, "bt4007_sealed_hand")}
     ],
     Mod = fun(K) -> proplists:get_value(K, Mods) end,
-    St = fun(M) -> #{a => 1, b => 2, c => 3, n => 0, '__class_mod__' => M} end,
+    %% Sanity: how many store / load / callee edits the hand-lowering made.
+    lists:foreach(fun({Label, Lowered}) ->
+        io:format("~s hand-lowering edits: ~p stores, ~p gets (callers + callee entry), ~p callee entry loads~n",
+                  [Label, count(Lowered, "_CellStore"), count(Lowered, "':'get'('$bt_actor_state')"),
+                   count(Lowered, "_CellIn =")])
+    end, [{"open", hand_lower(core(Dir, "off", Open))}, {"sealed", hand_lower_sealed(core(Dir, "off", Sealed))}]),
+    St = fun(M) -> #{a => 1, b => 2, c => 3, n => 0, '$beamtalk_class' => 'Probe', '__class_mod__' => M} end,
     Self = {beamtalk_object, 'Probe', undefined, self()},
     Cases = [
         {"field_body (10r/3w intrinsics)", field_off, field_on, 'body', [], 1},
@@ -51,7 +61,11 @@ main([Dir, BatchesS, RepsS]) ->
         {"open_self_top (per self-send), off vs on", open_off, open_on, 'top:', [1000], 1000},
         {"open_self_arm (per self-send), off vs on", open_off, open_on, 'arm:', [1000], 1000},
         {"open_self_top, off vs hand-lowered", open_off, open_hand, 'top:', [1000], 1000},
-        {"open_self_arm, off vs hand-lowered", open_off, open_hand, 'arm:', [1000], 1000}
+        {"open_self_arm, off vs hand-lowered", open_off, open_hand, 'arm:', [1000], 1000},
+        {"sealed_self_top (per self-send), off vs on", sealed_off, sealed_on, 'top:', [1000], 1000},
+        {"sealed_self_arm (per self-send), off vs on", sealed_off, sealed_on, 'arm:', [1000], 1000},
+        {"sealed_self_top, off vs hand-lowered", sealed_off, sealed_hand, 'top:', [1000], 1000},
+        {"sealed_self_arm, off vs hand-lowered", sealed_off, sealed_hand, 'arm:', [1000], 1000}
     ],
     io:format("batches=~p reps=~p schedulers=~p (ns per op: per call, per bracketed send, per self-send)~n",
               [Batches, Reps, erlang:system_info(schedulers_online)]),
@@ -59,14 +73,15 @@ main([Dir, BatchesS, RepsS]) ->
               ["case", "A med", "A p90", "B med", "B p90", "B/A", "B-A med"]),
     lists:foreach(fun({Name, A, B, Sel, Args, Per}) ->
         {AM, BM} = {Mod(A), Mod(B)},
-        Run = fun(M) ->
+        Run = fun(M, N) ->
             S0 = St(M),
             erlang:put('$bt_actor_state', S0),
-            {T, _} = timer:tc(fun() -> loop(M, Sel, Args, Self, S0, Reps) end, nanosecond),
-            T / (Reps * Per)
+            {T, _} = timer:tc(fun() -> loop(M, Sel, Args, Self, S0, N) end, nanosecond),
+            T / (N * Per)
         end,
-        _ = Run(AM), _ = Run(BM),
-        Samples = [{Run(AM), Run(BM)} || _ <- lists:seq(1, Batches)],
+        Reps1 = case Per >= 1000 of true -> max(1, Reps div 50); false -> Reps end,
+        _ = Run(AM, Reps1), _ = Run(BM, Reps1),
+        Samples = [{Run(AM, Reps1), Run(BM, Reps1)} || _ <- lists:seq(1, Batches)],
         As = lists:sort([X || {X, _} <- Samples]),
         Bs = lists:sort([Y || {_, Y} <- Samples]),
         AMed = pct(As, 0.5), BMed = pct(Bs, 0.5),
@@ -74,6 +89,8 @@ main([Dir, BatchesS, RepsS]) ->
                   [Name, AMed, pct(As, 0.9), BMed, pct(Bs, 0.9), BMed / AMed, BMed - AMed])
     end, Cases),
     pair_bench(Batches).
+
+count(Bin, Pat) -> length(binary:matches(Bin, list_to_binary(Pat))).
 
 pct(Sorted, Q) -> lists:nth(max(1, round(length(Sorted) * Q)), Sorted).
 
@@ -129,6 +146,32 @@ os_tmp() ->
 %% its `StateAcc` before the dispatch and loads the next one from the cell after
 %% it; the callee `foo` loads `State` from the cell on entry and stores its last
 %% version on exit.
+%% The sealed actor's self-send is a direct call of `__sealed_foo/2`: the same two
+%% pairs, the callee's entry load and exit store inside `__sealed_foo`.
+hand_lower_sealed(Core) ->
+    S0 = binary_to_list(Core),
+    {Pre, FooOn} = split_at(S0, "'__sealed_foo'/2  ="),
+    {Foo0, Rest} = split_at(FooOn, "'__sealed_top:'/3  ="),
+    Foo1 = re:replace(Foo0, "call 'maps':'get'\\('n', State\\)",
+                      "call 'maps':'get'('n', _CellIn)", [global, {return, list}]),
+    Foo2 = re:replace(Foo1, "call 'maps':'put'\\('n', (_Val[0-9]+), State\\)",
+                      "call 'maps':'put'('n', \\1, _CellIn)", [global, {return, list}]),
+    Foo3 = re:replace(Foo2, "let (_Val[0-9]+) = ",
+                      "let _CellIn = call 'erlang':'get'('$bt_actor_state') in let \\1 = ",
+                      [{return, list}]),
+    Foo4 = re:replace(Foo3, "\\{'reply', (_Val[0-9]+), State1\\}",
+                      "let _CellOut = call 'erlang':'put'('$bt_actor_state', State1) in "
+                      "{'reply', \\1, State1}", [{return, list}]),
+    All = Pre ++ Foo4 ++ Rest,
+    Callers0 = re:replace(All, "let (_SD[0-9]+) = case call '([^']+)':'__sealed_foo'",
+                          "let _CellStore\\1 = call 'erlang':'put'('$bt_actor_state', StateAcc) in "
+                          "let \\1 = case call '\\2':'__sealed_foo'", [global, {return, list}]),
+    Callers1 = re:replace(Callers0,
+                          "let (StateAcc[0-9]+) = call 'erlang':'element'\\(2, (_SD[0-9]+)\\) in",
+                          "let \\1 = call 'erlang':'get'('$bt_actor_state') in",
+                          [global, {return, list}]),
+    list_to_binary(Callers1).
+
 hand_lower(Core) ->
     S0 = binary_to_list(Core),
     {Pre, FooOn} = split_at(S0, "<'foo'> when 'true' ->"),
