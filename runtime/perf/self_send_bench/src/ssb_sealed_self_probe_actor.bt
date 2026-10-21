@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4007 (ADR 0137 Phase 0), gate 3: sealed actor self-sends at the top level
+// and in a `do:` arm of the same method.
+
+sealed Actor subclass: SsbSealedSelfProbeActor
+  state: n :: Integer = 0
+
+  foo -> Integer => self.n := self.n + 1
+
+  top: k :: Integer -> Integer =>
+    1 to: k do: [:i | self foo]
+    k
+
+  arm: k :: Integer -> Integer =>
+    1 to: k do: [:i | i > 0 ifTrue: [self foo]]
+    k
