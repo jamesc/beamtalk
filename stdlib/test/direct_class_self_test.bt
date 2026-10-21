@@ -76,6 +76,16 @@ TestCase subclass: DirectClassSelfTest
   testSelfSendToInheritedClassMethod =>
     self assert: DirectClassSelfValue viaInherited equals: Value
 
+  testOpenMethodForwardsItsClassSelfToSealedSibling =>
+    self assert: DirectClassSelfValue viaOpenToSealed x equals: 3
+
+  testSelfInNonLocalReturnFromBlock =>
+    self assert: (DirectClassSelfValue firstOf: #(7, 8)) x equals: 7
+
+  testSelfInNonLocalReturnFromBlockDynamic =>
+    cls := DirectClassSelfValue
+    self assert: (cls firstOf: #(6)) x equals: 6
+
   // --- errors -------------------------------------------------------------------
   testSelfErrorRaisesUserError =>
     self should: [DirectClassSelfValue raises] raise: #user_error

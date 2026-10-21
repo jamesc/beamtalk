@@ -11,7 +11,7 @@ use super::class_var_access::function_text;
 use super::*;
 
 const PROLOGUE: &str = "let ClassSelf = case _DirectClassSelf of <'nil'> when 'true' -> \
-                        case call 'beamtalk_class_registry':'resolve_class_object'('Pt') of ";
+                        case call 'beamtalk_class_registry':'whereis_class'('Pt') of ";
 
 const SRC: &str = concat!(
     "sealed Value subclass: Pt\n",
@@ -67,7 +67,7 @@ fn methods_that_do_not_read_class_self_do_no_lookup() {
     ] {
         let text = function_text(&code, header);
         assert!(
-            !text.contains("resolve_class_object"),
+            !text.contains("whereis_class"),
             "{header} must not resolve the class object: {text}"
         );
     }

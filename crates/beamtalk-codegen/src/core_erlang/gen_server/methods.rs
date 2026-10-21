@@ -2567,32 +2567,34 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces
-    /// (never `format!` — Core Erlang fragments must use the Document API,
-    /// ADR 0089). Empty when there are no user parameters.
     /// BT-4029: the prologue of a direct-called class method whose body reads
     /// `ClassSelf`. The method was entered with [`DIRECT_CLASS_SELF_PARAM`],
     /// which is `nil` on the direct path and the real class object when a
-    /// sibling class method forwards its own; either way `ClassSelf` becomes
-    /// the class object. The class is sealed, so the receiver is statically
-    /// this class: `resolve_class_object/1` builds the same
-    /// `#beamtalk_object{}` the class process would pass (deadlock-safe from
-    /// inside the class process, BT-3820), and a class that is not loaded
-    /// raises the usual `class_not_found`.
+    /// non-direct sibling class method forwards its own; either way
+    /// `ClassSelf` becomes the class object.
+    ///
+    /// The class is sealed, so the receiver is statically this class: the
+    /// metaclass tag and the module are compile-time constants (the same
+    /// `{'beamtalk_object', Tag, Module, Pid}` shape a class reference builds,
+    /// `class_object_from_registry_clause`), and only the pid is looked up,
+    /// with the `whereis_class/1` a class reference uses (no call into the
+    /// class process, so it is safe from inside it). A class that is not
+    /// registered raises the usual `class_not_found`.
     ///
     /// ```erlang
     /// let ClassSelf = case _DirectClassSelf of
     ///   <'nil'> when 'true' ->
-    ///     case call 'beamtalk_class_registry':'resolve_class_object'('Pt') of
+    ///     case call 'beamtalk_class_registry':'whereis_class'('Pt') of
     ///       <'undefined'> when 'true' -> %% class_not_found
-    ///       <Resolved> when 'true' -> Resolved
+    ///       <Pid> when 'true' -> {'beamtalk_object', 'Pt class', 'bt@pt', Pid}
     ///     end
     ///   <Given> when 'true' -> Given
     /// end in
     /// ```
     pub(in crate::core_erlang) fn direct_class_self_prologue_doc(&mut self) -> Document<'static> {
         let class_name = self.class_name();
-        let resolved_var = self.fresh_temp_var("ResolvedClassSelf");
+        let module = self.module_name.clone();
+        let pid_var = self.fresh_temp_var("ClassPid");
         let given_var = self.fresh_temp_var("GivenClassSelf");
         let not_found = self.class_not_found_error_doc(&class_name);
         docvec![
@@ -2601,15 +2603,19 @@ impl CoreErlangGenerator {
             " = case ",
             leaf::var(DIRECT_CLASS_SELF_PARAM),
             " of <'nil'> when 'true' -> ",
-            "case call 'beamtalk_class_registry':'resolve_class_object'(",
-            leaf::atom(class_name),
+            "case call 'beamtalk_class_registry':'whereis_class'(",
+            leaf::atom(class_name.clone()),
             ") of ",
             not_found,
             "<",
-            leaf::var(resolved_var.clone()),
-            "> when 'true' -> ",
-            leaf::var(resolved_var),
-            " end <",
+            leaf::var(pid_var.clone()),
+            "> when 'true' -> {'beamtalk_object', ",
+            leaf::atom(super::super::util::metaclass_tag(&class_name)),
+            ", ",
+            leaf::atom(module),
+            ", ",
+            leaf::var(pid_var),
+            "} end <",
             leaf::var(given_var.clone()),
             "> when 'true' -> ",
             leaf::var(given_var),
@@ -2620,8 +2626,11 @@ impl CoreErlangGenerator {
 
     /// Whether the rendered `doc` references Core Erlang variable `var` as a
     /// whole token (not as a prefix or suffix of a longer name). A match
-    /// inside a string or atom literal is a harmless false positive: it only
-    /// adds an unneeded prologue.
+    /// inside a string or atom literal, or a nested `ClassBuilder` fun's own
+    /// `ClassSelf` parameter, is a false positive: it costs an unneeded
+    /// `whereis_class` per call but is never wrong. A miss would be (the
+    /// `element(2, nil)` badarg), so anything that references `ClassSelf` must
+    /// be part of the body document scanned here, never added around it later.
     fn doc_mentions_var(doc: &Document<'static>, var: &str) -> bool {
         let text = doc.to_pretty_string();
         let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '@';
@@ -2632,6 +2641,9 @@ impl CoreErlangGenerator {
         })
     }
 
+    /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces
+    /// (never `format!` — Core Erlang fragments must use the Document API,
+    /// ADR 0089). Empty when there are no user parameters.
     fn class_method_params_suffix_doc(param_vars: &[String]) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::new();
         for var in param_vars {
