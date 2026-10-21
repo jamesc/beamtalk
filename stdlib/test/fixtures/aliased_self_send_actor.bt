@@ -17,16 +17,12 @@ Actor subclass: AliasedSelfSendActor
     other := self
     other fieldAt: #x
 
-  // Alias self and mutate a field via the alias, then read back via alias
-  aliasedFieldAtPut =>
-    other := self
-    other fieldAt: #x put: 42
-    other fieldAt: #x
-
-  // Alias self and call a user-defined method via the alias
-  aliasedUserMethod =>
-    other := self
-    other getValue
+  // BT-3998: a state-changing send to an alias of self (`other fieldAt: #x
+  // put: 42`, `other setX: 1`, any user method) is a compile error, since the
+  // change is lost when the message ends; see
+  // tests/repl-protocol/cases/adr0133_escaping_block.btscript. ADR 0137
+  // (BT-4006) makes alias writes correct. A read-only user method is
+  // rejected conservatively too.
 
   // Read the current x value
   getValue => self.x

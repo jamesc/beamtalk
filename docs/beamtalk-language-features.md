@@ -3143,6 +3143,23 @@ return, or argument is a parse error (`cast_in_expression_error`).
 
 Use `!` when you intentionally don't need the result and don't want to block.
 
+`self foo!` inside an actor's own method is a real cast to the actor's own
+mailbox: `foo` runs after the current message finishes, and its field writes
+are kept. It does not run inline, so the rest of the current method does not
+see its effects.
+
+A state-changing send to a local that is bound only to `self` (`other := self.
+other setX: 7`) is a compile error: it is an ordinary send, not a self-send,
+and the state change it makes is lost when the message ends. So is any send
+to such a local after an earlier field write in the same method. Read-only
+reflective sends to it (`other fieldNames`, `other fieldAt: #x`) and `!` casts
+(`other foo!`) are fine. Every other selector, including every user method
+and overridable ones such as `printString`, counts as state-changing, since the
+compiler cannot tell. Send to `self` directly. The check is narrow: it only
+finds a local assigned from a bare `self`, not `self` passed as an argument,
+`self yourself`, or `self` read back out of a collection, which can still lose
+a write until ADR 0137 lifts this restriction.
+
 ### Deadlock Prevention
 
 Because `.` sends block the caller (gen_server:call), two actors calling each other creates a deadlock. The default timeout is **5000ms**, after which a `#timeout` error is raised:
