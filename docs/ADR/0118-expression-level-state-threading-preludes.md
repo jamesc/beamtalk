@@ -700,7 +700,7 @@ producer when its arms need threading, as a plain send otherwise.
 | Method-body statement | the receiver's `Bind`s are root statements (were hidden by the gap backfill) |
 | Conditional arm | a conditional statement whose receiver is sequenced goes through `threaded_expression` -> the splice (`arm_statement_is_producer`; it used to be compiled as a raw tuple the arm unpacked, with the receiver's `Bind`s inside it) |
 | `Letrec` loop body (`whileTrue:`/`whileFalse:`/`timesRepeat:`/`to:do:`/`to:by:do:`) | `lower_letrec_non_assign_expr` -> `thread_ahead` -> the splice |
-| `Foldl` loop body (`do:`/...) | a value position goes through `thread_ahead` -> the splice; a conditional statement takes the fold's own `{Result, StateAcc}` unpack, whose element 2 carries the receiver's change (verified with opaque gaps, so the runtime `foldBody` row is its proof; a non-literal block argument there is BT-4017) |
+| `Foldl` loop body (`do:`/...) | a value position goes through `thread_ahead` -> the splice; a conditional statement goes through `thread_ahead` -> the splice too, its value read back (`fold_statement_threads_ahead`, BT-4017), in every fold kind; it used to take the fold's raw `{Result, StateAcc}` unpack, which raised `badarg` for a non-literal block argument (a plain send). The verifier cannot see a run-time value's shape, so the corpus's codegen-shape check and the runtime rows are its proof |
 | `on:do:`/`ensure:` arm | `generate_exception_body_with_threading_inner` -> `thread_ahead` -> the splice (its last statement used to take the same raw-tuple path as the conditional arm; `arm_statement_is_producer` routes it to `thread_ahead`) |
 | Bare block, stored closure, NLR boundary | not a statement sequence of this frame (as above) |
 
