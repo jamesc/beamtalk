@@ -3143,6 +3143,23 @@ return, or argument is a parse error (`cast_in_expression_error`).
 
 Use `!` when you intentionally don't need the result and don't want to block.
 
+`self foo!` inside an actor's own method is a real cast to the actor's own
+mailbox: `foo` runs after the current message finishes, and its field writes
+are kept. It does not run inline, so the rest of the current method does not
+see its effects.
+
+A state-changing send to a local that is bound only to `self` (`other := self.
+other setX: 7`) is a compile error: it is an ordinary send, not a self-send,
+and the state change it makes is lost when the message ends. So is any send
+to such a local after an earlier field write in the same method. Read-only
+reflective sends to it (`other fieldNames`, `other fieldAt: #x`) and `!` casts
+(`other foo!`) are fine. Every other selector, including every user method
+and overridable ones such as `printString`, counts as state-changing, since the
+compiler cannot tell. Send to `self` directly. The check is narrow: it only
+finds a local assigned from a bare `self`, not `self` passed as an argument,
+`self yourself`, or `self` read back out of a collection, which can still lose
+a write until ADR 0137 lifts this restriction.
+
 ### Deadlock Prevention
 
 Because `.` sends block the caller (gen_server:call), two actors calling each other creates a deadlock. The default timeout is **5000ms**, after which a `#timeout` error is raised:
@@ -3644,7 +3661,7 @@ Rules for configuration methods:
 - **Arg lifetime:** args are replayed on every restart, so any pid or handle in them must outlive the child (an ancestor's handle does; a caller's pid or a socket does not).
 - A configuration method that raises, or returns an invalid value (`maxChildren`, `childShutdown`), fails the start once with `#supervisor_start_failed` (or fails the parent's start for a nested supervisor), carrying the error's hint.
 
-The post-start hook is the instance-side `initialize` (it was `class initialize: sup`). It runs once per top-level start, in the caller's process after the supervisor has started, so `self` is the supervisor and messages to it work. If it raises, the supervisor is stopped and the start fails. Only `class supervisionPolicy` stays class-side. The old class-side forms (`class children`, `class strategy`, …, `class initialize:`) are compile errors with a fix-it: drop `class`, rename `class children` to `childSpecs`, and use `self` for `sup` in `initialize`.
+The post-start hook is the instance-side `initialize` (it was `class initialize: sup`). It runs once per top-level start, in the caller's process after the supervisor has started, so `self` is the supervisor and messages to it work. If it raises, the supervisor is stopped and the start fails: `spawn` and `spawnWith:` re-raise the error, while `supervise`, `spawnAs:` and `spawnWith:as:` answer `Result error:` with kind `#supervisor_start_failed` (as `Actor spawnAs:` does). Concurrent `supervise` calls on one class are served in arrival order; one that waits too long behind a start that does not finish also answers `#supervisor_start_failed`. Only `class supervisionPolicy` stays class-side. The old class-side forms (`class children`, `class strategy`, …, `class initialize:`) are compile errors with a fix-it: drop `class`, rename `class children` to `childSpecs`, and use `self` for `sup` in `initialize`.
 
 **For Erlang/Elixir developers.** Every OTP concept has a direct counterpart (rows marked † arrive with BT-3966):
 
@@ -3902,6 +3919,9 @@ This matters in practice: you can call `WebApp supervise` at every entry point o
 - `#child_start_failed` — child's `init/1` raised, or the supervisor rejected the spec.
 - `#terminate_failed` — `supervisor:terminate_child/2` returned a reason other than `not_found` (supervisor crash, timeout).
 - `#stale_handle` — the supervisor process itself is dead.
+- `#node_down` — the handle names a supervisor on another node that cannot be reached (down, partitioned, or too slow to answer). The supervisor may still be running, so this is not a stale handle; `details` carries `node` and `reason` (`#nodedown`, `#noconnection` or `#timeout`). Every supervisor handle call (`args`, `count`, `stop`, the child calls above) reports it the same way, where a local handle would report `#stale_handle`.
+
+`isAlive` and `stop` are sealed on `Supervisor` and `DynamicSupervisor`: the runtime answers them on a handle without a method lookup, so overriding either is a compile error. `isAlive` on a remote supervisor answers `true` without a network round trip, as it does for an actor.
 
 ### Call-site patterns
 
@@ -4468,6 +4488,8 @@ A destructure that ends a predicate block (`select:`, `detect:`, `allSatisfy:` a
 - `^` or a field store at the method-body level;
 - the value of a local assignment at the method-body level, or directly inside exactly one of an `ifTrue:` arm, an `on:do:` protected body, an `ensure:` cleanup block, a `do:`, `collect:` or `inject:into:` block, or a `detect:ifNone:` handler (not nested in another block);
 - at the REPL, only a statement or assignment at the top level of the input.
+
+In an actor method, an evaluated block literal (`[...] value`, `[:k | ...] value: x`) that binds a local, writes a field or sends to `self` answers its value only at some positions; elsewhere the value would be the raw `{Value, State}` pair, so it is a compile error ([BT-3981](https://linear.app/beamtalk/issue/BT-3981), until the block is lowered as a frame, [BT-3947](https://linear.app/beamtalk/issue/BT-3947)). It answers at a method-body statement, assignment (`r := [...] value`) or `^`, and inside an `ifTrue:` arm, a `collect:` block, a `match:` arm or a `whileTrue:` block; directly in a stored block, an Erlang FFI argument block or a block passed to a method it does not (assign it to a local in the method body, or compute it in a method of its own). As an operand (a receiver, an argument, a cascade part, `([...] value)` in parentheses) it never does. A `do:`, `to:do:` or `timesRepeat:` body accepts the evaluated block only as its last statement (or assigned to a local). In the body of a `do:`, collection operation or loop that writes an outer local, only `outer := [...] value` (the one outer local it writes) and a conditional arm answer; any other statement there is a compile error. A block of a conditional, collection or loop selector the compiler has no measured case for (`or:`, `at:ifAbsent:`, `reject:`, `anySatisfy:`, `whileFalse:`, `keysAndValuesDo:`, ...) is judged as a plain block, so the evaluated block as its last statement or assigned there is a compile error too. Class and value-type methods answer the value everywhere.
 
 The REPL displays the same value. Destructuring is not an expression, so it cannot appear as an operand (`r := ({a, b} := pair)` is a compile error).
 

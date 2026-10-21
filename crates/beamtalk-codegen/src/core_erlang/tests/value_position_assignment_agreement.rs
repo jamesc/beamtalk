@@ -158,6 +158,32 @@ fn no_value_position_local_assignment_is_dropped(contexts: &[&str]) {
     );
 }
 
+/// BT-3993: a legacy workspace block body whose last statement is a
+/// parenthesised `(t := x)` (an assignment of a plain local) compiles with no
+/// dropped write: `with_value_assign_sites` lowers that body like an actor
+/// method body. The corpus places `(@A)` last with `t := t + 1` and
+/// `w := t + 1`; this pins the plain-local right-hand side too, last and
+/// followed by a read.
+#[test]
+fn a_legacy_block_body_ending_in_a_parenthesised_local_assignment_drops_nothing() {
+    for tail in ["(t := x)", "((t := x))", "(t := x)\n    t", "x := (t := x)"] {
+        let src = format!("foo := [:a |\n    t := 0\n    x := 1\n    {tail}\n]\n");
+        let (module, parse_diags) = parse(lex_with_eof(&src));
+        assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
+        let analysis = analyse_full(&module, AnalysisContext::default());
+        assert!(
+            !analysis
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == Severity::Error),
+            "{src}: {:?}",
+            analysis.diagnostics
+        );
+        let dropped = dropped(&module).unwrap_or_else(|why| panic!("{src}: {why}"));
+        assert!(dropped.is_empty(), "{src}: drops {dropped:?}");
+    }
+}
+
 beamtalk_core::per_family_tests! {
     list = CONTEXTS,
     families = CONTEXT_FAMILIES,

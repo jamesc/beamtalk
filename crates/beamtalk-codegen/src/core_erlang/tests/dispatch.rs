@@ -1938,9 +1938,9 @@ fn test_cast_send_to_non_self_keyword_receiver_uses_dispatch_cast() {
 }
 
 #[test]
-fn test_cast_self_send_uses_safe_dispatch_and_discards_result() {
-    // `self increment!` in actor context should call safe_dispatch but
-    // discard the result and return 'ok'.
+fn test_cast_self_send_routes_to_mailbox() {
+    // `self increment!` in actor context routes through the mailbox
+    // (beamtalk_message_dispatch:cast/3), BT-3998.
     let mut generator = CoreErlangGenerator::new("test");
     // CoreErlangGenerator::new defaults to Actor context — self-sends are valid
 
@@ -1970,23 +1970,18 @@ fn test_cast_self_send_uses_safe_dispatch_and_discards_result() {
     };
 
     let output = doc.to_pretty_string();
-    // Self cast: calls safe_dispatch and discards result
+    // BT-3998: a self cast routes to the mailbox, it is not dispatched inline
     assert!(
-        output.contains("safe_dispatch"),
-        "Self cast send should use safe_dispatch. Got: {output}"
+        output.contains("'beamtalk_message_dispatch':'cast'("),
+        "Self cast send should route through the mailbox. Got: {output}"
+    );
+    assert!(
+        !output.contains("safe_dispatch"),
+        "Self cast send must not dispatch inline. Got: {output}"
     );
     assert!(
         output.contains("'increment'"),
         "Self cast send should include selector atom. Got: {output}"
-    );
-    assert!(
-        output.contains("'ok'"),
-        "Self cast send should evaluate to 'ok'. Got: {output}"
-    );
-    // Must NOT use beamtalk_message_dispatch:cast (that's for external sends)
-    assert!(
-        !output.contains("beamtalk_message_dispatch':'cast'"),
-        "Self cast send must NOT use message dispatch cast. Got: {output}"
     );
 }
 
