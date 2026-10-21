@@ -792,9 +792,10 @@
         "object",
         "property",
         "set",
-        "subclassing"
+        "subclassing",
+        "tick"
       ],
-      "source": "Server subclass: PeriodicWorker\n  state: count = 0\n\n  initialize =>\n    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick\n\n  handleInfo: msg =>\n    msg match: [\n      #tick -> [\n        self.count := self.count + 1.\n        Erlang erlang send_after: 1000 dest: (self pid) msg: #tick\n      ];\n      _ -> nil\n    ]\n\n  getValue => self.count",
+      "source": "Server subclass: PeriodicWorker\n  state: count = 0\n\n  initialize =>\n    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick\n\n  handleInfo: msg =>\n    msg match: [\n      #tick -> self tick;\n      _ -> nil\n    ]\n\n  tick =>\n    self.count := self.count + 1\n    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick\n\n  getValue => self.count",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -884,11 +885,12 @@
         "mutate",
         "mutation",
         "object",
+        "onReady:",
         "property",
         "set",
         "subclassing"
       ],
-      "source": "Server subclass: Connection\n  state: sock = nil\n\n  handleInfo: msg =>\n    msg match: [\n      {#ready, s} -> [\n        self.sock := s\n        self continueWith: #handleConnection   // runs before any queued #tcp message\n      ];\n      _ -> nil\n    ]\n\n  // Set up the socket here, before the first #tcp message is handled.\n  handleConnection => self.sock",
+      "source": "Server subclass: Connection\n  state: sock = nil\n\n  handleInfo: msg =>\n    msg match: [\n      {#ready, s} -> self onReady: s;\n      _ -> nil\n    ]\n\n  onReady: s =>\n    self.sock := s\n    self continueWith: #handleConnection   // runs before any queued #tcp message\n\n  // Set up the socket here, before the first #tcp message is handled.\n  handleConnection => self.sock",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -37221,6 +37223,35 @@
       "explanation": "BT-915: Actor fixture for testing self.slot := inside conditional blocks Exercises ifTrue:, ifFalse:, and ifTrue:ifFalse: with field mutation threading"
     },
     {
+      "id": "stdlib-test-fixtures-connection",
+      "title": "Connection",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Connection",
+        "Server",
+        "assign",
+        "assignment",
+        "connection",
+        "extends",
+        "field",
+        "handleConnection",
+        "handleInfo:",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "onReady:",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "// BT-4024: the § Continuations (`continueWith:`) example from\n// docs/beamtalk-language-features.md. The `{#ready, s}` arm calls a method\n// rather than holding a `[ ... ]` block, which would be a value that never runs.\n\nServer subclass: Connection\n  state: sock = nil\n\n  handleInfo: msg =>\n    msg match: [\n      {#ready, s} -> self onReady: s;\n      _ -> nil\n    ]\n\n  onReady: s =>\n    self.sock := s\n    self continueWith: #handleConnection  // runs before any queued #tcp message\n\n  // Set up the socket here, before the first #tcp message is handled.\n  handleConnection => self.sock",
+      "explanation": "BT-4024: the § Continuations (`continueWith:`) example from docs/beamtalk-language-features.md. The `{#ready, s}` arm calls a method rather than holding a `[ ... ]` block, which would be a value that never runs."
+    },
+    {
       "id": "stdlib-test-fixtures-continue-with-actor",
       "title": "ContinueWithActor",
       "category": "stdlib-fixtures",
@@ -42881,6 +42912,36 @@
       "explanation": "Test fixture: an Announcement subclass used for MRO matching tests."
     },
     {
+      "id": "stdlib-test-fixtures-periodic-worker",
+      "title": "PeriodicWorker",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "PeriodicWorker",
+        "Server",
+        "assign",
+        "assignment",
+        "extends",
+        "field",
+        "getValue",
+        "handleInfo:",
+        "inherit",
+        "inheritance",
+        "initialize",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "periodic_worker",
+        "property",
+        "set",
+        "subclassing",
+        "tick"
+      ],
+      "source": "// BT-4024: the § Defining a Server example from\n// docs/beamtalk-language-features.md. The `#tick` arm calls a method rather\n// than holding a `[ ... ]` block, which would be a value that never runs.\n\nServer subclass: PeriodicWorker\n  state: count = 0\n\n  initialize =>\n    Erlang erlang\n      send_after: 1000\n      dest: (self pid)\n      msg: #tick\n\n  handleInfo: msg =>\n    msg match: [\n      #tick -> self tick;\n      _ -> nil\n    ]\n\n  tick =>\n    self.count := self.count + 1\n    Erlang erlang\n      send_after: 1000\n      dest: (self pid)\n      msg: #tick\n\n  getValue => self.count",
+      "explanation": "BT-4024: the § Defining a Server example from docs/beamtalk-language-features.md. The `#tick` arm calls a method rather than holding a `[ ... ]` block, which would be a value that never runs."
+    },
+    {
       "id": "stdlib-test-fixtures-plain-actor-for-info-test",
       "title": "PlainActorForInfoTest",
       "category": "stdlib-fixtures",
@@ -46377,6 +46438,34 @@
       "explanation": "BT-1222: Concrete Supervisor subclass with overridden config — fixture for supervisor_defaults_test.bt"
     },
     {
+      "id": "stdlib-test-fixtures-tick-counter",
+      "title": "TickCounter",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Server",
+        "TickCounter",
+        "assign",
+        "assignment",
+        "extends",
+        "field",
+        "getValue",
+        "handleInfo:",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "subclassing",
+        "tick_counter"
+      ],
+      "source": "// BT-4024: the `handleinfo-no-catch-all` lint example from\n// docs/beamtalk-language-features.md § handleInfo: Semantics, wrapped in a\n// class. A single-statement arm can write a field directly.\n\nServer subclass: TickCounter\n  state: count = 0\n\n  handleInfo: msg =>\n    msg match: [\n      {#tick, n} -> self.count := self.count + n;\n      _ -> nil\n    ]\n\n  getValue => self.count",
+      "explanation": "BT-4024: the `handleinfo-no-catch-all` lint example from docs/beamtalk-language-features.md § handleInfo: Semantics, wrapped in a class. A single-statement arm can write a field directly."
+    },
+    {
       "id": "stdlib-test-fixtures-tier2subexpr-and-conditional-block-test-actor",
       "title": "Tier2SubexprAndConditionalBlockTestActor",
       "category": "stdlib-fixtures",
@@ -48344,7 +48433,9 @@
         "testCoreSyntaxBinaryOperators",
         "testDestructuringInMatchArms",
         "testGradualTyping",
+        "testMatchArmBlockIsAValue",
         "testPatternMatchingMatchExpression",
+        "testServerHandleInfoExamples",
         "testStandardLibraryStream",
         "testStringEncodingAndUtf8",
         "testTestingFrameworkExpressionTests",
@@ -48352,7 +48443,7 @@
         "to_string",
         "where"
       ],
-      "source": "// Auto-tests for examples in docs/beamtalk-language-features.md\n\nTestCase subclass: LanguageFeaturesDocTest\n\n  testStringEncodingAndUtf8 =>\n    self assert: \"Hello\" length equals: 5\n    self assert: \"世界\" length equals: 2\n    // Slicing by grapheme\n    self assert: (\"Hello\" at: 1) equals: \"H\"\n    self assert: (\"世界\" at: 1) equals: \"世\"\n    // Case conversion\n    self assert: \"HELLO\" lowercase equals: \"hello\"\n    self assert: \"straße\" uppercase equals: \"STRASSE\"\n\n  testCoreSyntaxBinaryOperators =>\n    // Exponentiation\n    self assert: (2 ** 10) equals: 1024\n    // Multiplicative\n    self assert: (3 * 4) equals: 12\n    self assert: (10 / 2) equals: 5 asFloat\n    self assert: (17 % 5) equals: 2\n    // Additive\n    self assert: (3 + 4) equals: 7\n    self assert: (10 - 3) equals: 7\n    self assert: \"Hello\" ++ \" World\" equals: \"Hello World\"\n    // Comparison\n    self assert: (3 < 5)\n    self assert: (5 > 3)\n    self assert: (3 <= 3)\n    self assert: (5 >= 3)\n    // Equality\n    self assert: (5 =:= 5)\n    self assert: (5 == 5.0)\n    self assert: (5 /= 6)\n    self assert: (5 =/= 6)\n\n  testGradualTyping =>\n    typedDocMath := TypedMath new\n    self assert: (typedDocMath identity: 7) equals: 7\n    self assert: (typedDocMath sum: 2 with: 5) equals: 7\n    self assert: (typedDocMath maybeName: false) equals: \"none\"\n    typedDocAccount := TypedAccount spawn\n    self assert: (typedDocAccount deposit: 8) equals: 8\n    self assert: typedDocAccount balance equals: 8\n\n  testBlocksClosures =>\n    // Block with arguments\n    self assert: ([:x :y | x + y] value: 3 value: 4) equals: 7\n    // Block with local variables\n    myBlock := [:x |\n      temp := x * 2\n      temp + 1\n    ]\n    self assert: (myBlock value: 5) equals: 11\n\n  testPatternMatchingMatchExpression =>\n    // Variable binding in patterns\n    self assert: (42 match: [n -> n + 1]) equals: 43\n    // Match on computed expression\n    self\n      assert: ((3 + 4) match: [\n        7 -> \"correct\";\n        _ -> \"wrong\"\n      ])\n      equals: \"correct\"\n    // Integer literal matching\n    self\n      assert: (1 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"one\"\n    self\n      assert: (2 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"two\"\n    self\n      assert: (3 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"other\"\n    // Symbol matching\n    self\n      assert: (#ok match: [\n        #ok -> \"success\";\n        #error -> \"failure\";\n        _ -> \"unknown\"\n      ])\n      equals: \"success\"\n    // String matching\n    self\n      assert: (\"hello\" match: [\n        \"hello\" -> \"hi\";\n        _ -> \"huh?\"\n      ])\n      equals: \"hi\"\n    // Negative number patterns\n    self\n      assert: (-1 match: [\n        -1 -> \"minus one\";\n        0 -> \"zero\";\n        _ -> \"other\"\n      ])\n      equals: \"minus one\"\n    self\n      assert: (0 match: [\n        -1 -> \"minus one\";\n        0 -> \"zero\";\n        _ -> \"other\"\n      ])\n      equals: \"zero\"\n    // Guard clauses with when:\n    self\n      assert: (10 match: [\n        n when: [n > 100] -> \"big\";\n        n when: [n > 5] -> \"medium\";\n        _ -> \"small\"\n      ])\n      equals: \"medium\"\n    // Wildcard match\n    self assert: (42 match: [_ -> \"matched\"]) equals: \"matched\"\n\n  testDestructuringInMatchArms =>\n    // Variable captures the matched value\n    self assert: (42 match: [x -> x + 1]) equals: 43\n    // Multiple arms with variable binding\n    self assert: (\"hello\" match: [s -> s size]) equals: 5\n\n  testStandardLibraryStream =>\n    // Terminal forces computation through the pipeline\n    self assert: (((Stream from: 1) select: [:n |\n      n isEven\n    ]) take: 5) equals: #(2, 4, 6, 8, 10)\n    self assert: ((Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n |\n      sum + n\n    ]) equals: 10\n    // Stream printString — pipeline inspection\n    self assert: ((Stream from: 1) printString) equals: \"Stream(from: 1)\"\n    self assert: ((Stream on: #(1, 2, 3)) printString) equals: \"Stream(on: [...])\"\n    self assert: (((Stream from: 1) select: [:n |\n      n isEven\n    ]) printString) equals: \"Stream(from: 1) | select: [...]\"\n    // Eager vs Lazy boundary\n    self assert: (#(1, 2, 3, 4, 5) select: [:n | n > 2]) equals: #(3, 4, 5)\n\n  testTestingFrameworkExpressionTests =>\n    // From the expression tests example\n    self assert: (1 + 2) equals: 3\n    self assert: \"hello\" size equals: 5\n    self assert: \"hello\" ++ \" world\" equals: \"hello world\"",
+      "source": "// Auto-tests for examples in docs/beamtalk-language-features.md\n\nTestCase subclass: LanguageFeaturesDocTest\n\n  testStringEncodingAndUtf8 =>\n    self assert: \"Hello\" length equals: 5\n    self assert: \"世界\" length equals: 2\n    // Slicing by grapheme\n    self assert: (\"Hello\" at: 1) equals: \"H\"\n    self assert: (\"世界\" at: 1) equals: \"世\"\n    // Case conversion\n    self assert: \"HELLO\" lowercase equals: \"hello\"\n    self assert: \"straße\" uppercase equals: \"STRASSE\"\n\n  testCoreSyntaxBinaryOperators =>\n    // Exponentiation\n    self assert: (2 ** 10) equals: 1024\n    // Multiplicative\n    self assert: (3 * 4) equals: 12\n    self assert: (10 / 2) equals: 5 asFloat\n    self assert: (17 % 5) equals: 2\n    // Additive\n    self assert: (3 + 4) equals: 7\n    self assert: (10 - 3) equals: 7\n    self assert: \"Hello\" ++ \" World\" equals: \"Hello World\"\n    // Comparison\n    self assert: (3 < 5)\n    self assert: (5 > 3)\n    self assert: (3 <= 3)\n    self assert: (5 >= 3)\n    // Equality\n    self assert: (5 =:= 5)\n    self assert: (5 == 5.0)\n    self assert: (5 /= 6)\n    self assert: (5 =/= 6)\n\n  testGradualTyping =>\n    typedDocMath := TypedMath new\n    self assert: (typedDocMath identity: 7) equals: 7\n    self assert: (typedDocMath sum: 2 with: 5) equals: 7\n    self assert: (typedDocMath maybeName: false) equals: \"none\"\n    typedDocAccount := TypedAccount spawn\n    self assert: (typedDocAccount deposit: 8) equals: 8\n    self assert: typedDocAccount balance equals: 8\n\n  // BT-4024: § Defining a Server, § handleInfo: Semantics and\n  // § Continuations. Fixtures: periodic_worker.bt, tick_counter.bt, connection.bt.\n  testServerHandleInfoExamples =>\n    worker := PeriodicWorker spawn\n    Erlang erlang send: worker pid msg: #tick\n    // >= 1: initialize's own 1s send_after timer may also have fired.\n    self assert: worker getValue >= 1\n    worker stop\n    counter := TickCounter spawn\n    Erlang erlang send: counter pid msg: (Erlang erlang list_to_tuple: #(#tick, 5))\n    self assert: counter getValue equals: 5\n    counter stop\n    conn := Connection spawn\n    Erlang erlang send: conn pid msg: (Erlang erlang list_to_tuple: #(#ready, 42))\n    self assert: conn handleConnection equals: 42\n    conn stop\n\n  // BT-4024: § Match Expression. A `[ ... ]` arm body is a Block value and\n  // does not run; `[ ... ] value` runs it.\n  testMatchArmBlockIsAValue =>\n    r := 1 match: [\n      1 -> [2 + 3];\n      _ -> [0]\n    ]\n    self assert: (r isKindOf: Block)\n    self assert: r value equals: 5\n    self\n      assert: (1 match: [\n        1 -> [2 + 3] value;\n        _ -> 0\n      ])\n      equals: 5\n\n  testBlocksClosures =>\n    // Block with arguments\n    self assert: ([:x :y | x + y] value: 3 value: 4) equals: 7\n    // Block with local variables\n    myBlock := [:x |\n      temp := x * 2\n      temp + 1\n    ]\n    self assert: (myBlock value: 5) equals: 11\n\n  testPatternMatchingMatchExpression =>\n    // Variable binding in patterns\n    self assert: (42 match: [n -> n + 1]) equals: 43\n    // Match on computed expression\n    self\n      assert: ((3 + 4) match: [\n        7 -> \"correct\";\n        _ -> \"wrong\"\n      ])\n      equals: \"correct\"\n    // Integer literal matching\n    self\n      assert: (1 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"one\"\n    self\n      assert: (2 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"two\"\n    self\n      assert: (3 match: [\n        1 -> \"one\";\n        2 -> \"two\";\n        _ -> \"other\"\n      ])\n      equals: \"other\"\n    // Symbol matching\n    self\n      assert: (#ok match: [\n        #ok -> \"success\";\n        #error -> \"failure\";\n        _ -> \"unknown\"\n      ])\n      equals: \"success\"\n    // String matching\n    self\n      assert: (\"hello\" match: [\n        \"hello\" -> \"hi\";\n        _ -> \"huh?\"\n      ])\n      equals: \"hi\"\n    // Negative number patterns\n    self\n      assert: (-1 match: [\n        -1 -> \"minus one\";\n        0 -> \"zero\";\n        _ -> \"other\"\n      ])\n      equals: \"minus one\"\n    self\n      assert: (0 match: [\n        -1 -> \"minus one\";\n        0 -> \"zero\";\n        _ -> \"other\"\n      ])\n      equals: \"zero\"\n    // Guard clauses with when:\n    self\n      assert: (10 match: [\n        n when: [n > 100] -> \"big\";\n        n when: [n > 5] -> \"medium\";\n        _ -> \"small\"\n      ])\n      equals: \"medium\"\n    // Wildcard match\n    self assert: (42 match: [_ -> \"matched\"]) equals: \"matched\"\n\n  testDestructuringInMatchArms =>\n    // Variable captures the matched value\n    self assert: (42 match: [x -> x + 1]) equals: 43\n    // Multiple arms with variable binding\n    self assert: (\"hello\" match: [s -> s size]) equals: 5\n\n  testStandardLibraryStream =>\n    // Terminal forces computation through the pipeline\n    self assert: (((Stream from: 1) select: [:n |\n      n isEven\n    ]) take: 5) equals: #(2, 4, 6, 8, 10)\n    self assert: ((Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n |\n      sum + n\n    ]) equals: 10\n    // Stream printString — pipeline inspection\n    self assert: ((Stream from: 1) printString) equals: \"Stream(from: 1)\"\n    self assert: ((Stream on: #(1, 2, 3)) printString) equals: \"Stream(on: [...])\"\n    self assert: (((Stream from: 1) select: [:n |\n      n isEven\n    ]) printString) equals: \"Stream(from: 1) | select: [...]\"\n    // Eager vs Lazy boundary\n    self assert: (#(1, 2, 3, 4, 5) select: [:n | n > 2]) equals: #(3, 4, 5)\n\n  testTestingFrameworkExpressionTests =>\n    // From the expression tests example\n    self assert: (1 + 2) equals: 3\n    self assert: \"hello\" size equals: 5\n    self assert: \"hello\" ++ \" world\" equals: \"hello world\"",
       "explanation": "Auto-tests for examples in docs/beamtalk-language-features.md"
     },
     {

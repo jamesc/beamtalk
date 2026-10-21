@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4024: the `handleinfo-no-catch-all` lint example from
+// docs/beamtalk-language-features.md § handleInfo: Semantics, wrapped in a
+// class. A single-statement arm can write a field directly.
+
+Server subclass: TickCounter
+  state: count = 0
+
+  handleInfo: msg =>
+    msg match: [
+      {#tick, n} -> self.count := self.count + n;
+      _ -> nil
+    ]
+
+  getValue => self.count
