@@ -138,42 +138,30 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        // Module header
-        let module_header = if has_classes {
-            docvec![
-                "module ",
-                leaf::atom(self.module_name.clone()),
-                " [",
-                base_exports,
-                class_method_export_doc,
-                ", 'register_class'/0]",
-                "\n",
-                "  attributes ['on_load' = [{'register_class', 0}]",
-                beamtalk_class_attr,
-                file_attr,
-                source_path_attr,
-                alias_type_suffix,
-                spec_suffix,
-                "]\n",
-            ]
+        // Module exports and attributes (the header itself is
+        // `module_shell::core_module`'s)
+        let (exports, attributes) = if has_classes {
+            (
+                docvec![
+                    base_exports,
+                    class_method_export_doc,
+                    ", 'register_class'/0"
+                ],
+                docvec![
+                    "'on_load' = [{'register_class', 0}]",
+                    beamtalk_class_attr,
+                    file_attr,
+                    source_path_attr,
+                    alias_type_suffix,
+                    spec_suffix,
+                ],
+            )
         } else {
-            docvec![
-                "module ",
-                leaf::atom(self.module_name.clone()),
-                " [",
-                base_exports,
-                class_method_export_doc,
-                "]",
-                "\n",
-                "  attributes [",
-                file_attr,
-                source_path_attr,
-                alias_type_suffix,
-                spec_suffix,
-                "]\n",
-            ]
+            (
+                docvec![base_exports, class_method_export_doc],
+                docvec![file_attr, source_path_attr, alias_type_suffix, spec_suffix],
+            )
         };
-        docs.push(module_header);
         docs.push(Document::Str("\n"));
 
         // Helper: push a generated function + newline separator
@@ -230,9 +218,12 @@ impl CoreErlangGenerator {
             docs.push(self.generate_native_register_class(module)?);
         }
 
-        docs.push(Document::Str("end\n"));
-
-        Ok(Document::Vec(docs))
+        Ok(crate::core_erlang::module_shell::core_module(
+            self.module_name.clone(),
+            exports,
+            attributes,
+            Document::Vec(docs),
+        ))
     }
 
     /// Generates `spawn/0` for native facade — calls `spawn/1` with empty map.

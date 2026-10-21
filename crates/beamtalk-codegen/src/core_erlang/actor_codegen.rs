@@ -239,50 +239,46 @@ impl CoreErlangGenerator {
         // Build 'file' attribute so BEAM stacktraces show the .bt source file.
         let file_attr = self.file_attr();
 
-        // Module header with exports and attributes
+        // Module exports and attributes. The module skeleton itself, including
+        // the predefined module_info/0,1, is `module_shell::core_module`'s.
         // Include register_class/0 export and on_load attribute when
         // the module has classes OR protocols (protocol-only files need it too).
-        let module_header = if needs_register_class {
-            docvec![
-                "module ",
-                atom(self.module_name.to_string()),
-                " [",
-                base_exports,
-                sealed_export_doc,
-                class_method_export_doc,
-                supervision_spec_export,
-                protocol_source_export,
-                ", 'register_class'/0]",
-                "\n",
-                "  attributes ['behaviour' = ['gen_server'], \
-                 'on_load' = [{'register_class', 0}]",
-                beamtalk_class_attr,
-                file_attr,
-                source_path_attr,
-                alias_type_suffix,
-                spec_suffix,
-                "]\n",
-            ]
+        let (exports, attributes) = if needs_register_class {
+            (
+                docvec![
+                    base_exports,
+                    sealed_export_doc,
+                    class_method_export_doc,
+                    supervision_spec_export,
+                    protocol_source_export,
+                    ", 'register_class'/0",
+                ],
+                docvec![
+                    "'behaviour' = ['gen_server'], 'on_load' = [{'register_class', 0}]",
+                    beamtalk_class_attr,
+                    file_attr,
+                    source_path_attr,
+                    alias_type_suffix,
+                    spec_suffix,
+                ],
+            )
         } else {
-            docvec![
-                "module ",
-                atom(self.module_name.to_string()),
-                " [",
-                base_exports,
-                sealed_export_doc,
-                class_method_export_doc,
-                supervision_spec_export,
-                "]",
-                "\n",
-                "  attributes ['behaviour' = ['gen_server']",
-                file_attr,
-                source_path_attr,
-                alias_type_suffix,
-                spec_suffix,
-                "]\n",
-            ]
+            (
+                docvec![
+                    base_exports,
+                    sealed_export_doc,
+                    class_method_export_doc,
+                    supervision_spec_export,
+                ],
+                docvec![
+                    "'behaviour' = ['gen_server']",
+                    file_attr,
+                    source_path_attr,
+                    alias_type_suffix,
+                    spec_suffix,
+                ],
+            )
         };
-        docs.push(module_header);
         docs.push(Document::Str("\n"));
 
         // Helper: push a generated function + newline separator
@@ -393,10 +389,12 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Module end
-        docs.push(Document::Str("end\n"));
-
-        Ok(Document::Vec(docs))
+        Ok(super::module_shell::core_module(
+            self.module_name.to_string(),
+            exports,
+            attributes,
+            Document::Vec(docs),
+        ))
     }
 
     /// Returns true if the class has any instance methods with a selector-based `@primitive` body.

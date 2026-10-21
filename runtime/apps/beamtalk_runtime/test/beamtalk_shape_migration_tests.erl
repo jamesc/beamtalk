@@ -680,7 +680,10 @@ with_shape_chain_cart_meta(ShapeVersion, Migrations, Fun) ->
 %% and every non-overridden call forwards straight to RealMod, still fully
 %% loaded and untouched throughout.
 build_delegate_proxy(RealMod, StubMod, OverrideSources) ->
-    {ok, {RealMod, [{exports, Exports}]}} = beam_lib:chunks(code:which(RealMod), [exports]),
+    {ok, {RealMod, [{exports, AllExports}]}} = beam_lib:chunks(code:which(RealMod), [exports]),
+    %% The stub is compiled from Erlang forms, so erlc adds its own
+    %% module_info/0,1; delegating RealMod's (BT-4067) would redefine them.
+    Exports = [FA || {F, _} = FA <- AllExports, F =/= module_info],
     ExportsDecl =
         "-export([" ++
             string:join(

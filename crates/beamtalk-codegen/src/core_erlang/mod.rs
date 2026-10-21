@@ -135,6 +135,7 @@ mod gen_server;
 pub(in crate::core_erlang) mod generator;
 mod intrinsics;
 mod method_frame;
+pub mod module_shell;
 mod nlr;
 mod operators;
 mod options;

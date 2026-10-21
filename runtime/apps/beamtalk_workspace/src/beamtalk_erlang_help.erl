@@ -380,11 +380,10 @@ format_exports_list(Module) ->
     %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
     try Module:module_info(exports) of
         Exports ->
-            %% Filter out module_info/0,1
             Filtered = [
                 {F, A}
              || {F, A} <- Exports,
-                F =/= module_info
+                not beamtalk_reflection:is_predefined_function(F)
             ],
             Sorted = lists:sort(Filtered),
             Lines = [
@@ -410,7 +409,10 @@ format_eep48_signatures_or_exports(Module) ->
     %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
     try Module:module_info(exports) of
         Exports ->
-            Filtered = [{F, A} || {F, A} <- Exports, F =/= module_info],
+            Filtered = [
+                {F, A}
+             || {F, A} <- Exports, not beamtalk_reflection:is_predefined_function(F)
+            ],
             %% Single lookup per function: filter hidden and get signature in one pass
             Lookups = [
                 {{F, A}, beamtalk_native_docs:lookup(Module, F, A)}

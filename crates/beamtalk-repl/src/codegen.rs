@@ -20,6 +20,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::leaf::{atom, var};
+use beamtalk_codegen::core_erlang::module_shell::core_module;
 use beamtalk_codegen::core_erlang::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, GeneratedModule, Result,
 };
@@ -360,6 +361,23 @@ impl<'a> ReplAssembler<'a> {
         Self { generator }
     }
 
+    /// Wraps an `eval/1` body (everything after `let State = Bindings in`)
+    /// in the shared module skeleton, which also exports and defines
+    /// `module_info/0,1` (BT-4067).
+    fn eval_module(&self, eval_body: Document<'static>) -> Document<'static> {
+        core_module(
+            self.generator.module_name.clone(),
+            leaf::fname("eval", 1),
+            Document::Nil,
+            docvec![
+                "\n",
+                "'eval'/1 = fun (Bindings) ->\n",
+                "    let State = Bindings in\n",
+                eval_body,
+            ],
+        )
+    }
+
     /// BT-3910 (ADR 0131 §1): marks the value-position local assignments of the
     /// input `expressions` as producers, by the one rule
     /// (`value_position_assignment_spans`).
@@ -544,15 +562,7 @@ impl<'a> ReplAssembler<'a> {
         if let Expression::DestructureAssignment { pattern, value, .. } = expression {
             let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
             let final_state = self.generator.current_state_var();
-            let module_name = self.generator.module_name.clone();
-            let mut parts: Vec<Document<'static>> = vec![
-                docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
-                Document::Str("  attributes []\n"),
-                Document::Str("\n"),
-                Document::Str("'eval'/1 = fun (Bindings) ->\n"),
-                Document::Str("    let State = Bindings in\n"),
-            ];
-            parts.extend(binding_docs);
+            let mut parts: Vec<Document<'static>> = binding_docs;
             parts.push(docvec!["    let Result = ", var(rhs_var), " in\n",]);
             parts.push(docvec![
                 "    {[{",
@@ -561,8 +571,7 @@ impl<'a> ReplAssembler<'a> {
                 var(final_state),
                 "}\n",
             ]);
-            parts.push(Document::Str("end\n"));
-            return Ok(Document::Vec(parts));
+            return Ok(self.eval_module(Document::Vec(parts)));
         }
 
         let (prelude, expr_code, repl_mutated) =
@@ -589,14 +598,7 @@ impl<'a> ReplAssembler<'a> {
             docvec!["{[{", leaf::binary_lit(source_text), ", Result}], State}"]
         };
 
-        let doc = docvec![
-            "module ",
-            leaf::atom(self.generator.module_name.clone()),
-            " ['eval'/1]\n",
-            "  attributes []\n",
-            "\n",
-            "'eval'/1 = fun (Bindings) ->\n",
-            "    let State = Bindings in\n",
+        Ok(self.eval_module(docvec![
             prelude,
             "    let Result = ",
             expr_code,
@@ -604,10 +606,7 @@ impl<'a> ReplAssembler<'a> {
             "    ",
             return_tuple,
             "\n",
-            "end\n",
-        ];
-
-        Ok(doc)
+        ]))
     }
 
     /// Multi-expression trace body.
@@ -651,23 +650,15 @@ impl<'a> ReplAssembler<'a> {
         let (pre_bindings, last_val_doc, trace_return) =
             self.generate_trace_last_expr(last_expr, &source_texts[n - 1], step_pairs)?;
 
-        let module_name = self.generator.module_name.clone();
-        let mut all_parts: Vec<Document<'static>> = vec![
-            docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
-            Document::Str("  attributes []\n"),
-            Document::Str("\n"),
-            Document::Str("'eval'/1 = fun (Bindings) ->\n"),
-            Document::Str("    let State = Bindings in\n"),
-        ];
-        all_parts.extend(body_parts);
+        let mut all_parts: Vec<Document<'static>> = body_parts;
         all_parts.extend(pre_bindings);
         all_parts.push(Document::Str("    let Result = "));
         all_parts.push(last_val_doc);
         all_parts.push(Document::Str(" in\n    "));
         all_parts.push(trace_return);
-        all_parts.push(Document::Str("\nend\n"));
+        all_parts.push(Document::Str("\n"));
 
-        Ok(Document::Vec(all_parts))
+        Ok(self.eval_module(Document::Vec(all_parts)))
     }
 
     /// Generates the value doc and trace return expression for the last statement.
@@ -821,19 +812,10 @@ impl<'a> ReplAssembler<'a> {
         if let Expression::DestructureAssignment { pattern, value, .. } = expression {
             let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
             let final_state = self.generator.current_state_var();
-            let module_name = self.generator.module_name.clone();
-            let mut parts: Vec<Document<'static>> = vec![
-                docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
-                Document::Str("  attributes []\n"),
-                Document::Str("\n"),
-                Document::Str("'eval'/1 = fun (Bindings) ->\n"),
-                Document::Str("    let State = Bindings in\n"),
-            ];
-            parts.extend(binding_docs);
+            let mut parts: Vec<Document<'static>> = binding_docs;
             parts.push(docvec!["    let Result = ", var(rhs_var), " in\n",]);
             parts.push(docvec!["    {Result, ", var(final_state), "}\n",]);
-            parts.push(Document::Str("end\n"));
-            return Ok(Document::Vec(parts));
+            return Ok(self.eval_module(Document::Vec(parts)));
         }
 
         // Capture the expression output (ADR 0018 bridge)
@@ -861,14 +843,7 @@ impl<'a> ReplAssembler<'a> {
             Document::Str("{Result, State}")
         };
 
-        let doc = docvec![
-            "module ",
-            leaf::atom(self.generator.module_name.clone()),
-            " ['eval'/1]\n",
-            "  attributes []\n",
-            "\n",
-            "'eval'/1 = fun (Bindings) ->\n",
-            "    let State = Bindings in\n",
+        Ok(self.eval_module(docvec![
             prelude,
             "    let Result = ",
             expr_code,
@@ -876,10 +851,7 @@ impl<'a> ReplAssembler<'a> {
             "    ",
             return_tuple,
             "\n",
-            "end\n",
-        ];
-
-        Ok(doc)
+        ]))
     }
 
     /// Multi-expression eval module body.
@@ -914,23 +886,15 @@ impl<'a> ReplAssembler<'a> {
         let last_expr = &expressions[n - 1];
         let (pre_bindings, last_val_doc, return_tuple) = self.generate_repl_last_expr(last_expr)?;
 
-        let module_name = self.generator.module_name.clone();
-        let mut all_parts: Vec<Document<'static>> = vec![
-            docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
-            Document::Str("  attributes []\n"),
-            Document::Str("\n"),
-            Document::Str("'eval'/1 = fun (Bindings) ->\n"),
-            Document::Str("    let State = Bindings in\n"),
-        ];
-        all_parts.extend(body_parts);
+        let mut all_parts: Vec<Document<'static>> = body_parts;
         all_parts.extend(pre_bindings);
         all_parts.push(Document::Str("    let Result = "));
         all_parts.push(last_val_doc);
         all_parts.push(Document::Str(" in\n    "));
         all_parts.push(return_tuple);
-        all_parts.push(Document::Str("\nend\n"));
+        all_parts.push(Document::Str("\n"));
 
-        Ok(Document::Vec(all_parts))
+        Ok(self.eval_module(Document::Vec(all_parts)))
     }
 
     /// Generates code for a non-last expression in a multi-statement REPL sequence.
@@ -1225,7 +1189,10 @@ mod tests {
             result.contains("module 'repl_test_1'"),
             "missing module name"
         );
-        assert!(result.contains("['eval'/1]"), "missing eval/1 export");
+        assert!(
+            result.contains("['eval'/1, 'module_info'/0, 'module_info'/1]"),
+            "missing eval/1 export"
+        );
         assert!(result.contains("fun (Bindings)"), "missing Bindings param");
         assert!(result.contains("42"), "missing integer value");
         assert!(result.contains("{Result, State}"), "missing return tuple");
@@ -1282,7 +1249,10 @@ mod tests {
     fn repl_module_structure() {
         let result = generate_repl_expression(&int_expr(1), "repl_mod_struct").unwrap();
         // Verify the essential Core Erlang module structure
-        assert!(result.contains("module 'repl_mod_struct' ['eval'/1]"));
+        assert!(
+            result
+                .contains("module 'repl_mod_struct' ['eval'/1, 'module_info'/0, 'module_info'/1]")
+        );
         assert!(result.contains("attributes []"));
         assert!(result.contains("'eval'/1 = fun (Bindings)"));
         assert!(result.contains("let State = Bindings"));
@@ -1416,7 +1386,9 @@ mod tests {
     #[test]
     fn test_expression_module_structure() {
         let result = generate_test_expression(&str_expr("test"), "test_struct").unwrap();
-        assert!(result.contains("module 'test_struct' ['eval'/1]"));
+        assert!(
+            result.contains("module 'test_struct' ['eval'/1, 'module_info'/0, 'module_info'/1]")
+        );
         assert!(result.contains("attributes []"));
         assert!(result.contains("'eval'/1 = fun (Bindings)"));
         assert!(result.contains("let State = Bindings"));
@@ -1651,5 +1623,67 @@ mod tests {
             result.contains("[{"),
             "should produce a multi-step trace list: {result}"
         );
+    }
+
+    // ── BT-4067: every eval-module shape carries module_info/0,1 ──────
+
+    #[test]
+    fn every_eval_module_shape_defines_module_info() {
+        let destr = || destructure_assign_expr(&["a", "b"], int_expr(9));
+        let cases: Vec<(&str, String)> = vec![
+            (
+                "single",
+                generate_repl_expression(&int_expr(1), "m_single").unwrap(),
+            ),
+            (
+                "destructure",
+                generate_repl_expression(&destr(), "m_destr").unwrap(),
+            ),
+            (
+                "multi",
+                generate_repl_expressions(&[int_expr(1), int_expr(2)], "m_multi").unwrap(),
+            ),
+            (
+                "traced",
+                generate_repl_expressions_traced(&[int_expr(1)], "1", "m_tr", HashMap::new())
+                    .unwrap(),
+            ),
+            (
+                "traced destructure",
+                generate_repl_expressions_traced(&[destr()], "9", "m_tr_d", HashMap::new())
+                    .unwrap(),
+            ),
+            (
+                "traced multi",
+                generate_repl_expressions_traced(
+                    &[int_expr(1), int_expr(2)],
+                    "1\n2",
+                    "m_tr_multi",
+                    HashMap::new(),
+                )
+                .unwrap(),
+            ),
+            (
+                "test",
+                generate_test_expression(&int_expr(1), "m_test").unwrap(),
+            ),
+        ];
+        for (shape, code) in cases {
+            assert!(
+                code.contains("['eval'/1, 'module_info'/0, 'module_info'/1]"),
+                "{shape}: module_info not exported:\n{code}"
+            );
+            assert_eq!(
+                code.matches("'module_info'/1 = fun (Key) ->").count(),
+                1,
+                "{shape}: module_info/1 must be defined once:\n{code}"
+            );
+            assert_eq!(
+                code.matches("'module_info'/0 = fun () ->").count(),
+                1,
+                "{shape}: module_info/0 must be defined once:\n{code}"
+            );
+            assert!(code.ends_with("end\n"), "{shape}:\n{code}");
+        }
     }
 }

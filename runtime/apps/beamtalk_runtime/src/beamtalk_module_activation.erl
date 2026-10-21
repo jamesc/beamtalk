@@ -742,11 +742,10 @@ extract_class_info_from_beam(EbinDir, ModuleName) ->
 -doc """
 Read a module's exports without depending on `Module:module_info/1`.
 
-Beamtalk's Core Erlang codegen compiles straight to Core Erlang and feeds it
-to `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which never runs the
-abstract-form `sys_pre_expand` compiler pass that auto-injects
-`module_info/0,1`. So every Beamtalk-compiled (`bt@...`) module lacks
-`module_info/1`, and `Module:module_info(exports)` always raises `undef` for
+Beamtalk compiles from Core Erlang (`from_core`), which skips the `v3_core`
+pass that adds `module_info/0,1` to Erlang sources. Codegen has emitted the
+functions itself since BT-4067, but a `bt@...` module compiled before that
+has no `module_info/1`, and `Module:module_info(exports)` raises `undef` for
 one.
 
 Tries `erlang:get_module_info/2` first — a BIF that reads the VM's

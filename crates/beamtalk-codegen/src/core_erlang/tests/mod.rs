@@ -228,6 +228,7 @@ mod local_producer_agreement_repl;
 mod local_rebind_verifier_corpus;
 mod loop_body_conditional_receiver_corpus;
 mod loop_body_self_send_operand_corpus;
+mod module_info;
 mod nlr;
 mod primitives;
 mod protocol_registration_conformance;

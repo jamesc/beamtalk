@@ -1987,6 +1987,40 @@ value_type_responds_to_via_exports_test_() ->
             ?assertNot(beamtalk_primitive:responds_to(Tagged, totallyFakeSelector))
         end}.
 
+%% BT-4067: module_info/0,1 is the BEAM's predefined reflection function,
+%% never a Beamtalk method — on the exports fallback (a class module with no
+%% has_method/1 or dispatch/3) it is neither understood nor sent.
+value_type_module_info_is_not_a_method_test_() ->
+    Module = 'bt@mod_info_plain_value',
+    {setup,
+        fun() ->
+            application:ensure_all_started(beamtalk_runtime),
+            beamtalk_stdlib:init(),
+            Forms = beamtalk_test_erl_forms:parse_forms([
+                "-module('bt@mod_info_plain_value').",
+                "-export([size/1]).",
+                "size(_Self) -> 3."
+            ]),
+            {ok, Module, Bin} = compile:forms(Forms, []),
+            {module, Module} = code:load_binary(Module, "mod_info_plain_value.erl", Bin),
+            ok
+        end,
+        fun(_) ->
+            code:purge(Module),
+            code:delete(Module)
+        end,
+        fun() ->
+            Value = #{'$beamtalk_class' => 'ModInfoPlainValue'},
+            ?assert(erlang:function_exported(Module, module_info, 1)),
+            ?assert(beamtalk_primitive:responds_to(Value, size)),
+            ?assertNot(beamtalk_primitive:responds_to(Value, module_info)),
+            ?assertEqual(3, beamtalk_primitive:send(Value, size, [])),
+            ?assertError(
+                #{error := #beamtalk_error{kind = does_not_understand, selector = module_info}},
+                beamtalk_primitive:send(Value, module_info, [])
+            )
+        end}.
+
 %%% ============================================================================
 %%% module_for_value — tagged map variants
 %%%

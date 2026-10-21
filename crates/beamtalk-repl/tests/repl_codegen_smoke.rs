@@ -1261,7 +1261,7 @@ fn test_cascade_repl_expression() {
 
     // Should have module structure
     assert!(
-        code.contains("module 'test_cascade' ['eval'/1]"),
+        code.contains("module 'test_cascade' ['eval'/1, 'module_info'/0, 'module_info'/1]"),
         "Should have module header. Got:\n{code}"
     );
 

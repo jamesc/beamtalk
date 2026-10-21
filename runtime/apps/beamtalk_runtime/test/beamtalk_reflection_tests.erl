@@ -207,3 +207,9 @@ write_field_with_complex_key_test() ->
     {Value, NewState} = beamtalk_reflection:write_field(some_long_field_name, <<"data">>, State),
     ?assertEqual(<<"data">>, Value),
     ?assertEqual(<<"data">>, maps:get(some_long_field_name, NewState)).
+
+%% BT-4067: module_info is the predefined function every module exports.
+is_predefined_function_test() ->
+    ?assert(beamtalk_reflection:is_predefined_function(module_info)),
+    ?assertNot(beamtalk_reflection:is_predefined_function(dispatch)),
+    ?assertNot(beamtalk_reflection:is_predefined_function('module_info:')).

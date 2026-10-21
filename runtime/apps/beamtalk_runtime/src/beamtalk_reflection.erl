@@ -29,7 +29,8 @@ See also: beamtalk_tagged_map
     has_field/2,
     clear_field/2,
     inspect_string/1,
-    source_file_from_module/1
+    source_file_from_module/1,
+    is_predefined_function/1
 ]).
 
 %%% ============================================================================
@@ -126,11 +127,22 @@ inspect_string(State) when is_map(State) ->
     beamtalk_object_printer:structural_from_state(State).
 
 -doc """
+True for the BEAM's predefined `module_info` function, which every module
+exports: erlc adds it to Erlang sources, and Beamtalk codegen to every
+generated module (BT-4067). It is reflection plumbing, never a Beamtalk
+method or a user-facing Erlang function, so code that enumerates a module's
+exports as methods or completions drops it.
+""".
+-spec is_predefined_function(atom()) -> boolean().
+is_predefined_function(module_info) -> true;
+is_predefined_function(_) -> false.
+
+-doc """
 Read the beamtalk_source file path from a compiled module's attributes.
 
-Uses erlang:get_module_info/2 BIF instead of Mod:module_info/1 because
-Beamtalk modules compiled from Core Erlang via compile:forms(_, [from_core])
-do not export module_info/0,1. The BIF works regardless of exports.
+Uses the erlang:get_module_info/2 BIF rather than Mod:module_info/1 so it
+also works for modules compiled before BT-4067, which did not export
+module_info/0,1. The BIF works regardless of exports.
 Returns nil for stdlib/bootstrap/dynamically-created classes.
 """.
 -spec source_file_from_module(atom()) -> binary() | 'nil'.
