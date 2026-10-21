@@ -47,7 +47,7 @@ fn native_sibling_type_reference_resolves_after_build() {
 
     // A sibling native module whose `-spec` references the other module's
     // type in an `{ok, T} | {error, E}` return — the pattern that should
-    // resolve to a parameterized `Result(NativeThingResponse)`.
+    // resolve to a parameterized `Result(NativeThingResponse, Exception)`.
     std::fs::write(
         project.path().join("native/native_thing.erl"),
         "%% Copyright 2026 James Casey\n\
@@ -67,7 +67,8 @@ fn native_sibling_type_reference_resolves_after_build() {
         .success();
 
     // The project-local type cache should have resolved `native_thing:get/0`
-    // to `Result(NativeThingResponse)`, not a bare `Result` or `Dynamic`.
+    // to `Result(NativeThingResponse, Exception)`, not a bare `Result` or
+    // `Dynamic` (the error side is always an Exception class, BT-4023).
     let cache_dir = project.path().join("_build/type_cache");
     let entries = std::fs::read_dir(&cache_dir)
         .unwrap_or_else(|e| panic!("expected {cache_dir:?} to exist: {e}"));
@@ -81,8 +82,8 @@ fn native_sibling_type_reference_resolves_after_build() {
     }
 
     assert!(
-        combined.contains("Result(NativeThingResponse)"),
-        "expected native_thing:get/0 to resolve to Result(NativeThingResponse); \
+        combined.contains("Result(NativeThingResponse, Exception)"),
+        "expected native_thing:get/0 to resolve to Result(NativeThingResponse, Exception); \
          type cache contents:\n{combined}"
     );
 }

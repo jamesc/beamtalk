@@ -1560,3 +1560,47 @@ guarded untyped 35 / 36 ns, guarded typed (same code as bare typed) 157 / 83 ns.
 
 Decision: untyped fields (`state:`, `field:`, `classState:`, sealed or not) are always guarded; a
 `:: Integer` / `:: Float` / `:: Number` annotation is the way to get the bare BIF.
+
+## BT-4021: inline FFI `direct_call/3` without the per-call export check
+
+Question: every inline FFI send (`Erlang erlang monotonic_time`, `(Erlang gen_tcp) send: s with: d`, ...)
+lowers to `beamtalk_erlang_proxy:direct_call(M, F, Args)`, which read `M:module_info(exports)` and did a
+`lists:member/2` before every apply. The Catalina Phase 0 spike (BT-4019, spike 6) measured ~7-15 µs per
+inline FFI call from that check, more than a whole loopback round trip. What does the call cost once the
+export list is read only after an `error:undef` on the target?
+
+### Method
+
+`runtime/perf/beamtalk_perf_tests.erl`, `bench_ffi_direct_call/0` (`just perf`, lines `PERF: ffi/*`):
+batches of 100 calls timed with `timer:tc(..., nanosecond)`, 1000 samples after 20,000 warm-up calls, ns
+per call. The table comes from a standalone escript using the same method, run twice against the built
+runtime with the pre-BT-4021 `beamtalk_erlang_proxy` (compiled from `origin/main`) on the code path
+("before") and twice without it ("after"), so both columns share one VM build and machine state. macOS,
+Apple Silicon, OTP 28, medians.
+
+| call | before (ns) | after (ns) |
+|---|---|---|
+| `erlang:monotonic_time()` (plain call) | 32-34 | 34-35 |
+| `direct_call(erlang, monotonic_time, [])` | 14,472-14,752 | 60 |
+| `direct_call(lists, reverse, [[a]])` | 12,705-12,792 | 29-30 |
+| `direct_call(gen_tcp, module_info, [module])` | 12,100-12,135 | 37-43 |
+| `gen_tcp:module_info(exports)` (the removed per-call work) | 11,912-11,982 | 11,830-12,049 |
+
+`just perf` after the change: `ffi/plain_monotonic_time` 28 ns, `ffi/direct_call_monotonic_time` 62 ns,
+`ffi/direct_call_vs_plain` 2.2x.
+
+### Findings
+
+- The export check was the whole cost: `direct_call` was the price of one `module_info(exports)` plus
+  noise. Without it an inline FFI call costs ~30-60 ns, about 2x a plain remote call; what remains is the
+  `try` frame, the class-variable snapshot (ADR 0130) and ok/error → `Result` coercion (ADR 0076).
+- Nothing is cached, so hot reload and purge need no invalidation: each call applies against whatever
+  code is loaded. `direct_call_tracks_hot_reload_and_purge_test` reloads a module with a function added,
+  then removed, then purges it, and checks each call.
+- Error messages are built lazily from the same `module_info(exports)` read, after an `undef` whose top
+  stack frame is the FFI target, so unknown-function, wrong-arity and module-not-loaded errors are
+  unchanged. An `undef` raised inside the callee (another MFA on top) is now wrapped as the canonical
+  `runtime_error` ("Undefined function: m:f/n") instead of being misreported as the FFI target missing.
+- One intended behaviour change: with no export gate in front of the apply, a module exporting
+  `'$handle_undefined_function'/2` now handles unknown FFI calls the way it would for a plain Erlang
+  caller (the pre-check used to reject them).
