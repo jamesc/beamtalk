@@ -55,17 +55,27 @@ Actor subclass: Bt4017FoldBodyBlockArgActor
   // Literal arms that write a field: the inline-threaded producer, now also
   // lowered through `thread_ahead` in the fold body.
   collectFieldArm =>
-    r := #(1, 2, 3) collect: [:e | (self tick) ifTrue: [self.f := self.f + e] ifFalse: [0]]
+    r := #(1, 2, 3) collect: [:e |
+      (self tick) ifTrue: [self.f := self.f + e] ifFalse: [0]
+    ]
     #[r last, self.f, self.ticks]
 
   // A plain receiver with a field-writing arm, and a `match:` whose arm
   // writes a field: also lowered through `thread_ahead` now.
   collectPlainArm =>
-    r := #(1, 2, 3) collect: [:e | (e > 1) ifTrue: [self.f := self.f + e] ifFalse: [0]]
+    r := #(1, 2, 3) collect: [:e |
+      (e > 1) ifTrue: [self.f := self.f + e] ifFalse: [0]
+    ]
     #[r last, self.f]
 
   doMatch =>
-    #(1, 2, 3) do: [:e | e match: [2 -> self.f := self.f + 10; _ -> 0]]
+    #(1, 2, 3)
+      do: [:e |
+        e match: [
+          2 -> self.f := self.f + 10;
+          _ -> 0
+        ]
+      ]
     self.f
 
   selectFieldArm =>
@@ -81,19 +91,34 @@ Actor subclass: Bt4017FoldBodyBlockArgActor
     #[r size, self.f, self.ticks]
 
   injectLast: blk =>
-    r := #(1, 2, 3) inject: 0 into: [:a :e | (self tick) ifTrue: blk ifFalse: blk]
+    r := #(1, 2, 3) inject: 0 into: [:a :e |
+      (self tick) ifTrue: blk ifFalse: blk
+    ]
     #[r, self.ticks]
 
   injectBeforeTail: blk =>
-    r := #(1, 2, 3) inject: 0 into: [:a :e | (self tick) ifTrue: blk. a + e]
+    r := #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        (self tick) ifTrue: blk
+        a + e
+      ]
     #[r, self.ticks]
 
   selectRow: blk =>
-    r := #(1, 2, 3) select: [:e | (self tick) ifTrue: blk. e > 1]
+    r := #(1, 2, 3)
+      select: [:e |
+        (self tick) ifTrue: blk
+        e > 1
+      ]
     #[r size, self.ticks]
 
   rejectRow: blk =>
-    r := #(1, 2, 3) reject: [:e | (self tick) ifFalse: blk. e =:= 2]
+    r := #(1, 2, 3)
+      reject: [:e |
+        (self tick) ifFalse: blk
+        e =:= 2
+      ]
     #[r size, self.ticks]
 
   anySatisfyRow: blk =>
@@ -109,7 +134,12 @@ Actor subclass: Bt4017FoldBodyBlockArgActor
     #[r, self.ticks >= 2]
 
   detectIfNone: blk =>
-    r := #(1, 2, 3) detect: [:e | (self tick) ifTrue: blk. false] ifNone: [0]
+    r := #(1, 2, 3)
+      detect: [:e |
+        (self tick) ifTrue: blk
+        false
+      ]
+      ifNone: [0]
     #[r, self.ticks]
 
   countRow: blk =>
@@ -117,21 +147,41 @@ Actor subclass: Bt4017FoldBodyBlockArgActor
     #[r, self.ticks]
 
   takeWhileRow: blk =>
-    r := #(1, 2, 3) takeWhile: [:e | (self tick) ifTrue: blk. e < 3]
+    r := #(1, 2, 3)
+      takeWhile: [:e |
+        (self tick) ifTrue: blk
+        e < 3
+      ]
     #[r size, self.ticks >= 2]
 
   dropWhileRow: blk =>
-    r := #(1, 2, 3) dropWhile: [:e | (self tick) ifTrue: blk. e < 2]
+    r := #(1, 2, 3)
+      dropWhile: [:e |
+        (self tick) ifTrue: blk
+        e < 2
+      ]
     #[r size, self.ticks >= 2]
 
   partitionRow: blk =>
-    #(1, 2, 3) partition: [:e | (self tick) ifTrue: blk. e > 1]
+    #(1, 2, 3)
+      partition: [:e |
+        (self tick) ifTrue: blk
+        e > 1
+      ]
     self.ticks
 
   groupByRow: blk =>
-    #(1, 2, 3) groupBy: [:e | (self tick) ifTrue: blk. e > 1]
+    #(1, 2, 3)
+      groupBy: [:e |
+        (self tick) ifTrue: blk
+        e > 1
+      ]
     self.ticks
 
   sortRow: blk =>
-    r := #(3, 1, 2) sort: [:a :b | (self tick) ifTrue: blk. a < b]
+    r := #(3, 1, 2)
+      sort: [:a :b |
+        (self tick) ifTrue: blk
+        a < b
+      ]
     #[r first, self.ticks > 0]
