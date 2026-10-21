@@ -36,9 +36,10 @@
 //! one-off census, never for the compiler or any user-facing surface.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::ast::{MethodDefinition, Module};
+use crate::file_walker::FileWalker;
 use crate::semantic_analysis::block_facts::{class_var_accesses, escaping_blocks};
 use crate::source_analysis::{Severity, lex_with_eof, parse};
 
@@ -98,10 +99,13 @@ pub fn parse_corpus_source(path: &str, source: &str) -> Option<CorpusFile> {
 /// Recursively collects and parses every `.bt` / `.btscript` file under `roots`.
 #[must_use]
 pub fn scan_corpus(roots: &[PathBuf]) -> CorpusScan {
-    let mut paths = Vec::new();
-    for root in roots {
-        collect_sources(root, &mut paths);
-    }
+    let walker = FileWalker::new()
+        .extensions(&["bt", "btscript"])
+        .strict_errors(false);
+    let mut paths: Vec<PathBuf> = roots
+        .iter()
+        .flat_map(|root| walker.walk_pathbuf(root).unwrap_or_default())
+        .collect();
     paths.sort();
     let mut scan = CorpusScan::default();
     for path in paths {
@@ -116,29 +120,6 @@ pub fn scan_corpus(roots: &[PathBuf]) -> CorpusScan {
         }
     }
     scan
-}
-
-fn collect_sources(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_symlink() {
-            continue;
-        }
-        if file_type.is_dir() {
-            collect_sources(&path, out);
-        } else if path
-            .extension()
-            .is_some_and(|ext| ext == "bt" || ext == "btscript")
-        {
-            out.push(path);
-        }
-    }
 }
 
 /// Finds every escaping closure that reads a class variable across `files`.
@@ -262,6 +243,8 @@ fn line_of(source: &str, offset: u32) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     fn sites_for(source: &str) -> Vec<EscapeSite> {
