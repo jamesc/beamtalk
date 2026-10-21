@@ -380,16 +380,79 @@ send_every_does_not_drift_test() ->
 
 %% Ticks missed while the timer process is descheduled are skipped, not
 %% replayed as a burst.
+%%
+%% Synchronised on observable conditions, not guessed sleeps:
+%%   1. the first tick proves the process is inside send_loop with a deadline;
+%%   2. it is suspended until 10 of its deadlines have passed (asserted);
+%%   3. the overdue tick it sends on resume proves it is running again;
+%%   4. `status = waiting` proves it has finished sending and is blocked on
+%%      its next deadline, so the mailbox now holds everything it sent.
+%% The old burst-replay loop never reaches `waiting` until it has sent all
+%% ~10 missed ticks, so the final count is 9+ there and at most 1 here (a
+%% phase point may legitimately fall between resume and cancel).
 send_every_skips_missed_ticks_test() ->
-    T = beamtalk_timer:'send:to:every:'(tick, self(), 20),
+    Ms = 20,
+    T = beamtalk_timer:'send:to:every:'(tick, self(), Ms),
     Pid = maps:get(pid, T),
+    receive
+        tick -> ok
+    after 1000 -> ?assert(false, "no first tick")
+    end,
     true = erlang:suspend_process(Pid),
-    timer:sleep(200),
+    MissedUntil = erlang:monotonic_time(millisecond) + 10 * Ms,
+    wait_until(MissedUntil),
+    ?assert(erlang:monotonic_time(millisecond) >= MissedUntil),
+    %% Nothing can be sent while suspended; drop any tick sent before it.
     flush_ticks(),
     true = erlang:resume_process(Pid),
-    timer:sleep(5),
+    receive
+        tick -> ok
+    after 1000 -> ?assert(false, "no overdue tick after resume")
+    end,
+    wait_for_status(Pid, waiting, 5000),
     ?assert(beamtalk_timer:cancel(T)),
-    ?assert(count_ticks(0) =< 2).
+    ?assert(count_ticks(0) =< 1).
+
+%% The skip arithmetic itself, with no timing involved.
+next_deadline_test_() ->
+    [
+        %% sent on time or slightly late: the next phase point
+        ?_assertEqual(120, beamtalk_timer:next_deadline(100, 100, 20)),
+        ?_assertEqual(120, beamtalk_timer:next_deadline(100, 119, 20)),
+        %% exactly one interval late: skip one
+        ?_assertEqual(140, beamtalk_timer:next_deadline(100, 120, 20)),
+        %% ten deadlines missed: jump to the first one after Now, keeping phase
+        ?_assertEqual(320, beamtalk_timer:next_deadline(100, 305, 20)),
+        ?_assertEqual(0, (beamtalk_timer:next_deadline(100, 305, 20) - 100) rem 20),
+        %% Now before Next (clock read early): still one interval on
+        ?_assertEqual(120, beamtalk_timer:next_deadline(100, 90, 20))
+    ].
+
+%% Block until the monotonic clock reaches Deadline (ms). This is the test's
+%% precondition (deadlines must be missed), not a synchronisation guess.
+wait_until(Deadline) ->
+    case Deadline - erlang:monotonic_time(millisecond) of
+        Left when Left > 0 ->
+            receive
+            after Left -> wait_until(Deadline)
+            end;
+        _ ->
+            ok
+    end.
+
+%% Yield until Pid reports Status, failing after Timeout ms.
+wait_for_status(Pid, Status, Timeout) ->
+    wait_for_status(Pid, Status, erlang:monotonic_time(millisecond) + Timeout, poll).
+
+wait_for_status(Pid, Status, Deadline, poll) ->
+    case erlang:process_info(Pid, status) of
+        {status, Status} ->
+            ok;
+        _ ->
+            ?assert(erlang:monotonic_time(millisecond) < Deadline),
+            erlang:yield(),
+            wait_for_status(Pid, Status, Deadline, poll)
+    end.
 
 count_ticks(N) ->
     receive

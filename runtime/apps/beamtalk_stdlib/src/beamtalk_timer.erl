@@ -73,6 +73,10 @@ to the canonical `'after:do:'/2` implementation.
 %% FFI shims for (Erlang beamtalk_timer) dispatch
 -export(['after'/2, every/2, sleep/1, 'sendAfter'/3, 'sendEvery'/3]).
 
+-ifdef(TEST).
+-export([next_deadline/3]).
+-endif.
+
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Largest delay `erlang:send_after/3` and `receive ... after` accept.
@@ -357,12 +361,17 @@ send_loop(Ms, Dest, Msg, Mon, Next) ->
         catch
             error:badarg -> ok
         end),
-        %% Skip ticks missed while the process was descheduled instead of
-        %% replaying them as a burst; the phase stays fixed (no drift).
-        Now = erlang:monotonic_time(millisecond),
-        Skipped = max(0, (Now - Next) div Ms),
-        send_loop(Ms, Dest, Msg, Mon, Next + (Skipped + 1) * Ms)
+        send_loop(Ms, Dest, Msg, Mon, next_deadline(Next, erlang:monotonic_time(millisecond), Ms))
     end.
+
+%% The deadline after the tick due at `Next`, given the time `Now` that tick
+%% was sent: the first phase point (`Next + k * Ms`, k >= 1) after `Now`.
+%% Ticks missed while the process was descheduled are skipped instead of
+%% replayed as a burst, and the phase stays fixed (no drift).
+-spec next_deadline(integer(), integer(), pos_integer()) -> integer().
+next_deadline(Next, Now, Ms) ->
+    Skipped = max(0, (Now - Next) div Ms),
+    Next + (Skipped + 1) * Ms.
 
 -spec repeat_loop(integer(), function()) -> ok.
 repeat_loop(Ms, Block) ->
