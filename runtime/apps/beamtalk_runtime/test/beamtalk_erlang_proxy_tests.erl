@@ -18,6 +18,17 @@ error wrapping, and printString formatting.
 %% the charlist-retry exit/throw tests: raise `badarg` on a binary arg (to
 %% trigger the retry) then `exit`/`throw` on the charlist-coerced retry arg.
 -export([retry_then_exit/1, retry_then_throw/1, write_then_badarg/1, retry_class/0]).
+%% BT-4021 fixtures: a target that raises `undef` itself, and one whose charlist
+%% retry hits a nested `undef`.
+-export([explicit_undef_stub/1, retry_then_nested_undef/1, empty_stack_undef_stub/1]).
+
+explicit_undef_stub(_Arg) -> erlang:error(undef).
+
+%% Raises `undef` with an empty stacktrace from inside an exported target.
+empty_stack_undef_stub(_Arg) -> erlang:raise(error, undef, []).
+
+retry_then_nested_undef(Arg) when is_binary(Arg) -> erlang:error(badarg);
+retry_then_nested_undef(Arg) when is_list(Arg) -> completely_bogus_module_xyz:missing(1).
 
 retry_then_exit(Arg) when is_binary(Arg) -> erlang:error(badarg);
 retry_then_exit(Arg) when is_list(Arg) -> exit(retry_exit_reason).
@@ -1170,3 +1181,341 @@ native_call_charlist_coercion_retry_test() ->
     Result = beamtalk_erlang_proxy:native_call(os, cmd, [<<"echo hello">>], {'Os', 'cmd:'}),
     ?assert(is_binary(Result)),
     ?assertEqual(<<"hello">>, string:trim(Result, trailing)).
+
+%%% ===================================================================
+%%% BT-4021 — lazy export validation
+%%%
+%%% direct_call/3 and validate_and_apply/4 no longer read
+%%% module_info(exports) before every apply. The export list is read only after
+%%% an error:undef whose top frame is the FFI target. These pin that an undef
+%%% raised *inside* the callee is not misreported as the target missing, and
+%%% that hot reload / purge stays correct with no cache.
+%%% ===================================================================
+
+%% A callee argument that raises error:undef from a nested call to a missing module.
+undef_inside_callee_fun() ->
+    fun(X) -> completely_bogus_module_xyz:missing(X) end.
+
+assert_undef_inside_callee_is_runtime_error(Fun) ->
+    try
+        Fun(),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            %% Not does_not_understand / arity_mismatch on the FFI target: the
+            %% canonical undef classifier names the *nested* missing function.
+            ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
+            ?assertEqual(
+                <<"Undefined function: completely_bogus_module_xyz:missing/1">>,
+                Inner#beamtalk_error.message
+            ),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(undef, maps:get(erlang_error, Details)),
+            ?assertMatch(
+                [{completely_bogus_module_xyz, missing, [1], _} | _],
+                maps:get(erlang_stacktrace, Details)
+            )
+    end.
+
+direct_call_undef_inside_callee_is_not_missing_function_test() ->
+    %% lists:map/2 exists; the undef comes from the fun it calls.
+    assert_undef_inside_callee_is_runtime_error(fun() ->
+        beamtalk_erlang_proxy:direct_call(lists, map, [undef_inside_callee_fun(), [1]])
+    end).
+
+dispatch_undef_inside_callee_is_not_missing_function_test() ->
+    Proxy = beamtalk_erlang_proxy:new(lists),
+    assert_undef_inside_callee_is_runtime_error(fun() ->
+        beamtalk_erlang_proxy:dispatch('map:with:', [undef_inside_callee_fun(), [1]], Proxy)
+    end).
+
+native_call_undef_inside_callee_is_not_missing_function_test() ->
+    assert_undef_inside_callee_is_runtime_error(fun() ->
+        beamtalk_erlang_proxy:native_call(
+            lists, map, [undef_inside_callee_fun(), [1]], {'Stream', 'collect:'}
+        )
+    end).
+
+direct_call_wrong_arity_error_unchanged_test() ->
+    %% The lazily-built arity error keeps the pre-BT-4021 message and details.
+    try
+        beamtalk_erlang_proxy:direct_call(lists, reverse, [[1], [2], [3]]),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind),
+            ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
+            ?assertEqual(reverse, Inner#beamtalk_error.selector),
+            ?assertEqual(
+                <<"lists:reverse/1, 2 exists but was called with 3 arguments">>,
+                Inner#beamtalk_error.hint
+            ),
+            ?assertEqual(
+                #{
+                    module => lists,
+                    function => reverse,
+                    expected_arities => [1, 2],
+                    actual_arity => 3
+                },
+                Inner#beamtalk_error.details
+            )
+    end.
+
+direct_call_missing_function_error_unchanged_test() ->
+    try
+        beamtalk_erlang_proxy:direct_call(lists, nonexistent_xyz, [1]),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+            ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
+            ?assertEqual(nonexistent_xyz, Inner#beamtalk_error.selector),
+            ?assertEqual(
+                <<"This Erlang function does not exist. Check spelling and arity.">>,
+                Inner#beamtalk_error.hint
+            ),
+            ?assertEqual(
+                #{module => lists, function => nonexistent_xyz, arity => 1},
+                Inner#beamtalk_error.details
+            )
+    end.
+
+direct_call_unloaded_module_error_unchanged_test() ->
+    try
+        beamtalk_erlang_proxy:direct_call(completely_bogus_module_xyz, foo, []),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+            ?assertNotEqual(
+                nomatch,
+                binary:match(
+                    Inner#beamtalk_error.hint, <<"is not loaded. Is it on the code path?">>
+                )
+            )
+    end.
+
+direct_call_explicit_undef_in_target_is_not_arity_mismatch_test() ->
+    %% The target exists and runs, then raises `undef` itself. Its own frame is on
+    %% top (integer-arity form), but it must not read as "exists but was called
+    %% with 1 arguments".
+    try
+        beamtalk_erlang_proxy:direct_call(?MODULE, explicit_undef_stub, [x]),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
+            ?assertEqual(undef, maps:get(erlang_error, Inner#beamtalk_error.details))
+    end.
+
+%% An `undef` with an empty stacktrace carries no frame to compare, so it is
+%% treated as "maybe the target" and confirmed against the loaded exports. The
+%% target here is exported, so both inline FFI and `native:` must wrap it as a
+%% runtime_error, not report the target as missing.
+assert_empty_stack_undef_is_runtime_error(Fun) ->
+    try
+        Fun(),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
+            ?assertEqual(undef, maps:get(erlang_error, Inner#beamtalk_error.details)),
+            ?assertEqual([], maps:get(erlang_stacktrace, Inner#beamtalk_error.details))
+    end.
+
+direct_call_empty_stack_undef_from_exported_target_test() ->
+    assert_empty_stack_undef_is_runtime_error(fun() ->
+        beamtalk_erlang_proxy:direct_call(?MODULE, empty_stack_undef_stub, [x])
+    end).
+
+native_call_empty_stack_undef_from_exported_target_test() ->
+    assert_empty_stack_undef_is_runtime_error(fun() ->
+        beamtalk_erlang_proxy:native_call(
+            ?MODULE, empty_stack_undef_stub, [x], {'Stream', 'take:'}
+        )
+    end).
+
+%% Run `Fun` with `backtrace_depth` 0, restoring the old value afterwards.
+with_backtrace_depth_zero(Fun) ->
+    Old = erlang:system_flag(backtrace_depth, 0),
+    try
+        Fun()
+    after
+        erlang:system_flag(backtrace_depth, Old)
+    end.
+
+backtrace_depth_zero_keeps_ffi_errors_test() ->
+    %% With backtrace_depth 0 the VM still records the undef frame, so a missing
+    %% target is still reported as missing (inline and native:), and a nested
+    %% undef is still a runtime_error, not a missing FFI function.
+    with_backtrace_depth_zero(fun() ->
+        try
+            beamtalk_erlang_proxy:direct_call(lists, nonexistent_xyz, [1]),
+            ?assert(false)
+        catch
+            error:#{error := Inline} ->
+                ?assertEqual(does_not_understand, Inline#beamtalk_error.kind),
+                ?assertEqual(
+                    #{module => lists, function => nonexistent_xyz, arity => 1},
+                    Inline#beamtalk_error.details
+                )
+        end,
+        try
+            beamtalk_erlang_proxy:native_call(
+                lists, nonexistent_xyz, [1], {'Stream', 'take:'}
+            ),
+            ?assert(false)
+        catch
+            error:#{error := Native} ->
+                ?assertEqual(does_not_understand, Native#beamtalk_error.kind),
+                ?assertEqual('Stream', Native#beamtalk_error.class),
+                ?assertEqual('take:', Native#beamtalk_error.selector)
+        end,
+        assert_undef_inside_callee_is_runtime_error(fun() ->
+            beamtalk_erlang_proxy:native_call(
+                lists, map, [undef_inside_callee_fun(), [1]], {'Stream', 'collect:'}
+            )
+        end),
+        assert_empty_stack_undef_is_runtime_error(fun() ->
+            beamtalk_erlang_proxy:native_call(
+                ?MODULE, empty_stack_undef_stub, [x], {'Stream', 'take:'}
+            )
+        end)
+    end).
+
+direct_call_retry_nested_undef_is_runtime_error_test() ->
+    %% badarg → charlist retry → nested undef: the retry pass classifies it too.
+    assert_undef_inside_callee_is_runtime_error(fun() ->
+        beamtalk_erlang_proxy:direct_call(?MODULE, retry_then_nested_undef, [<<"x">>])
+    end).
+
+dispatch_call_args_errors_unchanged_test() ->
+    %% The `call:args:` path reports its own selector with the pre-BT-4021 text.
+    Proxy = beamtalk_erlang_proxy:new(lists),
+    try
+        beamtalk_erlang_proxy:dispatch('call:args:', [reverse, {}], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Arity} ->
+            ?assertEqual(arity_mismatch, Arity#beamtalk_error.kind),
+            ?assertEqual('call:args:', Arity#beamtalk_error.selector),
+            ?assertEqual(
+                <<"lists:reverse/1, 2 exists but was called with 0 arguments">>,
+                Arity#beamtalk_error.hint
+            )
+    end,
+    try
+        beamtalk_erlang_proxy:dispatch('call:args:', [nonexistent_xyz, {1}], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Missing} ->
+            ?assertEqual(does_not_understand, Missing#beamtalk_error.kind),
+            ?assertEqual('call:args:', Missing#beamtalk_error.selector),
+            ?assertEqual(
+                #{module => lists, function => nonexistent_xyz, arity => 1},
+                Missing#beamtalk_error.details
+            )
+    end.
+
+direct_call_handle_undefined_function_test() ->
+    %% Without the export pre-check, a module's '$handle_undefined_function'/2
+    %% sees unknown calls like it would from plain Erlang. When it re-raises via
+    %% error_handler, the old missing-function error comes back.
+    Mod = bt4021_handle_undef_probe,
+    {ok, Mod, Bin} = compile:forms(
+        [
+            {attribute, 1, module, Mod},
+            {attribute, 2, export, [{'$handle_undefined_function', 2}]},
+            {function, 3, '$handle_undefined_function', 2, [
+                {clause, 3, [{atom, 3, magic}, {var, 3, 'Args'}], [], [
+                    {tuple, 3, [{atom, 3, handled}, {var, 3, 'Args'}]}
+                ]},
+                {clause, 4, [{var, 4, 'F'}, {var, 4, 'Args'}], [], [
+                    {call, 4,
+                        {remote, 4, {atom, 4, error_handler}, {atom, 4, raise_undef_exception}}, [
+                            {atom, 4, Mod}, {var, 4, 'F'}, {var, 4, 'Args'}
+                        ]}
+                ]}
+            ]}
+        ],
+        []
+    ),
+    try
+        {module, Mod} = code:load_binary(Mod, "bt4021_handle_undef_probe.erl", Bin),
+        ?assertEqual({handled, [1]}, beamtalk_erlang_proxy:direct_call(Mod, magic, [1])),
+        try
+            beamtalk_erlang_proxy:direct_call(Mod, other, [1]),
+            ?assert(false)
+        catch
+            error:#{error := Inner} ->
+                ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+                ?assertEqual(
+                    #{module => Mod, function => other, arity => 1},
+                    Inner#beamtalk_error.details
+                )
+        end
+    after
+        _ = code:purge(Mod),
+        _ = code:delete(Mod),
+        _ = code:purge(Mod)
+    end.
+
+%% Load an in-memory module `Mod` exporting each `{Name, Return}` as a
+%% zero-arity function returning `Return`.
+load_hot_module(Mod, Funs) ->
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, export, [{Name, 0} || {Name, _} <- Funs]}
+        | [
+            {function, 3, Name, 0, [{clause, 3, [], [], [erl_parse:abstract(Ret)]}]}
+         || {Name, Ret} <- Funs
+        ]
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, []),
+    _ = code:purge(Mod),
+    {module, Mod} = code:load_binary(Mod, "bt4021_hot_reload_probe.erl", Bin),
+    ok.
+
+direct_call_tracks_hot_reload_and_purge_test() ->
+    Mod = bt4021_hot_reload_probe,
+    try
+        load_hot_module(Mod, [{answer, 1}]),
+        ?assertEqual(1, beamtalk_erlang_proxy:direct_call(Mod, answer, [])),
+        %% Reload: answer/0 changes value and gone/0 appears.
+        load_hot_module(Mod, [{answer, 2}, {gone, x}]),
+        ?assertEqual(2, beamtalk_erlang_proxy:direct_call(Mod, answer, [])),
+        ?assertEqual(x, beamtalk_erlang_proxy:direct_call(Mod, gone, [])),
+        %% Reload without gone/0: the next call reports it missing.
+        load_hot_module(Mod, [{answer, 3}]),
+        ?assertEqual(3, beamtalk_erlang_proxy:direct_call(Mod, answer, [])),
+        try
+            beamtalk_erlang_proxy:direct_call(Mod, gone, []),
+            ?assert(false)
+        catch
+            error:#{error := Missing} ->
+                ?assertEqual(does_not_understand, Missing#beamtalk_error.kind),
+                ?assertEqual(
+                    #{module => Mod, function => gone, arity => 0},
+                    Missing#beamtalk_error.details
+                )
+        end,
+        %% Delete + purge: the module (in-memory only) can no longer be loaded.
+        _ = code:purge(Mod),
+        true = code:delete(Mod),
+        _ = code:purge(Mod),
+        try
+            beamtalk_erlang_proxy:direct_call(Mod, answer, []),
+            ?assert(false)
+        catch
+            error:#{error := Purged} ->
+                ?assertEqual(does_not_understand, Purged#beamtalk_error.kind),
+                ?assertNotEqual(
+                    nomatch,
+                    binary:match(Purged#beamtalk_error.hint, <<"is not loaded">>)
+                )
+        end
+    after
+        _ = code:purge(Mod),
+        _ = code:delete(Mod),
+        _ = code:purge(Mod)
+    end.
