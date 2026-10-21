@@ -1447,15 +1447,18 @@ class completed while `Fetch` ran, then:
 
 How "no publish completed" is checked depends on the scope:
 
-- `{class, Class}`: `Class`'s generation is read before and after `Fetch`;
-  only that class's gen is consulted by the caller's filter.
+- `{class, Class}`: `Class`'s generation and the `xref_gen_epoch` counter
+  are read before and after `Fetch` (four O(1) reads); only that class's gen
+  is consulted by the caller's filter. The epoch catches a purge plus
+  re-register mid-fetch, which restarts the class at the same gen.
 - `all`: the `xref_gen_epoch` counter is read before and after `Fetch` plus
   one copy of `xref_class_gen` taken between `Fetch` and the second epoch
   read. Writers bump the epoch *before* touching `xref_class_gen`
   (`publish_gen/2`, `do_purge_class/1`), so a gen change visible in that copy
   was preceded by an epoch bump that either landed before the first epoch read
   (its rows were inserted before the fetch) or makes the two epoch reads
-  differ (retry).
+  differ (retry). A purge deletes the gen row before the data rows, so a copy
+  that still shows the class predates the purge's row deletes.
 
 If a publish raced us we retry, up to `?READ_STABLE_RETRIES` times. Retries
 converge almost immediately because the fetch is a single ETS read while each
@@ -1491,10 +1494,12 @@ read_stable_loop(Scope, Fetch, 0) ->
     Result = Fetch(),
     {Snapshot, Result};
 read_stable_loop({class, _} = Scope, Fetch, Retries) ->
-    Before = gen_snapshot(Scope),
+    %% The epoch is compared too: a purge followed by a re-register restarts
+    %% the class at gen 1, so equal gens alone could hide both (ABA).
+    Before = {gen_epoch(), gen_snapshot(Scope)},
     Result = Fetch(),
-    case gen_snapshot(Scope) of
-        Before -> {Before, Result};
+    case {gen_epoch(), gen_snapshot(Scope)} of
+        Before -> {element(2, Before), Result};
         _ -> read_stable_loop(Scope, Fetch, Retries - 1)
     end;
 read_stable_loop(all, Fetch, Retries) ->
@@ -1957,8 +1962,12 @@ non-existent literal-map `match_delete` form.
 """.
 -spec do_purge_class(class_name()) -> ok.
 do_purge_class(Class) ->
-    %% Epoch first: a whole-index `read_stable/2` that overlaps this purge retries.
+    %% Bump the epoch, then drop the generation row BEFORE any data row: a
+    %% `read_stable/2` snapshot that still shows `Class` was taken before every
+    %% row delete below, hence after its fetch, so it never pairs a live gen
+    %% with a half-purged fetch.
     ok = bump_gen_epoch(),
+    true = ets:delete(?CLASS_GEN_TABLE, Class),
     %% Methods are keyed by {Class, ClassSide, Selector} — direct key match.
     true = ets:match_delete(?METHODS_TABLE, {{Class, '_', '_'}, '_'}),
     %% Senders / references — match on the value map's owner field.
@@ -1970,7 +1979,6 @@ do_purge_class(Class) ->
         ?REFERENCES_TABLE,
         [{{'_', #{owner => '$1'}}, [{'=:=', '$1', {const, Class}}], [true]}]
     ),
-    true = ets:delete(?CLASS_GEN_TABLE, Class),
     %% State-var rows are keyed by {Class, Name} — direct match.
     true = ets:match_delete(?STATE_VARS_TABLE, {{Class, '_'}, '_'}),
     ok.

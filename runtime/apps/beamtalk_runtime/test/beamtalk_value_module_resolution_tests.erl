@@ -271,6 +271,25 @@ runtime_method_changes_are_seen_by_next_send() ->
     after
         stop_class(Pid)
     end,
+    %% Re-parenting (merge_identity/5, the hot-reload write) is seen too.
+    Pid2 = start_class(?MODULE_LESS, undefined, none),
+    try
+        ?assertEqual(
+            not_found, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, 'hasField:')
+        ),
+        ok = beamtalk_class_metadata:merge_identity(
+            ?MODULE_LESS, ?MODULE_LESS, [], 'Object', false
+        ),
+        ?assertMatch(
+            {ok, _}, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, 'hasField:')
+        ),
+        ok = beamtalk_class_metadata:merge_identity(?MODULE_LESS, ?MODULE_LESS, [], none, false),
+        ?assertEqual(
+            not_found, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, 'hasField:')
+        )
+    after
+        stop_class(Pid2)
+    end,
     %% Removing the class drops its cached resolution too.
     ?assertEqual(
         unpublished, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, answer)

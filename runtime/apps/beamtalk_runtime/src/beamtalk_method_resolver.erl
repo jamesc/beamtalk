@@ -149,7 +149,9 @@ published_method_info(ClassName, Selector) ->
                 end
         end
     end,
-    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
+    %% `+ 1`: the walk starts at `ClassName` itself, which
+    %% `resolve_with_hierarchy/2` does not count against the budget.
+    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH + 1) of
         {found, Result} -> Result;
         not_found -> not_found;
         {max_depth_exceeded, _} -> unpublished

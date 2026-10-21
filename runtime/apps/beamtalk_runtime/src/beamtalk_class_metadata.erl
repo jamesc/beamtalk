@@ -571,8 +571,12 @@ record for a still-present selector, never a gap.
 put_method_records(Name, Side, Records) ->
     write_method_records(Name, Side, Records),
     %% BT-4071: `beamtalk_method_resolver:instance_method_info/2` memoises
-    %% method resolution from these records; invalidate after the write lands.
-    beamtalk_class_derived_cache:invalidate().
+    %% instance-side resolution from these records; invalidate after the write
+    %% lands. Class-side records feed no cached fact, so they don't flush it.
+    case Side of
+        instance -> beamtalk_class_derived_cache:invalidate();
+        class -> ok
+    end.
 
 -spec write_method_records(class_name(), side(), #{selector() => method_record()}) -> ok.
 write_method_records(Name, Side, Records) ->

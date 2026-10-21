@@ -108,7 +108,9 @@ The protocol a `CompiledMethod` was flattened from (ADR 0127 §12), or nil for a
 method its class wrote itself. Read from `beamtalk_xref` on demand, keyed by
 the defining class and side `beamtalk_object_class:compiled_method_map/7`
 records: resolving a method for dispatch must not pay for an xref lookup
-(BT-4071), so only this reflective read does.
+(BT-4071), so only this reflective read does. The answer reflects the index
+at read time: a `CompiledMethod` held across a reload or removal of its class
+reports the current provenance (nil once the class is gone).
 """.
 -spec origin(map()) -> atom() | nil.
 origin(#{'__defining_class__' := Class, '__side__' := Side, '__selector__' := Sel}) when
