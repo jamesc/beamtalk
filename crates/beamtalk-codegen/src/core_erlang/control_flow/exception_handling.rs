@@ -1898,10 +1898,10 @@ impl CoreErlangGenerator {
                     // If this is a nested control flow construct returning {Result, State},
                     // destructure it. Otherwise just capture the result.
                     // A producer of this arm (a `BranchArm` frame, or a REPL arm,
-                    // BT-3823) goes to `thread_ahead` below instead.
+                    // BT-3823; a conditional whose receiver advances `State`, BT-4000) goes to
+                    // `thread_ahead` below instead.
                     if self.control_flow_has_mutations(expr)
-                        && !((arm.is_some() || self.is_repl_mode())
-                            && self.local_producer_locals(expr).is_some())
+                        && !self.arm_statement_is_producer(expr, arm.is_some())
                     {
                         // E5 — nested mutation construct returns {Result,
                         // State} tuple; C10-last's shape with ExResult

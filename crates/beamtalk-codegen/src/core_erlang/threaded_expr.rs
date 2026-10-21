@@ -136,6 +136,12 @@ pub(super) mod fault {
         /// before BT-4002, so the `Self` a `whileTrue:`/`whileFalse:` condition
         /// writes is not carried (`ConditionFamilyNotCarried`).
         BodyOnlyLoopFamilies,
+        /// BT-4000: an actor conditional's state-advancing receiver is not
+        /// sequenced ahead, as before BT-4000: its prelude is rendered into
+        /// the conditional's own tuple document, out of the frame's sight, so
+        /// in a loop body the conditional's `State` extraction reads a version
+        /// the frame never binds (`UnboundVersion`).
+        ReceiverPreludeInTuple,
     }
 
     thread_local! {

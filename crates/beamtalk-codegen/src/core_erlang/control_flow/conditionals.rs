@@ -478,6 +478,25 @@ impl CoreErlangGenerator {
         self.threaded_expression(receiver, frame)
     }
 
+    /// Whether an arm statement `expr` with mutations is lowered through
+    /// [`Self::threaded_expression`], its prelude spliced into the arm
+    /// (`arm_is_frame`: the arm is a `BranchArm` frame of a producer), rather
+    /// than as a raw `{Value, State}` tuple the arm unpacks: a local-threading
+    /// producer of a `BranchArm` frame or a REPL arm (ADR 0131 Phase 3,
+    /// BT-3823), and (BT-4000) a conditional whose receiver is sequenced ahead
+    /// ([`Self::conditional_receiver_is_sequenced`]) in any arm, so the
+    /// receiver's `Bind`s are the arm's own statements. The one predicate for
+    /// the conditional arm and the `on:do:`/`ensure:` arm.
+    pub(in crate::core_erlang::control_flow) fn arm_statement_is_producer(
+        &self,
+        expr: &Expression,
+        arm_is_frame: bool,
+    ) -> bool {
+        ((arm_is_frame || self.is_repl_mode()) && self.local_producer_locals(expr).is_some())
+            || Self::conditional_send_receiver(expr.unwrap_parens())
+                .is_some_and(|r| self.conditional_receiver_is_sequenced(r))
+    }
+
     /// Whether a conditional in `frame` is lowered as a local-threading
     /// producer: it is one (`producer`, [`Self::conditional_producer_locals`]),
     /// `frame` is the method root or a registered frame (a `BranchArm`, or a loop
@@ -2696,9 +2715,16 @@ impl CoreErlangGenerator {
                 // BT-3823: so is one that is a statement of a REPL arm
                 // (`generate_repl_arm_inline`): its prelude adopts the bindings
                 // map the arm's `StateAcc` is.
+                // BT-4000: and so is a conditional whose receiver advances
+                // `State`, in every arm, as at the method root and in a loop
+                // body: through `threaded_expression` its receiver's prelude
+                // (`conditional_receiver_operand`) and its `State` extraction are
+                // this arm's own statements. Compiled as the raw tuple of C10
+                // below, the receiver's `Bind`s were rendered inside the tuple
+                // document, and the arm's extraction read a version no `Bind` of
+                // the arm produced (`UnboundVersion`).
                 BodyExprKind::ControlFlowWithMutations
-                    if (arm.is_some() || self.is_repl_mode())
-                        && self.local_producer_locals(expr).is_some() =>
+                    if self.arm_statement_is_producer(expr, arm.is_some()) =>
                 {
                     let tv = self.threaded_expression(expr, frame)?;
                     stmts.extend(tv.prelude);

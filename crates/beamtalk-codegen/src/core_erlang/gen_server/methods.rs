@@ -3324,7 +3324,7 @@ impl CoreErlangGenerator {
             //
             // BT-3910: a receiver holding a value-position local assignment is
             // sequenced ahead by `threaded_expression`
-            // (`conditional_receiver_assignment_operand`), so its `LocalRebind`
+            // (`conditional_receiver_operand`), so its `LocalRebind`
             // reaches the statement sequence instead of a closed tuple document.
             if self.conditional_receiver_needs_threading(receiver)
                 && self.contained_local_assignment_targets(receiver).is_empty()

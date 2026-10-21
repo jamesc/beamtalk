@@ -362,10 +362,11 @@ impl CoreErlangGenerator {
             return self.lower_local_assignment_producer(inner, frame);
         }
 
-        // BT-3910: a conditional whose receiver holds a value-position local
-        // assignment (`((t := t + 1) > 0) and: [...]`) sequences the receiver
-        // ahead, so the assignment's `LocalRebind` lands in the caller's frame.
-        if let Some(tv) = self.conditional_receiver_assignment_operand(expr, frame)? {
+        // BT-3910 / BT-4000: a conditional whose receiver's prelude rebinds a
+        // threaded family (a value-position local assignment, an actor
+        // self-send) sequences the receiver ahead, so that prelude lands in the
+        // caller's frame.
+        if let Some(tv) = self.conditional_receiver_operand(expr, frame)? {
             return Ok(tv);
         }
 
@@ -552,20 +553,30 @@ impl CoreErlangGenerator {
         Ok(ThreadedValue { prelude, value })
     }
 
-    /// BT-3910 (ADR 0131 §1): a conditional (producer or not) whose receiver
-    /// holds a value-position local assignment (`((t := t + 1) > 0) and: [...]`)
-    /// sequences the receiver ahead, so the assignment's `LocalRebind` lands in
-    /// the caller's frame instead of a closed document, and then lowers the
-    /// conditional over the sequenced receiver (already registered, so every
-    /// lowering reads its value back).
-    fn conditional_receiver_assignment_operand(
+    /// The receiver-prelude splice: a conditional (producer or not) whose
+    /// receiver's prelude rebinds a threaded family
+    /// ([`Self::conditional_receiver_is_sequenced`]) sequences the receiver
+    /// ahead, so that prelude lands in the caller's frame instead of a closed
+    /// document, and then lowers the conditional over the sequenced receiver
+    /// (already registered, so every lowering reads its value back).
+    ///
+    /// - BT-3910 (ADR 0131 §1): a receiver holding a value-position local
+    ///   assignment (`((t := t + 1) > 0) and: [...]`): its `LocalRebind`.
+    /// - BT-4000: a receiver whose evaluation advances the actor `State`
+    ///   (`(self done) ifTrue: [...]`, `((self isAlive: n) and: [...]) ifTrue:`):
+    ///   its dispatch `Bind`s. Rendered into the conditional's own tuple
+    ///   document they were invisible to the frame, so in a `Letrec` loop body
+    ///   the conditional's `State` extraction read a version no `Bind` of the
+    ///   loop frame produced (`UnboundVersion`), and the loop's recursive call
+    ///   carried the pre-statement `State`, dropping the self-send's change.
+    fn conditional_receiver_operand(
         &mut self,
         expr: &Expression,
         frame: FrameId,
     ) -> Result<Option<ThreadedValue>> {
         let inner = expr.unwrap_parens();
         let Some(receiver) = Self::conditional_send_receiver(inner)
-            .filter(|r| !self.contained_local_assignment_targets(r).is_empty())
+            .filter(|r| self.conditional_receiver_is_sequenced(r))
         else {
             return Ok(None);
         };
@@ -916,6 +927,41 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
+    /// Whether a conditional's `receiver` is sequenced ahead of the
+    /// conditional by [`Self::conditional_receiver_operand`], its prelude
+    /// spliced into the caller's frame: it holds a value-position local
+    /// assignment (BT-3910), or, in an actor instance method, its evaluation
+    /// advances the `State` family (an actor self-send anywhere in its
+    /// sequenceable sub-tree, BT-4000).
+    ///
+    /// **Invariant** (every scope kind): a statement whose evaluation produces
+    /// a `State` version binds it in the frame the statement runs in — the
+    /// method root, a conditional arm, a `Letrec` loop body, a fold body, an
+    /// `on:do:`/`ensure:` arm — before anything reads it. A conditional's
+    /// receiver is evaluated first and unconditionally, so its prelude belongs
+    /// to that frame, not inside the conditional's own tuple document. A
+    /// value-type receiver that writes a field has its own splice
+    /// (`vt_conditional_operand`); a class-method receiver produces no family
+    /// version (ADR 0130).
+    pub(in crate::core_erlang) fn conditional_receiver_is_sequenced(
+        &self,
+        receiver: &Expression,
+    ) -> bool {
+        if !self.contained_local_assignment_targets(receiver).is_empty() {
+            return true;
+        }
+        // Test-only fault injection: the pre-BT-4000 lowering, so the
+        // verifier's `UnboundVersion` is shown to fire on a real compile
+        // (`tests/loop_body_conditional_receiver_corpus.rs`).
+        #[cfg(test)]
+        if super::threaded_expr::fault::active()
+            == Some(super::threaded_expr::fault::LocalRebindFault::ReceiverPreludeInTuple)
+        {
+            return false;
+        }
+        self.in_actor_instance_context() && self.subexpr_needs_prelude(receiver)
+    }
+
     /// The receiver of a conditional send (`ifTrue:`, `and:`, ...), the one
     /// operand the sequencing rule leaves to the conditional's own lowering.
     pub(super) fn conditional_send_receiver(expr: &Expression) -> Option<&Expression> {
@@ -1041,10 +1087,10 @@ impl CoreErlangGenerator {
         if self.is_local_assignment_producer(inner) {
             return true;
         }
-        // BT-3910: and a conditional whose receiver holds one
-        // (`conditional_receiver_assignment_operand`).
+        // BT-3910 / BT-4000: and a conditional whose receiver's prelude is
+        // spliced into the caller's frame (`conditional_receiver_operand`).
         if Self::conditional_send_receiver(inner)
-            .is_some_and(|r| !self.contained_local_assignment_targets(r).is_empty())
+            .is_some_and(|r| self.conditional_receiver_is_sequenced(r))
         {
             return true;
         }
