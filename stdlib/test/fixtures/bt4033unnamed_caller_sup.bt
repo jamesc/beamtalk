@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4033: an anonymous child whose first continuation (requested in
+// `initialize`) calls this supervisor — the documented place for a first
+// parent call. The supervisor is no longer waiting on the child by then.
+
+Supervisor subclass: Bt4033UnnamedCallerSup
+
+  childSpecs =>
+    #((Bt3992ParentCaller supervisionSpec withArgs: #{#parent => self}))

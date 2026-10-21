@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4033: a DynamicSupervisor whose pool children fail their `initialize`.
+
+DynamicSupervisor(Bt4033Opener) subclass: Bt4033OpenerPool
+
+  childClass => Bt4033Opener
