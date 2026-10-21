@@ -671,6 +671,10 @@ fn scope_method(ctx: &ScopeContext, i: usize, body: &str) -> String {
 #[test]
 fn fold_body_statements_in_every_scope_compile_without_a_raw_tuple_unpack() {
     let rows = scope_rows();
+    let field_write_rows = rows
+        .iter()
+        .filter(|(_, body)| body.contains("self.f :="))
+        .count();
     let mut failures = Vec::new();
     let mut counts = Vec::new();
     for ctx in SCOPE_CONTEXTS {
@@ -681,11 +685,14 @@ fn fold_body_statements_in_every_scope_compile_without_a_raw_tuple_unpack() {
             let src = format!("{}{}{m}", ctx.header, ctx.helpers);
             assert_parses(&src);
             match scope_codegen(&src) {
-                // Only a field write nested in the fold body is refused by a
-                // language rule (a value type's slots are immutable; a
-                // `TestCase` field write in a nested block has no channel
-                // back). Every other row must compile.
-                Ok(ScopeCodegen::Rejected) if body.contains("self.f :=") => rejected += 1,
+                // Only a field write nested in the fold body of an instance
+                // method is refused by a language rule (a value type's slots
+                // are immutable; a `TestCase` field write in a nested block
+                // has no channel back). Class-side, `f` is a class variable
+                // written in place, so every row must compile.
+                Ok(ScopeCodegen::Rejected) if !ctx.class_side && body.contains("self.f :=") => {
+                    rejected += 1;
+                }
                 Ok(ScopeCodegen::Rejected) => {
                     failures.push(format!("{} / {name}: rejected\n{src}", ctx.name));
                 }
@@ -704,13 +711,20 @@ fn fold_body_statements_in_every_scope_compile_without_a_raw_tuple_unpack() {
             ctx.name,
             compiled.len()
         ));
-        assert!(
-            compiled.len() >= rows.len() / 4,
-            "{}: only {} of {} rows compile; the corpus has thinned out",
-            ctx.name,
-            compiled.len(),
-            rows.len()
-        );
+        // Exact accounting: every row either compiles or is one of the
+        // rejected field-write rows, and an instance context rejects all of
+        // them (none slips through to compile), a class-side context none.
+        let expected_rejected = if ctx.class_side { 0 } else { field_write_rows };
+        if compiled.len() + rejected != rows.len() || rejected != expected_rejected {
+            failures.push(format!(
+                "{}: {} compile + {rejected} rejected of {} rows; expected {} compile + \
+                 {expected_rejected} rejected",
+                ctx.name,
+                compiled.len(),
+                rows.len(),
+                rows.len() - expected_rejected
+            ));
+        }
         let methods: String = compiled.iter().map(|(_, m, _)| m.as_str()).collect();
         if !passes(&format!("{}{}{methods}", ctx.header, ctx.helpers)) {
             failures.extend(
