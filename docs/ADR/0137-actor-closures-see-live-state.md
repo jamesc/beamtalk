@@ -101,7 +101,7 @@ let State4 = call 'erlang':'get'('$bt_actor_state') in
 
 A call needs the bracket when it may run user code in this process: a
 `value`-family call on a block that is not inlined, a send with a block
-argument, a self-send that may pass a block (below), an aliased self-send,
+argument, an aliased self-send,
 a send to an in-process object (a value type, a collection, any non-actor
 object), an Erlang FFI call, and any primitive or runtime helper that
 receives a block or calls a user method. The last group includes the
@@ -125,14 +125,30 @@ the compiler can rarely prove the receiver is not `self` (an aliased `self` is
 an actor reference too), so actor sends are bracketed in practice. The pair
 costs about 10 ns against a 700 ns round trip.
 
-A self-send whose callee is statically known and that passes no argument that
-could be a block is not bracketed. It keeps today's explicit `State`
-threading. This covers unary, binary, keyword, `super` and cascade sends to
-`self`, to sealed and open classes alike. An argument counts as possibly a
-block unless it is a literal constant that is not a block, so `self add: 5`
-threads and `self add: n` is bracketed. Phase 0 measured the bracket on a
-plain self-send at 1.35x to 1.60x (see Cost), which is the reason for the
-exception.
+A self-send whose target is a compiled Beamtalk method of this actor is not
+bracketed. It keeps today's explicit `State` threading. This covers unary,
+binary, keyword, `super` and cascade sends to `self`, to sealed and open
+classes alike, with any arguments, blocks included. A block passed into such a
+send can only run when the callee evaluates it, and the callee, compiled under
+this ADR, brackets that evaluation with its own current `State`. So the shape
+of the arguments does not matter; what matters is whether the callee follows
+the protocol. Phase 0 measured the bracket on a plain self-send at 1.35x to
+1.60x (see Cost), which is the reason for the exception.
+
+A native method or an ADR 0066 instance-side extension fun is Erlang code that
+does not follow the protocol and may run a block, so a self-send that lands
+on one is bracketed. The bracket sits where it lands, not at the call site.
+A compiled class's `dispatch/4` routes a selector to its compiled clause, to
+a native method, or to the runtime's extension lookup, and it invokes every
+native method and every extension fun through one runtime helper,
+`beamtalk_actor_state:call_foreign/3`. The helper stores `State` to the cell,
+invokes the fun with it, and answers the fun's `{reply, R, NewState}`. A
+native method or extension fun that runs a block reads the block's writes
+back from the cell before it answers; that is the one rule foreign code
+follows. The call site needs no knowledge of the target: the self-send emitter
+always threads, and an extension installed at run time on a selector the
+compiler saw as compiled still passes through the helper. The invariant for
+foreign targets lives in that one function.
 
 Methods keep today's calling convention. A compiled method is
 `dispatch(Selector, Args, Self, State)` and answers `{reply, R, NewState}`.
@@ -156,23 +172,24 @@ dispatch_call(Selector, Args, From, State) ->
 ```
 
 The invariant is: at every bracketed call the cell equals the current
-threaded `State`, and the caller reloads after it. For a bracketed self-send
-the reload is the `State` the callee answers, which includes every write the
-callee made; for every other bracketed call it is a load from the cell. A
-threaded self-send needs no bracket because the callee receives the current
-`State` as its argument and answers its last version, as today.
+threaded `State`, and the caller reloads after it. A threaded self-send needs
+no bracket because the callee receives the current `State` as its argument
+and answers its last version, as today. When the callee is foreign,
+`call_foreign/3` is the bracket.
 
-This holds when the callee itself runs a stored block. In
+This holds when the callee itself runs a block, stored or passed. In
 `fire => self.cb value`, a threaded `self fire` passes the caller's current
 `State` to `fire`. The `self.cb value` inside `fire` may run user code, so
 `fire` brackets it with its own current `State`, which is the caller's plus
 whatever `fire` wrote before the call. The block sees that state in the cell,
 its writes are loaded into `fire`'s next version, and `fire` answers that
-version to the caller. Every block runs inside some bracket, and the method
-that emits the bracket is the one holding the current version.
+version to the caller. `self twice: [self add: 5]` is the same case with the
+block passed as an argument: `twice:` brackets each `aBlock value`. Every
+block runs inside some bracket, and the method or helper that emits the
+bracket is the one holding the current version.
 
-Users see no difference between the two lowerings. A self-send means the same
-thing whether it threads or is bracketed.
+Users see no difference. A self-send means the same thing whether its target
+is compiled or foreign.
 
 Between callbacks the `gen_server` state is the only copy. The cell does not
 exist outside a callback.
@@ -186,10 +203,11 @@ as `OnDoCatch` does for its snapshot and restore. A new `VerifyError`,
 `SyncedCall`, so a missed sync point is a build failure and never a stale
 read. `just verify-threaded-ir` runs it over the stdlib and bootstrap corpus.
 
-The default is "may run user code". A threaded self-send under §1's rule is
-not a `SyncedCall`, and the verifier accepts it only when its receiver is
-`self` and every argument is a literal non-block constant. Any other call is
-exempt only if the emitter built it from one of two existing sources. Inlined constructs come from
+The default is "may run user code". A direct self-send (receiver `self` or
+`super`) is not a `SyncedCall`; the verifier accepts it whatever its
+arguments, because `dispatch/4` brackets a foreign target through
+`call_foreign/3` (§1). Any other call is exempt only if the emitter built it
+from one of two existing sources. Inlined constructs come from
 `beamtalk-core/src/state_threading_selectors.rs` and `WellKnownSelector`
 (`beamtalk-core/src/ast/well_known.rs`) and never produce a call node. Exempt
 intrinsics come from the one table codegen already uses to emit them: the
@@ -343,8 +361,8 @@ checks both.
 
 ### 5. Self-sends and self-casts
 
-A direct self-send with a statically known callee threads `State` as today,
-or is bracketed when it may pass a block (§1). An aliased self-send
+A direct self-send threads `State` as today, and a foreign target is
+bracketed where it lands (§1). An aliased self-send
 (`other := self. other x`) is bracketed: `self_dispatch/2` runs the method on
 the cell, which is current, and stores its answer back, so the aliased form
 starts from the live state and its writes persist. A method-level
@@ -432,8 +450,8 @@ medians over 101 interleaved batches on a quiet 18-core machine (load average
 
 An intrinsic-only field loop compiles to the same code as today, so its cost
 is unchanged by construction. A send that may run user code pays one store
-and one load, about 10 ns. A plain self-send compiles to the same code as
-today. A field write inside an `ensure:` protected body adds one `put`, which
+and one load, about 10 ns. A self-send compiles to the same code as today
+whatever its arguments. A field write inside an `ensure:` protected body adds one `put`, which
 was not measured separately. End-to-end `gen_server:call` runs vary by about
 1% to 2% between rounds on identical builds, which is about 50 ns over ten
 sends, so they cannot resolve a 10 ns difference. The in-VM figures are the
@@ -445,9 +463,10 @@ The gates, as Phase 0 left them:
    only: at most 1.05x today. Passed.
 2. A method making ten in-process sends that each update a field: at most
    10 ns more per send than today. At the limit.
-3. Open and sealed actor self-sends, top level and in a `do:` arm: the
-   generated code is identical to today's. Bracketing them failed this gate,
-   which is why §1 threads them.
+3. Open and sealed actor self-sends to compiled methods, top level and in a
+   `do:` arm, with and without block arguments: the generated call site is
+   identical to today's. Bracketing them failed this gate, which is why §1
+   threads them.
 4. Zero `UnbracketedUserCodeSend` over the full corpus. This is the exit
    criterion of Phase 2a. The prototype left 187 of 511 may-run-user-code
    sends in BUnit actor methods unbracketed (loop bodies, branch arms,
@@ -582,8 +601,10 @@ per self-cast to keep a behaviour that loses writes today.
 
 ### Negative
 - Every send that may run user code pays a store and a load, about 10 ns.
-- A self-send lowers two ways, threaded or bracketed, depending on whether an
-  argument could be a block.
+- The bracket protocol has two homes: `SyncedCall` in compiled code and
+  `call_foreign/3` for native methods and extension funs. Foreign code that
+  runs a block must read the block's writes back from the cell before it
+  answers.
 - Generated actor code changes, so the module ABI marker is bumped. Older
   modules are refused with `abi_mismatch`, and crossing the release needs a
   node restart (ADR 0125).
@@ -602,7 +623,7 @@ per self-cast to keep a behaviour that loses writes today.
 - Locals, value types and class variables are unchanged.
 - Methods, native Erlang actor methods and ADR 0066 extension funs keep
   `{reply, R, NewState}`.
-- Plain self-sends compile to the same code as today.
+- Self-sends compile to the same call-site code as today.
 
 ## Implementation
 
@@ -612,8 +633,10 @@ for bracketed self-sends, which led to the self-send exception in §1. The
 results are in Cost.
 
 **Phase 1 (M).** `beamtalk_actor_state` (`install`, `take`, `uninstall`,
-`get`, `put`, `has`, `clear`, `capture`, `protect`), used by every callback
-wrapper in `beamtalk_actor.erl` and by `self_dispatch/2`. The
+`get`, `put`, `has`, `clear`, `capture`, `protect`, `call_foreign`), used by
+every callback wrapper in `beamtalk_actor.erl`, by `self_dispatch/2` and by
+the extension lookup. Native method clauses in `dispatch/4` call through
+`call_foreign/3`. The
 `actor_state_unreachable` error kind.
 
 **Phase 2a (L).** The `SyncedCall` node in `threaded_ir/` and bracket
@@ -671,10 +694,12 @@ Decided by the maintainer on 2026-10-20, when the ADR was accepted.
    actors. The compiler does not try to prove a receiver is not `self`. A
    bracket costs about 10 ns against a 700 ns call; revisit only if profiling
    shows it matters.
-4. Decided on 2026-10-21 after Phase 0: a self-send with a statically known
-   callee and no argument that could be a block keeps explicit `State`
-   threading, and methods keep `{reply, R, State}` (§1). Bracketing every
-   self-send cost 1.35x to 1.60x on the self-send itself.
+4. Decided on 2026-10-21 after Phase 0: a self-send whose target is a
+   compiled Beamtalk method keeps explicit `State` threading whatever its
+   arguments, and methods keep `{reply, R, State}` (§1). A self-send that
+   lands on a native method or an extension fun is bracketed by
+   `call_foreign/3`. Bracketing every self-send cost 1.35x to 1.60x on the
+   self-send itself.
 
 ## References
 
