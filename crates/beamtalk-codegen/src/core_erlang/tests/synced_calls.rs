@@ -170,3 +170,11 @@ fn a_threaded_fold_whose_body_advances_nothing_still_hands_back_the_state_map() 
         "{on}"
     );
 }
+
+#[test]
+fn a_state_default_with_a_collection_op_has_no_state_to_thread() {
+    // Built while the state map itself is made: no `State` to store or thread.
+    let src = "Actor subclass: Probe\n  state: items = (#(1, 2, 3) collect: [:x | x printString])\n\n  run => self.items\n";
+    assert_eq!(compile(src, true), compile(src, false));
+    super::assert_compiles_through_erlc("test", &compile(src, true));
+}

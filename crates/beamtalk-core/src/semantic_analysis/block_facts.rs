@@ -106,6 +106,25 @@ impl BlockMutationAnalysis {
         root: Option<RootMethodKind>,
         actor_state_eligible: bool,
     ) -> bool {
+        self.needs_mutation_threading_with(
+            root,
+            actor_state_eligible,
+            self.has_synced_user_code_sends(),
+        )
+    }
+
+    /// [`Self::needs_mutation_threading`] with the ADR 0137 bracket decided by
+    /// the caller (`synced`: this block holds a call bracketed with a
+    /// `State` store/reload where it is compiled). Codegen passes its own
+    /// context-aware answer (`synced_calls_active`); the context-free default
+    /// above reads only the global switch.
+    #[must_use]
+    pub fn needs_mutation_threading_with(
+        &self,
+        root: Option<RootMethodKind>,
+        actor_state_eligible: bool,
+        synced: bool,
+    ) -> bool {
         let captured_local_mutation = || {
             self.captured_reads
                 .iter()
@@ -115,8 +134,7 @@ impl BlockMutationAnalysis {
             None => self.has_mutations(),
             Some(RootMethodKind::Class) => captured_local_mutation(),
             Some(RootMethodKind::Actor) => {
-                (actor_state_eligible
-                    && (self.has_state_effects() || self.has_synced_user_code_sends()))
+                (actor_state_eligible && (self.has_state_effects() || synced))
                     || !self.local_writes.is_empty()
             }
             Some(RootMethodKind::ValueType) => {

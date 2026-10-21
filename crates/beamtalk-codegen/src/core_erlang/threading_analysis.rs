@@ -92,7 +92,8 @@ impl CoreErlangGenerator {
         let actor_state_eligible = !ThreadedFamilies::from_matches(&self.eligible_families())
             .as_slice()
             .is_empty();
-        analysis.needs_mutation_threading(root, actor_state_eligible)
+        let synced = self.synced_calls_active() && analysis.has_user_code_sends;
+        analysis.needs_mutation_threading_with(root, actor_state_eligible, synced)
     }
 
     /// Returns `true` if the block body contains list op message sends

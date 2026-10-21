@@ -13,7 +13,7 @@
 //!
 //! The switch lives here, below both the analysis and the code generator,
 //! because both read it. `BEAMTALK_SYNCED_CALLS` selects the mode, read once
-//! per process: unset or `0` is [`SyncedCallsMode::Off`]; `count` builds the
+//! per process: unset, empty, `0`, `off`, `false` or `no` is [`SyncedCallsMode::Off`]; `count` builds the
 //! brackets and records the calls left outside one without failing (the
 //! count-by-region tool); anything else is [`SyncedCallsMode::Enforce`],
 //! where such a call is a verifier finding. A test can override the mode for
@@ -50,7 +50,9 @@ pub fn mode() -> SyncedCallsMode {
     }
     *ENV.get_or_init(|| match std::env::var(SYNCED_CALLS_ENV) {
         Ok(v) if v == "count" => SyncedCallsMode::Count,
-        Ok(v) if !v.is_empty() && v != "0" => SyncedCallsMode::Enforce,
+        Ok(v) if !matches!(v.as_str(), "" | "0" | "off" | "false" | "no") => {
+            SyncedCallsMode::Enforce
+        }
         _ => SyncedCallsMode::Off,
     })
 }

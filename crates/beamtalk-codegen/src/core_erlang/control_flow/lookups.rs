@@ -150,6 +150,10 @@ impl CoreErlangGenerator {
 
     /// The raw `{Value, StateAcc}` case of [`Self::generate_lookup_producer`]
     /// (see the module docs for its shape).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one linear lowering; the splice branch is the flag-on twin of the original"
+    )]
     fn generate_lookup_tuple(
         &mut self,
         receiver: &Expression,
@@ -163,9 +167,13 @@ impl CoreErlangGenerator {
         // The receiver is evaluated first and its value bound before the key's
         // own prelude (an actor self-send in the key) can run.
         let recv_tv = self.threaded_expression(receiver, frame)?;
+        // Flag off: render in the original order (rendering mints temps).
+        let eager = !self.synced_calls_active();
+        let eager_recv = eager.then(|| self.threaded_prelude_doc(&recv_tv.prelude));
         let recv_value = self.threaded_value_doc(&recv_tv.value);
         let recv_var = self.fresh_temp_var("LookupRecv");
         let key_tv = self.threaded_expression(key, frame)?;
+        let eager_key = eager.then(|| self.threaded_prelude_doc(&key_tv.prelude));
         let key_value = self.threaded_value_doc(&key_tv.value);
         let key_var = self.fresh_temp_var("LookupKey");
         // With the synced-calls flag on, a non-empty prelude is spliced into the
@@ -173,7 +181,9 @@ impl CoreErlangGenerator {
         let splice = self.synced_calls_active()
             && !(recv_tv.prelude.is_empty() && key_tv.prelude.is_empty());
         let mut head: Vec<ThreadedStmt> = Vec::new();
-        let (recv_preamble, key_preamble) = if splice {
+        let (recv_preamble, key_preamble) = if let (Some(r), Some(k)) = (eager_recv, eager_key) {
+            (r, k)
+        } else if splice {
             head.extend(recv_tv.prelude);
             head.push(ThreadedStmt::Statement(
                 docvec![
