@@ -177,9 +177,9 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
         // exactly like a `Bind`'s (`RebindLowering::version_step`), so the
         // gap scan counts it as the producer it is.
         let step = match stmt {
-            ThreadedStmt::Bind { .. } | ThreadedStmt::SyncedCall { .. } => {
-                stmt.version_step().map(|(target, source, _)| (target, source))
-            }
+            ThreadedStmt::Bind { .. } | ThreadedStmt::SyncedCall { .. } => stmt
+                .version_step()
+                .map(|(target, source, _)| (target, source)),
             ThreadedStmt::LocalRebind { lowering, .. } => lowering
                 .version_step()
                 .map(|(source, target)| (target, source)),

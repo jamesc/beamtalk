@@ -310,10 +310,18 @@ impl CoreErlangGenerator {
         let Expression::Block(cond_block) = condition else {
             return false;
         };
-        if !beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
-            condition,
-            self.in_class_method(),
-        ) {
+        // ADR 0137: in an actor instance method a condition holding a bracketed
+        // call threads `State` like a state effect does.
+        let synced = self.synced_calls_active()
+            && beamtalk_core::semantic_analysis::block_facts::while_condition_has_synced_user_code_sends(
+                condition,
+            );
+        if !synced
+            && !beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
+                condition,
+                self.in_class_method(),
+            )
+        {
             return false;
         }
         let threaded_locals = match body {

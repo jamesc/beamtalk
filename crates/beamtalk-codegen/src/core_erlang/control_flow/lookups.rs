@@ -135,8 +135,8 @@ impl CoreErlangGenerator {
         let scratch = self.conditional_scratch(frame);
         let (head, tuple_doc) =
             self.generate_lookup_tuple(receiver, &selector, key, &arms, &handlers, scratch)?;
-        let mut tv =
-            self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &handlers, tail, true)?;
+        let mut tv = self
+            .conditional_tuple_to_threaded_value(tuple_doc, frame, span, &handlers, tail, true)?;
         if !head.is_empty() {
             // ADR 0137: the receiver's and the key's own preludes (a bracketed
             // call steps `State`) belong to the producer's frame, ahead of the
@@ -176,12 +176,24 @@ impl CoreErlangGenerator {
         let (recv_preamble, key_preamble) = if splice {
             head.extend(recv_tv.prelude);
             head.push(ThreadedStmt::Statement(
-                docvec!["let ", leaf::var(recv_var.clone()), " = ", recv_value.clone(), " in "],
+                docvec![
+                    "let ",
+                    leaf::var(recv_var.clone()),
+                    " = ",
+                    recv_value.clone(),
+                    " in "
+                ],
                 receiver.span(),
             ));
             head.extend(key_tv.prelude);
             head.push(ThreadedStmt::Statement(
-                docvec!["let ", leaf::var(key_var.clone()), " = ", key_value.clone(), " in "],
+                docvec![
+                    "let ",
+                    leaf::var(key_var.clone()),
+                    " = ",
+                    key_value.clone(),
+                    " in "
+                ],
                 key.span(),
             ));
             (Document::Nil, Document::Nil)
@@ -217,29 +229,38 @@ impl CoreErlangGenerator {
             (Document::Nil, Document::Nil)
         } else {
             (
-                docvec!["let ", leaf::var(recv_var.clone()), " = ", recv_value, " in "],
+                docvec![
+                    "let ",
+                    leaf::var(recv_var.clone()),
+                    " = ",
+                    recv_value,
+                    " in "
+                ],
                 docvec!["let ", leaf::var(key_var.clone()), " = ", key_value, " in "],
             )
         };
-        Ok((head, docvec![
-            recv_preamble,
-            recv_let,
-            key_preamble,
-            key_let,
-            seed_doc,
-            "case call 'beamtalk_map':'lookup_for_threading'(",
-            leaf::var(recv_var),
-            ", ",
-            leaf::atom(selector.to_string()),
-            ", ",
-            leaf::var(key_var),
-            ") of <{'ok', ",
-            leaf::var(found_var),
-            "}> when 'true' -> ",
-            found_arm,
-            " <_> when 'true' -> ",
-            absent_arm,
-            " end",
-        ]))
+        Ok((
+            head,
+            docvec![
+                recv_preamble,
+                recv_let,
+                key_preamble,
+                key_let,
+                seed_doc,
+                "case call 'beamtalk_map':'lookup_for_threading'(",
+                leaf::var(recv_var),
+                ", ",
+                leaf::atom(selector.to_string()),
+                ", ",
+                leaf::var(key_var),
+                ") of <{'ok', ",
+                leaf::var(found_var),
+                "}> when 'true' -> ",
+                found_arm,
+                " <_> when 'true' -> ",
+                absent_arm,
+                " end",
+            ],
+        ))
     }
 }

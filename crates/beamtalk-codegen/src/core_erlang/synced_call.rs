@@ -120,6 +120,23 @@ pub(in crate::core_erlang) enum UserCodeCall {
 }
 
 impl CoreErlangGenerator {
+    /// Applies [`CodegenOptions::with_synced_calls`](super::CodegenOptions::with_synced_calls)
+    /// (`None`: keep the environment's mode). The block analysis reads the same
+    /// switch, so an explicit option is held for it too, for as long as the
+    /// returned guard lives.
+    pub(in crate::core_erlang) fn apply_synced_calls_option(
+        &mut self,
+        option: Option<bool>,
+    ) -> Option<beamtalk_core::synced_calls::OverrideGuard> {
+        let enabled = option?;
+        self.synced.mode = if enabled {
+            SyncMode::Enforce
+        } else {
+            SyncMode::Off
+        };
+        Some(beamtalk_core::synced_calls::override_mode(self.synced.mode))
+    }
+
     /// Whether the bracket is being built and checked for the code being
     /// compiled: the flag is on and this is an actor instance method (a
     /// class method and a value type thread no actor `State`; the REPL has
@@ -129,6 +146,8 @@ impl CoreErlangGenerator {
             && self.context == CodeGenContext::Actor
             && !self.in_class_method()
             && !self.is_repl_mode()
+            // A compiled class (not a legacy workspace block body).
+            && self.class_context.is_some()
             // Outside a method body (a `state:` default, built while the state
             // map itself is being made) there is no `State` to store.
             && self.current_method_selector.is_some()
@@ -210,7 +229,9 @@ impl CoreErlangGenerator {
                 .find_method(superclass.as_str(), selector.name().as_str())
                 .is_some_and(|m| {
                     let defined_in = m.defined_in.as_str();
-                    hierarchy.get_class(defined_in).is_some_and(|c| !c.is_native)
+                    hierarchy
+                        .get_class(defined_in)
+                        .is_some_and(|c| !c.is_native)
                         && defined_in != "Actor"
                         && hierarchy
                             .superclass_chain(defined_in)
@@ -266,7 +287,12 @@ impl CoreErlangGenerator {
         }
     }
 
-    fn classify_binary(&self, left: &Expression, op: &str, arguments: &[Expression]) -> UserCodeCall {
+    fn classify_binary(
+        &self,
+        left: &Expression,
+        op: &str,
+        arguments: &[Expression],
+    ) -> UserCodeCall {
         use super::operators::{StructuralBinary, structural_binary};
         match structural_binary(op) {
             // `>>` looks a method up; `**`, `++`, `%` and the equality
@@ -351,13 +377,47 @@ impl CoreErlangGenerator {
         }
         let kind = errors
             .iter()
-            .map(|e| format!("{e:?}").split([' ', '{']).next().unwrap_or("").to_string())
+            .map(|e| {
+                format!("{e:?}")
+                    .split([' ', '{'])
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            })
             .collect::<Vec<_>>()
             .join("+");
         self.synced
             .other_findings
             .push(format!("{label}\t{kind}\t{}", at.start()));
         true
+    }
+
+    /// The statement of a self-dispatch prelude: the dispatch `call` itself, or
+    /// (store-only [`ThreadedStmt::SyncedCall`]) with the cell stored first
+    /// when the send may reach `dispatch/4`'s default arm.
+    pub(in crate::core_erlang) fn self_dispatch_statement(
+        &mut self,
+        selector: &MessageSelector,
+        call: Document<'static>,
+        store: VersionedVar,
+        span: Span,
+    ) -> ThreadedStmt {
+        if !self.synced_calls_active()
+            || self.in_cell_resident_closure()
+            || !super::expr_shape::selector_dispatches_via_self(selector)
+            || self.classify_self_send(selector) != UserCodeCall::SelfViaDefaultArm
+        {
+            return ThreadedStmt::Statement(call, span);
+        }
+        self.synced.default_arm_sends += 1;
+        self.synced.brackets += 1;
+        ThreadedStmt::SyncedCall {
+            store,
+            call,
+            result: None,
+            load: None,
+            span,
+        }
     }
 
     /// The self-dispatch builders' note of a dispatching self-send: a send
@@ -496,7 +556,7 @@ impl CoreErlangGenerator {
 
 /// Proof that a bracket window was opened for an expression
 /// ([`CoreErlangGenerator::open_sync_window`]).
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[must_use]
 pub(in crate::core_erlang) struct SyncWindow(());
 
@@ -505,7 +565,10 @@ impl CoreErlangGenerator {
     /// user code and nothing already brackets it. Calls compiled inside the
     /// window (its operands) run between the store and the reload, so they
     /// are not gaps.
-    pub(in crate::core_erlang) fn open_sync_window(&mut self, expr: &Expression) -> Option<SyncWindow> {
+    pub(in crate::core_erlang) fn open_sync_window(
+        &mut self,
+        expr: &Expression,
+    ) -> Option<SyncWindow> {
         if !self.is_sync_site(expr.unwrap_parens()) {
             return None;
         }
@@ -553,7 +616,11 @@ impl CoreErlangGenerator {
             return false;
         }
         let class = self.classify_expr(inner);
-        !matches!(class, UserCodeCall::No | UserCodeCall::CompiledSelfSend)
+        // A self-send's own prelude carries its store (`self_dispatch_statement`).
+        !matches!(
+            class,
+            UserCodeCall::No | UserCodeCall::CompiledSelfSend | UserCodeCall::SelfViaDefaultArm
+        )
     }
 
     /// Closes a window opened by [`Self::open_sync_window`].
@@ -572,14 +639,11 @@ impl CoreErlangGenerator {
         tv: ThreadedValue,
         expr: &Expression,
         frame: FrameId,
-    ) -> super::Result<ThreadedValue> {
+    ) -> ThreadedValue {
         let span = expr.unwrap_parens().span();
-        if self.classify_expr(expr.unwrap_parens()) == UserCodeCall::SelfViaDefaultArm {
-            return Ok(self.store_before_self_dispatch(tv, expr, span));
-        }
         let ValueRef::Doc(call) = tv.value else {
             self.record_gap(Self::send_label(expr), span);
-            return Ok(tv);
+            return tv;
         };
         let state_not_authoritative = (self.loop_mode.in_direct_params_loop
             && !self.loop_mode.in_hybrid_loop)
@@ -590,10 +654,10 @@ impl CoreErlangGenerator {
             // params), or holds fields in pre-extracted parameters (hybrid):
             // the loop has to thread one (its owning node's job).
             self.record_gap(Self::send_label(expr), span);
-            return Ok(ThreadedValue {
+            return ThreadedValue {
                 prelude: tv.prelude,
                 value: ValueRef::Doc(call),
-            });
+            };
         }
         let mut prelude = tv.prelude;
         let store = VersionedVar::new(VersionPrefix::State, self.state_version(), frame);
@@ -608,59 +672,9 @@ impl CoreErlangGenerator {
             span,
         });
         self.synced.brackets += 1;
-        Ok(ThreadedValue {
-            prelude,
-            value: ValueRef::Var(result),
-        })
-    }
-
-    /// The store-only form for a self-send that may reach `dispatch/4`'s
-    /// default arm: the send keeps its explicit `{reply, R, State}` threading
-    /// (the `Bind` that follows its dispatch statement), and the dispatch
-    /// statement is wrapped so the cell holds the current `State` while it
-    /// runs. Anything but the producer's own `[.., dispatch, Bind]` shape is a
-    /// gap.
-    fn store_before_self_dispatch(
-        &mut self,
-        tv: ThreadedValue,
-        expr: &Expression,
-        span: Span,
-    ) -> ThreadedValue {
-        let mut prelude = tv.prelude;
-        let n = prelude.len();
-        let store = match prelude.get(n.wrapping_sub(1)) {
-            Some(ThreadedStmt::Bind { source, target, .. })
-                if n >= 2
-                    && target.prefix == VersionPrefix::State
-                    && matches!(prelude[n - 2], ThreadedStmt::Statement(..)) =>
-            {
-                Some(source.clone())
-            }
-            _ => None,
-        };
-        let Some(store) = store else {
-            self.record_gap(Self::send_label(expr), span);
-            return ThreadedValue {
-                prelude,
-                value: tv.value,
-            };
-        };
-        if let ThreadedStmt::Statement(call, stmt_span) = prelude.remove(n - 2) {
-            prelude.insert(
-                n - 2,
-                ThreadedStmt::SyncedCall {
-                    store,
-                    call,
-                    result: None,
-                    load: None,
-                    span: stmt_span,
-                },
-            );
-        }
-        self.synced.brackets += 1;
         ThreadedValue {
             prelude,
-            value: tv.value,
+            value: ValueRef::Var(result),
         }
     }
 

@@ -967,8 +967,8 @@ impl VerifyWalk<'_> {
         let mut current: Option<&VersionedVar> = None;
         for stmt in stmts {
             match stmt {
-                ThreadedStmt::Bind { target, .. } if own_state(target) => current = Some(target),
-                ThreadedStmt::SyncedCall {
+                ThreadedStmt::Bind { target, .. }
+                | ThreadedStmt::SyncedCall {
                     load: Some(target), ..
                 } if own_state(target) => current = Some(target),
                 ThreadedStmt::TupleAccUnpack { targets, .. } => {

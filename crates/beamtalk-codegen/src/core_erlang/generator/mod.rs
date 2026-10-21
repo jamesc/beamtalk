@@ -472,9 +472,7 @@ impl CoreErlangGenerator {
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
             closure_drops_state: false,
-            synced: super::synced_call::SyncedCallState::new(
-                beamtalk_core::synced_calls::mode(),
-            ),
+            synced: super::synced_call::SyncedCallState::new(beamtalk_core::synced_calls::mode()),
             class_var_capture: None,
             class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,

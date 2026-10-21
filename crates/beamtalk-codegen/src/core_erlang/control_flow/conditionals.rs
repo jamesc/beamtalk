@@ -188,24 +188,23 @@ impl CoreErlangGenerator {
         // Capture the source version BEFORE generating the value expression —
         // the RHS may itself read the field being assigned (`self.x := self.x
         // + 1`) and must see the pre-assignment snapshot.
-        let (prelude_doc, value_doc, source_version) = if site == FieldWriteSite::Actor
-            && self.is_sync_site(value.unwrap_parens())
-        {
-            // ADR 0137: the assigned value is a call that may run user code. It is
-            // bracketed (its prelude steps `State`), and the write goes on the
-            // version the reload produced. The prelude is rendered ahead of the
-            // `Val` binding, in the same statement sequence as the `Bind`.
-            let tv = self.threaded_expression(value, frame)?;
-            let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
-            let value_doc = self.threaded_value_doc(&tv.value);
-            (prelude_doc, value_doc, self.state_version())
-        } else {
-            let source_version = match site {
-                FieldWriteSite::ValueType => self.self_version(),
-                FieldWriteSite::Actor => self.state_version(),
+        let (prelude_doc, value_doc, source_version) =
+            if site == FieldWriteSite::Actor && self.is_sync_site(value.unwrap_parens()) {
+                // ADR 0137: the assigned value is a call that may run user code. It is
+                // bracketed (its prelude steps `State`), and the write goes on the
+                // version the reload produced. The prelude is rendered ahead of the
+                // `Val` binding, in the same statement sequence as the `Bind`.
+                let tv = self.threaded_expression(value, frame)?;
+                let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                let value_doc = self.threaded_value_doc(&tv.value);
+                (prelude_doc, value_doc, self.state_version())
+            } else {
+                let source_version = match site {
+                    FieldWriteSite::ValueType => self.self_version(),
+                    FieldWriteSite::Actor => self.state_version(),
+                };
+                (Document::Nil, self.expression_doc(value)?, source_version)
             };
-            (Document::Nil, self.expression_doc(value)?, source_version)
-        };
         let target_version = match site {
             FieldWriteSite::ValueType => {
                 self.next_self_var();

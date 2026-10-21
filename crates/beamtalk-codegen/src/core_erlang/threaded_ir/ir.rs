@@ -1033,7 +1033,9 @@ impl ThreadedStmt {
     /// [`SyncedCall`](Self::SyncedCall) that reloads: `(target, source, span)`.
     /// The one place a scan for "the last `State` version a prelude produced"
     /// reads, so a bracket's reload counts as the step it is.
-    pub(in crate::core_erlang) fn version_step(&self) -> Option<(&VersionedVar, &VersionedVar, Span)> {
+    pub(in crate::core_erlang) fn version_step(
+        &self,
+    ) -> Option<(&VersionedVar, &VersionedVar, Span)> {
         match self {
             Self::Bind {
                 target,
@@ -1063,14 +1065,13 @@ impl ThreadedStmt {
 pub(in crate::core_erlang) enum UserCodeRegion {
     /// The method's own flat statement sequence.
     MethodRoot,
-    /// A conditional or `match:` arm.
+    /// A conditional, `match:` or `on:do:`/`ensure:` arm (a handler or
+    /// cleanup is a `BranchArm` frame like any other arm).
     BranchArm,
     /// A `Letrec` loop body (`whileTrue:`, `to:do:`, `timesRepeat:`, `repeat`).
     LetrecLoop,
     /// A `foldl` list-op body (`do:`, `collect:`, `inject:into:`, ...).
     FoldBody,
-    /// An `on:do:`/`ensure:` protected body, handler or cleanup.
-    Handler,
     /// A Tier 2 stateful-block body.
     Tier2Body,
     /// Anything else (named so a count of it is visibly unexplained).
@@ -1085,7 +1086,6 @@ impl UserCodeRegion {
             Self::BranchArm => "arm",
             Self::LetrecLoop => "loop",
             Self::FoldBody => "fold",
-            Self::Handler => "handler",
             Self::Tier2Body => "tier2-body",
             Self::Other => "other",
         }

@@ -341,7 +341,7 @@ impl CoreErlangGenerator {
         if let Some(window) = self.open_sync_window(expr) {
             let tv = self.threaded_expression_core(expr, frame);
             self.close_sync_window(window);
-            return self.synced_call_value(tv?, expr, frame);
+            return Ok(self.synced_call_value(tv?, expr, frame));
         }
         self.threaded_expression_core(expr, frame)
     }

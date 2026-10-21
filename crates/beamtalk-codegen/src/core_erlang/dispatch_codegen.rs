@@ -1685,8 +1685,17 @@ impl CoreErlangGenerator {
         let (call_doc, dispatch_var) =
             self.generate_self_dispatch_call_doc_for(selector, arguments)?;
         let target_version = self.state_version();
+        // ADR 0137: a self-send that may reach `dispatch/4`'s default arm keeps its
+        // explicit `{reply, R, State}` threading and has the cell stored before it
+        // runs; built here, the one place every self-dispatch prelude is made.
+        let dispatch = self.self_dispatch_statement(
+            selector,
+            call_doc,
+            VersionedVar::new(VersionPrefix::State, source_version, frame),
+            span,
+        );
         let prelude = vec![
-            ThreadedStmt::Statement(call_doc, span),
+            dispatch,
             ThreadedStmt::Bind {
                 target: VersionedVar::new(VersionPrefix::State, target_version, frame),
                 source: VersionedVar::new(VersionPrefix::State, source_version, frame),
@@ -1824,7 +1833,13 @@ impl CoreErlangGenerator {
         ok_doc: Document<'static>,
     ) -> Document<'static> {
         let applies = self.in_state_dropping_closure();
-        self.state_guard_when(applies, reply_state, dispatched_state, selector_atom, ok_doc)
+        self.state_guard_when(
+            applies,
+            reply_state,
+            dispatched_state,
+            selector_atom,
+            ok_doc,
+        )
     }
 
     /// [`Self::closure_self_dispatch_state_guard`] with the position decided by
@@ -1899,7 +1914,6 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<(Document<'static>, String)> {
-        self.note_self_dispatch(selector, arguments);
         {
             let selector_atom = selector.name().to_string();
             // `selector_atom` is moved into `call_doc` below (some

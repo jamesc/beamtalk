@@ -84,6 +84,10 @@ pub fn generate_module_surfacing_verifier(
 /// - The module uses unsupported features
 /// - Code generation encounters an internal error
 /// - Formatting fails
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear driver: option plumbing, analysis hand-off, hierarchy set-up, then generation"
+)]
 pub fn generate_module_with_warnings(
     module: &Module,
     options: CodegenOptions,
@@ -105,18 +109,7 @@ pub fn generate_module_with_warnings(
     if let Some(enabled) = options.codegen_diagnostics {
         generator.codegen_diagnostics_enabled = enabled;
     }
-
-    if let Some(enabled) = options.synced_calls {
-        generator.synced.mode = if enabled {
-            super::synced_call::SyncMode::Enforce
-        } else {
-            super::synced_call::SyncMode::Off
-        };
-    }
-    // The block analysis reads the same switch, so an explicit option holds for it too.
-    let _synced_calls_override = options
-        .synced_calls
-        .map(|_| beamtalk_core::synced_calls::override_mode(generator.synced.mode));
+    let _synced_calls_override = generator.apply_synced_calls_option(options.synced_calls);
 
     // Consume the driver's already-computed analysis when supplied
     // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,
@@ -332,7 +325,6 @@ pub fn generate_module_with_warnings(
 
     generator.finish_synced_calls(module.span);
     generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);
-
     Ok(GeneratedModule {
         code: doc.to_pretty_string(),
         warnings: generator.codegen_warnings,

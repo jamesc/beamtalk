@@ -24,6 +24,7 @@
 //! - [`fold_family`] — BT-3827 `FoldFamilyNotCarried` over fold lambda bodies
 //! - [`fold_locals`] — BT-3863 `FoldLocalsNotCarried` over fold lambda bodies
 //! - [`nlr_throw`] — the `NlrThrow` node's rendering and `NlrThrowWithoutSlot`
+//! - [`synced_call`] — ADR 0137 Phase 2a `SyncedCall` rendering and verification
 //! - [`verifier_diagnostic`] — BT-3724 release-mode `internal:` warning
 
 use super::*;
@@ -65,6 +66,7 @@ mod lower_and_render_shim;
 mod nlr_throw;
 mod render_naming;
 mod simple_bind;
+mod synced_call;
 mod tuple_acc;
 mod verifier_diagnostic;
 mod verify_walk;

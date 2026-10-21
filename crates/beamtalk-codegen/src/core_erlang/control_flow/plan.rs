@@ -222,6 +222,9 @@ impl LoopFamilyParam {
 struct BodyEffects {
     /// Condition block has state effects (field writes or self-sends).
     cond_has_state_effects: bool,
+    /// ADR 0137: the body holds a call bracketed with a `State` store/reload
+    /// (actor instance method, synced-calls flag on).
+    body_has_synced_sends: bool,
     /// Body has a tier-2 value call assigned to a threaded local.
     has_tier2_threaded_assign: bool,
     /// Body has nested list ops incompatible with direct-params.
@@ -374,8 +377,12 @@ impl BodyEffects {
             .last()
             .is_some_and(|s| matches!(s.expression, Expression::DestructureAssignment { .. }));
 
+        let body_has_synced_sends = generator.synced_calls_active()
+            && block_analysis::analyze_block(body).has_synced_user_code_sends();
+
         Self {
             cond_has_state_effects,
+            body_has_synced_sends,
             has_tier2_threaded_assign,
             has_non_tuple_safe_list_op,
             has_nested_counted_loop_mutation,
@@ -826,6 +833,7 @@ impl ThreadingPlan {
             return false;
         }
         !body_analysis.has_state_effects()
+            && !effects.body_has_synced_sends
             && !effects.cond_has_state_effects
             && !effects.has_tier2_threaded_assign
             && !effects.has_non_tuple_safe_list_op
@@ -852,6 +860,7 @@ impl ThreadingPlan {
             return false;
         }
         !body_analysis.has_state_effects()
+            && !effects.body_has_synced_sends
             && !effects.has_tier2_threaded_assign
             && !effects.has_cf_mutations
             && !effects.has_conditional_threaded_writes
@@ -920,7 +929,7 @@ impl ThreadingPlan {
         }
         !body_analysis.field_writes.is_empty()
             && !body_analysis.has_self_sends
-            && !body_analysis.has_synced_user_code_sends()
+            && !effects.body_has_synced_sends
             && !effects.cond_has_state_effects
             && !effects.has_tier2_threaded_assign
             && !effects.has_cf_mutations

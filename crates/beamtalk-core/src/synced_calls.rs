@@ -36,6 +36,8 @@ pub enum SyncedCallsMode {
     Enforce,
 }
 
+static ENV: OnceLock<SyncedCallsMode> = OnceLock::new();
+
 thread_local! {
     static OVERRIDE: Cell<Option<SyncedCallsMode>> = const { Cell::new(None) };
 }
@@ -46,7 +48,6 @@ pub fn mode() -> SyncedCallsMode {
     if let Some(overridden) = OVERRIDE.with(Cell::get) {
         return overridden;
     }
-    static ENV: OnceLock<SyncedCallsMode> = OnceLock::new();
     *ENV.get_or_init(|| match std::env::var(SYNCED_CALLS_ENV) {
         Ok(v) if v == "count" => SyncedCallsMode::Count,
         Ok(v) if !v.is_empty() && v != "0" => SyncedCallsMode::Enforce,
