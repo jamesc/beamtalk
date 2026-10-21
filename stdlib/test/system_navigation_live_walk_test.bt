@@ -1,0 +1,95 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4095: system-wide SystemNavigation queries tolerate classes removed while
+// they walk. Every query walks classes through
+// `SystemNavigation liveClassesIn:inject:into:`, so these tests inject the
+// removal deterministically inside that walk (between enumerating a class and
+// sending to it) instead of racing a concurrent remover.
+
+TestCase subclass: SystemNavigationLiveWalkTest
+  field: cls = nil
+
+  tearDown =>
+    (self.cls isNil or: [
+      SystemNavigation isRemoved: self.cls
+    ]) ifFalse: [self.cls removeFromSystem]
+
+  makeProbe: aName :: Symbol -> Object =>
+    Object classBuilder name: aName;
+      superclass: Object;
+      methods: #{#bt4095Probe => [:_self | 1]};
+      register
+
+  // The class is removed after the walk enumerated it and before the block's
+  // send reaches it: the send raises `class_not_found`, and the walk skips the
+  // class instead of letting the error escape.
+  testWalkSkipsClassRemovedMidWalk =>
+    self.cls := self makeProbe: #BT4095RemovedMidWalk
+    probe := self.cls
+    scope := #(probe, Object, Integer)
+    visited := SystemNavigation
+      liveClassesIn: scope
+      inject: List new
+      into: [:acc :c |
+        c == probe ifTrue: [c removeFromSystem]
+        c includesSelector: #bt4095Probe
+        acc add: c
+      ]
+    self assert: (SystemNavigation isRemoved: probe)
+    self assert: visited equals: #(Object, Integer)
+
+  // `select:` shares the same tolerant walk.
+  testSelectSkipsClassRemovedMidWalk =>
+    self.cls := self makeProbe: #BT4095RemovedMidSelect
+    probe := self.cls
+    scope := #(Object, probe)
+    found := SystemNavigation
+      liveClassesIn: scope
+      select: [:c |
+        c == probe ifTrue: [c removeFromSystem]
+        c includesSelector: #bt4095Probe
+      ]
+    self assert: found isEmpty
+
+  // A class already removed when the walk reaches it is skipped without the
+  // block running for it.
+  testWalkSkipsClassRemovedBeforeVisit =>
+    self.cls := self makeProbe: #BT4095RemovedBefore
+    probe := self.cls
+    scope := #(probe, Object)
+    probe removeFromSystem
+    visited := SystemNavigation
+      liveClassesIn: scope
+      inject: List new
+      into: [:acc :c | acc add: c]
+    self assert: visited equals: #(Object)
+
+  // An error from a class that is still registered is a real failure and is
+  // re-raised, not swallowed.
+  testWalkReraisesErrorsForLiveClasses =>
+    self
+      should: [
+        SystemNavigation
+          liveClassesIn: #(Object)
+          inject: 0
+          into: [:n :c | c perform: #bt4095NoSuchSelector]
+      ]
+      raise: #does_not_understand
+
+  // Fallback names resolve from the registry snapshot; a removed name drops out.
+  testClassesNamedDropsRemovedNames =>
+    self.cls := self makeProbe: #BT4095NamedProbe
+    probe := self.cls
+    self assert: (SystemNavigation classesNamed: #(#BT4095NamedProbe, #Integer)) equals: #(probe, Integer)
+    self.cls removeFromSystem
+    self assert: (SystemNavigation classesNamed: #(#BT4095NamedProbe, #Integer)) equals: #(Integer)
+
+  // implementorsOf: finds a builder-registered class and, once the class is
+  // removed, answers without it rather than raising.
+  testImplementorsOfAcrossRemoval =>
+    self.cls := self makeProbe: #BT4095Implementor
+    probe := self.cls
+    self assert: ((SystemNavigation implementorsOf: #bt4095Probe) includes: probe)
+    probe removeFromSystem
+    self deny: ((SystemNavigation implementorsOf: #bt4095Probe) includes: probe)
