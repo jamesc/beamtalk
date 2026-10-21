@@ -487,7 +487,7 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
 -doc """
 Raise an error for missing function or wrong arity.
 
-Used by `raise_undef_error/6` for inline FFI (`direct_call/3`, `validate_and_apply/4`).
+Used by `raise_missing_target/6` for inline FFI (`direct_call/3`, `validate_and_apply/4`).
 """.
 -spec raise_function_or_arity_error(atom(), atom(), non_neg_integer(), atom(), [
     {atom(), non_neg_integer()}
@@ -579,36 +579,63 @@ is_ffi_target_undef(_Module, _FunName, _Arity, _Stack) ->
 Raise a structured error for an FFI target that is not callable.
 
 Reached when the apply fails with `error:undef` and `is_ffi_target_undef/4`
-confirms the target itself is missing (unloaded module, unknown function, wrong
-arity, or removed by a hot reload).
+says the target itself may be missing (unloaded module, unknown function, wrong
+arity, removed by a hot reload, or an empty stacktrace that gives no evidence).
 
-Pass the actual arity so the error message is accurate (not "0 arguments").
+Every context first confirms that against the loaded code with
+`ffi_target_status/3`. If the target *is* exported, there is no missing
+function to report: the `undef` came from inside the callee (seen with an empty
+stacktrace) or a reload landed between the apply and this read. It is then
+wrapped like any other `error:*` (`raise_generic_error/6`) instead of a
+self-contradicting "does not understand" / arity error.
 
-For inline FFI (`Context = none`) this reads exports to distinguish
-"module not loaded", "missing function" and "wrong arity". If the target *is*
-exported by the time exports are read (a reload landed between the apply and
-this read), there is no missing function to report, so the `undef` is wrapped
-like any other `error:*` instead of a self-contradicting arity error. For a
-`native:` delegation (`Context = {Class, Sel}`) it surfaces a
-`does_not_understand` carrying the Beamtalk `{Class, Sel}` directly.
+Otherwise, pass the actual arity so the error message is accurate. Inline FFI
+(`Context = none`) distinguishes "module not loaded", "missing function" and
+"wrong arity". A `native:` delegation (`Context = {Class, Sel}`) surfaces a
+`does_not_understand` carrying the Beamtalk `{Class, Sel}`.
 """.
 -spec raise_undef_error(atom(), atom(), non_neg_integer(), atom(), error_context(), list()) ->
     no_return().
-raise_undef_error(Module, FunName, Arity, OrigSelector, none, Stack) ->
+raise_undef_error(Module, FunName, Arity, OrigSelector, Context, Stack) ->
+    case ffi_target_status(Module, FunName, Arity) of
+        exported ->
+            raise_generic_error(Module, FunName, OrigSelector, Context, undef, Stack);
+        Missing ->
+            raise_missing_target(Module, FunName, Arity, OrigSelector, Context, Missing)
+    end.
+
+-doc """
+Is `Module:FunName/Arity` callable in the code loaded right now?
+
+Read only on the `undef` error path, never per call (BT-4021), so it always
+reflects the current code and needs no invalidation on reload or purge.
+""".
+-spec ffi_target_status(atom(), atom(), non_neg_integer()) ->
+    exported | not_loaded | {not_exported, [{atom(), non_neg_integer()}]}.
+ffi_target_status(Module, FunName, Arity) ->
     case get_exports(Module) of
         {error, not_loaded} ->
-            raise_module_not_loaded(Module, OrigSelector);
+            not_loaded;
         {ok, Exports} ->
             case lists:member({FunName, Arity}, Exports) of
-                true ->
-                    raise_generic_error(Module, FunName, OrigSelector, none, undef, Stack);
-                false ->
-                    raise_function_or_arity_error(
-                        Module, FunName, Arity, OrigSelector, Exports
-                    )
+                true -> exported;
+                false -> {not_exported, Exports}
             end
-    end;
-raise_undef_error(Module, FunName, Arity, _OrigSelector, {Class, Selector}, _Stack) ->
+    end.
+
+-spec raise_missing_target(
+    atom(),
+    atom(),
+    non_neg_integer(),
+    atom(),
+    error_context(),
+    not_loaded | {not_exported, [{atom(), non_neg_integer()}]}
+) -> no_return().
+raise_missing_target(Module, _FunName, _Arity, OrigSelector, none, not_loaded) ->
+    raise_module_not_loaded(Module, OrigSelector);
+raise_missing_target(Module, FunName, Arity, OrigSelector, none, {not_exported, Exports}) ->
+    raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports);
+raise_missing_target(Module, FunName, Arity, _OrigSelector, {Class, Selector}, _Missing) ->
     Error1 = beamtalk_error:new(does_not_understand, Class, Selector),
     Error2 = beamtalk_error:with_hint(
         Error1,

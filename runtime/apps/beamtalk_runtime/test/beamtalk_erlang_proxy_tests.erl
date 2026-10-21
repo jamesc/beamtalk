@@ -20,9 +20,12 @@ error wrapping, and printString formatting.
 -export([retry_then_exit/1, retry_then_throw/1, write_then_badarg/1, retry_class/0]).
 %% BT-4021 fixtures: a target that raises `undef` itself, and one whose charlist
 %% retry hits a nested `undef`.
--export([explicit_undef_stub/1, retry_then_nested_undef/1]).
+-export([explicit_undef_stub/1, retry_then_nested_undef/1, empty_stack_undef_stub/1]).
 
 explicit_undef_stub(_Arg) -> erlang:error(undef).
+
+%% Raises `undef` with an empty stacktrace from inside an exported target.
+empty_stack_undef_stub(_Arg) -> erlang:raise(error, undef, []).
 
 retry_then_nested_undef(Arg) when is_binary(Arg) -> erlang:error(badarg);
 retry_then_nested_undef(Arg) when is_list(Arg) -> completely_bogus_module_xyz:missing(1).
@@ -1304,6 +1307,81 @@ direct_call_explicit_undef_in_target_is_not_arity_mismatch_test() ->
             ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
             ?assertEqual(undef, maps:get(erlang_error, Inner#beamtalk_error.details))
     end.
+
+%% An `undef` with an empty stacktrace carries no frame to compare, so it is
+%% treated as "maybe the target" and confirmed against the loaded exports. The
+%% target here is exported, so both inline FFI and `native:` must wrap it as a
+%% runtime_error, not report the target as missing.
+assert_empty_stack_undef_is_runtime_error(Fun) ->
+    try
+        Fun(),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
+            ?assertEqual(undef, maps:get(erlang_error, Inner#beamtalk_error.details)),
+            ?assertEqual([], maps:get(erlang_stacktrace, Inner#beamtalk_error.details))
+    end.
+
+direct_call_empty_stack_undef_from_exported_target_test() ->
+    assert_empty_stack_undef_is_runtime_error(fun() ->
+        beamtalk_erlang_proxy:direct_call(?MODULE, empty_stack_undef_stub, [x])
+    end).
+
+native_call_empty_stack_undef_from_exported_target_test() ->
+    assert_empty_stack_undef_is_runtime_error(fun() ->
+        beamtalk_erlang_proxy:native_call(
+            ?MODULE, empty_stack_undef_stub, [x], {'Stream', 'take:'}
+        )
+    end).
+
+%% Run `Fun` with `backtrace_depth` 0, restoring the old value afterwards.
+with_backtrace_depth_zero(Fun) ->
+    Old = erlang:system_flag(backtrace_depth, 0),
+    try
+        Fun()
+    after
+        erlang:system_flag(backtrace_depth, Old)
+    end.
+
+backtrace_depth_zero_keeps_ffi_errors_test() ->
+    %% With backtrace_depth 0 the VM still records the undef frame, so a missing
+    %% target is still reported as missing (inline and native:), and a nested
+    %% undef is still a runtime_error, not a missing FFI function.
+    with_backtrace_depth_zero(fun() ->
+        try
+            beamtalk_erlang_proxy:direct_call(lists, nonexistent_xyz, [1]),
+            ?assert(false)
+        catch
+            error:#{error := Inline} ->
+                ?assertEqual(does_not_understand, Inline#beamtalk_error.kind),
+                ?assertEqual(
+                    #{module => lists, function => nonexistent_xyz, arity => 1},
+                    Inline#beamtalk_error.details
+                )
+        end,
+        try
+            beamtalk_erlang_proxy:native_call(
+                lists, nonexistent_xyz, [1], {'Stream', 'take:'}
+            ),
+            ?assert(false)
+        catch
+            error:#{error := Native} ->
+                ?assertEqual(does_not_understand, Native#beamtalk_error.kind),
+                ?assertEqual('Stream', Native#beamtalk_error.class),
+                ?assertEqual('take:', Native#beamtalk_error.selector)
+        end,
+        assert_undef_inside_callee_is_runtime_error(fun() ->
+            beamtalk_erlang_proxy:native_call(
+                lists, map, [undef_inside_callee_fun(), [1]], {'Stream', 'collect:'}
+            )
+        end),
+        assert_empty_stack_undef_is_runtime_error(fun() ->
+            beamtalk_erlang_proxy:native_call(
+                ?MODULE, empty_stack_undef_stub, [x], {'Stream', 'take:'}
+            )
+        end)
+    end).
 
 direct_call_retry_nested_undef_is_runtime_error_test() ->
     %% badarg → charlist retry → nested undef: the retry pass classifies it too.
