@@ -1605,6 +1605,34 @@ impl CoreErlangGenerator {
             .collect()
     }
 
+    /// BT-3939 / BT-4014: the producer sites of the frame-body statement
+    /// `stmt` that thread a local, as `(site span, locals)`, for
+    /// [`threaded_ir::verify_producer_sites_threaded`] once the body is built:
+    /// [`Self::body_producer_site_exprs`] narrowed to the sites
+    /// [`Self::producer_locals_at_site`] names a producer. Read just before
+    /// `stmt` is lowered, so a local an earlier statement bound is live. Empty
+    /// in the REPL, whose producers adopt the bindings map. Shared by the
+    /// Tier 2 block body and the Letrec and fold bodies, so every frame body
+    /// checks its own statements by one rule.
+    pub(super) fn frame_producer_sites(
+        &self,
+        stmt: &Expression,
+        fold: bool,
+        arm: bool,
+    ) -> Vec<(Span, Vec<String>)> {
+        if self.is_repl_mode() {
+            return Vec::new();
+        }
+        self.body_producer_site_exprs(stmt, fold, arm)
+            .into_iter()
+            .filter_map(|site| {
+                let site = site.unwrap_parens();
+                self.producer_locals_at_site(site)
+                    .map(|locals| (site.span(), locals))
+            })
+            .collect()
+    }
+
     /// Runs `f` (a loop or fold body's lowering) with the body's own
     /// statements as local-producer sites (ADR 0131 Phase 2b): each
     /// statement that is itself a loop or fold, and each sequenced operand

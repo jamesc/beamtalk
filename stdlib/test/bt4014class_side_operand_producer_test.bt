@@ -8,17 +8,14 @@
 
 TestCase subclass: Bt4014ClassSideOperandProducerTest
 
-  testRepro =>
-    self assert: Bt4014ClassSideOperandProducer probe equals: 0
+  testRepro => self assert: Bt4014ClassSideOperandProducer probe equals: 0
 
   testWhileFalse =>
     self assert: Bt4014ClassSideOperandProducer whileFalseArg equals: 0
 
-  testToDo =>
-    self assert: Bt4014ClassSideOperandProducer toDoArg equals: 6
+  testToDo => self assert: Bt4014ClassSideOperandProducer toDoArg equals: 6
 
-  testDo =>
-    self assert: Bt4014ClassSideOperandProducer doArg equals: 3
+  testDo => self assert: Bt4014ClassSideOperandProducer doArg equals: 3
 
   testInject =>
     self assert: Bt4014ClassSideOperandProducer injectArg equals: #[3, 3]
@@ -26,16 +23,13 @@ TestCase subclass: Bt4014ClassSideOperandProducerTest
   testConditional =>
     self assert: Bt4014ClassSideOperandProducer conditionalArg equals: #[7, 0]
 
-  testOnDo =>
-    self assert: Bt4014ClassSideOperandProducer onDoArg equals: 4
+  testOnDo => self assert: Bt4014ClassSideOperandProducer onDoArg equals: 4
 
   testAssignment =>
     self assert: Bt4014ClassSideOperandProducer assignmentArg equals: #[4, 4]
 
   testSiblingReadBeforeRebind =>
-    self
-      assert: Bt4014ClassSideOperandProducer secondArgReadsBefore
-      equals: #[#[3, nil], 0]
+    self assert: Bt4014ClassSideOperandProducer secondArgReadsBefore equals: #[#[3, nil], 0]
 
   testNestedSend =>
     self assert: Bt4014ClassSideOperandProducer nestedSend equals: 0

@@ -312,3 +312,49 @@ fn class_side_operand_producers_report_the_pre_fix_lowering() {
         missed.join("\n")
     );
 }
+
+/// BT-4014: over every class-side row, at every position (nested sends, the
+/// arm and loop-body frames, the class-variable writes), the pre-fix
+/// lowering ([`LocalRebindFault::ClassSendOperandsInPlace`]) is never a silent
+/// miscompile: either some verifier check reports it, or its output still
+/// compiles through `erlc`. A frame body checks its own statements
+/// (`ProducerSiteNotThreaded` in the Letrec and fold bodies too), so a
+/// producer trapped in a send inside a loop or fold body is caught there.
+#[cfg(debug_assertions)]
+#[test]
+fn class_side_operand_producers_pre_fix_lowering_is_never_silent() {
+    let fault = LocalRebindFault::ClassSendOperandsInPlace;
+    let mut silent = Vec::new();
+    let mut reported = 0;
+    for ctx in CONTEXTS.iter().filter(|c| c.class_side) {
+        for (name, stmt) in rows(ctx) {
+            if pinned_bt4089(ctx, &stmt) {
+                continue;
+            }
+            let src = module(ctx, &method(ctx, 0, &stmt));
+            if codegen_outcome(&src) != Ok(FieldCodegen::Compiles) {
+                continue;
+            }
+            if super::verifier_report(&src, Some(fault)).is_some() {
+                reported += 1;
+                continue;
+            }
+            let compiles = catch_unwind(AssertUnwindSafe(|| {
+                crate::core_erlang::threaded_expr::fault::with(fault, || {
+                    assert_compiles_through_erlc("test", &codegen(&src));
+                });
+            }))
+            .is_ok();
+            if !compiles {
+                silent.push(format!("{} / {name}:\n{src}", ctx.name));
+            }
+        }
+    }
+    assert!(reported >= 200, "only {reported} row(s) reported");
+    assert!(
+        silent.is_empty(),
+        "{} row(s) where the pre-fix lowering fails erlc with a silent verifier:\n\n{}",
+        silent.len(),
+        silent.join("\n\n")
+    );
+}
