@@ -21,6 +21,10 @@ ETS read.
 
 * `fetch/2` — generic memo: `fetch(Key, Compute)` returns the cached value
   for `Key`, or runs `Compute()` and caches its result.
+* `fetch/3` — the same, with a `Valid` check applied to a cached value
+  before it is served (for facts that also depend on state this cache does
+  not track, such as whether a module is loaded). A hit that fails it is
+  recomputed and the entry overwritten.
 * `inherits_from/2` — cached `beamtalk_class_registry:inherits_from/2`,
   the shared hierarchy helper (e.g. the Exception check on the Value send
   path; class-reference / `isKindOf:` checks can reuse it).
@@ -55,13 +59,21 @@ match the winning one.
 
 Facts that also depend on code-loading state (whether a module is loaded)
 are not tracked by this invalidation; callers that cache such facts must
-re-validate them on a hit (see `beamtalk_primitive:tagged_class_dispatch/1`).
+re-validate them on a hit with `fetch/3` (see
+`beamtalk_primitive:tagged_class_dispatch/1`).
+
+**Only the `beamtalk_class_metadata` API may write the metadata table.** A
+raw `ets:insert`/`ets:delete` on it bypasses `invalidate/0`; code that must
+do one (test fixtures restoring a snapshot) has to call `invalidate/0`
+itself. The two tables are created together by `beamtalk_class_metadata:new/0`,
+so they share an owner and heir and are lost together.
 """.
 
 -export([
     new/0,
     invalidate/0,
     fetch/2,
+    fetch/3,
     inherits_from/2
 ]).
 
@@ -126,6 +138,17 @@ path, not the class table). Without the cache table or counter (before
 """.
 -spec fetch(term(), fun(() -> {cache | nocache, Value})) -> Value.
 fetch(Key, Compute) ->
+    fetch(Key, Compute, fun always_valid/1).
+
+-doc """
+`fetch/2` with a validity check on hits: a cached value for which
+`Valid(Value)` is false is recomputed (and, if `Compute` says `cache`,
+overwritten), so a stale entry is repaired once rather than re-derived on
+every call. `Valid` is applied to cached values only, never to a value
+`Compute` has just produced.
+""".
+-spec fetch(term(), fun(() -> {cache | nocache, Value}), fun((Value) -> boolean())) -> Value.
+fetch(Key, Compute, Valid) ->
     case persistent_term:get(?GEN_KEY, undefined) of
         undefined ->
             {_, Value} = Compute(),
@@ -134,8 +157,13 @@ fetch(Key, Compute) ->
             %% Read the generation before computing (see the moduledoc).
             Gen = atomics:get(Ref, 1),
             try ets:lookup(?TABLE, Key) of
-                [{_, Gen, Value}] -> Value;
-                _ -> compute_and_store(Key, Gen, Compute)
+                [{_, Gen, Value}] ->
+                    case Valid(Value) of
+                        true -> Value;
+                        false -> compute_and_store(Key, Gen, Compute)
+                    end;
+                _ ->
+                    compute_and_store(Key, Gen, Compute)
             catch
                 error:badarg -> element(2, Compute())
             end
@@ -145,18 +173,26 @@ fetch(Key, Compute) ->
 Cached `beamtalk_class_registry:inherits_from/2`: true if `Class` is
 `Ancestor` or a (transitive) subclass of it, per `beamtalk_class_metadata`.
 
-An unregistered class answers `false`, and that `false` is cached too: the
-class's registration writes its metadata row, which invalidates the cache.
+Only answers for a registered `Class` (one with a superclass in its
+metadata row) are cached, so probing arbitrary names cannot grow the table.
 """.
 -spec inherits_from(atom(), atom()) -> boolean().
 inherits_from(Class, Ancestor) ->
     fetch({inherits_from, Class, Ancestor}, fun() ->
-        {cache, beamtalk_class_registry:inherits_from(Class, Ancestor)}
+        Cacheable =
+            case beamtalk_class_metadata:lookup_superclass(Class) of
+                {ok, _} -> cache;
+                not_found -> nocache
+            end,
+        {Cacheable, beamtalk_class_registry:inherits_from(Class, Ancestor)}
     end).
 
 %%====================================================================
 %% Internal
 %%====================================================================
+
+-spec always_valid(term()) -> true.
+always_valid(_) -> true.
 
 -spec compute_and_store(term(), integer(), fun(() -> {cache | nocache, Value})) -> Value.
 compute_and_store(Key, Gen, Compute) ->
@@ -177,7 +213,8 @@ ensure_generation() ->
     case persistent_term:get(?GEN_KEY, undefined) of
         undefined ->
             Ref = atomics:new(1, [{signed, false}]),
-            atomics:put(Ref, 1, erlang:unique_integer([positive]) bsl 32),
+            %% Masked so the shifted value always fits the unsigned 64-bit cell.
+            atomics:put(Ref, 1, (erlang:unique_integer([positive]) band 16#FFFFFFFF) bsl 32),
             persistent_term:put(?GEN_KEY, Ref);
         _ ->
             ok

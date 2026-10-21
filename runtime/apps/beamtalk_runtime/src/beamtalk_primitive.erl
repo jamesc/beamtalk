@@ -846,37 +846,38 @@ which is invalidated by every metadata write (class load, hot reload /
 redefinition, removal). After the first send a hit is one counter read and
 one ETS read, with no `string`, `beamtalk_module_name` or `code_server` call.
 
-An unregistered class (no metadata row) is not cached: its answer comes from
-the code path (`class_name_to_module_cold/2`), which the cache does not
-track. Code loading is not tracked either, so a hit whose module has since
-been unloaded (purged without the class going away) is re-derived instead of
-served.
+What is cached, and why that is safe:
+
+* Only answers for a **registered** class (one with a metadata row). An
+  unregistered class's answer comes from the code path
+  (`class_name_to_module_cold/2`), which the cache does not track.
+* Only answers whose module is **loaded** at compute time. A compiled class
+  writes its metadata row from its module's `on_load`, i.e. while the module
+  may not yet count as loaded; an answer derived in that window could rank
+  the modules differently from the one derived once loading completes, so it
+  is not kept.
+* Code loading is not tracked by the cache's invalidation. The rule this
+  relies on: every load of a class's module also writes the class's metadata
+  row (`on_load` registration), so a newly loaded module that would change
+  the answer comes with an invalidation. Unloading is checked instead: a hit
+  whose module has since been purged (class still registered) is re-derived
+  and the entry repaired (`fetch/3`'s validity check).
 """.
 -spec tagged_class_dispatch(atom()) -> exception | {stdlib, atom()} | {value, atom()}.
 tagged_class_dispatch(Class) ->
-    Resolved = beamtalk_class_derived_cache:fetch(
+    beamtalk_class_derived_cache:fetch(
         {tagged_class_dispatch, Class},
-        fun() -> resolve_tagged_class_dispatch(Class) end
-    ),
-    case resolved_module_loaded(Class, Resolved) of
-        true ->
-            Resolved;
-        false ->
-            {_, Fresh} = resolve_tagged_class_dispatch(Class),
-            Fresh
-    end.
+        fun() -> resolve_tagged_class_dispatch(Class) end,
+        fun(Resolved) -> resolved_module_loaded(Class, Resolved) end
+    ).
 
 -doc "Uncached derivation behind `tagged_class_dispatch/1`.".
 -spec resolve_tagged_class_dispatch(atom()) ->
     {cache | nocache, exception | {stdlib, atom()} | {value, atom()}}.
 resolve_tagged_class_dispatch(Class) ->
-    %% Whether the class is registered decides cacheability (see
-    %% tagged_class_dispatch/1).
-    Cacheable =
-        case beamtalk_class_metadata:lookup_module(Class) of
-            {ok, _} -> cache;
-            not_found -> nocache
-        end,
+    %% Read before deriving, like the cache's generation (see
+    %% tagged_class_dispatch/1 for what is cacheable).
+    Registered = beamtalk_class_metadata:lookup_module(Class) =/= not_found,
     Resolved =
         case beamtalk_exception_handler:is_exception_class(Class) of
             true ->
@@ -886,6 +887,11 @@ resolve_tagged_class_dispatch(Class) ->
                     undefined -> {value, class_name_to_module(Class)};
                     Mod -> {stdlib, Mod}
                 end
+        end,
+    Cacheable =
+        case Registered andalso resolved_module_loaded(Class, Resolved) of
+            true -> cache;
+            false -> nocache
         end,
     {Cacheable, Resolved}.
 

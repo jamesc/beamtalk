@@ -60,7 +60,9 @@ value_module_resolution_test_() ->
         {"warm Value sends do no module-name string work (BT-4064)",
             fun warm_value_send_does_no_string_work/0},
         {"exception bit follows a superclass change (BT-4064)",
-            fun exception_bit_follows_superclass_change/0}
+            fun exception_bit_follows_superclass_change/0},
+        {"a cached module that is purged and reloaded is re-derived (BT-4064)",
+            fun purged_module_is_rederived/0}
     ]}.
 
 package_value_send_makes_no_code_server_call() ->
@@ -138,7 +140,12 @@ warm_value_send_does_no_string_work() ->
         7 = beamtalk_primitive:send(Self, getX, []),
         5 = beamtalk_primitive:send(Duration, asMilliseconds, []),
         {Results, Calls} = calls_during(
-            [{beamtalk_module_name, '_', '_'}, {string, '_', '_'}],
+            [
+                {beamtalk_module_name, '_', '_'},
+                {string, '_', '_'},
+                {beamtalk_class_registry, inherits_from, 2},
+                {code_server, call, 1}
+            ],
             fun() ->
                 [
                     beamtalk_primitive:send(Self, getX, []),
@@ -172,6 +179,35 @@ exception_bit_follows_superclass_change() ->
         ?assert(beamtalk_primitive:responds_to(Self, getX))
     after
         stop_class(Pid)
+    end.
+
+purged_module_is_rederived() ->
+    %% Code loading is not a metadata write, so the cache re-checks that a
+    %% cached module is still loaded. Purging the class's module (the class
+    %% stays registered) must not leave sends calling into a stale answer, and
+    %% reloading it must bring the warm path back.
+    Pid = start_class(?CLASS, ?MOD),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    try
+        ?assertEqual(7, beamtalk_primitive:send(Self, getX, [])),
+        code:purge(?MOD),
+        true = code:delete(?MOD),
+        code:purge(?MOD),
+        ?assertNot(erlang:module_loaded(?MOD)),
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand, selector = getX}},
+            beamtalk_primitive:send(Self, getX, [])
+        ),
+        ok = load_accessor_module(?MOD, x),
+        ?assertEqual(7, beamtalk_primitive:send(Self, getX, [])),
+        {Results, Calls} = code_server_calls_during(fun() ->
+            [beamtalk_primitive:send(Self, getX, []), beamtalk_primitive:send(Self, getX, [])]
+        end),
+        ?assertEqual([7, 7], Results),
+        ?assertEqual([], Calls)
+    after
+        stop_class(Pid),
+        _ = load_accessor_module(?MOD, x)
     end.
 
 %%% ============================================================================
