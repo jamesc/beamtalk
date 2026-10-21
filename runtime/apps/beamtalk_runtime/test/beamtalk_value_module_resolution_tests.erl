@@ -177,7 +177,10 @@ code_server_calls_during(Fun) ->
     end),
     1 = erlang:trace_pattern({code_server, call, 1}, true, [global]),
     %% Always remove the global trace pattern, even on a timeout, so it never
-    %% leaks into (and slows down) the rest of the EUnit run.
+    %% leaks into (and slows down) the rest of the EUnit run, and never leave
+    %% the (unlinked, unmonitored) worker behind: if erlang:trace/3 fails it
+    %% never receives `go`, and on worker_timeout it is still running. On the
+    %% success path it has already exited, so the kill is a no-op.
     Result =
         try
             1 = erlang:trace(Worker, true, [call]),
@@ -187,7 +190,8 @@ code_server_calls_during(Fun) ->
             after 5000 -> error(worker_timeout)
             end
         after
-            erlang:trace_pattern({code_server, call, 1}, false, [global])
+            erlang:trace_pattern({code_server, call, 1}, false, [global]),
+            exit(Worker, kill)
         end,
     %% Make sure every trace message the worker generated has arrived.
     Ref = erlang:trace_delivered(Worker),
