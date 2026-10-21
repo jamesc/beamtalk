@@ -23,15 +23,24 @@ Timer objects are represented as tagged maps of one of two shapes:
 `send:to:after:` delivers a message to a process exactly as `erlang:send/2`
 would, so a Server receives it in `handleInfo:`.
 
-- **One-shot** (`send:to:after:`) is backed by `erlang:send_after/3` — no
-  extra process. `cancel` is `erlang:cancel_timer/1` (true when it had not
-  fired yet) and `isActive` is `erlang:read_timer/1 =/= false`.
+- **One-shot** (`send:to:after:`) to a local target is backed by
+  `erlang:send_after/3` — no extra process. `cancel` is
+  `erlang:cancel_timer/1` (true when it had not fired yet) and `isActive` is
+  `erlang:read_timer/1 =/= false`. `send_after/3` only accepts a local pid or
+  a local registered name, so a remote target (a pid on another node, a
+  `{registered, Name, Node}` actor, a global name held on another node) uses
+  a small one-shot process instead, with the pid-based cancel protocol.
 - **Repeating** (`send:to:every:`) uses the same spawned-process machinery
   as `every:do:` (not `timer:send_interval/3`), so `cancel`/`isActive` share
   the pid-based ack protocol of block timers. The process is not linked to
-  the creator; it monitors a pid target and stops when the target dies.
+  the creator; it monitors the target (a pid, a registered name or
+  `{Name, Node}`) and stops when the target dies, so a restarted named
+  Server never inherits its predecessor's ticks. Each tick is scheduled
+  against an absolute monotonic deadline, so intervals do not drift.
 
-A target that has died makes the timer a silent no-op, as in OTP.
+A target that has died makes the timer a silent no-op, as in OTP. A global
+name is resolved once, when the timer is created. A one-shot timer reference
+is node-local: `cancel`/`isActive` answer false on another node.
 
 ## Cancel Protocol
 
@@ -62,6 +71,9 @@ to the canonical `'after:do:'/2` implementation.
 -export(['after'/2, every/2, sleep/1, 'sendAfter'/3, 'sendEvery'/3]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+
+%% Largest delay `erlang:send_after/3` and `receive ... after` accept.
+-define(MAX_TIMEOUT_MS, 4294967295).
 
 -type t() :: #{'$beamtalk_class' := 'Timer', atom() => term()}.
 -export_type([t/0]).
@@ -131,18 +143,23 @@ milliseconds or a Duration. Backed by `erlang:send_after/3`.
 -spec 'send:to:after:'(term(), term(), integer() | beamtalk_duration:t()) -> t().
 'send:to:after:'(Msg, Target, #{'$beamtalk_class' := 'Duration'} = D) ->
     'send:to:after:'(Msg, Target, beamtalk_duration:'asMilliseconds'(D));
-'send:to:after:'(Msg, Target, Ms) when is_integer(Ms), Ms >= 0 ->
+'send:to:after:'(Msg, Target, Ms) when is_integer(Ms), Ms >= 0, Ms =< ?MAX_TIMEOUT_MS ->
     case resolve_dest('send:to:after:', Target) of
-        undefined ->
-            %% Target not reachable (e.g. an unregistered global name): an
-            %% inert timer — cancel answers false, isActive false.
+        unreachable ->
+            %% An unregistered global name: an inert timer — cancel answers
+            %% false, isActive false.
             make_tref_timer(make_ref());
-        Dest ->
-            make_tref_timer(erlang:send_after(Ms, Dest, Msg))
+        {ok, Dest} when is_atom(Dest) ->
+            make_tref_timer(erlang:send_after(Ms, Dest, Msg));
+        {ok, Dest} when is_pid(Dest), node(Dest) =:= node() ->
+            make_tref_timer(erlang:send_after(Ms, Dest, Msg));
+        {ok, Dest} ->
+            %% Remote target: send_after/3 rejects it, so a one-shot process.
+            make_timer(spawn(fun() -> send_once(Ms, Dest, Msg) end))
     end;
 'send:to:after:'(_Msg, _Target, _Ms) ->
     raise_error(
-        'send:to:after:', <<"Delay must be a non-negative Integer or a non-negative Duration">>
+        'send:to:after:', <<"Delay must be an Integer or a Duration from 0 to 4294967295 ms">>
     ).
 
 -doc """
@@ -155,23 +172,23 @@ Integer milliseconds or a Duration. Runs in a small unlinked process (the
 -spec 'send:to:every:'(term(), term(), integer() | beamtalk_duration:t()) -> t().
 'send:to:every:'(Msg, Target, #{'$beamtalk_class' := 'Duration'} = D) ->
     'send:to:every:'(Msg, Target, beamtalk_duration:'asMilliseconds'(D));
-'send:to:every:'(Msg, Target, Ms) when is_integer(Ms), Ms > 0 ->
+'send:to:every:'(Msg, Target, Ms) when is_integer(Ms), Ms > 0, Ms =< ?MAX_TIMEOUT_MS ->
     case resolve_dest('send:to:every:', Target) of
-        undefined ->
+        unreachable ->
             make_tref_timer(make_ref());
-        Dest ->
+        {ok, Dest} ->
             Pid = spawn(fun() ->
-                Mon =
-                    case is_pid(Dest) of
-                        true -> erlang:monitor(process, Dest);
-                        false -> undefined
-                    end,
-                send_loop(Ms, Dest, Msg, Mon)
+                %% monitor/2 takes a pid, a local name or {Name, Node}; an
+                %% unregistered name answers DOWN at once and the loop stops.
+                Mon = erlang:monitor(process, Dest),
+                send_loop(Ms, Dest, Msg, Mon, erlang:monotonic_time(millisecond) + Ms)
             end),
             make_timer(Pid)
     end;
 'send:to:every:'(_Msg, _Target, _Ms) ->
-    raise_error('send:to:every:', <<"Interval must be a positive Integer or a positive Duration">>).
+    raise_error(
+        'send:to:every:', <<"Interval must be an Integer or a Duration from 1 to 4294967295 ms">>
+    ).
 
 -doc """
 Block the current process for the given delay.
@@ -281,48 +298,63 @@ make_timer(Pid) ->
 make_tref_timer(TRef) ->
     #{'$beamtalk_class' => 'Timer', tref => TRef}.
 
-%% Resolve a `to:` target to something `erlang:send/2` accepts: a pid or a
-%% locally registered name (re-resolved on every delivery, like OTP).
-%% Answers `undefined` for a global name that is not currently registered.
--spec resolve_dest(atom(), term()) -> pid() | atom() | undefined.
+%% Resolve a `to:` target to `{ok, Dest}`, where `Dest` is what
+%% `erlang:send/2` accepts: a pid, a locally registered name (re-resolved on
+%% every delivery, like OTP) or `{Name, Node}`. Answers `unreachable` for a
+%% global name that is not currently registered; raises for a non-target.
+-spec resolve_dest(atom(), term()) -> {ok, pid() | atom() | {atom(), node()}} | unreachable.
 resolve_dest(_Selector, Pid) when is_pid(Pid) ->
-    Pid;
+    {ok, Pid};
 resolve_dest(_Selector, #beamtalk_object{pid = Pid}) when is_pid(Pid) ->
-    Pid;
+    {ok, Pid};
 resolve_dest(_Selector, #beamtalk_object{pid = {registered, Name}}) ->
-    Name;
-resolve_dest(Selector, #beamtalk_object{pid = {registered, Name, Node}}) ->
-    case Node =:= node() of
-        true -> Name;
-        false -> raise_error(Selector, <<"Message timers need a local target">>)
-    end;
+    {ok, Name};
+resolve_dest(_Selector, #beamtalk_object{pid = {registered, Name, Node}}) when Node =:= node() ->
+    {ok, Name};
+resolve_dest(_Selector, #beamtalk_object{pid = {registered, Name, Node}}) ->
+    {ok, {Name, Node}};
 resolve_dest(_Selector, #beamtalk_object{pid = {global, Name}}) ->
     case global:whereis_name(Name) of
-        undefined -> undefined;
-        Pid -> Pid
+        undefined -> unreachable;
+        Pid -> {ok, Pid}
     end;
 resolve_dest(Selector, _Other) ->
     raise_error(Selector, <<"Target must be an Actor or a Pid">>).
 
+%% One-shot message timer for a remote target (send_after/3 is local-only).
+-spec send_once(non_neg_integer(), pid() | {atom(), node()}, term()) -> ok.
+send_once(Ms, Dest, Msg) ->
+    receive
+        {cancel, From, Ref} ->
+            From ! {Ref, canceled},
+            ok
+    after Ms ->
+        Dest ! Msg,
+        ok
+    end.
+
 %% Repeating message-timer loop. Stops on cancel or when the monitored
-%% target dies; a send to an unregistered name is a silent no-op.
--spec send_loop(pos_integer(), pid() | atom(), term(), reference() | undefined) -> ok.
-send_loop(Ms, Dest, Msg, Mon) ->
+%% target dies. `Next` is the absolute monotonic deadline of the next tick,
+%% so a slow send never shifts later ticks.
+-spec send_loop(
+    pos_integer(), pid() | atom() | {atom(), node()}, term(), reference(), integer()
+) -> ok.
+send_loop(Ms, Dest, Msg, Mon, Next) ->
+    Wait = max(0, Next - erlang:monotonic_time(millisecond)),
     receive
         {cancel, From, Ref} ->
             From ! {Ref, canceled},
             ok;
         {'DOWN', Mon, process, _, _} ->
             ok
-    after Ms ->
-        %% bt-catcher-audit: not-applicable-other-process - runs in the timer process;
-        %% badarg only for an unregistered name, which OTP treats as a no-op
+    after Wait ->
+        %% badarg only if a registered name vanished just before this send
         (try
             Dest ! Msg
         catch
             error:badarg -> ok
         end),
-        send_loop(Ms, Dest, Msg, Mon)
+        send_loop(Ms, Dest, Msg, Mon, Next + Ms)
     end.
 
 -spec repeat_loop(integer(), function()) -> ok.

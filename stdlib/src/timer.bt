@@ -63,8 +63,10 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   ///
   /// `target` is an Actor (including a Server) or a Pid. The message is
   /// delivered exactly as `erlang:send/2` would deliver it, so a Server
-  /// receives it in `handleInfo:`. Backed by `erlang:send_after/3`, with no
-  /// extra process. If the target has died, the timer silently does nothing.
+  /// receives it in `handleInfo:`; a plain Actor ignores it. Backed by
+  /// `erlang:send_after/3`, with no extra process (a target on another node
+  /// uses a small process instead). If the target has died, the timer
+  /// silently does nothing. The delay is at most 4294967295 ms.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -84,7 +86,8 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   ///
   /// `target` is an Actor (including a Server) or a Pid; a Server receives
   /// each message in `handleInfo:`. Runs in a small process that stops on
-  /// `cancel`, or when the target dies.
+  /// `cancel`, or when the target dies (a restarted named Server does not
+  /// inherit the ticks). Ticks follow fixed deadlines, so they do not drift.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -112,7 +115,9 @@ sealed typed Object subclass: Timer native: beamtalk_timer
 
   /// Cancel this timer. Returns true if the timer was active, false if already done.
   /// For a one-shot timer, true means it had not fired yet; a repeating timer
-  /// stops.
+  /// stops. A message timer's message sent just before `cancel` may still be
+  /// in the target's mailbox, so tag messages (`{#tick, ref}`) when a stale
+  /// one matters.
   ///
   /// ## Examples
   /// ```beamtalk

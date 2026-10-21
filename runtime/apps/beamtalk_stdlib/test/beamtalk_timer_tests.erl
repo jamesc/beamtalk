@@ -319,9 +319,76 @@ send_after_cancel_before_fire_test() ->
 send_after_dead_target_is_silent_test() ->
     Dead = spawn(fun() -> ok end),
     wait_for_exit(Dead, 1000),
-    T = beamtalk_timer:'send:to:after:'(tick, Dead, 1),
-    timer:sleep(20),
+    %% send_after/3 to a dead local pid cancels the timer at once.
+    T = beamtalk_timer:'send:to:after:'(tick, Dead, 10000),
+    ?assertNot(beamtalk_timer:'isActive'(T)),
+    ?assertNot(beamtalk_timer:cancel(T)).
+
+%% A pid on another node (never connected): send_after/3 would raise badarg,
+%% so the one-shot falls back to a cancellable process.
+send_after_remote_pid_uses_process_test() ->
+    Remote = fake_remote_pid(),
+    T = beamtalk_timer:'send:to:after:'(tick, Remote, 10000),
+    ?assertMatch(#{'$beamtalk_class' := 'Timer', pid := _}, T),
+    ?assert(beamtalk_timer:'isActive'(T)),
+    ?assert(beamtalk_timer:cancel(T)),
     ?assertNot(beamtalk_timer:'isActive'(T)).
+
+send_after_remote_registered_uses_process_test() ->
+    Obj = #beamtalk_object{
+        class = 'Foo', class_mod = foo, pid = {registered, bt4048_far, 'bt4048@nowhere'}
+    },
+    T = beamtalk_timer:'send:to:after:'(tick, Obj, 10000),
+    ?assert(beamtalk_timer:'isActive'(T)),
+    ?assert(beamtalk_timer:cancel(T)).
+
+send_after_remote_pid_fires_test() ->
+    T = beamtalk_timer:'send:to:after:'(tick, fake_remote_pid(), 1),
+    wait_for_exit(maps:get(pid, T), 1000),
+    ?assertNot(beamtalk_timer:cancel(T)).
+
+send_after_delay_too_large_raises_test() ->
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:after:'(tick, self(), 4294967296)),
+    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:every:'(tick, self(), 4294967296)).
+
+%% A repeating timer to a registered name stops when the named process dies,
+%% so a restarted process under the same name does not inherit its ticks.
+send_every_registered_name_stops_when_holder_dies_test() ->
+    Name = bt4048_every_target,
+    Holder = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    true = register(Name, Holder),
+    Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {registered, Name}},
+    T = beamtalk_timer:'send:to:every:'(tick, Obj, 10),
+    Holder ! stop,
+    wait_for_exit(maps:get(pid, T), 1000).
+
+send_every_unregistered_name_stops_test() ->
+    Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {registered, bt4048_nobody}},
+    T = beamtalk_timer:'send:to:every:'(tick, Obj, 10),
+    wait_for_exit(maps:get(pid, T), 1000).
+
+send_every_does_not_drift_test() ->
+    T = beamtalk_timer:'send:to:every:'(tick, self(), 20),
+    timer:sleep(210),
+    ?assert(beamtalk_timer:cancel(T)),
+    N = count_ticks(0),
+    ?assert(N >= 8 andalso N =< 11).
+
+count_ticks(N) ->
+    receive
+        tick -> count_ticks(N + 1)
+    after 0 -> N
+    end.
+
+fake_remote_pid() ->
+    Node = atom_to_binary('bt4048@nowhere'),
+    binary_to_term(
+        <<131, 88, 119, (byte_size(Node)), Node/binary, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1>>
+    ).
 
 send_after_unregistered_global_is_inert_test() ->
     Obj = #beamtalk_object{class = 'Foo', class_mod = foo, pid = {global, bt4048_nobody}},

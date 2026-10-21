@@ -15,10 +15,10 @@ TestCase subclass: TimerMessageTest
     t := Timer
       send: #tick
       to: self.s
-      after: 20
+      after: 500
     self assert: t class equals: Timer
     self assert: self.s ticks equals: 0
-    Timer sleep: 150
+    Timer sleep: 1000
     self assert: self.s ticks equals: 1
 
   testOneShotDeliversTupleMessage =>
@@ -26,7 +26,7 @@ TestCase subclass: TimerMessageTest
       send: {#data, 42}
       to: self.s
       after: 10
-    Timer sleep: 150
+    Timer sleep: 500
     self assert: self.s payloads equals: #(42)
 
   testOneShotToPid =>
@@ -34,16 +34,16 @@ TestCase subclass: TimerMessageTest
       send: #tick
       to: self.s pid
       after: 10
-    Timer sleep: 150
+    Timer sleep: 500
     self assert: self.s ticks equals: 1
 
   testDurationDelay =>
     t := Timer
       send: #tick
       to: self.s
-      after: (Duration milliseconds: 20)
+      after: (Duration milliseconds: 500)
     self assert: t isActive
-    Timer sleep: 150
+    Timer sleep: 1000
     self assert: self.s ticks equals: 1
     self deny: t isActive
 
@@ -51,9 +51,9 @@ TestCase subclass: TimerMessageTest
     t := Timer
       send: #tick
       to: self.s
-      after: 50
+      after: 300
     self assert: t cancel equals: true
-    Timer sleep: 150
+    Timer sleep: 600
     self assert: self.s ticks equals: 0
 
   testCancelAfterFiringAnswersFalse =>
@@ -61,7 +61,7 @@ TestCase subclass: TimerMessageTest
       send: #tick
       to: self.s
       after: 10
-    Timer sleep: 150
+    Timer sleep: 500
     self assert: self.s ticks equals: 1
     self assert: t cancel equals: false
 
@@ -81,7 +81,7 @@ TestCase subclass: TimerMessageTest
       to: self.s
       every: 20
     self assert: t isActive
-    Timer sleep: 150
+    Timer sleep: 500
     self assert: t cancel equals: true
     self deny: t isActive
     n := self.s ticks
@@ -95,13 +95,13 @@ TestCase subclass: TimerMessageTest
       send: #tick
       to: self.s
       every: (Duration milliseconds: 20)
-    Timer sleep: 100
+    Timer sleep: 500
     t cancel
     self assert: self.s ticks >= 2
 
   testSelfReschedulingServer =>
     self.s startPeriodic
-    Timer sleep: 300
+    Timer sleep: 1000
     self assert: self.s ticks equals: 3
 
   testDeadTargetOneShotIsSilent =>
@@ -139,5 +139,27 @@ TestCase subclass: TimerMessageTest
           send: #tick
           to: self.s
           every: 0
+      ]
+      raise: #type_error
+
+  testErrorDelayTooLarge =>
+    // erlang:send_after/3 caps delays at 2^32 - 1 ms
+    self
+      should: [
+        Timer
+          send: #tick
+          to: self.s
+          after: 4294967296
+      ]
+      raise: #type_error
+
+  testErrorBadTarget =>
+    @expect type
+    self
+      should: [
+        Timer
+          send: #tick
+          to: 42
+          after: 10
       ]
       raise: #type_error
