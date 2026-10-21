@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture (BT-3960 / ADR 0134): supervises one E2EFailingInfoServer,
+// restarted with a new pid when a handleInfo: error crashes it.
+
+Supervisor subclass: E2EFailingInfoSup
+
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  childSpecs -> List =>
+    #(E2EFailingInfoServer supervisionSpec withRestart: #permanent)

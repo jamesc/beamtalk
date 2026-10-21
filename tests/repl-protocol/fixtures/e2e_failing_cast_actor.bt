@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture (BT-3960 / ADR 0134): an actor whose `explode` method raises.
+// Sent as a `!` cast, the error has no caller, so it crashes the actor.
+
+Actor subclass: E2EFailingCastActor
+
+  explode => Error signal: "deliberate cast error"
+
+  ping => #pong

@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture (BT-3960 / ADR 0134): a Server whose handleInfo: raises on
+// #crash. Since ADR 0134 that error crashes the server instead of being
+// logged. Any other raw message is counted.
+
+Server subclass: E2EFailingInfoServer
+  state: count = 0
+
+  handleInfo: msg =>
+    msg match: [
+      #crash -> Error signal: "deliberate handleInfo: error";
+      _ -> self.count := self.count + 1
+    ]
+
+  getCount => self.count
