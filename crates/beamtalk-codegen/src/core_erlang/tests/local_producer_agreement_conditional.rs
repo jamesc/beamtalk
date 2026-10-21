@@ -24,7 +24,8 @@ use crate::core_erlang::threaded_expr::fault::recording_producers;
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::{Expression, ExpressionStatement};
 use beamtalk_core::semantic_analysis::block_facts::{
-    RootMethodKind, conditional_arm_blocks, exception_arm_blocks, sequenced_operand_sites,
+    RootMethodKind, conditional_arm_blocks, exception_arm_blocks, match_arms,
+    sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -34,31 +35,31 @@ use std::collections::{HashMap, HashSet};
 /// arms, two locals, and arms holding a loop, a fold, a nested conditional,
 /// a nested non-producer (rejected by Phase 0, so skipped) or a `^`.
 pub(super) const CONDITIONALS: &[&str] = &[
-    "(s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]",
-    "(s < 3) ifTrue: [t := t + 1]",
-    "(s < 3) ifFalse: [t := t + 1. 2]",
-    "(s < 3) and: [t := t + 1. true]",
-    "(s < 3) or: [t := t + 1. true]",
+    "(s == 3) ifTrue: [t := t + 1. 2] ifFalse: [3]",
+    "(s == 3) ifTrue: [t := t + 1]",
+    "(s == 3) ifFalse: [t := t + 1. 2]",
+    "(s == 3) and: [t := t + 1. true]",
+    "(s == 3) or: [t := t + 1. true]",
     "s ifNil: [t := t + 1. 2]",
     "s ifNotNil: [:v | t := t + v. 2]",
     "s ifNil: [t := t + 1. 0] ifNotNil: [:v | t := t + 2. v]",
     "s ifNotNil: [:v | t := t + 2. v] ifNil: [t := t + 1. 0]",
-    "(s < 3) ifTrue: [t := 9. 2] ifFalse: [3]",
-    "(s < 3) ifTrue: [t := t + 1. u := 5. 2] ifFalse: [u := 6. 3]",
-    "(s < 3) ifTrue: [t := t + 1] ifFalse: [u := u + 1]",
-    "(s < 3) ifTrue: [#(1, 2) do: [:x | t := t + x]]",
-    "(s < 3) ifTrue: [n := (#(1, 2) collect: [:x | t := t + x]) size. 2] ifFalse: [3]",
-    "(s < 3) ifTrue: [1 to: 2 do: [:i | t := t + i]. t := t + 100]",
-    "(s < 3) ifTrue: [[s < 2] whileTrue: [s := s + 1. t := t + 1]]",
-    "(s < 3) ifTrue: [(s < 3) ifTrue: [t := t + 1. 1] ifFalse: [2]] ifFalse: [3]",
-    "(s < 3) ifTrue: [(s < 3) ifTrue: [t := t + 1]]",
-    "(s < 3) ifTrue: [t := t + 1. (s < 3) ifTrue: [u := u + 1]]",
-    "(s < 3) ifTrue: [#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]]",
-    "(s < 3) ifTrue: [#(1, 2) do: [:x | (s < 3) ifTrue: [t := t + x]]]",
-    "(s < 3) ifTrue: [t := t + 1. ^t]",
-    "(s < 3) ifTrue: [[t := t + 1] on: Error do: [:e | 0]]",
-    "(s < 3) ifTrue: [n := (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]) + 1. 2] ifFalse: [3]",
-    "(s < 3) ifTrue: [(#(1, 2) collect: [:x | t := t + x]) size]",
+    "(s == 3) ifTrue: [t := 9. 2] ifFalse: [3]",
+    "(s == 3) ifTrue: [t := t + 1. u := 5. 2] ifFalse: [u := 6. 3]",
+    "(s == 3) ifTrue: [t := t + 1] ifFalse: [u := u + 1]",
+    "(s == 3) ifTrue: [#(1, 2) do: [:x | t := t + x]]",
+    "(s == 3) ifTrue: [n := (#(1, 2) collect: [:x | t := t + x]) size. 2] ifFalse: [3]",
+    "(s == 3) ifTrue: [1 to: 2 do: [:i | t := t + i]. t := t + 100]",
+    "(s == 3) ifTrue: [[s == 2] whileTrue: [s := s + 1. t := t + 1]]",
+    "(s == 3) ifTrue: [(s == 3) ifTrue: [t := t + 1. 1] ifFalse: [2]] ifFalse: [3]",
+    "(s == 3) ifTrue: [(s == 3) ifTrue: [t := t + 1]]",
+    "(s == 3) ifTrue: [t := t + 1. (s == 3) ifTrue: [u := u + 1]]",
+    "(s == 3) ifTrue: [#(1, 2) detect: [:x | x == 5] ifNone: [t := t + 1]]",
+    "(s == 3) ifTrue: [#(1, 2) do: [:x | (s == 3) ifTrue: [t := t + x]]]",
+    "(s == 3) ifTrue: [t := t + 1. ^t]",
+    "(s == 3) ifTrue: [[t := t + 1] on: Error do: [:e | 0]]",
+    "(s == 3) ifTrue: [n := (#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]) + 1. 2] ifFalse: [3]",
+    "(s == 3) ifTrue: [(#(1, 2) collect: [:x | t := t + x]) size]",
     // BT-3841: an evaluated literal block is the degenerate conditional (one arm
     // that always runs): the same site rule, producer rule and arm frame.
     "[t := t + 1. 2] value",
@@ -67,11 +68,25 @@ pub(super) const CONDITIONALS: &[&str] = &[
     "[t := t + 1] value",
     "[#(1, 2) do: [:x | t := t + x]] value",
     "[n := (#(1, 2) collect: [:x | t := t + x]) size. 2] value",
-    "[(s < 3) ifTrue: [t := t + 1. 1] ifFalse: [2]] value",
+    "[(s == 3) ifTrue: [t := t + 1. 1] ifFalse: [2]] value",
     "[[t := t + 1. 1] value. 3] value",
     "[t := t + 1. ^t] value",
     "[[t := t + 1] on: Error do: [:e | 0]] value",
-    "[#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]] value",
+    "[#(1, 2) detect: [:x | x == 5] ifNone: [t := t + 1]] value",
+    // BT-3947: a `match:` is the conditional whose arms are expressions: the same
+    // site rule, producer rule and arm frame, one arm per `match:` arm.
+    "s match: [0 -> (t := t + 1); _ -> 2]",
+    "s match: [0 -> (t := 9); _ -> (t := t + 1)]",
+    "s match: [n -> (t := t + n)]",
+    "s match: [0 -> (t := t + 1); _ -> (u := u + 1)]",
+    "s match: [0 -> (#(1, 2) do: [:x | t := t + x]); _ -> 0]",
+    "s match: [0 -> (s match: [0 -> (t := t + 1); _ -> 0]); _ -> 0]",
+    "s match: [0 -> ((s < 3) ifTrue: [t := t + 1] ifFalse: [2]); _ -> 0]",
+    "s match: [#[a, b] -> (t := t + a); _ -> 0]",
+    "s match: [n :: Integer -> (t := t + n); _ -> 0]",
+    "s match: [n when: [n > 1] -> (t := t + n); _ -> 0]",
+    "s match: [0 -> ([t := t + 1. 2] value); _ -> 0]",
+    "s match: [0 -> (#(1, 2) detect: [:x | x == 5] ifNone: [t := t + 1]); _ -> 0]",
     // Not producers: a literal with parameters or arguments (`value:`), and a
     // parenthesised block receiver.
     "[:v | t := t + v] value: 2",
@@ -93,32 +108,38 @@ pub(super) const CONDITIONAL_POSITIONS: &[&str] = &[
 
 /// The arm frames: a conditional producer's arm holding `{s}`.
 pub(super) const ARM_FRAMES: &[&str] = &[
-    "(s < 3) ifTrue: [{s}]",
+    "(s == 3) ifTrue: [{s}]",
     // An arm that binds a local of its own before the statement (BT-3840).
-    "(s < 3) ifTrue: [w := 0. {s}. w]",
-    "(s < 3) ifTrue: [{s}] ifFalse: [nil]",
-    "(s < 3) ifFalse: [{s}]",
-    "(s < 3) and: [{s}. true]",
-    "(s < 3) or: [{s}. true]",
+    "(s == 3) ifTrue: [w := 0. {s}. w]",
+    "(s == 3) ifTrue: [{s}] ifFalse: [nil]",
+    "(s == 3) ifFalse: [{s}]",
+    "(s == 3) and: [{s}. true]",
+    "(s == 3) or: [{s}. true]",
     "s ifNil: [{s}] ifNotNil: [:v | v]",
     "s ifNotNil: [:v | {s}]",
-    "(s < 3) ifTrue: [(s < 3) ifTrue: [{s}]]",
-    "(s < 3) ifTrue: [t := t + 1. {s}]",
-    "(s < 3) ifTrue: [#(1, 2) do: [:k | {s}]]",
-    "(s < 3) ifTrue: [r := (s < 3) ifTrue: [{s}. 1] ifFalse: [2]. r]",
-    "#(1, 2) do: [:k | (s < 3) ifTrue: [{s}]]",
-    "2 timesRepeat: [(s < 3) ifTrue: [#(1, 2) do: [:i | {s}]]]",
+    "(s == 3) ifTrue: [(s == 3) ifTrue: [{s}]]",
+    "(s == 3) ifTrue: [t := t + 1. {s}]",
+    "(s == 3) ifTrue: [#(1, 2) do: [:k | {s}]]",
+    "(s == 3) ifTrue: [r := (s == 3) ifTrue: [{s}. 1] ifFalse: [2]. r]",
+    "#(1, 2) do: [:k | (s == 3) ifTrue: [{s}]]",
+    "2 timesRepeat: [(s == 3) ifTrue: [#(1, 2) do: [:i | {s}]]]",
     // BT-3841: the arm frame of an evaluated literal block, alone and in the
     // other frames.
     "[{s}] value",
     "[{s}. 1] value",
     "[w := 0. {s}. w] value",
     "[[{s}] value] value",
-    "(s < 3) ifTrue: [[{s}] value]",
-    "[(s < 3) ifTrue: [{s}]] value",
+    "(s == 3) ifTrue: [[{s}] value]",
+    "[(s == 3) ifTrue: [{s}]] value",
     "#(1, 2) do: [:k | [{s}] value]",
     "[#(1, 2) do: [:k | {s}]] value",
     "[[{s}] on: Error do: [:e | 0]] value",
+    // BT-3947: the arm frame of a `match:` producer.
+    "s match: [0 -> ({s}); _ -> 1]",
+    "s match: [_ -> ({s})]",
+    "s match: [0 -> (t := t + 1); _ -> ({s})]",
+    "(s < 3) ifTrue: [s match: [0 -> ({s}); _ -> 1]]",
+    "#(1, 2) do: [:k | s match: [0 -> ({s}); _ -> 1]]",
 ];
 
 /// Constructs used inside arm frames (a subset of [`CONSTRUCTS`] that keeps the
@@ -127,17 +148,17 @@ pub(super) const ARM_CONSTRUCTS: &[&str] = &[
     "#(1, 2) collect: [:x | t := t + x]",
     "#(1, 2) inject: 0 into: [:a :x | t := t + 1. a + x]",
     "1 to: 2 do: [:i | t := t + i]",
-    "[s < 2] whileTrue: [s := s + 1. t := t + 1]",
+    "[s == 2] whileTrue: [s := s + 1. t := t + 1]",
     "#(1, 2) do: [:x | t := t + x]",
-    "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]",
-    "(s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]",
+    "#(1, 2) detect: [:x | x == 5] ifNone: [t := t + 1. 0]",
+    "(s == 3) ifTrue: [t := t + 1. 2] ifFalse: [3]",
     "s ifNil: [t := t + 1. 2]",
     "Result tryDo: [t := t + 1. 2]",
     "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]. 2]",
     // Write-only: the first mention of `t` is the write, yet `t` is bound
     // outside (BT-3840).
     "Result tryDo: [#{#a => 1} at: #k ifAbsent: [t := 1]. 2]",
-    "[(s < 3) ifTrue: [t := 1]. 1] on: Error do: [:e | 0]",
+    "[(s == 3) ifTrue: [t := 1]. 1] on: Error do: [:e | 0]",
     "Result tryDo: [t := 5. 2]",
     "[t := t + 1. 2] value",
 ];
@@ -178,6 +199,12 @@ fn conditional_spans(body: &[ExpressionStatement]) -> HashMap<Span, Vec<Span>> {
                 out.insert(
                     Expression::span(e.unwrap_parens()),
                     arms.iter().map(|b| b.span).collect(),
+                );
+            } else if let Some(arms) = match_arms(e) {
+                // BT-3947: a `match:`'s arms, by the arm body's span.
+                out.insert(
+                    Expression::span(e.unwrap_parens()),
+                    arms.iter().map(|a| a.body.span()).collect(),
                 );
             }
         });
@@ -253,21 +280,12 @@ pub(super) fn check_conditional_agreement(src: &str) -> Option<usize> {
     // And the other way: codegen lowers no conditional as a producer that the
     // core rule does not name.
     for (span, names) in &lowered {
-        // A loop or fold lowered as a producer inside an arm of a conditional
-        // the core rule does not name would be lowered by an arm frame the
-        // Phase 0 check never judged it under (it applies the legacy rows to
-        // the arm): codegen registers an arm frame only for a conditional
-        // producer.
-        for (cond, arms) in &conditionals {
-            let inside = arms
-                .iter()
-                .any(|a| a.start() <= span.start() && span.end() <= a.end());
-            assert!(
-                !inside || expected.contains_key(cond) || expected.contains_key(span),
-                "codegen lowered the construct at {span:?} as a producer in an arm of \
-                 the non-producer conditional at {cond:?}\n{src}"
-            );
-        }
+        // BT-3912 (BT-3833): a loop or fold in an arm of a conditional the core
+        // rule does not name IS lowered as a producer: the arm is a plain closure
+        // body, a frame of its own (`with_closure_body_frame`), and the loop's
+        // rebinds of the arm's own locals are `LocalRebind`s of that frame. (It
+        // used to be unpacked by the legacy single-local write-back.) Only the
+        // conditional itself must agree with the core rule.
         if conditionals.contains_key(span) {
             assert!(
                 expected.contains_key(span),
@@ -300,9 +318,9 @@ fn every_conditional_site_the_core_rule_accepts_is_lowered_by_the_producer() {
 /// `ifTrue:`/`ifFalse:` arms; the boolean and nil-testing arms; an arm nested
 /// in another producer; an arm in a loop or holding a conditional; an
 /// evaluated literal block's arm alone; the same nested in or around other
-/// frames.
+/// frames; a `match:` producer's arms (BT-3947).
 pub(super) const ARM_FRAME_FAMILIES: &[std::ops::Range<usize>] =
-    &[0..4, 4..8, 8..11, 11..14, 14..19, 19..23];
+    &[0..4, 4..8, 8..11, 11..14, 14..19, 19..23, 23..28];
 
 /// Both ways, for a loop, fold, conditional or exception in a statement of
 /// one family of [`ARM_FRAMES`]: the whole proof is the per-family tests
@@ -337,6 +355,7 @@ beamtalk_core::per_family_tests! {
     every_arm_frame_site_in_a_loop_or_holding_a_conditional_the_core_rule_accepts_is_lowered_by_the_producer => 3,
     every_evaluated_block_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 4,
     every_nested_evaluated_block_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 5,
+    every_match_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 6,
 }
 
 /// Actor conditionals the core rule does not name as producers (the arm writes a
@@ -347,27 +366,27 @@ beamtalk_core::per_family_tests! {
 /// fold in the arm of any other conditional is judged and lowered by the legacy
 /// rows, never by an arm frame.
 const ACTOR_NON_PRODUCER_CONDITIONALS: &[&str] = &[
-    "(s < 3) ifTrue: [self.n := 1. #(1) do: [:e | t := t + e]]",
-    "(s < 3) ifTrue: [self.n := 1. 1 to: 2 do: [:i | t := t + i]]",
-    "(s < 3) ifTrue: [self.n := 1. #(1) inject: 0 into: [:a :e | t := t + e. a + e]]",
-    "(s < 3) ifTrue: [self.n := 1. [s < 2] whileTrue: [s := s + 1. t := t + 1]]",
-    "(s < 3) ifTrue: [self go. #(1) do: [:e | t := t + e]]",
-    "(s < 3) ifTrue: [self.n := 1. (s < 3) ifTrue: [self.n := 2. #(1) do: [:e | t := t + e]]]",
-    "(s < 3) ifTrue: [#(1) do: [:e | self.n := e. t := t + e]]",
-    "(s < 3) ifTrue: [self.n := 1] ifFalse: [#(1) do: [:e | t := t + e]]",
-    "(s < 3) ifTrue: [self.n := t]",
-    "(s < 3) ifTrue: [self.n := 1. t := t + 1. #(1) detect: [:e | e > 5] ifNone: [t := t + 1. 0]]",
-    "(s < 3) ifTrue: [self.n := 1. #(1) collect: [:e | t := t + e]]",
+    "(s == 3) ifTrue: [self.n := 1. #(1) do: [:e | t := t + e]]",
+    "(s == 3) ifTrue: [self.n := 1. 1 to: 2 do: [:i | t := t + i]]",
+    "(s == 3) ifTrue: [self.n := 1. #(1) inject: 0 into: [:a :e | t := t + e. a + e]]",
+    "(s == 3) ifTrue: [self.n := 1. [s == 2] whileTrue: [s := s + 1. t := t + 1]]",
+    "(s == 3) ifTrue: [self go. #(1) do: [:e | t := t + e]]",
+    "(s == 3) ifTrue: [self.n := 1. (s == 3) ifTrue: [self.n := 2. #(1) do: [:e | t := t + e]]]",
+    "(s == 3) ifTrue: [#(1) do: [:e | self.n := e. t := t + e]]",
+    "(s == 3) ifTrue: [self.n := 1] ifFalse: [#(1) do: [:e | t := t + e]]",
+    "(s == 3) ifTrue: [self.n := t]",
+    "(s == 3) ifTrue: [self.n := 1. t := t + 1. #(1) detect: [:e | e == 5] ifNone: [t := t + 1. 0]]",
+    "(s == 3) ifTrue: [self.n := 1. #(1) collect: [:e | t := t + e]]",
     "s ifNil: [self.n := 1. #(1) do: [:e | t := t + e]]",
     "s ifNotNil: [:v | self go. 1 to: 2 do: [:i | t := t + i]]",
-    "(s < 3) and: [self.n := 1. #(1) do: [:e | t := t + e]. true]",
+    "(s == 3) and: [self.n := 1. #(1) do: [:e | t := t + e]. true]",
     // Loops writing only a local of the arm: the conditional writes no outer
     // local (not a producer), yet its arm holds a producer-shaped loop.
-    "(s < 3) ifTrue: [self.n := 1. m := 0. #(1, 2) do: [:e | m := m + e]. m]",
-    "(s < 3) ifTrue: [self go. m := 0. 1 to: 2 do: [:i | m := m + i]. m] ifFalse: [0]",
-    "(s < 3) ifTrue: [self.n := 1. m := 0. #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]]",
-    "(s < 3) ifTrue: [self.n := 1. m := 0. [m < 2] whileTrue: [m := m + 1]. m]",
-    "(s < 3) ifTrue: [self.n := 1. m := 0. (#(1, 2) collect: [:e | m := m + e]) size]",
+    "(s == 3) ifTrue: [self.n := 1. m := 0. #(1, 2) do: [:e | m := m + e]. m]",
+    "(s == 3) ifTrue: [self go. m := 0. 1 to: 2 do: [:i | m := m + i]. m] ifFalse: [0]",
+    "(s == 3) ifTrue: [self.n := 1. m := 0. #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]]",
+    "(s == 3) ifTrue: [self.n := 1. m := 0. [m == 2] whileTrue: [m := m + 1]. m]",
+    "(s == 3) ifTrue: [self.n := 1. m := 0. (#(1, 2) collect: [:e | m := m + e]) size]",
 ];
 
 /// The same, in every method context: conditionals with no outer-local write
@@ -375,15 +394,15 @@ const ACTOR_NON_PRODUCER_CONDITIONALS: &[&str] = &[
 /// another arm, and with a self-send. No field write (a value type cannot write
 /// one, ADR 0042).
 const NON_PRODUCER_CONDITIONALS: &[&str] = &[
-    "(s < 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifFalse: [0]",
-    "(s < 3) ifTrue: [m := 0. 1 to: 2 do: [:i | m := m + i]. m] ifFalse: [0]",
-    "(s < 3) ifTrue: [m := 0. #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]. m]",
-    "(s < 3) ifTrue: [m := 0. [m < 2] whileTrue: [m := m + 1]. m]",
-    "(s < 3) ifTrue: [m := 0. (#(1, 2) collect: [:e | m := m + e]) size + m]",
-    "(s < 3) ifTrue: [self go. m := 0. #(1, 2) do: [:e | m := m + e]. m]",
-    "(s < 3) ifTrue: [(s < 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m]]",
+    "(s == 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifFalse: [0]",
+    "(s == 3) ifTrue: [m := 0. 1 to: 2 do: [:i | m := m + i]. m] ifFalse: [0]",
+    "(s == 3) ifTrue: [m := 0. #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]. m]",
+    "(s == 3) ifTrue: [m := 0. [m == 2] whileTrue: [m := m + 1]. m]",
+    "(s == 3) ifTrue: [m := 0. (#(1, 2) collect: [:e | m := m + e]) size + m]",
+    "(s == 3) ifTrue: [self go. m := 0. #(1, 2) do: [:e | m := m + e]. m]",
+    "(s == 3) ifTrue: [(s == 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m]]",
     "s ifNil: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifNotNil: [:v | v]",
-    "(s < 3) and: [m := 0. #(1, 2) do: [:e | m := m + e]. true]",
+    "(s == 3) and: [m := 0. #(1, 2) do: [:e | m := m + e]. true]",
     // An evaluated literal block that writes no outer local is not a producer
     // either (BT-3841): the loop in it is judged by the legacy rows.
     "[m := 0. #(1, 2) do: [:e | m := m + e]. m] value",
@@ -441,7 +460,7 @@ fn actor_conditionals_that_are_not_producers_agree_with_the_core_rule() {
 pub(super) const LOOP_BODY_FRAMES: &[&str] = &[
     "1 to: 2 do: [:k | {s}]",
     "2 timesRepeat: [{s}]",
-    "[s < 3] whileTrue: [s := s + 1. {s}]",
+    "[s == 3] whileTrue: [s := s + 1. {s}]",
     "#(1, 2) do: [:k | {s}]",
     "#(1, 2) collect: [:k | {s}. k]",
     "#(1, 2) inject: 0 into: [:a :k | {s}. a + k]",
@@ -458,21 +477,21 @@ pub(super) const LOOP_BODY_FRAMES: &[&str] = &[
 /// Conditionals that write `t`, a cross-section of [`CONDITIONALS`] for the
 /// loop-body products, which multiply by every frame and statement shape.
 const LOOP_BODY_CONDITIONALS: &[&str] = &[
-    "(s < 3) ifTrue: [t := t + 1. 2] ifFalse: [3]",
-    "(s < 3) ifTrue: [t := t + 1]",
-    "(s < 3) and: [t := t + 1. true]",
+    "(s == 3) ifTrue: [t := t + 1. 2] ifFalse: [3]",
+    "(s == 3) ifTrue: [t := t + 1]",
+    "(s == 3) and: [t := t + 1. true]",
     "s ifNil: [t := t + 1. 2]",
     "s ifNotNil: [:v | t := t + v. 2]",
-    "(s < 3) ifTrue: [t := t + 1. u := 5. 2] ifFalse: [u := 6. 3]",
-    "(s < 3) ifTrue: [#(1, 2) do: [:x | t := t + x]]",
-    "(s < 3) ifTrue: [1 to: 2 do: [:i | t := t + i]. t := t + 100]",
-    "(s < 3) ifTrue: [(s < 3) ifTrue: [t := t + 1. 1] ifFalse: [2]] ifFalse: [3]",
-    "(s < 3) ifTrue: [#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1]]",
-    "(s < 3) ifTrue: [t := t + 1. ^t]",
-    "(s < 3) ifTrue: [[t := t + 1] on: Error do: [:e | 0]]",
+    "(s == 3) ifTrue: [t := t + 1. u := 5. 2] ifFalse: [u := 6. 3]",
+    "(s == 3) ifTrue: [#(1, 2) do: [:x | t := t + x]]",
+    "(s == 3) ifTrue: [1 to: 2 do: [:i | t := t + i]. t := t + 100]",
+    "(s == 3) ifTrue: [(s == 3) ifTrue: [t := t + 1. 1] ifFalse: [2]] ifFalse: [3]",
+    "(s == 3) ifTrue: [#(1, 2) detect: [:x | x == 5] ifNone: [t := t + 1]]",
+    "(s == 3) ifTrue: [t := t + 1. ^t]",
+    "(s == 3) ifTrue: [[t := t + 1] on: Error do: [:e | 0]]",
     "[t := t + 1. 2] value",
     "[#(1, 2) do: [:x | t := t + x]] value",
-    "[(s < 3) ifTrue: [t := t + 1]] value",
+    "[(s == 3) ifTrue: [t := t + 1]] value",
 ];
 
 /// The families of [`LOOP_BODY_FRAMES`], as index ranges, one test each here
@@ -524,17 +543,17 @@ beamtalk_core::per_family_tests! {
 /// it lowers as a plain loop, never as a locals-less `StateAcc` loop
 /// (`StateAccLoopWithoutLocals`).
 const LOOP_BODY_NON_PRODUCER_CONDITIONALS: &[&str] = &[
-    "(s < 3) ifTrue: [m := 0. m := m + 1. m] ifFalse: [0]",
-    "(s < 3) ifTrue: [m := 5. m]",
+    "(s == 3) ifTrue: [m := 0. m := m + 1. m] ifFalse: [0]",
+    "(s == 3) ifTrue: [m := 5. m]",
     "s ifNil: [m := 1. m] ifNotNil: [:v | v]",
     "s ifNotNil: [:v | m := v. m]",
-    "(s < 3) and: [m := 1. true]",
-    "(s < 3) ifTrue: [(s < 3) ifTrue: [m := 1. m]]",
-    "(s < 3) ifTrue: [t] ifFalse: [u]",
-    "(s < 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifFalse: [0]",
-    "(s < 3) ifTrue: [m := 0. 1 to: 2 do: [:e | m := m + e]. m] ifFalse: [0]",
-    "s ifNotNil: [:v | m := v. [m < 5] whileTrue: [m := m + 1]. m]",
-    "(s < 3) ifTrue: [m := 0. (#(1, 2) collect: [:e | m := m + e]) size]",
+    "(s == 3) and: [m := 1. true]",
+    "(s == 3) ifTrue: [(s == 3) ifTrue: [m := 1. m]]",
+    "(s == 3) ifTrue: [t] ifFalse: [u]",
+    "(s == 3) ifTrue: [m := 0. #(1, 2) do: [:e | m := m + e]. m] ifFalse: [0]",
+    "(s == 3) ifTrue: [m := 0. 1 to: 2 do: [:e | m := m + e]. m] ifFalse: [0]",
+    "s ifNotNil: [:v | m := v. [m == 5] whileTrue: [m := m + 1]. m]",
+    "(s == 3) ifTrue: [m := 0. (#(1, 2) collect: [:e | m := m + e]) size]",
 ];
 
 /// Conditionals that are not producers, as a statement of every loop or fold

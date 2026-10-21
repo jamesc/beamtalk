@@ -452,7 +452,7 @@ pub fn producer_body_arg_index(sel: &str, arity: usize) -> Option<usize> {
         (
             "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
             | "reject:" | "count:" | "detect:" | "keysAndValuesDo:" | "doWithKey:" | "anySatisfy:"
-            | "allSatisfy:" | "eachWithIndex:",
+            | "allSatisfy:" | "eachWithIndex:" | "groupBy:",
             1,
         )
         | ("detect:ifNone:" | "do:separatedBy:", 2) => Some(0),
@@ -613,6 +613,154 @@ pub fn is_dictionary_inline_lookup(sel: &str) -> bool {
 #[must_use]
 pub fn is_try_do_selector(sel: &str) -> bool {
     sel == "tryDo:"
+}
+
+// ─── ADR 0137 (BT-4020): which sends may run user code ──────────────────────
+
+/// ADR 0137 §1–2: whether a send, as a *call*, may run one of this actor's
+/// blocks or methods in the calling process — the classification the cell
+/// bracket (`SyncedCall`) and its verifier (`UnbracketedUserCodeSend`) key on.
+/// Derived entirely from the tables above and [`WellKnownSelector`], so there
+/// is no second list to keep in step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendUserCode {
+    /// An intrinsic that can never dispatch to user code, whatever its
+    /// arguments are (`isNil`, `class`, `hash`, `error:`, the field
+    /// reflection family, `spawn`/`await`, `asType:`, `yourself`).
+    Never,
+    /// A construct the compiler lowers in place (`ifTrue:`, `whileTrue:`, an
+    /// inlined `do:`, `on:do:`, a literal block's `value`, ...). It is not a
+    /// call; the sends in its blocks are classified where they are compiled.
+    Inlined,
+    /// A collection message with a literal block: lowered in place as a
+    /// fold when its block threads `State`, but otherwise handed to a runtime
+    /// helper (`lists:foreach`, `lists:map`, ...) with the block as a closure,
+    /// which runs in this process (and falls back to a real send for a
+    /// receiver that is not a list). Whether it is a call is the code
+    /// generator's to judge (it knows whether the fold is threaded); the
+    /// block analysis counts it, conservatively, as one.
+    InlinedOrClosureCall,
+    /// Anything else: bracket it. This is the default (ADR 0137 §2): a
+    /// primitive that takes a block or can dispatch to user code for some
+    /// argument, a non-inlined `value`, `perform:`, a send to an unknown or
+    /// in-process receiver, an FFI call.
+    MayRun,
+}
+
+/// Classifies the send `receiver selector arguments`. A receiver of `self`
+/// or `super` is the caller's to judge: a compiled self-send is explicit
+/// threading, not a call into the cell.
+#[must_use]
+pub fn send_user_code(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> SendUserCode {
+    let is_block = |e: &Expression| matches!(e.unwrap_parens(), Expression::Block(_));
+    if let Some(wk) = selector.well_known() {
+        if matches!(
+            wk,
+            WellKnownSelector::Class
+                | WellKnownSelector::RespondsTo
+                | WellKnownSelector::IsNil
+                | WellKnownSelector::NotNil
+                | WellKnownSelector::Hash
+                | WellKnownSelector::Error
+                | WellKnownSelector::FieldAt
+                | WellKnownSelector::FieldAtPut
+                | WellKnownSelector::FieldNames
+                | WellKnownSelector::HasField
+                | WellKnownSelector::ClearField
+        ) {
+            return SendUserCode::Never;
+        }
+        if wk.is_block_value() {
+            return if is_block(receiver) {
+                SendUserCode::Inlined
+            } else {
+                SendUserCode::MayRun
+            };
+        }
+    }
+    let name = selector.name();
+    let name = name.as_str();
+    if matches!(
+        name,
+        "asType:" | "yourself" | "spawn" | "spawnWith:" | "await" | "awaitForever" | "await:"
+    ) {
+        return SendUserCode::Never;
+    }
+    // Collection messages: inlined as a fold when the callable is a literal block.
+    if COLLECTION_KEYWORD_SELECTORS.contains(&name) {
+        return match opaque_fold_callable_arg(name, arguments) {
+            Some(callable) if is_block(callable) => SendUserCode::InlinedOrClosureCall,
+            // `eachWithIndex:`/`do:separatedBy:`/... take their blocks by position.
+            None if !arguments.is_empty() && arguments.iter().all(is_block) => {
+                SendUserCode::InlinedOrClosureCall
+            }
+            _ => SendUserCode::MayRun,
+        };
+    }
+    if is_state_threading_keyword_selector(name)
+        || is_state_threading_unary_selector(name)
+        || name == "repeat"
+    {
+        // Loops and `ensure:`/`on:do:` run their receiver block in place.
+        let receiver_inlined = !(is_state_threaded_block_receiver(name)
+            || matches!(
+                name,
+                "whileTrue:"
+                    | "whileFalse:"
+                    | "whileTrue"
+                    | "whileFalse"
+                    | "timesRepeat"
+                    | "repeat"
+            ))
+            || is_block(receiver);
+        let args_inlined = state_threaded_block_arg_indices(name)
+            .iter()
+            .all(|&i| arguments.get(i).is_some_and(is_block));
+        return if receiver_inlined && args_inlined {
+            SendUserCode::Inlined
+        } else {
+            SendUserCode::MayRun
+        };
+    }
+    SendUserCode::MayRun
+}
+
+// ─── Structurally lowered binary selectors (shared leaf, BT-4020) ───────────
+
+/// How the compiler lowers a binary selector structurally, i.e. without
+/// dispatching it as a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralBinary {
+    /// `>>`: method lookup (`generate_message_send`).
+    MethodLookup,
+    /// `**`: `math:pow` (`generate_power_op`).
+    Power,
+    /// `++`: list/string concatenation (`generate_concat_op`).
+    Concat,
+    /// Remainder and the equality/identity operators (ADR 0002): a bare Erlang BIF.
+    Bif(&'static str),
+}
+
+/// The one table of structurally lowered binary selectors. Both lowering sites
+/// (`generate_message_send` for `>>`, `generate_binary_op` for the rest) and
+/// [`is_structurally_lowered_binary`] key off it.
+#[must_use]
+pub fn structural_binary(op: &str) -> Option<StructuralBinary> {
+    match op {
+        ">>" => Some(StructuralBinary::MethodLookup),
+        "**" => Some(StructuralBinary::Power),
+        "++" => Some(StructuralBinary::Concat),
+        "%" => Some(StructuralBinary::Bif("rem")),
+        "==" => Some(StructuralBinary::Bif("==")),
+        "=:=" => Some(StructuralBinary::Bif("=:=")), // Strict equality (ADR 0002)
+        "/=" => Some(StructuralBinary::Bif("/=")),   // Loose inequality (ADR 0002)
+        "=/=" => Some(StructuralBinary::Bif("=/=")), // Strict inequality (ADR 0002)
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -1137,5 +1285,107 @@ mod tests {
                  expected WellKnownSelector classification"
             );
         }
+    }
+
+    // ─── ADR 0137 (BT-4020): `send_user_code` ───────────────────────────────
+
+    fn classify(src: &str) -> SendUserCode {
+        use crate::source_analysis::{lex_with_eof, parse};
+        let (module, _) = parse(lex_with_eof(src));
+        let expr = &module.expressions[0].expression;
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = expr
+        else {
+            panic!("not a send: {src}");
+        };
+        send_user_code(receiver, selector, arguments)
+    }
+
+    #[test]
+    fn intrinsics_that_never_dispatch_to_user_code_are_never() {
+        for src in [
+            "x isNil",
+            "x notNil",
+            "x class",
+            "x hash",
+            "x respondsTo: #foo",
+            "x error: 'boom'",
+            "x fieldNames",
+            "x yourself",
+            "x asType: Integer",
+            "Foo spawn",
+            "x await",
+        ] {
+            assert_eq!(classify(src), SendUserCode::Never, "{src}");
+        }
+    }
+
+    #[test]
+    fn constructs_the_compiler_lowers_in_place_are_not_calls() {
+        for src in [
+            "x ifTrue: [1] ifFalse: [2]",
+            "x ifNil: [1]",
+            "[x] whileTrue: [y]",
+            "5 timesRepeat: [y]",
+            "1 to: 3 do: [:i | i]",
+            "[1] value",
+            "[:a | a] value: 1",
+            "[x] on: Error do: [:e | 0]",
+            "[x] ensure: [y]",
+        ] {
+            assert_eq!(classify(src), SendUserCode::Inlined, "{src}");
+        }
+    }
+
+    #[test]
+    fn a_collection_message_with_a_literal_block_is_inlined_or_a_closure_call() {
+        for src in [
+            "xs do: [:e | e]",
+            "xs inject: 0 into: [:a :e | a]",
+            "xs collect: [:e | e]",
+            "d keysAndValuesDo: [:k :v | v]",
+        ] {
+            assert_eq!(classify(src), SendUserCode::InlinedOrClosureCall, "{src}");
+        }
+    }
+
+    #[test]
+    fn the_same_constructs_with_a_non_literal_block_are_calls() {
+        for src in [
+            "x ifTrue: blk",
+            "xs do: blk",
+            "blk value",
+            "blk value: 1",
+            "xs inject: 0 into: blk",
+            "5 timesRepeat: blk",
+        ] {
+            assert_eq!(classify(src), SendUserCode::MayRun, "{src}");
+        }
+    }
+
+    #[test]
+    fn everything_else_defaults_to_may_run_user_code() {
+        for src in [
+            "x printString",
+            "x foo: 1",
+            "x perform: #foo",
+            "Foo new",
+            "x at: 1",
+            "x size",
+        ] {
+            assert_eq!(classify(src), SendUserCode::MayRun, "{src}");
+        }
+    }
+
+    #[test]
+    fn structurally_lowered_binary_selectors_are_the_one_table() {
+        assert_eq!(structural_binary("**"), Some(StructuralBinary::Power));
+        assert_eq!(structural_binary("%"), Some(StructuralBinary::Bif("rem")));
+        assert_eq!(structural_binary("+"), None);
+        assert_eq!(structural_binary("<"), None);
     }
 }

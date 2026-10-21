@@ -92,7 +92,8 @@ impl CoreErlangGenerator {
         let actor_state_eligible = !ThreadedFamilies::from_matches(&self.eligible_families())
             .as_slice()
             .is_empty();
-        analysis.needs_mutation_threading(root, actor_state_eligible)
+        let synced = self.synced_calls_active() && analysis.has_user_code_sends;
+        analysis.needs_mutation_threading_with(root, actor_state_eligible, synced)
     }
 
     /// Returns `true` if the block body contains list op message sends
@@ -310,10 +311,18 @@ impl CoreErlangGenerator {
         let Expression::Block(cond_block) = condition else {
             return false;
         };
-        if !beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
-            condition,
-            self.in_class_method(),
-        ) {
+        // ADR 0137: in an actor instance method a condition holding a bracketed
+        // call threads `State` like a state effect does.
+        let synced = self.synced_calls_active()
+            && beamtalk_core::semantic_analysis::block_facts::while_condition_has_synced_user_code_sends(
+                condition,
+            );
+        if !synced
+            && !beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects(
+                condition,
+                self.in_class_method(),
+            )
+        {
             return false;
         }
         let threaded_locals = match body {
@@ -739,7 +748,7 @@ impl CoreErlangGenerator {
     }
 
     /// The sorted, deduplicated names of `writes`.
-    fn write_names(writes: Vec<OuterLocalWrite>) -> Vec<String> {
+    pub(in crate::core_erlang) fn write_names(writes: Vec<OuterLocalWrite>) -> Vec<String> {
         let mut names: Vec<String> = writes.into_iter().map(|w| w.name.to_string()).collect();
         names.sort();
         names.dedup();

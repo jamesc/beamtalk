@@ -3005,6 +3005,8 @@ Specific forms:
 - **Nested loop and fold bodies**: `items do: [:x | result := xs collect: [:y | t := t + y]]`; a conditional whose arm writes an outer local, inside a loop or fold body
 - **`do:`** answers `nil` and keeps its writes; **`eachWithIndex:`** and **`do:separatedBy:`** likewise answer `nil` and keep the writes of their blocks; a **`detect:ifNone:`** whose `ifNone:` handler writes an outer local keeps them
 - **`keysAndValuesDo:` / `doWithKey:`** (on a `Dictionary`) answer `nil` and keep their writes. **`anySatisfy:` / `allSatisfy:`** answer their boolean and keep their writes, and stop at the first decisive element like the non-writing form: the block runs up to and including that element, so `n := n + 1` counts only the elements up to the match and the later elements are never visited (`#(1, nil) anySatisfy: [:x | n := n + 1. x > 0]` answers `true` after one visit). **`detect:` / `detect:ifNone:`** (class and value-type methods) answer the first match, or the `ifNone:` result, and keep the writes of the search block and of the handler; the search block stops at the first match the same way
+
+In a value-type method, a `do:`, `collect:` or `inject:into:` that writes a field (`self.m := ...`) may sit inside the arm of a conditional (`c ifTrue: [xs do: [:e | self.m := self.m + e]]`): the arm is a frame whose fold hands its updated `self` to the statements after the conditional (BT-3844, BT-3854).
 - **Conditionals**: `c ifTrue: [t := t + 1] ifFalse: [0]` and the rest of the family, at method-root sites in all three method kinds and at operand sites in the REPL
 - **REPL arms**: in the REPL, the arms of a conditional, the blocks of an `on:do:`/`ensure:`, the block of a `Result tryDo:` and an evaluated block (`[...] value`, `[:k | ...] value: x`) are producer frames too: a loop, fold, conditional, exception construct or `[...] value`/`value:` send at a statement, an assignment's value or an operand of an arm statement keeps its writes (`[x ifTrue: [(xs inject: 0 into: [:a :e | t := t + e. a + e]) + 1]] on: Error do: [:e | 0]`); an evaluated block counts only when the send's arity matches the block's, and a mismatched `[t := t + 1] value: 1` in an arm raises the usual wrong-number-of-arguments error
 - **`on:do:` and `ensure:`**: `[t := t + 1] ensure: [u := u + 1]` in any producer position; the protected body, handler and cleanup are arms of the producer
@@ -3021,7 +3023,7 @@ t                                             // => 0, the write inside the rais
 
 This is a deliberate departure from Pharo, where temporaries are shared cells and a write made before the raise survives. On BEAM the protected region's locals are a value that is returned only when the block completes. A block that does not raise keeps all its writes.
 
-**`match:` arms.** A `match:` arm is an expression, not a block, so an arm that assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a compile error in class, value-type and actor methods; bind the match value (`t := x match: [#a -> t + 1; _ -> t]`) or use `ifTrue:`/`ifNil:` instead. The REPL reports the same error. BT-3875 (lowered by BT-3947) makes `match:` arms producers everywhere.
+**`match:` arms.** A `match:` arm is an expression, not a block, but it is the same frame a conditional's block is ([BT-3947](https://linear.app/beamtalk/issue/BT-3947), closing [BT-3875](https://linear.app/beamtalk/issue/BT-3875)): a `match:` whose arm assigns an outer local (`x match: [#a -> (t := t + 1); _ -> 0]`) is a local-threading producer wherever a conditional would be (a statement, an assignment's value, an operand, a loop body, a conditional or `match:` arm), in class, value-type and actor methods and in the REPL, and the write comes back. It stays a compile error where it is not a producer: a write in a guard (`x when: [(t := 1) > 0] -> ...`), or a `match:` that is the subject of another `match:`; bind the value there (`t := x match: [#a -> t + 1; _ -> t]`).
 
 **Position errors.** Some combinations of a construct, the position it sits in and the method kind are not yet lowered as producers and are rejected with a second, temporary error rather than being allowed to drop the write:
 
@@ -3432,7 +3434,7 @@ Server subclass: PeriodicWorker
   state: count = 0
 
   initialize =>
-    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+    Timer send: #tick to: self after: 1000
 
   handleInfo: msg =>
     msg match: [
@@ -3442,10 +3444,12 @@ Server subclass: PeriodicWorker
 
   tick =>
     self.count := self.count + 1
-    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+    Timer send: #tick to: self after: 1000
 
   getValue => self.count
 ```
+
+`Timer send:to:after:` delivers the message to the server's mailbox exactly as `erlang:send/2` would, so it arrives in `handleInfo:` (see § Message Timers).
 
 A `match:` arm body is an expression, so an arm that needs more than one statement calls a method (`#tick -> self tick`). Do not write `#tick -> [ ... ]`: that arm answers the block itself without running it (a block that writes a field or sends to `self` fails to compile; see § Match Expression).
 
@@ -3454,6 +3458,7 @@ A `match:` arm body is an expression, so an arm that needs more than one stateme
 - Defined on `Server` with a **default no-op** implementation — messages are ignored unless you override it.
 - **Error handling:** an error raised in `handleInfo:` crashes the server, as in OTP (ADR 0134): `terminate:` runs with the error as its reason, `onExit:` observers receive it, a crash report is logged, and a supervisor applies its restart policy. A method sent with `!` and a `continueWith:` step behave the same way (see § Explicit Async Cast and § Continuations); a sync call is the only send whose error goes back to a caller. Unmatched messages are still harmless: the default `handleInfo:` ignores everything, and a `match:` over the message should end with a `_ -> nil` arm so an unexpected message does not raise `#pattern_mismatch`.
 - Sending `handleInfo:` to a plain `Actor` raises `doesNotUnderstand` — only Server subclasses have this method.
+- **Sending a raw message:** `aServer pid send: msg` (`Pid>>send:`, `erlang:send/2`) puts `msg` in the server's mailbox, where `handleInfo:` receives it. It is not a method call: it is asynchronous, answers `nil`, and sending to a dead pid is a silent no-op. Use `Reference new` (`erlang:make_ref/0`) for a unique tag to correlate replies or timers, and `self processLabel: term` (`proc_lib:set_label/1`) to name an actor's process in observer and crash reports; `self processLabel` reads it back (`nil` when unset).
 - **Lint `handleinfo-no-catch-all`** (ADR 0134): a `handleInfo:` whose body is a `match:` with no catch-all arm warns at compile time, because `match:` with no matching arm raises `#pattern_mismatch` on every message no arm names, and that error crashes the server. Add `_ -> nil` as the last arm to ignore unexpected messages. A tuple-pattern arm (`{tag, payload}`) is not a catch-all. Configure it under `[diagnostics]` as `handleinfo-no-catch-all`; it has no dedicated `@expect` category.
 
   ```beamtalk
@@ -3499,9 +3504,45 @@ Actor subclass: Ticker
 
 No `state:` for the timer reference, no `terminate:` cleanup needed — the link handles it.
 
+### Message Timers
+
+A block timer runs its block in a separate process, so the block cannot touch the actor's state; it can only send the actor a message. When the actor is a `Server`, deliver the message directly with a **message timer** instead, and handle it in `handleInfo:`:
+
+```beamtalk
+t := Timer send: #tick to: self after: 1000          // one-shot; answers a Timer
+t := Timer send: {#readTimeout, tag} to: self after: (Duration seconds: 5)
+t := Timer send: #tick to: self every: 1000          // repeating
+t cancel                                             // => Boolean
+t isActive                                           // => Boolean
+```
+
+- `to:` takes an Actor (including a Server) or a `Pid`. The message is delivered exactly as `erlang:send/2` would deliver it: a Server receives it in `handleInfo:`, and a plain Actor ignores it.
+- The delay is Integer milliseconds or a `Duration`, as for `after:do:`, up to 4294967295 ms.
+- A one-shot message timer maps to `erlang:send_after/3`, with no extra process; `cancel` is `erlang:cancel_timer/1` and answers `true` only if the message had not been sent yet. `isActive` is `erlang:read_timer/1`. A target on another node uses a small process instead, because `send_after/3` only accepts local targets.
+- A repeating message timer runs in a small process that is **not** linked to the caller. It stops on `cancel`, or when the target dies, so a supervisor-restarted named Server does not inherit the old ticks. Ticks follow fixed deadlines and do not drift; ticks missed while the system was busy are skipped, not replayed. Because the timer is not tied to its creator, a caller that targets another process owns the Timer: keep it and `cancel` it, or it runs for as long as the target lives.
+- A timer whose target has died does nothing, as in OTP.
+- A message sent just before `cancel` may already be in the mailbox. When a stale tick matters, tag the message with a fresh `Reference new` (`{#tick, ref}`), keep the current tag in state, and ignore messages carrying an old one.
+
+```beamtalk
+Server subclass: Poller
+  state: timer = nil
+
+  initialize => self.timer := Timer send: #poll to: self every: 5000
+
+  handleInfo: msg =>
+    msg match: [
+      #poll -> self poll;
+      _ -> nil
+    ]
+
+  poll => nil
+
+  pause => self.timer cancel
+```
+
 ### Continuations (`continueWith:`)
 
-`self continueWith: #selector` (or `self continueWith: #sel: withArguments: #(arg)`) asks the actor to run a follow-up step **after the current message has been handled and before any other message in its mailbox**. It is OTP's `{noreply, State, {continue, Term}}` / `handle_continue/2`. Neither alternative gives this ordering: `self foo` is a direct call that runs immediately, and `Erlang erlang send: self pid msg: #foo` queues behind everything already in the mailbox.
+`self continueWith: #selector` (or `self continueWith: #sel: withArguments: #(arg)`) asks the actor to run a follow-up step **after the current message has been handled and before any other message in its mailbox**. It is OTP's `{noreply, State, {continue, Term}}` / `handle_continue/2`. Neither alternative gives this ordering: `self foo` is a direct call that runs immediately, and `self pid send: #foo` (a raw message for `handleInfo:`) queues behind everything already in the mailbox.
 
 ```beamtalk
 Server subclass: Connection
@@ -4523,13 +4564,7 @@ swap => {a, b} := self pair       // answers the pair, not nil
 // => #(#(1, 2), #(3, 2))
 ```
 
-A destructure that ends a predicate block (`select:`, `detect:`, `allSatisfy:` and the like) passes its right-hand side, a list, tuple or map, as the predicate, so it raises like any other non-boolean predicate. In an actor method or at the REPL, a `groupBy:` whose block binds a local is lowered as a fold whose raw result is the value, except in these positions (anywhere else it is a compile error until the fold is lowered as a frame, [BT-3897](https://linear.app/beamtalk/issue/BT-3897)):
-
-- a statement at the method-body level;
-- a non-final statement directly in a `do:` or `timesRepeat:` body (not nested in another block);
-- `^` or a field store at the method-body level;
-- the value of a local assignment at the method-body level, or directly inside exactly one of an `ifTrue:` arm, an `on:do:` protected body, an `ensure:` cleanup block, a `do:`, `collect:` or `inject:into:` block, or a `detect:ifNone:` handler (not nested in another block);
-- at the REPL, only a statement or assignment at the top level of the input.
+A destructure that ends a predicate block (`select:`, `detect:`, `allSatisfy:` and the like) passes its right-hand side, a list, tuple or map, as the predicate, so it raises like any other non-boolean predicate. A `groupBy:` is a fold like `collect:` ([BT-3897](https://linear.app/beamtalk/issue/BT-3897), lowered by BT-3912): in an actor method or at the REPL its block may bind a local, write a field or send to `self`, and the grouped dictionary is the value wherever the `groupBy:` sits.
 
 In an actor method, an evaluated block literal (`[...] value`, `[:k | ...] value: x`) that binds a local, writes a field or sends to `self` answers its value only at some positions; elsewhere the value would be the raw `{Value, State}` pair, so it is a compile error ([BT-3981](https://linear.app/beamtalk/issue/BT-3981), until the block is lowered as a frame, [BT-3947](https://linear.app/beamtalk/issue/BT-3947)). It answers at a method-body statement, assignment (`r := [...] value`) or `^`, and inside an `ifTrue:` arm, a `collect:` block, a `match:` arm or a `whileTrue:` block; directly in a stored block, an Erlang FFI argument block or a block passed to a method it does not (assign it to a local in the method body, or compute it in a method of its own). As an operand (a receiver, an argument, a cascade part, `([...] value)` in parentheses) it never does. A `do:`, `to:do:` or `timesRepeat:` body accepts the evaluated block only as its last statement (or assigned to a local). In the body of a `do:`, collection operation or loop that writes an outer local, only `outer := [...] value` (the one outer local it writes) and a conditional arm answer; any other statement there is a compile error. A block of a conditional, collection or loop selector the compiler has no measured case for (`or:`, `at:ifAbsent:`, `reject:`, `anySatisfy:`, `whileFalse:`, `keysAndValuesDo:`, ...) is judged as a plain block, so the evaluated block as its last statement or assigned there is a compile error too. Class and value-type methods answer the value everywhere.
 
@@ -6250,7 +6285,7 @@ Telemetry detach: #auditMisses
 - The runtime's own handler ids (the ones `Tracing` relies on) are reserved: `attach:` and `detach:` refuse them with `#reserved_name`.
 - Exporters (StatsD, Prometheus, OpenTelemetry) are still attached in Erlang. Attaching from Beamtalk is mainly for tests and in-image consumers.
 
-The methods call the runtime (`beamtalk_telemetry`) directly rather than through the `(Erlang telemetry)` FFI, so an emit costs about 60–100 ns more than a raw `telemetry:execute/3`, against about 13 µs for the FFI spelling.
+`Telemetry` is `native: beamtalk_telemetry`: each method is a `self delegate` pass-through to the runtime module ([`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object)), so a wrapped error names `Telemetry` and the selector. An emit costs about 0.2–0.4 µs more than a raw `telemetry:execute/3` (`docs/development/benchmarks.md`).
 
 ---
 

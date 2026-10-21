@@ -2098,6 +2098,9 @@ mod tests {
     /// may pass as explicit lint targets. Without canonical-form dedup the
     /// same file would appear twice in the extraction list and be parsed
     /// twice downstream.
+    ///
+    /// Serialized on `cwd`: the relative target only resolves against the
+    /// process working directory, which this test temporarily changes.
     #[test]
     #[serial_test::serial(cwd)]
     fn collect_package_class_files_dedups_absolute_and_relative() {

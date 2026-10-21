@@ -308,13 +308,6 @@ fn closed_fun_corpus_keeps_enclosing_state_version() {
             let cases: Vec<(&str, String)> = EMITTERS
                 .iter()
                 .enumerate()
-                // PIN-BUG BT-3947 (BT-3939): a Tier 2 block body that assigns a
-                // local and rebinds it in a loop (`j := 0. [j < 2] whileTrue:
-                // [... j := j + 1]`) answers the pre-loop value, so it is a
-                // compile error until BT-3947 lowers the body as a frame.
-                .filter(|(_, (emitter_name, _))| {
-                    !(*emitter_name == "tier2_block" && *body_name == "nested_loop")
-                })
                 .map(|(i, (emitter_name, emitter))| {
                     let method = enclosing
                         .method

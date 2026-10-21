@@ -21,6 +21,7 @@ TestCase subclass: Bt3889DestructureValueTest
     self assert: o collect equals: #(#(1, 2), #(3, 2))
     self assert: (o threadedCollect) equals: #(#(#(1, 1), #(3, 4)), 4)
     self assert: o inject equals: #(3, #(1, 0))
+    self assert: o groupBy equals: #(3)
     self assert: ([o select] on: Error do: [:e | #raised]) equals: #raised
 
   testClass =>

@@ -7,7 +7,7 @@
 
 -moduledoc """
 EUnit tests for beamtalk_telemetry (BT-4025): the stdlib Telemetry facade's
-runtime half (execute/3, span/3 with NLR handling, attach/3, attach_many/3,
+runtime half (execute/3, span/3 with NLR handling, attach/3, attachMany/3,
 detach/1, handle_event/4) and the runtime helpers moved from beamtalk_actor
 (emit/3, maybe_span/3).
 """.
@@ -232,7 +232,7 @@ attach_duplicate_is_handler_exists() ->
 attach_many_covers_every_event() ->
     Self = self(),
     Block = fun(E, _, _) -> Self ! {many, E} end,
-    #{isOk := true} = beamtalk_telemetry:attach_many(
+    #{isOk := true} = beamtalk_telemetry:attachMany(
         bt4025_many, [[bt4025, m1], [bt4025, m2]], Block
     ),
     beamtalk_telemetry:execute([bt4025, m1], #{}, #{}),
@@ -253,9 +253,9 @@ attach_rejects_bad_arguments() ->
     ?assertEqual(
         type_error, kind_of(fun() -> beamtalk_telemetry:attach(x, [a], fun() -> ok end) end)
     ),
-    ?assertEqual(type_error, kind_of(fun() -> beamtalk_telemetry:attach_many(x, [], Block) end)),
+    ?assertEqual(type_error, kind_of(fun() -> beamtalk_telemetry:attachMany(x, [], Block) end)),
     ?assertEqual(
-        type_error, kind_of(fun() -> beamtalk_telemetry:attach_many(x, [[a], []], Block) end)
+        type_error, kind_of(fun() -> beamtalk_telemetry:attachMany(x, [[a], []], Block) end)
     ).
 
 detach_is_idempotent() ->
@@ -336,7 +336,7 @@ detach_rejects_bad_and_reserved_ids() ->
             ?assertEqual(
                 reserved_name,
                 kind_of(fun() ->
-                    beamtalk_telemetry:attach_many(Reserved, [[a]], fun(_, _, _) -> ok end)
+                    beamtalk_telemetry:attachMany(Reserved, [[a]], fun(_, _, _) -> ok end)
                 end)
             )
         end

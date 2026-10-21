@@ -27,6 +27,12 @@
 //! epilogue (`control_flow::body::generate_foldl_loop_body`, the same
 //! addendum's next issue).
 //!
+//! ADR 0137 Phase 2a (BT-4020, behind the synced-calls flag, off by default):
+//! [`ThreadedStmt::SyncedCall`] is the cell bracket around a call that may run
+//! user code — store the threaded `State`, call, reload — and
+//! [`VerifyError::UnbracketedUserCodeSend`] reports a call that was not built
+//! into one (`synced_call.rs`).
+//!
 //! ## Module layout
 //!
 //! This module is split into four submodules, each depending only on the
@@ -89,14 +95,14 @@ pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId, LoopCounter, NlrThrowShape,
     OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId,
-    TryRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // The one family slot order and the `'__local__'` key prefix.
 pub(super) use ir::{LOCAL_STATE_KEY_PREFIX, canonical_families};
 pub(super) use verify::{
     SequencedSibling, VerifyError, verify_bind_frames, verify_fold_family_carried,
-    verify_fold_locals_carried, verify_sibling_reads,
+    verify_fold_locals_carried, verify_producer_sites_threaded, verify_sibling_reads,
 };
 
 // `AccParam`/`CloseContext` have no production caller by name

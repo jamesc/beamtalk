@@ -59,13 +59,19 @@ the live class registry first (which knows the real casing) and falls back
 to this heuristic only when a module isn't a registered class.
 """.
 
+-define(REPL_EVAL_PREFIX, "beamtalk_repl_eval_").
+-define(INSPECTOR_EVAL_PREFIX, "beamtalk_inspector_eval_").
+
 -export([
     camel_to_snake/1,
     to_module_atom/1,
     to_stdlib_module_atom/1,
     to_qualified_module_atom/2,
     is_stdlib_module/1,
-    snake_to_class/1
+    snake_to_class/1,
+    repl_eval_module/1,
+    inspector_eval_module/1,
+    is_compiled_beamtalk_module/1
 ]).
 
 %%====================================================================
@@ -205,6 +211,43 @@ is_stdlib_module(Module) when is_atom(Module) ->
     end;
 is_stdlib_module(_) ->
     false.
+
+%%====================================================================
+%% Per-evaluation modules (REPL, inspector) and compiled-code detection
+%%
+%% The single source of truth for these names: `beamtalk_repl_eval` builds
+%% them here, and `beamtalk_erlang_proxy` recognises Beamtalk code with
+%% `is_compiled_beamtalk_module/1` (BT-4055).
+%%====================================================================
+
+-doc "Module name for the `N`th REPL evaluation (`beamtalk_repl_eval_<N>`).".
+-spec repl_eval_module(non_neg_integer()) -> atom().
+repl_eval_module(N) when is_integer(N), N >= 0 ->
+    % elp:fixme W0023 intentional atom creation, one per evaluation
+    list_to_atom(?REPL_EVAL_PREFIX ++ integer_to_list(N)).
+
+-doc "Module name for an inspector evaluation (`beamtalk_inspector_eval_<N>`).".
+-spec inspector_eval_module(non_neg_integer()) -> atom().
+inspector_eval_module(N) when is_integer(N), N >= 0 ->
+    % elp:fixme W0023 intentional atom creation, one recycled atom per process
+    list_to_atom(?INSPECTOR_EVAL_PREFIX ++ integer_to_list(N)).
+
+-doc """
+Whether a module was emitted by the Beamtalk compiler: a class module
+(`bt@…`) or a REPL/inspector evaluation module (`repl_eval_module/1`,
+`inspector_eval_module/1`).
+""".
+-spec is_compiled_beamtalk_module(atom()) -> boolean().
+is_compiled_beamtalk_module(Module) when is_atom(Module) ->
+    case atom_to_list(Module) of
+        "bt@" ++ _ -> true;
+        ?REPL_EVAL_PREFIX ++ Rest -> is_digits(Rest);
+        ?INSPECTOR_EVAL_PREFIX ++ Rest -> is_digits(Rest);
+        _ -> false
+    end.
+
+is_digits([_ | _] = Str) -> lists:all(fun(C) -> C >= $0 andalso C =< $9 end, Str);
+is_digits([]) -> false.
 
 %%====================================================================
 %% Inverse (lossy) — snake_case -> CamelCase, fallback only

@@ -202,17 +202,26 @@ fn class_method_self_send_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     else {
         return false;
     };
-    let is_self_receiver = is_self_identifier(receiver);
-    let is_own_class_reference = matches!(
-        receiver.as_ref(),
-        Expression::ClassReference { name, package, .. }
-            if package.is_none() && name.name == ctx.class_name
-    );
-    if !(is_self_receiver || is_own_class_reference) {
+    if !(is_self_identifier(receiver) || is_own_class_reference(ctx, receiver)) {
         return false;
     }
     let sel_atom = selector.name().to_string();
     ctx.class_method_selectors.contains(&sel_atom)
+}
+
+/// Whether `expr` is an explicit, unqualified reference to the class whose
+/// class method is being compiled (`C` inside `C class run => …`). Such a
+/// receiver dispatches exactly like `self` there, for every selector shape
+/// (unary, binary, keyword): the send is already running inside the class's
+/// own `gen_server:call`, so it must become a direct class-side call
+/// ([`CoreErlangGenerator::generate_class_method_self_send`]), never a
+/// `class_send` back into that same `gen_server`.
+pub(super) fn is_own_class_reference(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+    ctx.in_class_method
+        && beamtalk_core::semantic_analysis::block_facts::is_own_class_reference(
+            expr,
+            &ctx.class_name,
+        )
 }
 
 /// Whether `expr` is the bare `self` identifier.
@@ -319,6 +328,38 @@ pub(super) fn binary_self_send_dispatches(op: &str) -> bool {
     !super::operators::is_structurally_lowered_binary(op)
 }
 
+/// BT-3985 / BT-4005: whether the binary send `receiver op …` is a send to
+/// the dispatching `self` — taking `generate_message_send`'s `HANDLERS` path
+/// (`try_handle_self_dispatch`, `try_handle_class_method_self_send`,
+/// `try_handle_class_reference`) instead of the operator lowering
+/// (`generate_binary_op`, whose non-number fallback is a runtime send that,
+/// for the class object inside its own class method, re-enters the class's
+/// own `gen_server` and deadlocks).
+///
+/// The receiver is the dispatching self when it is:
+/// - bare `self` in an actor instance method or any class method, or
+/// - an own-class reference ([`is_own_class_reference`]) in a class method,
+///   which dispatches exactly like `self` there for every selector shape —
+///   the unary/keyword shapes already reach `try_handle_class_reference`
+///   unconditionally, so this is the one place the binary shape is admitted.
+///
+/// And the selector must be one that dispatches at all
+/// ([`binary_self_send_dispatches`]): a structurally lowered operator stays
+/// lowered whatever the receiver.
+pub(super) fn binary_send_dispatches_to_self(
+    ctx: &ShapeCtx<'_>,
+    receiver: &Expression,
+    op: &str,
+) -> bool {
+    if !binary_self_send_dispatches(op) {
+        return false;
+    }
+    if is_self_identifier(receiver) {
+        return ctx.in_class_method || ctx.context == CodeGenContext::Actor;
+    }
+    is_own_class_reference(ctx, receiver)
+}
+
 /// The selector half of [`is_dispatching_actor_self_send`]'s check —
 /// extracted (ADR 0118 phase 1b) so a caller that already knows
 /// the receiver is a bare `self` without owning an `Expression::MessageSend`
@@ -329,7 +370,13 @@ pub(super) fn binary_self_send_dispatches(op: &str) -> bool {
 ///
 /// Excludes selectors that are intercepted by handlers before
 /// `try_handle_self_dispatch` in `generate_message_send`:
-/// - Binary operators (`+`, `-`, `*`, etc.)
+/// - Binary selectors — excluded here only for this function's own callers
+///   (`cascade_self_dispatch_messages`: a `self` cascade holding a binary
+///   message is not threaded message by message). A standalone binary send to `self` is decided by
+///   [`binary_self_send_dispatches`] (and, receiver included,
+///   [`binary_send_dispatches_to_self`]), not by this function: every
+///   binary selector there other than a structurally lowered operator is a
+///   real self-dispatch (BT-3985)
 /// - `asType:` (compile-time erasure)
 /// - `ProtoObject` messages (`class`, `perform:`, `perform:withArguments:`)
 /// - Object reflection (`fieldAt:`, `fieldAt:put:`, `fieldNames`, `respondsTo:`)
@@ -338,7 +385,8 @@ pub(super) fn binary_self_send_dispatches(op: &str) -> bool {
 /// - Error signaling (`error:`)
 /// - Block evaluation (`value`, `value:`, `repeat`, `whileTrue:`, etc.)
 pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
-    // Binary operators are always intercepted by generate_binary_op
+    // Binary selectors: excluded for cascades only — a standalone binary
+    // self-send is decided by `binary_self_send_dispatches` (see the doc).
     if matches!(selector, MessageSelector::Binary(_)) {
         return false;
     }

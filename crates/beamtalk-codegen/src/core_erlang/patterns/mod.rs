@@ -23,6 +23,8 @@ mod destructure;
 mod match_lowering;
 mod type_tests;
 
+pub(super) use match_lowering::MatchThreading;
+
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::MapPatternKey;

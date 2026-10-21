@@ -1563,8 +1563,8 @@ Decision: untyped fields (`state:`, `field:`, `classState:`, sealed or not) are 
 
 ## BT-4025: `Telemetry` facade emit cost
 
-`Telemetry execute:measurements:metadata:` (ADR 0069 amendment) is a `@primitive` that lowers to a
-direct call into `beamtalk_telemetry:execute/3`, which validates the arguments and calls
+`Telemetry execute:measurements:metadata:` (ADR 0069 amendment) was a `@primitive` that lowered to a
+direct call into `beamtalk_telemetry:execute/3` (since BT-4055 it is `self delegate`; see the next section), which validates the arguments and calls
 `telemetry:execute/3`. The issue's target was "within about 1 µs of a raw `telemetry:execute/3`".
 The comparison point is the BT-4019 spike's spelling, `(Erlang telemetry) execute:with:with:`, which
 compiles to `beamtalk_erlang_proxy:direct_call/3` and re-reads `module_info(exports)` on every call
@@ -1611,6 +1611,33 @@ times cheaper than the FFI spelling. An earlier, quieter run gave +60 ns (runtim
 roughly 30–60 ns more than a raw call, so the facade's advantage over the FFI spelling is now small.
 The facade is still preferred: it is typed, validates its arguments, and needs no package-level
 `telemetry` native dependency.
+
+## BT-4055: `Telemetry` on `native:` delegation
+
+BT-4055 replaced the facade's `@primitive` bodies and their per-class compiler table with
+`native: beamtalk_telemetry` and `=> self delegate` (ADR 0101). The `facade` row now goes through
+`beamtalk_erlang_proxy:native_call/4` (the shared path every `native:` class uses) rather than a
+direct call into `beamtalk_telemetry:execute/3`. The issue's bar was "no more than about 1 µs over a
+raw `telemetry:execute/3`"; past that, the fix belonged in `native_call`, not in a table.
+
+Same harness and command as BT-4025 above. Apple M5 Max, OTP 28, `+S 1`, 2026-10-21, on a heavily
+shared machine (load average about 140–160), so the absolute numbers are rough:
+
+| Row | ns/call, 0 handlers | vs raw | ns/call, 1 no-op handler | vs raw |
+|---|---|---|---|---|
+| raw | 58 | — | 119 | — |
+| runtime | 141 | +83 | 306 | +187 |
+| facade (`native_call`) | 267 | +210 | 533 | +414 |
+| ffi | 145 | +87 | 236 | +117 |
+
+`native_call` adds about 125 ns (0 handlers) to 230 ns (1 handler) over calling
+`beamtalk_telemetry:execute/3` directly: the class-variable snapshot, the `try` frame and the
+result-coercion check (`beamtalk_telemetry` opts out of `ok`/`error` → `Result` coercion through
+`beamtalk_ffi_raw_results/0`, so a span block's value comes back unchanged). That leaves the facade
+about 0.2–0.4 µs over a raw emit, inside the 1 µs bar, so `native_call` was left as is. The `ffi` row
+is now cheaper than the facade because `direct_call/3` reaches stock `telemetry`, which skips the
+Beamtalk-module checks; the facade still validates its arguments and needs no package-level
+`telemetry` dependency.
 
 ## BT-4021: inline FFI `direct_call/3` without the per-call export check
 

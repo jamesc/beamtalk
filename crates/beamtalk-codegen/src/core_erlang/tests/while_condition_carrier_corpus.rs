@@ -307,8 +307,14 @@ fn bt4002_verifier_reports_a_condition_family_the_loop_drops() {
     }
 }
 
-/// How many programs [`generated_while_programs_compile`] draws.
-const GENERATED_PROGRAMS: usize = 256;
+/// How many programs [`generated_while_programs_compile`] draws (256, or
+/// `BT4020_PROGRAMS` for a larger seed count: the synced-calls flag-on runs use it).
+fn generated_programs() -> usize {
+    std::env::var("BT4020_PROGRAMS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(256)
+}
 
 /// The superclasses a generated program's `run` methods are compiled under:
 /// the plain-object and value-type scopes where BT-3999 broke, the
@@ -323,7 +329,7 @@ fn generated_while_programs_compile() {
     use beamtalk_core::unparse::unparse_module;
 
     // Every drawn program's `run` method, renamed `run<i>`, in one class.
-    let mut programs = draw_programs("GenWhileProbe", GENERATED_PROGRAMS);
+    let mut programs = draw_programs("GenWhileProbe", generated_programs());
     let mut module = programs.remove(0);
     for (i, program) in programs.into_iter().enumerate() {
         let mut run = program.classes[0].methods[0].clone();
@@ -704,7 +710,8 @@ fn generated_field_condition_programs_compile() {
     use beamtalk_core::test_helpers::test_support::draw_programs_with_field_writing_conditions;
     use beamtalk_core::unparse::unparse_module;
 
-    let programs = draw_programs_with_field_writing_conditions("GenWhileProbe", GENERATED_PROGRAMS);
+    let programs =
+        draw_programs_with_field_writing_conditions("GenWhileProbe", generated_programs());
     let mut module = programs[0].clone();
     module.classes[0].methods.clear();
     for (i, program) in programs.iter().enumerate() {

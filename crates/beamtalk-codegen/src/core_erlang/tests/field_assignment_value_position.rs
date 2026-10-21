@@ -601,8 +601,9 @@ pub(super) const VT_SHAPES: &[(&str, &str, bool)] = &[
 pub(super) const VT_FOLD_REJECTING_SHAPES: &[&str] = &["block_value", "conditional_condition"];
 
 /// BT-3844: in every shape that nests STMT below the method body (`may_reject == true`: a
-/// conditional arm, plain or local-threading, a loop body, a `do:` body, an `on:do:` block) a
-/// field-writing fold is not merely *allowed* to be rejected, it MUST be: the enclosing
+/// loop body, a `do:` body, an `on:do:` block; a conditional arm, plain or local-threading, was
+/// one until BT-3912 lowered it) a field-writing fold is not merely *allowed* to be rejected, it
+/// MUST be: the enclosing
 /// construct is lowered by the shared up-front rejection of a field write below an arm's / a
 /// body's top level (`reject_nested_vt_conditional_self_field_writes`,
 /// `reject_unthreadable_value_self_field_write`), so no consumer reads the fold's `Self` slot
@@ -612,8 +613,20 @@ pub(super) const VT_FOLD_REJECTING_SHAPES: &[&str] = &["block_value", "condition
 /// code after the construct). Lifting it means adding that coverage first (`BUnit` cases that
 /// read the field after the construct, and a position in `value_type_fold_family_corpus.rs`'s
 /// oracle run), then exempting that shape here.
-fn fold_writing_position_must_be_rejected(shape_may_reject: bool, position: &str) -> bool {
-    shape_may_reject && is_fold_writing_position(position)
+fn fold_writing_position_must_be_rejected(
+    shape_name: &str,
+    shape_may_reject: bool,
+    position: &str,
+) -> bool {
+    // BT-3912 (BT-3854): a conditional arm is a frame whose fold producers carry
+    // `Self`, proven on a BEAM against an oracle over every generated fold in
+    // every arm form, selector and position
+    // (`generated_field_writing_folds_in_conditional_arms_agree_with_the_oracle_when_run`).
+    let arm_proven = matches!(
+        shape_name,
+        "conditional_arm" | "local_threading_conditional_arm"
+    );
+    shape_may_reject && !arm_proven && is_fold_writing_position(position)
 }
 
 /// Whether a [`VT_POSITIONS`] template is one of the BT-3827 field-writing fold positions.
@@ -808,7 +821,11 @@ fn value_type_field_assignment_value_position_corpus(
             }
             match vt_outcome(&src) {
                 VtOutcome::Compiles(_)
-                    if fold_writing_position_must_be_rejected(*shape_may_reject, position) =>
+                    if fold_writing_position_must_be_rejected(
+                        shape_name,
+                        *shape_may_reject,
+                        position,
+                    ) =>
                 {
                     failing.push(name.clone());
                     details.push(format!(

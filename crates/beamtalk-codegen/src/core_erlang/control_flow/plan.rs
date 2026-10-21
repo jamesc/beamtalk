@@ -222,6 +222,9 @@ impl LoopFamilyParam {
 struct BodyEffects {
     /// Condition block has state effects (field writes or self-sends).
     cond_has_state_effects: bool,
+    /// ADR 0137: the body holds a call bracketed with a `State` store/reload
+    /// (actor instance method, synced-calls flag on).
+    body_has_synced_sends: bool,
     /// Body has a tier-2 value call assigned to a threaded local.
     has_tier2_threaded_assign: bool,
     /// Body has nested list ops incompatible with direct-params.
@@ -374,8 +377,12 @@ impl BodyEffects {
             .last()
             .is_some_and(|s| matches!(s.expression, Expression::DestructureAssignment { .. }));
 
+        let body_has_synced_sends = generator.synced_calls_active()
+            && block_analysis::analyze_block(body).has_synced_user_code_sends();
+
         Self {
             cond_has_state_effects,
+            body_has_synced_sends,
             has_tier2_threaded_assign,
             has_non_tuple_safe_list_op,
             has_nested_counted_loop_mutation,
@@ -662,7 +669,10 @@ impl ThreadingPlan {
     /// condition closure (frame `frame`) is lowered in when it is not part of
     /// the loop's own `StateAcc` frame: the loop's mode, threading nothing
     /// (the closure is called once per iteration and hands back only its
-    /// boolean, so no outer local leaves it).
+    /// boolean, so no outer local leaves it). BT-3912: also the frame of every
+    /// other plain closure body (`with_closure_body_frame`): a closed `fun`
+    /// that hands back only its value, so it has no `StateAcc` to continue and
+    /// extends no `State` chain.
     ///
     /// The frame is a `DirectParams` one whatever the loop's own mode: with
     /// nothing threaded every write is a plain `Let` rebind that dies with the
@@ -670,7 +680,7 @@ impl ThreadingPlan {
     /// frame runs over the bindings map, so [`RebindFrame::with_repl_binding`]
     /// makes every binding a member and a write `Put`s into a map the closure
     /// never hands back (a step no document can carry, and the write is lost).
-    pub(in crate::core_erlang) fn condition_rebind_frame(frame: FrameId) -> RebindFrame {
+    pub(in crate::core_erlang) fn closure_rebind_frame(frame: FrameId) -> RebindFrame {
         RebindFrame {
             frame,
             kind: RebindFrameKind::Loop(ThreadingMode::DirectParams),
@@ -826,6 +836,7 @@ impl ThreadingPlan {
             return false;
         }
         !body_analysis.has_state_effects()
+            && !effects.body_has_synced_sends
             && !effects.cond_has_state_effects
             && !effects.has_tier2_threaded_assign
             && !effects.has_non_tuple_safe_list_op
@@ -852,6 +863,7 @@ impl ThreadingPlan {
             return false;
         }
         !body_analysis.has_state_effects()
+            && !effects.body_has_synced_sends
             && !effects.has_tier2_threaded_assign
             && !effects.has_cf_mutations
             && !effects.has_conditional_threaded_writes
@@ -920,6 +932,7 @@ impl ThreadingPlan {
         }
         !body_analysis.field_writes.is_empty()
             && !body_analysis.has_self_sends
+            && !effects.body_has_synced_sends
             && !effects.cond_has_state_effects
             && !effects.has_tier2_threaded_assign
             && !effects.has_cf_mutations

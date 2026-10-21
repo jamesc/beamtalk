@@ -10,8 +10,8 @@
 
 use crate::ast::well_known::WellKnownSelector;
 use crate::ast::{
-    Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodDefinition,
-    MethodKind, ParameterDefinition,
+    Block, BlockParameter, ClassDefinition, Expression, ExpressionStatement, MatchArm,
+    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition,
 };
 use crate::ast_walker::{
     SendSite, WalkEvent, cascade_sends, walk_expression_and_sends, walk_sends,
@@ -37,6 +37,14 @@ pub struct BlockMutationAnalysis {
     pub field_writes: HashSet<String>,
     /// Whether the block contains self-sends (which may mutate actor state).
     pub has_self_sends: bool,
+    /// ADR 0137 (BT-4020): whether the block contains a send to something
+    /// other than `self` that may run user code in the calling process
+    /// ([`send_user_code`], and a binary operator that is not a bare BIF or a
+    /// numeric-literal operation), nested blocks included. Counted as a state
+    /// effect only while the synced-calls switch is on
+    /// ([`crate::synced_calls`]), because such a call is bracketed with a
+    /// store and a reload of the threaded `State`.
+    pub has_user_code_sends: bool,
     /// Selectors sent to `self` anywhere in the block, including inside
     /// nested blocks (e.g. a `do:`/`collect:` argument) — unlike `has_self_sends`,
     /// tracked by name so a caller can distinguish a self-send to a provably
@@ -63,6 +71,19 @@ impl BlockMutationAnalysis {
         !self.field_writes.is_empty() || self.has_self_sends
     }
 
+    /// ADR 0137: whether the block holds a call that is bracketed with a
+    /// store/reload of `State` in an actor instance method (the switch is on
+    /// and the block has a send that may run user code). It threads `State`
+    /// like a state effect does, and cannot keep its fields in pre-extracted
+    /// loop parameters (hybrid mode): the cell must hold the whole `State`
+    /// map at the call. Deliberately not part of [`Self::has_state_effects`]:
+    /// that one is context-free, and a value-type, class-side or REPL block
+    /// has no actor `State` to bracket (the caller knows the context).
+    #[must_use]
+    pub fn has_synced_user_code_sends(&self) -> bool {
+        self.has_user_code_sends && crate::synced_calls::enabled()
+    }
+
     /// Whether a loop or fold over this block is lowered with mutation
     /// threading, in a method of kind `root` (`None`: a top-level expression,
     /// the REPL or a script). The one per-context rule: codegen's
@@ -85,6 +106,25 @@ impl BlockMutationAnalysis {
         root: Option<RootMethodKind>,
         actor_state_eligible: bool,
     ) -> bool {
+        self.needs_mutation_threading_with(
+            root,
+            actor_state_eligible,
+            self.has_synced_user_code_sends(),
+        )
+    }
+
+    /// [`Self::needs_mutation_threading`] with the ADR 0137 bracket decided by
+    /// the caller (`synced`: this block holds a call bracketed with a
+    /// `State` store/reload where it is compiled). Codegen passes its own
+    /// context-aware answer (`synced_calls_active`); the context-free default
+    /// above reads only the global switch.
+    #[must_use]
+    pub fn needs_mutation_threading_with(
+        &self,
+        root: Option<RootMethodKind>,
+        actor_state_eligible: bool,
+        synced: bool,
+    ) -> bool {
         let captured_local_mutation = || {
             self.captured_reads
                 .iter()
@@ -94,7 +134,8 @@ impl BlockMutationAnalysis {
             None => self.has_mutations(),
             Some(RootMethodKind::Class) => captured_local_mutation(),
             Some(RootMethodKind::Actor) => {
-                (actor_state_eligible && self.has_state_effects()) || !self.local_writes.is_empty()
+                (actor_state_eligible && (self.has_state_effects() || synced))
+                    || !self.local_writes.is_empty()
             }
             Some(RootMethodKind::ValueType) => {
                 !self.field_writes.is_empty() || captured_local_mutation()
@@ -121,28 +162,11 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
     analyze_statements(&block.body, &mut ctx)
 }
 
-/// ADR 0133 Phase 3 (BT-3909): whether a `groupBy:` with the literal block
-/// `block`, which writes no local bound outside it, is lowered as the threaded
-/// fold (`{GroupMap, ...}` accumulator) in a method of kind `root` (`None`:
-/// the REPL). Codegen's fold gate for such a block:
-/// [`BlockMutationAnalysis::needs_mutation_threading`] (`State` always
-/// eligible in an actor instance method) and, at the REPL, a binding written
-/// anywhere through nested constructs; the gate's other disjuncts are
-/// outer-local writes, which the Phase 0 check judges. Read by the
-/// `GroupByValue` residual check; `group_by_fold_gate_agreement` in
-/// `beamtalk-codegen` compiles a corpus of blocks and asserts codegen takes
-/// the fold exactly when this says so.
-#[must_use]
-pub fn group_by_fold_threads(block: &Block, root: Option<RootMethodKind>) -> bool {
-    inline_block_threads(block, root)
-}
-
 /// BT-3981 (ADR 0133 Phase 3): whether a block literal that writes no local
-/// bound outside it, inlined where it is sent (`groupBy:`'s fold, an evaluated
-/// `[...] value`), is lowered as a state-threading block in a method of kind
-/// `root` (`None`: the REPL): the block yields a `{Value, State}` pair that
-/// the site must unpack. The one gate `group_by_fold_threads` and the
-/// `EvaluatedBlockValue` residual check read; codegen's
+/// bound outside it, inlined where it is sent (an evaluated `[...] value`), is
+/// lowered as a state-threading block in a method of kind `root` (`None`: the
+/// REPL): the block yields a `{Value, State}` pair that the site must unpack.
+/// The gate the `EvaluatedBlockValue` residual check reads; codegen's
 /// `needs_mutation_threading` (with `State` always eligible in an actor
 /// instance method) is the rule.
 #[must_use]
@@ -255,8 +279,11 @@ pub fn compute_class_var_mutating_selectors(
     mutating
 }
 
-/// Whether `receiver` is the unqualified class reference `class_name`.
-fn is_own_class_reference(receiver: &Expression, class_name: &str) -> bool {
+/// Whether `receiver` is the unqualified class reference `class_name`: the
+/// one own-class-receiver shape the class-side rules share (here, and
+/// codegen's `expr_shape::is_own_class_reference`, BT-4005).
+#[must_use]
+pub fn is_own_class_reference(receiver: &Expression, class_name: &str) -> bool {
     matches!(
         receiver,
         Expression::ClassReference { name, package, .. }
@@ -707,9 +734,10 @@ fn analyze_expression(
             receiver,
             selector,
             arguments,
+            is_cast,
             ..
         } => {
-            record_send_target(receiver, selector, analysis);
+            record_send_target(receiver, selector, arguments, *is_cast, analysis);
             // on:do:/ensure: run their receiver (the try/protected
             // block) inline too, in the same activation — so it needs the same
             // local_writes propagation as an inline-conditional block argument
@@ -784,6 +812,9 @@ fn analyze_expression(
             if nested_analysis.has_self_sends {
                 analysis.has_self_sends = true;
             }
+            if nested_analysis.has_user_code_sends {
+                analysis.has_user_code_sends = true;
+            }
             analysis
                 .self_send_selectors
                 .extend(nested_analysis.self_send_selectors.iter().cloned());
@@ -804,7 +835,13 @@ fn analyze_expression(
             // x`) must reach `compute_class_var_mutating_selectors`.
             analyze_expression(receiver, analysis, ctx);
             for send in cascade_sends(expr).filter(|s| s.site == SendSite::CascadeLater) {
-                record_send_target(send.receiver, send.selector, analysis);
+                record_send_target(
+                    send.receiver,
+                    send.selector,
+                    send.arguments,
+                    false,
+                    analysis,
+                );
                 for arg in send.arguments {
                     analyze_expression(arg, analysis, ctx);
                 }
@@ -862,6 +899,8 @@ fn analyze_expression(
 fn record_send_target(
     receiver: &Expression,
     selector: &MessageSelector,
+    arguments: &[Expression],
+    is_cast: bool,
     analysis: &mut BlockMutationAnalysis,
 ) {
     if is_self_reference(receiver) {
@@ -869,7 +908,45 @@ fn record_send_target(
         analysis
             .self_send_selectors
             .insert(selector.name().to_string());
+    } else if !is_cast && send_may_run_user_code(receiver, selector, arguments) {
+        analysis.has_user_code_sends = true;
     }
+}
+
+/// ADR 0137: a conservative, syntactic answer to "may this send to something
+/// other than `self` run user code in this process" — a superset of what
+/// codegen brackets (which also knows static operand types), so a construct
+/// that holds a bracketed call is always seen as holding one here. Read off
+/// the shared selector tables ([`send_user_code`],
+/// [`crate::state_threading_selectors::structural_binary`]).
+fn send_may_run_user_code(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> bool {
+    use crate::state_threading_selectors::{SendUserCode, send_user_code, structural_binary};
+    if matches!(receiver, Expression::Super(_)) {
+        return false;
+    }
+    if let MessageSelector::Binary(op) = selector {
+        if structural_binary(op).is_some() {
+            return false;
+        }
+        let numeric_literal = |e: &Expression| {
+            matches!(
+                e.unwrap_parens(),
+                Expression::Literal(
+                    crate::ast::Literal::Integer(..) | crate::ast::Literal::Float(..),
+                    _
+                )
+            )
+        };
+        return !(numeric_literal(receiver) && arguments.first().is_some_and(numeric_literal));
+    }
+    matches!(
+        send_user_code(receiver, selector, arguments),
+        SendUserCode::MayRun | SendUserCode::InlinedOrClosureCall
+    )
 }
 
 /// Adds all variable names bound by `pattern` to `ctx.local_bindings` and
@@ -1028,6 +1105,16 @@ pub fn is_result_try_do(receiver: &Expression, selector_name: &str) -> bool {
         )
 }
 
+/// ADR 0137 (BT-4020): whether a `whileTrue:`/`whileFalse:` `condition` holds
+/// a call bracketed with a `State` store/reload
+/// ([`BlockMutationAnalysis::has_synced_user_code_sends`]). The caller adds it
+/// to [`while_condition_has_state_effects`] in an actor instance method only.
+#[must_use]
+pub fn while_condition_has_synced_user_code_sends(condition: &Expression) -> bool {
+    matches!(condition, Expression::Block(block)
+        if analyze_block(block).has_synced_user_code_sends())
+}
+
 /// ADR 0118 phase 3 / BT-3845: whether a `whileTrue:`/`whileFalse:`
 /// `condition` has state effects (a field write, a self-send, a stored-block
 /// call or an opaque-callable HOM send) that the loop must thread. Only a
@@ -1123,6 +1210,9 @@ fn propagate_inline_block_writes(
         .extend(nested.field_writes.iter().cloned());
     if nested.has_self_sends {
         analysis.has_self_sends = true;
+    }
+    if nested.has_user_code_sends {
+        analysis.has_user_code_sends = true;
     }
     analysis
         .self_send_selectors
@@ -2367,7 +2457,8 @@ fn arm_statement_lowers(
         if sites.contains(&e.span())
             && (operand_producer_writes(e, arm_bound).is_some()
                 || conditional_producer_writes(e, arm_bound, kind).is_some()
-                || exception_producer_writes(e, arm_bound, kind).is_some())
+                || exception_producer_writes(e, arm_bound, kind).is_some()
+                || match_producer_writes(e, arm_bound, kind).is_some())
         {
             producers.push(e.span());
         }
@@ -2389,6 +2480,13 @@ fn arm_statement_lowers(
             if !inside_producer(e.span())
                 && !construct_outer_local_writes(&construct, arm_bound).is_empty()
             {
+                ok = false;
+            }
+        }
+        // BT-3947: a nested `match:` that writes an outer local and is not a
+        // producer here would drop the write, like any construct.
+        if let Expression::Match { arms, .. } = e {
+            if !inside_producer(e.span()) && !match_arm_body_writes(arms, arm_bound).is_empty() {
                 ok = false;
             }
         }
@@ -2520,6 +2618,183 @@ pub fn root_producer_writes(
     operand_producer_writes(expr, bound_outside)
         .or_else(|| conditional_producer_writes(expr, bound_outside, kind))
         .or_else(|| exception_producer_writes(expr, bound_outside, kind))
+        .or_else(|| match_producer_writes(expr, bound_outside, kind))
+}
+
+/// BT-3947 (closes BT-3875): the arms of the `match:` expression `expr`
+/// (parentheses peeled), or `None` for any other expression.
+///
+/// A `match:` is a local-threading construct whose arms are *expressions*, not
+/// blocks, so [`local_threading_construct`] cannot name it. Its arm is the same
+/// frame a conditional's block is, though: [`match_arm_block`] gives the arm as
+/// that one-statement block, and every rule below reads those blocks.
+#[must_use]
+pub fn match_arms(expr: &Expression) -> Option<&[MatchArm]> {
+    match expr.unwrap_parens() {
+        Expression::Match { arms, .. } => Some(arms),
+        _ => None,
+    }
+}
+
+/// BT-3947: the arm of a `match:` as a block whose one statement is the arm's
+/// body and whose parameters are the arm pattern's bindings (the names the arm
+/// binds for itself, `extract_match_arm_bindings`). The frame the arm is
+/// lowered as; spans are the arm's own, so a producer site in the body keeps
+/// its span; the block's own is the arm's.
+#[must_use]
+pub fn match_arm_block(arm: &MatchArm) -> Block {
+    let (bindings, _) = crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+    Block::new(
+        bindings
+            .into_iter()
+            .map(|id| BlockParameter::new(id.name, id.span))
+            .collect(),
+        vec![ExpressionStatement::bare(arm.body.clone())],
+        arm.span,
+    )
+}
+
+/// The outer locals the arms of a `match:` write, closed over `nested` blocks as
+/// [`threaded_block_writes`] is. The walk is the one every construct block gets
+/// ([`OuterWriteWalker`]): an arm's pattern bindings are bound inside it, and its
+/// guard is walked with it.
+fn match_arm_writes_in(
+    arms: &[MatchArm],
+    bound_outside: &dyn Fn(&str) -> bool,
+    nested: NestedBlocks,
+    with_guards: bool,
+) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside,
+        frames: Vec::new(),
+        writes: Vec::new(),
+        state_writes: Vec::new(),
+        blocks_entered: 1,
+        nested,
+    };
+    for arm in arms {
+        let (ids, _) = crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+        walker
+            .frames
+            .push(ids.into_iter().map(|id| id.name).collect());
+        if with_guards {
+            if let Some(guard) = &arm.guard {
+                walker.expr(guard);
+            }
+        }
+        walker.expr(&arm.body);
+        walker.frames.pop();
+    }
+    walker.writes
+}
+
+/// BT-3947: the outer locals the arm *bodies* of a `match:` write, closed over
+/// the nested constructs of its arms ([`threaded_block_writes`]'s rule).
+#[must_use]
+pub fn match_arm_body_writes(
+    arms: &[MatchArm],
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    match_arm_writes_in(arms, bound_outside, NestedBlocks::Producers, false)
+}
+
+/// BT-3947: the outer locals the *guards* of a `match:` write. A guard runs
+/// before its arm is chosen, in no frame of the arm's, so a write there is never
+/// threaded: it keeps the `match:` arm error.
+#[must_use]
+pub fn match_guard_writes(
+    arms: &[MatchArm],
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> Vec<OuterLocalWrite> {
+    let mut walker = OuterWriteWalker {
+        bound_outside,
+        frames: Vec::new(),
+        writes: Vec::new(),
+        state_writes: Vec::new(),
+        blocks_entered: 1,
+        nested: NestedBlocks::Producers,
+    };
+    for arm in arms {
+        let (ids, _) = crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+        walker
+            .frames
+            .push(ids.into_iter().map(|id| id.name).collect());
+        if let Some(guard) = &arm.guard {
+            walker.expr(guard);
+        }
+        walker.frames.pop();
+    }
+    walker.writes
+}
+
+/// BT-3947 (closes BT-3875): whether the arms of a `match:` can be lowered by the
+/// `match:` producer in a method of kind `kind`: [`conditional_arms_lower_as_producer`]'s
+/// rule over the arms as blocks ([`match_arm_block`]). Read by the Phase 0 check and
+/// by codegen's producer predicate.
+#[must_use]
+pub fn match_arms_lower_as_producer(
+    arms: &[MatchArm],
+    kind: RootMethodKind,
+    bound_outside: &dyn Fn(&str) -> bool,
+) -> bool {
+    let blocks: Vec<Block> = arms.iter().map(match_arm_block).collect();
+    let refs: Vec<&Block> = blocks.iter().collect();
+    // An arm binds its pattern variables for itself, on top of the names the
+    // scope holds: they are the block's parameters, so the shared rule sees
+    // them as the arm's own.
+    arms_lower_as_producer(&refs, kind, bound_outside, false)
+}
+
+/// BT-3947 (closes BT-3875): the threaded set of a `match:` that codegen lowers
+/// as a local-threading producer (a conditional with one arm per `match:` arm,
+/// [`conditional_producer_writes`]'s counterpart), or `None` when `expr` is not
+/// one: it has at least one arm that writes an outer local, no guard writes one,
+/// the set its arms pack (the nested constructs threaded today) is the whole set
+/// so no write is dropped, and the arms are ones the producer can lower in this
+/// kind of method ([`match_arms_lower_as_producer`]).
+#[must_use]
+pub fn match_producer_writes(
+    expr: &Expression,
+    bound_outside: &dyn Fn(&str) -> bool,
+    kind: RootMethodKind,
+) -> Option<Vec<OuterLocalWrite>> {
+    let arms = match_arms(expr)?;
+    // The subject is evaluated before the arms' scratch map is seeded, so a
+    // subject that assigns a local would be lost to an arm that also writes it:
+    // such a `match:` stays the loud `MatchArmWrite` error.
+    // Any assignment in the subject keeps the `match:` the loud error: codegen
+    // seeds the arms' scratch map before the subject is evaluated and, unlike a
+    // conditional's receiver, does not sequence the subject's writes first, so
+    // even an unrelated local assigned there is an unthreaded assignment (the
+    // verifier's `UnthreadedLocalAssignment`).
+    if let Expression::Match { value, .. } = expr.unwrap_parens() {
+        let mut assigns = false;
+        crate::ast_walker::walk_expression(value, &mut |e| {
+            assigns |= matches!(e, Expression::Assignment { .. });
+        });
+        if assigns {
+            return None;
+        }
+    }
+    if !match_guard_writes(arms, bound_outside).is_empty()
+        || !match_arms_lower_as_producer(arms, kind, bound_outside)
+    {
+        return None;
+    }
+    let all = match_arm_body_writes(arms, bound_outside);
+    let today = match_arm_writes_in(
+        arms,
+        bound_outside,
+        NestedBlocks::ProducersThreadedToday,
+        false,
+    );
+    let names = |writes: &[OuterLocalWrite]| {
+        let mut names: Vec<&str> = writes.iter().map(|w| w.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        names.into_iter().map(str::to_string).collect::<Vec<_>>()
+    };
+    (!all.is_empty() && names(&all) == names(&today)).then_some(all)
 }
 
 /// ADR 0131 Phase 2 (BT-3749): the sub-expressions of the method-body
@@ -2613,6 +2888,15 @@ pub fn repl_producer_writes(
     bound_outside: &dyn Fn(&str) -> bool,
 ) -> Option<Vec<OuterLocalWrite>> {
     let inner = expr.unwrap_parens();
+    // BT-3947: a `match:` whose arms write a binding (no guard does) adopts the
+    // bindings map like a REPL conditional.
+    if let Some(arms) = match_arms(inner) {
+        if !match_guard_writes(arms, bound_outside).is_empty() {
+            return None;
+        }
+        let writes = match_arm_body_writes(arms, bound_outside);
+        return (!writes.is_empty()).then_some(writes);
+    }
     let construct = local_threading_construct(inner)?;
     match construct.family {
         LocalThreadingFamily::Lookup => None,
@@ -2711,7 +2995,7 @@ pub fn repl_arm_producer_sites(stmt: &Expression) -> Vec<&Expression> {
         }
     }
     let mut sites = sequenced_operand_sites(stmt);
-    if local_threading_construct(inner).is_some() {
+    if local_threading_construct(inner).is_some() || match_arms(inner).is_some() {
         sites.push(inner);
     }
     sites
@@ -2761,6 +3045,7 @@ pub fn loop_body_producer_sites(stmt: &Expression) -> Vec<&Expression> {
     if producer_body_block(inner).is_some()
         || conditional_arm_blocks(inner).is_some()
         || exception_arm_blocks(inner).is_some()
+        || match_arms(inner).is_some()
     {
         sites.push(inner);
     }
@@ -4021,6 +4306,72 @@ mod tests {
 
     fn bare(expr: Expression) -> ExpressionStatement {
         ExpressionStatement::bare(expr)
+    }
+
+    // ─── ADR 0137 (BT-4020): sends that may run user code ───────────────────
+
+    fn analyzed(src: &str) -> BlockMutationAnalysis {
+        use crate::source_analysis::{lex_with_eof, parse};
+        let (module, _) = parse(lex_with_eof(src));
+        let Expression::Block(block) = &module.expressions[0].expression else {
+            panic!("not a block: {src}");
+        };
+        analyze_block(block)
+    }
+
+    #[test]
+    fn a_send_to_another_object_may_run_user_code() {
+        for src in [
+            "[x foo]",
+            "[x printString]",
+            "[a + b]",
+            "[x < 1]",
+            "[xs do: blk]",
+            // A literal-block collection message may be a closure handed to a runtime fold.
+            "[xs do: [:e | e]]",
+        ] {
+            assert!(analyzed(src).has_user_code_sends, "{src}");
+        }
+    }
+
+    #[test]
+    fn intrinsics_inlined_constructs_and_self_sends_do_not_count() {
+        for src in [
+            "[x isNil]",
+            "[x == y]",
+            "[x ifTrue: [1] ifFalse: [2]]",
+            "[1 + 2]",
+            "[self foo]",
+            "[super foo]",
+            "[x foo!]",
+        ] {
+            assert!(!analyzed(src).has_user_code_sends, "{src}");
+        }
+    }
+
+    #[test]
+    fn a_nested_block_contributes_its_user_code_sends() {
+        assert!(analyzed("[xs do: [:e | e foo]]").has_user_code_sends);
+    }
+
+    #[test]
+    fn the_switch_gates_the_state_effect_not_the_fact() {
+        use crate::synced_calls::{SyncedCallsMode, override_mode};
+        let analysis = analyzed("[x foo]");
+        {
+            let _off = override_mode(SyncedCallsMode::Off);
+            assert!(analysis.has_user_code_sends);
+            assert!(!analysis.has_synced_user_code_sends());
+            assert!(!analysis.needs_mutation_threading(Some(RootMethodKind::Actor), true));
+        }
+        let _on = override_mode(SyncedCallsMode::Enforce);
+        assert!(analysis.has_synced_user_code_sends());
+        // `has_state_effects` stays context-free; only the actor root counts the bracket.
+        assert!(!analysis.has_state_effects());
+        assert!(analysis.needs_mutation_threading(Some(RootMethodKind::Actor), true));
+        assert!(!analysis.needs_mutation_threading(Some(RootMethodKind::ValueType), true));
+        assert!(!analysis.needs_mutation_threading(Some(RootMethodKind::Class), true));
+        assert!(!analysis.needs_mutation_threading(None, true));
     }
 
     #[test]

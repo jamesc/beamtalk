@@ -272,6 +272,11 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
 -doc """
 Auto-coerce binary args to charlists and retry once on `badarg`.
 
+No retry when a direct argument is a fun: re-running the call would re-run
+that code (a Beamtalk block's side effects would happen twice), so the
+`badarg` is raised as a `type_error` instead (BT-4055). Funs nested inside a
+list, map or tuple argument are not detected.
+
 Many Erlang functions (os:cmd/1, file:read_file/1, …) expect charlists but
 Beamtalk strings are binaries. Applies the same unified catch policy on the
 retry; if the retry still fails (or no binary args were coercible) the error is
@@ -286,7 +291,9 @@ discarded, the same rule `beamtalk_class_vars:protect/1` applies (BT-3728).
 ) -> term().
 maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack, Snap) ->
     CoercedArgs = coerce_binaries_to_charlists(Args),
-    case CoercedArgs =/= Args of
+    %% Never retry a call that was passed a fun (a Beamtalk block): the retry
+    %% would run caller code a second time, side effects included (BT-4055).
+    case CoercedArgs =/= Args andalso not lists:any(fun erlang:is_function/1, Args) of
         true ->
             beamtalk_class_vars:restore(Snap),
             %% bt-catcher-audit: converted - restores the pre-call snapshot before retrying; the
@@ -335,6 +342,12 @@ exception clause here cannot silently skip one path.
 Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/5`:
 - `error:#{error := #beamtalk_error{}}` / `error:#beamtalk_error{}` → re-raised
   (idempotent; never reclassified)
+- any other `error:*` raised in compiled Beamtalk code that the callee ran
+  (a Beamtalk block passed to a `native:` method or to inline FFI) → re-raised
+  unchanged, with no badarg retry: the fault is the block's, not the FFI
+  call's, so it keeps the kind it would have outside the call
+  (`raised_in_beamtalk_code/2`, BT-4055). The rules below apply to errors
+  raised by Erlang code.
 - `error:badarg` → `OnBadarg` (charlist retry on the first pass, terminal on the
   retry pass)
 - `error:undef` for the target → structured `does_not_understand` (missing
@@ -373,11 +386,45 @@ classify_ffi_exception(error, #beamtalk_error{} = Rec, Stack, _M, _F, _Args, _Se
     %% not reclassify it as a generic runtime_error.
     erlang:raise(error, beamtalk_exception_handler:wrap(Rec), Stack);
 classify_ffi_exception(
-    error, badarg, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
+    error, Reason, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
+) ->
+    case raised_in_beamtalk_code(Module, Stack) of
+        true ->
+            %% Raised by compiled Beamtalk code the callee ran (a block passed
+            %% in, say): not an FFI fault, so it propagates exactly as it would
+            %% had the block run outside the call (BT-4055).
+            erlang:raise(error, Reason, Stack);
+        false ->
+            classify_erlang_error(
+                Reason, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
+            )
+    end;
+classify_ffi_exception(Class, Reason, Stack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg) ->
+    %% exit:* and throw:* propagate unchanged — re-raising with the captured
+    %% stacktrace is transparent, but lets a single catch own the whole policy.
+    erlang:raise(Class, Reason, Stack).
+
+-doc """
+Classify an `error:Reason` raised by Erlang code: the FFI target itself or
+anything it called other than compiled Beamtalk code. See
+`classify_ffi_exception/9` for the policy.
+""".
+-spec classify_erlang_error(
+    term(),
+    list(),
+    atom(),
+    atom(),
+    list(),
+    atom(),
+    error_context(),
+    fun((atom(), atom(), list(), atom(), error_context(), list()) -> term())
+) -> term().
+classify_erlang_error(
+    badarg, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
 ) ->
     OnBadarg(Module, FunName, Args, OrigSelector, Context, Stack);
-classify_ffi_exception(
-    error, undef, Stack, Module, FunName, Args, OrigSelector, Context, _OnBadarg
+classify_erlang_error(
+    undef, Stack, Module, FunName, Args, OrigSelector, Context, _OnBadarg
 ) ->
     Arity = length(Args),
     case is_ffi_target_undef(Module, FunName, Arity, Stack) of
@@ -392,23 +439,19 @@ classify_ffi_exception(
             %% target (BT-4021).
             raise_generic_error(Module, FunName, OrigSelector, Context, undef, Stack)
     end;
-classify_ffi_exception(
-    error, function_clause, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
+classify_erlang_error(
+    function_clause, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
 ) ->
     raise_function_clause_error(Module, FunName, OrigSelector, Context, Stack);
-classify_ffi_exception(
-    error, badarith, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
+classify_erlang_error(
+    badarith, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
 ) ->
     raise_badarith_error(Module, FunName, OrigSelector, Context, Stack);
-classify_ffi_exception(
-    error, Reason, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
+classify_erlang_error(
+    Reason, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
 ) ->
     %% Catch-all that makes casual FFI safe by default (ADR 0101 Part 2).
-    raise_generic_error(Module, FunName, OrigSelector, Context, Reason, Stack);
-classify_ffi_exception(Class, Reason, Stack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg) ->
-    %% exit:* and throw:* propagate unchanged — re-raising with the captured
-    %% stacktrace is transparent, but lets a single catch own the whole policy.
-    erlang:raise(Class, Reason, Stack).
+    raise_generic_error(Module, FunName, OrigSelector, Context, Reason, Stack).
 
 %%% ============================================================================
 %%% Internal helpers
@@ -574,6 +617,36 @@ is_ffi_target_undef(Module, FunName, Arity, [{Module, FunName, Args, _Loc} | _])
     length(Args) =:= Arity;
 is_ffi_target_undef(_Module, _FunName, _Arity, _Stack) ->
     false.
+
+-doc """
+True when an exception was raised in compiled Beamtalk code (a `bt@` class
+module, or a REPL/inspector evaluation module) that the FFI target ran, such as
+a Beamtalk block passed in as an argument.
+
+Scans the stacktrace from the raise point toward the caller. Reaching a `bt@`
+frame first means Beamtalk code raised it, directly or through a runtime helper
+it called. Reaching the target module or this proxy first means Erlang code
+raised it (the target, or a stock module it called), so the FFI classification
+applies. A stacktrace with neither is classified as before.
+
+Best effort: a tail call out of Beamtalk code into a raising Erlang function, or
+a raise more than `backtrace_depth` frames below the block, hides the Beamtalk
+frame, and the error is then classified as the call's. `maybe_retry_badarg/7`
+does not rely on this: it never retries a call with a fun as a direct
+argument. A fun nested inside a list, map or tuple argument is not detected.
+""".
+-spec raised_in_beamtalk_code(atom(), list()) -> boolean().
+raised_in_beamtalk_code(_Target, []) ->
+    false;
+raised_in_beamtalk_code(Target, [{Target, _, _, _} | _]) ->
+    false;
+raised_in_beamtalk_code(_Target, [{?MODULE, _, _, _} | _]) ->
+    false;
+raised_in_beamtalk_code(Target, [{Module, _, _, _} | Rest]) ->
+    case beamtalk_module_name:is_compiled_beamtalk_module(Module) of
+        true -> true;
+        false -> raised_in_beamtalk_code(Target, Rest)
+    end.
 
 -doc """
 Raise a structured error for an FFI target that is not callable.

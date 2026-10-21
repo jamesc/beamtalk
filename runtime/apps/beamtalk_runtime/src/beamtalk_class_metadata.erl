@@ -232,6 +232,14 @@ handles the race between `ets:info/1` and `ets:new/2`.
 """.
 -spec new() -> ok.
 new() ->
+    %% BT-4064: the derived-fact cache (resolved dispatch module, Exception
+    %% bit, ...) lives and dies with this table. A freshly (re)created table has
+    %% no rows, so anything cached against the old one is stale.
+    ok = beamtalk_class_derived_cache:new(),
+    case ets:info(?TABLE, owner) of
+        undefined -> beamtalk_class_derived_cache:invalidate();
+        _ -> ok
+    end,
     ensure_table(?TABLE, [
         set,
         public,
@@ -336,7 +344,8 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
     %% BT-3669: a full-row write resets has_runtime_class_methods to false;
     %% clear the shadow flag only AFTER the gate is closed (a stale true is safe).
     beamtalk_class_shadow_flags:clear(runtime_fun, Name),
-    ok.
+    %% BT-4064: only after the row has landed (see beamtalk_class_derived_cache).
+    beamtalk_class_derived_cache:invalidate().
 
 -doc """
 Merge identity fields into an **existing** metadata row — row *update*.
@@ -384,7 +393,9 @@ merge_identity(Name, Module, Selectors, Superclass, IsAbstract) ->
     of
         true ->
             sync_subclass_index(Name, OldSuperclass, Superclass),
-            ok;
+            %% BT-4064: a hot reload / redefinition can move the class to
+            %% another module or superclass; drop derived facts after the write.
+            beamtalk_class_derived_cache:invalidate();
         false ->
             %% No existing row — fall back to row creation. A brand-new row
             %% has no funs to preserve, so insert/5's gate reset is correct.
@@ -424,7 +435,9 @@ delete(Name) ->
         ok
     catch
         error:badarg -> ok
-    end.
+    end,
+    %% BT-4064: a removed class must not keep resolving through the cache.
+    beamtalk_class_derived_cache:invalidate().
 
 %%====================================================================
 %% Reads
