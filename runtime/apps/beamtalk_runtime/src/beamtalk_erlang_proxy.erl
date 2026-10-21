@@ -89,7 +89,7 @@ dispatch('methods', _Args, Self) ->
                     <<"/">>,
                     integer_to_binary(A)
                 ])
-             || {F, A} <- Exports, F =/= module_info
+             || {F, A} <- Exports, not beamtalk_reflection:is_predefined_function(F)
             ]);
         {error, not_loaded} ->
             raise_module_not_loaded(Module, 'methods')

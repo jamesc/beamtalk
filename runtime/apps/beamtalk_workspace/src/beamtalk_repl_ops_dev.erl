@@ -235,7 +235,7 @@ handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
                                         Filtered = [
                                             atom_to_binary(F, utf8)
                                          || {F, _A} <- Exports,
-                                            F =/= module_info
+                                            not beamtalk_reflection:is_predefined_function(F)
                                         ],
                                         Unique = lists:usort(Filtered),
                                         [

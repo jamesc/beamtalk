@@ -29,7 +29,8 @@ See also: beamtalk_tagged_map
     has_field/2,
     clear_field/2,
     inspect_string/1,
-    source_file_from_module/1
+    source_file_from_module/1,
+    is_predefined_function/1
 ]).
 
 %%% ============================================================================
@@ -124,6 +125,17 @@ Object modules can call it from generated dispatch/4 code.
 -spec inspect_string(map()) -> binary().
 inspect_string(State) when is_map(State) ->
     beamtalk_object_printer:structural_from_state(State).
+
+-doc """
+True for the BEAM's predefined `module_info` function, which every module
+exports: erlc adds it to Erlang sources, and Beamtalk codegen to every
+generated module (BT-4067). It is reflection plumbing, never a Beamtalk
+method or a user-facing Erlang function, so code that enumerates a module's
+exports as methods or completions drops it.
+""".
+-spec is_predefined_function(atom()) -> boolean().
+is_predefined_function(module_info) -> true;
+is_predefined_function(_) -> false.
 
 -doc """
 Read the beamtalk_source file path from a compiled module's attributes.

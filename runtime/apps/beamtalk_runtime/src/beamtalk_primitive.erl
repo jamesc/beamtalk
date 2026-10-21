@@ -972,10 +972,8 @@ value_type_send(Self, Class, Module, Selector, Args) ->
             Module:dispatch(Selector, Args, Self);
         false ->
             Arity = length(Args) + 1,
-            %% module_info/1 is the BEAM's predefined reflection function,
-            %% not a Beamtalk method (BT-4067).
             case
-                Selector =/= module_info andalso
+                not beamtalk_reflection:is_predefined_function(Selector) andalso
                     erlang:function_exported(Module, Selector, Arity)
             of
                 true ->
@@ -1123,9 +1121,7 @@ value_type_responds_to(Class, Module, Selector) ->
                     true -> Module:module_info(exports);
                     false -> []
                 end,
-            %% module_info/0,1 is the BEAM's predefined reflection function,
-            %% not a Beamtalk method (BT-4067).
-            (Selector =/= module_info andalso
+            (not beamtalk_reflection:is_predefined_function(Selector) andalso
                 lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports)) orelse
                 %% Module-less classes report their fun-backed instance
                 %% methods (and inherited ones) as understood.
