@@ -288,3 +288,217 @@ fn bt4000_repros_compile() {
         assert!(passes(&src), "{src}");
     }
 }
+
+// ─── BT-4017: every fold kind, and a non-literal block argument ─────────────
+//
+// `#(1, 2) do: [:e | (self done) ifTrue: blk]` raised `badarg` at run time:
+// the fold body classified the conditional as a construct answering
+// `{Result, StateAcc}` and unpacked `element(2, ...)` of it, but with a
+// non-literal block argument the conditional compiles to a plain `ifTrue:`
+// send. The fold body now lowers every statement `thread_ahead` registers
+// unwrapped (`thread_ahead_unwraps`) through `thread_ahead`, as the other
+// frames do (`fold_statement_threads_ahead`).
+//
+// The verifier cannot see this bug: the shape of a run-time value is not in
+// the IR, the fold body's raw-tuple unpack is an opaque statement, and `erlc`
+// accepts `element(2, X)` of any `X`. The proof is a codegen-shape check
+// ([`fold_raw_tuple_unpacks`]) over the generated corpus, shown to catch the
+// pre-fix routing ([`LocalRebindFault::FoldRawTupleUnpack`]), plus the runtime
+// rows in `stdlib/test/bt4017fold_body_block_arg_test.bt`.
+
+/// Every fold kind, with the conditional statement `{S}` as the body's last
+/// statement (the kind's value) and before the kind's own tail.
+const FOLDS: &[&str] = &[
+    "#(1, 2) do: [:e | {S}]",
+    "#(1, 2) do: [:e | {S}. e]",
+    "#{#a => 1} keysAndValuesDo: [:k :w | {S}]",
+    "#(1, 2) collect: [:e | {S}]",
+    "#(1, 2) collect: [:e | {S}. e]",
+    "#(1, 2) inject: 0 into: [:a :e | {S}]",
+    "#(1, 2) inject: 0 into: [:a :e | {S}. a + e]",
+    "#(1, 2) select: [:e | {S}]",
+    "#(1, 2) reject: [:e | {S}. true]",
+    "#(1, 2) anySatisfy: [:e | {S}]",
+    "#(1, 2) allSatisfy: [:e | {S}. true]",
+    "#(1, 2) detect: [:e | {S}]",
+    "#(1, 2) detect: [:e | {S}. false] ifNone: [0]",
+    "#(1, 2) count: [:e | {S}]",
+    "#(1, 2) takeWhile: [:e | {S}]",
+    "#(1, 2) dropWhile: [:e | {S}. false]",
+    "#(1, 2) partition: [:e | {S}]",
+    "#(1, 2) groupBy: [:e | {S}]",
+    "#(2, 1) sort: [:a :b | {S}. a < b]",
+];
+
+/// Conditionals over a receiver `{R}` with a non-literal block argument (the
+/// method's `blk` parameter), alone and next to a literal arm. (A literal arm
+/// that writes a field next to a non-literal one is not inlined, so it is
+/// `FieldAssignmentInUnsupportedBlock`, a compile error.)
+const BLOCK_ARG_CONDITIONALS: &[&str] = &[
+    "{R} ifTrue: blk",
+    "{R} ifFalse: blk",
+    "{R} ifTrue: blk ifFalse: blk",
+    "{R} ifTrue: [0] ifFalse: blk",
+    "{R} ifNil: blk",
+    "{R} and: blk",
+    "{R} or: blk",
+];
+
+/// The fold-body statements, each with whether the pre-BT-4017 fold body
+/// routed it to the raw-tuple unpack: every non-literal-block conditional
+/// (it did), and every literal-arm conditional whose arm writes a field (it
+/// did; element 2 of that producer's tuple was right) or a local (it did not:
+/// a local-threading producer already went through `thread_ahead`).
+/// BT-4000's fold row covered `do:` only.
+fn fold_statements() -> Vec<(String, bool)> {
+    let mut out: Vec<(String, bool)> = BLOCK_ARG_CONDITIONALS
+        .iter()
+        .map(|c| ((*c).to_string(), true))
+        .collect();
+    for cond in CONDITIONALS {
+        out.push((cond.replace("{B}", ARMS[1]), false));
+        out.push((cond.replace("{B}", ARMS[2]), true));
+    }
+    out
+}
+
+fn block_arg_method(prelude: &str, i: usize, body: &str) -> String {
+    format!("  probe{i}: blk =>\n{prelude}    n := 3\n    {body}\n    n\n")
+}
+
+/// `(name, method body)` rows: every fold kind x receiver x fold statement,
+/// and every other frame of [`LOOPS`] x receiver x non-literal-block
+/// conditional (BT-4000 fixed those; pinned here so they stay fixed).
+fn block_arg_rows() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let statements = fold_statements();
+    for (l, fold) in FOLDS.iter().enumerate() {
+        for (r, receiver) in RECEIVERS.iter().enumerate() {
+            for (s, (stmt, raw_pre_fix)) in statements.iter().enumerate() {
+                let tag = if *raw_pre_fix { "raw" } else { "producer" };
+                out.push((
+                    format!("fold{l} recv{r} stmt{s} {tag}"),
+                    fold.replace("{S}", &stmt.replace("{R}", receiver)),
+                ));
+            }
+        }
+    }
+    for (l, lp) in LOOPS.iter().enumerate() {
+        for (r, receiver) in RECEIVERS.iter().enumerate() {
+            for (c, cond) in BLOCK_ARG_CONDITIONALS.iter().enumerate() {
+                out.push((
+                    format!("loop{l} recv{r} blockarg{c}"),
+                    lp.replace("{S}", &cond.replace("{R}", receiver)),
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// The codegen-shape check: how many raw `{Value, StateAcc}` unpacks of a
+/// statement (`lower_foldl_body`'s `CondResult` tuple) `code` holds. A
+/// conditional with a sequenced receiver is never one (BT-4017), so for every
+/// row of [`block_arg_rows`] this is zero.
+fn fold_raw_tuple_unpacks(code: &str) -> usize {
+    code.matches("_CondResult").count()
+}
+
+/// The rows Phase 0 accepts, as `(name, single-method source)`, each checked
+/// to be well-formed.
+fn block_arg_sources(prelude: &str) -> Vec<(String, String)> {
+    block_arg_rows()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, (name, body))| {
+            let src = format!("{HEADER}{HELPERS}{}", block_arg_method(prelude, i, &body));
+            assert_parses(&src);
+            (!phase0_rejects(&src)).then_some((name, src))
+        })
+        .collect()
+}
+
+/// BT-4017: every row passes the debug verifier, compiles through `erlc`, and
+/// holds no raw-tuple unpack of its conditional (one module per context;
+/// bisected to the failing rows on failure).
+#[test]
+fn fold_body_block_arg_corpus_compiles_without_a_raw_tuple_unpack() {
+    let mut failures = Vec::new();
+    for (ctx, prelude) in PRELUDES {
+        let rows = block_arg_sources(prelude);
+        assert!(
+            rows.len() >= 1500,
+            "only {} rows; the corpus has thinned out",
+            rows.len()
+        );
+        let methods: Vec<String> = rows
+            .iter()
+            .map(|(_, src)| src[HEADER.len() + HELPERS.len()..].to_string())
+            .collect();
+        let module = format!("{HEADER}{HELPERS}{}", methods.concat());
+        let whole = catch_unwind(AssertUnwindSafe(|| codegen(&module)));
+        if let Ok(code) = &whole
+            && fold_raw_tuple_unpacks(code) == 0
+            && passes(&module)
+        {
+            continue;
+        }
+        failures.extend(rows.iter().filter_map(|(name, src)| {
+            let ok = catch_unwind(AssertUnwindSafe(|| codegen(src)))
+                .is_ok_and(|code| fold_raw_tuple_unpacks(&code) == 0)
+                && passes(src);
+            (!ok).then(|| format!("{ctx} / {name}:\n{src}"))
+        }));
+    }
+    assert!(
+        failures.is_empty(),
+        "{} block-argument row(s) fail verified codegen or hold a raw-tuple unpack:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
+/// BT-4017: with the fold body's pre-fix routing restored
+/// ([`LocalRebindFault::FoldRawTupleUnpack`]), every fold row the pre-fix
+/// routing sent to the raw-tuple unpack is one again, which the codegen-shape
+/// check reports, while the verifier stays silent: the reason the proof is a
+/// shape check and a runtime test rather than a `VerifyError`.
+#[cfg(debug_assertions)]
+#[test]
+fn fold_body_block_arg_corpus_reports_the_pre_fix_routing() {
+    use crate::core_erlang::threaded_expr::fault;
+    let mut missed = Vec::new();
+    let rows: Vec<_> = block_arg_sources("")
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("fold") && name.ends_with(" raw"))
+        .collect();
+    assert!(rows.len() >= 900, "only {} rows", rows.len());
+    for (name, src) in rows {
+        if let Some(report) =
+            super::verifier_report(&src, Some(LocalRebindFault::FoldRawTupleUnpack))
+        {
+            missed.push(format!("{name}: the verifier saw it ({report})\n{src}"));
+            continue;
+        }
+        let code = fault::with(LocalRebindFault::FoldRawTupleUnpack, || codegen(&src));
+        if fold_raw_tuple_unpacks(&code) == 0 {
+            missed.push(format!("{name}: no raw-tuple unpack\n{src}"));
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "{} row(s) where the pre-fix routing is not as described:\n{}",
+        missed.len(),
+        missed.join("\n")
+    );
+}
+
+/// The issue's repro (BT-4017), with a silent verifier, through `erlc` and
+/// without a raw-tuple unpack.
+#[test]
+fn bt4017_repro_compiles() {
+    let src = "Actor subclass: Nonlit\n  state: f = 0\n  done =>\n    self.f := self.f + 1\n    true\n  fold: blk =>\n    #(1, 2) do: [:e | (self done) ifTrue: blk]\n    self.f\n";
+    assert_eq!(super::verifier_report(src, None), None, "{src}");
+    assert_eq!(fold_raw_tuple_unpacks(&codegen(src)), 0, "{src}");
+    assert!(passes(src), "{src}");
+}

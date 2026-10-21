@@ -1,0 +1,78 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4017: in an actor method, a fold body statement that is a conditional
+// whose receiver is a self-send and whose block argument is not a literal
+// (`#(1, 2) do: [:e | (self done) ifTrue: blk]`) runs, and keeps the
+// receiver's state change on every iteration. It used to raise `badarg`. One
+// test per fold kind. The codegen corpus is
+// `loop_body_conditional_receiver_corpus.rs`.
+// Fixture: fixtures/bt4017fold_body_block_arg_actor.bt.
+
+TestCase subclass: Bt4017FoldBodyBlockArgTest
+
+  testRepro =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn fold: [nil]) equals: 2
+
+  testDoLast =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn doLast: [nil]) equals: 3
+
+  testDoBeforeTail =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn doBeforeTail: [nil]) equals: #[6, 3]
+
+  testKeysAndValuesDo =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn keysAndValuesDoRow: [nil]) equals: 2
+
+  testCollectLast =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn collectLast: [7]) equals: #[7, 3]
+
+  testCollectMixed =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn collectMixed: [5]) equals: #[5, 0, 3]
+
+  testCollectFieldArm =>
+    self assert: Bt4017FoldBodyBlockArgActor spawn collectFieldArm equals: #[5, 5, 3]
+
+  testSelectFieldArm =>
+    self assert: Bt4017FoldBodyBlockArgActor spawn selectFieldArm equals: #[2, 2, 3]
+
+  testInjectLast =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn injectLast: [10]) equals: #[10, 3]
+
+  testInjectBeforeTail =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn injectBeforeTail: [nil]) equals: #[6, 3]
+
+  testSelect =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn selectRow: [nil]) equals: #[2, 3]
+
+  testReject =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn rejectRow: [nil]) equals: #[2, 3]
+
+  testAnySatisfy =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn anySatisfyRow: [true]) equals: #[true, true]
+
+  testAllSatisfy =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn allSatisfyRow: [true]) equals: #[true, 3]
+
+  testDetect =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn detectRow: [true]) equals: #[2, true]
+
+  testDetectIfNone =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn detectIfNone: [nil]) equals: #[0, 3]
+
+  testCount =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn countRow: [true]) equals: #[2, 3]
+
+  testTakeWhile =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn takeWhileRow: [nil]) equals: #[2, true]
+
+  testDropWhile =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn dropWhileRow: [nil]) equals: #[2, true]
+
+  testPartition =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn partitionRow: [nil]) equals: 3
+
+  testGroupBy =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn groupByRow: [nil]) equals: 3
+
+  testSort =>
+    self assert: (Bt4017FoldBodyBlockArgActor spawn sortRow: [nil]) equals: #[1, true]

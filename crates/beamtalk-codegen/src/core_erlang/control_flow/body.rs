@@ -253,6 +253,32 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-4017: whether a fold body statement is lowered through
+    /// [`Self::thread_ahead`] and its value read back, rather than unpacked as
+    /// the raw `{Value, StateAcc}` tuple of a construct with mutations: the one
+    /// predicate [`Self::thread_ahead_unwraps`], as for the method root, a
+    /// `Letrec` body, a conditional arm and an `on:do:`/`ensure:` body.
+    ///
+    /// **Invariant** (every fold kind: `do:`/`keysAndValuesDo:`, `collect:`,
+    /// `inject:into:`, `select:`/`reject:`, `anySatisfy:`/`allSatisfy:`,
+    /// `detect:`/`detect:ifNone:`, `count:`, `takeWhile:`/`dropWhile:`,
+    /// `partition:`, `groupBy:`, `sort:`): a statement whose value
+    /// `thread_ahead` registers unwrapped is never the operand of an
+    /// `element(N, ...)` unpack. Its prelude is spliced into the fold body's
+    /// frame and its plain value feeds the kind's last-expression tail.
+    fn fold_statement_threads_ahead(&self, expr: &Expression) -> bool {
+        // Test-only fault injection: the pre-BT-4017 routing, so the
+        // codegen-shape check is shown to catch it on a real compile
+        // (`tests/loop_body_conditional_receiver_corpus.rs`).
+        #[cfg(test)]
+        if super::super::threaded_expr::fault::active()
+            == Some(super::super::threaded_expr::fault::LocalRebindFault::FoldRawTupleUnpack)
+        {
+            return false;
+        }
+        self.thread_ahead_unwraps(expr)
+    }
+
     /// BT-3863: the accumulator statement a fold lambda body ends in, tagged
     /// with what `value` threads to the next iteration
     /// ([`threaded_ir::VerifyError::FoldLocalsNotCarried`]). Every `BodyKind`
@@ -876,13 +902,28 @@ impl CoreErlangGenerator {
                         span,
                     );
                 }
-            } else if !gate_split && self.local_producer_locals(expr).is_some() {
+            } else if !gate_split
+                && (self.local_producer_locals(expr).is_some()
+                    || self.fold_statement_threads_ahead(expr))
+            {
                 // ADR 0131 Phase 2b: a nested loop or fold is a local-threading
                 // producer in this fold's frame. `lower_non_assign_expr`
                 // threads it ahead (`thread_ahead` -> `threaded_expression`),
                 // splicing its construct tuple and one `LocalRebind` per
                 // threaded local lowered by this frame's mode, and reads its
                 // value back for the kind's last-expression tail.
+                //
+                // BT-4017: so is every statement `thread_ahead` registers
+                // already unwrapped (`thread_ahead_unwraps`: an inline-threaded
+                // conditional or `match:`, an exception or evaluated-block
+                // producer, a conditional whose receiver is sequenced ahead),
+                // exactly as the `Letrec` body lowers it
+                // (`lower_letrec_non_assign_expr`). Its prelude, the receiver's
+                // `Bind`s included, is this body's own statements, and its value
+                // is read back, never unpacked as a `{Value, StateAcc}` tuple:
+                // `(self done) ifTrue: blk` with a non-literal `blk` compiles to
+                // a plain `ifTrue:` send, whose `element(2, ...)` raised
+                // `badarg` at run time.
                 self.lower_non_assign_expr(
                     &mut stmts,
                     expr,
