@@ -1137,12 +1137,14 @@ Erlang file write_file: "/tmp/out.txt" with: "data"
 
 **Conversion rules:**
 - `{ok, Value}` becomes `Result ok: Value`
-- `{error, Reason}` becomes `Result error: Reason`
+- `{error, Reason}` becomes a `Result error:` holding an Exception that wraps `Reason` (read the raw term back with `error reason`, see "The raw error term" below)
 - Bare `ok` atom becomes `Result ok: nil`
-- Bare `error` atom becomes `Result error: nil`
+- Bare `error` atom becomes a `Result error:` holding an Exception whose `reason` is `nil`
 - Tuples with 3+ elements, non-ok/error tuples, and non-tuple values pass through unchanged
 
-**Lone `ok`/`error` return specs (ADR 0121, type inference):** A non-union Erlang return spec of `-> ok.` or `-> error.` — including annotated forms like `-> Result :: ok.` — is now recognized as `Result(Nil)` or `Result(Dynamic, Nil)` respectively, matching the runtime coercion that `coerce_result/1` already applies. Previously these lone atoms fell through to `Symbol` in the type inference, creating a static/dynamic type mismatch.
+**Inferred type of an FFI Result (BT-4023):** because the boundary always wraps the error reason, the spec reader types the error side as an Exception, never as the spec's reason type. `{ok, T} | {error, R}` and `ok | {error, R}` infer `Result(T, Exception)` and `Result(Nil, Exception)` whatever `R` is (an atom, a `posix()` enumeration, `term()`). The one refinement is a `#beamtalk_error{}` reason, which always wraps to an `Error` subclass and so infers `Result(T, Error)`. The rule lives in one place, `beamtalk_spec_reader:format_result_type/2`.
+
+**Lone `ok`/`error` return specs (ADR 0121, type inference):** A non-union Erlang return spec of `-> ok.` or `-> error.` — including annotated forms like `-> Result :: ok.` — is now recognized as `Result(Nil, Exception)` or `Result(Dynamic, Exception)` respectively, matching the runtime coercion that `coerce_result/1` already applies. Previously these lone atoms fell through to `Symbol` in the type inference, creating a static/dynamic type mismatch.
 
 **Opting out of Result conversion (BT-3836):** Result conversion is unconditional for FFI returns, which is wrong for a Beamtalk-owned module whose functions return *user data* (`Ets` hands back whatever value was stored, so a stored `#ok` must stay `#ok`). Such a module exports `beamtalk_ffi_raw_results/0` returning `true`, and `beamtalk_erlang_proxy` then passes its results through unchanged. Only opt out when none of the module's functions signal success or failure with `ok` / `{ok, _}` / `{error, _}` returns, since the opt-out removes the conversion for those too. The opt-out is runtime-only: the spec reader (ADR 0121) still infers `Result` for an `-> ok` or `ok | error` spec, so an opted-out module must not give its exported functions such return specs, or the inferred type and the runtime value will disagree.
 
@@ -1208,6 +1210,8 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 [Error signal: "boom"] on: Error do: [:e | e reason]
 // => nil
 ```
+
+For an FFI Result `r`, `r error` is an Exception (the type checker infers `Result(T, Exception)`, see "Inferred type of an FFI Result" above) and `r error reason` is the raw Erlang term. Comparing the Exception itself to a Symbol, as in `r error =:= #closed`, is always false, so the compiler warns: ``comparing an Exception to a Symbol with `=:=` is always false; use `r error reason` ``, with the hint ``did you mean `r error reason =:= #closed`?``. The warning covers `=:=`, `==`, `=/=` and `/=` (the negated forms are always true) in either operand order, for any `Exception`-typed expression compared with a Symbol literal. Silence a deliberate comparison with `@expect type`.
 
 A `native:` method's wrapped error carries the Beamtalk `Class`/selector (e.g. `Type error in 'take:' on Stream`), whereas inline `(Erlang …)` FFI carries the Erlang-facing `ErlangModule` context (e.g. `Type error in 'atom_to_list' on ErlangModule`) — a documented limitation, since the proxy knows the MFA but not the calling class.
 

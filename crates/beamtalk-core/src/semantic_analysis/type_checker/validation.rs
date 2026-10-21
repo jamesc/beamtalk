@@ -30,7 +30,9 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::edit_distance;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
+use crate::source_analysis::{
+    Diagnostic, DiagnosticCategory, Severity, Span, equality_operator_is_negated,
+};
 use ecow::EcoString;
 
 use super::known_remote;
@@ -2297,6 +2299,88 @@ impl TypeChecker {
             self.diagnostics.push(diag);
         }
         handled
+    }
+
+    /// Warn when an `Exception`-typed expression is compared for equality
+    /// with a Symbol literal (BT-4023).
+    ///
+    /// The FFI boundary wraps every `{error, Reason}` in an Exception
+    /// (ADR 0101), so an FFI Result's `error` is typed `Exception` and
+    /// `r error =:= #closed` is always false at runtime — the raw reason is
+    /// `r error reason`. Covers every equality operator
+    /// ([`crate::source_analysis::is_equality_operator`]: `=:=`, `==`, `=/=`,
+    /// `/=`; Beamtalk has no bare `=` or `~=`) in either operand order, for
+    /// `Exception` and its subclasses. Deliberately targeted: this is not a
+    /// general disjoint-type comparison lint.
+    #[allow(clippy::too_many_arguments)] // two operand (expr, type) pairs + context
+    pub(super) fn check_exception_symbol_comparison(
+        &mut self,
+        operator: &str,
+        receiver: &Expression,
+        receiver_ty: &InferredType,
+        arg: &Expression,
+        arg_ty: Option<&InferredType>,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let Some(negated) = equality_operator_is_negated(operator) else {
+            return;
+        };
+        let is_exception = |ty: Option<&InferredType>| {
+            matches!(ty, Some(InferredType::Known { class_name, .. })
+                if class_name.as_str() == "Exception"
+                    || hierarchy
+                        .superclass_chain(class_name)
+                        .iter()
+                        .any(|s| s.as_str() == "Exception"))
+        };
+        let is_symbol_literal = |e: &Expression| {
+            matches!(
+                e.unwrap_parens(),
+                Expression::Literal(Literal::Symbol(_), _)
+            )
+        };
+
+        let exception_expr = if is_exception(Some(receiver_ty)) && is_symbol_literal(arg) {
+            receiver
+        } else if is_exception(arg_ty) && is_symbol_literal(receiver) {
+            arg
+        } else {
+            return;
+        };
+
+        let render = |e: &Expression| crate::unparse::unparse_expression(e).to_pretty_string();
+        // Appending the unary `reason` binds tighter than a binary/keyword
+        // send, cascade or assignment, so those need parentheses.
+        let needs_parens = match exception_expr {
+            Expression::MessageSend { selector, .. } => {
+                !matches!(selector, crate::ast::MessageSelector::Unary(_))
+            }
+            Expression::Assignment { .. } | Expression::Cascade { .. } => true,
+            _ => false,
+        };
+        let exception_src = render(exception_expr);
+        let fixed = if needs_parens {
+            format!("({exception_src}) reason")
+        } else {
+            format!("{exception_src} reason")
+        };
+        let suggestion = if std::ptr::eq(exception_expr, receiver) {
+            format!("{fixed} {operator} {}", render(arg))
+        } else {
+            format!("{} {operator} {fixed}", render(receiver))
+        };
+        let outcome = if negated { "true" } else { "false" };
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "comparing an Exception to a Symbol with `{operator}` is always {outcome}; use `{fixed}`"
+                ),
+                span,
+            )
+            .with_category(DiagnosticCategory::Type)
+            .with_hint(format!("did you mean `{suggestion}`?")),
+        );
     }
 
     /// The argument kind a comparison (`<` `>` `<=` `>=`) expects for `receiver_ty`.

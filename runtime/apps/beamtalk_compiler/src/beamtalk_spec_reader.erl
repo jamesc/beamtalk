@@ -1081,13 +1081,16 @@ Dispatch order:
      even if it contains a bare `ok`/`error` (e.g. `emergency | error | info`).
   2. Otherwise `map_union_result/1` applies ADR-0076 ok/error Result recognition,
      falling back to standard branch-by-branch mapping:
-       - {ok, T} | {error, E}  → Result(T, E)
-       - ok | {error, E}       → Result(Nil, E)    (bare ok atom)
-       - {ok, T} alone         → Result(T, Dynamic) (no error branch)
-       - {error, E} alone      → Result(Dynamic, E) (no ok branch)
-       - 3+ branch union with ok/error → Result(T, E) | Other
-       - bare `ok | error` (subset of {ok, error}) → Result(Nil, Nil)
+       - {ok, T} | {error, E}  → Result(T, Exception)
+       - ok | {error, E}       → Result(Nil, Exception)    (bare ok atom)
+       - {ok, T} alone         → Result(T, Exception) (no error branch)
+       - {error, E} alone      → Result(Dynamic, Exception) (no ok branch)
+       - 3+ branch union with ok/error → Result(T, Exception) | Other
+       - bare `ok | error` (subset of {ok, error}) → Result(Nil, Exception)
        - non-ok/error unions → each branch mapped via map_type
+     The error side is always an Exception class (`Error` for a
+     `#beamtalk_error{}` reason), whatever `E` is: see
+     `format_result_type/2` (BT-4023).
 """.
 -spec map_union([tuple()], term()) -> binary().
 map_union(Branches, _Line) ->
@@ -1136,10 +1139,10 @@ map_union_result(Branches) ->
             %% each member.
             join_types([map_type(B) || B <- Branches]);
         _ ->
-            %% At least one ok or error branch — emit Result(T, E)
-            OkType = resolve_ok_type(OkTypes),
-            ErrType = resolve_err_type(ErrTypes),
-            ResultType = format_result_type(OkType, ErrType),
+            %% At least one ok or error branch — emit Result(T, <Exception class>).
+            %% The error branches' reason types never become the error type:
+            %% see format_result_type/2.
+            ResultType = format_result_type(resolve_ok_type(OkTypes), ErrTypes),
             case OtherBranches of
                 [] ->
                     ResultType;
@@ -1249,31 +1252,49 @@ resolve_ok_type(Types) ->
      || T <- Types
     ]).
 
-%% Determine the error type from classified error branches.
--spec resolve_err_type([tuple() | nil]) -> binary().
-resolve_err_type([]) ->
-    <<"Dynamic">>;
-resolve_err_type([nil]) ->
-    <<"Nil">>;
-resolve_err_type([Type]) ->
-    map_type(Type);
-resolve_err_type(Types) ->
-    join_types([
-        case T of
-            nil -> <<"Nil">>;
-            _ -> map_type(T)
-        end
-     || T <- Types
+%% Format the Result type string for an FFI-returned ok/error value.
+%%
+%% This is the one place the Erlang→Beamtalk spec mapping decides a Result's
+%% error type (BT-4023). The error side is always an Exception class, never
+%% the spec's raw reason type: at runtime the FFI boundary turns
+%% `{error, Reason}` (and a bare `error`) into a `Result error:` whose error is
+%% `beamtalk_exception_handler:ensure_wrapped(Reason)` — an Exception object
+%% (`beamtalk_result:from_tagged_tuple/1`, ADR 0101). The raw reason is
+%% reachable as `r error reason` (`Exception>>reason`), so typing the error side
+%% as e.g. `Symbol` would wrongly reject `r error reason` and accept the
+%% always-false `r error =:= #enoent`. A parameterised `Exception(R)` carrying
+%% the reason type was considered and deferred (it would make the whole
+%% Exception hierarchy generic).
+%%
+%% `ErrTypes` (the error branches' reason types) only refines *which*
+%% Exception class: see ffi_result_error_type/1.
+-spec format_result_type(binary(), [tuple() | nil]) -> binary().
+format_result_type(OkType, ErrTypes) ->
+    iolist_to_binary([
+        <<"Result(">>, OkType, <<", ">>, ffi_result_error_type(ErrTypes), <<")">>
     ]).
 
-%% Format Result(T, E) type string.
--spec format_result_type(binary(), binary()) -> binary().
-format_result_type(<<"Dynamic">>, <<"Dynamic">>) ->
-    <<"Result">>;
-format_result_type(OkType, <<"Dynamic">>) ->
-    iolist_to_binary([<<"Result(">>, OkType, <<")">>]);
-format_result_type(OkType, ErrType) ->
-    iolist_to_binary([<<"Result(">>, OkType, <<", ">>, ErrType, <<")">>]).
+%% The Exception class an FFI Result's error is wrapped as.
+%%
+%% `Exception` in general. When every error branch's reason is a
+%% `#beamtalk_error{}` record (the runtime shims' `{error, #beamtalk_error{}}`
+%% specs), it is `Error`: `beamtalk_exception_handler:wrap/1` turns that record
+%% into its `kind_to_class/1` class, all of which are `Error` subclasses. This
+%% keeps the stdlib's `-> Result(Self, Error)` wrappers over those shims exact.
+-spec ffi_result_error_type([tuple() | nil]) -> binary().
+ffi_result_error_type([_ | _] = ErrTypes) ->
+    case lists:all(fun is_beamtalk_error_record_type/1, ErrTypes) of
+        true -> <<"Error">>;
+        false -> <<"Exception">>
+    end;
+ffi_result_error_type([]) ->
+    <<"Exception">>.
+
+-spec is_beamtalk_error_record_type(tuple() | nil) -> boolean().
+is_beamtalk_error_record_type({type, _, record, [{atom, _, beamtalk_error} | _]}) ->
+    true;
+is_beamtalk_error_record_type(_) ->
+    false.
 
 %% Format a parametric collection type like `List(T)` or `Tuple(T1, ..., Tn)`.
 %%
