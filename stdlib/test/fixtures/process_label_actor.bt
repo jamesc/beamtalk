@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4049: an actor that labels its own process from inside a method.
+// Used by stdlib/test/process_primitives_test.bt.
+
+Actor subclass: ProcessLabelActor
+
+  labelSelfWith: term => self processLabel: term
+
+  ownLabel => self processLabel

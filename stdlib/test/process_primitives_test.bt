@@ -1,0 +1,103 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4049: process primitives — `Pid>>send:`, `Reference new`,
+// `Actor>>processLabel:` / `processLabel`.
+//
+// Fixtures: stdlib/test/fixtures/handle_info_counter.bt
+//           stdlib/test/fixtures/process_label_actor.bt
+
+TestCase subclass: ProcessPrimitivesTest
+
+  // === Pid>>send: ===
+  testPidSendReachesHandleInfo =>
+    server := HandleInfoCounter spawn
+    server pid send: #tick
+    server pid send: #tick
+    self assert: server getCount equals: 2
+    server pid send: {#ready, 42}
+    self assert: server getLastMsg equals: {#ready, 42}
+    server stop
+
+  testPidSendAnswersNil =>
+    server := HandleInfoCounter spawn
+    self assert: (server pid send: #tick) equals: nil
+    server stop
+
+  testPidSendToDeadPidIsANoOp =>
+    server := HandleInfoCounter spawn
+    pid := server pid
+    server stop
+    self deny: pid isAlive
+    self assert: (pid send: #tick) equals: nil
+
+  testPidSendDeliversResultShapedTermsUnchanged =>
+    server := HandleInfoCounter spawn
+    server pid send: {#ok, 1}
+    self assert: server getLastMsg equals: {#ok, 1}
+    server pid send: #ok
+    self assert: server getLastMsg equals: #ok
+    server stop
+
+  testPidSendDynamicDispatch =>
+    server := HandleInfoCounter spawn
+    p := server pid
+    self assert: (p respondsTo: #send:)
+    self assert: (p perform: #send: withArguments: #(#tick)) equals: nil
+    self assert: server getCount equals: 1
+    server stop
+
+  // === Reference new ===
+  testReferenceNewDynamicDispatch =>
+    cls := Reference
+    self assert: (cls perform: #new) class equals: Reference
+
+  testReferenceNewAnswersAReference =>
+    self assert: Reference new class equals: Reference
+
+  testReferenceNewIsUnique =>
+    a := Reference new
+    b := Reference new
+    self deny: a =:= b
+    self assert: a =/= b
+    self assert: a =:= a
+
+  testReferenceNewIsUsableAsDictionaryKey =>
+    a := Reference new
+    b := Reference new
+    d := (Dictionary new at: a put: 1) at: b put: 2
+    self assert: d size equals: 2
+    self assert: (d at: a) equals: 1
+    self assert: (d at: b) equals: 2
+
+  // === Actor>>processLabel: / processLabel ===
+  testProcessLabelIsNilByDefault =>
+    actor := ProcessLabelActor spawn
+    self assert: actor processLabel equals: nil
+    self assert: actor ownLabel equals: nil
+    actor stop
+
+  testProcessLabelRoundTripsFromInside =>
+    actor := ProcessLabelActor spawn
+    self assert: (actor labelSelfWith: {#connection, 7}) equals: nil
+    self assert: actor ownLabel equals: {#connection, 7}
+    self assert: actor processLabel equals: {#connection, 7}
+    actor stop
+
+  testProcessLabelRoundTripsResultAndCharlistShapedTerms =>
+    actor := ProcessLabelActor spawn
+    actor processLabel: #ok
+    self assert: actor processLabel equals: #ok
+    actor processLabel: {#ok, 1}
+    self assert: actor processLabel equals: {#ok, 1}
+    actor processLabel: {#error, #closed}
+    self assert: actor processLabel equals: {#error, #closed}
+    actor processLabel: #(72, 105)
+    self assert: actor processLabel equals: #(72, 105)
+    actor stop
+
+  testProcessLabelLabelsTheActorNotTheCaller =>
+    actor := ProcessLabelActor spawn
+    actor processLabel: #worker
+    self assert: ((Erlang proc_lib) get_label: actor pid) equals: #worker
+    actor stop
