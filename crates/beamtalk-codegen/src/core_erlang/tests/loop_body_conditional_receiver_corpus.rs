@@ -675,6 +675,20 @@ fn fold_body_statements_in_every_scope_compile_without_a_raw_tuple_unpack() {
         .iter()
         .filter(|(_, body)| body.contains("self.f :="))
         .count();
+    // Guard against the corpus thinning out: exact per-context accounting
+    // below only proves the rows that exist, so pin a floor on the row set
+    // and on the rows every context must compile (1938 / 1235 today).
+    assert!(
+        rows.len() >= 1500,
+        "scope corpus shrank to {} rows; expected >= 1500",
+        rows.len()
+    );
+    assert!(
+        rows.len() - field_write_rows >= rows.len() / 2,
+        "only {} of {} scope rows are non-field-write rows; expected at least half",
+        rows.len() - field_write_rows,
+        rows.len()
+    );
     let mut failures = Vec::new();
     let mut counts = Vec::new();
     for ctx in SCOPE_CONTEXTS {
