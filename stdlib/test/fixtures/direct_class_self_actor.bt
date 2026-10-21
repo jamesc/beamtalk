@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4029: a sealed, stateless Actor whose `class sealed` factories are
+// direct-called (ADR 0129 Phase 0b) and spawn through `self`.
+
+sealed Actor subclass: DirectClassSelfActor
+  state: value = 0
+
+  class sealed make => self spawn
+
+  class sealed makeWith: n :: Integer => self spawnWith: #{#value => n}
+
+  class sealed makeByName => DirectClassSelfActor spawn
+
+  getValue => self.value

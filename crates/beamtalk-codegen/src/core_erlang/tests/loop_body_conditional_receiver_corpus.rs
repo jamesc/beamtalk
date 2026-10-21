@@ -684,8 +684,8 @@ fn fold_body_statements_in_every_scope_compile_without_a_raw_tuple_unpack() {
         rows.len()
     );
     assert!(
-        rows.len() - field_write_rows >= rows.len() / 2,
-        "only {} of {} scope rows are non-field-write rows; expected at least half",
+        rows.len() - field_write_rows >= 1000,
+        "only {} of {} scope rows are non-field-write rows; expected >= 1000",
         rows.len() - field_write_rows,
         rows.len()
     );

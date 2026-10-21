@@ -1,0 +1,114 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4029: inside a direct-called `class sealed` method (ADR 0129 Phase 0b),
+// the class-side `self` is the real class object, whichever way the method was
+// reached: a static send (`Cls sel`), a dynamic send through a variable
+// (`cls sel`, which the runtime routes through `lookup_direct_call` with
+// `ClassSelf = nil`), or `perform:`. Before the fix every `ClassSelf` read in
+// such a method (instantiation, `spawn`/`spawnWith:`, `self` as a value,
+// `self class`, class-side self-sends, `self error:`) raised `badarg`.
+//
+// Fixtures: fixtures/direct_class_self_value.bt,
+// fixtures/direct_class_self_actor.bt.
+
+TestCase subclass: DirectClassSelfTest
+
+  // --- instantiation (Value) --------------------------------------------------
+  testSelfNew => self assert: DirectClassSelfValue viaSelfNew x equals: 0
+
+  testSelfNewDynamic =>
+    cls := DirectClassSelfValue
+    self assert: cls viaSelfNew x equals: 0
+
+  testSelfNewViaPerform =>
+    self assert: (DirectClassSelfValue perform: #viaSelfNew) x equals: 0
+
+  testSelfNewWith =>
+    self assert: DirectClassSelfValue viaSelfNewWith x equals: 3
+
+  testOwnClassNameNewWith =>
+    self assert: DirectClassSelfValue viaNameNew x equals: 1
+
+  testOwnClassNameNewWithDynamic =>
+    cls := DirectClassSelfValue
+    self assert: cls viaNameNew x equals: 1
+
+  testOwnClassNameNew =>
+    self assert: DirectClassSelfValue viaNameNewBare x equals: 0
+
+  testKeywordConstructor =>
+    self assert: DirectClassSelfValue viaKeyword x equals: 2
+
+  testOpenClassMethodSelfNew =>
+    self assert: DirectClassSelfValue viaOpenSelfNew x equals: 0
+
+  testInstanceHasTheClass =>
+    self assert: DirectClassSelfValue viaSelfNew class equals: DirectClassSelfValue
+
+  // --- self as a value, and reflection -----------------------------------------
+  testSelfIsTheClass =>
+    self assert: DirectClassSelfValue me equals: DirectClassSelfValue
+
+  testSelfIsTheClassDynamic =>
+    cls := DirectClassSelfValue
+    self assert: cls me equals: DirectClassSelfValue
+
+  testSelfIsUsableAsAClass =>
+    self assert: (DirectClassSelfValue me x: 5) x equals: 5
+
+  testSelfClass =>
+    self assert: DirectClassSelfValue myClass equals: DirectClassSelfValue class
+
+  testSelfInBlock => self assert: DirectClassSelfValue viaBlock x equals: 4
+
+  // --- class-side self-sends ---------------------------------------------------
+  testSelfSendToSealedSibling =>
+    self assert: DirectClassSelfValue viaSealedSibling x equals: 3
+
+  testSelfSendToSealedSiblingDynamic =>
+    cls := DirectClassSelfValue
+    self assert: cls viaSealedSibling x equals: 3
+
+  testSelfSendToOpenSibling =>
+    self assert: DirectClassSelfValue viaOpenSibling x equals: 0
+
+  testSelfSendToInheritedClassMethod =>
+    self assert: DirectClassSelfValue viaInherited equals: Value
+
+  testOpenMethodForwardsItsClassSelfToSealedSibling =>
+    self assert: DirectClassSelfValue viaOpenToSealed x equals: 3
+
+  testSelfInNonLocalReturnFromBlock =>
+    self assert: (DirectClassSelfValue firstOf: #(7, 8)) x equals: 7
+
+  testSelfInNonLocalReturnFromBlockDynamic =>
+    cls := DirectClassSelfValue
+    self assert: (cls firstOf: #(6)) x equals: 6
+
+  // --- errors -------------------------------------------------------------------
+  testSelfErrorRaisesUserError =>
+    self should: [DirectClassSelfValue raises] raise: #user_error
+
+  // --- spawn / spawnWith: (Actor) ---------------------------------------------
+  testSelfSpawn =>
+    a := DirectClassSelfActor make
+    self assert: a getValue equals: 0
+
+  testSelfSpawnDynamic =>
+    cls := DirectClassSelfActor
+    a := cls make
+    self assert: a getValue equals: 0
+
+  testSelfSpawnWith =>
+    a := DirectClassSelfActor makeWith: 9
+    self assert: a getValue equals: 9
+
+  testSelfSpawnWithDynamic =>
+    cls := DirectClassSelfActor
+    a := cls makeWith: 8
+    self assert: a getValue equals: 8
+
+  testOwnClassNameSpawn =>
+    a := DirectClassSelfActor makeByName
+    self assert: a class equals: DirectClassSelfActor
