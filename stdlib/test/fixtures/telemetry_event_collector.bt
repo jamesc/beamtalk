@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4025: collects the raw `{Event, Ref, Measurements, Metadata}` messages
+// sent by the Erlang-side `telemetry_test` handler, so TelemetryTest can check
+// exactly what a plain Erlang handler receives from `Telemetry execute:` and
+// `Telemetry span:`.
+
+Server subclass: TelemetryEventCollector
+  state: received = #()
+
+  handleInfo: msg => self.received := self.received add: msg
+
+  received => self.received

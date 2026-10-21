@@ -434,8 +434,8 @@ init([]) ->
     %% telemetry and telemetry_poller are declared in beamtalk_runtime.app.src,
     %% so OTP starts and loads their modules before this init/1 runs in normal
     %% application startup. Guard the attach call with a function_exported
-    %% check anyway, mirroring the maybe_span/3 and maybe_execute_telemetry/3
-    %% pattern in beamtalk_actor.erl, so the trace store still degrades
+    %% check anyway, mirroring the maybe_span/3 and emit/3
+    %% pattern in beamtalk_telemetry.erl, so the trace store still degrades
     %% gracefully if it's started outside its OTP application context (e.g.
     %% direct gen_server:start_link/3 in a partial test harness).
     case erlang:function_exported(telemetry, attach, 4) of
@@ -709,65 +709,47 @@ update_counter_refs(NewRef) ->
 %%====================================================================
 
 -doc """
+The trace store's telemetry handlers: `{HandlerId, EventName, HandlerFun}`.
+One list drives both attach and detach so they cannot drift apart.
+""".
+telemetry_handlers() ->
+    [
+        {beamtalk_trace_store_dispatch_stop, [beamtalk, actor, dispatch, stop],
+            fun ?MODULE:handle_dispatch_stop/4},
+        {beamtalk_trace_store_dispatch_exception, [beamtalk, actor, dispatch, exception],
+            fun ?MODULE:handle_dispatch_exception/4},
+        %% Lifecycle event handlers (start, stop, kill)
+        {beamtalk_trace_store_lifecycle_start, [beamtalk, actor, lifecycle, start],
+            fun ?MODULE:handle_lifecycle_event/4},
+        {beamtalk_trace_store_lifecycle_stop, [beamtalk, actor, lifecycle, stop],
+            fun ?MODULE:handle_lifecycle_event/4},
+        {beamtalk_trace_store_lifecycle_kill, [beamtalk, actor, lifecycle, kill],
+            fun ?MODULE:handle_lifecycle_event/4},
+        {beamtalk_trace_store_vm_measurements, [vm, memory], fun ?MODULE:handle_vm_measurements/4}
+    ].
+
+-doc """
 Attach telemetry event handlers.
 Detach first to handle restarts after crash (terminate/2 not called on kill).
 """.
 attach_telemetry_handlers() ->
     detach_telemetry_handlers(),
-    ok = telemetry:attach(
-        beamtalk_trace_store_dispatch_stop,
-        [beamtalk, actor, dispatch, stop],
-        fun ?MODULE:handle_dispatch_stop/4,
-        #{}
-    ),
-    ok = telemetry:attach(
-        beamtalk_trace_store_dispatch_exception,
-        [beamtalk, actor, dispatch, exception],
-        fun ?MODULE:handle_dispatch_exception/4,
-        #{}
-    ),
-    %% Lifecycle event handlers (start, stop, kill)
-    ok = telemetry:attach(
-        beamtalk_trace_store_lifecycle_start,
-        [beamtalk, actor, lifecycle, start],
-        fun ?MODULE:handle_lifecycle_event/4,
-        #{}
-    ),
-    ok = telemetry:attach(
-        beamtalk_trace_store_lifecycle_stop,
-        [beamtalk, actor, lifecycle, stop],
-        fun ?MODULE:handle_lifecycle_event/4,
-        #{}
-    ),
-    ok = telemetry:attach(
-        beamtalk_trace_store_lifecycle_kill,
-        [beamtalk, actor, lifecycle, kill],
-        fun ?MODULE:handle_lifecycle_event/4,
-        #{}
-    ),
-    ok = telemetry:attach(
-        beamtalk_trace_store_vm_measurements,
-        [vm, memory],
-        fun ?MODULE:handle_vm_measurements/4,
-        #{}
-    ),
-    ok.
+    lists:foreach(
+        fun({Id, EventName, Handler}) ->
+            ok = telemetry:attach(Id, EventName, Handler, #{})
+        end,
+        telemetry_handlers()
+    ).
 
--doc "Detach telemetry handlers on shutdown (safe if telemetry not loaded or handler table not running).".
+-doc """
+Detach telemetry handlers on shutdown (safe if telemetry not loaded or handler
+table not running — `beamtalk_telemetry:detach/1` is idempotent).
+""".
 detach_telemetry_handlers() ->
-    try
-        telemetry:detach(beamtalk_trace_store_dispatch_stop),
-        telemetry:detach(beamtalk_trace_store_dispatch_exception),
-        %% Lifecycle event handlers
-        telemetry:detach(beamtalk_trace_store_lifecycle_start),
-        telemetry:detach(beamtalk_trace_store_lifecycle_stop),
-        telemetry:detach(beamtalk_trace_store_lifecycle_kill),
-        telemetry:detach(beamtalk_trace_store_vm_measurements)
-    catch
-        error:undef -> ok;
-        exit:{noproc, _} -> ok
-    end,
-    ok.
+    lists:foreach(
+        fun({Id, _EventName, _Handler}) -> beamtalk_telemetry:detach(Id) end,
+        telemetry_handlers()
+    ).
 
 -doc "Configure telemetry_poller for periodic VM measurements.".
 configure_poller() ->

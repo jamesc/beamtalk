@@ -1560,3 +1560,48 @@ guarded untyped 35 / 36 ns, guarded typed (same code as bare typed) 157 / 83 ns.
 
 Decision: untyped fields (`state:`, `field:`, `classState:`, sealed or not) are always guarded; a
 `:: Integer` / `:: Float` / `:: Number` annotation is the way to get the bare BIF.
+
+## BT-4025: `Telemetry` facade emit cost
+
+`Telemetry execute:measurements:metadata:` (ADR 0069 amendment) is a `@primitive` that lowers to a
+direct call into `beamtalk_telemetry:execute/3`, which validates the arguments and calls
+`telemetry:execute/3`. The issue's target was "within about 1 µs of a raw `telemetry:execute/3`".
+The comparison point is the BT-4019 spike's spelling, `(Erlang telemetry) execute:with:with:`, which
+compiles to `beamtalk_erlang_proxy:direct_call/3` and re-reads `module_info(exports)` on every call
+(BT-4021).
+
+### Harness
+
+`runtime/perf/bench_telemetry_facade.escript`, run after `just build`:
+
+```bash
+ERL_FLAGS="+S 1" escript runtime/perf/bench_telemetry_facade.escript 31 200000
+```
+
+It boots `beamtalk_stdlib`, times four rows per batch, interleaved, and reports the median of 31
+batches of 200,000 calls. Each call emits `[bench, bt4025, event]` with a one-key measurements map and
+a one-key metadata map.
+
+| Row | What it calls |
+|---|---|
+| raw | `telemetry:execute/3` |
+| runtime | `beamtalk_telemetry:execute/3` (the `@primitive` target) |
+| facade | `bt@stdlib@telemetry:'class_execute:measurements:metadata:'/4`, which a compiled static `Telemetry execute: ...` send direct-calls (sealed, stateless, `class sealed`; ADR 0129) |
+| ffi | `beamtalk_erlang_proxy:direct_call(telemetry, execute, [...])` |
+
+### Results
+
+Apple M5 Max, OTP 28, `+S 1`, 2026-10-21. The machine was shared with other agents' builds (load
+average 23 to 72), so treat the absolute numbers as rough; the ratios held across three runs.
+
+| Row | ns/call, 0 handlers | vs raw | ns/call, 1 no-op handler | vs raw |
+|---|---|---|---|---|
+| raw | 56 | — | 85 | — |
+| runtime | 135 | +79 | 187 | +102 |
+| facade | 153 | +97 | 176 | +91 |
+| ffi | 14,049 | +13,993 | 14,950 | +14,866 |
+
+The facade costs about 60–100 ns over a raw emit: the event-name and measurement-key checks, the
+`function_exported/3` guard and one extra call. That is well inside the 1 µs target and about 90
+times cheaper than the FFI spelling. An earlier, quieter run gave +60 ns (runtime) and +81 ns
+(facade) with no handlers.

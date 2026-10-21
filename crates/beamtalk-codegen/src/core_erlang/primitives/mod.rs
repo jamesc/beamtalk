@@ -29,6 +29,7 @@ mod list;
 mod protocol;
 mod reflection;
 mod string;
+mod telemetry;
 mod value_types;
 
 use beamtalk_cerl_doc::Document;
@@ -103,6 +104,7 @@ const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
     ("Class", behaviour::generate_tower_bif),
     ("Metaclass", behaviour::generate_tower_bif),
     ("Protocol", protocol::generate_protocol_bif),
+    ("Telemetry", telemetry::generate_telemetry_bif),
     ("StackFrame", error_handling::generate_stack_frame_bif),
     ("Pid", actor_types::generate_pid_bif),
     ("Port", actor_types::generate_port_bif),

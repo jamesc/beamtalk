@@ -1,0 +1,113 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Telemetry — Emit and observe application events on the BEAM `telemetry` bus.
+///
+/// A class-side facade (ADR 0129 style: sealed, stateless, class-side only)
+/// over the bundled `telemetry` library (ADR 0069, amended by BT-4025).
+/// The events are ordinary `telemetry` events, so Erlang and Elixir handlers,
+/// LiveDashboard, StatsD exporters and `opentelemetry_telemetry` see exactly
+/// what they would from Erlang code.
+///
+/// - **Event names** are a non-empty List of Symbols, such as
+///   `#(#myapp, #request, #stop)`. They become the atom list `telemetry` expects.
+/// - **Measurements** are a Dictionary with Symbol keys; **metadata** is any
+///   Dictionary. Both are passed through unchanged.
+/// - Each method calls the runtime directly (`beamtalk_telemetry`), not the
+///   `(Erlang …)` FFI.
+///
+/// `Telemetry` is the application event bus. For actor-dispatch
+/// observability (trace capture, per-method stats, health), see `Tracing`.
+///
+/// ## Examples
+/// ```beamtalk
+/// Telemetry execute: #(#myapp, #cache, #miss) measurements: #{#count => 1} metadata: #{#key => "user:1"}
+/// // => nil
+/// Telemetry span: #(#myapp, #work) metadata: #{} do: [6 * 7]
+/// // => 42
+/// ```
+sealed typed Object subclass: Telemetry
+
+  /// Emit one event.
+  ///
+  /// `eventName` must be a non-empty List of Symbols and `measurements`
+  /// a Dictionary with Symbol keys; anything else raises a `TypeError`
+  /// (kind `#type_error`). Metadata keys and values of any kind pass
+  /// through unchanged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Telemetry execute: #(#myapp, #request, #stop) measurements: #{#duration => 120} metadata: #{#path => "/"}
+  /// // => nil
+  /// ```
+  class sealed execute: eventName :: List(Symbol) measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
+    @primitive "telemetryExecute"
+
+  /// Run `aBlock` inside a span and answer its value.
+  ///
+  /// Emits `eventPrefix ++ #(#start)` (measurements `#monotonic_time`,
+  /// `#system_time`) before the block and `eventPrefix ++ #(#stop)`
+  /// (`#monotonic_time`, `#duration`) after it, both with `metadata`.
+  /// If the block raises, it emits `eventPrefix ++ #(#exception)`, whose
+  /// metadata adds `#kind`, `#reason` and `#stacktrace`, and re-raises the
+  /// original error unchanged. All three events carry the same
+  /// `#telemetry_span_context` reference.
+  ///
+  /// A `^` out of the block is a normal exit, not an exception: the span
+  /// emits `stop` and the method returns as usual.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Telemetry span: #(#myapp, #query) metadata: #{#table => #users} do: [3 + 4]
+  /// // => 7
+  /// ```
+  class sealed span: eventPrefix :: List(Symbol) metadata: metadata :: Dictionary do: aBlock :: Block(T) -> T =>
+    @primitive "telemetrySpan"
+
+  /// Attach a Beamtalk handler block to one event.
+  ///
+  /// The block receives `[:event :measurements :metadata | ...]`.
+  /// `handlerId` is a Symbol or a String. Answers `Result ok: nil`, or
+  /// `Result error:` with kind `#handler_exists` when `handlerId` is
+  /// already attached.
+  ///
+  /// The handler runs **in the emitting process**, synchronously, so keep it
+  /// short. If it raises, `telemetry` logs the error and detaches the handler;
+  /// the emitter is unaffected. Class variables follow ADR 0130's rule for a
+  /// block running away from home: reads see a snapshot and a write raises
+  /// `class_state_unreachable`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Telemetry attach: #docExample to: #(#myapp, #doc) do: [:event :measurements :metadata | nil]) isOk
+  /// // => true
+  /// Telemetry detach: #docExample
+  /// // => nil
+  /// ```
+  class sealed attach: handlerId :: Symbol | String to: eventName :: List(Symbol) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
+    @primitive "telemetryAttach"
+
+  /// Attach one handler block to several events (`telemetry:attach_many/4`).
+  ///
+  /// `eventNames` is a non-empty List of event names. Otherwise the same as
+  /// `attach:to:do:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Telemetry attach: "doc-many" toAll: #(#(#myapp, #a), #(#myapp, #b)) do: [:e :m :md | nil]) isOk
+  /// // => true
+  /// Telemetry detach: "doc-many"
+  /// // => nil
+  /// ```
+  class sealed attach: handlerId :: Symbol | String toAll: eventNames :: List(List(Symbol)) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
+    @primitive "telemetryAttachMany"
+
+  /// Detach a handler. Idempotent: detaching an unknown id answers nil too.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Telemetry detach: #notAttached
+  /// // => nil
+  /// ```
+  class sealed detach: handlerId :: Symbol | String -> Nil =>
+    @primitive "telemetryDetach"

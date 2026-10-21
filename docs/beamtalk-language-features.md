@@ -36,6 +36,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
   - [ChangeLog — Tracking In-Memory Changes (ADR 0082)](#changelog--tracking-in-memory-changes-adr-0082)
   - [Live Re-Checking on Reload (ADR 0105)](#live-re-checking-on-reload-adr-0105)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
+- [Application Telemetry Events (ADR 0069 amendment)](#application-telemetry-events-adr-0069-amendment)
 - [Announcements — Typed Events (ADR 0093)](#announcements--typed-events-adr-0093)
 - [Distribution — Location-Transparent Actors (ADR 0126)](#distribution--location-transparent-actors-adr-0126)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
@@ -6027,7 +6028,7 @@ the REPL.
 
 ## Actor Observability and Tracing (ADR 0069)
 
-The `Tracing` class provides actor observability and performance telemetry. It is a sealed, class-only facade (like `System` and `Logger`) — all methods are class-side, there are no instances. See [ADR 0069](ADR/0069-actor-observability-and-tracing.md) for the full design.
+The `Tracing` class provides actor observability and performance telemetry. It is a sealed, class-only facade (like `System` and `Logger`) — all methods are class-side, there are no instances. See [ADR 0069](ADR/0069-actor-observability-and-tracing.md) for the full design. To emit your own application events, use `Telemetry` ([Application Telemetry Events](#application-telemetry-events-adr-0069-amendment)).
 
 Two levels of instrumentation are available:
 
@@ -6180,6 +6181,49 @@ Actor messages automatically carry a propagated context map across boundaries. T
 | **How fast is it happening** — timing, call counts, bottlenecks | `Tracing stats`, `Tracing slowMethods:` | [ADR 0069](ADR/0069-actor-observability-and-tracing.md) |
 
 Runtime logging configuration lives on class-side `Logger` (BT-3653, [ADR 0129](ADR/0129-class-side-system-facades.md)): `Logger logLevel:`, `Logger logFormat:`, `Logger enableDebug:` / `disableDebug:`, `Logger debugTargets`, `Logger activeDebugTargets`, `Logger disableAllDebug` and `Logger loggerInfo`. These moved from `Beamtalk` with no shim.
+
+---
+
+## Application Telemetry Events (ADR 0069 amendment)
+
+`Telemetry` lets Beamtalk code emit, and attach to, ordinary events on the BEAM [`telemetry`](https://hexdocs.pm/telemetry) bus, the library Phoenix, Ecto and Thousand Island use. Erlang and Elixir handlers, LiveDashboard, StatsD exporters and `opentelemetry_telemetry` see a Beamtalk event exactly as they would one emitted from Erlang. Like `Tracing`, it is a sealed class-side facade with no instances. `Tracing` observes actor dispatch; `Telemetry` is the event bus for your own application events. See the [ADR 0069 amendment](ADR/0069-actor-observability-and-tracing.md#amendment-2026-10-21-application-events-bt-4025).
+
+```beamtalk
+// Emit one event
+Telemetry execute: #(#myapp, #cache, #miss)
+  measurements: #{#count => 1}
+  metadata: #{#key => "user:1"}
+// => nil
+
+// Time a block: emits [myapp, query, start] and [myapp, query, stop]
+Telemetry span: #(#myapp, #query) metadata: #{#table => #users} do: [3 + 4]
+// => 7
+```
+
+- **Event names** are a non-empty List of Symbols (`#(#myapp, #cache, #miss)`), passed to `telemetry` as the atom list `[myapp, cache, miss]`. There is no dotted shorthand. Any other value raises a `TypeError` (`#type_error`).
+- **Measurements** are a Dictionary with Symbol keys; **metadata** is any Dictionary. Both are passed through unchanged.
+- **`span:metadata:do:`** answers the block's value. The `start` event carries `#monotonic_time` and `#system_time`; `stop` carries `#monotonic_time` and `#duration` (native time units) and the same metadata. If the block raises, the span emits `exception`, whose metadata adds `#kind`, `#reason` and `#stacktrace`, and re-raises the original error unchanged (in a cast or `handleInfo:` the actor still crashes, ADR 0134). A `^` out of the block is a normal return: the span emits `stop`. All three events share one `#telemetry_span_context` reference. The block is passed to another method, so it cannot assign the method's locals ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md)); use its value instead.
+
+### Attaching handlers
+
+```beamtalk
+seen := Ets new: #seen type: #set
+(Telemetry attach: #auditMisses to: #(#myapp, #cache, #miss) do: [:event :measurements :metadata |
+  seen at: #last put: metadata]) unwrap
+Telemetry execute: #(#myapp, #cache, #miss) measurements: #{#count => 1} metadata: #{#key => "k"}
+(seen at: #last) at: #key
+// => "k"
+Telemetry detach: #auditMisses
+// => nil
+```
+
+- `attach:to:do:` answers `Result ok: nil`, or `Result error:` with kind `#handler_exists` when the id is already attached. `attach:toAll:do:` takes a List of event names. Handler ids are Symbols or Strings. `detach:` is idempotent.
+- The handler runs **synchronously in the emitting process**, so keep it short (hand work to an actor if it is slow).
+- If a handler raises, `telemetry` logs the error and **detaches** it; the emitter is not affected.
+- A handler block runs away from its home class, so class variables follow [ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md): it reads the values captured when the block was created, and a write raises `class_state_unreachable`.
+- Exporters (StatsD, Prometheus, OpenTelemetry) are still attached in Erlang. Attaching from Beamtalk is mainly for tests and in-image consumers.
+
+The methods call the runtime (`beamtalk_telemetry`) directly rather than through the `(Erlang telemetry)` FFI, so an emit costs about 60–100 ns more than a raw `telemetry:execute/3`, against about 13 µs for the FFI spelling.
 
 ---
 

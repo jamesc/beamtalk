@@ -1,7 +1,38 @@
 # ADR 0069: Actor Observability and Tracing
 
 ## Status
-Accepted | Implemented (2026-03-21)
+Accepted | Implemented (2026-03-21). Amended 2026-10-21 (BT-4025): Beamtalk code can emit and attach to application `telemetry` events through a `Telemetry` facade; see "Amendment (2026-10-21): application events (BT-4025)" below.
+
+## Amendment (2026-10-21): application events (BT-4025)
+
+This amendment is additive. It widens the scope of the `telemetry` dependency from "the runtime's actor events, with Erlang-level handlers for operators" to "an event bus Beamtalk code can emit to and attach to". Nothing in the original decision is withdrawn.
+
+### Why
+
+Packages ported from Elixir (catalina, a Thousand Island port; exdura; symphony) must emit their own events (the equivalent of `[:thousand_island, :connection, :start]`) so ecosystem handlers such as LiveDashboard, `opentelemetry_telemetry` and StatsD exporters can subscribe. `Tracing` is consumer-side only and had no way to emit an application event. The BT-4019 spike therefore called `(Erlang telemetry) execute:with:with:` directly and declared `telemetry` as a package `[native.dependencies]` entry. That path triggers false `unresolved_ffi` warnings (BT-4022), leaves argument conversion and `Result` typing (BT-4023) to every caller, and pays the inline-FFI exports lookup on every emit (BT-4021, about 13 µs per call).
+
+### Decision
+
+A new stdlib class, `Telemetry` (`stdlib/src/telemetry.bt`), is a sealed, stateless, class-side facade (ADR 0129) over the bundled library:
+
+| Method | Behaviour |
+|---|---|
+| `execute: eventName measurements: m metadata: md` | `telemetry:execute/3`. Answers `nil`. |
+| `span: eventPrefix metadata: md do: aBlock` | Emits `prefix ++ [start]` (`monotonic_time`, `system_time`), runs the block, emits `prefix ++ [stop]` (`monotonic_time`, `duration`) and answers the block's value. Stop metadata is the start metadata. A raise emits `prefix ++ [exception]` (metadata adds `kind`, `reason`, `stacktrace`) and re-raises the original class, reason and stacktrace. All three events carry one `telemetry_span_context` reference. |
+| `attach: id to: eventName do: [:event :measurements :metadata \| ...]` | `Result(Nil, Error)`; a duplicate id answers `Result error:` with kind `handler_exists`. |
+| `attach: id toAll: eventNames do: [...]` | The `telemetry:attach_many/4` form. |
+| `detach: id` | Idempotent; answers `nil`. |
+
+- **One spelling for event names:** a non-empty List of Symbols, which is the atom list `telemetry` expects. There is no dotted-Symbol shorthand. Anything else raises a `type_error` naming the argument.
+- **Measurements and metadata pass through unchanged.** A Beamtalk Dictionary with Symbol keys already is the atom-keyed map `telemetry` expects. Measurements must have Symbol keys (checked once per call, without copying); metadata keys and values of any kind pass straight through, so Erlang and Elixir handlers see the same terms they would from Erlang code.
+- **`span:` is NLR-aware.** `telemetry:span/3` catches every `throw`, so a Beamtalk `^` out of the block (thrown as the `'$bt_nlr'` tuple, ADR 0041) would be reported as an `exception`. The runtime's span implementation recognises the NLR with the shared `?IS_NLR` check, emits `stop` and lets the NLR continue. Under ADR 0134 a raise inside a span in a cast or `handleInfo:` still crashes the actor, with the `exception` event emitted first.
+- **Beamtalk handlers.** The block is stored in the handler config and called through the exported `beamtalk_telemetry:handle_event/4`; `telemetry` warns about (and slows down) local funs used as handlers. The handler runs synchronously in the emitting process, and `telemetry` detaches a handler that raises (and logs it). Class-variable access from the block follows ADR 0130's rule for a block running away from home: reads see a snapshot and a write raises `class_state_unreachable`. Handler ids are Symbols or Strings.
+- **No FFI hop.** The facade's methods are `@primitive` bodies that compile to direct calls into a new runtime module, `beamtalk_telemetry`. A compiled static `Telemetry execute: ...` send is a direct call into the class module (sealed, stateless, `class sealed`). Measured overhead is about 60–100 ns over a raw `telemetry:execute/3` (`docs/development/benchmarks.md`).
+- **One implementation.** `beamtalk_actor:maybe_span/3` and the emit half of `maybe_execute_telemetry/3` moved into `beamtalk_telemetry` (`maybe_span/3`, `emit/3`), and actor dispatch spans share the facade's span implementation. `beamtalk_actor:maybe_execute_telemetry/3` keeps only the actor-lifecycle announcement (ADR 0093) on top. `beamtalk_trace_store` detaches its handlers through `beamtalk_telemetry:detach/1`.
+- **`Tracing` stays separate.** `Tracing` is actor-dispatch observability (capture, stats, health); `Telemetry` is the application event bus. Each class comment points to the other, and `Tracing` gains no `events` view.
+- **Exporters stay Erlang-side.** StatsD, Prometheus and OpenTelemetry bridges are still attached in Erlang. Attaching from Beamtalk exists mainly for tests and in-image consumers.
+
+A user class named `Telemetry` now shadows the stdlib class and gets the usual shadowing warning. Catalina had already renamed its own class to `CatalinaTelemetry`.
 
 ## Context
 
@@ -90,7 +121,7 @@ telemetry_poller (periodic VM stats for systemHealth)
 **Design principle: no bottlenecks on the hot path.** Aggregate updates use the `counters` module (truly lock-free, ~50ns). Trace event inserts go directly to ETS from the calling process. The gen_server only handles control operations (enable/disable/clear) and periodic maintenance (ring buffer eviction). With ETS `{heir, SupervisorPid, HeirData}` ownership transfer and counter refs in `persistent_term`, a gen_server crash does not lose accumulated data — only a full VM crash (SIGKILL, OOM) does. The gen_server is not in the write path, so its crash does not affect actor dispatch.
 
 **Why `telemetry` + `telemetry_poller`?**
-- `telemetry`: Single dependency, zero transitive deps, pure Erlang (~500 LOC). De facto BEAM ecosystem standard (Phoenix, Ecto, Broadway). Composable at the Erlang layer — system developers familiar with BEAM internals can attach custom handlers in Erlang (export to StatsD, Datadog, Prometheus) via `telemetry:attach/4` without modifying Beamtalk internals. This is an escape hatch for operations/infrastructure teams, not a general Beamtalk developer concern. Critically, adopting `telemetry` now means the OpenTelemetry upgrade is purely additive — users add the `opentelemetry_telemetry` bridge package to their project deps, and correlated distributed traces work immediately with no Beamtalk changes (see "Propagated Context Across Actor Boundaries").
+- `telemetry`: Single dependency, zero transitive deps, pure Erlang (~500 LOC). De facto BEAM ecosystem standard (Phoenix, Ecto, Broadway). Composable at the Erlang layer — system developers familiar with BEAM internals can attach custom handlers in Erlang (export to StatsD, Datadog, Prometheus) via `telemetry:attach/4` without modifying Beamtalk internals. Exporters remain an Erlang-side concern for operations/infrastructure teams; since the 2026-10-21 amendment (BT-4025), Beamtalk code can also emit application events and attach handler blocks through the `Telemetry` facade, mainly for tests and in-image consumers. Critically, adopting `telemetry` now means the OpenTelemetry upgrade is purely additive — users add the `opentelemetry_telemetry` bridge package to their project deps, and correlated distributed traces work immediately with no Beamtalk changes (see "Propagated Context Across Actor Boundaries").
 - `telemetry_poller`: Periodic VM measurements (scheduler utilization, memory, run queues) — eliminates custom implementation for `Tracing systemHealth`. Pure Erlang, zero transitive deps beyond `telemetry`.
 
 **Why not OpenTelemetry directly?**

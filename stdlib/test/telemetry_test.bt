@@ -1,0 +1,315 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4025: the Telemetry facade (ADR 0069 amendment) — execute:, span:,
+// attach:/attach:toAll:/detach: over the bundled `telemetry` library.
+//
+// Beamtalk handlers record what they receive in an Ets table: a handler runs
+// in the emitting process (here, the test process) and, being a stored block,
+// cannot assign the test's locals.
+//
+// Fixture: stdlib/test/fixtures/telemetry_event_collector.bt (receives the
+// messages sent by the Erlang-side `telemetry_test` handler).
+
+TestCase subclass: TelemetryTest
+  field: table = nil
+
+  class serial -> Boolean => true
+
+  setUp => self withTable: (Ets new: #telemetryTestEvents type: #set)
+
+  tearDown =>
+    Telemetry detach: #telemetryTest
+    self.table isNil ifFalse: [[self.table delete] on: Error do: [:e | nil]]
+
+  /// Attach a recording handler to the span events under `prefix`, keyed by
+  /// the last event-name element (#start / #stop / #exception).
+  recordSpan: prefix =>
+    t := self.table
+    names := #(#start, #stop, #exception) collect: [:suffix |
+      prefix add: suffix
+    ]
+    (Telemetry
+      attach: #telemetryTest
+      toAll: names
+      do: [:event :measurements :metadata |
+        t at: event last put: #(measurements, metadata)
+      ]) unwrap
+
+  // === execute:measurements:metadata: ===
+  testErlangHandlerReceivesExactNameAndMaps =>
+    collector := TelemetryEventCollector spawn
+    @expect unresolved_ffi
+    ref := Erlang telemetry_test attach_event_handlers: collector pid with: #(#(#bt4025, #erl))
+    self
+      assert: (Telemetry
+        execute: #(#bt4025, #erl)
+        measurements: #{#count => 3}
+        metadata: #{#key => "k", "str" => 1})
+      equals: nil
+    msgs := collector received
+    self assert: msgs size equals: 1
+    msg := msgs first
+    self assert: (msg at: 1) equals: #(#bt4025, #erl)
+    self assert: (msg at: 3) equals: #{#count => 3}
+    self assert: (msg at: 4) equals: #{#key => "k", "str" => 1}
+    @expect unresolved_ffi
+    Erlang telemetry detach: ref
+    collector stop
+
+  testBeamtalkHandlerReceivesNameAndMaps =>
+    t := self.table
+    (Telemetry
+      attach: #telemetryTest
+      to: #(#bt4025, #bt)
+      do: [:event :measurements :metadata |
+        t at: #got put: #(event, measurements, metadata)
+      ]) unwrap
+    Telemetry
+      execute: #(#bt4025, #bt)
+      measurements: #{#n => 1}
+      metadata: #{#who => "me"}
+    got := t at: #got
+    self assert: (got at: 1) equals: #(#bt4025, #bt)
+    self assert: (got at: 2) equals: #{#n => 1}
+    self assert: (got at: 3) equals: #{#who => "me"}
+
+  testExecuteWithNoHandlerAnswersNil =>
+    self
+      assert: (Telemetry
+        execute: #(#bt4025, #nobody)
+        measurements: #{}
+        metadata: #{})
+      equals: nil
+
+  // === span:metadata:do: ===
+  testSpanAnswersBlockValueAndEmitsStartStop =>
+    self recordSpan: #(#bt4025, #span)
+    self
+      assert: (Telemetry
+        span: #(#bt4025, #span)
+        metadata: #{#job => 1}
+        do: [6 * 7])
+      equals: 42
+    start := self.table at: #start
+    stop := self.table at: #stop
+    self assert: ((start at: 1) includesKey: #monotonic_time)
+    self assert: ((start at: 1) includesKey: #system_time)
+    self assert: ((stop at: 1) at: #duration) >= 0
+    self assert: ((stop at: 2) at: #job) equals: 1
+    // start and stop share one span context
+    self assert: ((stop at: 2) at: #telemetry_span_context) equals: ((start at: 2) at: #telemetry_span_context)
+    self assert: (self.table at: #exception) equals: nil
+
+  testErlangHandlerSeesSpanEvents =>
+    collector := TelemetryEventCollector spawn
+    @expect unresolved_ffi
+    ref := Erlang telemetry_test attach_event_handlers: collector pid with: #(#(#bt4025, #espan, #start), #(#bt4025, #espan, #stop))
+    self
+      assert: (Telemetry
+        span: #(#bt4025, #espan)
+        metadata: #{}
+        do: [#done])
+      equals: #done
+    names := collector received collect: [:m | m at: 1]
+    self assert: names equals: #(#(#bt4025, #espan, #start), #(#bt4025, #espan, #stop))
+    @expect unresolved_ffi
+    Erlang telemetry detach: ref
+    collector stop
+
+  testSpanRaiseEmitsExceptionAndReraisesUnchanged =>
+    self recordSpan: #(#bt4025, #boom)
+    text := [
+      Telemetry
+        span: #(#bt4025, #boom)
+        metadata: #{#job => 2}
+        do: [Error signal: "span boom"]
+    ] on: Error do: [:e | e message]
+    self assert: text equals: "span boom"
+    exception := self.table at: #exception
+    self assert: ((exception at: 1) at: #duration) >= 0
+    self assert: ((exception at: 2) at: #kind) equals: #error
+    self assert: ((exception at: 2) at: #job) equals: 2
+    self assert: ((exception at: 2) includesKey: #stacktrace)
+    self assert: (self.table at: #stop) equals: nil
+
+  testSpanReraisesOriginalErrorKind =>
+    self
+      should: [
+        Telemetry
+          span: #(#bt4025, #empty)
+          metadata: #{}
+          do: [#() first]
+      ]
+      raise: #empty_collection
+
+  testNonLocalReturnFromSpanEmitsStopNotException =>
+    self recordSpan: #(#bt4025, #nlr)
+    self assert: self returnFromSpan equals: 99
+    self deny: (self.table at: #stop) isNil
+    self assert: (self.table at: #exception) equals: nil
+
+  returnFromSpan =>
+    Telemetry
+      span: #(#bt4025, #nlr)
+      metadata: #{}
+      do: [^99]
+    0
+
+  // === attach / detach ===
+  testDuplicateAttachIsHandlerExists =>
+    first := Telemetry
+      attach: #telemetryTest
+      to: #(#bt4025, #dup)
+      do: [:e :m :md | nil]
+    self assert: first isOk
+    second := Telemetry
+      attach: #telemetryTest
+      to: #(#bt4025, #dup)
+      do: [:e :m :md | nil]
+    self assert: second isError
+    self assert: second error kind equals: #handler_exists
+
+  testStringHandlerId =>
+    self
+      assert: (Telemetry
+        attach: "telemetry-test-string"
+        to: #(#bt4025, #str)
+        do: [:e :m :md | nil]) isOk
+    self assert: (Telemetry detach: "telemetry-test-string") equals: nil
+
+  testDetachIsIdempotent =>
+    (Telemetry
+      attach: #telemetryTest
+      to: #(#bt4025, #det)
+      do: [:e :m :md | nil]) unwrap
+    self assert: (Telemetry detach: #telemetryTest) equals: nil
+    self assert: (Telemetry detach: #telemetryTest) equals: nil
+    self assert: (Telemetry detach: #neverAttached) equals: nil
+
+  testDetachedHandlerNoLongerRuns =>
+    t := self.table
+    (Telemetry
+      attach: #telemetryTest
+      to: #(#bt4025, #off)
+      do: [:e :m :md | t at: #ran put: true]) unwrap
+    Telemetry detach: #telemetryTest
+    Telemetry
+      execute: #(#bt4025, #off)
+      measurements: #{}
+      metadata: #{}
+    self assert: (t at: #ran) equals: nil
+
+  testRaisingHandlerIsDetachedAndEmitterUnaffected =>
+    t := self.table
+    (Telemetry
+      attach: #telemetryTest
+      to: #(#bt4025, #bad)
+      do: [:e :m :md |
+        t at: #calls increment: 1
+        Error signal: "handler boom"
+      ]) unwrap
+    self
+      assert: (Telemetry
+        execute: #(#bt4025, #bad)
+        measurements: #{}
+        metadata: #{})
+      equals: nil
+    self
+      assert: (Telemetry
+        execute: #(#bt4025, #bad)
+        measurements: #{}
+        metadata: #{})
+      equals: nil
+    // telemetry detached it after the first raise
+    self assert: (t at: #calls) equals: 1
+    // ...so the id is free again
+    self
+      assert: (Telemetry
+        attach: #telemetryTest
+        to: #(#bt4025, #bad)
+        do: [:e :m :md | nil]) isOk
+
+  // === Argument errors ===
+  testEmptyEventNameIsTypeError =>
+    self
+      should: [
+        Telemetry
+          execute: #()
+          measurements: #{}
+          metadata: #{}
+      ]
+      raise: #type_error
+
+  testNonSymbolEventNameIsTypeError =>
+    self
+      should: [
+        Telemetry
+          execute: #(#ok, "no")
+          measurements: #{}
+          metadata: #{}
+      ]
+      raise: #type_error
+
+  testNonListEventNameIsTypeError =>
+    @expect type
+    self
+      should: [
+        Telemetry
+          execute: #a
+          measurements: #{}
+          metadata: #{}
+      ]
+      raise: #type_error
+
+  testNonSymbolMeasurementKeyIsTypeError =>
+    self
+      should: [
+        Telemetry
+          execute: #(#bt4025, #m)
+          measurements: #{"count" => 1}
+          metadata: #{}
+      ]
+      raise: #type_error
+
+  testNonDictionaryMetadataIsTypeError =>
+    @expect type
+    self
+      should: [
+        Telemetry
+          execute: #(#bt4025, #m)
+          measurements: #{}
+          metadata: 3
+      ]
+      raise: #type_error
+
+  testSpanBadPrefixIsTypeError =>
+    self
+      should: [
+        Telemetry
+          span: #()
+          metadata: #{}
+          do: [1]
+      ]
+      raise: #type_error
+
+  testAttachBadHandlerIdIsTypeError =>
+    @expect type
+    self
+      should: [
+        Telemetry
+          attach: 42
+          to: #(#bt4025, #x)
+          do: [:e :m :md | nil]
+      ]
+      raise: #type_error
+
+  testAttachToAllEmptyIsTypeError =>
+    self
+      should: [
+        Telemetry
+          attach: #telemetryTest
+          toAll: #()
+          do: [:e :m :md | nil]
+      ]
+      raise: #type_error
