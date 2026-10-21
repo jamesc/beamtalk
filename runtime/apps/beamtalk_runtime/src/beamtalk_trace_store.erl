@@ -200,9 +200,12 @@ This runs in the calling process for lock-free performance.
 Class comes from telemetry metadata — the authoritative source.
 """.
 -spec record_dispatch(term(), atom(), non_neg_integer(), atom(), atom(), atom()) -> ok.
-record_dispatch(Pid, _Selector, _Duration, _Outcome, _Mode, _Class) when not is_pid(Pid) ->
+record_dispatch(Pid, Selector, _Duration, _Outcome, _Mode, Class) when
+    not is_pid(Pid); not is_atom(Selector); not is_atom(Class)
+->
     %% Malformed metadata (the function is exported and any code can emit the
-    %% event): a non-pid cannot be monitored, so its rows could never retire.
+    %% event): a non-pid cannot be monitored, so its rows could never retire;
+    %% a non-atom class or selector would poison the stats readers.
     ok;
 record_dispatch(Pid, Selector, Duration, Outcome, Mode, Class) ->
     %% A missing table (the gen_server mid-restart, or a hot upgrade whose new

@@ -1838,6 +1838,16 @@ non_pid_metadata_is_dropped_test_() ->
                     )
                  || Bad <- [not_a_pid, {some_name, node()}, 42]
                 ],
+                Live = idle_process(),
+                ?assertEqual(
+                    ok,
+                    beamtalk_trace_store:record_dispatch(Live, increment, 1, ok, sync, "Counter")
+                ),
+                ?assertEqual(
+                    ok,
+                    beamtalk_trace_store:record_dispatch(Live, <<"inc">>, 1, ok, sync, 'Counter')
+                ),
+                Live ! stop,
                 ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
                 ?assertEqual(StorePid, whereis(beamtalk_trace_store))
             end)}
