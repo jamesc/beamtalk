@@ -85,6 +85,10 @@ impl CoreErlangGenerator {
              \x20 [x < 10] whileTrue: [x := x + 1]",
         )?;
 
+        // BT-4002: a condition field write the loop cannot carry is rejected
+        // as the same write in the body is.
+        self.reject_unthreadable_condition_field_writes(condition)?;
+
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // ADR 0118 phase 3: a condition-only self-send/field
@@ -135,6 +139,10 @@ impl CoreErlangGenerator {
             "Fix: The body block must take no arguments:\n\
              \x20 [x > 0] whileFalse: [x := x + 1]",
         )?;
+
+        // BT-4002: a condition field write the loop cannot carry is rejected
+        // as the same write in the body is.
+        self.reject_unthreadable_condition_field_writes(condition)?;
 
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {

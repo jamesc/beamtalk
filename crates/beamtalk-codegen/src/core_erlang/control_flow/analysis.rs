@@ -348,6 +348,36 @@ impl CoreErlangGenerator {
         matches!(condition, Expression::Block(cond) if self.loop_body_threads_value_self(cond))
     }
 
+    /// BT-4002: the condition-side twin of the loop body's per-statement
+    /// rejections. A `whileTrue:`/`whileFalse:` condition carries a value-type
+    /// field write only as a bare top-level statement
+    /// ([`Self::loop_condition_threads_value_self`]), exactly as a body does,
+    /// so a write anywhere else in the condition (a conditional arm, an `and:`
+    /// block, an assignment's or a send's value, a nested loop) is the same
+    /// structured error the body gives it: the nested loop's
+    /// `ValueSelfMutationLostAcrossNestedLoop`, then
+    /// [`Self::reject_unthreadable_value_self_field_write`]. Unrejected, the
+    /// write was dropped every iteration (the loop never ended) or tripped the
+    /// verifier.
+    pub(in crate::core_erlang) fn reject_unthreadable_condition_field_writes(
+        &self,
+        condition: &Expression,
+    ) -> Result<()> {
+        let Expression::Block(cond) = condition else {
+            return Ok(());
+        };
+        for expr in super::super::util::collect_body_exprs(&cond.body) {
+            if let Some(mutation) = self.nested_loop_lost_value_self_mutation(expr) {
+                return Err(CodeGenError::ValueSelfMutationLostAcrossNestedLoop {
+                    mutation,
+                    location: self.location_label(expr.span()),
+                });
+            }
+            self.reject_unthreadable_value_self_field_write(expr, self.is_field_assignment(expr))?;
+        }
+        Ok(())
+    }
+
     /// BT-4002: whether a `Letrec` loop threads the value-type `SelfVt` family:
     /// the union of what its condition and its body produce (the ADR 0131
     /// invariant: a loop's carried families are those its condition and body

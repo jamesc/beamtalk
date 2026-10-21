@@ -705,7 +705,16 @@ It holds wherever the loop sits, with the same exception a body write has: a
 loop nested in a fold, another loop or a conditional arm whose condition writes
 a field is the same structured rejection
 (`ValueSelfMutationLostAcrossNestedLoop`, `FieldAssignmentInUnsupportedBlock`)
-that a body write there gets.
+that a body write there gets. Inside the condition, the rule is also the
+body's. Only a bare top-level `self.f := ...` statement is carried. A write in
+a conditional arm, an `and:` block, an assignment's or a send's value, or a
+nested loop is rejected up front by `reject_unthreadable_condition_field_writes`,
+the condition-side twin of the body's per-statement checks. Before this
+amendment those writes were dropped on every iteration, so the loop never
+ended; a write in a value position also tripped the new verifier check.
+`ConditionFamilyNotCarried` measures the condition's top-level `Self` counter,
+which a nested construct restores. That is why nested writes are rejected
+rather than checked.
 
 The verifier check is `VerifyError::ConditionFamilyNotCarried`. A
 `ConditionalLoop` declares the families its condition advanced

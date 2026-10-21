@@ -613,6 +613,12 @@ fn check_field_context(ctx: &Context) -> Vec<String> {
                 "{} / {}: rejected, but the body-side twin compiles\n{}",
                 ctx.name, case.name, case.source
             )),
+            // The other direction: a condition write that compiles where the
+            // body's is rejected is a write no loop is known to carry there.
+            (Ok(FieldCodegen::Compiles), Ok(FieldCodegen::Rejected)) => failures.push(format!(
+                "{} / {}: compiles, but the body-side twin is rejected\n{}",
+                ctx.name, case.name, case.source
+            )),
             (Ok(FieldCodegen::Compiles), _) => compiled.push((case.name, case.source)),
             (Ok(_), _) => {}
         }
@@ -786,6 +792,66 @@ fn generated_field_condition_programs_compile() {
     assert!(
         failures.is_empty(),
         "{} generated field-condition program(s) fail:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
+/// Conditions that write the field `f` somewhere other than a top-level
+/// statement: in a conditional arm, an `and:` block, an assignment's or a
+/// send's value, a nested loop, and a nested write after a top-level one.
+const NESTED_FIELD_CONDITIONS: &[&str] = &[
+    "(self.f > 0) ifTrue: [self.f := self.f - 1]. self.f < 3",
+    "(n > 100) ifTrue: [self.f := 0] ifFalse: [self.f := self.f + 1]. self.f < 3",
+    "(self.f < 3) and: [self.f := self.f + 1. true]",
+    "(self.f := self.f + 1) < 3",
+    "n := (self.f := self.f + 1). n < 3",
+    "[self.f > 5] whileTrue: [self.f := self.f - 1]. self.f < 3",
+    "self.f := self.f + 1. (self.f < 3) and: [self.f := self.f + 1. true]",
+];
+
+/// BT-4002: a value-type condition carries a field write only as a top-level
+/// statement, as a body does. Anywhere else in the condition the write is the
+/// structured rejection the body gives it
+/// (`reject_unthreadable_condition_field_writes`), never a silent drop (the
+/// loop never ended), a verifier panic or an `erlc` failure. In an actor the
+/// write rides `State` and these compile.
+#[test]
+fn nested_field_writes_in_a_condition_are_rejected_like_the_body() {
+    let mut failures = Vec::new();
+    for ctx in FIELD_CONTEXTS.iter().filter(|c| !c.class_side) {
+        for keyword in LOOPS {
+            for cond in NESTED_FIELD_CONDITIONS {
+                for body in &FIELD_CONDITION_BODIES[..3] {
+                    let source =
+                        POSITIONS[0].replace("LOOP", &format!("[{cond}] {keyword} [{body}]"));
+                    let expected = if ctx.actor_instance {
+                        FieldCodegen::Compiles
+                    } else {
+                        FieldCodegen::Rejected
+                    };
+                    match field_case_codegen(ctx, &source) {
+                        Ok(got) if got == expected => {
+                            if got == FieldCodegen::Compiles {
+                                let src =
+                                    format!("{}{HELPERS}{}", ctx.header, method(ctx, 0, &source));
+                                if !passes(&src) {
+                                    failures.push(format!("{}: erlc\n{src}", ctx.name));
+                                }
+                            }
+                        }
+                        got => failures.push(format!(
+                            "{}: expected {expected:?}, got {got:?}\n{source}",
+                            ctx.name
+                        )),
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} nested field-condition case(s) fail:\n\n{}",
         failures.len(),
         failures.join("\n\n")
     );
