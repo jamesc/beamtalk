@@ -53,13 +53,8 @@ const CONDITIONS: &[&str] = &[
 ];
 
 /// Loop bodies: carrying nothing, a self-send, an outer-local write (the
-/// control: the loop threads `n`), a nested loop, a conditional, `^` and a
-/// fold.
-///
-/// PIN-BUG BT-4000: the conditional whose receiver is a self-send
-/// ([`SELF_SEND_CONDITIONAL_BODY`]) is skipped in actor instance methods,
-/// where it trips `UnboundVersion State1` whatever the loop condition is;
-/// [`pin_bug_bt4000_actor_loop_body_self_send_conditional`] pins it.
+/// control: the loop threads `n`), a nested loop, a conditional whose
+/// receiver is a self-send (BT-4000), `^` and a fold.
 const BODIES: &[&str] = &[
     "nil",
     "Timer sleep: 0",
@@ -104,7 +99,7 @@ const HELPERS: &str = "  done => false
 /// method that threads `SelfVt` elsewhere is covered).
 struct Context {
     name: &'static str,
-    /// An actor instance method (PIN-BUG BT-4000 skips one body there).
+    /// An actor instance method.
     actor_instance: bool,
     header: &'static str,
     class_side: bool,
@@ -184,9 +179,6 @@ fn cases(ctx: &Context) -> Vec<(String, String)> {
     for keyword in LOOPS {
         for (c, cond) in CONDITIONS.iter().enumerate() {
             for (b, body) in BODIES.iter().enumerate() {
-                if ctx.actor_instance && *body == SELF_SEND_CONDITIONAL_BODY {
-                    continue;
-                }
                 let has_field = !ctx.class_side && ctx.header.contains("f = 0");
                 if *body == FIELD_WRITE_BODY && !has_field {
                     continue;
@@ -250,23 +242,17 @@ fn while_condition_corpus_compiles() {
     );
 }
 
-/// PIN-BUG BT-4000: an actor loop body whose statement is a conditional with a
-/// self-send receiver reads a `State1` no `Bind` produces, whatever the loop
-/// condition. A fix for BT-4000 flips this pin and drops the actor skip in
-/// [`cases`].
-#[cfg(debug_assertions)]
+/// BT-4000 (flips the `PIN-BUG BT-4000` pin): an actor loop body whose
+/// statement is a conditional with a self-send receiver splices the
+/// receiver's `State` `Bind` into the loop frame, so the verifier is silent.
+/// The matrix is `loop_body_conditional_receiver_corpus.rs`.
 #[test]
-fn pin_bug_bt4000_actor_loop_body_self_send_conditional() {
+fn bt4000_actor_loop_body_self_send_conditional() {
     let src = format!(
         "Actor subclass: WhileCarrierProbe\n  state: f = 0\n{HELPERS}  probe =>\n    n := 0\n    [n > 0] whileTrue: [{SELF_SEND_CONDITIONAL_BODY}]\n    n\n"
     );
-    let report = super::verifier_report(&src, None);
-    assert!(
-        report
-            .as_deref()
-            .is_some_and(|r| r.contains("UnboundVersion")),
-        "BT-4000 pin: expected the verifier to report UnboundVersion, got {report:?}"
-    );
+    assert_eq!(super::verifier_report(&src, None), None);
+    assert!(passes(&src));
 }
 
 /// PIN-BUG BT-4014: a class-side while loop that writes a local, as the

@@ -72,7 +72,12 @@ impl CoreErlangGenerator {
         // producer in this body — `threaded_expression` below splices its
         // prelude (the construct tuple and its `LocalRebind`s) and yields
         // the unwrapped value.
-        if self.control_flow_has_mutations(value) && !self.expr_has_local_producer(value) {
+        // BT-4000: nor an inline-threaded construct, whose value
+        // `threaded_expression` below yields unwrapped (as at the method root).
+        if self.control_flow_has_mutations(value)
+            && !self.expr_has_local_producer(value)
+            && !self.thread_ahead_unwraps(value)
+        {
             return Ok(None);
         }
         // BT-3493: the RHS is itself a field write (`r := (self.x :=
@@ -362,7 +367,10 @@ impl CoreErlangGenerator {
                 // this loop-body function has always structurally
                 // paralleled — including its rebind of any OTHER outer local
                 // the RHS's own block mutated.
-                if self.control_flow_has_mutations(value) {
+                // BT-4000: not an inline-threaded construct, which
+                // `thread_ahead` below registers already unwrapped (the plain
+                // path reads it back, as at the method root).
+                if self.control_flow_has_mutations(value) && !self.thread_ahead_unwraps(value) {
                     let frame = self.current_frame();
                     let mut prelude_stmts: Vec<ThreadedStmt> = Vec::new();
                     let thread_scope = self.thread_ahead(value, &mut prelude_stmts, frame)?;

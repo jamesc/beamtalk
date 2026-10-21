@@ -136,6 +136,12 @@ pub(super) mod fault {
         /// before BT-4002, so the `Self` a `whileTrue:`/`whileFalse:` condition
         /// writes is not carried (`ConditionFamilyNotCarried`).
         BodyOnlyLoopFamilies,
+        /// BT-4000: an actor conditional's state-advancing receiver is not
+        /// sequenced ahead, as before BT-4000: its prelude is rendered into
+        /// the conditional's own tuple document, out of the frame's sight, so
+        /// in a loop body the conditional's `State` extraction reads a version
+        /// the frame never binds (`UnboundVersion`).
+        ReceiverPreludeInTuple,
     }
 
     thread_local! {
@@ -467,7 +473,7 @@ impl CoreErlangGenerator {
         // path for every other `ControlFlowWithMutations` shape (loops,
         // list-ops, exception handlers) that still returns a raw tuple
         // `Document` from `expression_doc`.
-        if self.inline_producer_construct(expr.unwrap_parens()) {
+        if self.thread_ahead_unwraps(expr) {
             let result_var = self.fresh_temp_var("Result");
             let result_doc = self.expression_doc(expr)?;
             stmts.push(ThreadedStmt::Statement(
@@ -939,6 +945,18 @@ impl CoreErlangGenerator {
         self.inline_control_flow_needs_threading(expr)
             || self.exception_producer_in_frame(expr)
             || self.block_value_producer_in_frame(expr)
+    }
+
+    /// Whether [`Self::thread_ahead`] registers `expr`'s value already
+    /// unwrapped, so a consumer must read it back rather than unpack a
+    /// `{Value, State}` tuple: an inline-threaded construct
+    /// ([`Self::inline_producer_construct`]), or (BT-4000) a conditional whose
+    /// receiver is sequenced ahead (`conditional_receiver_is_sequenced`), which
+    /// is then lowered over the sequenced receiver as a producer or as a plain
+    /// send (`(self done) ifTrue: aBlock`).
+    pub(super) fn thread_ahead_unwraps(&self, expr: &Expression) -> bool {
+        self.inline_producer_construct(expr.unwrap_parens())
+            || self.is_conditional_with_sequenced_receiver(expr)
     }
 
     /// The outer locals the threading construct `expr` (paren-unwrapped)
