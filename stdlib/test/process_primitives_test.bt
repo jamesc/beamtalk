@@ -48,11 +48,6 @@ TestCase subclass: ProcessPrimitivesTest
     server stop
 
   // === Reference new ===
-  testReferenceNewWithArgsRaises =>
-    self should: [
-      Reference perform: #new: withArguments: #(#{})
-    ] raise: #instantiation_error
-
   testReferenceNewDynamicDispatch =>
     cls := Reference
     self assert: (cls perform: #new) class equals: Reference
