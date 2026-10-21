@@ -1,7 +1,8 @@
 # ADR 0137: Actor Closures See the Actor's Live State
 
 ## Status
-Accepted (2026-10-20); Proposed 2026-10-20
+Accepted (2026-10-20); Proposed 2026-10-20; Amended 2026-10-21 (self-send
+exception after Phase 0, BT-4007)
 
 Amends ADR 0133 (an escaping block may assign `self.field`) and ADR 0041 (an
 actor's closures no longer capture `State`). ADR 0130 is the precedent and is
@@ -100,14 +101,15 @@ let State4 = call 'erlang':'get'('$bt_actor_state') in
 
 A call needs the bracket when it may run user code in this process: a
 `value`-family call on a block that is not inlined, a send with a block
-argument, every self-send (unary, binary, keyword, `super`, cascade, aliased),
+argument, a self-send that may pass a block (below), an aliased self-send,
 a send to an in-process object (a value type, a collection, any non-actor
 object), an Erlang FFI call, and any primitive or runtime helper that
 receives a block or calls a user method. The last group includes the
 `on:do:` handler and `ensure:` cleanup runners, `Result tryDo:` and
 `protect/1`, the `beamtalk_collection` fold helpers, sort comparators,
 `Timer`, and collection primitives such as `includes:` that send `=` to
-elements. A call needs no bracket only in two cases. One is a construct the
+elements. Apart from the self-send exception below, a call needs no bracket
+only in two cases. One is a construct the
 compiler lowers in place (`ifTrue:`, an inlined `do:`, `whileTrue:`, …), which
 is not a call at all. The other is an intrinsic or primitive that can never
 dispatch to user code, whatever its arguments are. Integer arithmetic and
@@ -121,28 +123,56 @@ the `'false'` branch only, so `count + 1` on an integer pays nothing. A send
 to another actor is a `gen_server:call` and its blocks run away from home, but
 the compiler can rarely prove the receiver is not `self` (an aliased `self` is
 an actor reference too), so actor sends are bracketed in practice. The pair
-costs 6 to 7 ns against a 700 ns round trip.
+costs about 10 ns against a 700 ns round trip.
 
-The cell is also how `State` crosses a method boundary. A compiled method is
-`dispatch(Selector, Args, Self)` and answers a bare value. Its first statement
-loads `State` from the cell, its body threads `State`, `State1`, … in locals
-with the existing `State` family and actor frame mode, and its exit stores the
-last version to the cell. Nothing else in the body touches the cell except
-the bracket around a call that may run user code. A self-send is a bracketed
-call to `dispatch/3`. The callback wrapper installs the `gen_server` state,
-runs the method, and returns the cell:
+A self-send whose callee is statically known and that passes no argument that
+could be a block is not bracketed. It keeps today's explicit `State`
+threading. This covers unary, binary, keyword, `super` and cascade sends to
+`self`, to sealed and open classes alike. An argument counts as possibly a
+block unless it is a literal constant that is not a block, so `self add: 5`
+threads and `self add: n` is bracketed. Phase 0 measured the bracket on a
+plain self-send at 1.35x to 1.60x (see Cost), which is the reason for the
+exception.
+
+Methods keep today's calling convention. A compiled method is
+`dispatch(Selector, Args, Self, State)` and answers `{reply, R, NewState}`.
+Its body threads `State`, `State1`, … in locals with the existing `State`
+family and actor frame mode. Nothing in the body touches the cell except the
+bracket around a call that may run user code, and closures, which read and
+write the cell when they run at home (§3). The callback wrapper installs the
+`gen_server` state in the cell so that closures can find it, runs the method,
+and returns the state the method answered:
 
 ```erlang
 dispatch_call(Selector, Args, From, State) ->
     Old = beamtalk_actor_state:install(State),
-    try Module:dispatch(Selector, Args, Self) of
-        Result -> {reply, encode(From, Result), beamtalk_actor_state:take()}
+    try Module:dispatch(Selector, Args, Self, State) of
+        {reply, Result, NewState} -> {reply, encode(From, Result), NewState}
     catch
         Class:Reason:ST -> {reply, encode(From, {error, ...}), State}
     after
         beamtalk_actor_state:uninstall(Old)
     end.
 ```
+
+The invariant is: at every bracketed call the cell equals the current
+threaded `State`, and the caller reloads after it. For a bracketed self-send
+the reload is the `State` the callee answers, which includes every write the
+callee made; for every other bracketed call it is a load from the cell. A
+threaded self-send needs no bracket because the callee receives the current
+`State` as its argument and answers its last version, as today.
+
+This holds when the callee itself runs a stored block. In
+`fire => self.cb value`, a threaded `self fire` passes the caller's current
+`State` to `fire`. The `self.cb value` inside `fire` may run user code, so
+`fire` brackets it with its own current `State`, which is the caller's plus
+whatever `fire` wrote before the call. The block sees that state in the cell,
+its writes are loaded into `fire`'s next version, and `fire` answers that
+version to the caller. Every block runs inside some bracket, and the method
+that emits the bracket is the one holding the current version.
+
+Users see no difference between the two lowerings. A self-send means the same
+thing whether it threads or is bracketed.
 
 Between callbacks the `gen_server` state is the only copy. The cell does not
 exist outside a callback.
@@ -156,8 +186,10 @@ as `OnDoCatch` does for its snapshot and restore. A new `VerifyError`,
 `SyncedCall`, so a missed sync point is a build failure and never a stale
 read. `just verify-threaded-ir` runs it over the stdlib and bootstrap corpus.
 
-The default is "may run user code". A call is exempt only if the emitter
-built it from one of two existing sources. Inlined constructs come from
+The default is "may run user code". A threaded self-send under §1's rule is
+not a `SyncedCall`, and the verifier accepts it only when its receiver is
+`self` and every argument is a literal non-block constant. Any other call is
+exempt only if the emitter built it from one of two existing sources. Inlined constructs come from
 `beamtalk-core/src/state_threading_selectors.rs` and `WellKnownSelector`
 (`beamtalk-core/src/ast/well_known.rs`) and never produce a call node. Exempt
 intrinsics come from the one table codegen already uses to emit them: the
@@ -170,16 +202,16 @@ some argument types (`,` for strings) stays unmarked. Codegen exempts such a
 call only where the type checker shows every argument is a `String`. A binding with a block-typed parameter
 cannot carry it, and `build-stdlib` rejects the combination. The emitter and
 the verifier read the same mark, so there is no second list to keep in step.
-An unmarked primitive is bracketed, which costs 6 to 7 ns and is never wrong.
+An unmarked primitive is bracketed, which costs about 10 ns and is never wrong.
 
 ### 3. Closures at home and away
 
 A closure has no threaded `State`. Its field reads and writes go through
 `beamtalk_actor_state` (`get`, `put`, and the reflective `fieldAt:`,
 `fieldAt:put:`, `clearField:`, `hasField:`), as `beamtalk_class_vars` does for
-class variables. A closure only runs at home through a bracketed call, so the
-cell is current when it starts and the method loads its writes when it
-returns.
+class variables. A closure only runs at home inside a bracketed call, made by
+the caller or by a callee further down, so the cell is current when it starts
+and the method that emitted the bracket loads its writes when it returns.
 
 Where a block's field access goes is decided when the block runs. It is at
 home when a callback of its own actor is running in the current process,
@@ -257,9 +289,10 @@ block; its catch arm now also stores that version to the cell before the
 handler runs, so a closure or callee in the handler sees it. The `OnDoCatch`
 node owns the store, and the verifier's `CatchWithoutClassVarRestore` becomes
 `CatchWithoutStateRestore`. `Result tryDo:` and the other runtime catchers do
-the same through `protect/1`. A `^` is a sync point: the compiler stores the
-current version before the `$bt_nlr` throw and loads after the catch, so the
-actor NLR 4-tuple `{'$bt_nlr', Tok, Val, State}` loses its `State` slot.
+the same through `protect/1`. A `^` stores the current version to the cell
+before the `$bt_nlr` throw, so an `ensure:` cleanup on the way out sees it.
+The actor NLR 4-tuple `{'$bt_nlr', Tok, Val, State}` keeps its `State` slot,
+which is how the method returns that version.
 
 Inside an `ensure:` protected body, every field write also stores to the
 cell (write-through), and the cleanup reads the cell. Entering an `ensure:`
@@ -278,7 +311,8 @@ protected body. What the cleanup sees:
 - On an exception raised by a bracketed callee, every write made before the
   `ensure:` and every write the body made, plus the callee's writes up to the
   callee's last store. A callee stores before
-  each call it brackets and at its normal exit. Writes it made after its last
+  each call it brackets and at each field write inside its own `ensure:`
+  protected bodies. Writes it made after its last
   store and before raising were held only in its threaded locals, and the
   cleanup does not see them. The same holds for nested callees.
 
@@ -288,28 +322,32 @@ not add one. On every exception path, the next catch boundary or the callback
 discards all of these writes anyway. `on:do:` still rolls back to the state
 from before its protected block.
 
-Each `gen_server` callback keeps its own contract. A callback returns the cell
-only when it exits normally; on an exception it returns, or stops with, the
-state it was called with.
+Each `gen_server` callback keeps its own contract. A callback returns the
+state its method answered only when it exits normally; on an exception it
+returns, or stops with, the state it was called with.
 
 | Callback | User code | Cell | Normal exit | Exception |
 |---|---|---|---|---|
 | `init/1` | none; `initialize` runs in `handle_continue` (ADR 0078) | not installed | `{ok, State, {continue, initialize}}` | unchanged |
-| `handle_continue(initialize, _)` | the `initialize` chain, parent first | installed around the chain, snapshotted before each step | `{noreply, take()}` after the field check | `{stop, Reason, S}` with `S` the state before the failing step, as today; `terminate:` sees `S` |
-| `handle_call`, `handle_cast`, `handle_info`, BT-3968 continuations | one method | around the dispatch | `{reply, R, take()}` / `{noreply, take()}` | pre-call state; `handle_call` replies with the error, no-reply handlers follow ADR 0134 |
+| `handle_continue(initialize, _)` | the `initialize` chain, parent first | installed around the chain, snapshotted before each step | `{noreply, S}` with `S` the last step's answer, after the field check | `{stop, Reason, S}` with `S` the state before the failing step, as today; `terminate:` sees `S` |
+| `handle_call`, `handle_cast`, `handle_info`, BT-3968 continuations | one method | around the dispatch | `{reply, R, NewState}` / `{noreply, NewState}` from the method's answer | pre-call state; `handle_call` replies with the error, no-reply handlers follow ADR 0134 |
 | `terminate/2` | `terminate:` if defined | around the dispatch (new; today it does not stash) | `ok`, cell erased | caught and ignored, as today; cell erased |
 | `code_change/3` | none; `beamtalk_hot_reload:code_change/3` | not installed | `{ok, NewState}` | unchanged |
 | `format_status/1` | not implemented | not installed | would format the `gen_server` state | n/a |
 
 #4447 needed an un-publish wherever a state change was discarded. Here the
 method body is the source of truth between sync points and the cell is the
-source of truth across them, and every crossing is a `SyncedCall` the verifier
-checks.
+source of truth across them. Every crossing is either a `SyncedCall` or a
+threaded self-send that passes `State` as an argument, and the verifier
+checks both.
 
 ### 5. Self-sends and self-casts
 
-Direct and aliased self-sends both run in-process on the cell, so the aliased
-form starts from the live state and its writes persist. A method-level
+A direct self-send with a statically known callee threads `State` as today,
+or is bracketed when it may pass a block (§1). An aliased self-send
+(`other := self. other x`) is bracketed: `self_dispatch/2` runs the method on
+the cell, which is current, and stores its answer back, so the aliased form
+starts from the live state and its writes persist. A method-level
 `self foo!` becomes `gen_server:cast` to the actor's own pid and runs after
 the current message, which is what `!` means elsewhere (principles §7) and
 already means inside a block.
@@ -317,7 +355,8 @@ already means inside a block.
 ### 6. Unchanged
 
 Class variables, value-type `Self` threading (ADR 0120) and local-variable
-threading stay as they are. Actor methods keep their frame mode, and locals
+threading stay as they are. Actor methods keep their calling convention
+(`dispatch/4` answering `{reply, R, State}`) and their frame mode, and locals
 keep riding in the actor map as `__local__` keys. ADR 0133's rule for captured
 locals stays; only its field half is amended. The wire protocol,
 `sync_send`/`cast_send`, supervision and `stopWith:`/`continueWith:` are
@@ -378,46 +417,41 @@ ADR 0130's class variables).
 
 ## Cost
 
-Throwaway spikes on OTP 28 compare today's threading, this design, and the
-per-access cell from the first draft of this ADR (see Alternatives). Figures
-are medians over 101 batches on a shared 18-core machine at load average 14
-to 77 during the runs, with `+S 1` (three runs) and with 18 schedulers (one
-run), so treat differences under about 15% as noise.
+Phase 0 (BT-4007, #4478) measured a prototype behind a codegen flag, in the VM
+on the generated Core Erlang, with `runtime/perf/bench_adr0137_gates.escript`:
+medians over 101 interleaved batches on a quiet 18-core machine (load average
+1.5 to 2.3), with `+S 1` and with 18 schedulers.
 
-| Measure | Schedulers | Threaded (today) | This design | Per-access cell |
-|---|---|---|---|---|
-| Store + load pair, isolated | `+S 1` / 18 | | 6.2–6.9 ns / 6.1 ns | |
-| Field loop, 10 reads + 3 writes, intrinsics only, in process | `+S 1` | 31–41 ns | same code | 171–215 ns |
-| Same | 18 | 26 ns | same code | 96 ns |
-| `gen_server:call`, that body once | `+S 1` | 2.4–3.2 µs | 0.77x–0.98x | 0.82x–1.16x |
-| Same | 18 | 0.70 µs | 1.01x | 1.08x |
-| `gen_server:call`, that body 10 times | `+S 1` | 2.9–3.9 µs | 0.96x–0.99x | 1.16x–1.37x |
-| Same | 18 | 0.97 µs | 1.16x | 2.03x |
+| Measure | `+S 1` | 18 schedulers |
+|---|---|---|
+| Field loop, 10 reads + 3 writes, intrinsics only (identical code) | 1.009x | 1.010x |
+| Store + load pair, isolated | 7.8 ns | 9.0 ns |
+| Bracketed in-process send, added per send | +9.9 ns | +10.4 ns |
+| Self-send (~31 ns), bracketed, open and sealed, top level and in a `do:` arm | 1.35x–1.38x | 1.49x–1.60x |
+| Self-send, threaded under §1 (identical code) | 0.99x–1.02x | |
 
 An intrinsic-only field loop compiles to the same code as today, so its cost
-is unchanged by construction. A send that may run user code pays one store and
-one load, 6 to 7 ns. A field write inside an `ensure:` protected body adds
-one `put`, which was not measured separately. A send-heavy benchmark (ten in-process remote calls, each
-writing a field) measured this design faster than today's threading in every
-run (0.5x to 0.66x). The two versions differ only by the store and load, so
-that result is an artifact of the harness and is not reported as a saving;
-the isolated pair is the number to use. The end-to-end figures sit within
-noise of today's apart from the 18-scheduler 10-body case at 1.16x, a single
-run.
+is unchanged by construction. A send that may run user code pays one store
+and one load, about 10 ns. A plain self-send compiles to the same code as
+today. A field write inside an `ensure:` protected body adds one `put`, which
+was not measured separately. End-to-end `gen_server:call` runs vary by about
+1% to 2% between rounds on identical builds, which is about 50 ns over ten
+sends, so they cannot resolve a 10 ns difference. The in-VM figures are the
+ones to use.
 
-Phase 0 gates, measured with `runtime/perf/self_send_bench` and
-`runtime/perf/bench_method_threading.erl` as described in
-`docs/development/benchmarks.md` (at least 7 interleaved rounds on an idle
-machine):
+The gates, as Phase 0 left them:
 
 1. A method looping over ten field reads and three writes with intrinsics
-   only, through `gen_server:call`: at most 1.05x today.
+   only: at most 1.05x today. Passed.
 2. A method making ten in-process sends that each update a field: at most
-   10 ns more per send than today.
-3. Open and sealed actor self-sends, top level and in a `do:` arm: no
-   regression beyond noise.
-4. `UnbracketedUserCodeSend` reports zero over the stdlib, bootstrap and BUnit
-   corpus.
+   10 ns more per send than today. At the limit.
+3. Open and sealed actor self-sends, top level and in a `do:` arm: the
+   generated code is identical to today's. Bracketing them failed this gate,
+   which is why §1 threads them.
+4. Zero `UnbracketedUserCodeSend` over the full corpus. This is the exit
+   criterion of Phase 2a. The prototype left 187 of 511 may-run-user-code
+   sends in BUnit actor methods unbracketed (loop bodies, branch arms,
+   mutation-threaded statements) and produced two stale reads there.
 
 ## What It Deletes
 
@@ -433,7 +467,6 @@ Classified against `main` at `1df39217f` and the open PRs on 2026-10-20.
 | The actor-state `stateful_block_dispatch` for a callable forwarded to a list op | `control_flow/list_ops/mod.rs` |
 | `detect_tier2_self_send`, `scan_class_for_tier2_blocks`, `tier2_method_info`, `tier2_block_params` (unreachable since BT-3922) | codegen |
 | `generate_discarding_self_dispatch` | `dispatch_codegen.rs` |
-| `{reply, R, NewState}` from methods, the state arms of `unwrap_dispatch_result/1`, the `State` slot of the actor NLR tuple | runtime, codegen |
 | `generate_self_cast_send` | `dispatch_codegen.rs` |
 
 `testPureIfNoneAfterFoldPinBug` (BT-3952) and the
@@ -441,15 +474,20 @@ Classified against `main` at `1df39217f` and the open PRs on 2026-10-20.
 `stdlib/test/actor_self_send_hom_test.bt` flip to the correct answers.
 BT-3988 and BT-3990 close.
 
-Phase 0 runs the 733-shape oracle (BT-3950) to settle these, which mix actor
-state with locals: `RESIDUAL_DENY_SET` `EvaluatedBlockValue` (BT-3981, with
+The oracle (BT-3950) settles these, which mix actor state with locals. Phase 0
+ran it with the flag on and off and every cell agreed, because the matrix
+probes local threading and the prototype did not change it, so they are
+decided after Phase 2b: `RESIDUAL_DENY_SET` `EvaluatedBlockValue` (BT-3981, with
 its PIN-BUGs in `bt3971test.bt` and `bt3939tier2inlined_test.bt`) and
 `GroupByValue`, and the roughly 15 `DENY_SET` rows marked `stateful`, 11 of
 them for actors.
 
-These stay. The `State` family, the actor frame mode, ADR 0118's self-send
-preludes (a self-send still rebinds `State`, now from the load), and
-`strip_local_temps/1` stay because method bodies still thread. So does
+These stay. The `State` family, the actor frame mode, the `{reply, R, State}`
+method convention with the state arms of `unwrap_dispatch_result/1`, the
+`State` slot of the actor NLR tuple, ADR 0118's self-send preludes (a
+self-send rebinds `State` from the callee's answer, or from the load when it
+is bracketed), and `strip_local_temps/1` stay because method bodies and plain
+self-sends still thread. So does
 `RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` (BT-3948), which is about the
 actor loop frame. The locals rules stay: the `WriteKind::Local` half of
 `Tier2BlockNoReturnChannel` with `Escape::Ffi` (BT-3917), `Passed` and
@@ -487,8 +525,17 @@ could write actor state being sent to another actor.
 threading and every `self.x` is a `get` and `put` on the cell. It is one
 lowering with no sync points to get right, and it deletes the `State` family.
 It costs 3.7x to 6.9x on a field-heavy body in process and up to 2x end to end
-for a call that makes 130 field accesses (table above), on every actor method
-whether or not it uses a block.
+for a call that makes 130 field accesses (spikes for the first draft, on a
+loaded machine), on every actor method whether or not it uses a block.
+
+**Bracket every self-send.** This ADR as accepted on 2026-10-20: methods take
+`State` from the cell on entry and store it on exit, every self-send is a
+`SyncedCall`, and the `{reply, R, State}` convention, the state arms of
+`unwrap_dispatch_result/1` and the NLR `State` slot are deleted. It has one
+kind of self-send and one calling convention. Phase 0 measured it at 1.35x to
+1.38x on a 31 ns self-send with `+S 1` and 1.49x to 1.60x with 18 schedulers,
+for open and sealed actors, top level and in a `do:` arm. Plain self-sends are
+the most common call in actor code, and the deletions do not pay for that.
 
 **A per-class switch: thread when no block touches `self`.** Use today's
 lowering for classes whose blocks never read fields or self-send, and the
@@ -534,12 +581,15 @@ per self-cast to keep a behaviour that loses writes today.
 - A missed sync point fails the build through `UnbracketedUserCodeSend`.
 
 ### Negative
-- Every send that may run user code pays a store and a load, 6 to 7 ns.
-- Every compiled actor changes calling convention. Older modules are refused
-  with `abi_mismatch`, and crossing the release needs a node restart
-  (ADR 0125).
-- The `State` family and the actor frame mode stay, so this deletes less
-  codegen than the per-access cell would.
+- Every send that may run user code pays a store and a load, about 10 ns.
+- A self-send lowers two ways, threaded or bracketed, depending on whether an
+  argument could be a block.
+- Generated actor code changes, so the module ABI marker is bumped. Older
+  modules are refused with `abi_mismatch`, and crossing the release needs a
+  node restart (ADR 0125).
+- The `State` family, the actor frame mode and the `{reply, R, State}`
+  convention stay, so this deletes less codegen than the per-access cell or
+  bracketing every self-send would.
 - Every `ensure:` entry, and every field write inside an `ensure:` protected
   body, also does a `put`.
 - If a bracketed callee raises, an `ensure:` cleanup does not see the writes
@@ -550,35 +600,40 @@ per self-cast to keep a behaviour that loses writes today.
 
 ### Neutral
 - Locals, value types and class variables are unchanged.
-- Native Erlang actor methods keep `{reply, R, NewState}` through an adapter.
+- Methods, native Erlang actor methods and ADR 0066 extension funs keep
+  `{reply, R, NewState}`.
+- Plain self-sends compile to the same code as today.
 
 ## Implementation
 
-**Phase 0 (S).** Behind a codegen flag, emit `SyncedCall` and the cell
-calling convention for the stdlib, BUnit and REPL corpora. Run the four
-gates and the 733-shape oracle. Turn the spike's OTP checks into EUnit tests.
-Proceed only if the gates pass and no shape that answers right today answers
-wrong with the flag on.
+**Phase 0 (S, done: BT-4007, #4478).** A prototype behind a codegen flag,
+the four gates, the oracle and the OTP checks as EUnit tests. Gate 3 failed
+for bracketed self-sends, which led to the self-send exception in §1. The
+results are in Cost.
 
 **Phase 1 (M).** `beamtalk_actor_state` (`install`, `take`, `uninstall`,
 `get`, `put`, `has`, `clear`, `capture`, `protect`), used by every callback
-wrapper in `beamtalk_actor.erl` and by `self_dispatch/2`. An adapter for native
-methods and ADR 0066 instance-side extension funs that return
-`{reply, R, NewState}`. The `actor_state_unreachable` error kind.
+wrapper in `beamtalk_actor.erl` and by `self_dispatch/2`. The
+`actor_state_unreachable` error kind.
 
-**Phase 2 (L).** The `SyncedCall` node and `UnbracketedUserCodeSend` in
-`threaded_ir/`, emitted by the send emitter in `dispatch_codegen.rs` and the
-`'false'` branch of the operator guard in `operators.rs`. Methods become
-`dispatch(Selector, Args, Self)`, loading on entry and storing on exit.
-Closure field access goes through the helpers, and field-reading block
-literals bind the capture. `OnDoCatch` stores its pre-region version under
-`CatchWithoutStateRestore`. `^` stores before the throw. Field writes inside
-an `ensure:` protected body write through, and entering an `ensure:` stores.
-The `no_user_code` mark goes on
-`PrimitiveBindingTable` entries, set from the stdlib pragmas and checked by
-`build-stdlib`. `self foo!` lowers to a cast. Bump the module ABI marker.
+**Phase 2a (L).** The `SyncedCall` node in `threaded_ir/` and bracket
+emission, behind a flag, from the send emitter in `dispatch_codegen.rs` and
+the `'false'` branch of the operator guard in `operators.rs`, with §1's
+self-send exception. The `UnbracketedUserCodeSend` verifier. Drive its count
+to zero over the stdlib, BUnit, REPL and generated corpora, fixing each miss
+in the `ThreadedIr` node that owns the scope. If the count does not converge
+that way, stop and report before Phase 2b.
 
-**Phase 3 (M).** Delete the table above and whatever Phase 0 confirmed.
+**Phase 2b (L).** Closure field access goes through the helpers, and
+field-reading block literals bind the capture. Entering an `ensure:` stores,
+and field writes inside its protected body write through. `OnDoCatch` stores
+its pre-region version under `CatchWithoutStateRestore`. `^` stores before
+the throw. The `no_user_code` mark goes on `PrimitiveBindingTable` entries,
+set from the stdlib pragmas and checked by `build-stdlib`. `self foo!` lowers
+to a cast. Remove the flag and bump the module ABI marker.
+
+**Phase 3 (M).** Delete the table above and whatever the oracle confirms
+after Phase 2b.
 Update the "field mutations require control-flow context" text in
 `docs/beamtalk-language-features.md`.
 
@@ -614,8 +669,12 @@ Decided by the maintainer on 2026-10-20, when the ADR was accepted.
    works. Fields and class variables follow one rule.
 3. Every send that may run user code is bracketed, including sends to other
    actors. The compiler does not try to prove a receiver is not `self`. A
-   bracket costs 6 to 7 ns against a 700 ns call; revisit only if profiling
+   bracket costs about 10 ns against a 700 ns call; revisit only if profiling
    shows it matters.
+4. Decided on 2026-10-21 after Phase 0: a self-send with a statically known
+   callee and no argument that could be a block keeps explicit `State`
+   threading, and methods keep `{reply, R, State}` (§1). Bracketing every
+   self-send cost 1.35x to 1.60x on the self-send itself.
 
 ## References
 
