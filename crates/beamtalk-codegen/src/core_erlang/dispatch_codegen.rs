@@ -38,6 +38,7 @@
 
 use super::control_flow::{Closure, FieldWriteSite};
 use super::expr_shape::is_character_typed_receiver;
+use super::method_frame::{CLASS_SELF_VAR, DIRECT_CLASS_SELF_PARAM};
 use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
 };
@@ -1166,6 +1167,7 @@ impl CoreErlangGenerator {
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let call_doc = Self::class_direct_call_doc(
                 &self.module_name,
+                self.sibling_class_self_arg(&selector_atom),
                 &selector_atom,
                 args_doc,
                 !arguments.is_empty(),
@@ -1189,6 +1191,7 @@ impl CoreErlangGenerator {
             let walk_doc = Self::class_self_send_call_doc(&selector_atom, args_doc.clone());
             let direct_doc = Self::class_direct_call_doc(
                 &self.module_name,
+                CLASS_SELF_VAR,
                 &selector_atom,
                 args_doc,
                 !arguments.is_empty(),
@@ -1225,12 +1228,16 @@ impl CoreErlangGenerator {
             // Hash long keyword constructor atoms to stay within
             // Erlang's 255-char atom limit.
             let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
+            // The generated keyword constructor ignores its class-self
+            // argument (`fun (_ClassSelf, ...)`, `value_accessors`), so pass
+            // `nil`: reading `ClassSelf` here would make a direct-called
+            // caller resolve its class object for nothing (BT-4029).
             let call_doc = docvec![
                 "call ",
                 leaf::atom(module),
                 ":",
                 leaf::atom(safe_fn),
-                "(ClassSelf",
+                "('nil'",
                 comma,
                 args_doc,
                 ")"
@@ -1352,11 +1359,31 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Direct call `class_<sel>(ClassSelf, Args...)` into this module. Long
+    /// The class-object argument of a class-side direct call to this class's
+    /// own `selector`. BT-4029: from a direct-called method to a direct-called
+    /// sibling it forwards the method's raw incoming class-self
+    /// ([`DIRECT_CLASS_SELF_PARAM`], possibly `nil`), so the forwarding alone
+    /// never makes the caller resolve its class object; the sibling resolves
+    /// it in its own prologue if it needs it. Everywhere else it is
+    /// `ClassSelf`, which the callee may read.
+    fn sibling_class_self_arg(&self, selector: &str) -> &'static str {
+        if self.current_class_method_is_direct_called()
+            && self
+                .direct_call_eligible_module(&self.class_name(), selector)
+                .is_some()
+        {
+            DIRECT_CLASS_SELF_PARAM
+        } else {
+            CLASS_SELF_VAR
+        }
+    }
+
+    /// Direct call `class_<sel>(<class_self>, Args...)` into this module. Long
     /// selectors are hashed to stay within Erlang's 255-char atom limit (same
     /// guard as the keyword-constructor path).
     fn class_direct_call_doc(
         module: &str,
+        class_self: &'static str,
         selector_atom: &str,
         args_doc: Document<'static>,
         has_args: bool,
@@ -1368,7 +1395,8 @@ impl CoreErlangGenerator {
             leaf::atom(module.to_string()),
             ":",
             leaf::atom(safe_fn),
-            "(ClassSelf",
+            "(",
+            leaf::var(class_self),
             comma,
             args_doc,
             ")"
@@ -2780,8 +2808,10 @@ impl CoreErlangGenerator {
 
     /// Generates a direct function call to a sealed class method.
     ///
-    /// Passes `nil` for `ClassSelf` since sealed classes with no class
-    /// variables never reference it.
+    /// Passes `nil` for `ClassSelf`: resolving the class object here would
+    /// cost every call a registry lookup, so a callee whose body reads
+    /// `ClassSelf` resolves it in its own prologue instead (BT-4029,
+    /// `direct_class_self_prologue_doc`).
     ///
     /// ```erlang
     /// call 'module':'class_<selector>'('nil', Args...)

@@ -222,11 +222,13 @@ impl CoreErlangGenerator {
     /// Phase 0b): its class is `sealed` with no class variables and the method
     /// is `class sealed`, the one `ClassInfo::is_direct_call_eligible` rule
     /// that `compute_direct_call_eligible` applies to build
-    /// `direct_call_eligible`. Only those methods run with `ClassSelf = nil`
-    /// (ADR 0130 §2). Every other class method, including an inheritable one
-    /// of a class that has no class variables of its own, runs with its
-    /// receiver class as `ClassSelf`.
-    fn current_class_method_is_direct_called(&self) -> bool {
+    /// `direct_call_eligible`. Only those methods can be entered with
+    /// `ClassSelf = nil` (ADR 0130 §2); their prologue rebinds it to the real
+    /// class object when the body reads it (BT-4029,
+    /// `direct_class_self_prologue_doc`). Every other class method, including
+    /// an inheritable one of a class that has no class variables of its own,
+    /// runs with its receiver class as `ClassSelf`.
+    pub(in crate::core_erlang) fn current_class_method_is_direct_called(&self) -> bool {
         // A ClassBuilder class-method fun always runs with the built class as
         // `ClassSelf`; `current_method_selector` and `class_name()` still
         // describe the enclosing compiled method there.
@@ -246,9 +248,10 @@ impl CoreErlangGenerator {
     /// a `self` receiver. The `HasField` intrinsic calls it; the capture walker
     /// ([`Self::block_reads_class_var`]) applies the same rule.
     ///
-    /// A direct-called method is excluded because its `ClassSelf` is `nil`,
-    /// which `beamtalk_class_vars:has` rejects; its `hasField:` is a constant,
-    /// see [`Self::is_class_method_has_field_direct_called`].
+    /// A direct-called method is excluded: its class has no class variables,
+    /// so its `hasField:` is a constant and needs no `ClassSelf` (which is
+    /// `nil` on entry, BT-4029), see
+    /// [`Self::is_class_method_has_field_direct_called`].
     pub(super) fn is_class_var_has_field(&self, receiver: &Expression) -> bool {
         self.in_class_method()
             && Self::is_self_receiver(receiver)

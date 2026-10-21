@@ -46,6 +46,39 @@ TestCase subclass: LanguageFeaturesDocTest
     self assert: (typedDocAccount deposit: 8) equals: 8
     self assert: typedDocAccount balance equals: 8
 
+  // BT-4024: § Defining a Server, § handleInfo: Semantics and
+  // § Continuations. Fixtures: periodic_worker.bt, tick_counter.bt, connection.bt.
+  testServerHandleInfoExamples =>
+    worker := PeriodicWorker spawn
+    Erlang erlang send: worker pid msg: #tick
+    // >= 1: initialize's own 1s send_after timer may also have fired.
+    self assert: worker getValue >= 1
+    worker stop
+    counter := TickCounter spawn
+    Erlang erlang send: counter pid msg: (Erlang erlang list_to_tuple: #(#tick, 5))
+    self assert: counter getValue equals: 5
+    counter stop
+    conn := Connection spawn
+    Erlang erlang send: conn pid msg: (Erlang erlang list_to_tuple: #(#ready, 42))
+    self assert: conn handleConnection equals: 42
+    conn stop
+
+  // BT-4024: § Match Expression. A `[ ... ]` arm body is a Block value and
+  // does not run; `[ ... ] value` runs it.
+  testMatchArmBlockIsAValue =>
+    r := 1 match: [
+      1 -> [2 + 3];
+      _ -> [0]
+    ]
+    self assert: (r isKindOf: Block)
+    self assert: r value equals: 5
+    self
+      assert: (1 match: [
+        1 -> [2 + 3] value;
+        _ -> 0
+      ])
+      equals: 5
+
   testBlocksClosures =>
     // Block with arguments
     self assert: ([:x :y | x + y] value: 3 value: 4) equals: 7

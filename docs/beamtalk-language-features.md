@@ -1137,12 +1137,14 @@ Erlang file write_file: "/tmp/out.txt" with: "data"
 
 **Conversion rules:**
 - `{ok, Value}` becomes `Result ok: Value`
-- `{error, Reason}` becomes `Result error: Reason`
+- `{error, Reason}` becomes a `Result error:` holding an Exception that wraps `Reason` (read the raw term back with `error reason`, see "The raw error term" below)
 - Bare `ok` atom becomes `Result ok: nil`
-- Bare `error` atom becomes `Result error: nil`
+- Bare `error` atom becomes a `Result error:` holding an Exception whose `reason` is `nil`
 - Tuples with 3+ elements, non-ok/error tuples, and non-tuple values pass through unchanged
 
-**Lone `ok`/`error` return specs (ADR 0121, type inference):** A non-union Erlang return spec of `-> ok.` or `-> error.` — including annotated forms like `-> Result :: ok.` — is now recognized as `Result(Nil)` or `Result(Dynamic, Nil)` respectively, matching the runtime coercion that `coerce_result/1` already applies. Previously these lone atoms fell through to `Symbol` in the type inference, creating a static/dynamic type mismatch.
+**Inferred type of an FFI Result (BT-4023):** because the boundary always wraps the error reason, the spec reader types the error side as an Exception, never as the spec's reason type. `{ok, T} | {error, R}` and `ok | {error, R}` infer `Result(T, Exception)` and `Result(Nil, Exception)` whatever `R` is (an atom, a `posix()` enumeration, `term()`). The one refinement is a `#beamtalk_error{}` reason, which always wraps to an `Error` subclass and so infers `Result(T, Error)`. The rule lives in one place, `beamtalk_spec_reader:format_result_type/2`.
+
+**Lone `ok`/`error` return specs (ADR 0121, type inference):** A non-union Erlang return spec of `-> ok.` or `-> error.` — including annotated forms like `-> Result :: ok.` — is now recognized as `Result(Nil, Exception)` or `Result(Dynamic, Exception)` respectively, matching the runtime coercion that `coerce_result/1` already applies. Previously these lone atoms fell through to `Symbol` in the type inference, creating a static/dynamic type mismatch.
 
 **Opting out of Result conversion (BT-3836):** Result conversion is unconditional for FFI returns, which is wrong for a Beamtalk-owned module whose functions return *user data* (`Ets` hands back whatever value was stored, so a stored `#ok` must stay `#ok`). Such a module exports `beamtalk_ffi_raw_results/0` returning `true`, and `beamtalk_erlang_proxy` then passes its results through unchanged. Only opt out when none of the module's functions signal success or failure with `ok` / `{ok, _}` / `{error, _}` returns, since the opt-out removes the conversion for those too. The opt-out is runtime-only: the spec reader (ADR 0121) still infers `Result` for an `-> ok` or `ok | error` spec, so an opted-out module must not give its exported functions such return specs, or the inferred type and the runtime value will disagree.
 
@@ -1208,6 +1210,8 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 [Error signal: "boom"] on: Error do: [:e | e reason]
 // => nil
 ```
+
+For an FFI Result `r`, `r error` is an Exception (the type checker infers `Result(T, Exception)`, see "Inferred type of an FFI Result" above) and `r error reason` is the raw Erlang term. Comparing the Exception itself to a Symbol, as in `r error =:= #closed`, is always false, so the compiler warns: ``comparing an Exception to a Symbol with `=:=` is always false; use `r error reason` ``, with the hint ``did you mean `r error reason =:= #closed`?``. The warning covers `=:=`, `==`, `=/=` and `/=` (the negated forms are always true) in either operand order, for any `Exception`-typed expression compared with a Symbol literal. For an `Error`-typed value the hint also suggests `kind`, since a structured Beamtalk error usually records no raw `reason`. Silence a deliberate comparison with `@expect type`.
 
 A `native:` method's wrapped error carries the Beamtalk `Class`/selector (e.g. `Type error in 'take:' on Stream`), whereas inline `(Erlang …)` FFI carries the Erlang-facing `ErlangModule` context (e.g. `Type error in 'atom_to_list' on ErlangModule`) — a documented limitation, since the proxy knows the MFA but not the calling class.
 
@@ -3284,7 +3288,7 @@ Arguments and return values cross that boundary as copies, so blocks that comput
 - **Process-local side effects.** A block that writes to the process dictionary (`Erlang erlang put:value:`), reads `self()`, or otherwise depends on running in a particular process affects the *class* process. The caller sees none of it.
 - **Re-entrant class sends.** If the block messages the same class whose method is driving it, the class process would have to `gen_server:call` itself. That raises a structured `dispatch_error` naming the selector rather than deadlocking. Read what you need before the call, or hold the resource yourself instead of using the block form.
 
-**When there is no hop (ADR 0129 Phase 0b).** The process hop applies only to classes with class state (`classState:`), or to methods that are not `class sealed`. A `class sealed` method of a sealed class with no `classState:` is called directly, in the caller's process, however it is reached: statically, through a variable, `perform:`, `Beamtalk classNamed:`, or a class passed as an argument. For those methods a block runs where it was written, `self()` and the process dictionary are the caller's, there is no `class_send` timeout, and messaging the same class from inside does not raise `dispatch_error`. Eligibility is computed once by the compiler and emitted as `direct_class_methods` in `__beamtalk_meta/0`; `new`/`new:` and the supervisor `startLink` family are never direct.
+**When there is no hop (ADR 0129 Phase 0b).** The process hop applies only to classes with class state (`classState:`), or to methods that are not `class sealed`. A `class sealed` method of a sealed class with no `classState:` is called directly, in the caller's process, however it is reached: statically, through a variable, `perform:`, `Beamtalk classNamed:`, or a class passed as an argument. For those methods a block runs where it was written, `self()` and the process dictionary are the caller's, there is no `class_send` timeout, and messaging the same class from inside does not raise `dispatch_error`. `self` is still the class object, so `self new`, `self new:`, `self spawn`, `self spawnWith:`, `self class` and class-side self-sends behave as in any other class method (BT-4029). Eligibility is computed once by the compiler and emitted as `direct_class_methods` in `__beamtalk_meta/0`; `new`/`new:` and the supervisor `startLink` family are never direct.
 
 Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop. A `^` is not an error, so a class variable written before the block escaped keeps its write ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md) §4).
 
@@ -3431,15 +3435,18 @@ Server subclass: PeriodicWorker
 
   handleInfo: msg =>
     msg match: [
-      #tick -> [
-        self.count := self.count + 1.
-        Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
-      ];
+      #tick -> self tick;
       _ -> nil
     ]
 
+  tick =>
+    self.count := self.count + 1
+    Erlang erlang send_after: 1000 dest: (self pid) msg: #tick
+
   getValue => self.count
 ```
+
+A `match:` arm body is an expression, so an arm that needs more than one statement calls a method (`#tick -> self tick`). Do not write `#tick -> [ ... ]`: that arm answers the block itself without running it (a block that writes a field or sends to `self` fails to compile; see § Match Expression).
 
 ### handleInfo: Semantics
 
@@ -3501,12 +3508,13 @@ Server subclass: Connection
 
   handleInfo: msg =>
     msg match: [
-      {#ready, s} -> [
-        self.sock := s
-        self continueWith: #handleConnection   // runs before any queued #tcp message
-      ];
+      {#ready, s} -> self onReady: s;
       _ -> nil
     ]
+
+  onReady: s =>
+    self.sock := s
+    self continueWith: #handleConnection   // runs before any queued #tcp message
 
   // Set up the socket here, before the first #tcp message is handled.
   handleConnection => self.sock
@@ -3673,7 +3681,7 @@ small maxChildren        // => 10
 Rules for configuration methods:
 
 - **Do not send messages to `self`.** They run inside the supervisor's own `init/1`; a message to the supervisor is a call to itself, which OTP rejects (`calling_self`). The start fails with `#supervisor_start_failed` and the hint "configuration methods run inside the supervisor's init; use `self args` and return specs, do not send messages to `self`". Passing `self` *as a value* (for example in a child's args, so the child can reach its parent) is the intended use.
-- **Never synchronously call a supervisor from code it is waiting on**: its configuration methods, those of its nested supervisor children, or the `initialize` of a `withName:`/`withClassMethod:` actor child. The supervisor is blocked in that child's start function during the initial start, every OTP restart and every `startChild:`, so a call to it or an ancestor hangs. The compiler cannot check this.
+- **Never synchronously call a supervisor from code it is waiting on**: its configuration methods, those of its nested supervisor children, or the `initialize` of any actor child. The supervisor is blocked in that child's start function during the initial start, every OTP restart and every `startChild:`, so a call to it or an ancestor hangs (from a child's `initialize`, until the 5 s start timeout, which fails the start). The compiler cannot check this.
 - **Each setting is a separate send**, so expensive work (reading files, say) belongs in `childSpecs` only.
 - **Arg lifetime:** args are replayed on every restart, so any pid or handle in them must outlive the child (an ancestor's handle does; a caller's pid or a socket does not).
 - A configuration method that raises, or returns an invalid value (`maxChildren`, `childShutdown`), fails the start once with `#supervisor_start_failed` (or fails the parent's start for a nested supervisor), carrying the error's hint.
@@ -3749,7 +3757,21 @@ pool children    // => #(1, 2, 3)
 
 A bare supervisor class in `childSpecs` means `X supervisionSpec`, so it is an **anonymous** child: two parents that nest the same bare class run side by side, and `InnerSup current` does not find a nested instance (use `parent which: InnerSup`). A `DynamicSupervisor` whose child class is a supervisor starts a new anonymous child per `startChild` / `startChild: args`, and `startChild: args name: n` registers it.
 
-**The parent handle and the hang rule.** Passing `self` in a child's args (`#parent => self` above) is how a child reaches its parent; replaying it on restart is safe because a child never outlives its parent. **Never synchronously call a supervisor from code it is waiting on**: its configuration methods and those of its nested supervisor children (a call to an ancestor there hangs; a call to `self` fails fast), and the `initialize` of a `withName:`/`withClassMethod:` actor child (a call back stalls 5 s, then fails the start). This holds during the initial start, every OTP restart and every `DynamicSupervisor startChild:`. A continuation the child requests in `initialize` (`self continueWith:`) runs after its start has returned, so that is the place for a child's first call to its parent. An unnamed actor child's `initialize` runs after its start returns, so a call to the parent from there merely waits until the parent has started its remaining children (bounded by the 5 s call timeout, which a large tree can exceed).
+**The parent handle and the hang rule.** Passing `self` in a child's args (`#parent => self` above) is how a child reaches its parent; replaying it on restart is safe because a child never outlives its parent. **Never synchronously call a supervisor from code it is waiting on**: its configuration methods and those of its nested supervisor children (a call to an ancestor there hangs; a call to `self` fails fast), and the `initialize` of any actor child (a call back stalls 5 s, then fails the start with a hint naming this rule). The same goes for a call from that `initialize` to whoever is starting the supervisor or calling `startChild:` (an owner actor that passed `#owner => self`), which is blocked in that start too. This holds during the initial start, every OTP restart and every `DynamicSupervisor startChild:`. A continuation the child requests in `initialize` (`self continueWith:`) runs after its start has returned, so that is the place for a child's first call to its parent.
+
+**A child's `initialize` completes before its start returns.** Every supervised actor child starts like `spawnWith:`: the supervisor waits for the child's `initialize` before starting the next child (children start in order, as in OTP) and before its own start returns. An `initialize` that raises fails the start: `spawn` raises, and `supervise`/`spawnAs:` answer `Result error:`, with kind `#supervisor_start_failed` and the child's error in the hint (for `startChild`, `#child_start_failed`), instead of the child crash-looping after the start reported success. This is OTP's `init/1` returning `{stop, Reason}`. On an OTP restart a failing `initialize` fails that restart, which counts against `maxRestarts`. A slow `initialize` delays the whole tree's start, and one that takes over 5 s fails it, so put slow or parent-dependent setup in a `continueWith:` step:
+
+```beamtalk
+Actor subclass: Listener
+  state: port = 0
+  state: parent = nil
+
+  initialize =>
+    self bind: self.port          // a raise here fails the supervisor's start
+    self continueWith: #register  // runs after the start has returned
+
+  register => self.parent count   // safe: the parent is no longer waiting
+```
 
 ### Actor Supervision Policy
 
@@ -4338,6 +4360,8 @@ x match: [
 ]
 // => 2
 ```
+
+**An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is a compile error; one that does neither compiles without a warning and silently never runs. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`).
 
 **Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
 

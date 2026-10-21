@@ -25,9 +25,17 @@ type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne
 ///   passing `self` *as a value* (e.g. in a child's args) are fine.
 /// - **Never synchronously call a supervisor from code it is waiting on**:
 ///   its configuration methods, those of its nested supervisor children, or
-///   the `initialize` of a `withName:`/`withClassMethod:` actor child. A call
-///   to an ancestor from there hangs during start, every OTP restart and
-///   every `DynamicSupervisor startChild:`.
+///   the `initialize` of any actor child. A call to an ancestor from there
+///   hangs during start, every OTP restart and every `DynamicSupervisor
+///   startChild:` (from a child's `initialize`, until the 5 s start timeout,
+///   which then fails the start). Make a child's first call to its parent
+///   from a `continueWith:` step, which runs after its start has returned.
+/// - **A child's `initialize` completes before its start returns** (BT-4033):
+///   children start in order, each waiting for its `initialize`, as OTP
+///   `init/1` does. An `initialize` that raises fails the supervisor's start
+///   (`#supervisor_start_failed`, with the child's error in the hint)
+///   instead of the child crash-looping after the start reported success.
+///   Put slow setup in a `continueWith:` step.
 /// - **A start made from inside one of the class's own class methods**
 ///   (`class make => self spawnWith: …`, or `self supervise`) runs in that
 ///   class's process, like any class method body. Its configuration must not

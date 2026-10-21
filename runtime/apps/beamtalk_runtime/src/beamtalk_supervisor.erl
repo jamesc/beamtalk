@@ -87,6 +87,8 @@ functions that call OTP APIs from the caller's process context.
     await_initialized/1,
     ensure_init_gate_table/0,
     start_child_via_class_method/4,
+    start_actor_child/2,
+    start_actor_child/3,
     start_dynamic_child/2,
     start_dynamic_child/3,
     start_dynamic_child/4,
@@ -164,6 +166,16 @@ functions that call OTP APIs from the caller's process context.
 -define(TOP_LEVEL_TAG, '$beamtalk_top_level').
 -define(INSTANCES_GROUP, beamtalk_supervisor_instances).
 
+%% BT-4033: the hint for a supervised actor child whose `initialize` did not
+%% return within the start timeout (`?BT_INITIALIZE_TIMEOUT`, formatted in).
+-define(ACTOR_CHILD_INIT_TIMEOUT_HINT_FMT,
+    "initialize did not return within ~b ms. A supervisor waits for each actor "
+    "child's initialize, so a synchronous call from initialize to the child's "
+    "supervisor or any ancestor (which:, childWithId:, children, a send to a "
+    "sibling not yet started), or to the actor or class that is starting the "
+    "supervisor or calling startChild, blocks until this timeout (ADR 0135 "
+    "hang rule). Move such calls, and slow setup, into a continueWith: step."
+).
 %% ADR 0135 §2: hint for a configuration method that messaged its own
 %% supervisor (OTP `calling_self`) while it was still in `init/1`.
 -define(CALLING_SELF_HINT, <<
@@ -809,6 +821,9 @@ message — becomes the hint of the start error, with the original error in
 start_failed_error(Kind, ClassName, Selector, #beamtalk_error{} = Cause) ->
     Error0 = beamtalk_error:new(Kind, ClassName, Selector, cause_hint(Cause)),
     beamtalk_error:with_details(Error0, #{cause => Cause});
+start_failed_error(Kind, ClassName, Selector, {initialize_failed, #beamtalk_error{} = Cause}) ->
+    %% BT-4033: an actor child whose `initialize` failed (start_actor_child/3).
+    start_failed_error(Kind, ClassName, Selector, Cause);
 start_failed_error(
     Kind, ClassName, Selector, {shutdown, {failed_to_start_child, _Id, _Inner}} = Reason
 ) ->
@@ -823,6 +838,8 @@ start_failed_error(Kind, ClassName, Selector, Reason) ->
 %% `failed_to_start_child` wrappers (Root -> MidSup -> Pool), if there is one.
 -spec nested_start_cause(term()) -> {ok, #beamtalk_error{}} | none.
 nested_start_cause(#beamtalk_error{} = Cause) ->
+    {ok, Cause};
+nested_start_cause({initialize_failed, #beamtalk_error{} = Cause}) ->
     {ok, Cause};
 nested_start_cause({shutdown, {failed_to_start_child, _Id, Inner}}) ->
     nested_start_cause(Inner);
@@ -1900,10 +1917,9 @@ Called from `startChild: args name: aName` on DynamicSupervisor instances
 registration: `Name` is appended as a third extra argument that
 `supervisor:start_child/2` threads onto the shared `simple_one_for_one`
 template, landing on `start_dynamic_child/4`, which spawns the child via
-`beamtalk_actor:'spawnAs'/3` instead of a bare `ChildModule:start_link/1` —
-the same primitive `SupervisionSpec withName:` already uses for static
-children (ADR 0079). Because `simple_one_for_one` replays each dynamic
-child's own start args (now including `Name`) on automatic OTP restart, a
+`start_actor_child/3` with `{local, Name}` — the same awaited, named start
+`SupervisionSpec withName:` uses for static children (ADR 0079, BT-4033).
+Because `simple_one_for_one` replays each dynamic child's own start args (now including `Name`) on automatic OTP restart, a
 crashed named child re-registers under the same name every time, with no
 supervisor-side bookkeeping.
 
@@ -1938,7 +1954,10 @@ startChild(Self, Args, Name) ->
                 {error, #beamtalk_error{} = Err} ->
                     %% `'spawnAs'/3` already returns a structured error for
                     %% name_registered/type_error/reserved_name — re-attribute
-                    %% it to this call site rather than wrapping it again.
+                    %% it to this call site rather than wrapping it again. A
+                    %% failed `initialize` arrives as `{initialize_failed, _}`
+                    %% (BT-4033, start_actor_child/3) and falls through to
+                    %% `#child_start_failed` below, with its error as the cause.
                     ?LOG_ERROR("DynamicSupervisor named child start failed", #{
                         supervisor => SupClass,
                         child => ChildClass,
@@ -2055,7 +2074,7 @@ Build OTP child specs, threading `Mode` through to `spec_to_otp/2`.
 `Mode = dynamic` is used only by `dynamic_init/3` (a DynamicSupervisor's
 `simple_one_for_one` template): its default (`#spawn`) worker child spec
 gets a **zero**-static-arg MFA that routes through `start_dynamic_child/2,3`
-instead of baking `[#{}]` directly into `{ChildModule, start_link, _}` —
+instead of baking `[#{}]` directly into the static start MFA —
 see `spec_to_otp/2`. `Mode = static` (the default, used by
 `static_init/3` via `build_child_specs/1`) is unchanged: a static
 Supervisor's children start immediately at supervisor-init time and never
@@ -2624,6 +2643,94 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
     end.
 
 -doc """
+BT-4033: the start function of every supervised actor child that is not a
+`withClassMethod:` factory — a static `Supervisor` child (`spawn`,
+`withArgs:`, `withName:`, `withName:scope:`) and a `DynamicSupervisor` pool
+child (`startChild`, `startChild:`, `startChild:name:`), on its first start
+and on every OTP restart.
+
+The start is **awaited**, exactly like `Actor spawn`/`spawnWith:` (BT-3992)
+and like OTP `init/1`: it returns `{ok, Pid}` only once the child's
+`initialize` has returned (not the `continueWith:` steps it requested, which
+run after). An `initialize` that raises, fails the uninitialized-state check
+or stops the actor fails the start with `{error, Reason}`, so the parent's
+start fails (`#supervisor_start_failed` / `#child_start_failed`) instead of
+reporting success and then crash-looping the child; an OTP restart that
+fails this way counts against the restart intensity. An `initialize` still
+running after 5 s (typically a synchronous call back to this supervisor or
+an ancestor, which is blocked in this very start — the ADR 0135 hang rule)
+fails the start with a hint naming the rule.
+
+`Name` is `none` (an anonymous child, `beamtalk_actor:safe_spawn_linked/2`)
+or `{local | global, Atom}` (`withName:` / `startChild:name:`, through
+`beamtalk_actor:'spawnAs'/3` / `'spawnAsGlobal'/3`, ADR 0079 / ADR 0126 §4).
+Both are the same linked, trap-exit, init-ack-awaited start
+(`beamtalk_actor:start_link_and_await/3`); the link is what lets the calling
+supervisor see the child's exit. The answer is `{ok, Pid}` or `{error,
+Reason}` — never `ignore`, which the actor start converts to `{error,
+ignore}`.
+""".
+-spec start_actor_child(module(), term()) -> {ok, pid()} | {error, term()}.
+start_actor_child(ChildModule, Args) ->
+    start_actor_child(ChildModule, Args, none).
+
+-spec start_actor_child(module(), term(), none | {local | global, atom()}) ->
+    {ok, pid()} | {error, term()}.
+start_actor_child(ChildModule, Args, Name) ->
+    Result =
+        case Name of
+            none -> beamtalk_actor:safe_spawn_linked(ChildModule, Args);
+            {local, LocalName} -> beamtalk_actor:'spawnAs'(LocalName, ChildModule, Args);
+            {global, GlobalName} -> beamtalk_actor:'spawnAsGlobal'(GlobalName, ChildModule, Args)
+        end,
+    case Result of
+        {ok, Pid} -> {ok, Pid};
+        {error, Reason} -> {error, actor_child_start_error(ChildModule, Reason)}
+    end.
+
+%% BT-4033: the reason a supervised actor child's start failed.
+%%
+%% A top-level `#beamtalk_error{}` is the start's own error (`spawnAs/3`'s
+%% `#name_registered`, `#reserved_name`, `#type_error`) and is kept as it is.
+%% A failed `initialize` becomes `{initialize_failed, Error}`, with the
+%% `#beamtalk_error{}` lifted out of its stop reason, so the parent's
+%% `#supervisor_start_failed` / `#child_start_failed` hint carries the
+%% child's own error (`start_failed_error/4` unwraps it) and the error's kind
+%% is never mistaken for the start's own (an `initialize` that itself hits a
+%% `#name_registered`). An init timeout names the ADR 0135 hang rule. A stop
+%% reason with no structured error (a hand-written gen_server's own) is kept.
+-spec actor_child_start_error(module(), term()) -> term().
+actor_child_start_error(_ChildModule, #beamtalk_error{} = Error) ->
+    Error;
+actor_child_start_error(ChildModule, timeout) ->
+    {initialize_failed,
+        beamtalk_error:new(
+            instantiation_error,
+            child_class_name(ChildModule),
+            initialize,
+            iolist_to_binary(
+                io_lib:format(?ACTOR_CHILD_INIT_TIMEOUT_HINT_FMT, [?BT_INITIALIZE_TIMEOUT])
+            )
+        )};
+actor_child_start_error(_ChildModule, Reason) ->
+    %% The stop reason of a raising `initialize` nests the error in an
+    %% exception object and `{Error, Stacktrace}` / `{error, _}` tuples.
+    case beamtalk_error:extract_beamtalk_error(Reason, 3) of
+        #beamtalk_error{} = Error -> {initialize_failed, Error};
+        undefined -> Reason
+    end.
+
+%% The Beamtalk class name of an actor module, for error attribution; the
+%% module itself when it is not a registered class (a hand-written
+%% gen_server).
+-spec child_class_name(module()) -> atom().
+child_class_name(ChildModule) ->
+    case beamtalk_class_registry:class_name_for_module(ChildModule) of
+        {ok, ClassName} -> ClassName;
+        not_found -> ChildModule
+    end.
+
+-doc """
 Start a DynamicSupervisor's default (no per-call args) child.
 
 This is the arity-2 half of the zero-static-arg MFA `spec_to_otp/2` builds
@@ -2645,9 +2752,9 @@ lands on arity 2 (here) only for a child that was itself started with no
 extra args; a child started via `startChild: args` restarts through
 `start_dynamic_child/3` with that same `Args` — see its doc.
 """.
--spec start_dynamic_child(module(), map()) -> {ok, pid()} | ignore | {error, term()}.
+-spec start_dynamic_child(module(), map()) -> {ok, pid()} | {error, term()}.
 start_dynamic_child(ChildModule, DefaultArgs) ->
-    ChildModule:start_link(DefaultArgs).
+    start_actor_child(ChildModule, DefaultArgs).
 
 -doc """
 Start a DynamicSupervisor child with caller-supplied init args.
@@ -2658,7 +2765,7 @@ for a DynamicSupervisor's `simple_one_for_one` template. `startChild: args`
 `supervisor:start_child(SupPid, [Args])`, landing OTP's `apply/3` here at
 arity 3. `DefaultArgs` (the baked template value) is ignored in favour of
 the caller's `Args` — this is what makes `startChild: args` deliver
-exactly the args the caller passed to `ChildModule:start_link/1`, instead
+exactly the args the caller passed to the child's start, instead
 of the pre-fix behaviour where OTP concatenated the baked `#{}` and the
 caller's `Args` into a single 2-element arg list that `ChildModule` has no
 matching arity for and OTP misread as its 4-arity named-registration
@@ -2671,9 +2778,9 @@ verbatim on restart, so a crashed child restarts with the SAME `Args` it
 was originally given — not a blank default. See `start_dynamic_child/2`'s
 doc for the arity-2 (no-args) counterpart.
 """.
--spec start_dynamic_child(module(), map(), term()) -> {ok, pid()} | ignore | {error, term()}.
+-spec start_dynamic_child(module(), map(), term()) -> {ok, pid()} | {error, term()}.
 start_dynamic_child(ChildModule, _DefaultArgs, Args) ->
-    ChildModule:start_link(Args).
+    start_actor_child(ChildModule, Args).
 
 -doc """
 Start a DynamicSupervisor child with caller-supplied init args, registered
@@ -2681,10 +2788,11 @@ under a name (ADR 0079 amendment).
 
 The arity-4 entry point `startChild: args name: aName` lands on:
 `supervisor:start_child/2` appends `[Args, Name]` to the template's
-`[ChildModule, DefaultArgs]` static args. Delegates to
-`beamtalk_actor:'spawnAs'/3` instead of `ChildModule:start_link/1` so the
-child starts under `{local, Name}` registration — the same primitive
-`SupervisionSpec withName:` uses for static children (ADR 0079).
+`[ChildModule, DefaultArgs]` static args. Starts the child through
+`start_actor_child/3` with `{local, Name}`, so it registers under `Name`
+(through `beamtalk_actor:'spawnAs'/3`) — the same start
+`SupervisionSpec withName:` uses for static children (ADR 0079) — and the
+start waits for its `initialize` (BT-4033).
 
 Also the entry point automatic OTP restart lands on for a child started
 this way: `simple_one_for_one` bookkeeping (`supervisor:dyn_store/3`)
@@ -2695,7 +2803,7 @@ default. See `start_dynamic_child/2,3`'s docs for the unnamed counterparts.
 """.
 -spec start_dynamic_child(module(), map(), term(), atom()) -> {ok, pid()} | {error, term()}.
 start_dynamic_child(ChildModule, _DefaultArgs, Args, Name) ->
-    beamtalk_actor:'spawnAs'(Name, ChildModule, Args).
+    start_actor_child(ChildModule, Args, {local, Name}).
 
 -doc """
 Convert a Beamtalk child spec dict to an OTP-compatible child spec map.
@@ -2710,10 +2818,11 @@ start goes through the `start_supervisor_child` trampoline (ADR 0135 §3; see
 `supervisor_child_start/4`), so the child is anonymous, gets the spec's args
 and stays linked into the tree.
 
-For worker children, Beamtalk's spawn/0 returns {beamtalk_object,...} which
-OTP supervisor does not accept (it expects {ok, Pid}). The generated
-start_link/1 returns {ok, Pid} directly from gen_server:start_link, so
-worker children use start_link/1 with an init-args map instead of spawn/0.
+For actor (worker) children other than `withClassMethod:` factories, the
+start goes through `start_actor_child/2,3` (BT-4033): an awaited, linked
+start that answers `{ok, Pid}` once the child's `initialize` has returned,
+and `{error, Reason}` when it failed — so a failing `initialize` fails the
+parent's start, as OTP `init/1` returning `{stop, Reason}` does.
 
 `Mode` selects between a static Supervisor's immediate-start semantics and
 a DynamicSupervisor's extensible `simple_one_for_one` template — see the
@@ -2739,8 +2848,8 @@ spec_to_otp(BtSpec, Mode) ->
             true ->
                 supervisor_child_start(ChildClass, ChildModule, StartElems, Mode);
             false ->
-                %% Worker: use start_link/1 (returns {ok, Pid}) for OTP compatibility.
-                %% spawn/0 wraps the pid in {beamtalk_object,...} which OTP rejects.
+                %% Worker: start through start_actor_child/2,3 (BT-4033), the
+                %% awaited linked start answering {ok, Pid} | {error, Reason}.
                 StartFn = lists:nth(2, StartElems),
                 case StartFn of
                     spawn when Mode =:= dynamic ->
@@ -2755,7 +2864,7 @@ spec_to_otp(BtSpec, Mode) ->
                         %% start_dynamic_child/2,3 instead lets both the no-arg
                         %% `startChild` (arity 2: DefaultArgs) and `startChild: args`
                         %% (arity 3: caller's Args wins) resolve to the single correct
-                        %% argument for `ChildModule:start_link/1`. See
+                        %% argument for start_actor_child/2. See
                         %% start_dynamic_child/2,3's docs for how each restarts —
                         %% OTP's own simple_one_for_one bookkeeping replays each
                         %% child's own original start args, so this is unaffected
@@ -2765,7 +2874,8 @@ spec_to_otp(BtSpec, Mode) ->
                         %% Static Supervisor: no init args — start with empty state map.
                         %% Static children start once at supervisor-init time and never
                         %% have extra args appended, so a single baked arg is correct.
-                        {ChildModule, start_link, [#{}]};
+                        %% BT-4033: awaited start, see start_actor_child/2.
+                        {beamtalk_supervisor, start_actor_child, [ChildModule, #{}]};
                     'spawnWith:' when Mode =:= dynamic ->
                         %% A DynamicSupervisor childClass
                         %% can override `class supervisionSpec` to bake default args via
@@ -2779,40 +2889,48 @@ spec_to_otp(BtSpec, Mode) ->
                         {beamtalk_supervisor, start_dynamic_child, [ChildModule, InitArgsMap]};
                     'spawnWith:' ->
                         %% #(self args) uses list syntax (#(...)) so it compiles to an
-                        %% Erlang list [ArgsMap] — use it directly as the start_link arg.
-                        InitArgs = lists:nth(3, StartElems),
-                        {ChildModule, start_link, InitArgs};
+                        %% Erlang list [ArgsMap]. BT-4033: awaited start, see
+                        %% start_actor_child/2.
+                        [InitArgs] = lists:nth(3, StartElems),
+                        {beamtalk_supervisor, start_actor_child, [ChildModule, InitArgs]};
                     'spawnAs:' ->
                         %% ADR 0079: SupervisionSpec withName: routes
-                        %% named children through `beamtalk_actor:spawnAs/2,3`
-                        %% so the child registers under `Name` atomically inside
+                        %% named children through `beamtalk_actor:spawnAs/3`
+                        %% (via start_actor_child/3, BT-4033) so the child registers
+                        %% under `Name` atomically inside
                         %% gen_server:start_link({local, Name}, ...). The startArgs
                         %% in `SupervisionSpec childSpec` carry just the Name as
                         %% `#(name)` — i.e. an Erlang list `[Name]`.
                         SpawnAsArgs = lists:nth(3, StartElems),
                         [Name] = SpawnAsArgs,
-                        {beamtalk_actor, 'spawnAs', [Name, ChildModule]};
+                        {beamtalk_supervisor, start_actor_child, [ChildModule, #{}, {local, Name}]};
                     'spawnWith:as:' ->
                         %% ADR 0079: spawn-with-args under a registered
                         %% name. startArgs are `#(args, name)` → Erlang `[Args, Name]`.
-                        %% Translates to `beamtalk_actor:spawnAs/3` so the child is
-                        %% registered atomically with init args at start time.
+                        %% Goes through `beamtalk_actor:spawnAs/3` (via
+                        %% start_actor_child/3) so the child is registered
+                        %% atomically with init args at start time.
                         SpawnAsArgs2 = lists:nth(3, StartElems),
                         [InitArgsMap, NameAtom] = SpawnAsArgs2,
-                        {beamtalk_actor, 'spawnAs', [NameAtom, ChildModule, InitArgsMap]};
+                        {beamtalk_supervisor, start_actor_child, [
+                            ChildModule, InitArgsMap, {local, NameAtom}
+                        ]};
                     'spawnAs:scope:' ->
                         %% ADR 0126 §4, Phase 5: `SupervisionSpec withName:
                         %% scope: #global` — same shape as `spawnAs:` above
                         %% (startArgs carries just the Name, `#(name)` →
                         %% Erlang `[Name]`), but routes through
-                        %% `beamtalk_actor:'spawnAsGlobal'/2` so the child
+                        %% `beamtalk_actor:'spawnAsGlobal'/3` (via
+                        %% start_actor_child/3) so the child
                         %% registers with OTP `global` instead of the local
                         %% registry. `childSpec` only ever emits this
                         %% startFn when `scope` is `#global` — `#local`
                         %% still emits plain `#spawnAs:` above.
                         SpawnAsGlobalArgs = lists:nth(3, StartElems),
                         [GlobalName] = SpawnAsGlobalArgs,
-                        {beamtalk_actor, 'spawnAsGlobal', [GlobalName, ChildModule]};
+                        {beamtalk_supervisor, start_actor_child, [
+                            ChildModule, #{}, {global, GlobalName}
+                        ]};
                     'spawnWith:as:scope:' ->
                         %% ADR 0126 §4, Phase 5: cluster-global spawn-with-args
                         %% sibling of `spawnWith:as:` above — same startArgs
@@ -2820,8 +2938,8 @@ spec_to_otp(BtSpec, Mode) ->
                         %% routed through `beamtalk_actor:'spawnAsGlobal'/3`.
                         SpawnAsGlobalArgs2 = lists:nth(3, StartElems),
                         [GlobalInitArgsMap, GlobalNameAtom] = SpawnAsGlobalArgs2,
-                        {beamtalk_actor, 'spawnAsGlobal', [
-                            GlobalNameAtom, ChildModule, GlobalInitArgsMap
+                        {beamtalk_supervisor, start_actor_child, [
+                            ChildModule, GlobalInitArgsMap, {global, GlobalNameAtom}
                         ]};
                     classMethod ->
                         %% Route through the actor's keyword class method.

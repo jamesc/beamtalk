@@ -461,6 +461,10 @@ Object subclass: Actor
   ///
   /// DatabasePool supervisionSpec withId: #primary withArgs: #{#role => #primary}
   /// ```
+  ///
+  /// A child started from the spec starts like `spawnWith:`: its start
+  /// returns once its `initialize` has returned, and an `initialize` that
+  /// raises fails the supervisor's start (see `initialize`).
   class supervisionSpec -> SupervisionSpec =>
     policy := self supervisionPolicy
     spec := SupervisionSpec new withActorClass: self
@@ -558,8 +562,14 @@ Object subclass: Actor
   /// before the spawned object is returned to the caller.
   ///
   /// If `initialize` raises an error, the spawn fails with a catchable
-  /// `InstantiationError`. Under a supervisor, the child start fails and the
-  /// supervisor applies its restart strategy.
+  /// `InstantiationError`. Under a supervisor the same holds: the child's
+  /// start waits for `initialize`, so a raise fails the supervisor's start
+  /// (`#supervisor_start_failed`) or `startChild` (`#child_start_failed`),
+  /// and on an OTP restart it fails that restart, which counts against the
+  /// restart intensity. Because the supervisor is waiting, `initialize` must
+  /// not call it (or any ancestor) synchronously: that blocks until the 5 s
+  /// start timeout and fails the start. Make such calls, and slow setup, in
+  /// a `continueWith:` step, which runs after the start has returned.
   ///
   /// ## Examples
   /// ```beamtalk

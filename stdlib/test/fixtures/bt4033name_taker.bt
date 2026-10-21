@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4033: an actor whose `initialize` spawns another one under the name in
+// `other` (when set) and unwraps the result, so a taken name raises
+// `#name_registered` from inside `initialize`.
+
+Actor subclass: Bt4033NameTaker
+  state: other = nil
+
+  initialize =>
+    self.other isNil ifFalse: [(Bt4033NameTaker spawnAs: self.other) unwrap]

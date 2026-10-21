@@ -239,13 +239,14 @@ fn ffi_singleton_union_return_matches_declared_annotation() {
 }
 
 /// A lone (non-union) `-> ok.` Erlang spec — e.g. `beamtalk_actor:unregister/1`
-/// — is now recognized by `beamtalk_spec_reader.erl` as `Result(Nil)` (ADR
-/// 0121, BT-3498), not `Symbol`. Builds the registry entry from
-/// `map_type_name("Result(Nil)")`, the exact string the spec reader emits for
-/// this case, so this test exercises the real string-parsing path rather than
-/// a hand-built `InferredType`. A `.bt` method declaring the honest
-/// `-> Result(Nil)` return type over such an FFI call must type-check cleanly
-/// — this is the end-to-end reproduction of `Actor>>unregisterName`.
+/// — is now recognized by `beamtalk_spec_reader.erl` (ADR 0121, BT-3498) as
+/// `Result(Nil, Exception)` (BT-4023), not `Symbol`. Builds the registry entry
+/// from `map_type_name("Result(Nil, Exception)")`, the exact string the spec
+/// reader emits for this case, so this test exercises the real string-parsing
+/// path rather than a hand-built `InferredType`. A `.bt` method declaring the
+/// honest `-> Result(Nil)` return type over such an FFI call must type-check
+/// cleanly — this is the end-to-end reproduction of `Actor>>unregisterName`
+/// (a one-argument `Result(Nil)` leaves the error side unconstrained).
 #[test]
 fn ffi_bare_ok_spec_infers_result_nil_matching_declared_annotation() {
     let mut reg = NativeTypeRegistry::new();
@@ -258,7 +259,7 @@ fn ffi_bare_ok_spec_infers_result_nil_matching_declared_annotation() {
                 keyword: None,
                 type_: InferredType::Dynamic(DynamicReason::Unknown),
             }],
-            return_type: map_type_name("Result(Nil)"),
+            return_type: map_type_name("Result(Nil, Exception)"),
             provenance: TypeProvenance::Extracted,
             line: None,
         }],

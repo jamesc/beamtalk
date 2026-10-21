@@ -33,6 +33,7 @@ mod bt3408_dictionary_at_ifabsent_block_return_widening;
 mod bt3409_detect_ifnone_nil_narrowing;
 mod bt3463_union_receiver_chained_block_param;
 mod bt3604_known_remote_diagnostics;
+mod bt4023_ffi_result_exception;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;
