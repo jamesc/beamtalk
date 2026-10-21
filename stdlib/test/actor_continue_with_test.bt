@@ -17,9 +17,9 @@ TestCase subclass: ActorContinueWithTest
   // === Ordering: before messages already in the mailbox ===
   testContinuationFromHandleInfoRunsBeforeQueuedMessages =>
     server := ContinueWithServer spawn
-    Erlang erlang send: server pid msg: #one
-    Erlang erlang send: server pid msg: #two
-    Erlang erlang send: server pid msg: #three
+    server pid send: #one
+    server pid send: #two
+    server pid send: #three
     self assert: server log equals: #(#one, #continuation, #two, #three)
     server stop
 

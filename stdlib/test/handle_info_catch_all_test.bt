@@ -19,24 +19,24 @@ TestCase subclass: HandleInfoCatchAllTest
 
   testNoCatchAllServerHandlesMatchedMessages =>
     server := HandleInfoMatchNoCatchAllServer spawn
-    Erlang erlang send: server pid msg: {#add, 3}
-    Erlang erlang send: server pid msg: {#add, 4}
+    server pid send: {#add, 3}
+    server pid send: {#add, 4}
     self assert: server count equals: 7
-    Erlang erlang send: server pid msg: #reset
+    server pid send: #reset
     self assert: server count equals: 0
     server stop
 
   testCatchAllServerHandlesMatchedMessages =>
     server := HandleInfoMatchCatchAllServer spawn
-    Erlang erlang send: server pid msg: {#add, 5}
+    server pid send: {#add, 5}
     self assert: server count equals: 5
     server stop
 
   testCatchAllServerIgnoresStrayMessages =>
     server := HandleInfoMatchCatchAllServer spawn
-    Erlang erlang send: server pid msg: {#add, 2}
-    Erlang erlang send: server pid msg: #unexpected
-    Erlang erlang send: server pid msg: {#add, 1, 2}
+    server pid send: {#add, 2}
+    server pid send: #unexpected
+    server pid send: {#add, 1, 2}
     self assert: server count equals: 2
     self assert: server isAlive
     server stop

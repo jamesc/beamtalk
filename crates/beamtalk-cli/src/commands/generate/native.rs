@@ -577,6 +577,9 @@ Actor subclass: MyActor native: my_actor
 
     /// `find_bt_file` finds the conventional `snake_case` file, then the
     /// class name as written.
+    ///
+    /// Serialized on `cwd`: `find_bt_file` searches `src/` relative to the
+    /// process working directory, which this test temporarily changes.
     #[test]
     #[serial_test::serial(cwd)]
     fn test_find_bt_file_snake_case_then_class_name() {
