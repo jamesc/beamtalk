@@ -661,6 +661,33 @@ method_info_picks_current_generation_test_() ->
     end}.
 
 %%====================================================================
+%% xref_gen_epoch recreated on demand (BT-4071)
+%%====================================================================
+
+%% A `beamtalk_xref` hot-upgraded in place keeps its old tables, so the epoch
+%% table may be missing: the first write must recreate it, owned by the xref
+%% gen_server (the only process allowed to write a `protected` table).
+gen_epoch_table_recreated_on_first_write_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                sys:replace_state(beamtalk_xref, fun(S) ->
+                    true = ets:delete(xref_gen_epoch),
+                    S
+                end),
+                ?assertEqual(undefined, ets:whereis(xref_gen_epoch)),
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+                ?assertNotEqual(undefined, ets:whereis(xref_gen_epoch)),
+                ?assertEqual(whereis(beamtalk_xref), ets:info(xref_gen_epoch, owner)),
+                ?assertEqual(
+                    ['increment', 'value'],
+                    beamtalk_xref:defined_selectors('Counter', false)
+                )
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% method_origin/3 — ADR 0127 §12 trait provenance
 %%====================================================================
 

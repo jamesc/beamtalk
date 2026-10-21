@@ -21,6 +21,13 @@ Resolution now reads the class's registered module from
 The tests trace `code_server:call/1` (the single entry point for every
 `code:ensure_loaded/1` miss) on a worker process that performs the sends, so
 any reintroduced probe on the hot path fails them.
+
+BT-4071: a send the class module does not define falls through to
+`beamtalk_primitive:runtime_instance_method/2`. That lookup must resolve from
+the published method records (cached), never building a `CompiledMethod` or
+reading `beamtalk_xref`. `self hasField: #x` used to cost ~15-20 µs, almost
+all of it two full copies of `xref_class_gen` to fill a provenance field
+nobody read.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -62,7 +69,13 @@ value_module_resolution_test_() ->
         {"exception bit follows a superclass change (BT-4064)",
             fun exception_bit_follows_superclass_change/0},
         {"a cached module that is purged and reloaded is re-derived (BT-4064)",
-            fun purged_module_is_rederived/0}
+            fun purged_module_is_rederived/0},
+        {"inherited Object send makes no xref or CompiledMethod work (BT-4071)",
+            fun inherited_object_send_makes_no_xref_call/0},
+        {"fun-backed methods added or replaced at runtime are seen by the next send (BT-4071)",
+            fun runtime_method_changes_are_seen_by_next_send/0},
+        {"method_origin/3 copies no generation table (BT-4071)",
+            fun method_origin_copies_no_generation_table/0}
     ]}.
 
 package_value_send_makes_no_code_server_call() ->
@@ -210,12 +223,103 @@ purged_module_is_rederived() ->
         _ = load_accessor_module(?MOD, x)
     end.
 
+inherited_object_send_makes_no_xref_call() ->
+    %% `hasField:` is not in the class module, so the send falls through to
+    %% runtime_instance_method/2, which resolves ?CLASS -> Object.
+    Pid = start_class(?CLASS, ?MOD, 'Object'),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    try
+        true = beamtalk_primitive:send(Self, 'hasField:', [x]),
+        {Results, Calls} = calls_during(
+            [
+                {beamtalk_xref, '_', '_'},
+                {ets, tab2list, 1},
+                {beamtalk_object_class, compiled_method_map, 7},
+                {beamtalk_object_class, method, 2},
+                {gen_server, call, '_'}
+            ],
+            fun() ->
+                [
+                    beamtalk_primitive:send(Self, 'hasField:', [x]),
+                    beamtalk_primitive:send(Self, 'hasField:', [nope]),
+                    beamtalk_primitive:responds_to(Self, 'hasField:')
+                ]
+            end
+        ),
+        ?assertEqual([true, false, true], Results),
+        ?assertEqual([], Calls)
+    after
+        stop_class(Pid)
+    end.
+
+runtime_method_changes_are_seen_by_next_send() ->
+    %% The dispatch-time lookup is memoised; put_method (publish_reflection ->
+    %% put_method_records/3) must invalidate it.
+    Pid = start_class(?MODULE_LESS, undefined, 'Object'),
+    Self = #{'$beamtalk_class' => ?MODULE_LESS},
+    try
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand, selector = answer}},
+            beamtalk_primitive:send(Self, answer, [])
+        ),
+        ?assertNot(beamtalk_primitive:responds_to(Self, answer)),
+        ok = beamtalk_object_class:put_method(Pid, answer, fun(_Self) -> 42 end),
+        ?assertEqual(42, beamtalk_primitive:send(Self, answer, [])),
+        ?assert(beamtalk_primitive:responds_to(Self, answer)),
+        ok = beamtalk_object_class:put_method(Pid, answer, fun(_Self) -> 43 end),
+        ?assertEqual(43, beamtalk_primitive:send(Self, answer, []))
+    after
+        stop_class(Pid)
+    end,
+    %% Re-parenting (merge_identity/5, the hot-reload write) is seen too.
+    Pid2 = start_class(?MODULE_LESS, undefined, none),
+    try
+        ?assertEqual(
+            not_found, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, 'hasField:')
+        ),
+        ok = beamtalk_class_metadata:merge_identity(
+            ?MODULE_LESS, ?MODULE_LESS, [], 'Object', false
+        ),
+        ?assertMatch(
+            {ok, _}, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, 'hasField:')
+        ),
+        ok = beamtalk_class_metadata:merge_identity(?MODULE_LESS, ?MODULE_LESS, [], none, false),
+        ?assertEqual(
+            not_found, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, 'hasField:')
+        )
+    after
+        stop_class(Pid2)
+    end,
+    %% Removing the class drops its cached resolution too.
+    ?assertEqual(
+        unpublished, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, answer)
+    ).
+
+method_origin_copies_no_generation_table() ->
+    %% Reflection (`CompiledMethod origin`) still reads xref, but a one-class
+    %% read snapshots only that class's generation (read_stable/2), not the
+    %% whole xref_class_gen table twice.
+    {Results, Calls} = calls_during(
+        [{ets, tab2list, 1}],
+        fun() ->
+            [
+                beamtalk_xref:method_origin('Object', false, 'hasField:'),
+                beamtalk_xref:method_info('Object', false, 'hasField:')
+            ]
+        end
+    ),
+    ?assertMatch([nil, _], Results),
+    ?assertEqual([], Calls).
+
 %%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
 start_class(Name, Module) ->
-    Base = #{superclass => none, class_methods => #{}, class_state => #{}},
+    start_class(Name, Module, none).
+
+start_class(Name, Module, Superclass) ->
+    Base = #{superclass => Superclass, class_methods => #{}, class_state => #{}},
     ClassInfo =
         case Module of
             undefined -> Base;

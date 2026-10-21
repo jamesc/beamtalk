@@ -1031,7 +1031,7 @@ superclass chain — superclasses are *other* processes, so the normal
 runtime_instance_method(Class, Selector) ->
     case beamtalk_class_registry:whereis_class(Class) of
         Pid when is_pid(Pid), Pid =/= self() ->
-            method_fun_from_resolved(beamtalk_object_class:method(Pid, Selector));
+            runtime_instance_method_external(Class, Pid, Selector);
         Pid when is_pid(Pid) ->
             %% Dispatch is running inside this class gen_server: resolve without a
             %% deadlocking call to self().
@@ -1070,14 +1070,35 @@ runtime_instance_method_in_super(Selector) ->
         Super when is_atom(Super), Super =/= none, Super =/= nil ->
             case beamtalk_class_registry:whereis_class(Super) of
                 SuperPid when is_pid(SuperPid), SuperPid =/= self() ->
-                    method_fun_from_resolved(
-                        beamtalk_object_class:method(SuperPid, Selector)
-                    );
+                    runtime_instance_method_external(Super, SuperPid, Selector);
                 _ ->
                     none
             end;
         _ ->
             none
+    end.
+
+-doc """
+Resolve a fun-backed instance method on `Class` (whose class process is `Pid`,
+not the caller) and its superclass chain.
+
+Dispatch only needs the method's block, so this reads the published method
+records through `beamtalk_method_resolver:instance_method_info/2` (cached; no
+`CompiledMethod` construction, no `beamtalk_xref` lookup -- BT-4071). Only a
+class whose reflection is not yet published falls back to the authoritative
+pid-based `beamtalk_object_class:method/2`.
+""".
+-spec runtime_instance_method_external(atom(), pid(), atom()) -> {ok, fun()} | none.
+runtime_instance_method_external(Class, Pid, Selector) ->
+    case beamtalk_method_resolver:instance_method_info(Class, Selector) of
+        {ok, #{block := Fun}} when is_function(Fun) ->
+            {ok, Fun};
+        {ok, _CompiledInfo} ->
+            none;
+        not_found ->
+            none;
+        unpublished ->
+            method_fun_from_resolved(beamtalk_object_class:method(Pid, Selector))
     end.
 
 -doc "Extract a block fun from a resolved method map, or `none`.".
