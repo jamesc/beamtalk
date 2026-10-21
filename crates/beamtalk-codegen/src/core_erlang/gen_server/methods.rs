@@ -2222,14 +2222,17 @@ impl CoreErlangGenerator {
             // A direct-called method always names its parameter
             // `_DirectClassSelf`, which is what it forwards to direct-called
             // siblings (`sibling_class_self_arg`).
-            let (class_self_param, body_doc) = if !frame.current_class_method_is_direct_called() {
-                (CLASS_SELF_VAR, body_doc)
-            } else if Self::doc_mentions_var(&body_doc, CLASS_SELF_VAR) {
-                let prologue = frame.direct_class_self_prologue_doc();
-                (DIRECT_CLASS_SELF_PARAM, docvec![prologue, body_doc])
-            } else {
-                (DIRECT_CLASS_SELF_PARAM, body_doc)
-            };
+            // `class_self_unbound`: the function has no `ClassSelf` binding at
+            // all, so the finished function must not mention it.
+            let (class_self_param, body_doc, class_self_unbound) =
+                if !frame.current_class_method_is_direct_called() {
+                    (CLASS_SELF_VAR, body_doc, false)
+                } else if Self::doc_mentions_var(&body_doc, CLASS_SELF_VAR) {
+                    let prologue = frame.direct_class_self_prologue_doc();
+                    (DIRECT_CLASS_SELF_PARAM, docvec![prologue, body_doc], false)
+                } else {
+                    (DIRECT_CLASS_SELF_PARAM, body_doc, true)
+                };
 
             // Build function header with params (Document pieces, not format! —
             // Core Erlang fragments must use the Document API, ADR 0089).
@@ -2243,6 +2246,16 @@ impl CoreErlangGenerator {
                 nest(INDENT, docvec![line(), body_doc,]),
                 "\n",
             ];
+            // The prologue decision scans the body only; this re-checks the
+            // finished function, so a `ClassSelf` reference added around the
+            // body later fails the compile here instead of raising
+            // `element(2, nil)` badarg at runtime.
+            if class_self_unbound && Self::doc_mentions_var(&doc, CLASS_SELF_VAR) {
+                return Err(CodeGenError::Internal(format!(
+                    "direct-called class method `{selector_name}` reads `ClassSelf` outside \
+                     the body scanned for its class-self prologue (BT-4029)"
+                )));
+            }
             docs.push(doc);
 
             // `frame` drops here, popping the scope, clearing
