@@ -626,3 +626,91 @@ fn verify_silent_on_repro_b_when_the_condition_hands_self_back() {
         Vec::new()
     );
 }
+
+// ── BT-4015: ConditionFamilyNotCarried over a `Local` family ────────────
+
+/// The REPL repro's loop as IR: `[cw := cw + 1. cw < 3] whileTrue: [ck := ck +
+/// 1]`. The `StateAcc` loop threads the bindings map; the condition writes the
+/// binding `cw` (`condition_families`), and `hand_back` says whether the
+/// condition slot rebinds `StateAcc` to the map the condition closure answered
+/// (the fix) or the closure answers only its boolean (before it, the write died
+/// with the closure and the loop never ended).
+fn repl_condition_binding_loop(hand_back: bool) -> Vec<ThreadedStmt> {
+    let frame = FrameId::new(1);
+    let condition = if hand_back {
+        vec![
+            ThreadedStmt::Statement(
+                Document::Str("let _CondPair = apply _CondFun (StateAcc) in "),
+                span(),
+            ),
+            ThreadedStmt::ConditionHandBack {
+                pair: "_CondPair".to_string(),
+                value_var: "_CondBool".to_string(),
+                span: span(),
+            },
+        ]
+    } else {
+        vec![ThreadedStmt::Statement(
+            Document::Str("let _CondFun = fun (StateAcc) -> 'true' in "),
+            span(),
+        )]
+    };
+    vec![ThreadedStmt::ConditionalLoop {
+        fn_name: "while".to_string(),
+        mode: ThreadingMode::StateAcc(StateAccFallbackReason::ConditionStateEffects),
+        frame,
+        threads: Vec::new(),
+        counter: None,
+        condition,
+        condition_families: vec![VersionPrefix::Local("cw".to_string())],
+        condition_value: ValueRef::Doc(Document::Str("_CondBool")),
+        continue_arm: Document::Str("<'true'> when 'true' -> "),
+        body: Vec::new(),
+        produces: vec![VersionedVar::new(VersionPrefix::State, 0, frame)],
+        outer_args: None,
+        exit_arm: Document::Str("<opaque exit>"),
+        span: span(),
+    }]
+}
+
+#[test]
+fn verify_condition_local_not_carried_on_the_repl_repro() {
+    use crate::core_erlang::threaded_ir::verify_in_scope;
+    assert_eq!(
+        verify_in_scope(&repl_condition_binding_loop(false), ScopeKind::Repl),
+        vec![VerifyError::ConditionFamilyNotCarried {
+            family: VersionPrefix::Local("cw".to_string()),
+            at: span(),
+        }]
+    );
+}
+
+#[test]
+fn verify_silent_on_the_repl_repro_when_the_condition_hands_its_map_back() {
+    use crate::core_erlang::threaded_ir::verify_in_scope;
+    assert_eq!(
+        verify_in_scope(&repl_condition_binding_loop(true), ScopeKind::Repl),
+        Vec::new()
+    );
+}
+
+/// A `ConditionHandBack` carries the condition's `Local` writes only: a
+/// `SelfVt` family the condition advanced still needs its own `Bind`.
+#[test]
+fn verify_condition_hand_back_does_not_carry_self() {
+    use crate::core_erlang::threaded_ir::verify_in_scope;
+    let mut ir = repl_condition_binding_loop(true);
+    if let ThreadedStmt::ConditionalLoop {
+        condition_families, ..
+    } = &mut ir[0]
+    {
+        condition_families.insert(0, VersionPrefix::SelfVt);
+    }
+    assert_eq!(
+        verify_in_scope(&ir, ScopeKind::ValueType),
+        vec![VerifyError::ConditionFamilyNotCarried {
+            family: VersionPrefix::SelfVt,
+            at: span(),
+        }]
+    );
+}

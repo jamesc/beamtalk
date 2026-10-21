@@ -303,7 +303,7 @@ impl BodyEffects {
             condition.is_some_and(|c| condition_has_state_effects(generator, c, Some(body)));
 
         // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
-        // fall back to StateAcc mode so `generate_local_var_assignment_in_loop`
+        // fall back to StateAcc mode so `lower_local_var_assignment_bind`
         // can properly unpack the {Result, NewStateAcc} tuple.
         let has_tier2_threaded_assign = body.body.iter().any(|s| {
             if let Expression::Assignment { target, value, .. } = &s.expression {

@@ -3152,7 +3152,7 @@ impl CoreErlangGenerator {
     /// already handles it correctly.
     ///
     /// Also called from `control_flow/mod.rs`'s
-    /// `generate_local_var_assignment_in_loop` (the `is_tier2_value_call`
+    /// `lower_local_var_assignment_bind` (the `is_tier2_value_call`
     /// branch there) for the same reason: it unpacks a
     /// `{Result, NewState}` tuple.
     ///

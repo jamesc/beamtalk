@@ -240,6 +240,19 @@ pub(in crate::core_erlang) fn render(
             // BT-3863: the fold accumulator renders like a `Statement`; its
             // `carry` is for the verifier.
             ThreadedStmt::FoldAccumulator { value, .. } => docs.push(value.clone()),
+            // BT-4015: the condition closure's `{Bool, StateAcc, ...}` pair,
+            // split into the boolean and a shadowing rebind of `StateAcc`.
+            ThreadedStmt::ConditionHandBack {
+                pair, value_var, ..
+            } => docs.push(docvec![
+                "let ",
+                leaf::var(value_var.clone()),
+                " = call 'erlang':'element'(1, ",
+                leaf::var(pair.clone()),
+                ") in let StateAcc = call 'erlang':'element'(2, ",
+                leaf::var(pair.clone()),
+                ") in ",
+            ]),
             ThreadedStmt::OnDoCatch {
                 vars,
                 entry,
