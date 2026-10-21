@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3998: Fixture actor — `self foo!`.
+
+Actor subclass: SelfCastActor
+  state: x = 0
+  state: bumped = 0
+
+  getX => self.x
+
+  getBumped => self.bumped
+
+  setX: v => self.x := v
+
+  bump => self.bumped := self.bumped + 1
+
+  // `self bump!` lands after the current message: the read here is still 0.
+  castBump =>
+    self bump!
+    self.bumped
+
+  castSetX =>
+    self setX: 9!
+    self.x

@@ -1,0 +1,80 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4002: `whileTrue:`/`whileFalse:` loops whose condition writes a field, in
+// value-type methods. The condition's write must be carried into the body,
+// the next iteration and out of the loop. Before BT-4002 it was dropped every
+// iteration (the loop never ended) or the method failed to compile. See
+// stdlib/test/bt4002while_field_condition_test.bt.
+//
+// A `TestCase` subclass is the instantiable value type whose methods may
+// write a field (a `Value` subclass may not, and an `Object` subclass is not
+// instantiable); its methods compile in the value-type scope. This one holds
+// no tests: the test class calls it on a fresh instance per row.
+
+TestCase subclass: Bt4002WhileFieldConditionProbe
+  field: n = 0
+  field: m = 0
+
+  // Repro A: nothing else threads.
+  reproA =>
+    [
+      self.n := self.n + 1
+      self.n < 3
+    ] whileTrue: [nil]
+    self.n
+
+  // Repro B: the body threads a local.
+  reproB =>
+    k := 0
+    [
+      self.n := self.n + 1
+      self.n < 3
+    ] whileTrue: [k := k + 1]
+    #[k, self.n]
+
+  whileFalse =>
+    k := 0
+    [
+      self.n := self.n + 1
+      self.n >= 3
+    ] whileFalse: [k := k + 1]
+    #[k, self.n]
+
+  // The body writes a field too: it sees the condition's write, and the
+  // condition sees the body's.
+  bodyWritesField =>
+    [
+      self.n := self.n + 1
+      self.n < 5
+    ] whileTrue: [self.m := self.m + self.n]
+    #[self.n, self.m]
+
+  // The condition writes a local and the field; the body reads the local.
+  localAndField =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      self.n := self.n + t
+      self.n < 6
+    ] whileTrue: [u := u + t]
+    #[t, u, self.n]
+
+  // A field write before the loop: the loop starts from it.
+  priorWrite =>
+    self.n := 10
+    k := 0
+    [
+      self.n := self.n + 1
+      self.n < 13
+    ] whileTrue: [k := k + 1]
+    #[k, self.n]
+
+  // The loop's value assigned: the write is still carried out.
+  assigned =>
+    r := [
+      self.n := self.n + 1
+      self.n < 3
+    ] whileTrue: [nil]
+    #[r, self.n]

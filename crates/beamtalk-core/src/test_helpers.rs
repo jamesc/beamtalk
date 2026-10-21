@@ -768,6 +768,103 @@ pub mod test_support {
             .collect()
     }
 
+    /// BT-4002: [`draw_programs`] with a field `f` on the class and a field
+    /// write `self.f := self.f + 1` as the first statement of every
+    /// `whileTrue:`/`whileFalse:` condition the generator produced, so each
+    /// loop's condition produces the value-type `SelfVt` family (in a
+    /// value-type or `TestCase` class) or the actor `State` (in an actor).
+    /// A deterministic rewrite of the same corpus rather than a second
+    /// generator: the shapes around the loops are [`arb_program`]'s.
+    ///
+    /// The field is declared with `field:`; a caller compiling the programs
+    /// under `Actor` swaps it for `state:`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the strategy cannot produce a value (it never fails).
+    #[must_use]
+    pub fn draw_programs_with_field_writing_conditions(
+        class_name: &'static str,
+        n: usize,
+    ) -> Vec<Module> {
+        let mut programs = draw_programs(class_name, n);
+        for module in &mut programs {
+            for class in &mut module.classes {
+                let mut field = crate::ast::StateDeclaration::new(ident("f"), zero_span());
+                field.default_value = Some(Expression::Literal(Literal::Integer(0), zero_span()));
+                field.declared_keyword = crate::ast::DeclaredKeyword::Field;
+                class.state.push(field);
+                for method in &mut class.methods {
+                    for stmt in &mut method.body {
+                        prepend_condition_field_write(&mut stmt.expression);
+                    }
+                }
+            }
+        }
+        programs
+    }
+
+    /// `self.f := self.f + 1`.
+    fn field_increment() -> Expression {
+        let field = || Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(ident("self"))),
+            field: ident("f"),
+            span: zero_span(),
+        };
+        Expression::Assignment {
+            target: Box::new(field()),
+            value: Box::new(Expression::MessageSend {
+                receiver: Box::new(field()),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), zero_span())],
+                is_cast: false,
+                span: zero_span(),
+            }),
+            type_annotation: None,
+            span: zero_span(),
+        }
+    }
+
+    /// Walks the expression shapes [`arb_expr`] generates, prepending
+    /// [`field_increment`] to every `whileTrue:`/`whileFalse:` condition block.
+    fn prepend_condition_field_write(expr: &mut Expression) {
+        match expr {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => {
+                let is_while = matches!(
+                    selector,
+                    MessageSelector::Keyword(parts)
+                        if parts.len() == 1
+                            && matches!(parts[0].keyword.as_str(), "whileTrue:" | "whileFalse:")
+                );
+                prepend_condition_field_write(receiver);
+                for arg in arguments.iter_mut() {
+                    prepend_condition_field_write(arg);
+                }
+                if is_while && let Expression::Block(cond) = receiver.as_mut() {
+                    cond.body
+                        .insert(0, ExpressionStatement::bare(field_increment()));
+                }
+            }
+            Expression::Block(block) => {
+                for stmt in &mut block.body {
+                    prepend_condition_field_write(&mut stmt.expression);
+                }
+            }
+            Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
+                prepend_condition_field_write(value);
+            }
+            Expression::Parenthesized { expression, .. } => {
+                prepend_condition_field_write(expression);
+            }
+            _ => {}
+        }
+    }
+
     /// Generates class-variable programs (BT-3705, ADR 0130 Phase 1): the
     /// sibling of [`arb_program`] for class state, loops, exception handling
     /// and late-bound sends. A program is a pure function of `(seed, size)`,
