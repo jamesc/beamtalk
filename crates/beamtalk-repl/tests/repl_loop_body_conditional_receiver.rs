@@ -25,24 +25,24 @@ const RECEIVERS: &[&str] = &[
 ];
 
 const CONDITIONALS: &[&str] = &[
-    "R ifTrue: [B]",
-    "R ifFalse: [B]",
-    "R ifTrue: [B] ifFalse: [nil]",
-    "R ifNil: [B]",
-    "R and: [B. true]",
-    "R or: [B. false]",
+    "{R} ifTrue: [{B}]",
+    "{R} ifFalse: [{B}]",
+    "{R} ifTrue: [{B}] ifFalse: [nil]",
+    "{R} ifNil: [{B}]",
+    "{R} and: [{B}. true]",
+    "{R} or: [{B}. false]",
 ];
 
 const ARMS: &[&str] = &["Timer sleep: 0", "n := n - 1"];
 
 const LOOPS: &[&str] = &[
-    "[n > 0] whileTrue: [S]",
-    "[n <= 0] whileFalse: [S]",
-    "3 timesRepeat: [S]",
-    "1 to: 3 do: [:i | S]",
-    "1 to: 5 by: 2 do: [:i | S]",
-    "#(1, 2) do: [:e | S]",
-    "S",
+    "[n > 0] whileTrue: [{S}]",
+    "[n <= 0] whileFalse: [{S}]",
+    "3 timesRepeat: [{S}]",
+    "1 to: 3 do: [:i | {S}]",
+    "1 to: 5 by: 2 do: [:i | {S}]",
+    "#(1, 2) do: [:e | {S}]",
+    "{S}",
 ];
 
 fn inputs() -> Vec<String> {
@@ -51,8 +51,8 @@ fn inputs() -> Vec<String> {
         for receiver in RECEIVERS {
             for cond in CONDITIONALS {
                 for arm in ARMS {
-                    let stmt = cond.replace('R', receiver).replace('B', arm);
-                    out.push(lp.replace('S', &stmt));
+                    let stmt = cond.replace("{R}", receiver).replace("{B}", arm);
+                    out.push(lp.replace("{S}", &stmt));
                 }
             }
         }

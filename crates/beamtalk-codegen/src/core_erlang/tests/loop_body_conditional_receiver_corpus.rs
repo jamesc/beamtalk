@@ -48,35 +48,35 @@ const RECEIVERS: &[&str] = &[
     "((self done) or: [n > 1])",
 ];
 
-/// The conditionals over a receiver `R` and an arm body `B`.
+/// The conditionals over a receiver `{R}` and an arm body `{B}`.
 const CONDITIONALS: &[&str] = &[
-    "R ifTrue: [B]",
-    "R ifFalse: [B]",
-    "R ifTrue: [B] ifFalse: [nil]",
-    "R ifNil: [B]",
-    "R and: [B. true]",
-    "R or: [B. false]",
+    "{R} ifTrue: [{B}]",
+    "{R} ifFalse: [{B}]",
+    "{R} ifTrue: [{B}] ifFalse: [nil]",
+    "{R} ifNil: [{B}]",
+    "{R} and: [{B}. true]",
+    "{R} or: [{B}. false]",
 ];
 
 /// What the arm writes: nothing, an outer local, a field.
 const ARMS: &[&str] = &["Timer sleep: 0", "n := n - 1", "self.f := self.f + 1"];
 
-/// Where the conditional statement `S` runs: every `Letrec` loop kind
+/// Where the conditional statement `{S}` runs: every `Letrec` loop kind
 /// (`LOOPS[..5]`), a fold body, the method root, a conditional arm, an
 /// `on:do:` body, an `ensure:` body, and a `Letrec` loop nested in a
 /// conditional arm.
 const LOOPS: &[&str] = &[
-    "[n > 0] whileTrue: [S]",
-    "[n <= 0] whileFalse: [S]",
-    "3 timesRepeat: [S]",
-    "1 to: 3 do: [:i | S]",
-    "1 to: 5 by: 2 do: [:i | S]",
-    "#(1, 2) do: [:e | S]",
-    "S",
-    "(n > 0) ifTrue: [S]",
-    "[S] on: Error do: [:err | 0]",
-    "[S] ensure: [nil]",
-    "(n > 0) ifTrue: [3 timesRepeat: [S]]",
+    "[n > 0] whileTrue: [{S}]",
+    "[n <= 0] whileFalse: [{S}]",
+    "3 timesRepeat: [{S}]",
+    "1 to: 3 do: [:i | {S}]",
+    "1 to: 5 by: 2 do: [:i | {S}]",
+    "#(1, 2) do: [:e | {S}]",
+    "{S}",
+    "(n > 0) ifTrue: [{S}]",
+    "[{S}] on: Error do: [:err | 0]",
+    "[{S}] ensure: [nil]",
+    "(n > 0) ifTrue: [3 timesRepeat: [{S}]]",
 ];
 
 /// The actor contexts: a method whose first `State` version is the
@@ -92,10 +92,10 @@ fn rows() -> Vec<(String, String)> {
         for (r, receiver) in RECEIVERS.iter().enumerate() {
             for (c, cond) in CONDITIONALS.iter().enumerate() {
                 for (a, arm) in ARMS.iter().enumerate() {
-                    let stmt = cond.replace('R', receiver).replace('B', arm);
+                    let stmt = cond.replace("{R}", receiver).replace("{B}", arm);
                     out.push((
                         format!("loop{l} recv{r} cond{c} arm{a}"),
-                        lp.replace('S', &stmt),
+                        lp.replace("{S}", &stmt),
                     ));
                 }
             }
@@ -209,7 +209,7 @@ fn loop_body_conditional_receiver_value_positions_compile() {
                 let pair = format!("{receiver} ifTrue: [{arm}. #(1, 2)] ifFalse: [#(3, 4)]");
                 for (v, wrap) in VALUE_POSITIONS.iter().enumerate() {
                     let stmt = wrap.replace("{C}", &cond).replace("{P}", &pair);
-                    let m = method("", methods.len(), &lp.replace('S', &stmt));
+                    let m = method("", methods.len(), &lp.replace("{S}", &stmt));
                     assert_parses(&format!("{HEADER}{HELPERS}{m}"));
                     if phase0_rejects(&format!("{HEADER}{HELPERS}{m}")) {
                         continue;
