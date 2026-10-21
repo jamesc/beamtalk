@@ -218,10 +218,9 @@ fn class_method_self_send_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
 /// `class_send` back into that same `gen_server`.
 pub(super) fn is_own_class_reference(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     ctx.in_class_method
-        && matches!(
+        && beamtalk_core::semantic_analysis::block_facts::is_own_class_reference(
             expr,
-            Expression::ClassReference { name, package, .. }
-                if package.is_none() && name.name == ctx.class_name
+            &ctx.class_name,
         )
 }
 
