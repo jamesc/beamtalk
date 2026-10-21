@@ -341,8 +341,7 @@ live_registry_test_() ->
                         {beamtalk_object, 'Integer class', _, _}
                     ],
                     beamtalk_interface:classesNamed(['Object', 'ZzzNoSuchClass', 'Integer', 42])
-                ),
-                ?assertEqual([], beamtalk_interface:classesNamed(not_a_list))
+                )
             end},
             {"liveClassName names a live class and its metaclass", fun() ->
                 Integer = beamtalk_interface:findClass('Integer'),
@@ -361,6 +360,26 @@ live_registry_test_() ->
                     nil,
                     beamtalk_interface:liveClassName({beamtalk_object, 'Gone class', gone, Dead})
                 )
+            end},
+            %% A class killed untrappably keeps its reverse-index row (terminate/2
+            %% did not run) and is awaiting auto-restart: crashed, not removed.
+            {"liveClassName still names a crashed class whose row survives", fun() ->
+                Dead = spawn(fun() -> ok end),
+                MRef = monitor(process, Dead),
+                receive
+                    {'DOWN', MRef, process, Dead, _} -> ok
+                end,
+                ok = beamtalk_class_registry:record_class_pid(Dead, 'BT4095Crashed'),
+                try
+                    ?assertEqual(
+                        'BT4095Crashed',
+                        beamtalk_interface:liveClassName(
+                            {beamtalk_object, 'BT4095Crashed class', gone, Dead}
+                        )
+                    )
+                after
+                    ets:delete(beamtalk_class_pids, Dead)
+                end
             end},
             {"classNamed integer arg raises type_error", fun() ->
                 ?assertError(

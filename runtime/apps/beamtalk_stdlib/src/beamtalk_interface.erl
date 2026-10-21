@@ -146,9 +146,17 @@ classesNamed(Names) when is_list(Names) ->
             (Name) when is_atom(Name) ->
                 case beamtalk_class_registry:whereis_class(Name) of
                     Pid when is_pid(Pid) ->
-                        case class_object_for_pid(Name, Pid) of
-                            nil -> false;
-                            ClassObj -> {true, ClassObj}
+                        %% Skip a class still inside `init/1` (no reverse-index
+                        %% row yet), as `allClasses/0` does, so resolving it
+                        %% never blocks on its `module_name` call.
+                        case beamtalk_class_registry:class_name_for_pid(Pid) of
+                            {ok, _} ->
+                                case class_object_for_pid(Name, Pid) of
+                                    nil -> false;
+                                    ClassObj -> {true, ClassObj}
+                                end;
+                            not_found ->
+                                false
                         end;
                     undefined ->
                         false
@@ -157,9 +165,7 @@ classesNamed(Names) when is_list(Names) ->
                 false
         end,
         Names
-    );
-classesNamed(_) ->
-    [].
+    ).
 
 -doc """
 The registered name of the class behind a class or metaclass object, or `nil`
@@ -168,22 +174,23 @@ if that class has been removed (BT-4095).
 Called via `(Erlang beamtalk_interface) liveClassName: aClass` by
 `SystemNavigation`'s tolerant class walk, before and after each per-class
 step, to tell "this class was removed mid-walk" apart from a genuine error.
-For a local class this is message-free: the pid -> name reverse index
-(`class_name_for_pid/1`) plus `is_process_alive/1`, so a class whose process
-has exited — removed, or crashed and not yet restarted — answers `nil`. A
-remote class (pg spans a cluster) cannot be checked locally, so it falls back
-to `class_name_safe/1`'s call and answers `nil` only if that call exits.
+
+For a local class this is message-free: the pid's reverse-index row
+(`class_name_for_pid/1`), which `terminate/2` deletes when the class is
+removed (and a restart deletes when it replaces the pid). A class killed
+untrappably skips `terminate/2`, so its row survives: it is crashed and
+awaiting auto-restart, not removed, and still answers its name. The walk then
+sends to it, `class_send_with_recovery` restarts it, and a genuine error from
+it is re-raised rather than swallowed.
+
+A remote class (pg spans a cluster) cannot be checked locally, so it falls
+back to `class_name_safe/1`'s call and answers `nil` only if that call exits.
 """.
 -spec liveClassName(term()) -> atom() | nil.
 liveClassName(#beamtalk_object{pid = Pid}) when is_pid(Pid), node(Pid) =:= node() ->
-    case is_process_alive(Pid) of
-        false ->
-            nil;
-        true ->
-            case beamtalk_class_registry:class_name_for_pid(Pid) of
-                {ok, Name} -> Name;
-                not_found -> nil
-            end
+    case beamtalk_class_registry:class_name_for_pid(Pid) of
+        {ok, Name} -> Name;
+        not_found -> nil
     end;
 liveClassName(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
     try

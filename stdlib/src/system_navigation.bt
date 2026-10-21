@@ -108,7 +108,8 @@ sealed typed Object subclass: SystemNavigation
 
   /// Sort `classes` by class name, dropping any class removed since it was
   /// collected. Names come from the registry's metadata, so a class removed
-  /// between the walk and the sort cannot make the comparator raise.
+  /// between the walk and the sort cannot make the comparator raise (one
+  /// removed during the sort itself keeps its place under the key `""`).
   class sealed sortedByName: classes :: List(Behaviour) -> List(Behaviour) =>
     live := classes reject: [:c | self isRemoved: c]
     live sort: [:a :b | (self sortKeyOf: a) < (self sortKeyOf: b)]
