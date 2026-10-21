@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4033: an actor whose `initialize` always raises — a listener whose port
+// is taken. See stdlib/test/supervised_actor_awaited_start_test.bt.
+
+Actor subclass: Bt4033Opener
+  state: port = 0
+
+  initialize => Error signal: "eaddrinuse"

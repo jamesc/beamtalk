@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4033: the issue repro — a static Supervisor whose anonymous
+// `withArgs:` child fails its `initialize`.
+
+Supervisor subclass: Bt4033Sup
+
+  childSpecs =>
+    #((Bt4033Opener supervisionSpec
+      withId: #o
+      withRestart: #transient
+      withArgs: #{#port => 1}))

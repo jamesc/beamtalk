@@ -119,8 +119,9 @@ restart mechanism, not a bug. Its own `self`-send risk (a class method's
 right after the spawn succeeds — see
 `beamtalk_class_instantiation:do_class_self_named_spawn/6`. A plain
 (non-`withClassMethod:`) unnamed `Supervisor child` — real OTP supervision
-via `beamtalk_supervisor:spec_to_otp/1` calling `Module:start_link/1`
-directly — links to the supervisor without ever going through
+via `beamtalk_supervisor:spec_to_otp/1`, whose start MFA calls
+`beamtalk_supervisor:start_actor_child/2` → `safe_spawn_linked/2`
+(BT-4033) — links to the supervisor without ever going through
 `safe_spawn/2`, so it was never part of this bug.
 
 `SupervisionSpec withClassMethod:`
@@ -244,6 +245,8 @@ handle_getValue([], State) ->
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
 -export([await_initialize/1, await_initialize/2, await_initialize/3, safe_spawn/2]).
+%% BT-4033: the awaited linked start of an anonymous supervised actor child.
+-export([safe_spawn_linked/2]).
 
 %% BT-3992: named spawns that must not leave the actor linked to the caller.
 -export([spawn_named_for_caller/4, spawn_named_unlinked/3]).
@@ -823,13 +826,24 @@ safe_spawn(Module, InitArgs) ->
     end.
 
 -doc """
-Spawn an actor **linked**, with
-trap_exit + initialize synchronization, for the one `safe_spawn/2` case that
-needs the link — a `withClassMethod:` supervisor child's factory calling
-plain `self spawn`/`self spawnWith:` (see `safe_spawn/2`'s doc). Shares the
-trap_exit dance with `safe_spawn_named/5` via `start_link_and_await/1`.
+Spawn an actor **linked** to the caller, with trap_exit + initialize
+synchronization: answers `{ok, Pid}` once the actor's `initialize` has
+returned (not the continuations it requested), or `{error, Reason}` when it
+failed or timed out — never `ignore`.
+
+The start of every anonymous supervised actor child (BT-4033): a static
+`Supervisor` child's and a `DynamicSupervisor` pool child's start MFA goes
+through `beamtalk_supervisor:start_actor_child/2,3`, which calls this, so a
+failing `initialize` fails the supervisor's start or `startChild`, as OTP
+`init/1` returning `{stop, Reason}` does. It is also the `safe_spawn/2` case
+that needs the link — a `withClassMethod:` supervisor child's factory
+calling plain `self spawn`/`self spawnWith:` (see `safe_spawn/2`'s doc).
+Shares the trap_exit dance with `safe_spawn_named/5` via
+`start_link_and_await/3`. `InitArgs` that are not a map (a hand-written
+gen_server's own start args) carry no init-ack target and fall back to the
+sys-based wait (`await_initialize/3`).
 """.
--spec safe_spawn_linked(module(), map()) -> {ok, pid()} | {error, term()}.
+-spec safe_spawn_linked(module(), term()) -> {ok, pid()} | {error, term()}.
 safe_spawn_linked(Module, InitArgs) ->
     start_link_and_await(
         fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, linked

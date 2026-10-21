@@ -1,0 +1,81 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4033: a supervised actor child's start returns only once its
+// `initialize` has returned, as `Actor spawn` does (BT-3992) and as OTP
+// `init/1` does. An `initialize` that raises fails the child's start, and so
+// the parent's start, instead of the child crash-looping after the parent
+// reported success.
+//
+// Fixtures: stdlib/test/fixtures/bt4033opener.bt
+//           stdlib/test/fixtures/bt4033sup.bt
+//           stdlib/test/fixtures/bt4033named_sup.bt
+//           stdlib/test/fixtures/bt4033opener_pool.bt
+//           stdlib/test/fixtures/bt4033unnamed_caller_sup.bt
+//           stdlib/test/fixtures/bt4033init_parent_caller.bt
+//           stdlib/test/fixtures/bt4033init_caller_sup.bt
+//           stdlib/test/fixtures/bt3992parent_caller.bt (BT-3992)
+
+TestCase subclass: SupervisedActorAwaitedStartTest
+
+  // The issue repro: `spawn` raises at once, with the child's error in the
+  // hint, and leaves no supervisor behind to crash-loop.
+  testFailingChildInitializeFailsSupervisorSpawn =>
+    start := DateTime monotonicNow
+    e := [Bt4033Sup spawn] on: Error do: [:ex | ex]
+    self assert: DateTime monotonicNow - start < 4000000000
+    self assert: e kind equals: #supervisor_start_failed
+    self assert: (e hint includesSubstring: "eaddrinuse")
+    self assert: Bt4033Sup current equals: nil
+
+  testFailingChildInitializeIsAResultErrorForSupervise =>
+    r := Bt4033Sup supervise
+    self assert: r error kind equals: #supervisor_start_failed
+    self assert: (r error hint includesSubstring: "eaddrinuse")
+    self assert: Bt4033Sup current equals: nil
+
+  testFailingChildInitializeIsAResultErrorForSpawnAs =>
+    r := Bt4033Sup spawnAs: #bt4033_sup
+    self assert: r error kind equals: #supervisor_start_failed
+    self assert: (r error hint includesSubstring: "eaddrinuse")
+    self assert: (Bt4033Sup named: #bt4033_sup) error kind equals: #name_not_registered
+
+  testFailingNamedChildInitializeFailsSupervisorStart =>
+    r := Bt4033NamedSup supervise
+    self assert: r error kind equals: #supervisor_start_failed
+    self assert: (r error hint includesSubstring: "eaddrinuse")
+    self assert: (Bt4033Opener named: #bt4033_opener) error kind equals: #name_not_registered
+
+  testFailingPoolChildInitializeFailsStartChild =>
+    pool := Bt4033OpenerPool spawn
+    r := pool startChild: #{#port => 1}
+    self assert: r error kind equals: #child_start_failed
+    self assert: (r error hint includesSubstring: "eaddrinuse")
+    plain := pool startChild
+    self assert: plain error kind equals: #child_start_failed
+    named := pool startChild: #{#port => 1} name: #bt4033_pool_opener
+    self assert: named error kind equals: #child_start_failed
+    self assert: (named error hint includesSubstring: "eaddrinuse")
+    self assert: pool count equals: 0
+    self assert: pool isAlive
+    pool stop
+
+  // A continuation requested in `initialize` runs after the start returned,
+  // so its synchronous call to the parent neither hangs nor fails the start.
+  testUnnamedChildContinuationMayCallParent =>
+    start := DateTime monotonicNow
+    sup := Bt4033UnnamedCallerSup spawn
+    self assert: DateTime monotonicNow - start < 4000000000
+    child :: Bt3992ParentCaller := (sup which: Bt3992ParentCaller) unwrap
+    50 timesRepeat: [child parentCount isNil ifTrue: [Timer sleep: 20]]
+    self assert: child parentCount equals: 1
+    sup stop
+
+  // The hang rule: `initialize` calling its parent blocks until the 5 s init
+  // timeout (the parent is waiting for that `initialize`), and the start
+  // fails with a hint that names the rule.
+  testChildInitializeCallingParentFailsStartNamingHangRule =>
+    r := Bt4033InitCallerSup supervise
+    self assert: r error kind equals: #supervisor_start_failed
+    self assert: (r error hint includesSubstring: "hang rule")
+    self assert: (r error hint includesSubstring: "continueWith:")
