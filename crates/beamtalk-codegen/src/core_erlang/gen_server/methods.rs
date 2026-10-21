@@ -764,30 +764,6 @@ impl CoreErlangGenerator {
             let is_last = i == body_len - 1;
             let is_early_return = matches!(&kind, BodyExprKind::EarlyReturn);
             let span = expr.span();
-            // BT-4007 (ADR 0137 Phase 0 prototype): the statements with no state
-            // effect of their own (Pure, a pure local assignment, a field
-            // assignment) are the ones the prototype brackets, at the
-            // statement expression (the assigned value, for an assignment).
-            self.adr0137_stmt_synced = self.adr0137_cells()
-                && matches!(
-                    kind,
-                    BodyExprKind::Pure
-                        | BodyExprKind::LocalAssignPure
-                        | BodyExprKind::FieldAssignment
-                        | BodyExprKind::DispatchingSelfSend
-                );
-            self.adr0137_stmt_span = if self.adr0137_cells() {
-                match (&kind, expr) {
-                    (BodyExprKind::Pure, _) => Some(expr.unwrap_parens().span()),
-                    (
-                        BodyExprKind::LocalAssignPure | BodyExprKind::FieldAssignment,
-                        Expression::Assignment { value, .. },
-                    ) => Some(value.unwrap_parens().span()),
-                    _ => None,
-                }
-            } else {
-                None
-            };
 
             // Early return — always terminates generation regardless of position.
             // Classify the inner value to handle super/tier2/dispatch returns.
@@ -1650,14 +1626,16 @@ impl CoreErlangGenerator {
                         // `eval_rhs_to_temp_var` call (`expressions.rs`)
                         // compiles `value` via `expression_doc`, which
                         // substitutes the already-sequenced value.
-                        let rhs_scope =
-                            self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                        let (binding_docs, rhs_var) =
-                            self.generate_destructure_bindings_with_value(pattern, value)?;
+                        let (binding_docs, rhs_var) = self
+                            .generate_destructure_bindings_sequenced(
+                                pattern,
+                                value,
+                                threaded_ir::FrameId::ROOT,
+                                &mut stmts,
+                            )?;
                         for d in binding_docs {
                             stmts.push(ThreadedStmt::Statement(d, span));
                         }
-                        self.finish_precompiled_scope(rhs_scope)?;
                         rhs_value = Some(rhs_var);
                     }
                     if is_last {
@@ -1831,8 +1809,7 @@ impl CoreErlangGenerator {
                         // producer, so its prelude also carries one
                         // `LocalRebind` per threaded local; only the raw tuple
                         // path below re-reads its locals from the new state.
-                        let inline_conditional =
-                            self.inline_producer_construct(expr.unwrap_parens());
+                        let inline_conditional = self.thread_ahead_unwraps(expr);
                         if inline_conditional {
                             let expr_str = self.expression_doc(expr)?;
                             self.finish_precompiled_scope(scope)?;
@@ -3348,7 +3325,7 @@ impl CoreErlangGenerator {
             //
             // BT-3910: a receiver holding a value-position local assignment is
             // sequenced ahead by `threaded_expression`
-            // (`conditional_receiver_assignment_operand`), so its `LocalRebind`
+            // (`conditional_receiver_operand`), so its `LocalRebind`
             // reaches the statement sequence instead of a closed tuple document.
             if self.conditional_receiver_needs_threading(receiver)
                 && self.contained_local_assignment_targets(receiver).is_empty()

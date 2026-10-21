@@ -2215,8 +2215,9 @@ impl CoreErlangGenerator {
                     };
                     // see the analogous comment in
                     // `is_counted_loop_with_vt_local_threading`.
+                    // BT-4002: a field-writing condition threads `Self` too.
                     return !self.loop_threaded_locals(body, condition).is_empty()
-                        || self.loop_body_threads_value_self(body);
+                        || self.letrec_loop_threads_value_self(Some(receiver), body);
                 }
             }
         }
@@ -2511,23 +2512,28 @@ impl CoreErlangGenerator {
         if self.fold_threads_value_self(expr) {
             return ThreadedFamilies::from_matches(&[VersionPrefix::SelfVt]);
         }
-        let body = if self.is_while_with_vt_local_threading(expr) {
+        // BT-4002: a while loop's condition joins its body (`condition`).
+        let (condition, body) = if self.is_while_with_vt_local_threading(expr) {
             match expr {
-                Expression::MessageSend { arguments, .. } => match arguments.first() {
-                    Some(Expression::Block(body)) => Some(body),
-                    _ => None,
+                Expression::MessageSend {
+                    receiver,
+                    arguments,
+                    ..
+                } => match arguments.first() {
+                    Some(Expression::Block(body)) => (Some(receiver.as_ref()), Some(body)),
+                    _ => (None, None),
                 },
-                _ => None,
+                _ => (None, None),
             }
         } else if self.is_counted_loop_with_vt_local_threading(expr) {
-            Self::counted_loop_body_block(expr)
+            (None, Self::counted_loop_body_block(expr))
         } else {
-            None
+            (None, None)
         };
         let Some(body) = body else {
             return ThreadedFamilies::default();
         };
-        if self.loop_body_threads_value_self(body) {
+        if self.letrec_loop_threads_value_self(condition, body) {
             ThreadedFamilies::from_matches(&[VersionPrefix::SelfVt])
         } else {
             ThreadedFamilies::default()

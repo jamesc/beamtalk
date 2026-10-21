@@ -160,29 +160,6 @@ pub struct CoreErlangGenerator {
     /// Tier 1 `fun`, which cannot hand the actor `State` back. A Tier 2 `fun`
     /// returns `{Result, StateAccN}`, so it does carry it (false).
     pub(in crate::core_erlang) closure_drops_state: bool,
-    /// BT-4007 (ADR 0137 Phase 0 prototype): the span of the method-body
-    /// statement expression being lowered (the right-hand side of an
-    /// assignment statement), when it is a statement the prototype brackets
-    /// with a `SyncedCall`. Only that expression is bracketed.
-    pub(in crate::core_erlang) adr0137_stmt_span: Option<beamtalk_core::source_analysis::Span>,
-    /// BT-4007: whether the method-body statement being lowered is one whose
-    /// calls the prototype synchronises (a closure created in it reads the
-    /// cell; a closure created anywhere else keeps its captured `State`).
-    pub(in crate::core_erlang) adr0137_stmt_synced: bool,
-    /// BT-4007: nesting depth of the prototype's bracket scopes being compiled
-    /// (a synchronised statement's expression, a self-send's store).
-    pub(in crate::core_erlang) adr0137_in_bracket: usize,
-    /// BT-4007 measurement: brackets emitted, and the sends compiled in an
-    /// actor instance method that may run user code, bracketed or not (the
-    /// prototype's stand-in for `UnbracketedUserCodeSend`: the sends compiled
-    /// outside any bracket scope are listed in `adr0137_unbracketed`).
-    pub(in crate::core_erlang) adr0137_brackets: usize,
-    pub(in crate::core_erlang) adr0137_user_sends: usize,
-    pub(in crate::core_erlang) adr0137_unbracketed: Vec<String>,
-    /// BT-4007: the innermost enclosing Tier 1 closure was created in a
-    /// synchronised statement at the method root, so its field access goes
-    /// through the cell.
-    pub(in crate::core_erlang) adr0137_cell_closure: bool,
     /// ADR 0130 §5: the Core Erlang variable holding the class-variable
     /// capture of the innermost enclosing block literal that reads a class
     /// variable (`beamtalk_class_vars:capture/2` bound at its creation), or
@@ -377,7 +354,7 @@ pub struct CoreErlangGenerator {
     pub(in crate::core_erlang) current_method_selector: Option<String>,
     /// ADR 0065: Whether the current class is a Server subclass.
     /// When true, `generate_handle_info` dispatches to `handleInfo:` with
-    /// log-and-continue error semantics instead of the default ignore-all stub.
+    /// crash-on-error semantics (ADR 0134) instead of the default ignore-all stub.
     pub(in crate::core_erlang) is_server_subclass: bool,
     /// Pre-computed direct-call eligible class methods.
     ///
@@ -492,13 +469,6 @@ impl CoreErlangGenerator {
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
             closure_drops_state: false,
-            adr0137_stmt_span: None,
-            adr0137_stmt_synced: false,
-            adr0137_in_bracket: 0,
-            adr0137_brackets: 0,
-            adr0137_user_sends: 0,
-            adr0137_unbracketed: Vec::new(),
-            adr0137_cell_closure: false,
             class_var_capture: None,
             class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,

@@ -381,17 +381,6 @@ impl CoreErlangGenerator {
                     // value, and the slot is `nil`.
                     let state_doc = if self.in_class_method() {
                         leaf::atom("nil")
-                    } else if self.adr0137_in_cell_closure() {
-                        // BT-4007 (ADR 0137 Phase 0 prototype): a `^` in a Tier 1
-                        // actor closure hands back the live cell at home (the
-                        // closure's writes are in it), its captured `State` away.
-                        docvec![
-                            "call 'beamtalk_actor_state_proto':'nlr_state'(",
-                            leaf::var(self.adr0137_self_var()),
-                            ", ",
-                            leaf::var(self.current_state_var()),
-                            ")"
-                        ]
                     } else if self.context == CodeGenContext::Actor {
                         leaf::var(self.current_state_var())
                     } else {

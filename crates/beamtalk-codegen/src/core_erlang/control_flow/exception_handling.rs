@@ -1859,10 +1859,10 @@ impl CoreErlangGenerator {
                     result_var = val_var;
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                // E4 — exempt from Bind modeling, same as C5: no state
-                // version is produced or consumed, every binding is plain.
-                let (binding_docs, rhs_var) =
-                    self.generate_destructure_bindings_with_value(pattern, value)?;
+                // E4 — the bindings are plain; the right-hand side's own
+                // prelude is threaded ahead into this body (BT-4000).
+                let (binding_docs, rhs_var) = self
+                    .generate_destructure_bindings_sequenced(pattern, value, frame, &mut stmts)?;
                 for d in binding_docs {
                     stmts.push(ThreadedStmt::Statement(d, span));
                 }
@@ -1898,10 +1898,10 @@ impl CoreErlangGenerator {
                     // If this is a nested control flow construct returning {Result, State},
                     // destructure it. Otherwise just capture the result.
                     // A producer of this arm (a `BranchArm` frame, or a REPL arm,
-                    // BT-3823) goes to `thread_ahead` below instead.
+                    // BT-3823; a conditional whose receiver advances `State`, BT-4000) goes to
+                    // `thread_ahead` below instead.
                     if self.control_flow_has_mutations(expr)
-                        && !((arm.is_some() || self.is_repl_mode())
-                            && self.local_producer_locals(expr).is_some())
+                        && !self.arm_statement_is_producer(expr, arm.is_some())
                     {
                         // E5 — nested mutation construct returns {Result,
                         // State} tuple; C10-last's shape with ExResult

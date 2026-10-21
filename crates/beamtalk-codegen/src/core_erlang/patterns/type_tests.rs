@@ -124,13 +124,10 @@ impl CoreErlangGenerator {
     ///   (the class name) against the pattern's `class` field.
     /// - **`Supervisor`/`DynamicSupervisor`-hierarchy classes**: a
     ///   live supervisor reference is a third runtime shape, also a 4-tuple
-    ///   but tagged `'beamtalk_supervisor'` (or transiently
-    ///   `'beamtalk_supervisor_new'` — rewritten to `'beamtalk_supervisor'`
-    ///   by `beamtalk_class_dispatch:class_send_dispatch/3` before *any*
-    ///   caller, including `class initialize:` itself, ever observes it)
-    ///   rather than `'beamtalk_object'` — [`Self::wrap_supervisor_class_tag_test`]
-    ///   accepts either tag at `element(1)` before comparing `element(2)`
-    ///   against the pattern's `class` field.
+    ///   but tagged `'beamtalk_supervisor'` rather than `'beamtalk_object'`
+    ///   — [`Self::wrap_supervisor_class_tag_test`] tests that tag at
+    ///   `element(1)` before comparing `element(2)` against the pattern's
+    ///   `class` field.
     pub(super) fn generate_type_pattern(
         &mut self,
         match_var: &str,
@@ -228,8 +225,7 @@ impl CoreErlangGenerator {
             .as_ref()
             .is_some_and(|h| h.is_actor_subclass(class_name));
         // A Supervisor/DynamicSupervisor subclass reference is a
-        // *different* 4-tuple, tagged `'beamtalk_supervisor'` (or
-        // transiently `'beamtalk_supervisor_new'`) rather than
+        // *different* 4-tuple, tagged `'beamtalk_supervisor'` rather than
         // `'beamtalk_object'` — same reasoning as the actor case above, just
         // a different reserved tag.
         let is_supervisor = self.class_hierarchy.as_ref().is_some_and(|h| {
@@ -504,21 +500,13 @@ impl CoreErlangGenerator {
     /// Tests whether the scrutinee is a supervisor reference (a
     /// `Supervisor`/`DynamicSupervisor` subclass instance) of exactly
     /// `class_name`. A live supervisor reference is always
-    /// `{'beamtalk_supervisor', ClassAtom, ModuleAtom, Pid}` by the time any
-    /// caller observes it — `beamtalk_class_dispatch:class_send_dispatch/3`
-    /// rewrites the transient `{'beamtalk_supervisor_new', ClassAtom,
-    /// ModuleAtom, Pid}` fresh-start tag to `'beamtalk_supervisor'` before
-    /// `run_initialize` is even called, so `'beamtalk_supervisor_new'` is
-    /// never observable by user code, not even inside `class initialize:`
-    /// (see `beamtalk_supervisor.erl`'s `startLink/1` doc). The
-    /// `'beamtalk_supervisor_new'` arm below is defensive dead code kept for
-    /// symmetry with the tag pair, not a reachable runtime case. Neither
-    /// shape is a map, so [`Self::wrap_class_tag_test`]'s `is_map` check
-    /// would never match; this reuses the same
-    /// `is_tuple`/`tuple_size`/`element(1)`/`element(2)` idiom
-    /// [`Self::wrap_actor_class_tag_test`] uses, but accepts *either*
-    /// reserved tag at `element(1)` before comparing `element(2)` (the
-    /// class name) against `class_name`.
+    /// `{'beamtalk_supervisor', ClassAtom, ModuleAtom, Pid}`; the runtime has
+    /// no other supervisor tag (ADR 0135 §1). It is not a map, so
+    /// [`Self::wrap_class_tag_test`]'s `is_map` check would never match; this
+    /// reuses the same `is_tuple`/`tuple_size`/`element(1)`/`element(2)`
+    /// idiom [`Self::wrap_actor_class_tag_test`] uses, with the supervisor
+    /// tag at `element(1)`, before comparing `element(2)` (the class name)
+    /// against `class_name`.
     fn wrap_supervisor_class_tag_test(
         &mut self,
         match_var: &str,
@@ -530,8 +518,6 @@ impl CoreErlangGenerator {
         let no_match_class = self.fresh_temp_var("NoMatch");
         let v = leaf::var(match_var.to_string());
 
-        // Built once in source; cloned into both accepted tag arms below so
-        // the element(2) class-name check isn't copy-pasted in Rust source.
         let class_check = docvec![
             "case call 'erlang':'element'(2, ",
             v.clone(),
@@ -560,8 +546,6 @@ impl CoreErlangGenerator {
             v,
             ") of ",
             "<'beamtalk_supervisor'> when 'true' -> ",
-            class_check.clone(),
-            " <'beamtalk_supervisor_new'> when 'true' -> ",
             class_check,
             " <",
             leaf::var(no_match_tag),
@@ -580,7 +564,7 @@ impl CoreErlangGenerator {
     /// `Tuple` matches any Erlang tuple **except** the reserved 4-tuple
     /// shapes this compiler uses internally for actor references
     /// (`{'beamtalk_object', ...}`) and supervisor references
-    /// (`{'beamtalk_supervisor' | 'beamtalk_supervisor_new', ...}`) —
+    /// (`{'beamtalk_supervisor', ...}`) —
     /// without this exclusion, a live actor/supervisor reference is *also*
     /// a plain Erlang tuple structurally, so `x :: Tuple` would incorrectly
     /// match it too. (`Supervisor`/`DynamicSupervisor` subclasses
@@ -611,8 +595,6 @@ impl CoreErlangGenerator {
             "<'beamtalk_object'> when 'true' -> ",
             rest.clone(),
             " <'beamtalk_supervisor'> when 'true' -> ",
-            rest.clone(),
-            " <'beamtalk_supervisor_new'> when 'true' -> ",
             rest.clone(),
             " <",
             leaf::var(not_reserved),

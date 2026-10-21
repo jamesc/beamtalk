@@ -23,6 +23,7 @@ fn locals_less_state_acc_loop(reason: StateAccFallbackReason) -> Vec<ThreadedStm
         threads: Vec::new(),
         counter: None,
         condition: Vec::new(),
+        condition_families: Vec::new(),
         condition_value: ValueRef::Literal("'true'"),
         continue_arm: Document::Str("<opaque continue arm>"),
         body: Vec::new(),

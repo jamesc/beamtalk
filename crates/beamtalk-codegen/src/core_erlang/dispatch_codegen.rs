@@ -350,7 +350,6 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        self.adr0137_note_send(receiver, selector, receiver.span());
         // Special case: super message send
         // Super calls invoke the superclass implementation
         if matches!(receiver, Expression::Super(_)) {
@@ -550,10 +549,7 @@ impl CoreErlangGenerator {
     ///
     /// # Dispatch Strategy
     ///
-    /// - **Self-sends in actor context** (`self someMethod!`): Calls `safe_dispatch` directly
-    ///   but discards both the result and any state update — fire-and-forget semantics
-    ///   within the same process.
-    /// - **All other sends**: Routes through `beamtalk_message_dispatch:cast/3`, which
+    /// - **All sends, including `self someMethod!`** (BT-3998): Routes through `beamtalk_message_dispatch:cast/3`, which
     ///   extracts the actor PID and calls `beamtalk_actor:cast_send/3`. Non-actor
     ///   receivers are silently ignored.
     ///
@@ -564,53 +560,11 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
-        // Self-sends with ! in actor context: direct dispatch, discard result.
-        // Only use direct safe_dispatch when NOT inside a block (block_depth == 0).
-        // Blocks may execute in a different process (Timer callbacks, cross-actor callbacks),
-        // so self-cast sends inside blocks must route through the actor mailbox via
-        // beamtalk_message_dispatch:cast/3 to reach the actor's gen_server process.
-        if self.context == CodeGenContext::Actor && self.block_depth == 0 {
-            if let Expression::Identifier(id) = receiver {
-                if id.name == "self" {
-                    return self.generate_self_cast_send(selector, arguments);
-                }
-            }
-        }
-
-        // Non-self cast sends (and self-casts inside blocks): route through
-        // beamtalk_message_dispatch:cast/3
+        // Every cast, including `self foo!` (BT-3998), routes through
+        // beamtalk_message_dispatch:cast/3 to the receiver's mailbox. A
+        // self-cast therefore lands after the current message (what `!`
+        // means), instead of running now and dropping its State.
         self.generate_runtime_cast(receiver, selector, arguments)
-    }
-
-    /// Generates a self-cast send in actor context.
-    ///
-    /// Calls `safe_dispatch` synchronously but discards the result (and any state
-    /// mutation from the callee). Returns `'ok'` as the expression value.
-    ///
-    /// # Generated Code
-    ///
-    /// ```erlang
-    /// let _Cast0 = call 'module':'safe_dispatch'('selector', [Args], State) in 'ok'
-    /// ```
-    fn generate_self_cast_send(
-        &mut self,
-        selector: &MessageSelector,
-        arguments: &[Expression],
-    ) -> Result<Document<'static>> {
-        let selector_atom = selector.name().to_string();
-        let discard_var = self.fresh_temp_var("Cast");
-        let current_state = self.current_state_var();
-        let args_doc = self.capture_argument_list_doc(arguments)?;
-
-        let doc = docvec![
-            "let ",
-            leaf::var(discard_var),
-            " = ",
-            self.safe_dispatch_call_doc(selector_atom, args_doc, current_state),
-            " in 'ok'",
-        ];
-
-        Ok(doc)
     }
 
     /// Generates unified runtime cast via `beamtalk_message_dispatch:cast/3`.
@@ -1096,12 +1050,6 @@ impl CoreErlangGenerator {
         if self.context == CodeGenContext::Actor {
             if let Expression::Identifier(id) = receiver {
                 if id.name == "self" {
-                    // BT-4007 (ADR 0137 Phase 0 prototype): a closure's self-send
-                    // is a message to the actor (`sync_send/3`, Layer 1 at home),
-                    // not a dispatch against the closure's captured `State`.
-                    if self.adr0137_in_cell_closure() {
-                        return Ok(None);
-                    }
                     let doc = self.generate_discarding_self_dispatch(selector, arguments)?;
                     return Ok(Some(doc));
                 }
@@ -1835,32 +1783,6 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// BT-4007 (ADR 0137 Phase 0 prototype): whether the live-state cell
-    /// model is on for the code being compiled — the flag, in an actor
-    /// instance method (a class method threads no instance `State`).
-    pub(super) fn adr0137_cells(&self) -> bool {
-        beamtalk_core::adr0137_proto::adr0137_proto_enabled()
-            && self.context == CodeGenContext::Actor
-            && !self.in_class_method()
-    }
-
-    /// BT-4007: inside a Tier 1 actor closure under the cell model — the place
-    /// its field reads, field writes and self-sends go through the cell.
-    pub(super) fn adr0137_in_cell_closure(&self) -> bool {
-        self.adr0137_cells()
-            && self.block_depth > 0
-            && self.closure_drops_state
-            && self.adr0137_cell_closure
-    }
-
-    /// BT-4007: the Core Erlang variable naming the actor's `#beamtalk_object{}`
-    /// in an instance method (`Self`, the `dispatch/4` parameter).
-    pub(super) fn adr0137_self_var(&self) -> String {
-        self.lookup_var("self")
-            .cloned()
-            .unwrap_or_else(|| "Self".to_string())
-    }
-
     /// Whether the code being compiled is inside an actor closure that cannot
     /// hand a dispatch's returned `State` back (a Tier 1 `fun`): the one
     /// condition [`Self::closure_self_dispatch_state_guard`] applies under,
@@ -1973,36 +1895,6 @@ impl CoreErlangGenerator {
 
             // Capture arguments via bridge (ADR 0018 Phase 0)
             let args_doc = self.capture_argument_list_doc(arguments)?;
-
-            // BT-4007 (ADR 0137 Phase 0 prototype): a self-send from a Tier 1
-            // actor closure is an ordinary message to the actor. At home
-            // `sync_send/3` takes its Layer 1 path (`self_dispatch/2`) on the
-            // live cell and writes the callee's state back to it; away it is a
-            // `gen_server:call`. The closure's own `State` is unchanged, so the
-            // pair it answers carries the version it was dispatched against and
-            // the BT-3936 guard has nothing to raise.
-            if self.adr0137_in_cell_closure() {
-                let _ = self.next_state_var();
-                let self_var = self.adr0137_self_var();
-                let doc = docvec![
-                    "let ",
-                    leaf::var(dispatch_var.clone()),
-                    " = let ",
-                    leaf::var(result_var.clone()),
-                    " = call 'beamtalk_message_dispatch':'send'(",
-                    leaf::var(self_var),
-                    ", ",
-                    leaf::atom(selector_atom_for_error),
-                    ", [",
-                    args_doc,
-                    "]) in {",
-                    leaf::var(result_var),
-                    ", ",
-                    leaf::var(dispatch_state),
-                    "} in ",
-                ];
-                return Ok((doc, dispatch_var));
-            }
 
             // Build the dispatch call (varies by sealed optimization level)
             let call_doc = if self.is_class_sealed() {

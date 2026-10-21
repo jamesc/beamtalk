@@ -320,43 +320,10 @@ pub fn generate_module_with_warnings(
 
     generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);
 
-    adr0137_dump_stats(&generator);
-
     Ok(GeneratedModule {
         code: doc.to_pretty_string(),
         warnings: generator.codegen_warnings,
     })
-}
-
-/// BT-4007 (ADR 0137 Phase 0 prototype): appends this module's bracket and
-/// unbracketed-send counts to the file `BEAMTALK_ADR0137_STATS` names. A no-op
-/// when the variable is unset or the module has no actor-instance sends.
-fn adr0137_dump_stats(generator: &CoreErlangGenerator) {
-    use std::io::Write as _;
-    if generator.adr0137_user_sends == 0 && generator.adr0137_brackets == 0 {
-        return;
-    }
-    let Some(path) = std::env::var_os("BEAMTALK_ADR0137_STATS") else {
-        return;
-    };
-    let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    else {
-        return;
-    };
-    let module_name = &generator.module_name;
-    let _ = writeln!(
-        file,
-        "MODULE\t{module_name}\tbrackets={}\tuser_sends={}\tunbracketed={}",
-        generator.adr0137_brackets,
-        generator.adr0137_user_sends,
-        generator.adr0137_unbracketed.len()
-    );
-    for send in &generator.adr0137_unbracketed {
-        let _ = writeln!(file, "UNBRACKETED\t{module_name}\t{send}");
-    }
 }
 
 /// Flattens `uses:` on a clone of `module` for the self-sufficient path
