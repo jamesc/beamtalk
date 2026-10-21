@@ -226,6 +226,7 @@ mod protocol_registration_conformance;
 mod recv_type;
 mod sibling_snapshot;
 mod supervisor;
+mod synced_call_sites_corpus;
 mod synced_calls;
 mod threaded_locals;
 mod threaded_locals_agreement;

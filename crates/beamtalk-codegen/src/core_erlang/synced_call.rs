@@ -65,6 +65,110 @@ pub(in crate::core_erlang) struct UnbracketedSend {
     pub(in crate::core_erlang) selector: String,
     pub(in crate::core_erlang) region: UserCodeRegion,
     pub(in crate::core_erlang) at: Span,
+    /// Count mode only: the codegen site (`file:function`) that compiled the
+    /// call outside a `ThreadedIr` frame, and the codegen frames above it.
+    pub(in crate::core_erlang) site: GapSite,
+}
+
+/// Where in the code generator a gap was compiled: [`capture_site`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(in crate::core_erlang) struct GapSite {
+    /// `file:function` of the nearest lowering frame that is not generic plumbing.
+    pub(in crate::core_erlang) site: String,
+    /// The codegen frames, innermost first, for choosing the plumbing list.
+    pub(in crate::core_erlang) chain: String,
+}
+
+/// One gap as the invariant probe sees it (`tests/synced_call_sites.rs`).
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub(in crate::core_erlang) struct SiteRecord {
+    pub(in crate::core_erlang) site: String,
+    pub(in crate::core_erlang) chain: String,
+    pub(in crate::core_erlang) selector: String,
+    pub(in crate::core_erlang) region: UserCodeRegion,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test-only fault: no call is bracketed (every user-code call is a gap), so
+    /// the invariant probe can be shown to see a missing bracket.
+    pub(in crate::core_erlang) static FAULT_NO_BRACKETS: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Every gap a count-mode compile on this thread recorded.
+    pub(in crate::core_erlang) static SITE_LOG: std::cell::RefCell<Vec<SiteRecord>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Frames that are plumbing every expression passes through, never the owning
+/// lowering: skipped when naming a gap's site.
+const PLUMBING_FRAMES: &[&str] = &[
+    "capture_site",
+    "record_gap",
+    "note_send",
+    "note_self_dispatch",
+    "generate_message_send",
+    "generate_expression",
+    "generate_expression_inner",
+    "expression_doc",
+    "generate_runtime_dispatch",
+    "generate_binary_op",
+    "guarded_op_doc",
+];
+
+/// The `file:function` site of the code generator frame that compiled the
+/// current call (count mode; a backtrace per gap is too slow for anything else).
+pub(in crate::core_erlang) fn capture_site() -> GapSite {
+    let text = std::backtrace::Backtrace::force_capture().to_string();
+    let mut frames: Vec<(String, String)> = Vec::new();
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        let Some((index, symbol)) = trimmed.split_once(": ") else {
+            continue;
+        };
+        if !index.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        // The frame's source line follows its symbol; only code generator frames count.
+        let Some(at) = lines
+            .peek()
+            .and_then(|next| next.trim_start().strip_prefix("at "))
+        else {
+            continue;
+        };
+        let path = at.rsplitn(3, ':').last().unwrap_or(at);
+        let Some((_, file)) = path.split_once("src/core_erlang/") else {
+            continue;
+        };
+        let function = symbol
+            .split('<')
+            .next()
+            .unwrap_or(symbol)
+            .trim()
+            .to_string();
+        frames.push((file.to_string(), function));
+    }
+    let chain = frames
+        .iter()
+        .take(14)
+        .map(|(file, function)| format!("{file}:{function}"))
+        .collect::<Vec<_>>()
+        .join(" < ");
+    let site = frames
+        .iter()
+        .find(|(_, function)| {
+            !PLUMBING_FRAMES.contains(&function.as_str())
+                && !function.starts_with('{')
+                && !function.starts_with("with_")
+        })
+        .map(|(file, function)| format!("{file}:{function}"))
+        .unwrap_or_default();
+    GapSite { site, chain }
 }
 
 /// The generator's bracket bookkeeping.
@@ -284,6 +388,19 @@ impl CoreErlangGenerator {
         match send_user_code(receiver, selector, arguments) {
             SendUserCode::Never | SendUserCode::Inlined => UserCodeCall::No,
             SendUserCode::MayRun => UserCodeCall::Yes,
+            // A fold the block analysis threads is lowered in place (its
+            // statements are bracketed where they are compiled); one it does
+            // not is `lists:foreach(Closure, List)` with a send fallback: a call.
+            SendUserCode::InlinedOrClosureCall => {
+                if arguments.iter().any(|a| match a.unwrap_parens() {
+                    Expression::Block(block) => self.loop_body_has_carried_mutations(block),
+                    _ => false,
+                }) {
+                    UserCodeCall::No
+                } else {
+                    UserCodeCall::Yes
+                }
+            }
         }
     }
 
@@ -484,10 +601,16 @@ impl CoreErlangGenerator {
     /// Records one gap.
     pub(in crate::core_erlang) fn record_gap(&mut self, selector: String, at: Span) {
         let region = self.user_code_region();
+        let site = if self.synced.mode == SyncMode::Count {
+            capture_site()
+        } else {
+            GapSite::default()
+        };
         self.synced.gaps.push(UnbracketedSend {
             selector,
             region,
             at,
+            site,
         });
     }
 
@@ -500,7 +623,18 @@ impl CoreErlangGenerator {
         let gaps = std::mem::take(&mut self.synced.gaps);
         match self.synced.mode {
             SyncMode::Off => {}
-            SyncMode::Count => self.write_synced_calls_report(&gaps),
+            SyncMode::Count => {
+                #[cfg(test)]
+                SITE_LOG.with(|log| {
+                    log.borrow_mut().extend(gaps.iter().map(|g| SiteRecord {
+                        site: g.site.site.clone(),
+                        chain: g.site.chain.clone(),
+                        selector: g.selector.clone(),
+                        region: g.region,
+                    }));
+                });
+                self.write_synced_calls_report(&gaps);
+            }
             SyncMode::Enforce => {
                 let errors: Vec<VerifyError> = gaps
                     .iter()
@@ -545,10 +679,12 @@ impl CoreErlangGenerator {
         for gap in gaps {
             let _ = writeln!(
                 file,
-                "GAP\t{module}\t{}\t{}\t{}",
+                "GAP\t{module}\t{}\t{}\t{}\t{}\t{}",
                 gap.region.label(),
                 gap.selector,
-                gap.at.start()
+                gap.at.start(),
+                gap.site.site,
+                gap.site.chain
             );
         }
     }
@@ -605,6 +741,10 @@ impl CoreErlangGenerator {
         if !self.synced_calls_active() || self.in_cell_resident_closure() {
             return false;
         }
+        #[cfg(test)]
+        if FAULT_NO_BRACKETS.with(std::cell::Cell::get) {
+            return false;
+        }
         if self.precompiled_subexprs_contains(inner) {
             return false;
         }
@@ -639,6 +779,7 @@ impl CoreErlangGenerator {
         tv: ThreadedValue,
         expr: &Expression,
         frame: FrameId,
+        version_before: usize,
     ) -> ThreadedValue {
         let span = expr.unwrap_parens().span();
         let ValueRef::Doc(call) = tv.value else {
@@ -660,7 +801,28 @@ impl CoreErlangGenerator {
             };
         }
         let mut prelude = tv.prelude;
-        let store = VersionedVar::new(VersionPrefix::State, self.state_version(), frame);
+        // The `State` the call runs against is the one the prelude left, not the
+        // counter: the call's own operands may have minted versions inside a
+        // closed document (a generic dispatch closes its operands' brackets into
+        // the call), and those are not in scope at the store.
+        let stored_version = prelude
+            .iter()
+            .rev()
+            .find_map(|stmt| {
+                // A `Bind`, a bracket's reload, or a local rebind that steps the
+                // frame's `State` map (`MapPut`).
+                let target = match stmt {
+                    ThreadedStmt::LocalRebind { lowering, .. } => {
+                        lowering.version_step().map(|(_, target)| target)
+                    }
+                    other => other.version_step().map(|(target, _, _)| target),
+                };
+                target
+                    .filter(|t| t.prefix == VersionPrefix::State && t.frame == frame)
+                    .map(|t| t.version)
+            })
+            .unwrap_or(version_before);
+        let store = VersionedVar::new(VersionPrefix::State, stored_version, frame);
         self.next_state_var();
         let load = VersionedVar::new(VersionPrefix::State, self.state_version(), frame);
         let result = self.fresh_temp_var("Synced");

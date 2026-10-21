@@ -957,7 +957,10 @@ fn send_may_run_user_code(
         };
         return !(numeric_literal(receiver) && arguments.first().is_some_and(numeric_literal));
     }
-    send_user_code(receiver, selector, arguments) == SendUserCode::MayRun
+    matches!(
+        send_user_code(receiver, selector, arguments),
+        SendUserCode::MayRun | SendUserCode::InlinedOrClosureCall
+    )
 }
 
 /// Adds all variable names bound by `pattern` to `ctx.local_bindings` and
@@ -4143,6 +4146,8 @@ mod tests {
             "[a + b]",
             "[x < 1]",
             "[xs do: blk]",
+            // A literal-block collection message may be a closure handed to a runtime fold.
+            "[xs do: [:e | e]]",
         ] {
             assert!(analyzed(src).has_user_code_sends, "{src}");
         }
@@ -4154,7 +4159,6 @@ mod tests {
             "[x isNil]",
             "[x == y]",
             "[x ifTrue: [1] ifFalse: [2]]",
-            "[xs do: [:e | e]]",
             "[1 + 2]",
             "[self foo]",
             "[super foo]",

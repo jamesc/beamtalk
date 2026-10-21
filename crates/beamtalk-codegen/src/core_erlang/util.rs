@@ -339,9 +339,10 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         // ADR 0137: with the flag on, a call that may run user code is bracketed.
         if let Some(window) = self.open_sync_window(expr) {
+            let version_before = self.state_version();
             let tv = self.threaded_expression_core(expr, frame);
             self.close_sync_window(window);
-            return Ok(self.synced_call_value(tv?, expr, frame));
+            return Ok(self.synced_call_value(tv?, expr, frame, version_before));
         }
         self.threaded_expression_core(expr, frame)
     }

@@ -632,6 +632,14 @@ pub enum SendUserCode {
     /// inlined `do:`, `on:do:`, a literal block's `value`, ...). It is not a
     /// call; the sends in its blocks are classified where they are compiled.
     Inlined,
+    /// A collection message with a literal block: lowered in place as a
+    /// fold when its block threads `State`, but otherwise handed to a runtime
+    /// helper (`lists:foreach`, `lists:map`, ...) with the block as a closure,
+    /// which runs in this process (and falls back to a real send for a
+    /// receiver that is not a list). Whether it is a call is the code
+    /// generator's to judge (it knows whether the fold is threaded); the
+    /// block analysis counts it, conservatively, as one.
+    InlinedOrClosureCall,
     /// Anything else: bracket it. This is the default (ADR 0137 §2): a
     /// primitive that takes a block or can dispatch to user code for some
     /// argument, a non-inlined `value`, `perform:`, a send to an unknown or
@@ -685,10 +693,10 @@ pub fn send_user_code(
     // Collection messages: inlined as a fold when the callable is a literal block.
     if COLLECTION_KEYWORD_SELECTORS.contains(&name) {
         return match opaque_fold_callable_arg(name, arguments) {
-            Some(callable) if is_block(callable) => SendUserCode::Inlined,
+            Some(callable) if is_block(callable) => SendUserCode::InlinedOrClosureCall,
             // `eachWithIndex:`/`do:separatedBy:`/... take their blocks by position.
             None if !arguments.is_empty() && arguments.iter().all(is_block) => {
-                SendUserCode::Inlined
+                SendUserCode::InlinedOrClosureCall
             }
             _ => SendUserCode::MayRun,
         };
@@ -1324,14 +1332,24 @@ mod tests {
             "[x] whileTrue: [y]",
             "5 timesRepeat: [y]",
             "1 to: 3 do: [:i | i]",
-            "xs do: [:e | e]",
-            "xs inject: 0 into: [:a :e | a]",
             "[1] value",
             "[:a | a] value: 1",
             "[x] on: Error do: [:e | 0]",
             "[x] ensure: [y]",
         ] {
             assert_eq!(classify(src), SendUserCode::Inlined, "{src}");
+        }
+    }
+
+    #[test]
+    fn a_collection_message_with_a_literal_block_is_inlined_or_a_closure_call() {
+        for src in [
+            "xs do: [:e | e]",
+            "xs inject: 0 into: [:a :e | a]",
+            "xs collect: [:e | e]",
+            "d keysAndValuesDo: [:k :v | v]",
+        ] {
+            assert_eq!(classify(src), SendUserCode::InlinedOrClosureCall, "{src}");
         }
     }
 

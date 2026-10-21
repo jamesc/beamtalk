@@ -133,27 +133,32 @@ fn a_block_body_called_through_a_loop_is_bracketed_in_the_loop_frame() {
     assert_eq!(enforce_report(src), None);
 }
 
-// PIN-BUG BT-4020: the argument of a `value:` sent to a literal block that
-// writes a captured local (`generate_block_value_inline_with_mutations`) is
-// compiled outside the producers that bracket, so a call in it is reported as
-// an unbracketed user-code send. The owning node is that inlined block-value
-// lowering; fixing it flips this pin.
 #[test]
-fn pin_a_call_in_an_inlined_block_values_argument_is_an_unbracketed_send() {
+fn a_call_in_an_inlined_block_values_argument_is_bracketed() {
+    // The argument of a `value:` sent to a literal block that writes a captured
+    // local is compiled in the construct's own statement sequence (BT-4020).
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  run: a =>\n    loc := 0.\n    [:p | loc := p] value: a < a.\n    loc\n";
-    let report = enforce_report(src).expect("the gap is reported");
-    assert!(
-        report.contains("UnbracketedUserCodeSend") && report.contains("selector: \"<\""),
-        "{report}"
-    );
+    assert_eq!(enforce_report(src), None);
+    let on = compile(src, true);
+    assert!(on.contains("let _Synced"), "{on}");
+}
+
+#[test]
+fn a_loop_with_a_non_literal_body_is_a_call_not_a_construct_tuple() {
+    let src = "Actor subclass: Probe\n  state: n = 0\n\n  run: a with: body =>\n    [a] whileTrue: body printString.\n    self.n\n";
+    assert_eq!(enforce_report(src), None);
 }
 
 #[test]
 fn a_cast_in_a_fold_body_does_not_make_the_fold_threaded() {
     // A cast posts to a mailbox: it is no call into user code, so the fold
-    // keeps its plain closure (and a `Set` receiver keeps working).
+    // keeps its plain closure (and a `Set` receiver keeps working). Handing a
+    // closure to the runtime fold is itself a call, bracketed as one.
     let src = "Actor subclass: Room\n  state: members = Set new\n\n  say: text =>\n    self.members do: [:m | m receiveMessage: text!]\n";
-    assert_eq!(compile(src, true), compile(src, false));
+    let on = compile(src, true);
+    assert!(!on.contains("StateAcc"), "{on}");
+    assert!(on.contains("let _Synced"), "{on}");
+    super::assert_compiles_through_erlc("test", &on);
 }
 
 #[test]
@@ -177,4 +182,16 @@ fn a_state_default_with_a_collection_op_has_no_state_to_thread() {
     let src = "Actor subclass: Probe\n  state: items = (#(1, 2, 3) collect: [:x | x printString])\n\n  run => self.items\n";
     assert_eq!(compile(src, true), compile(src, false));
     super::assert_compiles_through_erlc("test", &compile(src, true));
+}
+
+#[test]
+fn a_bracket_around_a_call_whose_operand_is_bracketed_inside_a_closed_document_stores_the_prelude_version()
+ {
+    // `ifTrue:ifFalse:` with a non-literal argument is a real send; its operand
+    // `[^0] printString` is bracketed inside the dispatch's closed document, so
+    // the outer store must name the `State` the method has, not the inner version.
+    let src = "Actor subclass: Probe\n  state: n = 0\n\n  run: a =>\n    x := a ifTrue: [1] ifFalse: [^0] printString.\n    self.n\n";
+    let on = compile(src, true);
+    super::assert_compiles_through_erlc("test", &on);
+    assert_eq!(enforce_report(src), None);
 }

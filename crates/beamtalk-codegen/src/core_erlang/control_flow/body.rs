@@ -2068,7 +2068,9 @@ impl CoreErlangGenerator {
                     // numeric), so the raw value must not become the accumulator.
                     let threads_here = has_mutations
                         || has_plain_lets
-                        || (self.synced_calls_active() && !plan.use_tuple_acc);
+                        || (self.synced_calls_active()
+                            && !plan.use_tuple_acc
+                            && !Self::fold_statement_gate_split());
                     if threads_here {
                         let doc = self.bind_closed_expr_doc(expr, "_")?;
                         stmts.push(ThreadedStmt::Statement(doc, span));
