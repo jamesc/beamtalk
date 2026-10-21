@@ -167,15 +167,15 @@ functions that call OTP APIs from the caller's process context.
 -define(INSTANCES_GROUP, beamtalk_supervisor_instances).
 
 %% BT-4033: the hint for a supervised actor child whose `initialize` did not
-%% return within the 5 s start timeout.
--define(ACTOR_CHILD_INIT_TIMEOUT_HINT, <<
-    "initialize did not return within 5 s. A supervisor waits for each actor "
+%% return within the start timeout (`?BT_INITIALIZE_TIMEOUT`, formatted in).
+-define(ACTOR_CHILD_INIT_TIMEOUT_HINT_FMT,
+    "initialize did not return within ~b ms. A supervisor waits for each actor "
     "child's initialize, so a synchronous call from initialize to the child's "
     "supervisor or any ancestor (which:, childWithId:, children, a send to a "
     "sibling not yet started), or to the actor or class that is starting the "
     "supervisor or calling startChild, blocks until this timeout (ADR 0135 "
     "hang rule). Move such calls, and slow setup, into a continueWith: step."
->>).
+).
 %% ADR 0135 §2: hint for a configuration method that messaged its own
 %% supervisor (OTP `calling_self`) while it was still in `init/1`.
 -define(CALLING_SELF_HINT, <<
@@ -2708,7 +2708,9 @@ actor_child_start_error(ChildModule, timeout) ->
             instantiation_error,
             child_class_name(ChildModule),
             initialize,
-            ?ACTOR_CHILD_INIT_TIMEOUT_HINT
+            iolist_to_binary(
+                io_lib:format(?ACTOR_CHILD_INIT_TIMEOUT_HINT_FMT, [?BT_INITIALIZE_TIMEOUT])
+            )
         )};
 actor_child_start_error(_ChildModule, Reason) ->
     %% The stop reason of a raising `initialize` nests the error in an

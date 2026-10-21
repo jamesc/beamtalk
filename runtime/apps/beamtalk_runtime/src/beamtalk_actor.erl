@@ -225,8 +225,9 @@ handle_getValue([], State) ->
 %% the `initialize` step of handle_continue/2.
 -define(BT_INIT_ACK_KEY, '$bt_init_ack').
 
-%% BT-3992: how long a starter waits for `initialize` to finish.
--define(BT_INITIALIZE_TIMEOUT, 5000).
+%% BT-3992: how long a starter waits for `initialize` to finish —
+%% `?BT_INITIALIZE_TIMEOUT` lives in beamtalk.hrl (BT-4033: shared with
+%% `beamtalk_supervisor`'s init-timeout hint).
 
 %% BT-3968: the continuation-request selectors (`Actor>>continueWith:` /
 %% `continueWith:withArguments:`).
