@@ -108,6 +108,14 @@ fn method(prelude: &str, i: usize, body: &str) -> String {
     format!("  probe{i} =>\n{prelude}    n := 3\n    {body}\n    n\n")
 }
 
+/// Every generated row must be well-formed source, so a placeholder slip
+/// cannot turn rows into parser recoveries that pass vacuously.
+fn assert_parses(src: &str) {
+    let (_, diags) =
+        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
+    assert!(diags.is_empty(), "malformed corpus row:\n{src}\n{diags:?}");
+}
+
 fn passes(src: &str) -> bool {
     catch_unwind(AssertUnwindSafe(|| {
         assert_compiles_through_erlc("test", &codegen(src));
@@ -121,6 +129,9 @@ fn passes(src: &str) -> bool {
 fn loop_body_conditional_receiver_corpus_compiles() {
     let rows = rows();
     assert!(rows.len() >= 600, "the corpus has thinned out");
+    for (_, body) in &rows {
+        assert_parses(&format!("{HEADER}{HELPERS}{}", method("", 0, body)));
+    }
     let mut failures = Vec::new();
     for (ctx, prelude) in PRELUDES {
         let methods: Vec<String> = rows
@@ -166,20 +177,21 @@ fn phase0_rejects(src: &str) -> bool {
         })
 }
 
-/// The conditional `C` in value position inside the body statement: an
+/// The conditional `{C}` in value position inside the body statement: an
 /// assigned local, a field write, a self-send argument, the last statement of
-/// a nested block value, and a non-local return.
+/// a nested block value, and a non-local return. (Multi-character
+/// placeholders: a letter would also match receiver text such as `isAlive`.)
 const VALUE_POSITIONS: &[&str] = &[
-    "r := C",
-    "self.f := (C) printString size",
-    "self isAlive: (C) printString size",
-    "x := 0. x := C. x",
-    "(n > 5) ifTrue: [^ C]",
-    // The RHS of a field write and of a destructuring statement (`A` is the
+    "r := {C}",
+    "self.f := ({C}) printString size",
+    "self isAlive: ({C}) printString size",
+    "x := 0. x := {C}. x",
+    "(n > 5) ifTrue: [^ {C}]",
+    // The RHS of a field write and of a destructuring statement (`{P}` is the
     // conditional answering a two-element array): the arm's C6 -> C1 and C9
     // reroutes (`is_conditional_with_sequenced_receiver`).
-    "self.f := C",
-    "#(a, b) := A. self.f := a + b",
+    "self.f := {C}",
+    "#(a, b) := {P}. self.f := a + b",
 ];
 
 /// BT-4000: the conditional in value position (every [`VALUE_POSITIONS`]
@@ -196,8 +208,9 @@ fn loop_body_conditional_receiver_value_positions_compile() {
                 let cond = format!("{receiver} ifTrue: [{arm}. 1] ifFalse: [2]");
                 let pair = format!("{receiver} ifTrue: [{arm}. #(1, 2)] ifFalse: [#(3, 4)]");
                 for (v, wrap) in VALUE_POSITIONS.iter().enumerate() {
-                    let stmt = wrap.replace('C', &cond).replace('A', &pair);
+                    let stmt = wrap.replace("{C}", &cond).replace("{P}", &pair);
                     let m = method("", methods.len(), &lp.replace('S', &stmt));
+                    assert_parses(&format!("{HEADER}{HELPERS}{m}"));
                     if phase0_rejects(&format!("{HEADER}{HELPERS}{m}")) {
                         continue;
                     }
