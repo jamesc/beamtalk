@@ -47,6 +47,10 @@ pub fn core_module(
     attributes: Document<'static>,
     body: Document<'static>,
 ) -> Document<'static> {
+    debug_assert!(
+        !matches!(exports, Document::Nil),
+        "core_module needs a non-empty export list"
+    );
     let module_name = module_name.into();
     docvec![
         "module ",

@@ -105,8 +105,8 @@ pub(crate) fn check_reserved_internal_names(module: &Module, diagnostics: &mut V
 /// `beamtalk_codegen::core_erlang::module_shell`), so this name is reserved.
 pub const MODULE_INFO_FUNCTION: &str = "module_info";
 
-/// Reject a unary instance selector named `module_info` (an explicit method
-/// or a field, whose accessor is one).
+/// Reject a unary instance selector named `module_info` (an explicit method,
+/// a protocol-provided method, or a field, whose accessor is one).
 ///
 /// Value-type and supervisor instance methods, and `Value subclass:` field
 /// getters, compile to an exported function named after the selector, taking
@@ -125,6 +125,16 @@ pub(crate) fn check_reserved_module_info(module: &Module, diagnostics: &mut Vec<
                 .iter()
                 .filter(|standalone| !standalone.is_class_method)
                 .map(|standalone| &standalone.method),
+        )
+        // A protocol's provided (default) methods are flattened into every
+        // class that `uses:` it, after this check runs on the unflattened
+        // module, so they are checked at their definition.
+        .chain(
+            module
+                .protocols
+                .iter()
+                .flat_map(|protocol| protocol.provided_methods.iter())
+                .filter(|method| !method.is_class_method),
         );
     for method in instance_methods {
         if method.selector.arity() == 0 && method.selector.name() == MODULE_INFO_FUNCTION {
@@ -322,6 +332,10 @@ mod tests {
             "Object subclass: Widget\n  run => 1\n\nWidget >> module_info => 2\n",
         );
         assert_eq!(standalone.len(), 1, "{standalone:?}");
+        // A protocol default is flattened into each `uses:` class later.
+        let provided =
+            module_info_diagnostics_for("Protocol define: Tagged\n  module_info -> Integer => 1\n");
+        assert_eq!(provided.len(), 1, "{provided:?}");
     }
 
     #[test]

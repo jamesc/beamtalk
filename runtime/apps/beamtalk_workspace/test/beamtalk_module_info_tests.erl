@@ -10,8 +10,8 @@ OTP tools that call `M:module_info/0,1` work on a node running Beamtalk.
 Covers a stdlib module (`bt@stdlib@*`), a package-qualified class module
 compiled here through the real compiler port and `compile_core_erlang/1`
 (the same path a package build and the REPL loader use), and a `tprof`
-profile over a Beamtalk workload. Before BT-4067 `tprof`'s collect step
-crashed with `undef` on `bt@stdlib@*:module_info(functions)`.
+profile and an `eprof` analysis over a Beamtalk workload. Before BT-4067
+both crashed with `undef` on `M:module_info(functions)` for a `bt@` module.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -49,7 +49,8 @@ module_info_test_() ->
     {setup, fun setup/0, fun teardown/1, [
         {"stdlib module answers module_info/0,1", fun stdlib_module_info/0},
         {"package module answers module_info/0,1", fun package_module_info/0},
-        {"tprof profiles a Beamtalk workload", fun tprof_profiles_workload/0}
+        {"tprof profiles a Beamtalk workload", fun tprof_profiles_workload/0},
+        {"eprof analyses a Beamtalk workload", fun eprof_analyses_workload/0}
     ]}.
 
 stdlib_module_info() ->
@@ -69,11 +70,23 @@ assert_module_info(Module) ->
     ?assertEqual(Module, proplists:get_value(module, Module:module_info())),
     ?assert(lists:member({module_info, 1}, Module:module_info(exports))).
 
+workload() ->
+    Widget = ?PKG_MODULE:new(),
+    [beamtalk_message_dispatch:send(Widget, answer, []) || _ <- lists:seq(1, 50)].
+
+%% eprof:analyze/2 calls M:module_info(functions) on every traced module.
+eprof_analyses_workload() ->
+    {ok, _} = eprof:start(),
+    try
+        {ok, Answers} = eprof:profile([], fun workload/0, {?PKG_MODULE, '_', '_'}),
+        ?assertEqual(lists:duplicate(50, 42), Answers),
+        ?assertEqual(ok, eprof:analyze(total))
+    after
+        eprof:stop()
+    end.
+
 tprof_profiles_workload() ->
-    Workload = fun() ->
-        Widget = ?PKG_MODULE:new(),
-        [beamtalk_message_dispatch:send(Widget, answer, []) || _ <- lists:seq(1, 50)]
-    end,
+    Workload = fun workload/0,
     %% Trace only Beamtalk-compiled modules: tprof's collect step calls
     %% M:module_info(functions) on every traced module, which is what crashed
     %% before BT-4067. Tracing every function on the node would also slow
