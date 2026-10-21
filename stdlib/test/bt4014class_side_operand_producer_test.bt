@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4014: a construct that writes a local, as an argument of a class-side
+// self-send, rebinds the local for the statements after it. It used to fail
+// `erlc` with an unbound `_nN`.
+// Fixture: fixtures/bt4014class_side_operand_producer.bt.
+
+TestCase subclass: Bt4014ClassSideOperandProducerTest
+
+  testRepro => self assert: Bt4014ClassSideOperandProducer probe equals: 0
+
+  testWhileFalse =>
+    self assert: Bt4014ClassSideOperandProducer whileFalseArg equals: 0
+
+  testToDo => self assert: Bt4014ClassSideOperandProducer toDoArg equals: 6
+
+  testDo => self assert: Bt4014ClassSideOperandProducer doArg equals: 3
+
+  testInject =>
+    self assert: Bt4014ClassSideOperandProducer injectArg equals: #[3, 3]
+
+  testConditional =>
+    self assert: Bt4014ClassSideOperandProducer conditionalArg equals: #[7, 0]
+
+  testOnDo => self assert: Bt4014ClassSideOperandProducer onDoArg equals: 4
+
+  testAssignment =>
+    self assert: Bt4014ClassSideOperandProducer assignmentArg equals: #[4, 4]
+
+  testSiblingReadBeforeRebind =>
+    self assert: Bt4014ClassSideOperandProducer secondArgReadsBefore equals: #[#[3, nil], 0]
+
+  testNestedSend =>
+    self assert: Bt4014ClassSideOperandProducer nestedSend equals: 0
+
+  testClassVarWrite =>
+    self assert: Bt4014ClassSideOperandProducer classVarWrite equals: #[7, 7]

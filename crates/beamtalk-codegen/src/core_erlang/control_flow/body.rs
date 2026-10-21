@@ -424,10 +424,14 @@ impl CoreErlangGenerator {
         let has_direct_field_assignments =
             filtered_body.iter().any(|e| self.is_field_assignment(e));
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
+        // BT-4014: the producer sites of this frame's statements, checked
+        // against the lowered body (`ProducerSiteNotThreaded`).
+        let mut producer_sites = Vec::new();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
+            producer_sites.extend(self.frame_producer_sites(expr, false, false));
 
             // A nested loop/fold statement whose own body threads a
             // value-type `Self` mutation must be rejected ahead of every
@@ -484,6 +488,7 @@ impl CoreErlangGenerator {
                 )?;
             }
         }
+        self.verify_frame_producer_sites(&stmts, &producer_sites, filtered_body);
         Ok(stmts)
     }
 
@@ -690,9 +695,18 @@ impl CoreErlangGenerator {
             None
         };
 
+        // BT-4014: the producer sites of this frame's statements, checked
+        // against the lowered body (`ProducerSiteNotThreaded`). None when the
+        // gate-split fault registers no sites (the check it exercises is
+        // `FoldLocalsNotCarried`).
+        let mut producer_sites = Vec::new();
+
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
+            if !gate_split {
+                producer_sites.extend(self.frame_producer_sites(expr, true, false));
+            }
 
             // `expr` is a top-level statement of THIS loop/fold's own body. A
             // nested Letrec loop whose own body threads a value-type `Self`
@@ -1578,7 +1592,30 @@ impl CoreErlangGenerator {
             }
         }
 
+        self.verify_frame_producer_sites(&stmts, &producer_sites, &filtered_body);
         Ok(stmts)
+    }
+
+    /// BT-3939 / BT-4014: reports a producer site of a Letrec or fold body
+    /// (`sites`, read by [`Self::frame_producer_sites`]) with no
+    /// `ConstructTuple` threading its locals at the top level of the lowered
+    /// body `stmts`: a producer compiled inside an opaque statement (a
+    /// class-side self-send's closed `let`, say) whose rebinds every later
+    /// statement of the frame misses.
+    fn verify_frame_producer_sites(
+        &mut self,
+        stmts: &[ThreadedStmt],
+        sites: &[(beamtalk_core::source_analysis::Span, Vec<String>)],
+        body: &[&Expression],
+    ) {
+        let errors = super::super::threaded_ir::verify_producer_sites_threaded(stmts, sites);
+        let at = body.first().map_or_else(Default::default, |e| e.span());
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "loop or fold body's local-threading producer whose rebinds are not spliced into \
+             the body",
+            at,
+        );
     }
 
     // ── Body finalizer helpers (called from lower_foldl_body) ────────────────

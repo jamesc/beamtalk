@@ -160,6 +160,11 @@ pub(super) mod fault {
         /// time; the verifier and `erlc` cannot see a run-time value's shape,
         /// so the corpus's codegen-shape check is what catches it.
         FoldRawTupleUnpack,
+        /// BT-4014: a class-side self-send's arguments are not sequenced, as
+        /// before BT-4014, so a producer in one is compiled inside the send's
+        /// closed argument list and its `LocalRebind`s are scoped there
+        /// (`ProducerSiteNotThreaded` at the method root).
+        ClassSendOperandsInPlace,
     }
 
     thread_local! {
@@ -1598,6 +1603,53 @@ impl CoreErlangGenerator {
             .into_iter()
             .filter(|site| is_loop_body_producer_site(site, &ctx))
             .collect()
+    }
+
+    /// BT-3939 / BT-4014: the producer sites of the frame-body statement
+    /// `stmt` that thread a local, as `(site span, locals)`, for
+    /// [`threaded_ir::verify_producer_sites_threaded`] once the body is built:
+    /// [`Self::body_producer_site_exprs`] narrowed to the sites
+    /// [`Self::producer_site_locals`] names a producer. Read just before
+    /// `stmt` is lowered, so a local an earlier statement bound is live. Empty
+    /// in the REPL, whose producers adopt the bindings map. Shared by the
+    /// Tier 2 block body and the Letrec and fold bodies, so every frame body
+    /// checks its own statements by one rule.
+    pub(super) fn frame_producer_sites(
+        &self,
+        stmt: &Expression,
+        fold: bool,
+        arm: bool,
+    ) -> Vec<(Span, Vec<String>)> {
+        if self.is_repl_mode() {
+            return Vec::new();
+        }
+        self.body_producer_site_exprs(stmt, fold, arm)
+            .into_iter()
+            .filter_map(|site| {
+                self.producer_site_locals(site)
+                    .map(|locals| (site.unwrap_parens().span(), locals))
+            })
+            .collect()
+    }
+
+    /// BT-4014: the locals the construct at the producer site `site` threads
+    /// when it is a local-threading producer there, as
+    /// `ProducerSiteNotThreaded` reads it at every frame: a loop, fold,
+    /// conditional or exception construct ([`Self::producer_locals_at_site`]),
+    /// or a value-position local assignment (BT-3910, whose carrier is a
+    /// `ConstructTuple` at its own span), which threads its outermost target.
+    /// `None` for anything else.
+    pub(super) fn producer_site_locals(&self, site: &Expression) -> Option<Vec<String>> {
+        if let Some(locals) = self.producer_locals_at_site(site.unwrap_parens()) {
+            return Some(locals);
+        }
+        if !self.is_local_assignment_producer(site) {
+            return None;
+        }
+        beamtalk_core::semantic_analysis::block_facts::assignments_outside_blocks(site)
+            .into_iter()
+            .max_by_key(|(_, span)| span.len())
+            .map(|(local, _)| vec![local.to_string()])
     }
 
     /// Runs `f` (a loop or fold body's lowering) with the body's own

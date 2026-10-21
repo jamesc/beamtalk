@@ -492,14 +492,7 @@ impl CoreErlangGenerator {
             // stored block's `StateAcc` is not, and no source reaches a Tier 2
             // body there: a block that writes a captured binding is an ADR 0133
             // error.)
-            if !self.is_repl_mode() {
-                for site in self.body_producer_site_exprs(expr, false, true) {
-                    let site = site.unwrap_parens();
-                    if let Some(locals) = self.producer_locals_at_site(site) {
-                        producer_sites.push((site.span(), locals));
-                    }
-                }
-            }
+            producer_sites.extend(self.frame_producer_sites(expr, false, true));
 
             if self.is_field_assignment(expr) {
                 let _val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;

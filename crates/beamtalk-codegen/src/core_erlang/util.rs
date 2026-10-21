@@ -906,21 +906,43 @@ impl CoreErlangGenerator {
     /// ADR 0131 Phase 2d (BT-3795): the value of a class-variable write is a
     /// sequenced operand site (`sequenced_operand_sites`), so a local-threading
     /// producer in it (`self.n := (xs collect: [...]) size`) is sequenced
-    /// ahead of the write and its prelude spliced before it. Only a write
-    /// that holds a producer is sequenced, so every other class-variable
-    /// write compiles exactly as before.
+    /// ahead of the write and its prelude spliced before it. BT-4014: so are
+    /// the arguments of a same-class self-send (also sequenced operand
+    /// sites). Only an effect that holds a producer is sequenced, so every
+    /// other class-variable write and self-send compiles exactly as before.
     fn class_method_prelude_producer(
         &mut self,
         expr: &Expression,
         frame: FrameId,
     ) -> Result<Option<ThreadedValue>> {
         if self.is_class_side_effect(expr) {
-            let (mut prelude, scope) = match expr {
-                Expression::Assignment { value, .. } if self.statement_has_local_producer(expr) => {
-                    self.sequence_children(&[value.as_ref()], frame)?
-                }
-                _ => (Vec::new(), PrecompiledScope::new()),
-            };
+            // BT-4014: the operands of either kind of effect are sequenced
+            // alike: a class-variable write's value, and a self-send's
+            // arguments (`self take: ([n > 0] whileTrue: [n := n - 1])`). The
+            // effect itself is closed into the `let` below, so a producer left
+            // to compile inside it would scope its `LocalRebind`s there and
+            // every later read of the local would be unbound
+            // (`ProducerSiteNotThreaded`, checked by
+            // `lower_root_statement_with_producer`).
+            // Test-only fault injection: the pre-BT-4014 lowering, which
+            // sequenced a write's value only.
+            #[cfg(test)]
+            let only_writes = super::threaded_expr::fault::active()
+                == Some(super::threaded_expr::fault::LocalRebindFault::ClassSendOperandsInPlace);
+            #[cfg(not(test))]
+            let only_writes = false;
+            let children: Vec<&Expression> =
+                if only_writes && !matches!(expr, Expression::Assignment { .. }) {
+                    Vec::new()
+                } else if self.statement_has_local_producer(expr) {
+                    Self::single_sequenced_child(expr)
+                        .map(|value| vec![value])
+                        .or_else(|| Self::sequenced_send_children(expr))
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+            let (mut prelude, scope) = self.sequence_children(&children, frame)?;
             let doc = self.generate_expression(expr)?;
             self.finish_precompiled_scope(scope)?;
             let result_var = self.fresh_temp_var("Effect");
