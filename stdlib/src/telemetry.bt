@@ -13,8 +13,9 @@
 ///   `#(#myapp, #request, #stop)`. They become the atom list `telemetry` expects.
 /// - **Measurements** are a Dictionary with Symbol keys; **metadata** is any
 ///   Dictionary. Both are passed through unchanged.
-/// - Each method calls the runtime directly (`beamtalk_telemetry`), not the
-///   `(Erlang …)` FFI.
+/// - The class is `native: beamtalk_telemetry`: each method is a
+///   `self delegate` pass-through to the runtime module (ADR 0101), so
+///   wrapped errors name `Telemetry` and the selector.
 ///
 /// `Telemetry` is the application event bus. For actor-dispatch
 /// observability (trace capture, per-method stats, health), see `Tracing`.
@@ -26,7 +27,7 @@
 /// Telemetry span: #(#myapp, #work) metadata: #{} do: [6 * 7]
 /// // => 42
 /// ```
-sealed typed Object subclass: Telemetry
+sealed typed Object subclass: Telemetry native: beamtalk_telemetry
 
   /// Emit one event.
   ///
@@ -41,7 +42,7 @@ sealed typed Object subclass: Telemetry
   /// // => nil
   /// ```
   class sealed execute: eventName :: List(Symbol) measurements: measurements :: Dictionary metadata: metadata :: Dictionary -> Nil =>
-    @primitive "telemetryExecute"
+    self delegate
 
   /// Run `aBlock` inside a span and answer its value.
   ///
@@ -66,7 +67,7 @@ sealed typed Object subclass: Telemetry
   /// // => 7
   /// ```
   class sealed span: eventPrefix :: List(Symbol) metadata: metadata :: Dictionary do: aBlock :: Block(T) -> T =>
-    @primitive "telemetrySpan"
+    self delegate
 
   /// Attach a Beamtalk handler block to one event.
   ///
@@ -97,7 +98,7 @@ sealed typed Object subclass: Telemetry
   /// // => nil
   /// ```
   class sealed attach: handlerId :: Symbol | String to: eventName :: List(Symbol) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
-    @primitive "telemetryAttach"
+    self delegate
 
   /// Attach one handler block to several events (`telemetry:attach_many/4`).
   ///
@@ -112,7 +113,16 @@ sealed typed Object subclass: Telemetry
   /// // => nil
   /// ```
   class sealed attach: handlerId :: Symbol | String toAll: eventNames :: List(List(Symbol)) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
-    @primitive "telemetryAttachMany"
+    self
+      attachMany: handlerId
+      to: eventNames
+      do: handler
+
+  /// The `self delegate` target of `attach:toAll:do:`, which cannot delegate
+  /// itself: its first keyword, `attach`, is already `attach:to:do:`'s
+  /// backing function (`beamtalk_telemetry:attach/3`). Use `attach:toAll:do:`.
+  class internal sealed attachMany: handlerId :: Symbol | String to: eventNames :: List(List(Symbol)) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
+    self delegate
 
   /// Detach a handler. Idempotent: detaching an unknown id answers nil too.
   /// The runtime's own handlers (`Tracing`'s) are refused with `#reserved_name`.
@@ -122,5 +132,4 @@ sealed typed Object subclass: Telemetry
   /// Telemetry detach: #notAttached
   /// // => nil
   /// ```
-  class sealed detach: handlerId :: Symbol | String -> Nil =>
-    @primitive "telemetryDetach"
+  class sealed detach: handlerId :: Symbol | String -> Nil => self delegate

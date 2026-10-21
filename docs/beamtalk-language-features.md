@@ -6251,7 +6251,7 @@ Telemetry detach: #auditMisses
 - The runtime's own handler ids (the ones `Tracing` relies on) are reserved: `attach:` and `detach:` refuse them with `#reserved_name`.
 - Exporters (StatsD, Prometheus, OpenTelemetry) are still attached in Erlang. Attaching from Beamtalk is mainly for tests and in-image consumers.
 
-The methods call the runtime (`beamtalk_telemetry`) directly rather than through the `(Erlang telemetry)` FFI, so an emit costs about 60–100 ns more than a raw `telemetry:execute/3`, against about 13 µs for the FFI spelling.
+`Telemetry` is `native: beamtalk_telemetry`: each method is a `self delegate` pass-through to the runtime module ([`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object)), so a wrapped error names `Telemetry` and the selector. An emit costs about 0.2–0.4 µs more than a raw `telemetry:execute/3` (`docs/development/benchmarks.md`).
 
 ---
 

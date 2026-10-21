@@ -143,3 +143,20 @@ snake_to_class_lossy_for_acronyms_test() ->
 
 snake_to_class_unknown_atom_test() ->
     ?assertEqual(nil, beamtalk_module_name:snake_to_class("zzz_q123_unique_never_an_atom")).
+
+%% BT-4055: eval module names and compiled-code detection share one rule.
+eval_module_names_are_compiled_beamtalk_modules_test() ->
+    ?assertEqual('beamtalk_repl_eval_7', beamtalk_module_name:repl_eval_module(7)),
+    ?assertEqual('beamtalk_inspector_eval_9', beamtalk_module_name:inspector_eval_module(9)),
+    ?assert(
+        beamtalk_module_name:is_compiled_beamtalk_module(beamtalk_module_name:repl_eval_module(7))
+    ),
+    ?assert(
+        beamtalk_module_name:is_compiled_beamtalk_module(
+            beamtalk_module_name:inspector_eval_module(9)
+        )
+    ),
+    ?assert(beamtalk_module_name:is_compiled_beamtalk_module('bt@stdlib@list')),
+    ?assertNot(beamtalk_module_name:is_compiled_beamtalk_module(beamtalk_repl_eval)),
+    ?assertNot(beamtalk_module_name:is_compiled_beamtalk_module(beamtalk_repl_eval_tests)),
+    ?assertNot(beamtalk_module_name:is_compiled_beamtalk_module(beamtalk_erlang_proxy)).
