@@ -1,0 +1,72 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4014: a construct that writes a local, as an argument of a class-side
+// self-send, rebinds the local for the statements after it. It used to fail
+// `erlc` with an unbound `_nN`. One method per construct and operand shape;
+// each answers the local after the send (and, where the send's value matters,
+// what the send answered). The codegen corpus is
+// `class_side_operand_producer_corpus.rs`.
+// See stdlib/test/bt4014class_side_operand_producer_test.bt.
+
+Object subclass: Bt4014ClassSideOperandProducer
+  classState: f = 0
+
+  class take: v => v
+  class take: a with: b => #[a, b]
+
+  // The issue's repro.
+  class probe =>
+    n := 3
+    self take: ([n > 0] whileTrue: [n := n - 1])
+    n
+
+  class whileFalseArg =>
+    n := 3
+    self take: ([n <= 0] whileFalse: [n := n - 1])
+    n
+
+  class toDoArg =>
+    n := 0
+    self take: (1 to: 3 do: [:i | n := n + i])
+    n
+
+  class doArg =>
+    n := 0
+    self take: (#(1, 2) do: [:e | n := n + e])
+    n
+
+  class injectArg =>
+    n := 0
+    r := self take: (#(1, 2) inject: 0 into: [:a :e | n := n + e. a + e])
+    #[r, n]
+
+  class conditionalArg =>
+    n := 3
+    r := self take: (n > 0 ifTrue: [n := 0. 7] ifFalse: [n := 1. 8])
+    #[r, n]
+
+  class onDoArg =>
+    n := 3
+    self take: ([n := n + 1] on: Error do: [:err | n := 0])
+    n
+
+  class assignmentArg =>
+    n := 3
+    r := self take: (n := n + 1)
+    #[r, n]
+
+  class secondArgReadsBefore =>
+    n := 3
+    r := self take: n with: ([n > 0] whileTrue: [n := n - 1])
+    #[r, n]
+
+  class nestedSend =>
+    n := 3
+    self take: (self take: ([n > 0] whileTrue: [n := n - 1]))
+    n
+
+  class classVarWrite =>
+    n := 3
+    self.f := self take: (n := n + 4)
+    #[self.f, n]

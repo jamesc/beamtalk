@@ -255,23 +255,32 @@ fn bt4000_actor_loop_body_self_send_conditional() {
     assert!(passes(&src));
 }
 
-/// PIN-BUG BT-4014: a class-side while loop that writes a local, as the
-/// argument of a class-side self-send, fails `erlc` (an unbound `_nN`) with a
-/// silent verifier, whatever its condition. A fix for BT-4014 flips this pin
-/// and drops [`pinned_bt4014`].
+/// BT-4014 (flips the `PIN-BUG BT-4014` pin): a class-side while loop that
+/// writes a local, as the argument of a class-side self-send, failed `erlc`
+/// (an unbound `_nN`) with a silent verifier: the send's arguments were
+/// compiled inside the closed `let` that pins the send's order, so the loop's
+/// `LocalRebind` was scoped there. The arguments are now sequenced ahead of
+/// the send; the verifier's `ProducerSiteNotThreaded` check at the method root
+/// catches the pre-fix lowering
+/// ([`LocalRebindFault::ClassSendOperandsInPlace`]). The matrix is
+/// `class_side_operand_producer_corpus.rs`.
 #[test]
-fn pin_bug_bt4014_class_side_operand_loop_local_write() {
-    if !super::erlc_available() {
-        return;
-    }
+fn bt4014_class_side_operand_loop_local_write() {
     let src = format!(
         "Object subclass: WhileCarrierProbe\n{HELPERS}  class probe =>\n    n := 3\n    self take: ([n > 0] whileTrue: [n := n - 1])\n    n\n"
     );
     assert_eq!(super::verifier_report(&src, None), None);
-    assert!(
-        !passes(&src),
-        "BT-4014 pin: expected erlc to reject the class-side operand loop"
-    );
+    assert!(passes(&src));
+    #[cfg(debug_assertions)]
+    {
+        let report = super::verifier_report(&src, Some(LocalRebindFault::ClassSendOperandsInPlace));
+        assert!(
+            report
+                .as_deref()
+                .is_some_and(|r| r.contains("ProducerSiteNotThreaded")),
+            "expected ProducerSiteNotThreaded for the pre-fix lowering, got {report:?}"
+        );
+    }
 }
 
 /// BT-4002 (flips the `PIN-BUG BT-4002` pin): a field write in a value-type
@@ -510,7 +519,7 @@ fn field_cases() -> Vec<FieldCase> {
 
 /// What compiling one field-condition method came to.
 #[derive(Debug, PartialEq, Eq)]
-enum FieldCodegen {
+pub(super) enum FieldCodegen {
     /// Codegen succeeded (debug: with a silent verifier).
     Compiles,
     /// Codegen rejected it with a structured (non-internal) error.
@@ -524,11 +533,17 @@ enum FieldCodegen {
 /// Compiles one method of `ctx` (debug: the verifier panics on a finding);
 /// `Err` with the panic or internal error.
 fn field_case_codegen(ctx: &Context, body: &str) -> Result<FieldCodegen, String> {
+    codegen_outcome(&format!("{}{HELPERS}{}", ctx.header, method(ctx, 0, body)))
+}
+
+/// What compiling the module `src` comes to (debug: the verifier panics on a
+/// finding); `Err` with the panic or internal error. Shared with
+/// `class_side_operand_producer_corpus.rs` (BT-4014).
+pub(super) fn codegen_outcome(src: &str) -> Result<FieldCodegen, String> {
     use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
     use beamtalk_core::source_analysis::{DiagnosticCategory, Severity};
-    let src = format!("{}{HELPERS}{}", ctx.header, method(ctx, 0, body));
     let (module, _) =
-        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(&src));
+        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
     let analysis = analyse_full(&module, AnalysisContext::default());
     if analysis.diagnostics.iter().any(|d| {
         d.severity == Severity::Error
@@ -560,15 +575,6 @@ fn field_case_codegen(ctx: &Context, body: &str) -> Result<FieldCodegen, String>
     }
 }
 
-/// PIN-BUG BT-4014: a class-side while loop as the argument of a class-side
-/// self-send (`self take: (LOOP)`, [`POSITIONS`]`[2]`) whose body writes a
-/// local fails `erlc` with an unbound `_nN`, whatever its condition. The rows
-/// are skipped; [`pin_bug_bt4014_class_side_operand_loop_local_write`] pins
-/// it. A fix for BT-4014 flips the pin and drops this skip.
-fn pinned_bt4014(ctx: &Context, case: &FieldCase) -> bool {
-    ctx.class_side && case.name.contains(" position2 ") && case.name.ends_with("`n := n - 1`")
-}
-
 /// The field-condition rows of one context: every row codegens (verifier on)
 /// or is a structured rejection exactly where its body-side twin is one, and
 /// the rows that codegen compile through `erlc` (one run, bisected on failure).
@@ -576,9 +582,6 @@ fn check_field_context(ctx: &Context) -> Vec<String> {
     let mut failures = Vec::new();
     let mut compiled: Vec<(String, String)> = Vec::new();
     for case in field_cases() {
-        if pinned_bt4014(ctx, &case) {
-            continue;
-        }
         let row = field_case_codegen(ctx, &case.source);
         let twin = field_case_codegen(ctx, &case.twin);
         match (row, twin) {

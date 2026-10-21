@@ -160,6 +160,11 @@ pub(super) mod fault {
         /// time; the verifier and `erlc` cannot see a run-time value's shape,
         /// so the corpus's codegen-shape check is what catches it.
         FoldRawTupleUnpack,
+        /// BT-4014: a class-side self-send's arguments are not sequenced, as
+        /// before BT-4014, so a producer in one is compiled inside the send's
+        /// closed argument list and its `LocalRebind`s are scoped there
+        /// (`ProducerSiteNotThreaded` at the method root).
+        ClassSendOperandsInPlace,
     }
 
     thread_local! {

@@ -2730,7 +2730,67 @@ impl CoreErlangGenerator {
     /// rebinds are visible to the statements after it. Returns the variable
     /// bound to the statement's value, or `Ok(None)`, with nothing pushed,
     /// for any other statement.
+    ///
+    /// **Invariant** (BT-4014, every method-root scope this lowers: a class
+    /// method, a value-type method, and so the `TestCase` and plain-object
+    /// instance methods compiled as value types): each local-threading
+    /// producer at a sequenced operand site of `expr` (`sequenced_operand_sites`,
+    /// the set [`Self::with_local_producer_sites`] registers; a value-position
+    /// local assignment there too, BT-3910) has its
+    /// [`ThreadedStmt::ConstructTuple`], threading every local it writes, at
+    /// the top level of the prelude spliced into `stmts`, so its
+    /// `LocalRebind`s are in scope for every later statement of the method.
+    /// A producer compiled inside an operand the statement's own lowering
+    /// closes into a `Document` (a class-side self-send's argument list) is
+    /// scoped inside it and the next read of the local is unbound. Checked
+    /// here as [`VerifyError::ProducerSiteNotThreaded`], the BT-3939 rule a
+    /// Tier 2 block body and the arm and loop frames apply to their own
+    /// statements.
+    ///
+    /// [`VerifyError::ProducerSiteNotThreaded`]: threaded_ir::VerifyError::ProducerSiteNotThreaded
     pub(in crate::core_erlang) fn lower_root_statement_with_producer(
+        &mut self,
+        expr: &Expression,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<Option<String>> {
+        use beamtalk_core::semantic_analysis::block_facts::{
+            assignments_outside_blocks, sequenced_operand_sites,
+        };
+        let sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> =
+            sequenced_operand_sites(expr)
+                .into_iter()
+                .filter_map(|site| {
+                    if let Some(locals) = self.local_producer_locals(site) {
+                        return Some((site.span(), locals));
+                    }
+                    // A value-position local assignment at the site (BT-3910)
+                    // is a producer too: its carrier is a `ConstructTuple` at
+                    // its own span. Its local is the outermost assignment's.
+                    if !self.is_local_assignment_producer(site) {
+                        return None;
+                    }
+                    assignments_outside_blocks(site)
+                        .into_iter()
+                        .max_by_key(|(_, span)| span.len())
+                        .map(|(local, _)| (site.span(), vec![local.to_string()]))
+                })
+                .collect();
+        let start = stmts.len();
+        let result = self.lower_root_statement_with_producer_in_place(expr, stmts)?;
+        if result.is_some() {
+            let errors = threaded_ir::verify_producer_sites_threaded(&stmts[start..], &sites);
+            self.report_threaded_ir_verify_errors(
+                &errors,
+                "method-root statement's local-threading producer whose rebinds are not \
+                 spliced into the method body",
+                expr.span(),
+            );
+        }
+        Ok(result)
+    }
+
+    /// [`Self::lower_root_statement_with_producer`] before its check.
+    fn lower_root_statement_with_producer_in_place(
         &mut self,
         expr: &Expression,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,

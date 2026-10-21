@@ -761,8 +761,18 @@ The proof is `while_condition_carrier_corpus.rs`:
 BUnit coverage is `stdlib/test/bt4002while_field_condition_test.bt`.
 
 A class-side loop that writes a local, as the argument of a class-side
-self-send, fails `erlc` whatever its condition. This predates BT-4002 and is
-BT-4014, pinned in the corpus.
+self-send, failed `erlc` whatever its condition. This predates BT-4002 and was
+BT-4014. The send was bound in the ordered `let` that pins a class-side
+effect's order (ADR 0130), and only a class-variable write's value was
+sequenced ahead of that `let`. A self-send's arguments were compiled inside it,
+so their `LocalRebind`s were scoped there. The arguments are now sequenced the
+same way. `lower_root_statement_with_producer` checks the invariant at every
+method root as `ProducerSiteNotThreaded`, the BT-3939 rule: each producer at a
+statement's operand site, including a value-position assignment, has its
+`ConstructTuple` at the top level of the prelude the statement splices.
+`class_side_operand_producer_corpus.rs` proves it over producer x operand
+position x method context. BUnit coverage is
+`stdlib/test/bt4014class_side_operand_producer_test.bt`.
 
 **Amendment (BT-3910): `CarrierSlot::Whole`.** `CarrierSlot` gains `Whole`:
 `<read>` is the carrier itself, with no `element`/`maps:get`. Every row of the
