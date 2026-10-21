@@ -22,8 +22,9 @@ use crate::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{
     LocalThreadingFamily, conditional_arm_blocks, construct_outer_local_writes,
-    exception_arm_blocks, local_threading_construct, lookup_arm_blocks, repl_arm_producer_sites,
-    repl_evaluated_block, repl_operand_sites, repl_producer_writes,
+    exception_arm_blocks, local_threading_construct, lookup_arm_blocks, match_arm_body_writes,
+    match_arms, match_guard_writes, repl_arm_producer_sites, repl_evaluated_block,
+    repl_operand_sites, repl_producer_writes,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -123,6 +124,10 @@ fn block_spans(statements: &[&Expression]) -> Vec<Span> {
             if let Expression::Block(block) = e {
                 spans.push(block.span);
             }
+            // BT-3947: a `match:` arm body is a frame like a block.
+            if let Some(arms) = match_arms(e) {
+                spans.extend(arms.iter().map(|arm| arm.body.span()));
+            }
         });
     }
     spans
@@ -133,6 +138,11 @@ fn block_spans(statements: &[&Expression]) -> Vec<Span> {
 /// §6 rejection) whose blocks write a binding (the REPL treats every name as
 /// one).
 fn writes_a_binding(site: &Expression) -> bool {
+    // BT-3947: a `match:` whose arm bodies (no guard) write a binding.
+    if let Some(arms) = match_arms(site) {
+        return match_guard_writes(arms, &|_| true).is_empty()
+            && !match_arm_body_writes(arms, &|_| true).is_empty();
+    }
     local_threading_construct(site).is_some_and(|c| {
         c.family != LocalThreadingFamily::Lookup
             && !construct_outer_local_writes(&c, &|_| true).is_empty()

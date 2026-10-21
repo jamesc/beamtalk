@@ -149,7 +149,10 @@ ensure_hierarchy_table_test_() ->
             ({exists, Saved}) ->
                 %% Restore original entries
                 ets:delete_all_objects(beamtalk_class_metadata),
-                ets:insert(beamtalk_class_metadata, Saved)
+                ets:insert(beamtalk_class_metadata, Saved),
+                %% A raw restore bypasses the metadata API, so drop derived
+                %% facts cached against the test rows (BT-4064).
+                beamtalk_class_derived_cache:invalidate()
         end,
         fun() ->
             ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table()),
@@ -176,7 +179,10 @@ inherits_from_test_() ->
         fun(Saved) ->
             %% Restore original state
             ets:delete_all_objects(beamtalk_class_metadata),
-            ets:insert(beamtalk_class_metadata, Saved)
+            ets:insert(beamtalk_class_metadata, Saved),
+            %% A raw restore bypasses the metadata API, so drop derived
+            %% facts cached against the test rows (BT-4064).
+            beamtalk_class_derived_cache:invalidate()
         end,
         [
             {"same class", fun() ->
@@ -227,6 +233,9 @@ direct_subclasses_test_() ->
             ets:delete_all_objects(beamtalk_class_metadata),
             ets:delete_all_objects(beamtalk_class_subclass_index),
             ets:insert(beamtalk_class_metadata, Saved),
+            %% A raw restore bypasses the metadata API, so drop derived
+            %% facts cached against the test rows (BT-4064).
+            beamtalk_class_derived_cache:invalidate(),
             ets:insert(beamtalk_class_subclass_index, SavedIndex)
         end,
         [
@@ -269,6 +278,9 @@ all_subclasses_test_() ->
             ets:delete_all_objects(beamtalk_class_metadata),
             ets:delete_all_objects(beamtalk_class_subclass_index),
             ets:insert(beamtalk_class_metadata, Saved),
+            %% A raw restore bypasses the metadata API, so drop derived
+            %% facts cached against the test rows (BT-4064).
+            beamtalk_class_derived_cache:invalidate(),
             ets:insert(beamtalk_class_subclass_index, SavedIndex)
         end,
         [
@@ -780,7 +792,10 @@ get_method_return_type_test_() ->
                 Pids
             ),
             ets:delete_all_objects(beamtalk_class_metadata),
-            ets:insert(beamtalk_class_metadata, Saved)
+            ets:insert(beamtalk_class_metadata, Saved),
+            %% A raw restore bypasses the metadata API, so drop derived
+            %% facts cached against the test rows (BT-4064).
+            beamtalk_class_derived_cache:invalidate()
         end,
         [
             {"local hit", fun() ->
@@ -1024,7 +1039,10 @@ restart_class_recovery_test_() ->
                     end)
             end,
             ets:delete_all_objects(beamtalk_class_metadata),
-            ets:insert(beamtalk_class_metadata, HierSaved)
+            ets:insert(beamtalk_class_metadata, HierSaved),
+            %% A raw restore bypasses the metadata API, so drop derived
+            %% facts cached against the test rows (BT-4064).
+            beamtalk_class_derived_cache:invalidate()
         end,
         [
             {"kill and restart class", fun() ->

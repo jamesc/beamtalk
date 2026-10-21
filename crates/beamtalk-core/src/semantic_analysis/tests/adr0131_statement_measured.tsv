@@ -6125,7 +6125,7 @@ class	cond	fresh	ifTrue	right
 value	cond	fresh	and	right
 value	cond	fresh	ifNil	right
 value	cond	fresh	ifTrue	right
-actor	top	fresh	groupBy	wrong
+actor	top	fresh	groupBy	right
 class	top	fresh	groupBy	right
 value	top	fresh	groupBy	right
 actor	cond	direct	and	erlc

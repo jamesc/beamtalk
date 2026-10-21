@@ -66,6 +66,7 @@
 //! of that function is for an unrelated purpose (conditionals/exception-handling/match-arm
 //! classification), never a second recheck of the same Actor-body-mutation question.
 
+use super::control_flow::ThreadingPlan;
 use super::threaded_ir::{
     self, BindOp, CarrierSlot, FrameId, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
     ThreadedLocalSlot, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
@@ -132,6 +133,11 @@ pub(super) mod fault {
         /// answers `false`, so the assignment reaches the value-only lowering
         /// (`UnthreadedLocalAssignment`).
         NotAProducer,
+        /// BT-3939: a Tier 2 block body registers no producer sites, so a loop
+        /// or fold statement of it is lowered inside an opaque `let _ = ( ... )`
+        /// instead of as a producer (`ProducerSiteNotThreaded`): the shape that
+        /// answered the pre-loop value of a block-local the loop rebinds.
+        Tier2OpaqueProducers,
         /// BT-4002: a `Letrec` loop takes its families from its body only, as
         /// before BT-4002, so the `Self` a `whileTrue:`/`whileFalse:` condition
         /// writes is not carried (`ConditionFamilyNotCarried`).
@@ -692,6 +698,88 @@ impl CoreErlangGenerator {
         result
     }
 
+    /// BT-3912 (ADR 0133 Phase 3, BT-3947 cell 2): runs `f` (the lowering of a
+    /// plain, Tier 1 closure's body, `body` its statements) with the body as a
+    /// frame of its own: a fresh [`FrameId`] registered as a `MethodBody`-kind
+    /// [`RebindFrame`] that threads no local (so every local a producer in the
+    /// body rebinds is a plain `let`, ADR 0131 §2), [`Self::closure_frame`] set
+    /// so [`Self::current_frame`] answers it, and the body's own statements
+    /// registered as producer sites like an arm frame's
+    /// ([`Self::with_body_producer_sites`] with `arm`: the statement itself when
+    /// it is a loop, fold, conditional or exception construct, and its sequenced
+    /// operand sites). A closure is a separate Core Erlang scope: the frame it is
+    /// written in is not the one its locals are rebound in.
+    ///
+    /// Outside the REPL only: the REPL root adopts its bindings map whole
+    /// (BT-3876), so a closure there keeps its enclosing arm's frame.
+    pub(super) fn with_closure_body_frame<T>(
+        &mut self,
+        body: &[&Expression],
+        f: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if self.is_repl_mode() {
+            return f(self);
+        }
+        self.branch_frame_counter += 1;
+        let frame = FrameId::new(self.branch_frame_counter);
+        let rebind = ThreadingPlan::closure_rebind_frame(frame);
+        let saved = self.closure_frame.replace(frame);
+        // (The value-position assignments of the body are already in the set
+        // the method body installed: it descends into block literals with the
+        // closure rule, `value_position_assignment_spans`.)
+        let out = self.with_rebind_frame(rebind, |this| {
+            this.with_body_producer_sites(body, false, true, f)
+        });
+        self.closure_frame = saved;
+        out
+    }
+
+    /// BT-3912: whether `frame` is the plain closure body being lowered in an
+    /// actor instance method. A construct directly in it seeds its scratch map
+    /// from the `State` the closure captured, not from an empty map: its arms
+    /// may self-send or read a field, which dispatch on (and read) that state
+    /// exactly as the closure's other statements do. The scratch is still
+    /// private (the closure hands back only its value), so nothing adopts it as
+    /// the next `State` ([`Self::conditional_has_private_scratch`]).
+    pub(in crate::core_erlang) fn closure_scratch_continues_state(&self, frame: FrameId) -> bool {
+        self.closure_frame == Some(frame) && self.in_actor_instance_context()
+    }
+
+    /// BT-3912: renders a producer `prelude` lowered in the plain closure body
+    /// frame ([`Self::closure_frame`]) to a `Document` the closure's flat
+    /// statement sequence splices, after verifying it as that frame's body (a
+    /// `MethodBody` node, like [`Self::verified_root_prelude_doc`] does at the
+    /// method root): a closure body has no `Vec<ThreadedStmt>` of its own, so
+    /// this is where its producers' rebinds are checked. Any other prelude is
+    /// rendered by [`Self::threaded_prelude_doc`].
+    pub(super) fn closure_prelude_doc(
+        &mut self,
+        prelude: &[ThreadedStmt],
+        span: Span,
+    ) -> Document<'static> {
+        let Some(frame) = self.closure_frame else {
+            return self.threaded_prelude_doc(prelude);
+        };
+        let body = threaded_ir::backfill_opaque_version_gaps(
+            prelude,
+            frame,
+            &[threaded_ir::VersionPrefix::State],
+        );
+        let wrapper = [ThreadedStmt::MethodBody {
+            frame,
+            threads: Vec::new(),
+            body,
+            span,
+        }];
+        let errors = self.verify_threaded_ir(&wrapper);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "plain closure body local-threading prelude must be well-formed",
+            span,
+        );
+        self.threaded_prelude_doc(prelude)
+    }
+
     /// BT-3910: runs `f` (a body's lowering) with [`Self::value_assign_sites`]
     /// set to the value-position local assignments of `body`, judged by the kind
     /// of body it is ([`Self::root_method_kind`]; `None` for a legacy workspace
@@ -749,6 +837,16 @@ impl CoreErlangGenerator {
         {
             return None;
         }
+        self.producer_locals_at_site(inner)
+    }
+
+    /// [`Self::local_producer_locals`] for an `inner` (paren-unwrapped) that is
+    /// already known to sit at a producer site: the rule that says whether it
+    /// is a producer there and the locals it threads, independent of whether
+    /// the site was registered ([`Self::local_producer_sites`]). The BT-3939
+    /// check of a Tier 2 block body asks it of the sites the core rule names,
+    /// so a body that registered none cannot also hide them from the check.
+    pub(super) fn producer_locals_at_site(&self, inner: &Expression) -> Option<Vec<String>> {
         // BT-3823: the REPL's one rule, for every family.
         if self.is_repl_mode() {
             return self.repl_producer_locals(inner);
@@ -782,6 +880,11 @@ impl CoreErlangGenerator {
         beamtalk_core::semantic_analysis::block_facts::repl_producer_writes(expr, &|name| {
             self.binds_threadable_local(name)
         })?;
+        // BT-3947: a `match:` has no construct of its own; it adopts the
+        // bindings map like a REPL conditional.
+        if beamtalk_core::semantic_analysis::block_facts::match_arms(expr).is_some() {
+            return Some(Vec::new());
+        }
         self.threaded_locals_of(expr).map(|_| Vec::new())
     }
 
@@ -813,10 +916,21 @@ impl CoreErlangGenerator {
             // (`repl_producer_locals`). Reached here only from the inline
             // conditional lowering (`inline_control_flow_producer_with`);
             // `local_producer_locals` answers for the REPL itself.
-            conditional_arm_blocks(expr)?;
+            if beamtalk_core::semantic_analysis::block_facts::match_arms(expr).is_none() {
+                conditional_arm_blocks(expr)?;
+            }
             return self.repl_producer_locals(expr);
         }
         let kind = self.root_method_kind()?;
+        // BT-3947: a `match:` is the same construct with one arm per
+        // `match:` arm, judged by core's one rule over those arms.
+        if let Some(writes) = beamtalk_core::semantic_analysis::block_facts::match_producer_writes(
+            expr,
+            &|name| self.binds_threadable_local(name),
+            kind,
+        ) {
+            return Some(Self::write_names(writes));
+        }
         let arms = conditional_arm_blocks(expr)?;
         if !conditional_arms_lower_as_producer(&arms, kind, &|name| {
             self.binds_threadable_local(name)
@@ -1456,6 +1570,36 @@ impl CoreErlangGenerator {
         out
     }
 
+    /// The producer sites of the loop, fold or arm body statement `stmt`
+    /// (`beamtalk_core`'s `loop_body_producer_sites` narrowed by
+    /// `is_loop_body_producer_site`): the one rule behind
+    /// [`Self::with_body_producer_sites`] and the BT-3939 check that every
+    /// such site a Tier 2 block body threads a local through was lowered as a
+    /// producer.
+    pub(super) fn body_producer_site_exprs<'a>(
+        &self,
+        stmt: &'a Expression,
+        fold: bool,
+        arm: bool,
+    ) -> Vec<&'a Expression> {
+        use beamtalk_core::semantic_analysis::block_facts::{
+            LoopBodyContext, is_loop_body_producer_site, loop_body_producer_sites,
+        };
+        let mut ctx = LoopBodyContext::new(
+            stmt,
+            fold,
+            self.in_fold_frame,
+            self.in_actor_instance_context(),
+        );
+        if arm {
+            ctx = ctx.in_arm();
+        }
+        loop_body_producer_sites(stmt)
+            .into_iter()
+            .filter(|site| is_loop_body_producer_site(site, &ctx))
+            .collect()
+    }
+
     /// Runs `f` (a loop or fold body's lowering) with the body's own
     /// statements as local-producer sites (ADR 0131 Phase 2b): each
     /// statement that is itself a loop or fold, and each sequenced operand
@@ -1474,21 +1618,12 @@ impl CoreErlangGenerator {
         arm: bool,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        use beamtalk_core::semantic_analysis::block_facts::{
-            LoopBodyContext, is_loop_body_producer_site, loop_body_producer_sites,
-        };
-        let in_actor = self.in_actor_instance_context();
         let outer_fold = self.in_fold_frame;
         let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
         for stmt in body {
-            let mut ctx = LoopBodyContext::new(stmt, fold, outer_fold, in_actor);
-            if arm {
-                ctx = ctx.in_arm();
-            }
             sites.extend(
-                loop_body_producer_sites(stmt)
+                self.body_producer_site_exprs(stmt, fold, arm)
                     .into_iter()
-                    .filter(|site| is_loop_body_producer_site(site, &ctx))
                     .map(Expression::span),
             );
         }

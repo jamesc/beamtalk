@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3909 (ADR 0133 Phase 3): the actor `groupBy:` positions that unpack the
-// threaded fold's result and answer the grouped dictionary, which the
-// `GroupByValue` row of `RESIDUAL_DENY_SET` leaves accepted. Every other
-// position of a `groupBy:` whose block binds a local is a compile error until
-// BT-3912 (BT-3897). Asserted in adr0133residuals_test.bt.
+// threaded fold's result and answer the grouped dictionary. Every position of
+// a `groupBy:` whose block binds a local does since BT-3912 (BT-3897: it is a
+// fold producer); `bt3912group_by.bt` covers the rest. Asserted in
+// adr0133residuals_test.bt.
 
 Actor subclass: Adr0133ResidualsActor
   state: groups = nil

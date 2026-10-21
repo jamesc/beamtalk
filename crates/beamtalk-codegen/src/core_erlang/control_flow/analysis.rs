@@ -536,12 +536,57 @@ impl CoreErlangGenerator {
         expr: &Expression,
         threads_value_self: bool,
     ) -> Result<()> {
+        self.reject_unthreadable_value_self_field_write_outside(expr, threads_value_self, &[])
+    }
+
+    /// BT-3912 (BT-3854): [`Self::reject_unthreadable_value_self_field_write`]
+    /// for a statement of a value-type conditional's arm. The arm is a frame whose
+    /// loop and fold producers carry `Self` (`fold_threads_value_self`: the fold's
+    /// result tuple has a `Self` slot the producer's prelude merges into the arm's
+    /// own `Self` chain), so a field write inside the body of such a fold at a
+    /// producer site of the statement is carried and not rejected; one anywhere
+    /// else in the statement still is.
+    pub(in crate::core_erlang) fn reject_unthreadable_value_self_field_write_in_arm(
+        &self,
+        stmt: &Expression,
+    ) -> Result<()> {
+        let carried: Vec<Span> =
+            beamtalk_core::semantic_analysis::block_facts::loop_body_producer_sites(stmt)
+                .into_iter()
+                .filter(|site| self.fold_threads_value_self(site))
+                .filter_map(|site| {
+                    beamtalk_core::semantic_analysis::block_facts::producer_body_block(site)
+                        .map(|(_, body)| body.span)
+                })
+                .collect();
+        self.reject_unthreadable_value_self_field_write_outside(
+            stmt,
+            self.is_field_assignment(stmt),
+            &carried,
+        )
+    }
+
+    /// The walk behind both: a field write inside one of the `carried` spans
+    /// (block bodies whose lowering threads `Self` itself) is not a finding.
+    fn reject_unthreadable_value_self_field_write_outside(
+        &self,
+        expr: &Expression,
+        threads_value_self: bool,
+        carried: &[Span],
+    ) -> Result<()> {
         if self.in_class_method() || !matches!(self.context, CodeGenContext::ValueType) {
             return Ok(());
         }
         let mut found: Option<String> = None;
         beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
             if found.is_some() {
+                return;
+            }
+            let span = e.span();
+            if carried
+                .iter()
+                .any(|c| c.start() <= span.start() && span.end() <= c.end())
+            {
                 return;
             }
             // The loop's own tail call carries a top-level statement write

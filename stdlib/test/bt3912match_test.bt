@@ -1,0 +1,108 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947, closes BT-3875): see stdlib/test/fixtures/bt3912match_{class,value,actor}.bt.
+
+TestCase subclass: Bt3912MatchTest
+
+  testStmt0 =>
+    self assert: #[(Bt3912MatchClass stmt: 1), ((Bt3912MatchValue new) stmt: 1), ((Bt3912MatchActor spawn) stmt: 1)] equals: #[5, 5, 5]
+
+  testStmt1 =>
+    self assert: #[(Bt3912MatchClass stmt: 2), ((Bt3912MatchValue new) stmt: 2), ((Bt3912MatchActor spawn) stmt: 2)] equals: #[9, 9, 9]
+
+  testAssign0 =>
+    self assert: #[(Bt3912MatchClass assign: 1), ((Bt3912MatchValue new) assign: 1), ((Bt3912MatchActor spawn) assign: 1)] equals: #[#[5, 5], #[5, 5], #[5, 5]]
+
+  testAssign1 =>
+    self assert: #[(Bt3912MatchClass assign: 2), ((Bt3912MatchValue new) assign: 2), ((Bt3912MatchActor spawn) assign: 2)] equals: #[#[9, 9], #[9, 9], #[9, 9]]
+
+  testLast0 =>
+    self assert: #[(Bt3912MatchClass last: 1), ((Bt3912MatchValue new) last: 1), ((Bt3912MatchActor spawn) last: 1)] equals: #[5, 5, 5]
+
+  testLast1 =>
+    self assert: #[(Bt3912MatchClass last: 2), ((Bt3912MatchValue new) last: 2), ((Bt3912MatchActor spawn) last: 2)] equals: #[9, 9, 9]
+
+  testOperand0 =>
+    self assert: #[(Bt3912MatchClass operand: 1), ((Bt3912MatchValue new) operand: 1), ((Bt3912MatchActor spawn) operand: 1)] equals: #[#[6, 5], #[6, 5], #[6, 5]]
+
+  testOperand1 =>
+    self assert: #[(Bt3912MatchClass operand: 2), ((Bt3912MatchValue new) operand: 2), ((Bt3912MatchActor spawn) operand: 2)] equals: #[#[1, 0], #[1, 0], #[1, 0]]
+
+  testNotTaken0 =>
+    self assert: #[(Bt3912MatchClass notTaken: 1), ((Bt3912MatchValue new) notTaken: 1), ((Bt3912MatchActor spawn) notTaken: 1)] equals: #[5, 5, 5]
+
+  testNotTaken1 =>
+    self assert: #[(Bt3912MatchClass notTaken: 2), ((Bt3912MatchValue new) notTaken: 2), ((Bt3912MatchActor spawn) notTaken: 2)] equals: #[3, 3, 3]
+
+  testPatternVar0 =>
+    self assert: #[(Bt3912MatchClass patternVar: 4), ((Bt3912MatchValue new) patternVar: 4), ((Bt3912MatchActor spawn) patternVar: 4)] equals: #[4, 4, 4]
+
+  testArray0 =>
+    self assert: #[(Bt3912MatchClass array: #[3, 4]), ((Bt3912MatchValue new) array: #[3, 4]), ((Bt3912MatchActor spawn) array: #[3, 4])] equals: #[7, 7, 7]
+
+  testArray1 =>
+    self assert: #[(Bt3912MatchClass array: 1), ((Bt3912MatchValue new) array: 1), ((Bt3912MatchActor spawn) array: 1)] equals: #[100, 100, 100]
+
+  testTyped0 =>
+    self assert: #[(Bt3912MatchClass typed: 7), ((Bt3912MatchValue new) typed: 7), ((Bt3912MatchActor spawn) typed: 7)] equals: #[7, 7, 7]
+
+  testTyped1 =>
+    self assert: #[(Bt3912MatchClass typed: "s"), ((Bt3912MatchValue new) typed: "s"), ((Bt3912MatchActor spawn) typed: "s")] equals: #[-1, -1, -1]
+
+  testGuard0 =>
+    self assert: #[(Bt3912MatchClass guard: 5), ((Bt3912MatchValue new) guard: 5), ((Bt3912MatchActor spawn) guard: 5)] equals: #[5, 5, 5]
+
+  testGuard1 =>
+    self assert: #[(Bt3912MatchClass guard: 1), ((Bt3912MatchValue new) guard: 1), ((Bt3912MatchActor spawn) guard: 1)] equals: #[1, 1, 1]
+
+  testLoop0 =>
+    self assert: #[(Bt3912MatchClass loop: #(1, 2, 3)), ((Bt3912MatchValue new) loop: #(1, 2, 3)), ((Bt3912MatchActor spawn) loop: #(1, 2, 3))] equals: #[21, 21, 21]
+
+  testInArm0 =>
+    self assert: #[(Bt3912MatchClass inArm: true x: 1), ((Bt3912MatchValue new) inArm: true x: 1), ((Bt3912MatchActor spawn) inArm: true x: 1)] equals: #[5, 5, 5]
+
+  testInArm1 =>
+    self assert: #[(Bt3912MatchClass inArm: false x: 1), ((Bt3912MatchValue new) inArm: false x: 1), ((Bt3912MatchActor spawn) inArm: false x: 1)] equals: #[0, 0, 0]
+
+  testNested0 =>
+    self assert: #[(Bt3912MatchClass nested: 1 y: 1), ((Bt3912MatchValue new) nested: 1 y: 1), ((Bt3912MatchActor spawn) nested: 1 y: 1)] equals: #[11, 11, 11]
+
+  testNested1 =>
+    self assert: #[(Bt3912MatchClass nested: 1 y: 2), ((Bt3912MatchValue new) nested: 1 y: 2), ((Bt3912MatchActor spawn) nested: 1 y: 2)] equals: #[12, 12, 12]
+
+  testNested2 =>
+    self assert: #[(Bt3912MatchClass nested: 2 y: 1), ((Bt3912MatchValue new) nested: 2 y: 1), ((Bt3912MatchActor spawn) nested: 2 y: 1)] equals: #[20, 20, 20]
+
+  testTwoLocals0 =>
+    self assert: #[(Bt3912MatchClass twoLocals: 1), ((Bt3912MatchValue new) twoLocals: 1), ((Bt3912MatchActor spawn) twoLocals: 1)] equals: #[#[1, 0], #[1, 0], #[1, 0]]
+
+  testTwoLocals1 =>
+    self assert: #[(Bt3912MatchClass twoLocals: 2), ((Bt3912MatchValue new) twoLocals: 2), ((Bt3912MatchActor spawn) twoLocals: 2)] equals: #[#[0, 2], #[0, 2], #[0, 2]]
+
+  testArmLoop0 =>
+    self assert: #[(Bt3912MatchClass armLoop: 1), ((Bt3912MatchValue new) armLoop: 1), ((Bt3912MatchActor spawn) armLoop: 1)] equals: #[3, 3, 3]
+
+  testArmLoop1 =>
+    self assert: #[(Bt3912MatchClass armLoop: 2), ((Bt3912MatchValue new) armLoop: 2), ((Bt3912MatchActor spawn) armLoop: 2)] equals: #[0, 0, 0]
+
+  testPlainArm0 =>
+    self assert: #[(Bt3912MatchClass plainArm: 1), ((Bt3912MatchValue new) plainArm: 1), ((Bt3912MatchActor spawn) plainArm: 1)] equals: #[5, 5, 5]
+
+  testPlainArm1 =>
+    self assert: #[(Bt3912MatchClass plainArm: 2), ((Bt3912MatchValue new) plainArm: 2), ((Bt3912MatchActor spawn) plainArm: 2)] equals: #[9, 9, 9]
+
+  testValueArm0 =>
+    self assert: #[(Bt3912MatchClass valueArm: 1), ((Bt3912MatchValue new) valueArm: 1), ((Bt3912MatchActor spawn) valueArm: 1)] equals: #[#[2, 1], #[2, 1], #[2, 1]]
+
+  testValueArm1 =>
+    self assert: #[(Bt3912MatchClass valueArm: 2), ((Bt3912MatchValue new) valueArm: 2), ((Bt3912MatchActor spawn) valueArm: 2)] equals: #[#[0, 0], #[0, 0], #[0, 0]]
+
+  testLastInLoop0 =>
+    self assert: #[(Bt3912MatchClass lastInLoop: #(1, 2, 3)), ((Bt3912MatchValue new) lastInLoop: #(1, 2, 3)), ((Bt3912MatchActor spawn) lastInLoop: #(1, 2, 3))] equals: #[1100, 1100, 1100]
+
+  testReadWrite0 =>
+    self assert: #[(Bt3912MatchClass readWrite: 1), ((Bt3912MatchValue new) readWrite: 1), ((Bt3912MatchActor spawn) readWrite: 1)] equals: #[20, 20, 20]
+
+  testReadWrite1 =>
+    self assert: #[(Bt3912MatchClass readWrite: 2), ((Bt3912MatchValue new) readWrite: 2), ((Bt3912MatchActor spawn) readWrite: 2)] equals: #[11, 11, 11]

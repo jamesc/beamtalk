@@ -56,7 +56,13 @@ value_module_resolution_test_() ->
         {"redefinition and removal of the class are seen by the next send",
             fun resolution_follows_class_redefinition/0},
         {"module-less class resolves without a code_server call",
-            fun module_less_class_makes_no_code_server_call/0}
+            fun module_less_class_makes_no_code_server_call/0},
+        {"warm Value sends do no module-name string work (BT-4064)",
+            fun warm_value_send_does_no_string_work/0},
+        {"exception bit follows a superclass change (BT-4064)",
+            fun exception_bit_follows_superclass_change/0},
+        {"a cached module that is purged and reloaded is re-derived (BT-4064)",
+            fun purged_module_is_rederived/0}
     ]}.
 
 package_value_send_makes_no_code_server_call() ->
@@ -122,6 +128,88 @@ module_less_class_makes_no_code_server_call() ->
         stop_class(Pid)
     end.
 
+warm_value_send_does_no_string_work() ->
+    %% BT-4064: after the first send, resolving a Value class's dispatch module
+    %% is a cache hit — no CamelCase -> snake_case conversion
+    %% (beamtalk_module_name, built on `string`) and no superclass walk.
+    Pid = start_class(?CLASS, ?MOD),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    Duration = #{'$beamtalk_class' => 'Duration', millis => 5},
+    try
+        %% Warm both classes (the first send derives and caches).
+        7 = beamtalk_primitive:send(Self, getX, []),
+        5 = beamtalk_primitive:send(Duration, asMilliseconds, []),
+        {Results, Calls} = calls_during(
+            [
+                {beamtalk_module_name, '_', '_'},
+                {string, '_', '_'},
+                {beamtalk_class_registry, inherits_from, 2},
+                {code_server, call, 1}
+            ],
+            fun() ->
+                [
+                    beamtalk_primitive:send(Self, getX, []),
+                    beamtalk_primitive:responds_to(Self, getX),
+                    beamtalk_primitive:send(Duration, asMilliseconds, []),
+                    beamtalk_primitive:responds_to(Duration, asMilliseconds)
+                ]
+            end
+        ),
+        ?assertEqual([7, true, 5, true], Results),
+        ?assertEqual([], Calls)
+    after
+        stop_class(Pid)
+    end.
+
+exception_bit_follows_superclass_change() ->
+    %% The cached "is this an Exception subclass?" bit depends on the class's
+    %% superclass row; re-parenting the class (merge_identity/5, the hot-reload
+    %% write) must be seen by the next send.
+    Pid = start_class(?CLASS, ?MOD),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    try
+        ?assert(beamtalk_primitive:responds_to(Self, getX)),
+        ?assertNot(beamtalk_class_derived_cache:inherits_from(?CLASS, 'Exception')),
+        ok = beamtalk_class_metadata:merge_identity(?CLASS, ?MOD, [], 'Exception', false),
+        ?assert(beamtalk_class_derived_cache:inherits_from(?CLASS, 'Exception')),
+        %% Now dispatched by bt@stdlib@exception, which has no getX.
+        ?assertNot(beamtalk_primitive:responds_to(Self, getX)),
+        ok = beamtalk_class_metadata:merge_identity(?CLASS, ?MOD, [], none, false),
+        ?assertNot(beamtalk_class_derived_cache:inherits_from(?CLASS, 'Exception')),
+        ?assert(beamtalk_primitive:responds_to(Self, getX))
+    after
+        stop_class(Pid)
+    end.
+
+purged_module_is_rederived() ->
+    %% Code loading is not a metadata write, so the cache re-checks that a
+    %% cached module is still loaded. Purging the class's module (the class
+    %% stays registered) must not leave sends calling into a stale answer, and
+    %% reloading it must bring the warm path back.
+    Pid = start_class(?CLASS, ?MOD),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    try
+        ?assertEqual(7, beamtalk_primitive:send(Self, getX, [])),
+        code:purge(?MOD),
+        true = code:delete(?MOD),
+        code:purge(?MOD),
+        ?assertNot(erlang:module_loaded(?MOD)),
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand, selector = getX}},
+            beamtalk_primitive:send(Self, getX, [])
+        ),
+        ok = load_accessor_module(?MOD, x),
+        ?assertEqual(7, beamtalk_primitive:send(Self, getX, [])),
+        {Results, Calls} = code_server_calls_during(fun() ->
+            [beamtalk_primitive:send(Self, getX, []), beamtalk_primitive:send(Self, getX, [])]
+        end),
+        ?assertEqual([7, 7], Results),
+        ?assertEqual([], Calls)
+    after
+        stop_class(Pid),
+        _ = load_accessor_module(?MOD, x)
+    end.
+
 %%% ============================================================================
 %%% Helpers
 %%% ============================================================================
@@ -168,6 +256,15 @@ made. The worker is traced rather than the test process because a process
 cannot be its own tracer.
 """.
 code_server_calls_during(Fun) ->
+    {Result, Calls} = calls_during([{code_server, call, 1}], Fun),
+    {Result, [Request || {code_server, call, [Request]} <- Calls]}.
+
+-doc """
+Run `Fun` in a fresh process and return `{Result, Calls}`, where `Calls` lists
+every `{M, F, Args}` call that process made to a function matching one of
+`Patterns` (`{M, F, Arity}`, `'_'` wildcards allowed, traced as local calls).
+""".
+calls_during(Patterns, Fun) ->
     Parent = self(),
     Worker = spawn(fun() ->
         receive
@@ -175,9 +272,9 @@ code_server_calls_during(Fun) ->
         end,
         Parent ! {result, self(), catch Fun()}
     end),
-    1 = erlang:trace_pattern({code_server, call, 1}, true, [global]),
-    %% Always remove the global trace pattern, even on a timeout, so it never
-    %% leaks into (and slows down) the rest of the EUnit run, and never leave
+    lists:foreach(fun(P) -> erlang:trace_pattern(P, true, [local]) end, Patterns),
+    %% Always remove the local trace patterns, even on a timeout, so they never
+    %% leak into (and slows down) the rest of the EUnit run, and never leave
     %% the (unlinked, unmonitored) worker behind: if erlang:trace/3 fails it
     %% never receives `go`, and on worker_timeout it is still running. On the
     %% success path it has already exited, so the kill is a no-op.
@@ -190,7 +287,7 @@ code_server_calls_during(Fun) ->
             after 5000 -> error(worker_timeout)
             end
         after
-            erlang:trace_pattern({code_server, call, 1}, false, [global]),
+            lists:foreach(fun(P) -> erlang:trace_pattern(P, false, [local]) end, Patterns),
             exit(Worker, kill)
         end,
     %% Make sure every trace message the worker generated has arrived.
@@ -199,11 +296,11 @@ code_server_calls_during(Fun) ->
         {trace_delivered, Worker, Ref} -> ok
     after 5000 -> error(trace_delivery_timeout)
     end,
-    {Result, drain_code_server_calls(Worker, [])}.
+    {Result, drain_calls(Worker, [])}.
 
-drain_code_server_calls(Worker, Acc) ->
+drain_calls(Worker, Acc) ->
     receive
-        {trace, Worker, call, {code_server, call, [Request]}} ->
-            drain_code_server_calls(Worker, [Request | Acc])
+        {trace, Worker, call, MFA} ->
+            drain_calls(Worker, [MFA | Acc])
     after 0 -> lists:reverse(Acc)
     end.

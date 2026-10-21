@@ -255,6 +255,7 @@ beamtalk_core::per_family_tests! {
     lookups_in_the_arms_in_a_loop_or_holding_a_conditional_of_other_conditional_producers_agree => 3,
     lookups_in_the_evaluated_block_arms_of_other_conditional_producers_agree => 4,
     lookups_in_the_nested_evaluated_block_arms_of_other_conditional_producers_agree => 5,
+    lookups_in_the_match_arms_of_other_conditional_producers_agree => 6,
 }
 
 #[test]

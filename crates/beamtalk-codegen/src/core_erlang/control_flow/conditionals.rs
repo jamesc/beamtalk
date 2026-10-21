@@ -51,6 +51,7 @@
 //! `State{N}` chain managed by the method body generator.
 
 use super::super::gen_server::BodyExprKind;
+use super::super::patterns::MatchThreading;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
     self, BindOp, FrameId, RebindFrame, RebindFrameKind, ThreadedStmt, ThreadedValue,
@@ -64,7 +65,8 @@ use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression, MessageSelector};
+use beamtalk_core::ast::{Block, Expression, MatchArm, MessageSelector};
+use beamtalk_core::semantic_analysis::block_facts::match_arm_block;
 use beamtalk_core::source_analysis::Span;
 
 // ─── FieldWriteSite / Closure ────────────────────────────────────
@@ -394,6 +396,11 @@ impl CoreErlangGenerator {
         let seeded_state = self.fresh_temp_var("SeededState");
         let mut chain: Document<'static> = match scratch {
             ScratchStart::Continue => leaf::var(outer_state.to_string()),
+            // A plain closure body in an actor method starts from the `State` it
+            // captured (BT-3912): its arms self-send and read fields on it.
+            ScratchStart::Fresh if self.closure_scratch_continues_state(self.current_frame()) => {
+                leaf::var(self.current_field_read_state_var())
+            }
             ScratchStart::Fresh => Document::Str("call 'maps':'new'()"),
         };
         // Fold from the last var inward so the emitted nesting reads naturally.
@@ -435,7 +442,7 @@ impl CoreErlangGenerator {
     ///
     /// The six callers render `prelude` via
     /// [`CoreErlangGenerator::threaded_prelude_doc`] rather than
-    /// `verify_and_render_branch_arm`'s own wrap-and-`verify()`: unlike a
+    /// `render_branch_arm`'s own wrap-and-`verify()`: unlike a
     /// branch arm (whose `state_version` `enter_branch_context` always
     /// resets to 0 before it runs), a conditional's receiver compiles at
     /// the CALLER's current, possibly non-zero state version — its
@@ -447,7 +454,7 @@ impl CoreErlangGenerator {
     /// `generate_if_true_if_false_with_mutations` during this migration.
     /// `prelude`'s `Bind`s still render through the exact same
     /// `render`/`render_value` production every SPLICED prelude uses
-    /// (`threaded_prelude_doc` and `verify_and_render_branch_arm` share
+    /// (`threaded_prelude_doc` and `render_branch_arm` share
     /// that renderer), so this is a real, correctly-shaped `ThreadedIr`
     /// prelude — just one this phase cannot re-verify in isolation; full
     /// verification arrives with ADR 0118 phase 4, when a mutation-threaded
@@ -567,7 +574,7 @@ impl CoreErlangGenerator {
     /// branch context). When `param_value` is given, the block's parameter
     /// (`ifNotNil: [:v | ...]`, `at:ifPresent: [:v | ...]`) is bound to that
     /// Core Erlang variable inside the arm.
-    pub(in crate::core_erlang::control_flow) fn conditional_arm_clause(
+    pub(in crate::core_erlang) fn conditional_arm_clause(
         &mut self,
         block: &Block,
         param_value: Option<&str>,
@@ -857,6 +864,39 @@ impl CoreErlangGenerator {
 }
 
 impl CoreErlangGenerator {
+    /// BT-3947 (closes BT-3875): the [`ThreadedValue`] producer for a `match:` that
+    /// is a local-threading producer ([`CoreErlangGenerator::conditional_producer_locals`]):
+    /// a conditional with one arm per `match:` arm. The scratch map is seeded with
+    /// the locals its arms write (`seed_scratch_locals` over the arms as blocks,
+    /// [`match_arm_block`]), each arm is a `BranchArm` frame carrying them, and the
+    /// result tuple's `StateAcc` comes back through one `LocalRebind` per local,
+    /// lowered by the enclosing frame (`conditional_tuple_to_threaded_value`).
+    ///
+    /// `frame` is captured before the arms are lowered, like every conditional
+    /// producer's: the arms mint frames of their own.
+    pub(in crate::core_erlang) fn generate_match_producer(
+        &mut self,
+        value: &Expression,
+        arms: &[MatchArm],
+        span: Span,
+        tail: ProducerTail,
+    ) -> Result<ThreadedValue> {
+        let frame = self.current_frame();
+        let scratch = self.conditional_scratch(frame);
+        let blocks: Vec<Block> = arms.iter().map(match_arm_block).collect();
+        let block_refs: Vec<&Block> = blocks.iter().collect();
+        let outer_state = self.current_state_var();
+        let (seed_doc, base_state) = self.seed_scratch_locals(&block_refs, scratch, &outer_state);
+        let arm_frame = self.conditional_arm_frame(&block_refs, true);
+        let threading = MatchThreading {
+            base_state: &base_state,
+            arm: arm_frame.as_ref(),
+        };
+        let match_doc = self.generate_match_with(value, arms, Some(&threading))?;
+        let tuple_doc = docvec![seed_doc, match_doc];
+        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &block_refs, tail, true)
+    }
+
     /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
     /// ifTrue: [block]` — the expression-position counterpart of
     /// [`Self::generate_if_true_with_mutations_tuple`], whose raw tuple
@@ -1552,6 +1592,11 @@ impl CoreErlangGenerator {
         }
         if let Expression::Match { value, arms, .. } = expr {
             let span = expr.span();
+            // BT-3947: a `match:` that is a local-threading producer here has
+            // one `BranchArm` frame per arm, like a conditional's blocks.
+            if root_producer && !self.is_repl_mode() {
+                return Ok(Some(self.generate_match_producer(value, arms, span, tail)?));
+            }
             let frame = self.current_frame();
             let tuple_doc = self.generate_match(value, arms)?;
             return Ok(Some(
@@ -3100,37 +3145,15 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0111 Addendum 5, Rule 3: wraps a branch arm's real `Bind`/
-    /// `Statement` sequence in one `ThreadedStmt::Threaded { mode:
-    /// StateAcc(None), frame, .. }` node, `verify()`s it, and `render()`s
-    /// it. `StateAcc` mode's rendering is a transparent pass-through
-    /// (`render_threaded`'s `TupleAcc(_) | StateAcc(_) => render(body,
-    /// ctx)` arm) — wrapping changes zero output bytes versus rendering
-    /// `stmts` directly, while giving `verify()`'s frame-scoped `check_use`
-    /// the correct non-ROOT frame to walk against (`verify`'s top-level
-    /// slice is always implicitly `FrameId::ROOT` — see `FrameId`'s doc
-    /// comment — so an un-wrapped `verify(&stmts)` would falsely reject
-    /// every reference to this arm's own frame).
-    ///
-    /// This is also called directly from `expressions.rs`'s
-    /// `generate_block_stateful` — a single-arm `with_branch_context` use
-    /// (the Tier 2 stateful-block-body threading), same wrap/verify/render
-    /// shape as a conditional branch arm.
-    pub(in crate::core_erlang) fn verify_and_render_branch_arm(
-        &mut self,
-        stmts: Vec<ThreadedStmt>,
-        frame: FrameId,
-        final_version: usize,
-        span: Span,
-    ) -> (Document<'static>, usize) {
-        self.render_branch_arm(stmts, frame, final_version, span, None)
-    }
-
-    /// [`Self::verify_and_render_branch_arm`] for a conditional arm: with an
+    /// ADR 0111 Addendum 5, Rule 3: wraps a branch arm's real `Bind`/`Statement`
+    /// sequence in one node, `verify()`s it and `render()`s it. With an
     /// [`ArmFrame`] the arm is a [`ThreadedStmt::BranchArm`] node recording the
     /// construct's seeded `threads` (ADR 0131 §2), so the verifier reads the
-    /// frame's rebind shapes off the node; without one it is the legacy
-    /// `Threaded` wrapper, which threads nothing of its own.
+    /// frame's rebind shapes off the node (a conditional arm, and since BT-3939
+    /// a Tier 2 block body, `generate_block_stateful`); without one it is the
+    /// legacy `Threaded` wrapper (`StateAcc` mode, a transparent pass-through
+    /// whose only job is giving `verify()` the arm's non-ROOT frame), which
+    /// threads nothing of its own.
     pub(in crate::core_erlang) fn render_branch_arm(
         &mut self,
         stmts: Vec<ThreadedStmt>,
