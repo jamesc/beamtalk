@@ -658,21 +658,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_pid_send() {
-        let result = doc_to_string(generate_primitive_bif("Pid", "send:", &["Msg".to_string()]));
-        assert_eq!(
-            result,
-            Some("let <_Sent> = call 'erlang':'send'(Self, Msg) in 'nil'".to_string())
-        );
-    }
-
-    #[test]
-    fn test_reference_new() {
-        let result = doc_to_string(generate_primitive_bif("Reference", "new", &[]));
-        assert_eq!(result, Some("call 'erlang':'make_ref'()".to_string()));
-    }
-
     // Integer character predicate tests
 
     #[test]

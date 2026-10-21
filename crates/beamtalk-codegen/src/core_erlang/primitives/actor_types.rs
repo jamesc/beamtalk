@@ -83,16 +83,6 @@ pub(crate) fn pid_extra(selector: &str, params: &[String]) -> Option<Document<'s
                 ")"
             ])
         }
-        // Raw Erlang message send (erlang:send/2); answers nil (BT-4049).
-        // Never fails for a pid: sending to a dead process is a no-op.
-        "send:" => {
-            let p0 = param(params, 0, "_Msg");
-            Some(docvec![
-                "let <_Sent> = call 'erlang':'send'(Self, ",
-                leaf::var(p0.to_string()),
-                ") in 'nil'"
-            ])
-        }
         _ => None,
     }
 }
@@ -101,8 +91,6 @@ pub(crate) fn reference_extra(selector: &str, _params: &[String]) -> Option<Docu
     match selector {
         // demonitor cancels a monitor created by Actor>>monitor
         "demonitor" => Some(Document::Str("call 'erlang':'demonitor'(Self)")),
-        // Factory class method: a fresh unique reference (BT-4049).
-        "new" => Some(Document::Str("call 'erlang':'make_ref'()")),
         _ => None,
     }
 }

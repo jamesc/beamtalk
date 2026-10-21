@@ -31,7 +31,30 @@ TestCase subclass: ProcessPrimitivesTest
     self deny: pid isAlive
     self assert: (pid send: #tick) equals: nil
 
+  testPidSendDeliversResultShapedTermsUnchanged =>
+    server := HandleInfoCounter spawn
+    server pid send: {#ok, 1}
+    self assert: server getLastMsg equals: {#ok, 1}
+    server pid send: #ok
+    self assert: server getLastMsg equals: #ok
+    server stop
+
+  testPidSendDynamicDispatch =>
+    server := HandleInfoCounter spawn
+    p := server pid
+    self assert: (p respondsTo: #send:)
+    self assert: (p perform: #send: withArguments: #(#tick)) equals: nil
+    self assert: server getCount equals: 1
+    server stop
+
   // === Reference new ===
+
+  testReferenceNewWithArgsRaises =>
+    self should: [Reference perform: #new: withArguments: #(#{})] raise: #instantiation_error
+
+  testReferenceNewDynamicDispatch =>
+    cls := Reference
+    self assert: (cls perform: #new) class equals: Reference
   testReferenceNewAnswersAReference =>
     self assert: Reference new class equals: Reference
 

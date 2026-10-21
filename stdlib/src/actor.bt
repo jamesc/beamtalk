@@ -800,7 +800,8 @@ Object subclass: Actor
   /// (`self processLabel: ...`) or from another process. Requires OTP 27+,
   /// which is Beamtalk's supported floor (`otp-support.toml`). Named
   /// `processLabel:` rather than `label:` so it never collides with user
-  /// state or methods. Always returns `nil`.
+  /// state or methods. Always returns `nil`. Sent to a `withTimeout:`
+  /// proxy it labels the proxy's own process, not the wrapped actor.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -811,7 +812,8 @@ Object subclass: Actor
     nil
 
   /// The label set by `processLabel:`, or `nil` if none was set
-  /// (`proc_lib:get_label/1`).
+  /// (`proc_lib:get_label/1`). Erlang reports "no label" as the atom
+  /// `undefined`, so a label of `#undefined` also reads back as `nil`.
   ///
   /// ## Examples
   /// ```beamtalk

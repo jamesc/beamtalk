@@ -33,7 +33,11 @@ sealed typed Object subclass: Reference
   /// tag class                          // => Reference
   /// Reference new =:= Reference new    // => false
   /// ```
-  class sealed new -> Reference => @primitive
+  class sealed new -> Reference =>
+    // erlang:make_ref/0 has no Beamtalk-typed spec, so the FFI result is
+    // inferred Dynamic; it is always a reference.
+    @expect type
+    (Erlang erlang) make_ref
 
   /// Convert the reference to a readable string representation.
   ///
