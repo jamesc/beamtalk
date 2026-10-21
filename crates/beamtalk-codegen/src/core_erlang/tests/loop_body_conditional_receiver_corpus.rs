@@ -518,3 +518,218 @@ fn bt4017_repro_compiles() {
     assert_eq!(fold_raw_tuple_unpacks(&codegen(src)), 0, "{src}");
     assert!(passes(src), "{src}");
 }
+
+// ─── BT-4017: the fold-body rows in every other scope kind ──────────────────
+//
+// `fold_statement_threads_ahead` is not actor-only: in a value-type method
+// (`SelfVt` arm writes), a `TestCase` method, and a class method (class
+// variables are written in place, ADR 0130) a fold body statement for which
+// `thread_ahead_unwraps` holds (an inline-threaded conditional or `match:`, an
+// `on:do:`/`ensure:` or `[...] value` producer) is rerouted too. The same rows
+// run there, with the same checks.
+
+/// A non-actor method context: the class header (with a field or class
+/// variable `f`), its helpers, whether methods are class-side, and a statement
+/// prefixed to each method.
+struct ScopeContext {
+    name: &'static str,
+    header: &'static str,
+    helpers: &'static str,
+    class_side: bool,
+    prelude: &'static str,
+}
+
+const INSTANCE_HELPERS: &str = "  done => false
+  isAlive: k => k > 0
+  + k => k > 0
+";
+
+const CLASS_HELPERS: &str = "  class done => false
+  class isAlive: k => k > 0
+  class + k => k > 0
+";
+
+const SCOPE_CONTEXTS: &[ScopeContext] = &[
+    ScopeContext {
+        name: "value_field",
+        header: "Value subclass: FoldScopeProbe\n  field: f = 0\n",
+        helpers: INSTANCE_HELPERS,
+        class_side: false,
+        prelude: "",
+    },
+    ScopeContext {
+        name: "value_field_write",
+        header: "Value subclass: FoldScopeProbe\n  field: f = 0\n",
+        helpers: INSTANCE_HELPERS,
+        class_side: false,
+        prelude: "    self.f := 1\n",
+    },
+    ScopeContext {
+        name: "test_case",
+        header: "TestCase subclass: FoldScopeProbe\n  field: f = 0\n",
+        helpers: INSTANCE_HELPERS,
+        class_side: false,
+        prelude: "",
+    },
+    ScopeContext {
+        name: "test_case_field_write",
+        header: "TestCase subclass: FoldScopeProbe\n  field: f = 0\n",
+        helpers: INSTANCE_HELPERS,
+        class_side: false,
+        prelude: "    self.f := 1\n",
+    },
+    ScopeContext {
+        name: "object_class_side",
+        header: "Object subclass: FoldScopeProbe\n  classState: f = 0\n",
+        helpers: CLASS_HELPERS,
+        class_side: true,
+        prelude: "",
+    },
+    ScopeContext {
+        name: "actor_class_side",
+        header: "Actor subclass: FoldScopeProbe\n  classState: f = 0\n",
+        helpers: CLASS_HELPERS,
+        class_side: true,
+        prelude: "",
+    },
+];
+
+/// Fold-body statements that are `thread_ahead_unwraps` producers outside an
+/// actor too: an `on:do:`/`ensure:` body and an evaluated literal block that
+/// write the field (the `SelfVt` family in a value type).
+const SCOPE_PRODUCER_STATEMENTS: &[&str] = &[
+    "[self.f := self.f + 1] on: Error do: [:err | 0]",
+    "[self.f := self.f + 1] ensure: [nil]",
+    "[self.f := self.f + 1] value",
+];
+
+/// How one row of a non-actor scope compiles.
+enum ScopeCodegen {
+    /// Codegen succeeded; the generated module.
+    Compiles(String),
+    /// The Phase 0 check, or codegen with a structured (non-internal) error,
+    /// rejects the program: a language rule, not a lowering failure.
+    Rejected,
+}
+
+/// Compiles one program (debug: the verifier panics on a finding); `Err` with
+/// the panic or internal error.
+fn scope_codegen(src: &str) -> Result<ScopeCodegen, String> {
+    if phase0_rejects(src) {
+        return Ok(ScopeCodegen::Rejected);
+    }
+    let (module, _) =
+        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
+    let compiled = catch_unwind(AssertUnwindSafe(|| {
+        crate::core_erlang::generate_module(
+            &module,
+            crate::core_erlang::CodegenOptions::new("test"),
+        )
+    }));
+    match compiled {
+        Ok(Ok(code)) => Ok(ScopeCodegen::Compiles(code)),
+        Ok(Err(crate::core_erlang::CodeGenError::Internal(msg))) => Err(msg),
+        Ok(Err(_)) => Ok(ScopeCodegen::Rejected),
+        Err(payload) => Err(payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
+            .unwrap_or_default()),
+    }
+}
+
+/// `(name, method body)`: every fold frame x (the actor corpus's fold
+/// statements over every receiver, the plain-receiver / `match:` statements,
+/// and [`SCOPE_PRODUCER_STATEMENTS`]).
+fn scope_rows() -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = block_arg_rows()
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("fold"))
+        .collect();
+    for (l, fold) in FOLDS.iter().enumerate() {
+        for (s, stmt) in SCOPE_PRODUCER_STATEMENTS.iter().enumerate() {
+            out.push((format!("fold{l} producer{s}"), fold.replace("{S}", stmt)));
+        }
+    }
+    out
+}
+
+fn scope_method(ctx: &ScopeContext, i: usize, body: &str) -> String {
+    let side = if ctx.class_side { "class " } else { "" };
+    format!(
+        "  {side}probe{i}: blk =>\n{}    n := 3\n    {body}\n    n\n",
+        ctx.prelude
+    )
+}
+
+/// BT-4017: in every non-actor scope kind, every fold row passes the debug
+/// verifier, compiles through `erlc` and holds no raw-tuple unpack, except a
+/// row writing the field `f` inside the fold body in a value-type or `TestCase`
+/// method, which a language rule rejects with a structured error (class-side,
+/// `f` is a class variable written in place, and every row compiles).
+/// (One `erlc` module per context; bisected to the failing rows on failure.)
+#[test]
+fn fold_body_statements_in_every_scope_compile_without_a_raw_tuple_unpack() {
+    let rows = scope_rows();
+    let mut failures = Vec::new();
+    let mut counts = Vec::new();
+    for ctx in SCOPE_CONTEXTS {
+        let mut compiled = Vec::new();
+        let mut rejected = 0usize;
+        for (i, (name, body)) in rows.iter().enumerate() {
+            let m = scope_method(ctx, i, body);
+            let src = format!("{}{}{m}", ctx.header, ctx.helpers);
+            assert_parses(&src);
+            match scope_codegen(&src) {
+                // Only a field write nested in the fold body is refused by a
+                // language rule (a value type's slots are immutable; a
+                // `TestCase` field write in a nested block has no channel
+                // back). Every other row must compile.
+                Ok(ScopeCodegen::Rejected) if body.contains("self.f :=") => rejected += 1,
+                Ok(ScopeCodegen::Rejected) => {
+                    failures.push(format!("{} / {name}: rejected\n{src}", ctx.name));
+                }
+                Ok(ScopeCodegen::Compiles(code)) => {
+                    if fold_raw_tuple_unpacks(&code) == 0 {
+                        compiled.push((name, m, src));
+                    } else {
+                        failures.push(format!("{} / {name}: raw-tuple unpack\n{src}", ctx.name));
+                    }
+                }
+                Err(e) => failures.push(format!("{} / {name}: {e}\n{src}", ctx.name)),
+            }
+        }
+        counts.push(format!(
+            "{}: {} compile, {rejected} rejected",
+            ctx.name,
+            compiled.len()
+        ));
+        assert!(
+            compiled.len() >= rows.len() / 4,
+            "{}: only {} of {} rows compile; the corpus has thinned out",
+            ctx.name,
+            compiled.len(),
+            rows.len()
+        );
+        let methods: String = compiled.iter().map(|(_, m, _)| m.as_str()).collect();
+        if !passes(&format!("{}{}{methods}", ctx.header, ctx.helpers)) {
+            failures.extend(
+                compiled
+                    .iter()
+                    .filter(|(_, _, src)| !passes(src))
+                    .map(|(name, _, src)| format!("{} / {name}: erlc\n{src}", ctx.name)),
+            );
+        }
+    }
+    println!(
+        "BT-4017 scope rows ({} per context): {}",
+        rows.len(),
+        counts.join("; ")
+    );
+    assert!(
+        failures.is_empty(),
+        "{} fold row(s) fail in a non-actor scope:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
