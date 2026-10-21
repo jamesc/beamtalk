@@ -16,7 +16,7 @@
 //! The behavioural side (state-changing sends raise, read-only ones answer) is
 //! `stdlib/test/closure_self_send_matrix_test.bt`.
 
-use super::tier2_block_local_inner_loop::compile;
+use super::compile;
 
 const GUARD: &str = "'stateful_block_dispatch'";
 

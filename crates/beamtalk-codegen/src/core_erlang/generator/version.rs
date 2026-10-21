@@ -142,9 +142,12 @@ impl CoreErlangGenerator {
     /// `on:do:`/`ensure:` body, a Tier 2 stateful-block body, or — since
     /// ADR 0118 phase 2b — a real loop body itself, all of which
     /// set `in_loop_body`), [`FrameId::ROOT`](threaded_ir::FrameId::ROOT)
-    /// at the flat method body.
+    /// at the flat method body — or, first, the frame of the plain closure body
+    /// being lowered ([`Self::closure_frame`], BT-3912).
     pub(in crate::core_erlang) fn current_frame(&self) -> threaded_ir::FrameId {
-        if self.in_loop_body {
+        if let Some(frame) = self.closure_frame {
+            frame
+        } else if self.in_loop_body {
             self.current_branch_frame()
         } else {
             threaded_ir::FrameId::ROOT

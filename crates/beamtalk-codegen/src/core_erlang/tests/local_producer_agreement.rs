@@ -19,8 +19,9 @@ use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{
     LoopBodyContext, RootMethodKind, conditional_arm_blocks, conditional_producer_writes,
     exception_arm_blocks, exception_producer_writes, is_actor_fold_value_site, is_fold_frame_body,
-    is_loop_body_producer_site, is_threaded_frame_body, loop_body_producer_sites,
-    operand_producer_writes, producer_body_arm_handler, sequenced_operand_sites,
+    is_loop_body_producer_site, is_threaded_frame_body, loop_body_producer_sites, match_arm_block,
+    match_arms, match_producer_writes, operand_producer_writes, producer_body_arm_handler,
+    sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
@@ -65,6 +66,8 @@ pub(super) const CONSTRUCTS: &[&str] = &[
     "#(1, 2) detect: [:x | t := t + 1. x > 1]",
     "[s < 2] whileFalse: [s := s + 1. t := t + 1]",
     "1 to: 5 by: 2 do: [:i | t := t + i]",
+    // BT-3912 (closes BT-3897): `groupBy:` is a fold producer.
+    "#(1, 2) groupBy: [:x | t := t + x. x > 1]",
 ];
 
 pub(super) const POSITIONS: &[&str] = &[
@@ -476,6 +479,7 @@ pub(super) fn core_arm_site_producer(
     let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
     conditional_producer_writes(site, &bound, kind)
         .or_else(|| exception_producer_writes(site, &bound, kind))
+        .or_else(|| match_producer_writes(site, &bound, kind))
         .map(names_of)
 }
 
@@ -487,7 +491,7 @@ fn construct_frames(
     construct: &Expression,
     kind: RootMethodKind,
     arms_are_frames: bool,
-) -> Vec<(&beamtalk_core::ast::Block, bool, bool)> {
+) -> Vec<(beamtalk_core::ast::Block, bool, bool)> {
     let bound = |name: &str| matches!(name, "t" | "u" | "s" | "r");
     let inner = construct.unwrap_parens();
     let mut frames = Vec::new();
@@ -495,7 +499,7 @@ fn construct_frames(
         for arg in arguments {
             if let Expression::Block(block) = arg {
                 if is_threaded_frame_body(inner, block) {
-                    frames.push((block, is_fold_frame_body(inner, block), false));
+                    frames.push((block.clone(), is_fold_frame_body(inner, block), false));
                 }
             }
         }
@@ -505,7 +509,7 @@ fn construct_frames(
             conditional_arm_blocks(inner)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|b| (b, false, true)),
+                .map(|b| (b.clone(), false, true)),
         );
     }
     if arms_are_frames && exception_producer_writes(inner, &bound, kind).is_some() {
@@ -513,7 +517,16 @@ fn construct_frames(
             exception_arm_blocks(inner)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|b| (b, false, true)),
+                .map(|b| (b.clone(), false, true)),
+        );
+    }
+    // BT-3947: a `match:` producer's arms are frames too, one per arm.
+    if arms_are_frames && match_producer_writes(inner, &bound, kind).is_some() {
+        frames.extend(
+            match_arms(inner)
+                .unwrap_or_default()
+                .iter()
+                .map(|arm| (match_arm_block(arm), false, true)),
         );
     }
     frames

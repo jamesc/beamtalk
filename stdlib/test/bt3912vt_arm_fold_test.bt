@@ -1,0 +1,84 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3854, BT-3844): a value-type fold (`do:`, `collect:`, `inject:into:`) that
+// writes a field, inside the arm of a conditional, carries `Self` out of the arm: the arm is
+// a frame whose fold producer merges the fold's `Self` slot into the arm's own chain, and the
+// conditional's result tuple hands it to the statements after it. The codegen corpus
+// (`value_type_fold_family_corpus.rs`) runs every generated fold in every arm form, selector
+// and position against an oracle on a BEAM; these cases assert the field AFTER the
+// conditional, so a write that compiles but is lost fails here too. Start state: m = 7,
+// n = 20 (`c` is true).
+
+TestCase subclass: Bt3912VtArmFoldTest
+  field: m = 7
+  field: n = 20
+
+  doInTakenArm =>
+    c := self.n > 10
+    c ifTrue: [#(1, 2, 3) do: [:e | self.m := self.m + e]]
+    #(self.m, self.n)
+
+  doInUntakenArm =>
+    c := self.n > 100
+    c ifTrue: [#(1, 2, 3) do: [:e | self.m := self.m + e]]
+    #(self.m, self.n)
+
+  collectAssignedInArm =>
+    x := 0
+    c := self.n > 10
+    c
+      ifTrue: [
+        x := #(1, 2, 3)
+          collect: [:e |
+            self.n := e
+            e * 2
+          ]
+        x
+      ]
+    #(self.n, x)
+
+  injectAsValueOfBothArms =>
+    c := self.n > 10
+    r := c
+      ifTrue: [
+        #(1, 2, 3)
+          inject: 0
+          into: [:a :e |
+            self.m := self.m + e
+            a + e
+          ]
+      ]
+      ifFalse: [0]
+    #(self.m, r)
+
+  otherArmIsPlain =>
+    c := self.n > 100
+    r := c ifTrue: [#(1, 2, 3) do: [:e | self.m := self.m + e]] ifFalse: [5]
+    #(self.m, r)
+
+  lastStatement =>
+    c := self.n > 10
+    c
+      ifTrue: [
+        #(1, 2, 3)
+          inject: 0
+          into: [:a :e |
+            self.n := e
+            a + e
+          ]
+      ]
+
+  testDoInTakenArm => self assert: self doInTakenArm equals: #(13, 20)
+
+  testDoInUntakenArm => self assert: self doInUntakenArm equals: #(7, 20)
+
+  testCollectAssignedInArm =>
+    self assert: self collectAssignedInArm equals: #(3, #(2, 4, 6))
+
+  testInjectAsValueOfBothArms =>
+    self assert: self injectAsValueOfBothArms equals: #(13, 6)
+
+  testOtherArmIsPlain => self assert: self otherArmIsPlain equals: #(7, 5)
+
+  testLastStatement => self assert: self lastStatement equals: 6

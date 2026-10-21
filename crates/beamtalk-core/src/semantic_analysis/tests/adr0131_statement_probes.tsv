@@ -6291,9 +6291,11 @@ value	valTimes	dlocal	det	ok
 # ADR 0133 Phase 3 residuals (BT-3909), measured on a BEAM: a `fresh` local
 # bound in a conditional arm in a `whileTrue:` condition (BT-3891: `erlc`
 # fails in every method context; the REPL answers right), a `groupBy:` whose
-# block binds a local, as a receiver (BT-3897: the actor and the REPL answer
-# the raw carrier tuple), and a REPL `match:` arm writing an outer local
-# (BT-3875: the value-position error before BT-3909, now the `match:` arm error).
+# block binds a local, as a receiver (BT-3897: the actor and the REPL answered
+# the raw carrier tuple; BT-3912 makes `groupBy:` a fold producer, `ok`), and a
+# REPL `match:` arm writing an outer local
+# (BT-3875: the value-position error before BT-3909, the `match:` arm error
+# after; BT-3947 (BT-3912) lowers it, `ok`).
 actor	cond	fresh	and	ok
 actor	cond	fresh	ifNil	ok
 actor	cond	fresh	ifTrue	ok
@@ -6303,14 +6305,14 @@ class	cond	fresh	ifTrue	ok
 value	cond	fresh	and	ok
 value	cond	fresh	ifNil	ok
 value	cond	fresh	ifTrue	ok
-actor	top	fresh	groupBy	bad
+actor	top	fresh	groupBy	ok
 class	top	fresh	groupBy	ok
 value	top	fresh	groupBy	ok
 repl	cond	fresh	and	ok
 repl	cond	fresh	ifNil	ok
 repl	cond	fresh	ifTrue	ok
-repl	top	fresh	groupBy	bad
-repl	top	outer	match	bad
+repl	top	fresh	groupBy	ok
+repl	top	outer	match	ok
 # BT-3909 review: the `cond` role with a local bound outside the loop
 # (`outer`, `direct`) fails `erlc` in every method context too; the Phase 0
 # and section 6 checks reject it.

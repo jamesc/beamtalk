@@ -314,7 +314,7 @@ impl CoreErlangGenerator {
                 let rebind = if cond_effects {
                     plan.rebind_frame(frame)
                 } else {
-                    ThreadingPlan::condition_rebind_frame(frame)
+                    ThreadingPlan::closure_rebind_frame(frame)
                 };
                 this.with_rebind_frame(rebind, |this| {
                     if let Expression::Block(cond_block) = condition {
@@ -582,6 +582,23 @@ impl CoreErlangGenerator {
             return Ok(Document::Str("{'true', StateAcc}"));
         };
         let mut docs: Vec<Document<'static>> = Vec::with_capacity(filtered.len());
+        // BT-3912: the condition's statements are producer sites of the loop's
+        // own frame (it runs over the loop's `StateAcc`), like a body statement.
+        self.with_body_producer_sites(&filtered, false, false, |this| {
+            this.generate_stateful_while_condition_statements(rest, tail, carry_self, &mut docs)
+        })?;
+        Ok(Document::Vec(docs))
+    }
+
+    /// The statements of [`Self::generate_stateful_while_condition`], once the
+    /// condition's producer sites are registered.
+    fn generate_stateful_while_condition_statements(
+        &mut self,
+        rest: &[&Expression],
+        tail: &Expression,
+        carry_self: bool,
+        docs: &mut Vec<Document<'static>>,
+    ) -> Result<()> {
         for expr in rest {
             if CoreErlangGenerator::is_local_var_assignment(expr) {
                 // Mirrors `lower_letrec_body`/`lower_foldl_body`'s own dispatch
@@ -605,7 +622,7 @@ impl CoreErlangGenerator {
             }
         }
         docs.push(self.generate_stateful_while_condition_tail(tail, carry_self)?);
-        Ok(Document::Vec(docs))
+        Ok(())
     }
 
     /// The tail (boolean) statement of a state-effecting while condition —
@@ -733,7 +750,7 @@ impl CoreErlangGenerator {
     /// Addendum 2/13, was deleted).
     ///
     /// ADR 0133 Phase 3 (BT-3911, closes BT-3891): the condition closure is a
-    /// frame of its own ([`ThreadingPlan::condition_rebind_frame`]), so a
+    /// frame of its own ([`ThreadingPlan::closure_rebind_frame`]), so a
     /// conditional nested in it is lowered against the closure's scratch map
     /// (private: the closure has no `StateAcc` to continue), not the
     /// enclosing frame's.
@@ -745,7 +762,7 @@ impl CoreErlangGenerator {
         condition: &Expression,
     ) -> Result<(Document<'static>, usize)> {
         self.with_loop_condition_context(false, |this, frame| {
-            this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
+            this.with_rebind_frame(ThreadingPlan::closure_rebind_frame(frame), |this| {
                 if let Expression::Block(cond_block) = condition {
                     this.generate_block_body(cond_block)
                 } else {
@@ -1204,7 +1221,7 @@ impl CoreErlangGenerator {
             let prev_hybrid = this.loop_mode.in_hybrid_loop;
             this.loop_mode.in_hybrid_loop = true;
             let result =
-                this.with_rebind_frame(ThreadingPlan::condition_rebind_frame(frame), |this| {
+                this.with_rebind_frame(ThreadingPlan::closure_rebind_frame(frame), |this| {
                     if let Expression::Block(cond_block) = condition {
                         this.generate_block_body(cond_block)
                     } else {

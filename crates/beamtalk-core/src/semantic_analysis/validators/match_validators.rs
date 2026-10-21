@@ -7,10 +7,12 @@
 //!
 //! Validates pattern match exhaustiveness for sealed types.
 
-use crate::ast::{Expression, Identifier, Module, Pattern};
-use crate::ast_walker::walk_module;
+use crate::ast::{Expression, ExpressionStatement, Identifier, MethodDefinition, Module, Pattern};
+use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use ecow::EcoString;
+use std::collections::HashSet;
 
 // ── Match exhaustiveness for sealed types ─────────────────────────────────────
 
@@ -122,12 +124,14 @@ fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnosti
 
 // ── Assignment-in-match-arm footgun warning ─────────────────────────────────
 
-/// Warn when a match arm body contains a local variable assignment (`:=`).
+/// Warn when a match arm body is an assignment (`:=`) to a local the method has
+/// not bound yet.
 ///
 /// Core Erlang `case` arm bodies are single expressions — `let` bindings
 /// inside an arm do not escape to the enclosing scope.  A local assignment
-/// like `result := "success"` inside a match arm silently evaluates to the
-/// RHS value without updating the variable for code after the match.
+/// like `result := "success"` inside a match arm, to a name nothing bound
+/// before, silently evaluates to the RHS value without updating any variable
+/// for code after the match.
 ///
 /// The correct pattern is to capture the match result:
 /// ```beamtalk
@@ -136,6 +140,16 @@ fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnosti
 ///   _ -> "default"
 /// ]
 /// ```
+///
+/// # Outer locals are not dead (BT-3947)
+///
+/// An assignment to a local the method already bound (a parameter, an earlier
+/// assignment, a block parameter) writes that outer local, and a `match:` that
+/// is a local-threading producer where it sits threads the write back (each arm
+/// a `BranchArm` frame, ADR 0131 §2); where it is not one the ADR 0131 check
+/// reports `match: arm writes outer local`. Either way this lint stays out of
+/// it: "bound" is judged by source order over the method body, a conservative
+/// approximation of the scope the ADR 0131 check tracks exactly.
 ///
 /// # Local variables only
 ///
@@ -146,36 +160,80 @@ fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnosti
 /// is rejected there as `ValueSelfFieldAssignmentInMatchArm` rather than
 /// silently no-op'd.
 pub(crate) fn warn_assignment_in_match_arms(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    walk_module(module, &mut |expr| {
-        visit_assignment_in_match_arm(expr, diagnostics);
-    });
+    fn add_method<'a>(
+        bodies: &mut Vec<(Vec<EcoString>, &'a [ExpressionStatement])>,
+        method: &'a MethodDefinition,
+    ) {
+        bodies.push((
+            method
+                .parameters
+                .iter()
+                .map(|p| p.name.name.clone())
+                .collect(),
+            method.body.as_slice(),
+        ));
+    }
+    let mut bodies: Vec<(Vec<EcoString>, &[ExpressionStatement])> = Vec::new();
+    for class in &module.classes {
+        for method in class.methods.iter().chain(&class.class_methods) {
+            add_method(&mut bodies, method);
+        }
+    }
+    for standalone in &module.method_definitions {
+        add_method(&mut bodies, &standalone.method);
+    }
+    bodies.push((Vec::new(), module.expressions.as_slice()));
+    for (params, body) in bodies {
+        let mut bound: HashSet<EcoString> = params.into_iter().collect();
+        for stmt in body {
+            walk_expression(&stmt.expression, &mut |expr| {
+                visit_assignment_in_match_arm(expr, &mut bound, diagnostics);
+            });
+        }
+    }
 }
 
-fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
-    let Expression::Match { arms, .. } = expr else {
-        return;
-    };
-
-    for arm in arms {
-        if let Expression::Assignment { target, span, .. } = &arm.body {
+fn visit_assignment_in_match_arm(
+    expr: &Expression,
+    bound: &mut HashSet<EcoString>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match expr {
+        Expression::Assignment { target, .. } => {
             if let Expression::Identifier(id) = target.as_ref() {
-                diagnostics.push(
-                    Diagnostic::warning(
-                        format!(
-                            "Assignment to `{}` inside a match arm has no effect — \
-                             the variable is not updated after the match expression.",
-                            id.name,
-                        ),
-                        *span,
-                    )
-                    .with_hint(format!(
-                        "Capture the match result instead: `{} := value match: [...]`",
-                        id.name,
-                    ))
-                    .with_category(DiagnosticCategory::DeadAssignment),
-                );
+                bound.insert(id.name.clone());
             }
         }
+        Expression::Block(block) => {
+            bound.extend(block.parameters.iter().map(|p| p.name.clone()));
+        }
+        Expression::Match { arms, .. } => {
+            for arm in arms {
+                if let Expression::Assignment { target, span, .. } = &arm.body {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        if bound.contains(&id.name) {
+                            continue;
+                        }
+                        diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "Assignment to `{}` inside a match arm has no effect — \
+                                     the variable is not updated after the match expression.",
+                                    id.name,
+                                ),
+                                *span,
+                            )
+                            .with_hint(format!(
+                                "Capture the match result instead: `{} := value match: [...]`",
+                                id.name,
+                            ))
+                            .with_category(DiagnosticCategory::DeadAssignment),
+                        );
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }
 

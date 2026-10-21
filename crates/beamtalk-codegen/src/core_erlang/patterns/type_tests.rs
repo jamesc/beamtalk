@@ -11,6 +11,7 @@
 //! `generate_match_chain` (`patterns::match_lowering`).
 
 use super::super::{CoreErlangGenerator, Result};
+use super::match_lowering::MatchThreading;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -135,7 +136,7 @@ impl CoreErlangGenerator {
         binding: &Identifier,
         class: &Identifier,
         rest_arms: &[MatchArm],
-        base_state: Option<&str>,
+        threading: Option<&MatchThreading<'_>>,
     ) -> Result<Document<'static>> {
         // Bind `binding` to the whole matched value and generate guard/body
         // FIRST (before rest_arms) so state_version/temp-var counters are
@@ -144,11 +145,11 @@ impl CoreErlangGenerator {
         self.push_scope();
         let core_binding = Self::to_core_erlang_var(&binding.name);
         self.bind_var(&binding.name, &core_binding);
-        let body_doc = self.generate_match_arm_body(&arm.body, base_state)?;
+        let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
         // Rest is generated AFTER the current arm to prevent state leakage.
-        let rest_doc = self.generate_match_chain(match_var, rest_arms, base_state)?;
+        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
 
         // Use `case 'true' of <'true'> when GUARD -> body <'true'> when
         // 'true' -> rest end` (Core Erlang guard position) so guard

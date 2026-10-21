@@ -34,7 +34,7 @@ fn simple_language_service_reports_adr0131_local_threading_errors() {
         file.clone(),
         "Object subclass: CvA\n  class ap: b => b value\n\n  class s6 =>\n    t := 0\n    \
          r := CvA ap: [t := t + 1. 1]\n    #[r, t]\n\n  class m1 =>\n    t := 0\n    \
-         #a match: [#a -> (t := t + 1); _ -> 0]\n    t\n"
+         #a match: [x when: [(t := t + 1) > 0] -> 1; _ -> 0]\n    t\n"
             .to_string(),
     );
     let diagnostics = service.diagnostics(&file);

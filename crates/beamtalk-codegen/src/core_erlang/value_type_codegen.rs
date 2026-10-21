@@ -2948,7 +2948,7 @@ impl CoreErlangGenerator {
     /// general-purpose "does any of these blocks mutate an eligible family"
     /// detector `on:do:`/`ensure:` already shares with
     /// `Self::exception_construct_threaded_families` — rather than this
-    /// predicate's own `block_writes_vt_self_field` walk. The
+    /// predicate's own the former top-level-only write predicate walk. The
     /// `!self.in_class_method()` guard above fixes
     /// [`Self::eligible_families`] at `[SelfVt]` for every input this
     /// function can still reach (a class method threads no family), so that
@@ -2989,40 +2989,6 @@ impl CoreErlangGenerator {
             .exception_construct_families(&blocks)
             .as_slice()
             .is_empty()
-    }
-
-    /// `true` if any TOP-LEVEL statement of `block` is a value-type
-    /// `self.field := ...` write.
-    ///
-    /// Top-level-only for the same reason
-    /// [`CoreErlangGenerator::loop_body_threads_value_self`] is (and the same
-    /// reason): only a bare statement
-    /// lowers through [`Self::build_vt_conditional_branch_pieces_inner`]'s
-    /// own open-chain field-write arm, so only a bare statement produces a
-    /// `Self{N}` binding this arm's return tuple can actually name. A write
-    /// buried in a sub-expression keeps its own nested-`let` scoping,
-    /// untouched by this issue.
-    ///
-    /// **BT-3506 / BT-3522 update:** `on:do:`/`ensure:`'s own equivalent
-    /// check (`exception_handling.rs`'s `exception_construct_families`) does
-    /// not call this — it goes through ADR 0122's shared
-    /// [`CoreErlangGenerator::body_threaded_families`], whose walk is
-    /// RECURSIVE rather than top-level-only. The two therefore answer
-    /// differently for a write nested below a block's top level, and
-    /// deliberately so: this predicate answers "can this construct's branch
-    /// tuple NAME the write's `Self{N}`" (only a bare statement's can),
-    /// while the detector answers "is there a mutation here at all". What
-    /// they DO share is the one shape rule underneath —
-    /// [`CoreErlangGenerator::is_family_mutation`] (Decision 4), which
-    /// `is_vt_self_field_assignment` above delegates to — so "what counts as
-    /// a `SelfVt` write" can never drift between them.
-    pub(in crate::core_erlang) fn block_writes_vt_self_field(
-        &self,
-        block: &beamtalk_core::ast::Block,
-    ) -> bool {
-        super::util::collect_body_exprs(&block.body)
-            .into_iter()
-            .any(|e| self.is_vt_self_field_assignment(e))
     }
 
     /// Returns the list of local variables written in `block` that are already
@@ -3408,9 +3374,19 @@ impl CoreErlangGenerator {
         // whose only mutation is `self.field := ...` still needs this inline-`case`
         // (the generic Tier 1 closure path rejects a field write outright).
         let all_mutations = self.vt_conditional_outer_mutations(arguments);
-        let threads_self = arguments.iter().any(
-            |arg| matches!(arg, Expression::Block(block) if self.block_writes_vt_self_field(block)),
-        );
+        // (BT-3912: the recursive detector `is_conditional_with_vt_self_field_threading`
+        // reads, so an arm whose only write is a field-writing fold's body counts.)
+        let branch_blocks: Vec<&Block> = arguments
+            .iter()
+            .filter_map(|arg| match arg {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        let threads_self = !self
+            .exception_construct_families(&branch_blocks)
+            .as_slice()
+            .is_empty();
         // BT-3522: `threads_self` covers a write that is a BARE TOP-LEVEL STATEMENT of a
         // branch block. A write nested deeper mints a `Self{N}` that dies with its own
         // nested scope, so no branch tuple can name it: it was a SILENT DROP (the early
@@ -3530,13 +3506,23 @@ impl CoreErlangGenerator {
     /// first-seen order.
     fn vt_conditional_outer_mutations(&self, arguments: &[Expression]) -> Vec<String> {
         let mut all_mutations: Vec<String> = Vec::new();
+        let mut blocks: Vec<&Block> = Vec::new();
         for arg in arguments {
             if let Expression::Block(block) = arg {
+                blocks.push(block);
                 for var in self.outer_scope_mutations_in_block(block) {
                     if !all_mutations.contains(&var) {
                         all_mutations.push(var);
                     }
                 }
+            }
+        }
+        // BT-3912 (BT-3854): and the outer locals a loop or fold nested in an arm
+        // threads (`outer_scope_mutations_in_block` reads the arm's own
+        // statements only): the arm is a frame whose producers rebind them.
+        for var in self.branch_threaded_locals(&blocks) {
+            if !all_mutations.contains(&var) {
+                all_mutations.push(var);
             }
         }
         all_mutations
@@ -3627,10 +3613,7 @@ impl CoreErlangGenerator {
                 continue;
             };
             for stmt in super::util::collect_body_exprs(&block.body) {
-                self.reject_unthreadable_value_self_field_write(
-                    stmt,
-                    self.is_field_assignment(stmt),
-                )?;
+                self.reject_unthreadable_value_self_field_write_in_arm(stmt)?;
             }
         }
         Ok(())
@@ -3914,12 +3897,18 @@ impl CoreErlangGenerator {
         // post-`case` family merge (`vt_conditional_family_binds`) is what
         // legitimately advances the outer version, exactly once.
         self.set_self_version(self_before);
-        let result = self.build_vt_conditional_branch_pieces_inner(
-            block,
-            all_mutations,
-            baseline,
-            capture_value,
-        );
+        // BT-3912 (BT-3854): a loop or fold at a producer site of an arm
+        // statement is a producer: its prelude (the construct tuple, the `Self`
+        // merge, the local rebinds) is spliced into the arm's own statements.
+        let body = super::util::collect_body_exprs(&block.body);
+        let result = self.with_body_producer_sites(&body, false, false, |this| {
+            this.build_vt_conditional_branch_pieces_inner(
+                block,
+                all_mutations,
+                baseline,
+                capture_value,
+            )
+        });
         self.set_self_version(self_before);
         self.pop_scope();
         result

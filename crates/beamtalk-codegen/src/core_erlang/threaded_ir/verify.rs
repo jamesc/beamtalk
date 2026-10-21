@@ -361,6 +361,20 @@ pub(in crate::core_erlang) enum VerifyError {
     /// frame threads out, and the write is silently lost (`erlc`-clean).
     HeldRebindNotIdentity { local: String, at: Span },
 
+    /// BT-3939: a producer site of a frame's body (a loop or fold the core rule
+    /// names as a local-threading producer there, writing the outer locals
+    /// `locals`) has no [`ThreadedStmt::ConstructTuple`] at its span that
+    /// threads them. It was lowered inside an opaque statement
+    /// (`let _ = ( ... )`), so its `LocalRebind`s are scoped inside that
+    /// statement: every later statement of the frame reads the pre-construct
+    /// local and the frame returns the pre-construct state map, and the write
+    /// is silently lost (`erlc`-clean). The repro is a Tier 2 block body
+    /// (`[:xs | n := 0. xs do: [:y | n := n + y]. n]` promoted by an actor
+    /// self-send), which answered the pre-loop `n`. Applies to every frame
+    /// whose lowering registers its producer sites; checked by
+    /// [`verify_producer_sites_threaded`].
+    ProducerSiteNotThreaded { locals: Vec<String>, at: Span },
+
     /// An [`ThreadedStmt::NlrThrow`] with no slot version, in **every** scope:
     /// it would render `{'$bt_nlr', Tok, Val, {}}`, an empty tuple no catch
     /// unpacks. A throw always carries the state its boundary hands back (the
@@ -640,6 +654,39 @@ pub(in crate::core_erlang) fn verify_fold_locals_carried(
         found: found.cloned(),
         at,
     }]
+}
+
+/// BT-3939, [`VerifyError::ProducerSiteNotThreaded`] over one frame's
+/// statement list: each `(site, locals)` of `sites` (a producer site of the
+/// frame's body that writes `locals`, with `locals` non-empty) must have a
+/// [`ThreadedStmt::ConstructTuple`] in `body` inside the site's span (a loop's is
+/// at the site's own span, a conditional's or `on:do:`'s at its tail) whose
+/// `threads` lists every one of `locals`. The sites are read off the AST by
+/// the frame's owner before it lowers a statement; the nodes are read off the
+/// lowered IR, so the two cannot agree by construction. Needs no version
+/// history (like [`verify_fold_locals_carried`]).
+pub(in crate::core_erlang) fn verify_producer_sites_threaded(
+    body: &[ThreadedStmt],
+    sites: &[(Span, Vec<String>)],
+) -> Vec<VerifyError> {
+    sites
+        .iter()
+        .filter(|(site, locals)| {
+            !locals.is_empty()
+                && !body.iter().any(|stmt| match stmt {
+                    ThreadedStmt::ConstructTuple { threads, span, .. } => {
+                        span.start() >= site.start()
+                            && span.end() <= site.end()
+                            && locals.iter().all(|l| threads.contains(l))
+                    }
+                    _ => false,
+                })
+        })
+        .map(|(site, locals)| VerifyError::ProducerSiteNotThreaded {
+            locals: locals.clone(),
+            at: *site,
+        })
+        .collect()
 }
 
 /// First pass: collects, per [`VersionedVar`], how many `Bind`s produce it
@@ -1306,7 +1353,7 @@ impl VerifyWalk<'_> {
                 self.frame_stack.pop();
             }
             // A branch arm threads through its seeded `StateAcc` — the same
-            // `StateAcc(None)` mode `verify_and_render_branch_arm`'s wrapper
+            // `StateAcc(None)` mode `render_branch_arm`'s wrapper
             // records for an arm today.
             ThreadedStmt::BranchArm {
                 frame,

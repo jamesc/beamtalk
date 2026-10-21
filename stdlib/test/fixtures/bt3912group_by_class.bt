@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3897): a `groupBy:` that writes an outer local is a producer
+// like every other fold: its `{Map, StateAcc}` carrier is unpacked wherever it
+// sits, so the value is the grouped dictionary in every position (it was the raw
+// carrier tuple outside the few that unpacked it). Asserted in
+// stdlib/test/bt3912group_by_test.bt.
+
+Object subclass: Bt3912GroupByClass
+
+  class rebindsOuter =>
+    t := 0
+    r := #(1, 3)
+      groupBy: [:x |
+        t := t + x
+        x > 2
+      ]
+    #[r at: true, t]
+
+  class assignedRebinds =>
+    t := 0
+    r := Dictionary new
+    #(1)
+      do: [:z |
+        r := #(1, 3)
+          groupBy: [:x |
+            t := t + x
+            x > 2
+          ]
+      ]
+    #[r at: true, t]
+
+  class ownLocal =>
+    r := #(1, 3)
+      groupBy: [:x |
+        k := x > 2
+        k
+      ]
+    r at: true

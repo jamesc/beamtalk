@@ -40,6 +40,7 @@ pub(in crate::core_erlang) struct BranchContextGuard<'a> {
     saved_state_version: usize,
     saved_self_version: usize,
     saved_active_branch_frame: u32,
+    saved_closure_frame: Option<crate::core_erlang::threaded_ir::FrameId>,
 }
 
 impl Drop for BranchContextGuard<'_> {
@@ -48,6 +49,7 @@ impl Drop for BranchContextGuard<'_> {
         self.generator.set_state_version(self.saved_state_version);
         self.generator.set_self_version(self.saved_self_version);
         self.generator.active_branch_frame = self.saved_active_branch_frame;
+        self.generator.closure_frame = self.saved_closure_frame;
     }
 }
 
@@ -60,6 +62,9 @@ impl CoreErlangGenerator {
         let saved_in_loop = self.in_loop_body;
         let saved_self_version = self.self_version();
         let saved_active_branch_frame = self.active_branch_frame;
+        // A branch context is its own frame: the closure body (if any) around
+        // it is not the frame its statements are lowered in.
+        let saved_closure_frame = self.closure_frame.take();
         self.set_state_version(0);
         self.in_loop_body = true;
         // mint a fresh frame identity for this branch context —
@@ -89,6 +94,7 @@ impl CoreErlangGenerator {
             saved_state_version,
             saved_self_version,
             saved_active_branch_frame,
+            saved_closure_frame,
         }
     }
 

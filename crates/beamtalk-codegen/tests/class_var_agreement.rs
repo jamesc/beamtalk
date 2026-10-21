@@ -218,13 +218,6 @@ proptest! {
 /// Cases `block_locals_without_local_touch_pass_verified_codegen` draws.
 const BLOCK_LOCAL_CASES: usize = 256;
 
-/// PIN-BUG BT-3849: how many of the [`BLOCK_LOCAL_CASES`] fixed-draw programs
-/// codegen rejects with "Multiple threaded variables in control flow" (7 of
-/// the first 1024 of the same draw, `measure_failure_rate`; it was 2 before
-/// BT-3922 stopped stored closures writing a class variable directly, which
-/// shifted the draw).
-const BT_3849_REJECTED: usize = 1;
-
 /// BT-3834: with [`Shapes::LOCAL_TOUCH`] off no block writes a method-level
 /// local, so a conditional arm, `ensure:` or `on:do:` block that introduces a
 /// local and rebinds it in a nested loop ([`Shapes::BLOCK_LOCAL`]) threads
@@ -237,29 +230,17 @@ const BT_3849_REJECTED: usize = 1;
 #[test]
 fn block_locals_without_local_touch_pass_verified_codegen() {
     let shapes = Shapes::all().without(Shapes::LOCAL_TOUCH);
-    let mut rejected = 0;
     for (index, (seed, size, program)) in draw_class_programs(shapes, BLOCK_LOCAL_CASES)
         .iter()
         .enumerate()
     {
-        match check_program(index, program) {
-            Ok(()) => {}
-            // PIN-BUG BT-3849: a block lowered as a plain closure whose
-            // nested construct threads two of its locals is rejected
-            // (`generate_block_control_flow_threaded`). A rejection is a
-            // compile error, not a verifier failure or a wrong answer.
-            Err(e) if e.contains("Multiple threaded variables in control flow") => {
-                rejected += 1;
-            }
-            Err(e) => panic!("seed {seed} size {size}: {e}"),
+        // BT-3912 (BT-3849): a plain closure body is a frame of its own, so a
+        // nested construct that threads two of its locals is a producer in it
+        // (it was "Multiple threaded variables in control flow").
+        if let Err(e) = check_program(index, program) {
+            panic!("seed {seed} size {size}: {e}");
         }
     }
-    // The draw is fixed, so the count is exact: a fix for BT-3849 flips this
-    // pin to 0 (and removes the allowance above).
-    assert_eq!(
-        rejected, BT_3849_REJECTED,
-        "PIN-BUG BT-3849: programs of {BLOCK_LOCAL_CASES} rejected changed"
-    );
 }
 
 /// BT-3737: the programs that failed `enabled_shapes_pass_verified_codegen`

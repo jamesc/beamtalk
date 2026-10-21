@@ -1235,7 +1235,7 @@ fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
     assert!(adr0131_diagnostics(&src).is_empty());
 }
 
-/// PIN-BUG BT-3841: every method in the inert `*_pending.bt.pending` probe
+/// PIN-BUG BT-3913: every method in the inert `*_pending.bt.pending` probe
 /// fixtures is rejected by an ADR 0131 diagnostic today, and no method in the
 /// compiled fixtures is. A phase of the BT-3743 epic that makes a shape
 /// compile moves it out of the pending fixture (and its test into
@@ -1760,7 +1760,7 @@ fn probe_diagnostics(context: &str, container: &str, target: &str, kind: &str) -
     }
 }
 
-/// PIN-BUG BT-3841: the statement-position probe matrix, measured on the
+/// PIN-BUG BT-3913: the statement-position probe matrix, measured on the
 /// real build (BT-3753). Every shape `adr0131_statement_probes.tsv` records
 /// as answering wrong, raising or failing to compile (`bad`) is rejected by
 /// an ADR 0131 diagnostic, and every shape it records as answering right
@@ -1818,7 +1818,7 @@ fn adr0131_statement_probe_pins() {
 /// one that does not goes back here with a `PIN-BUG` and an open issue.
 const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[];
 
-/// PIN-BUG BT-3841: Phase 0 accepts exactly what codegen lowers correctly.
+/// PIN-BUG BT-3913: Phase 0 accepts exactly what codegen lowers correctly.
 /// `adr0131_statement_measured.tsv` records, for every class, value-type and
 /// actor cell the check once rejected, what the cell answers when compiled
 /// with the check bypassed and run on a BEAM (regenerate it with `just
@@ -1917,7 +1917,7 @@ fn operand_diagnostics(
     adr0131_diagnostics(&class_source(context, "P", &[method]))
 }
 
-/// PIN-BUG BT-3841: the operand-position half of Phase 0 (`ALLOW_SET`) is
+/// PIN-BUG BT-3913: the operand-position half of Phase 0 (`ALLOW_SET`) is
 /// sound. `adr0131_operand_measured.tsv` records what a construct answers as
 /// the value of an assignment, a receiver, an argument, a cascade part, a
 /// literal element, a `match:` subject or an interpolation, with the check
@@ -2018,7 +2018,7 @@ fn phase0_summary() -> String {
     text
 }
 
-/// PIN-BUG BT-3841: the checked-in summary of the measurement
+/// PIN-BUG BT-3913: the checked-in summary of the measurement
 /// (`adr0131_phase0_summary.tsv`) is the one the measured tables and Phase 0
 /// produce now; the family counts in the PR and the ADR are read off it.
 #[test]
@@ -3104,56 +3104,64 @@ fn section6_escape_in_a_repl_expression_list_is_checked() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-3817: a `match:` arm that assigns an outer local
+// BT-3817: a `match:` arm that assigns an outer local; BT-3947 (closes BT-3875)
+// lowers it
 // ---------------------------------------------------------------------------
 
+/// BT-3947: a `match:` whose arm writes an outer local is a local-threading
+/// producer (each arm a `BranchArm` frame), so it is accepted at the method root
+/// (a statement, an assignment's value, an operand, the last expression) in every
+/// context; the arms were a compile error (BT-3817) until then.
 #[test]
-fn match_arm_writing_an_outer_local_is_a_structured_error_in_every_context() {
-    let body = "#a match: [#a -> (t := t + 1); _ -> 0]\nt";
-    for src in [in_class(body), in_value(body), in_actor(body)] {
-        let diags = adr0131_diagnostics(&src);
-        let errors = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
-        assert_eq!(errors.len(), 1, "{src}: {diags:?}");
-        assert!(
-            errors[0]
-                .message
-                .contains("`match:` arm writes outer local `t`"),
-            "{}",
-            errors[0].message
-        );
+fn match_arm_writing_an_outer_local_is_a_producer_in_every_context() {
+    for body in [
+        "#a match: [#a -> (t := t + 1); _ -> 0]\nt",
+        "r := #a match: [#a -> (t := t + 1); _ -> 0]\n#[r, t]",
+        "#a match: [#a -> (t := t + 1); _ -> 0]",
+        "r := 1 + (#a match: [#a -> (t := 5); _ -> 0])\n#[r, t]",
+        "#a match: [#a -> self ap: (t := t + 1); _ -> 0]\nt",
+        "x := 3 match: [3 -> t := 7; _ -> 0]\nt",
+        // A nested `match:` is a producer in its enclosing arm's frame, and an
+        // inner arm's pattern variable shadows the outer local.
+        "#a match: [#a -> (3 match: [y -> (t := t + y)]); _ -> 0]\nt",
+        "x := 0\n#a match: [#a -> (3 match: [x -> (x := x + 1)]); _ -> 0]\nx",
+        // In a loop body and in a conditional arm.
+        "#(1, 2) do: [:e | e match: [1 -> (t := t + 1); _ -> (t := t + 10)]]\nt",
+        "true ifTrue: [#a match: [#a -> (t := t + 1); _ -> 0]]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
     }
 }
 
+/// What stays a structured error: a `match:` arm write that is not a producer
+/// here. A guard runs before any arm is chosen, in no frame of the arm's, so a
+/// write there is never threaded; and a `match:` that is the subject of another
+/// is not at a producer site.
 #[test]
-fn match_arm_write_nested_in_an_expression_is_an_error() {
-    let nested = "#a match: [#a -> self ap: (t := t + 1); _ -> 0]\nt";
-    for src in [in_class(nested), in_value(nested), in_actor(nested)] {
-        let diags = adr0131_diagnostics(&src);
-        assert_eq!(
-            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
-            1,
-            "{src}: {diags:?}"
-        );
-    }
-}
-
-#[test]
-fn nested_match_arms_are_judged_once_by_their_own_scope() {
-    // The write is reported once (by the inner arm), not once per enclosing arm.
-    let nested = "#a match: [#a -> (3 match: [y -> (t := t + y)]); _ -> 0]\nt";
-    for src in [in_class(nested), in_value(nested), in_actor(nested)] {
-        let diags = adr0131_diagnostics(&src);
-        assert_eq!(
-            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
-            1,
-            "{src}: {diags:?}"
-        );
-    }
-    // An inner arm's pattern variable shadows the outer local `x`.
-    let shadow = "x := 0\n#a match: [#a -> (3 match: [x -> (x := x + 1)]); _ -> 0]\nx";
-    for src in [in_class(shadow), in_value(shadow), in_actor(shadow)] {
-        let diags = adr0131_diagnostics(&src);
-        assert!(diags.is_empty(), "{src}: {diags:?}");
+fn match_arm_write_that_is_not_a_producer_stays_a_structured_error() {
+    for body in [
+        "#a match: [x when: [(t := t + 1) > 0] -> 1; _ -> 0]\nt",
+        "(#a match: [#a -> (t := t + 1); _ -> 0]) match: [_ -> 1]\nt",
+        // The subject assigns the local an arm also writes: evaluated before the
+        // arms' scratch map is seeded, so the assignment would be lost.
+        "(t := 5) match: [1 -> (t := 100); _ -> 0]\nt",
+        // An unrelated local is no better: codegen does not sequence the subject
+        // before the arms' scratch map is seeded.
+        "(m := 5) match: [5 -> (t := 100); _ -> 0]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            let errors = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.message.contains("`match:` arm writes outer local `t`")),
+                "{src}: {diags:?}"
+            );
+        }
     }
 }
 
@@ -3686,7 +3694,8 @@ fn a_value_position_local_assignment_is_accepted_in_every_context() {
 
 #[test]
 fn a_match_arm_write_to_an_outer_local_is_reported_once() {
-    let src = in_class("x := 3 match: [3 -> t := 7; _ -> 0]\nt");
+    // (A subject-position `match:` is not a producer site: one error per write.)
+    let src = in_class("x := (3 match: [3 -> t := 7; _ -> 0]) match: [_ -> 1]\nt");
     let diags = analyse_full(&parse_module(&src), AnalysisContext::default()).diagnostics;
     let at_arm: Vec<_> = diags
         .iter()
@@ -4001,171 +4010,98 @@ fn loop_condition_arm_write_is_accepted() {
     assert!(residual_messages(repl, Some(&[])).is_empty());
 }
 
-/// PIN-BUG BT-3912 (closes BT-3897): an actor or REPL `groupBy:` whose block
-/// binds a local (or, in an actor, writes a field or sends to `self`)
-/// answered the raw `{Map, StateAcc}` carrier wherever its value is used
-/// outside the positions that unpack it; BT-3909 makes those positions a
-/// compile error. BT-3912 lowers the fold body as a frame, deletes the
-/// `GroupByValue` row and flips these to accepted. Class and value-type
-/// methods answer the map and are not rejected.
+/// BT-3912 (closes BT-3897): an actor or REPL `groupBy:` whose block binds a
+/// local (or, in an actor, writes a field or sends to `self`) answered the raw
+/// `{Map, StateAcc}` carrier wherever its value was used outside the few positions
+/// that unpacked it, and BT-3909 made those positions a compile error. A
+/// `groupBy:` is a fold producer like `collect:` (`producer_body_arg_index`), so
+/// the carrier is unpacked wherever it sits and every position is accepted
+/// (`stdlib/test/bt3912group_by_test.bt` runs the actor ones on a BEAM,
+/// `adr0131_local_rebind.btscript` the REPL's). Class and value-type methods
+/// always answered the map.
 #[test]
-fn residual_group_by_value_is_an_error_where_the_carrier_leaks() {
-    // The BT-3897 repro, verbatim.
-    let repro = "Actor subclass: ZzGbProbe\n  letk =>\n    (#(1, 3) groupBy: [:x |\n      k := x > 2\n      k\n    ]) at: true\n";
-    let messages = residual_messages(repro, None);
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(
-        messages[0].contains("`groupBy:` binds a local")
-            && messages[0].contains("as the receiver of a message in an actor method")
-            && messages[0].contains("BT-3897, until BT-3912"),
-        "{messages:?}"
-    );
-    // The leaking positions measured on a BEAM, and the destructuring last
-    // statement BT-3897 records.
+fn group_by_whose_block_binds_a_local_is_accepted_everywhere() {
+    let g = "#(1, 3) groupBy: [:x | k := x > 2. k]";
     for body in [
-        "(#(1, 3) groupBy: [:x | k := x > 2. k]) at: true",
-        "(#(1, 3) groupBy: [:x | #(_a, _b) := #(x > 2, 0)]) size",
-        "(#(1, 3) groupBy: [:x | self.n := self.n + 1. x > 2]) at: true",
-        "#[(#(1, 3) groupBy: [:x | k := x > 2. k])] size",
-        "#(1) collect: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]]",
-        "#(1) do: [:z | ^#(1, 3) groupBy: [:x | k := x > 2. k]]\nnil",
-        "b := [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. r]\nb value: 1",
-        "#(1) do: [:z | self.n := (#(1, 3) groupBy: [:x | k := x > 2. k]) size]\nnil",
-        // An assignment directly in a loop or counted-loop body answered the
-        // carrier (measured, PR #4383 review).
-        "r := nil\n[r isNil] whileTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
-        "r := nil\n1 to: 1 do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
-        "r := nil\n1 timesRepeat: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
-        // Every block not in `GROUP_BY_ASSIGN_BLOCKS` (no BUnit cell proves
-        // it unpacks) stays rejected, keyed on the exact construct block.
-        // anySatisfy:
-        "r := nil\n#(1) anySatisfy: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
-        // allSatisfy:
-        "r := nil\n#(1) allSatisfy: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
-        // detect: search
-        "r := nil\n#(1) detect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
-        // detect:ifNone: search
-        "r := nil\n#(1) detect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true] ifNone: [0]\nr",
-        // select:
-        "r := nil\n#(1) select: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
-        // ifNil:
-        "r := nil\nnil ifNil: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
-        // ifTrue:ifFalse:
-        "r := nil\ntrue ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]] ifFalse: [nil]\nr",
-        // and:
-        "r := nil\ntrue and: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
-        // or:
-        "r := nil\nfalse or: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. true]\nr",
-        // at:ifAbsent:
-        "r := nil\n#{#a => 1} at: #k ifAbsent: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
-        // tryDo:
-        "r := nil\nResult tryDo: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
-        // on:do: handler
-        "r := nil\n[Error signal: \"x\"] on: Error do: [:e | r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
-        // keysAndValuesDo:
-        "r := nil\n#{#a => 1} keysAndValuesDo: [:kk :v | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
-        // eachWithIndex:
-        "r := nil\n#(1) eachWithIndex: [:z :j | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
-        // [...] value
-        "r := nil\n[r := #(1, 3) groupBy: [:x | k := x > 2. k]] value\nr",
-        // Listed blocks nested in each other: single level only, nesting is
-        // unmeasured.
-        "r := nil\ntrue ifTrue: [#(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",
-        "r := nil\n[#(1) collect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. z]. 0] on: Error do: [:e | 0]\nr",
-        // A non-final statement is unpacked only in the measured `do:` and
-        // `timesRepeat:` bodies (BT-3940): a loop condition, a handler, an
-        // arm and a nested block stay rejected.
-        "i := 0\n[#(1, 3) groupBy: [:x | k := x > 2. k]. i < 3] whileTrue: [i := i + 1]\ni",
-        "[Error signal: \"x\"] on: Error do: [:e | #(1, 3) groupBy: [:x | k := x > 2. k]. 0]",
-        "true ifTrue: [#(1, 3) groupBy: [:x | k := x > 2. k]. 0]",
-        "#(1) do: [:z | #(1) do: [:y | #(1, 3) groupBy: [:x | k := x > 2. k]. nil]. nil]",
-        "#(1) collect: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]. z]",
-        // Measured right, but keyed on every enclosing role: an arm in a
-        // loop body stays rejected (loud, not silent).
-        "r := nil\n1 to: 1 do: [:z | true ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]]\nr",
+        format!("({g}) at: true"),
+        format!("#[({g})] size"),
+        format!("#(1) collect: [:z | {g}]"),
+        format!("#(1) do: [:z | ^{g}]\nnil"),
+        format!("b := [:z | r := {g}. r]\nb value: 1"),
+        format!("r := nil\n[r isNil] whileTrue: [r := {g}]\nr"),
+        format!("r := nil\n1 to: 1 do: [:z | r := {g}]\nr"),
+        format!("r := nil\n#(1) anySatisfy: [:z | r := {g}. true]\nr"),
+        format!("r := nil\n#(1) detect: [:z | r := {g}. true]\nr"),
+        format!("r := nil\nnil ifNil: [r := {g}]\nr"),
+        format!("r := nil\ntrue and: [r := {g}. true]\nr"),
+        format!("r := nil\n#{{#a => 1}} at: #k ifAbsent: [r := {g}. 0]\nr"),
+        format!("r := nil\nResult tryDo: [r := {g}. 0]\nr"),
+        format!("r := nil\n[Error signal: \"x\"] on: Error do: [:e | r := {g}. 0]\nr"),
+        format!("r := nil\n[r := {g}] value\nr"),
+        format!("r := nil\ntrue ifTrue: [#(1) do: [:z | r := {g}]]\nr"),
+        format!("{g}\nnil"),
+        g.to_string(),
+        format!("r := {g}\nr at: true"),
+        format!("^{g}"),
+        "(#(1, 3) groupBy: [:x | x > 2]) at: true".to_string(),
     ] {
-        let src = in_actor(body);
-        let messages = residual_messages(&src, None);
-        assert!(
-            messages.iter().any(|m| m.contains("BT-3897")),
-            "{src}: {messages:?}"
-        );
-    }
-    // The positions that unpack it (measured right) and a pure block.
-    for body in [
-        "#(1, 3) groupBy: [:x | k := x > 2. k]\nnil",
-        // The method's last statement, its reply (`lastStatement` in
-        // adr0133residuals_test.bt answers the map).
-        "#(1, 3) groupBy: [:x | k := x > 2. k]",
-        "r := #(1, 3) groupBy: [:x | k := x > 2. k]\nr at: true",
-        "^#(1, 3) groupBy: [:x | k := x > 2. k]",
-        "r := nil\n#(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr at: true",
-        "r := nil\ntrue ifTrue: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr at: true",
-        "#(1) do: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]. nil]\nnil",
-        // Assignments in the other blocks measured to unpack the fold
-        // (`adr0133residuals_test.bt`), and a discarded statement in a loop.
-        "r := nil\n[r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0] on: Error do: [:e | 0]\nr",
-        "r := nil\n[nil] ensure: [r := #(1, 3) groupBy: [:x | k := x > 2. k]]\nr",
-        "r := nil\n#(1) collect: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. z]\nr",
-        "r := nil\n#(1) inject: 0 into: [:a :z | r := #(1, 3) groupBy: [:x | k := x > 2. k]. a]\nr",
-        "r := nil\n#(1) detect: [:z | false] ifNone: [r := #(1, 3) groupBy: [:x | k := x > 2. k]. 0]\nr",
-        "1 timesRepeat: [#(1, 3) groupBy: [:x | k := x > 2. k]. nil]\nnil",
-        "(#(1, 3) groupBy: [:x | x > 2]) at: true",
-    ] {
-        let src = in_actor(body);
+        let src = in_actor(&body);
         assert!(residual_messages(&src, None).is_empty(), "{src}");
     }
     let field = "Actor subclass: Ac\n  state: m = nil\n  probe =>\n    self.m := #(1, 3) groupBy: [:x | k := x > 2. k]\n    self.m\n";
     assert!(residual_messages(field, None).is_empty());
     for src in [
-        in_class("(#(1, 3) groupBy: [:x | k := x > 2. k]) at: true"),
-        in_value("(#(1, 3) groupBy: [:x | k := x > 2. k]) at: true"),
+        in_class(&format!("({g}) at: true")),
+        in_value(&format!("({g}) at: true")),
     ] {
         assert!(residual_messages(&src, None).is_empty(), "{src}");
     }
-    // The REPL: only a top-level statement or assignment unpacks it.
+    // The REPL, top level and nested alike.
     for input in [
-        "(#(1, 3) groupBy: [:x | k := x > 2. k]) at: true\n",
-        "#(1) do: [:z | #(1, 3) groupBy: [:x | k := x > 2. k]. nil]\n",
-        "r := nil. #(1) do: [:z | r := #(1, 3) groupBy: [:x | k := x > 2. k]]\n",
+        format!("({g}) at: true\n"),
+        format!("#(1) do: [:z | {g}. nil]\n"),
+        format!("r := nil. #(1) do: [:z | r := {g}]\n"),
+        format!("{g}\n"),
+        format!("r := {g}\n"),
     ] {
-        let messages = residual_messages(input, Some(&[]));
+        let messages = residual_messages(&input, Some(&[]));
         assert!(
-            messages.iter().any(|m| m.contains("BT-3897")),
+            messages.iter().all(|m| !m.contains("groupBy")),
             "{input}: {messages:?}"
         );
     }
-    for input in [
-        "#(1, 3) groupBy: [:x | k := x > 2. k]\n",
-        "r := #(1, 3) groupBy: [:x | k := x > 2. k]\n",
-    ] {
-        assert!(residual_messages(input, Some(&[])).is_empty(), "{input}");
-    }
-    // At the REPL only a local or field write threads the fold (the shared
-    // `needs_mutation_threading` rule): a block that forwards an opaque
-    // callable to a HOM is the plain `groupBy:` and answers the map
-    // anywhere (PR #4383 review).
-    let input = "(#(1, 3) groupBy: [:x | #(3) anySatisfy: f]) at: true\n";
-    assert!(residual_messages(input, Some(&["f"])).is_empty(), "{input}");
 }
 
-/// PIN-BUG BT-3947 (closes BT-3875): a REPL `match:` arm that writes an
-/// outer local draws the same `match:` arm error as a method (BT-3817), not
-/// the value-position error it drew before BT-3909 (maintainer-approved REPL
-/// output change), and only that one. BT-3947 lowers `match:` arms as frames,
-/// deletes the `MatchArmWrite` row and flips this to accepted.
+/// BT-3947 (closes BT-3875): a REPL `match:` arm that writes an outer local is a
+/// REPL construct (each arm inlined over the bindings map), so it is accepted at
+/// a statement, an assignment's value or an operand site, as a method's is. The
+/// `match:` arm error (BT-3909, maintainer-approved REPL output change) is left
+/// for a `match:` that is not a producer there: a write in a guard, or a
+/// `match:` that is the subject of another.
 #[test]
-fn residual_repl_match_arm_write_is_the_match_arm_error() {
-    let input = "r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]\n";
-    let messages = residual_messages(input, Some(&["t"]));
-    assert_eq!(
-        messages,
-        vec![
-            "a `match:` arm writes outer local `t`, but `match:` cannot return the write"
-                .to_string();
-            2
-        ]
-    );
+fn residual_repl_match_arm_write_is_accepted_where_it_is_a_producer() {
+    for input in [
+        "r := 3 match: [1 -> (t := 5); _ -> (t := t + 9)]\n",
+        "3 match: [1 -> (t := 5); _ -> (t := t + 9)]\n",
+        "r := 1 + (3 match: [1 -> (t := 5); _ -> 0])\n",
+        "true ifTrue: [3 match: [1 -> (t := 5); _ -> 0]]\n",
+        "3 match: [1 -> (4 match: [4 -> (t := 5); _ -> 0]); _ -> 0]\n",
+    ] {
+        let messages = residual_messages(input, Some(&["t"]));
+        assert!(messages.is_empty(), "{input}: {messages:?}");
+    }
+    for input in [
+        "3 match: [x when: [(t := 5) > 0] -> 1; _ -> 0]\n",
+        "(3 match: [1 -> (t := 5); _ -> 0]) match: [_ -> 1]\n",
+    ] {
+        let messages = residual_messages(input, Some(&["t"]));
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("a `match:` arm writes outer local `t`")),
+            "{input}: {messages:?}"
+        );
+    }
     // An arm binding a local of its own is not an outer write; it is still
     // the value-position error.
     let messages = residual_messages("r := 3 match: [_ -> (z := 5)]\n", Some(&[]));
