@@ -1713,7 +1713,10 @@ walk_chain_superclass_inheritance_test() ->
         cleanup_mock_class('WalkChainSub', PidSub),
         cleanup_mock_class('WalkChainSuper', PidSuper),
         ets:delete_all_objects(beamtalk_class_metadata),
-        ets:insert(beamtalk_class_metadata, Saved)
+        ets:insert(beamtalk_class_metadata, Saved),
+        %% A raw restore bypasses the metadata API, so drop derived
+        %% facts cached against the test rows (BT-4064).
+        beamtalk_class_derived_cache:invalidate()
     end.
 
 %%% resolve_chain_type/2 tests
