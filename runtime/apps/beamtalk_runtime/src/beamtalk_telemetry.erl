@@ -140,8 +140,6 @@ The runtime also uses it for its own Erlang-side handler ids (see
 """.
 -spec detach(term()) -> nil.
 detach(HandlerId) ->
-    %% bt-catcher-audit: not-applicable-no-block - telemetry:detach/1 is a static call
-    %% that never runs Beamtalk code
     try telemetry:detach(HandlerId) of
         _ -> nil
     catch
@@ -277,8 +275,6 @@ do_attach(HandlerId, EventNames, Block, Sel) ->
     check_handler_id(HandlerId, Sel),
     check_block(Block, 3, Sel),
     Result =
-        %% bt-catcher-audit: not-applicable-no-block - telemetry:attach_many/4 only
-        %% stores the handler; it never calls it
         try
             telemetry:attach_many(HandlerId, EventNames, fun ?MODULE:handle_event/4, #{
                 block => Block
@@ -330,6 +326,7 @@ all_atoms([A | Rest]) when is_atom(A) -> all_atoms(Rest);
 all_atoms([]) -> true;
 all_atoms(_) -> false.
 
+-spec event_name_error(atom(), binary(), term()) -> no_return().
 event_name_error(Sel, What, Name) ->
     type_error(Sel, <<What/binary, " must be a non-empty List of Symbols">>, Name).
 
