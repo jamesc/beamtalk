@@ -767,16 +767,20 @@ lifecycle_aggregate_stats_test_() ->
                 beamtalk_actor:sync_send(Pid, stop, []),
                 timer:sleep(100),
 
-                %% Get aggregate stats — should include lifecycle operations
+                %% Get aggregate stats — should include lifecycle operations.
+                %% The actor has stopped, so its per-pid entry is retired
+                %% into the class rollup (BT-4066).
                 Stats = beamtalk_trace_store:get_stats(),
                 PidKey = list_to_binary(pid_to_list(Pid)),
-                ?assertMatch(#{PidKey := _}, Stats),
-                PidStats = maps:get(PidKey, Stats),
-                Methods = maps:get(<<"methods">>, PidStats),
+                ?assertNot(maps:is_key(PidKey, Stats)),
+                ?assertMatch(#{<<"retired:Counter">> := _}, Stats),
+                Methods = maps:get(<<"methods">>, maps:get(<<"retired:Counter">>, Stats)),
 
-                %% Start should have at least 1 call
+                %% Start and stop should each have at least 1 call
                 StartStats = maps:get(<<"start">>, Methods),
-                ?assert(maps:get(<<"calls">>, StartStats) >= 1)
+                ?assert(maps:get(<<"calls">>, StartStats) >= 1),
+                StopStats = maps:get(<<"stop">>, Methods),
+                ?assert(maps:get(<<"calls">>, StopStats) >= 1)
             end)
         ]
     end}.

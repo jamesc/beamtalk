@@ -162,6 +162,10 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
 
   /// Per-actor, per-method aggregate stats (always available, even without tracing).
   ///
+  /// Live actors are keyed by pid. When an actor dies its stats are folded
+  /// into a per-class entry keyed `"retired:<Class>"` (with `retired => true`),
+  /// so the totals stay correct without keeping a row per dead actor.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// Tracing stats
@@ -170,7 +174,8 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
   class sealed stats -> Dictionary => self delegate
 
   /// Aggregate stats for a specific actor.
-  /// Returns #{} for unknown actors.
+  /// Returns #{} for unknown and dead actors (a dead actor's stats are in
+  /// the `"retired:<Class>"` entry of `stats`).
   ///
   /// ## Examples
   /// ```beamtalk

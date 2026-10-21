@@ -426,8 +426,8 @@ This approach reduces implementation effort (3 tools vs 10), avoids API surface 
 ### Cleanup and Lifecycle
 
 - **Trace events**: Bounded by ring buffer (100k default). Oldest dropped on overflow via batch eviction. Explicit `Tracing clear` resets.
-- **Aggregate stats**: Persist until `Tracing clear`. Size is proportional to unique `{Pid, Selector}` combinations, not call volume — bounded by the number of actors × methods seen.
-- **Actor death**: Stats and traces for dead actors are **retained** for post-mortem analysis. This is essential for the test workflow where actors spawn, run, and die before results are queried.
+- **Aggregate stats**: Persist until `Tracing clear`. Size is proportional to unique `{Pid, Selector}` combinations of **live** actors plus one rollup row per `{Class, Selector}` seen, not to call volume or actor churn.
+- **Actor death**: Trace events for dead actors are **retained** for post-mortem analysis. Their aggregate stats are retained too, folded into a per-`{Class, Selector}` rollup: `Tracing stats` reports it under a `"retired:<Class>"` key (`retired => true`), and `slowMethods:`/`hotMethods:`/`errorMethods:` report it as entries with `pid => "retired"`. Per-pid stats for a dead actor are not kept (`statsFor:` a dead actor answers `#{}`). *(Amended by BT-4066: originally per-pid stats were kept forever, which leaked one row per `{Pid, Selector}` for every actor in a long-running server.)* The dead pid's rows are retired by the lifecycle `stop` handler and, for actors that die without `terminate/2` (kill, untrapped exit), by a monitor the trace store arms on each actor's first aggregate row. The retired pid's atomics slots go on a free list and are reused, so the counters array does not keep doubling.
 - **`beamtalk_trace_store` gen_server**: Supervised under `beamtalk_runtime_sup`. Owns ETS tables (created with `{heir, HeirPid, undefined}`, where `HeirPid` is the `beamtalk_ets_heir` process) and counter references (stored in `persistent_term`). On gen_server crash: ETS ownership transfers to `beamtalk_ets_heir` via the `heir` mechanism, counters survive in `persistent_term`. The restarted gen_server takes its tables back from the heir (`beamtalk_ets_heir:reclaim/1`) — **no data loss on process crash**. Only a full VM crash (SIGKILL, OOM) loses data.
 
 ### Future: Block-Scoped Profiling
@@ -654,7 +654,7 @@ Place `enableTracing` / `disableTracing` / `tracingEnabled` on `Beamtalk`, with 
 - ~150ns overhead per actor message send (always-on aggregates via `counters`) — negligible but non-zero
 - BEAM VM crash (SIGKILL, OOM) loses all in-memory tracing data (mitigated: tracing data is ephemeral by nature; a future enhancement could periodically checkpoint aggregates to the workspace log)
 - Trace events reference PIDs which are opaque after actor death (mitigated: class name is captured at record time via `beamtalk_object_instances` lookup)
-- Aggregate `{Pid, Selector}` space grows without bound in long-running sessions with actor churn (PIDs are not reused within a BEAM session). Mitigated: `Tracing clear` resets; a future enhancement could auto-evict entries for dead PIDs on a periodic sweep
+- Aggregate `{Pid, Selector}` space would grow without bound in long-running sessions with actor churn (PIDs are not reused within a BEAM session). Resolved by BT-4066: dead actors' entries are folded into a per-class rollup and their counter slots reused; the cost is that per-pid stats for dead actors are not available
 - Standalone `Tracing` class is temporarily inconsistent with ADR 0064's pattern of logging config on `Beamtalk` (mitigated: planned `Logging` class migration will make both consistent)
 
 ### Neutral
