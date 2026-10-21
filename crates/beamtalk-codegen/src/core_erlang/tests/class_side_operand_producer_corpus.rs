@@ -49,30 +49,35 @@ const PRODUCERS: &[&str] = &[
     "n := n + 1",
 ];
 
-/// Where the producer sits (`P`): the arguments of a self-send of every arity
+/// Where the producer sits (`PROD`): the arguments of a self-send of every arity
 /// and nesting, around a sibling that reads `n`, inside a binary operand, as an
 /// assignment's value, as a class-variable write's value (class-side only),
-/// and in an arm and a loop body frame of its own. (A class-side closure that
+/// as an argument of a send to the class by name, and in an arm and a loop body
+/// frame of its own (followed by a read of `n` in that frame). (A class-side closure that
 /// writes an outer local is a structured rejection, BT-3743.)
 const POSITIONS: &[&str] = &[
-    "    self take: (P)\n",
-    "    self take: 1 with: (P)\n",
-    "    self take: (P) with: n\n",
-    "    self take: n with: (P)\n",
-    "    self take: (P) with: (self take: 2)\n",
-    "    self take: (self take: (P))\n",
-    "    self take: (P) + 1\n",
-    "    self take: ((P) printString)\n",
-    "    x := self take: (P)\n    x\n",
-    "    (self isAlive: 1) ifTrue: [self take: (P)]\n",
-    "    #(1, 2) do: [:e | self take: (P)]\n",
-    "    (self take: (P)) printString\n",
+    "    self take: (PROD)\n",
+    "    self take: 1 with: (PROD)\n",
+    "    self take: (PROD) with: n\n",
+    "    self take: n with: (PROD)\n",
+    "    self take: (PROD) with: (self take: 2)\n",
+    "    self take: (self take: (PROD))\n",
+    "    self take: (PROD) + 1\n",
+    "    self take: ((PROD) printString)\n",
+    "    x := self take: (PROD)\n    x\n",
+    "    self take: (self take: 1) with: (PROD)\n",
+    "    OperandProducerProbe take: (PROD)\n",
+    "    (self isAlive: 1) ifTrue: [self take: (PROD)]\n",
+    "    (self isAlive: 1) ifTrue: [self take: (PROD). self take: n] ifFalse: [0]\n",
+    "    #(1, 2) do: [:e | self take: (PROD)]\n",
+    "    #(1, 2) do: [:e | self take: (PROD). self take: n]\n",
+    "    (self take: (PROD)) printString\n",
 ];
 
 /// Class-variable writes of the class-side contexts (`classState: f`).
 const CLASS_VAR_POSITIONS: &[&str] = &[
-    "    self.f := self take: (P)\n",
-    "    self.f := (self take: (P)) + self.f\n",
+    "    self.f := self take: (PROD)\n",
+    "    self.f := (self take: (PROD)) + self.f\n",
 ];
 
 const HELPERS: &str = "  take: v => v
@@ -145,7 +150,7 @@ fn rows(ctx: &Context) -> Vec<(String, String)> {
         for (k, producer) in PRODUCERS.iter().enumerate() {
             out.push((
                 format!("producer{k} position{p}"),
-                position.replace('P', producer),
+                position.replace("PROD", producer),
             ));
         }
     }
@@ -273,13 +278,13 @@ fn class_side_operand_producers_compile() {
 fn class_side_operand_producers_report_the_pre_fix_lowering() {
     // The positions whose producer is a direct argument of the statement's own
     // self-send (the shape the fault reverts).
-    const DIRECT: &[usize] = &[0, 1, 2, 3, 4];
+    const DIRECT: &[usize] = &[0, 1, 2, 3, 4, 9];
     let mut missed = Vec::new();
     let mut checked = 0;
     for ctx in CONTEXTS.iter().filter(|c| c.class_side) {
         for &p in DIRECT {
             for producer in PRODUCERS {
-                let stmt = POSITIONS[p].replace('P', producer);
+                let stmt = POSITIONS[p].replace("PROD", producer);
                 if pinned_bt4089(ctx, &stmt) {
                     continue;
                 }
