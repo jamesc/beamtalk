@@ -1229,7 +1229,8 @@ impl CoreErlangGenerator {
                     // through the very same case as a
                     // fire-and-forget cast — pdict stash/restore,
                     // strip_local_temps, notify_state_change and
-                    // the shared no-reply error arms — by binding
+                    // the shared no-reply error arms, so a raising
+                    // step crashes the actor (ADR 0134) — by binding
                     // CastSelector / CastArgs in the pattern.
                     line(),
                     docvec![
@@ -1362,10 +1363,10 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-3968: the `let` binding that drops the continuation queue in a
-    /// dispatch-error arm — the follow-up steps a failed dispatch requested
-    /// are void. Steps committed by an earlier dispatch (the base seeded by
-    /// `handle_continue/2`) are kept.
+    /// BT-3968: the `let` binding that drops the continuation queue in
+    /// `handle_call/3`'s dispatch-error arm — the follow-up steps a failed
+    /// dispatch requested are void. (The no-reply error arms crash the actor
+    /// instead, which drops the whole queue; ADR 0134.)
     fn discard_continuations_binding() -> Document<'static> {
         docvec![
             "let _ContDiscarded = call ",
@@ -1376,11 +1377,6 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates the `handle_cast/2` callback for async message sends.
-    ///
-    /// Handles the fire-and-forget cast format: `{cast, Selector, Args}` — sent by
-    /// `beamtalk_actor:cast_send/3`. Dispatches the message and updates state;
-    /// errors are logged via `logger:warning` and discarded.
     /// Generates the pdict stash preamble for re-entrant self-sends.
     /// Returns `let _OldState = ... in let _PutOk = ... in` — caller appends
     /// the dispatch body and must call `pdict_restore_epilogue()` after.
@@ -1423,13 +1419,17 @@ impl CoreErlangGenerator {
         ]
     }
 
-    // helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
+    /// The inner `case safe_dispatch ... end` for a fire-and-forget cast (and
+    /// a `continueWith:` step, which reuses it). A successful dispatch commits
+    /// its new state and discards the result; a raising one crashes the actor
+    /// through the shared no-reply error arms (ADR 0134, BT-3958).
     fn cast_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
             Self::pdict_stash_preamble(),
             line(),
-            // Use safe_dispatch for error isolation; discard result on error
+            // safe_dispatch turns a raise into an {error, ...} value; the
+            // error arms below re-raise it after the pdict is restored
             docvec![
                 "let _CastDispatchResult = call ",
                 leaf::atom(module_name.clone()),
@@ -1460,8 +1460,8 @@ impl CoreErlangGenerator {
                         ]
                     ),
                     line(),
-                    // log error but don't crash — shared with handle_info
-                    noreply_error_arms("Cast", leaf::var("CastSelector")),
+                    // ADR 0134: re-raise, crashing the actor — shared with handle_info
+                    noreply_error_arms("Cast"),
                 ]
             ),
             line(),
@@ -1469,6 +1469,12 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// Generates the `handle_cast/2` callback for fire-and-forget (`!`) sends,
+    /// `{cast, Selector, Args}` from `beamtalk_actor:cast_send/3`. The result
+    /// is discarded; an error raised by the method crashes the actor (ADR
+    /// 0134, BT-3958) through the error arms shared with `handle_info/2` —
+    /// there is no caller to hand it to.
+    ///
     /// ADR 0069 Phase 2b: Matches 4-tuple messages with `PropCtx`
     /// for both fire-and-forget casts and async sends. Falls back to 3-tuple
     /// for backward compatibility.
@@ -1849,9 +1855,12 @@ impl CoreErlangGenerator {
     /// actor itself spawned and linked) — without this, that crash would be
     /// silently swallowed by the ignore-all default.
     ///
-    /// For **Server subclasses**, dispatches to the user-defined `handleInfo:` method
-    /// with log-and-continue error semantics: if `handleInfo:` raises an error, the
-    /// server logs a warning and continues with the pre-call state.
+    /// For **Server subclasses**, dispatches to the user-defined `handleInfo:`
+    /// method. If `handleInfo:` raises, the error is re-raised and the server
+    /// crashes (ADR 0134, BT-3958): `gen_server` calls `terminate/2` with the
+    /// error as its reason, emits a crash report, and the supervisor applies
+    /// its restart policy. The error arms are shared with `handle_cast/2`
+    /// (`noreply_error_arms`).
     ///
     /// For **plain Actor subclasses**, generates the default ignore-all stub that
     /// delegates to `beamtalk_actor:handle_info/2` — which itself checks for a
@@ -1865,9 +1874,12 @@ impl CoreErlangGenerator {
     ///         <'pass'> when 'true' ->
     ///             case call 'Module':'safe_dispatch'('handleInfo:', [Msg], State) of
     ///                 <{'reply', _Result, NewState}> when 'true' -> {'noreply', NewState}
-    ///                 <{'error', {_InfoType, InfoReason, InfoStacktrace}, _ErrState}> when 'true' ->
-    ///                     let _Log = call 'logger':'warning'(Msg, #{stacktrace => InfoStacktrace, ...})
-    ///                     in {'noreply', State}
+    ///                 <{'error', {InfoType, InfoReason, InfoStacktrace}, _InfoState}> when 'true' ->
+    ///                     let InfoBuiltStack = primop 'build_stacktrace'(InfoStacktrace) in
+    ///                     let InfoException = call 'beamtalk_exception_handler':'ensure_wrapped'(InfoType, InfoReason, InfoBuiltStack) in
+    ///                     primop 'raw_raise'('error', InfoException, InfoStacktrace)
+    ///                 <{'error', InfoError, _InfoState2}> when 'true' ->
+    ///                     call 'beamtalk_exception_handler':'reraise'(InfoError)
     ///                 <_Other> when 'true' -> {'noreply', State}
     ///             end
     ///         <_ExitResult> when 'true' -> _ExitResult
@@ -1915,8 +1927,8 @@ impl CoreErlangGenerator {
                             ]
                         ),
                         line(),
-                        // log error but don't crash — shared with handle_cast
-                        noreply_error_arms("Info", leaf::atom("handleInfo:")),
+                        // ADR 0134: re-raise, crashing the actor — shared with handle_cast
+                        noreply_error_arms("Info"),
                         line(),
                         "<_Other> when 'true' -> {'noreply', State}",
                     ]
@@ -2071,44 +2083,56 @@ impl CoreErlangGenerator {
     }
 }
 
-/// Generates the two error case arms shared by `gen_server` `noreply` callbacks
-/// (`handle_cast` and `handle_info`).
+/// Generates the two error case arms shared by every `gen_server` callback
+/// that dispatches a message with no reply channel: `handle_cast/2` (`!`
+/// sends), a Server's `handle_info/2` (`handleInfo:`) and the
+/// `'$bt_continue'` step of `handle_continue/2` (`continueWith:`, which
+/// reuses the cast dispatch case).
 ///
-/// Both callbacks dispatch into user code and must handle two error shapes with
-/// identical log-and-continue semantics:
+/// ADR 0134 (BT-3958): there is no caller to hand the error to, so the actor
+/// crashes the OTP way: both arms raise, `gen_server` calls `terminate/2`
+/// with `{Exception, Stacktrace}` as its reason, emits a crash report naming
+/// the last message, and the supervisor applies its restart policy.
 ///
-/// 1. **Triple-format error** `{'error', {Type, Reason, Stacktrace}, _State}`:
-///    the three-tuple produced by a `catch` expression in the dispatch path.
-///    Logged with `beamtalk_error:format_safe/2` (includes stacktrace).
-/// 2. **Plain-format fallback** `{'error', Error, _State2}`:
-///    DNU, `#beamtalk_error{}`, or any non-triple error from dispatch.
-///    Logged with `beamtalk_error:format_safe/1`.
+/// Both arms raise the error as a wrapped Exception object (an `error`-class
+/// raise of `beamtalk_exception_handler:ensure_wrapped`'s result), so
+/// `terminate:` and `onExit:` see the same kind of reason whatever was
+/// raised — a Beamtalk `Error signal:`, a raw Erlang `badarith`, an `exit`
+/// or a `throw` — and the same as a runtime-path actor
+/// (`beamtalk_actor:dispatch_cast/3`). Raising as `error` also matters for a
+/// `throw`: `gen_server` takes a throw escaping a callback as the callback's
+/// *return value*, so re-raising it as a throw would install the thrown term
+/// as the next state.
 ///
-/// Both arms log an OTP logger `warning` and return `{'noreply', State}`.
+/// 1. **Triple-format error** `{'error', {Type, Reason, RawStack}, _State}`:
+///    the three-tuple produced by `safe_dispatch`'s `catch`, whose third
+///    element is the raw trace the catch clause binds (see
+///    `generate_safe_dispatch`). The trace is built for the Exception's
+///    `stacktrace` field and the raise keeps the original trace
+///    (`primop 'raw_raise'`, since `erlang:raise/3` rejects a raw trace).
+/// 2. **Plain-format fallback** `{'error', Error, _State2}`: DNU,
+///    `#beamtalk_error{}`, a relayed non-local return, or any non-triple
+///    error from dispatch. Raised by `beamtalk_exception_handler:reraise/1`,
+///    which the runtime-path actor's `dispatch_cast/3` uses too.
 ///
 /// `var_prefix` is the capitalised variable-name prefix (e.g. `"Cast"` →
 /// `CastType`, `CastReason`, …; `"Info"` → `InfoType`, …).  Variable names are
 /// produced via [`leaf::var`] to satisfy the typed-leaf rule (ADR 0089).
-///
-/// `selector` is the Core Erlang expression for the `'selector'` key in the
-/// logger metadata map — a `leaf::var` call for `handle_cast` (the dynamic
-/// selector variable) and a `leaf::atom` call for `handle_info` (`'handleInfo:'`).
-#[allow(clippy::too_many_lines)] // document tree; length is structural, not algorithmic
-fn noreply_error_arms(var_prefix: &str, selector: Document<'static>) -> Document<'static> {
+fn noreply_error_arms(var_prefix: &str) -> Document<'static> {
     // Compute variable name strings from the prefix, then pass to leaf::var.
     // format! here derives the *input* to the typed-leaf API, not a raw Core
     // Erlang fragment — this is the sanctioned pattern per ADR 0089.
     let type_v = leaf::var(format!("{var_prefix}Type"));
     let reason_v = leaf::var(format!("{var_prefix}Reason"));
     let stack_v = leaf::var(format!("{var_prefix}Stacktrace"));
+    let built_v = leaf::var(format!("{var_prefix}BuiltStack"));
+    let wrapped_v = leaf::var(format!("{var_prefix}Exception"));
     let state1_v = leaf::var(format!("_{var_prefix}State"));
-    let msg_triple_v = leaf::var(format!("{var_prefix}ErrMsg"));
     let error_v = leaf::var(format!("{var_prefix}Error"));
     let state2_v = leaf::var(format!("_{var_prefix}State2"));
-    let msg_plain_v = leaf::var(format!("{var_prefix}ErrMsg2"));
 
     docvec![
-        // Triple-format arm — destructure error triple to log stacktrace
+        // Triple-format arm — wrap, then raise keeping the original trace
         docvec![
             "<{",
             leaf::atom("error"),
@@ -2128,56 +2152,37 @@ fn noreply_error_arms(var_prefix: &str, selector: Document<'static>) -> Document
             INDENT,
             docvec![
                 line(),
-                docvec![
-                    "let ",
-                    msg_triple_v.clone(),
-                    " = call ",
-                    leaf::atom("beamtalk_error"),
-                    ":",
-                    leaf::atom("format_safe"),
-                    "({",
-                    type_v.clone(),
-                    ", ",
-                    reason_v.clone(),
-                    "}, ",
-                    stack_v.clone(),
-                    ") in",
-                ],
+                "let ",
+                built_v.clone(),
+                " = primop ",
+                leaf::atom("build_stacktrace"),
+                "(",
+                stack_v.clone(),
+                ") in",
                 line(),
-                docvec![
-                    "let _ = call ",
-                    leaf::atom("logger"),
-                    ":",
-                    leaf::atom("warning"),
-                    "(",
-                    msg_triple_v,
-                    ", ~{",
-                    leaf::atom("selector"),
-                    " => ",
-                    selector.clone(),
-                    ", ",
-                    leaf::atom("reason"),
-                    " => {",
-                    type_v.clone(),
-                    ", ",
-                    reason_v.clone(),
-                    "}, ",
-                    leaf::atom("stacktrace"),
-                    " => ",
-                    stack_v,
-                    ", ",
-                    leaf::atom("domain"),
-                    " => [",
-                    leaf::atom("beamtalk"),
-                    "|[",
-                    leaf::atom("runtime"),
-                    "|[]]]}~)",
-                ],
+                "let ",
+                wrapped_v.clone(),
+                " = call ",
+                leaf::atom("beamtalk_exception_handler"),
+                ":",
+                leaf::atom("ensure_wrapped"),
+                "(",
+                type_v,
+                ", ",
+                reason_v,
+                ", ",
+                built_v,
+                ") in",
                 line(),
-                "in ",
-                CoreErlangGenerator::discard_continuations_binding(),
-                line(),
-                docvec!["{", leaf::atom("noreply"), ", State}"],
+                "primop ",
+                leaf::atom("raw_raise"),
+                "(",
+                leaf::atom("error"),
+                ", ",
+                wrapped_v,
+                ", ",
+                stack_v,
+                ")",
             ],
         ),
         line(),
@@ -2197,46 +2202,13 @@ fn noreply_error_arms(var_prefix: &str, selector: Document<'static>) -> Document
             INDENT,
             docvec![
                 line(),
-                docvec![
-                    "let ",
-                    msg_plain_v.clone(),
-                    " = call ",
-                    leaf::atom("beamtalk_error"),
-                    ":",
-                    leaf::atom("format_safe"),
-                    "(",
-                    error_v.clone(),
-                    ") in",
-                ],
-                line(),
-                docvec![
-                    "let _ = call ",
-                    leaf::atom("logger"),
-                    ":",
-                    leaf::atom("warning"),
-                    "(",
-                    msg_plain_v,
-                    ", ~{",
-                    leaf::atom("selector"),
-                    " => ",
-                    selector,
-                    ", ",
-                    leaf::atom("reason"),
-                    " => ",
-                    error_v,
-                    ", ",
-                    leaf::atom("domain"),
-                    " => [",
-                    leaf::atom("beamtalk"),
-                    "|[",
-                    leaf::atom("runtime"),
-                    "|[]]]}~)",
-                ],
-                line(),
-                "in ",
-                CoreErlangGenerator::discard_continuations_binding(),
-                line(),
-                docvec!["{", leaf::atom("noreply"), ", State}"],
+                "call ",
+                leaf::atom("beamtalk_exception_handler"),
+                ":",
+                leaf::atom("reraise"),
+                "(",
+                error_v,
+                ")",
             ],
         ),
     ]

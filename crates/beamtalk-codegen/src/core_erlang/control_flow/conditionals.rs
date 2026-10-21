@@ -478,6 +478,24 @@ impl CoreErlangGenerator {
         self.threaded_expression(receiver, frame)
     }
 
+    /// Whether an arm statement `expr` with mutations is lowered through
+    /// [`Self::threaded_expression`], its prelude spliced into the arm
+    /// (`arm_is_frame`: the arm is a `BranchArm` frame of a producer), rather
+    /// than as a raw `{Value, State}` tuple the arm unpacks: a local-threading
+    /// producer of a `BranchArm` frame or a REPL arm (ADR 0131 Phase 3,
+    /// BT-3823), and (BT-4000) a conditional whose receiver is sequenced ahead
+    /// ([`Self::conditional_receiver_is_sequenced`]) in any arm, so the
+    /// receiver's `Bind`s are the arm's own statements. The one predicate for
+    /// the conditional arm and the `on:do:`/`ensure:` arm.
+    pub(in crate::core_erlang::control_flow) fn arm_statement_is_producer(
+        &self,
+        expr: &Expression,
+        arm_is_frame: bool,
+    ) -> bool {
+        ((arm_is_frame || self.is_repl_mode()) && self.local_producer_locals(expr).is_some())
+            || self.is_conditional_with_sequenced_receiver(expr)
+    }
+
     /// Whether a conditional in `frame` is lowered as a local-threading
     /// producer: it is one (`producer`, [`Self::conditional_producer_locals`]),
     /// `frame` is the method root or a registered frame (a `BranchArm`, or a loop
@@ -1904,7 +1922,16 @@ impl CoreErlangGenerator {
         // local-threading producer in this body — C2 below threads it ahead
         // (`thread_ahead` splices the construct tuple and its `LocalRebind`s,
         // lowered by this frame's mode) and reads its unwrapped value back.
-        if self.control_flow_has_mutations(value) && !self.expr_has_local_producer(value) {
+        // BT-4000: nor an inline-threaded construct (a conditional, `match:`,
+        // an exception or evaluated-block producer): `thread_ahead` splices its
+        // prelude and registers its already-unwrapped value, as at the method
+        // root (`emit_actor_threaded_assign_rhs_stmts`), so C2 reads it back.
+        // Unwrapped a second time here, `element(1, ...)` of the value raised
+        // `badarg` at run time.
+        if self.control_flow_has_mutations(value)
+            && !self.expr_has_local_producer(value)
+            && !self.thread_ahead_unwraps(value)
+        {
             let cf_tuple = self.fresh_temp_var("CfTuple");
             let cf_state = self.fresh_temp_var("CfSt");
             let thread_scope = self.thread_ahead(value, stmts, frame)?;
@@ -2364,6 +2391,19 @@ impl CoreErlangGenerator {
                 }
             }
 
+            // BT-4000: `self.f := <conditional whose receiver is sequenced>` is
+            // lowered by C1, whose `lower_field_assignment_bind` threads the
+            // value ahead, so the receiver's `Bind`s are this arm's own
+            // statements rather than text inside C6's raw tuple.
+            let kind = match kind {
+                BodyExprKind::FieldAssignmentControlFlow
+                    if matches!(expr, Expression::Assignment { value, .. }
+                        if self.is_conditional_with_sequenced_receiver(value)) =>
+                {
+                    BodyExprKind::FieldAssignment
+                }
+                kind => kind,
+            };
             match kind {
                 // C1
                 BodyExprKind::FieldAssignment => {
@@ -2418,8 +2458,10 @@ impl CoreErlangGenerator {
                                 last_result = Some(ValueRef::Var(field_val_var));
                             }
                         } else {
-                            let (binding_docs, rhs_var) =
-                                self.generate_destructure_bindings_with_value(pattern, value)?;
+                            let (binding_docs, rhs_var) = self
+                                .generate_destructure_bindings_sequenced(
+                                    pattern, value, frame, &mut stmts,
+                                )?;
                             for d in binding_docs {
                                 stmts.push(ThreadedStmt::Statement(d, span));
                             }
@@ -2643,6 +2685,38 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+                // BT-4000: `{a, b} := <conditional whose receiver is sequenced>`:
+                // the value's prelude is this arm's own statements (C9's raw
+                // tuple would hold the receiver's `Bind`s inside it).
+                BodyExprKind::DestructureAssignmentControlFlow
+                    if matches!(expr, Expression::DestructureAssignment { value, .. }
+                        if self.is_conditional_with_sequenced_receiver(value)) =>
+                {
+                    if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                        let tv = self.threaded_expression(value, frame)?;
+                        stmts.extend(tv.prelude);
+                        let actual_val = self.fresh_temp_var("CfVal");
+                        let value_doc = self.threaded_value_doc(&tv.value);
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(actual_val.clone()),
+                                " = ",
+                                value_doc,
+                                " in "
+                            ],
+                            span,
+                        ));
+                        let binding_docs =
+                            self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
+                        for d in binding_docs {
+                            stmts.push(ThreadedStmt::Statement(d, span));
+                        }
+                        if is_last {
+                            last_result = Some(ValueRef::Var(actual_val));
+                        }
+                    }
+                }
                 // C9 — {a, b} := <control-flow-with-mutations>. No
                 // Gensym hop — element(2, tuple) binds State(v+1) directly.
                 BodyExprKind::DestructureAssignmentControlFlow => {
@@ -2696,9 +2770,16 @@ impl CoreErlangGenerator {
                 // BT-3823: so is one that is a statement of a REPL arm
                 // (`generate_repl_arm_inline`): its prelude adopts the bindings
                 // map the arm's `StateAcc` is.
+                // BT-4000: and so is a conditional whose receiver advances
+                // `State`, in every arm, as at the method root and in a loop
+                // body: through `threaded_expression` its receiver's prelude
+                // (`conditional_receiver_operand`) and its `State` extraction are
+                // this arm's own statements. Compiled as the raw tuple of C10
+                // below, the receiver's `Bind`s were rendered inside the tuple
+                // document, and the arm's extraction read a version no `Bind` of
+                // the arm produced (`UnboundVersion`).
                 BodyExprKind::ControlFlowWithMutations
-                    if (arm.is_some() || self.is_repl_mode())
-                        && self.local_producer_locals(expr).is_some() =>
+                    if self.arm_statement_is_producer(expr, arm.is_some()) =>
                 {
                     let tv = self.threaded_expression(expr, frame)?;
                     stmts.extend(tv.prelude);

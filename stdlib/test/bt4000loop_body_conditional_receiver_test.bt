@@ -1,0 +1,94 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4000: in an actor method, a loop body statement that is a conditional
+// whose receiver is a self-send compiles (it used to panic the debug verifier
+// with `UnboundVersion State1`) and keeps the self-send's state change (a
+// release build dropped it: the loop's next iteration and the code after it
+// saw the pre-statement state). The codegen corpus is
+// `loop_body_conditional_receiver_corpus.rs`.
+// Fixture: fixtures/bt4000loop_body_conditional_receiver_actor.bt.
+
+TestCase subclass: Bt4000LoopBodyConditionalReceiverTest
+
+  testWhileRepro =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn whileRepro equals: 0
+
+  testTimesRepeat =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn timesRepro equals: #[3, 2]
+
+  testWhileTrueWritesLocal =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn whileLocal equals: #[2, 3]
+
+  testUnparenthesisedReceiver =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn whileUnparenthesised equals: 2
+
+  testWhileFalseIfFalse =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn whileFalseIfFalse equals: #[2, 10]
+
+  testToDoIfFalse =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn toDoIfFalse equals: #[4, 10]
+
+  testToByDoIfTrueIfFalse =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn toByDoIfTrueIfFalse equals: #[3, 8]
+
+  testAndOperand =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn andOperand equals: #[3, 1]
+
+  testFoldBody =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn foldBody equals: #[3, 5]
+
+  testNonLocalReturnFromArm =>
+    a := Bt4000LoopBodyConditionalReceiverActor spawn
+    self assert: a nlrInLoop equals: 2
+    self assert: a ticks equals: 2
+
+  testArmWritesLocal =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn armLocal equals: #[2, 1]
+
+  testArmFieldValue =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn armFieldValue equals: #[1, 7]
+
+  testOnDoDestructure =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn onDoDestructure equals: #[1, 7]
+
+  testEnsureValue =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn ensureValue equals: #[1, 2]
+
+  testFoldDestructure =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn foldDestructure equals: #[2, 4]
+
+  testRootLast =>
+    a := Bt4000LoopBodyConditionalReceiverActor spawn
+    self assert: a rootLast equals: 11
+    self assert: a ticks equals: 1
+
+  testLoopAssign =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn loopAssign equals: #[3, 4]
+
+  testArmAssignFieldArm =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn armAssignFieldArm equals: #[5, 1]
+
+  testEnsureAssignFieldArm =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn ensureAssignFieldArm equals: #[5, 1]
+
+  testRootFieldValue =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn rootFieldValue equals: #[1, 7]
+
+  testRootDestructure =>
+    self assert: Bt4000LoopBodyConditionalReceiverActor spawn rootDestructure equals: #[1, 7]
+
+  testRootBlockArg =>
+    self assert: (Bt4000LoopBodyConditionalReceiverActor spawn rootBlockArg: [
+      nil
+    ]) equals: 1
+
+  testLoopBlockArg =>
+    self assert: (Bt4000LoopBodyConditionalReceiverActor spawn loopBlockArg: [
+      nil
+    ]) equals: 3
+
+  testArmBlockArg =>
+    self assert: (Bt4000LoopBodyConditionalReceiverActor spawn armBlockArg: [
+      nil
+    ]) equals: 1

@@ -631,10 +631,10 @@ pub enum DiagnosticCategory {
     DefiniteAssignment,
     /// Unguarded `late`-slot read reachable from `terminate:`/`handleInfo:`
     /// (ADR 0124 §4d, Implementation B6) — `terminate/2` wraps its dispatch
-    /// in `try … catch -> 'ok'` and `handleInfo:` errors are logged and
-    /// swallowed (log-and-continue), so an unguarded read that raises
+    /// in `try … catch -> 'ok'`, so an unguarded read that raises
     /// `UninitializedStateError` there lets the callback "complete" while
-    /// silently skipping whatever it was meant to do.
+    /// silently skipping whatever it was meant to do; in `handleInfo:` the
+    /// error crashes the server (ADR 0134).
     ///
     /// A sibling to [`Self::DefiniteAssignment`] rather than reusing it
     /// (ADR 0124 §4d, BT-3555): the two check different things (a
@@ -646,6 +646,13 @@ pub enum DiagnosticCategory {
     /// `DefiniteAssignment`, no `@expect` category suppresses this one by
     /// design — the exemption is the `hasField:` guard, not an annotation.
     UnguardedLateRead,
+    /// A `handleInfo:` whose body is a `match:` with no catch-all arm
+    /// (ADR 0134, BT-3959): errors in `handleInfo:` crash the server, and a
+    /// `match:` with no matching arm raises `#pattern_mismatch`, so any
+    /// message the author did not anticipate crashes it. The fix is a
+    /// `_ -> nil` arm. No `@expect` category suppresses this one by design
+    /// (the catch-all arm is the fix); `@expect all` still covers it.
+    HandleInfoNoCatchAll,
     /// A block literal that reads or writes a class variable of its home
     /// class is used where it will run outside an invocation of that class
     /// (ADR 0130 §5): a reading block handed to an asynchronous send, stored

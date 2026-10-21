@@ -24,6 +24,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::ast::Module;
+use crate::file_walker::FileWalker;
 use crate::source_analysis::Span;
 use crate::source_analysis::method_span::MethodSide;
 
@@ -37,23 +38,6 @@ use crate::source_analysis::method_span::MethodSide;
 /// doc for why a second copy of this computation is not the fix.
 pub(crate) fn repo_root() -> PathBuf {
     beamtalk_workspace::cargo_workspace_root!()
-}
-
-/// Recursively collects every `.bt` file under `dir`.
-fn collect_bt_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
-    // Deterministic order for stable test output.
-    entries.sort();
-    for path in entries {
-        if path.is_dir() {
-            collect_bt_files(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "bt") {
-            out.push(path);
-        }
-    }
 }
 
 /// The corpus directories: every `.bt` file lives under one of these.
@@ -74,11 +58,15 @@ pub(crate) fn corpus_present() -> bool {
 
 /// Gathers the whole corpus: every `.bt` file under `stdlib/src` and `examples`.
 pub(crate) fn corpus_files() -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    for dir in corpus_dirs() {
-        collect_bt_files(&dir, &mut files);
-    }
-    files
+    let walker = FileWalker::new()
+        .extensions(&["bt"])
+        .skip_symlinks(false)
+        .strict_errors(false);
+    corpus_dirs()
+        .iter()
+        .filter(|dir| dir.is_dir())
+        .flat_map(|dir| walker.walk_pathbuf(dir).unwrap_or_default())
+        .collect()
 }
 
 /// Reads a corpus file, hard-failing (with the path + error) if it is present

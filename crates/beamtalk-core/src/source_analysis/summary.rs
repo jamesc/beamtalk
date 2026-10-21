@@ -193,6 +193,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::FileClassNameMismatch => "FileClassNameMismatch",
         DiagnosticCategory::DefiniteAssignment => "DefiniteAssignment",
         DiagnosticCategory::UnguardedLateRead => "UnguardedLateRead",
+        DiagnosticCategory::HandleInfoNoCatchAll => "HandleInfoNoCatchAll",
         DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
         DiagnosticCategory::UnmigratedLocalThreading => "UnmigratedLocalThreading",
@@ -416,6 +417,10 @@ mod tests {
             ),
             (DiagnosticCategory::DefiniteAssignment, "DefiniteAssignment"),
             (DiagnosticCategory::UnguardedLateRead, "UnguardedLateRead"),
+            (
+                DiagnosticCategory::HandleInfoNoCatchAll,
+                "HandleInfoNoCatchAll",
+            ),
             (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
             (
                 DiagnosticCategory::Tier2BlockNoReturnChannel,

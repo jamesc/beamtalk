@@ -215,12 +215,6 @@ handle_getValue([], State) ->
 %% gen_server callback returns — it becomes OTP's `{continue, _}` action.
 -define(PENDING_CONTINUE_KEY, '$bt_pending_continue').
 
-%% BT-3968: the part of the continuation queue that was already committed
-%% before the current `handle_continue/2` step ran (seeded by
-%% seed_pending_continuations/1). A failing step drops only the requests it
-%% made itself — discard_pending_continuations/0 restores this base.
--define(PENDING_CONTINUE_BASE_KEY, '$bt_pending_continue_base').
-
 %% BT-3968: the `handle_continue/2` term carrying the continuation queue.
 -define(BT_CONTINUE_TAG, '$bt_continue').
 
@@ -308,8 +302,8 @@ handle_getValue([], State) ->
 %% `self continueWith:`; clear_pending_actions/0 runs first so a request can
 %% never leak in from anywhere else. seed_pending_continuations/1 (from
 %% handle_continue) keeps an already-queued chain ahead of new requests, and
-%% discard_pending_continuations/0 (from the dispatch-error arms) drops the
-%% continuations a failed dispatch requested.
+%% discard_pending_continuations/0 (from the replying dispatch-error arms)
+%% drops the continuations a failed dispatch requested.
 -export([
     clear_pending_actions/0,
     apply_pending_actions/1,
@@ -2286,7 +2280,6 @@ some unwrapped path earlier.
 clear_pending_actions() ->
     _ = erase(?PENDING_STOP_KEY),
     _ = erase(?PENDING_CONTINUE_KEY),
-    _ = erase(?PENDING_CONTINUE_BASE_KEY),
     ok.
 
 -doc """
@@ -2318,7 +2311,6 @@ when
 apply_pending_actions(Result) ->
     Stop = erase(?PENDING_STOP_KEY),
     Continuations = erase(?PENDING_CONTINUE_KEY),
-    _ = erase(?PENDING_CONTINUE_BASE_KEY),
     case {Stop, Continuations} of
         {{stop, Reason}, _} -> pending_stop_result(Result, Reason);
         {undefined, [_ | _] = RevQueue} -> add_continue(Result, lists:reverse(RevQueue));
@@ -2344,9 +2336,9 @@ add_continue(Result, _Queue) ->
 BT-3968: seed the continuation queue at the start of a `handle_continue/2`
 step with the continuations still waiting behind the one about to run, so
 any request the running continuation makes is appended *after* them (FIFO).
-The seeded part is also remembered as the committed base, which survives a
-failing step (see discard_pending_continuations/0). Runs after
-clear_pending_actions/0 inside the wrapped callback.
+Runs after clear_pending_actions/0 inside the wrapped callback. A step that
+raises crashes the actor (ADR 0134), so nothing seeded here outlives a
+failing step.
 """.
 -spec seed_pending_continuations([{atom(), list()}]) -> ok.
 seed_pending_continuations([]) ->
@@ -2354,22 +2346,21 @@ seed_pending_continuations([]) ->
 seed_pending_continuations(Rest) when is_list(Rest) ->
     RevRest = lists:reverse(Rest),
     put(?PENDING_CONTINUE_KEY, RevRest),
-    put(?PENDING_CONTINUE_BASE_KEY, RevRest),
     ok.
 
 -doc """
 BT-3968: drop the continuations requested by a dispatch that failed. Called
-from the dispatch-error arms: the failed method's follow-up steps are void.
-Continuations committed by an earlier, successful dispatch (the base seeded
-by seed_pending_continuations/1) are kept and still run — like casts queued
-behind a failing cast. A pending stop is left alone and still honoured.
+from the dispatch-error arms that reply (a sync call, an async send with a
+future): the failed method's follow-up steps are void. Such a callback never
+runs inside a `handle_continue/2` step, so no earlier continuation is queued
+alongside them. A pending stop is left alone and still honoured. A failed
+dispatch with no reply channel (a cast, `handleInfo:`, a continuation step)
+crashes the actor instead (ADR 0134, see dispatch_cast/3), which drops the
+whole queue.
 """.
 -spec discard_pending_continuations() -> ok.
 discard_pending_continuations() ->
-    case get(?PENDING_CONTINUE_BASE_KEY) of
-        undefined -> _ = erase(?PENDING_CONTINUE_KEY);
-        Base -> put(?PENDING_CONTINUE_KEY, Base)
-    end,
+    _ = erase(?PENDING_CONTINUE_KEY),
     ok.
 
 -doc """
@@ -3016,7 +3007,8 @@ Handle asynchronous messages (cast).
 Accepts two wire formats:
   {cast, Selector, Args}       - Fire-and-forget (no future, result discarded)
   {Selector, Args, FuturePid}  - Async with future (backward-compatible)
-Errors in fire-and-forget are logged but do not crash the actor.
+An error in fire-and-forget has no caller to go to, so it crashes the
+actor (ADR 0134, BT-3958; see dispatch_cast/3).
 Errors in async-with-future are communicated via future rejection.
 """.
 -spec handle_cast(term(), map()) ->
@@ -3125,18 +3117,14 @@ dispatch_cast(Selector, Args, State) ->
                 log_dispatch_complete(State, NewState, Selector, cast, T0),
                 {noreply, NewState};
             {error, Reason} ->
-                NewState = beamtalk_actor_state:take(),
-                %% Log error but don't crash — caller expects no reply.
-                %% BT-3968: the failed dispatch's continuations are void.
-                ok = discard_pending_continuations(),
-                T1 = erlang:monotonic_time(microsecond),
-                ?LOG_WARNING("Fire-and-forget dispatch error", #{
-                    selector => Selector,
-                    reason => Reason,
-                    duration_us => T1 - T0,
-                    domain => [beamtalk, runtime]
-                }),
-                {noreply, NewState}
+                %% BT-3958 (ADR 0134): no reply channel, so the error
+                %% crashes the actor (gen_server's crash report names the
+                %% message; terminate/2 sees the error as its reason). It is
+                %% raised as a wrapped Exception object, the same reason a
+                %% compiled actor's generated no-reply error arms raise
+                %% (`noreply_error_arms` in the codegen's
+                %% gen_server/callbacks.rs).
+                beamtalk_exception_handler:reraise(Reason)
         end
     after
         restore_dispatch_pdict(OldState)

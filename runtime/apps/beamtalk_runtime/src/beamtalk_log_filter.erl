@@ -8,11 +8,11 @@
 -moduledoc """
 Logger filters for suppressing redundant OTP crash reports.
 
-Beamtalk actors log errors via the generated `handle_continue`,
-`handle_cast`, and `handle_info` callbacks with structured fields
-(class, selector, stacktrace). OTP also emits its own crash reports
-(gen_server terminate, proc_lib crash, supervisor child_terminated)
-for the same event. The proc_lib crash report adds no useful
+A Beamtalk actor that crashes (a failed `initialize`, or an error in a
+`!` cast, `handleInfo:` or a continuation — ADR 0134) is reported by
+OTP's own crash reports (gen_server terminate, proc_lib crash,
+supervisor child_terminated), the gen_server one carrying the last
+message and the wrapped Exception with its stacktrace. The proc_lib crash report adds no useful
 information ("process crash: unknown"), so we filter it out.
 """.
 

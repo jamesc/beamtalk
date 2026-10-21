@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for handle_info_catch_all_test.bt — ADR 0134 (BT-3959): the same
+// `handleInfo:` `match:` with a `_ -> nil` catch-all arm is silent (no
+// `handleinfo-no-catch-all` warning) and ignores stray messages.
+
+Server subclass: HandleInfoMatchCatchAllServer
+  state: count = 0
+
+  handleInfo: msg =>
+    msg match: [
+      {#add, n} -> self.count := self.count + n;
+      #reset -> self.count := 0;
+      _ -> nil
+    ]
+
+  count => self.count

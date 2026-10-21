@@ -58,6 +58,26 @@ impl CoreErlangGenerator {
         Ok((docs, rhs_var))
     }
 
+    /// [`Self::generate_destructure_bindings_with_value`] for a statement of a
+    /// threaded body (the method root, an arm, a loop or fold body): the
+    /// right-hand side's prelude (a self-send, a conditional whose receiver is
+    /// sequenced, BT-4000) is threaded ahead into `stmts` in `frame`, so its
+    /// `Bind`s are the body's own statements and the extraction reads the
+    /// already-sequenced value. The one lowering of a destructuring statement
+    /// in those bodies.
+    pub(in crate::core_erlang) fn generate_destructure_bindings_sequenced(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+        frame: super::super::threaded_ir::FrameId,
+        stmts: &mut Vec<super::super::threaded_ir::ThreadedStmt>,
+    ) -> Result<(Vec<Document<'static>>, String)> {
+        let scope = self.thread_ahead(value, stmts, frame)?;
+        let result = self.generate_destructure_bindings_with_value(pattern, value)?;
+        self.finish_precompiled_scope(scope)?;
+        Ok(result)
+    }
+
     /// Like [`Self::generate_destructure_bindings`] but takes a pre-evaluated variable name
     /// instead of an expression.  Used when the RHS has already been unpacked from a
     /// `{Value, State}` tuple (e.g., `DestructureAssignmentControlFlow`).

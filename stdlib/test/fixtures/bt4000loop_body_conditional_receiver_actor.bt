@@ -1,0 +1,182 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4000: a loop body statement that is a conditional whose receiver is a
+// self-send. The receiver's state change must reach the next iteration and the
+// code after the loop. See stdlib/test/bt4000loop_body_conditional_receiver_test.bt.
+
+Actor subclass: Bt4000LoopBodyConditionalReceiverActor
+  state: ticks = 0
+  state: hits = 0
+
+  done => false
+
+  // Advances `ticks`; answers true from the second call on.
+  tick =>
+    self.ticks := self.ticks + 1
+    self.ticks > 1
+
+  whileRepro =>
+    n := 0
+    [n > 0] whileTrue: [(self done) ifTrue: [Timer sleep: 0]]
+    n
+
+  timesRepro =>
+    3 timesRepeat: [(self tick) ifTrue: [self.hits := self.hits + 1]]
+    #[self.ticks, self.hits]
+
+  whileLocal =>
+    k := 0
+    n := 3
+    [n > 0]
+      whileTrue: [
+        n := n - 1
+        (self tick) ifTrue: [k := k + 1]
+      ]
+    #[k, self.ticks]
+
+  whileUnparenthesised =>
+    n := 2
+    [n > 0]
+      whileTrue: [
+        n := n - 1
+        self tick ifTrue: [3]
+      ]
+    self.ticks
+
+  whileFalseIfFalse =>
+    n := 0
+    [n >= 2]
+      whileFalse: [
+        n := n + 1
+        (self tick) ifFalse: [self.hits := self.hits + 10]
+      ]
+    #[self.ticks, self.hits]
+
+  toDoIfFalse =>
+    1 to: 4 do: [:i | (self tick) ifFalse: [self.hits := self.hits + 10]]
+    #[self.ticks, self.hits]
+
+  toByDoIfTrueIfFalse =>
+    1
+      to: 5
+      by: 2
+      do: [:i | (self tick) ifTrue: [self.hits := self.hits + i] ifFalse: [nil]]
+    #[self.ticks, self.hits]
+
+  andOperand =>
+    3 timesRepeat: [
+      ((self tick) and: [self.ticks > 2]) ifTrue: [self.hits := self.hits + 1]
+    ]
+    #[self.ticks, self.hits]
+
+  foldBody =>
+    #(1, 2, 3) do: [:e | (self tick) ifTrue: [self.hits := self.hits + e]]
+    #[self.ticks, self.hits]
+
+  ticks => self.ticks
+
+  // A non-local return from a pure arm: the receiver's state change before it
+  // is kept.
+  nlrInLoop =>
+    3 timesRepeat: [(self tick) ifTrue: [^self.ticks]]
+    0
+
+  // The same conditional in the other frames a statement runs in.
+  armLocal =>
+    self.ticks := 1
+    (self.ticks > 0)
+      ifTrue: [
+        k := 0
+        (self tick) ifTrue: [k := 1]
+        self.hits := k
+      ]
+    #[self.ticks, self.hits]
+
+  armFieldValue =>
+    (self.ticks >= 0) ifTrue: [
+      self.hits := (self tick) ifTrue: [5] ifFalse: [7]
+    ]
+    #[self.ticks, self.hits]
+
+  onDoDestructure =>
+    [
+      #(a, b) := (self tick) ifTrue: [#(1, 2)] ifFalse: [#(3, 4)]
+      self.hits := a + b
+    ] on: Error do: [:e | 0]
+    #[self.ticks, self.hits]
+
+  ensureValue =>
+    [
+      x := (self tick) ifTrue: [1] ifFalse: [2]
+      self.hits := x
+    ] ensure: [nil]
+    #[self.ticks, self.hits]
+
+  foldDestructure =>
+    t := 0
+    #(1, 2)
+      do: [:e |
+        #(a, b) := (self tick) ifTrue: [#(1, 2)] ifFalse: [#(3, 4)]
+        t := t + a + (b - b)
+      ]
+    #[self.ticks, t]
+
+  rootLast => (self tick) ifTrue: [1] ifFalse: [self.ticks + 10]
+
+  loopAssign =>
+    t := 0
+    3
+      timesRepeat: [
+        x := (self tick) ifTrue: [1] ifFalse: [2]
+        t := t + x
+      ]
+    #[self.ticks, t]
+
+  // An assigned conditional whose arm writes a field, in an arm and in an
+  // `ensure:` body (it was unwrapped twice, a `badarg` at run time).
+  armAssignFieldArm =>
+    (self.ticks >= 0)
+      ifTrue: [
+        x := (self.ticks >= 0)
+          ifTrue: [
+            self.ticks := 5
+            1
+          ]
+          ifFalse: [2]
+        self.hits := x
+      ]
+    #[self.ticks, self.hits]
+
+  ensureAssignFieldArm =>
+    [
+      x := (self.ticks >= 0)
+        ifTrue: [
+          self.ticks := 5
+          1
+        ]
+        ifFalse: [2]
+      self.hits := x
+    ] ensure: [nil]
+    #[self.ticks, self.hits]
+
+  // The method root, and a non-literal block argument.
+  rootFieldValue =>
+    self.hits := (self tick) ifTrue: [5] ifFalse: [7]
+    #[self.ticks, self.hits]
+
+  rootDestructure =>
+    #(a, b) := (self tick) ifTrue: [#(1, 2)] ifFalse: [#(3, 4)]
+    #[self.ticks, a + b]
+
+  rootBlockArg: blk =>
+    (self tick) ifFalse: blk
+    self.ticks
+
+  loopBlockArg: blk =>
+    3 timesRepeat: [(self tick) ifFalse: blk]
+    self.ticks
+
+  armBlockArg: blk =>
+    (self.ticks >= 0) ifTrue: [(self tick) ifFalse: blk]
+    self.ticks

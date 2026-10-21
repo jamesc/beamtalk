@@ -30,6 +30,15 @@ curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --version v0.4.0
 curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --prefix /usr/local
 ```
 
+For CI or development against the latest unreleased code:
+
+```
+curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --nightly   # last nightly build
+curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --edge      # latest main commit (linux-x86_64 only)
+```
+
+The `--edge` channel (`BEAMTALK_EDGE=1` environment equivalent) installs the rolling build of the latest `main` commit, so downstream package CI can test against the current tip without waiting for a nightly.
+
 ## Manual install from release archive
 
 Download the latest release for your platform from the
