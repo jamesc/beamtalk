@@ -79,3 +79,27 @@ TestCase subclass: DirectDispatchTest
 
   testInheritedHasFieldOnStatelessParentIsFalse =>
     self assert: HasFieldProbeBase probe equals: false
+
+  // --- BT-4065: Result's constructors are `class sealed`, so direct ---------
+  // Every `Result ok:` in the node used to be a call into the one Result
+  // class process. Result is sealed and has no class variables, so its
+  // `class sealed` constructors are in the generated direct-call set.
+  testResultConstructorsAreDirectCallEligible =>
+    direct := (Erlang beamtalk_class_metadata) lookup_direct_class_methods: #Result
+    self assert: (direct includesKey: #ok:)
+    self assert: (direct includesKey: #error:)
+    self assert: (direct includesKey: #fromTuple:)
+    self assert: (direct includesKey: #tryDo:)
+
+  testDynamicResultConstructorsMatchStatic =>
+    cls := Result
+    self assert: (cls ok: 3) equals: (Result ok: 3)
+    // (`cls error: x` with a variable receiver is the Object>>error: intrinsic.)
+    self assert: (cls perform: #error: withArguments: #(#nope)) error equals: #nope
+    self assert: (Result perform: #ok: withArguments: #(4)) equals: (Result ok: 4)
+    self assert: (cls fromTuple: {#ok, 5}) equals: (Result ok: 5)
+
+  // A block inside `Result tryDo:` already ran in the caller; `ok:` now does too.
+  testResultOkInsideBlockRunsInCaller =>
+    r := Result tryDo: [Result ok: Erlang erlang self]
+    self assert: r value value equals: Erlang erlang self

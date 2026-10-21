@@ -91,6 +91,8 @@ that the Behaviour/Class libraries can rely on.
     classAllClassVarNames/1,
     className/1,
     classClass/1,
+    %% BT-4065: `Object>>isKindOf:` in the caller, no class-process sends
+    objectIsKindOf/2,
     %% ADR 0036: Metaclass primitives
     metaclassThisClass/1,
     metaclassSuperclass/1,
@@ -850,6 +852,152 @@ identical record. This enables `Metaclass class class == Metaclass class`
 classClass(Self) ->
     Pid = erlang:element(4, Self),
     #beamtalk_object{class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid}.
+
+-doc """
+`Object>>isKindOf:` — answer `Receiver class includesBehaviour: Behaviour`
+without messaging any class process (BT-4065).
+
+The Beamtalk definition, `self class includesBehaviour: aClass`, sends
+`includesBehaviour:`, then `inheritsFrom:` and `allSuperclasses`, to the
+receiver's class object; each of those is a `gen_server:call` into that class's
+process (to rule out a user class method of the same name, which `Behaviour`'s
+sealing forbids) before falling through to the `Behaviour` method. Every
+`isKindOf:` in the node queued on the receiver's class process.
+
+This computes the same answer from the class table. `includesBehaviour:` is
+`self == aBehaviour or: [self allSuperclasses includes: aBehaviour]`, where
+`self` is `class_of_object(Receiver)` and `allSuperclasses` is
+`classAllSuperclasses/1`:
+
+* an ordinary class `C` (an instance's class): `[C's superclasses]`, as class
+  objects;
+* a metaclass `C class` (a class object's class): `[the metaclasses of C's
+  superclasses] ++ [Class and its superclasses]`, the parallel tower grounded
+  at `Class` (ADR 0036).
+
+So for a *canonical* argument — `==` to the class or metaclass object the
+registry builds for its name — the answer is `inherits_from/2` on names
+(cached in `beamtalk_class_derived_cache`, invalidated on every class write):
+
+| receiver's class | argument     | answer                         |
+|------------------|--------------|--------------------------------|
+| class `C`        | class `A`    | `inherits_from(C, A)`          |
+| class `C`        | metaclass    | `false`                        |
+| metaclass `C class` | metaclass `A class` | `inherits_from(C, A)` |
+| metaclass `C class` | class `A`  | `inherits_from('Class', A)`    |
+
+Anything else — an argument that is not a canonical class or metaclass object
+(a protocol, a stale class object from a dead class process, a
+package-qualified tag, a non-class value), a receiver whose class is not
+registered, a future — takes the original route,
+`includesBehaviour:` sent to `class_of_object(Receiver)`, so its answer
+(or error) is unchanged.
+
+One transient difference: `classAllSuperclasses/1` stops at the first
+ancestor with no registered process, while `inherits_from/2` walks metadata
+rows. The two disagree only while an intermediate ancestor's process has been
+killed without `terminate/2` (its row survives) and before its supervisor
+restarts it; this answers as if the class were still there.
+
+A class-object receiver (`Counter isKindOf: X`) still reaches this method by a
+class-side send; only the `includesBehaviour:`/`inheritsFrom:`/
+`allSuperclasses` sends this used to make are gone.
+""".
+-spec objectIsKindOf(term(), term()) -> boolean().
+objectIsKindOf(Receiver, Behaviour) ->
+    case {receiver_class_side(Receiver), behaviour_side(Behaviour)} of
+        {{class, C}, {class, A}} -> beamtalk_class_derived_cache:inherits_from(C, A);
+        {{class, _}, {meta, _}} -> false;
+        {{meta, C}, {meta, A}} -> beamtalk_class_derived_cache:inherits_from(C, A);
+        {{meta, _}, {class, A}} -> beamtalk_class_derived_cache:inherits_from('Class', A);
+        _ -> is_kind_of_by_send(Receiver, Behaviour)
+    end.
+
+%% The original `self class includesBehaviour: aClass`.
+-spec is_kind_of_by_send(term(), term()) -> term().
+is_kind_of_by_send(Receiver, Behaviour) ->
+    beamtalk_message_dispatch:send(
+        beamtalk_primitive:class_of_object(Receiver), 'includesBehaviour:', [Behaviour]
+    ).
+
+%% Which behaviour `class_of_object(Receiver)` is, when it is the canonical
+%% class (`{class, Name}`) or metaclass (`{meta, Name}`) object of a live
+%% registered class; `other` otherwise.
+-spec receiver_class_side(term()) -> {class | meta, atom()} | other.
+receiver_class_side({beamtalk_future, _}) ->
+    other;
+receiver_class_side(#beamtalk_object{
+    class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid
+}) ->
+    %% class_of_object/1 of a metaclass is the metaclass itself.
+    canonical_meta(Pid);
+receiver_class_side(#beamtalk_object{class = 'Metaclass'}) ->
+    other;
+receiver_class_side(#beamtalk_object{class = Tag, pid = Pid} = Receiver) ->
+    case beamtalk_class_registry:is_class_name(Tag) of
+        %% A class object: its class is the metaclass on the same pid.
+        true -> canonical_meta(Pid);
+        false -> registered_class(beamtalk_primitive:class_of(Receiver))
+    end;
+receiver_class_side(Receiver) ->
+    registered_class(beamtalk_primitive:class_of(Receiver)).
+
+%% `{class, Name}` when `Behaviour` is `==` to the registry's class object
+%% for its name, `{meta, Name}` when it is that class's metaclass object.
+-spec behaviour_side(term()) -> {class | meta, atom()} | other.
+behaviour_side(#beamtalk_object{class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid}) ->
+    canonical_meta(Pid);
+behaviour_side(#beamtalk_object{pid = Pid} = Behaviour) when is_pid(Pid) ->
+    case beamtalk_class_registry:class_name_for_pid(Pid) of
+        {ok, Name} ->
+            case canonical_class_object(Name) of
+                Behaviour -> {class, Name};
+                _ -> other
+            end;
+        not_found ->
+            other
+    end;
+behaviour_side(_) ->
+    other.
+
+-spec canonical_meta(term()) -> {meta, atom()} | other.
+canonical_meta(Pid) when is_pid(Pid) ->
+    case beamtalk_class_registry:class_name_for_pid(Pid) of
+        {ok, Name} ->
+            case canonical_class_object(Name) of
+                #beamtalk_object{pid = Pid} -> {meta, Name};
+                _ -> other
+            end;
+        not_found ->
+            other
+    end;
+canonical_meta(_) ->
+    other.
+
+-spec registered_class(atom()) -> {class, atom()} | other.
+registered_class(Name) ->
+    case canonical_class_object(Name) of
+        undefined -> other;
+        _ -> {class, Name}
+    end.
+
+%% `beamtalk_class_registry:resolve_class_object/1` — the tuple a class
+%% reference, `class_of_object/1` and `classAllSuperclasses/1` all build —
+%% memoised. A class (re)start rewrites its metadata row, which invalidates
+%% the entry; the liveness check covers a class process killed without a
+%% restart (its registered name is gone, so the registry answers `undefined`).
+-spec canonical_class_object(atom()) -> #beamtalk_object{} | undefined.
+canonical_class_object(Name) ->
+    beamtalk_class_derived_cache:fetch(
+        {class_object, Name},
+        fun() ->
+            case beamtalk_class_registry:resolve_class_object(Name) of
+                undefined -> {nocache, undefined};
+                Obj -> {cache, Obj}
+            end
+        end,
+        fun(#beamtalk_object{pid = Pid}) -> is_process_alive(Pid) end
+    ).
 
 -doc """
 Return the class documentation string, or nil if none set.

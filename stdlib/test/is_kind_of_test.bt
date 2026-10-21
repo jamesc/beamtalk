@@ -116,3 +116,42 @@ TestCase subclass: IsKindOfTest
     self assert: chain first == ProtoObject class
     self assert: chain last == ProtoObject
     self assert: (chain includes: Class)
+
+  // --- BT-4065: isKindOf: is answered from the class table in the caller ---
+
+  // `isKindOf:` no longer sends `includesBehaviour:` to the receiver's class
+  // process; it must still give the answer that send gives, for instances,
+  // class objects and metaclass objects against classes and metaclasses.
+  testIsKindOfAgreesWithIncludesBehaviour =>
+    counter := Counter spawn
+    receivers := #(42, nil, "s", #sym, 3.5, true, #(), (Result ok: 1), counter, Integer, Counter, Result, Counter class, Integer class, Metaclass)
+    args := #(Integer, Number, Object, ProtoObject, Class, Behaviour, Metaclass, Actor, Counter, Result, Value, Exception, UndefinedObject, Number class, Actor class, Object class, ProtoObject class, Counter class, Result class)
+    receivers
+      do: [:r |
+        args do: [:a |
+          self assert: (r isKindOf: a) equals: (r class includesBehaviour: a)
+        ]
+      ]
+    counter stop
+
+  testValueAndActorInstances =>
+    counter := Counter spawn
+    self assert: ((Result ok: 1) isKindOf: Result)
+    self assert: ((Result ok: 1) isKindOf: Value)
+    self deny: ((Result ok: 1) isKindOf: Exception)
+    self assert: (counter isKindOf: Counter)
+    self assert: (counter isKindOf: Actor)
+    self deny: (counter isKindOf: Counter class)
+    counter stop
+
+  testNilIsKindOf =>
+    self assert: (nil isKindOf: UndefinedObject)
+    self assert: (nil isKindOf: Object)
+    self deny: (nil isKindOf: Exception)
+
+  // A non-class argument takes the original `includesBehaviour:` route.
+  testNonClassArgumentIsFalse =>
+    @expect type
+    self deny: (42 isKindOf: 42)
+    @expect type
+    self deny: (42 isKindOf: #Integer)
