@@ -1447,20 +1447,35 @@ fn check_method_for_self_alias_send(method: &MethodDefinition, diagnostics: &mut
                 format!("`{name}` is `self`: a send to it is not a self-send; {why}"),
                 span,
             )
-            .with_hint(format!(
-                "send to `self` directly instead of `{name}` (read-only reflective sends such \
-                 as `fieldNames` and `!` casts are fine)"
-            ))
+            .with_hint(self_alias_hint(&name, may_change))
             .with_category(DiagnosticCategory::Type),
         );
     }
 }
 
-/// Selectors that only read and that a class cannot override, so an alias
-/// send of one cannot lose a write. Overridable selectors such as
-/// `printString` or `isNil` are left out: an actor's own `printString` may
-/// write a field, and that write would be lost through the alias.
-const READ_ONLY_REFLECTIVE_SELECTORS: &[&str] = &["fieldNames", "fieldAt:", "class"];
+/// The hint for an alias-of-`self` diagnostic: a state-changing send can be
+/// replaced by a sealed reflective read or a cast; a read after a field write
+/// can move before the write.
+fn self_alias_hint(name: &str, may_change: bool) -> String {
+    if may_change {
+        format!(
+            "send to `self` directly instead of `{name}` (`{name} fieldNames`, \
+             `{name} fieldAt:` and `!` casts are fine)"
+        )
+    } else {
+        format!(
+            "send to `self` directly instead of `{name}`, or make this send before the \
+             field write"
+        )
+    }
+}
+
+/// Selectors that only read and are `sealed` on `Object`, so no class can
+/// override them and an alias send of one cannot lose a write. Overridable
+/// selectors such as `class`, `printString` or `isNil` are left out: an
+/// actor's own override may write a field, and that write would be lost
+/// through the alias.
+const READ_ONLY_REFLECTIVE_SELECTORS: &[&str] = &["fieldNames", "fieldAt:"];
 
 /// Builds the diagnostic for an unsafe field mutation in a block closure.
 ///
