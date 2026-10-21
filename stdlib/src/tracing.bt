@@ -17,6 +17,9 @@
 /// with negligible overhead (~150ns/call). Detailed trace events
 /// require explicit enable/disable.
 ///
+/// Tracing observes actor dispatch. To emit or attach to your own
+/// application events on the `telemetry` bus, use `Telemetry`.
+///
 /// ## Examples
 /// ```beamtalk
 /// // Set application-level trace context

@@ -2365,6 +2365,46 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-253",
+      "title": "Application Telemetry Events (ADR 0069 amendment) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop"
+      ],
+      "source": "// Emit one event\nTelemetry execute: #(#myapp, #cache, #miss)\n  measurements: #{#count => 1}\n  metadata: #{#key => \"user:1\"}\n// => nil\n\n// Time a block: emits [myapp, query, start] and [myapp, query, stop]\nTelemetry span: #(#myapp, #query) metadata: #{#table => #users} do: [3 + 4]\n// => 7",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-254",
+      "title": "Attaching handlers (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "for each",
+        "for-each",
+        "forEach",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "seen := Ets new: #seen type: #set\n(Telemetry attach: #auditMisses to: #(#myapp, #cache, #miss) do: [:event :measurements :metadata |\n  seen at: #last put: metadata]) unwrap\nTelemetry execute: #(#myapp, #cache, #miss) measurements: #{#count => 1} metadata: #{#key => \"k\"}\n(seen at: #last) at: #key\n// => \"k\"\nTelemetry detach: #auditMisses\n// => nil",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-255",
       "title": "Events — subclass Announcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2393,7 +2433,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-254",
+      "id": "docs-beamtalk-language-features-block-256",
       "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2424,7 +2464,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-256",
+      "id": "docs-beamtalk-language-features-block-258",
       "title": "Synchronous vs asynchronous (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2443,7 +2483,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-257",
+      "id": "docs-beamtalk-language-features-block-259",
       "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2471,7 +2511,20 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-258",
+      "id": "docs-beamtalk-language-features-block-26",
+      "title": "Number-on-the-left coercion (plusFromNumber: etc.) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "raise",
+        "throw"
+      ],
+      "source": "5 + \"not a vector\"\n// => ERROR: String does not understand 'plusFromNumber:'\n// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-260",
       "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2492,20 +2545,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-26",
-      "title": "Number-on-the-left coercion (plusFromNumber: etc.) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "5 + \"not a vector\"\n// => ERROR: String does not understand 'plusFromNumber:'\n// => ERROR: String has no 'plusFromNumber:' — implement it to support 'number + String' arithmetic",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-260",
+      "id": "docs-beamtalk-language-features-block-262",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2515,7 +2555,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-261",
+      "id": "docs-beamtalk-language-features-block-263",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2530,7 +2570,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-262",
+      "id": "docs-beamtalk-language-features-block-264",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2545,7 +2585,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-263",
+      "id": "docs-beamtalk-language-features-block-265",
       "title": "Node — a first-class value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2560,7 +2600,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-264",
+      "id": "docs-beamtalk-language-features-block-266",
       "title": "Remote spawn and lookup (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2580,7 +2620,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-265",
+      "id": "docs-beamtalk-language-features-block-267",
       "title": "Cluster-unique names — scope: #global (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2613,7 +2653,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-270",
+      "id": "docs-beamtalk-language-features-block-272",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2634,7 +2674,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-271",
+      "id": "docs-beamtalk-language-features-block-273",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2655,7 +2695,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-276",
+      "id": "docs-beamtalk-language-features-block-278",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2676,7 +2716,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-277",
+      "id": "docs-beamtalk-language-features-block-279",
       "title": "Binary vs String at Runtime (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2691,16 +2731,6 @@
         "to_string"
       ],
       "source": "bytes := Binary fromBytes: #(255, 254, 253)\nbytes class name    // => #Binary\nbytes size          // => 3 (bytes, not graphemes)\nbytes printString   // => \"<<FF FE FD>>\" (hex — never raw invalid UTF-8)\n\n(Binary fromBytes: #(104, 105)) class name   // => #String  (indistinguishable)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-279",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n#[] first                  // raises empty_collection\n#[] last                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2737,7 +2767,17 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-282",
+      "id": "docs-beamtalk-language-features-block-281",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n#[] first                  // raises empty_collection\n#[] last                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-284",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2756,7 +2796,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-283",
+      "id": "docs-beamtalk-language-features-block-285",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2766,7 +2806,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-285",
+      "id": "docs-beamtalk-language-features-block-287",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2776,7 +2816,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-287",
+      "id": "docs-beamtalk-language-features-block-289",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2786,32 +2826,6 @@
         "search"
       ],
       "source": "#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found\n(1 to: 3) detect: [:x | x > 10]             // raises not_found\n(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found\n\n(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-288",
-      "title": "Lookups That Find Nothing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-289",
-      "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "map",
-        "mapping",
-        "transform",
-        "where"
-      ],
-      "source": "1 to: 10                    // => (1 to: 10) — 10 elements: 1, 2, ..., 10\n1 to: 10 by: 2             // => (1 to: 10 by: 2) — 5 elements: 1, 3, 5, 7, 9\n10 to: 1 by: -1            // => (10 to: 1 by: -1) — 10 elements: 10, 9, ..., 1\n\n(1 to: 10) size            // => 10\n(1 to: 10) first           // => 1\n(1 to: 10) last            // => 10\n(1 to: 10) at: 5            // => 5 — bounds-checked; out-of-range raises\n                             // index_out_of_bounds (see \"Accessing an Empty\n                             // Collection\" above), never empty_collection\n(1 to: 10) includes: 5     // => true\n\n// Interval supports the full Collection protocol:\n(1 to: 5) inject: 0 into: [:sum :x | sum + x]   // => 15\n(1 to: 10) select: [:x | x isEven]              // => #(2, 4, 6, 8, 10)\n(1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2846,6 +2860,32 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-290",
+      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-291",
+      "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "map",
+        "mapping",
+        "transform",
+        "where"
+      ],
+      "source": "1 to: 10                    // => (1 to: 10) — 10 elements: 1, 2, ..., 10\n1 to: 10 by: 2             // => (1 to: 10 by: 2) — 5 elements: 1, 3, 5, 7, 9\n10 to: 1 by: -1            // => (10 to: 1 by: -1) — 10 elements: 10, 9, ..., 1\n\n(1 to: 10) size            // => 10\n(1 to: 10) first           // => 1\n(1 to: 10) last            // => 10\n(1 to: 10) at: 5            // => 5 — bounds-checked; out-of-range raises\n                             // index_out_of_bounds (see \"Accessing an Empty\n                             // Collection\" above), never empty_collection\n(1 to: 10) includes: 5     // => true\n\n// Interval supports the full Collection protocol:\n(1 to: 5) inject: 0 into: [:sum :x | sum + x]   // => 15\n(1 to: 10) select: [:x | x isEven]              // => #(2, 4, 6, 8, 10)\n(1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-292",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2869,7 +2909,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-291",
+      "id": "docs-beamtalk-language-features-block-293",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2888,7 +2928,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-292",
+      "id": "docs-beamtalk-language-features-block-294",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2909,7 +2949,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-293",
+      "id": "docs-beamtalk-language-features-block-295",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2922,7 +2962,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-294",
+      "id": "docs-beamtalk-language-features-block-296",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2938,7 +2978,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-295",
+      "id": "docs-beamtalk-language-features-block-297",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2951,7 +2991,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-296",
+      "id": "docs-beamtalk-language-features-block-298",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2970,53 +3010,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-297",
+      "id": "docs-beamtalk-language-features-block-299",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "File writeAll: \"output.txt\" contents: \"hello\"\nFile readAll: \"output.txt\"              // => \"hello\"\nFile mkdirAll: \"target/data/logs\"\nFile listDirectory: \"target/data\"       // => [\"logs\"]\nFile rename: \"output.txt\" to: \"target/data/output.txt\"\nFile delete: \"target/data/output.txt\"\nFile deleteAll: \"target/data\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-298",
-      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Block scope — the handle is closed however the block exits\n(File open: \"events.log\" mode: #append do: [:handle |\n  handle writeLine: \"an event\".\n  handle sync\n]) unwrap\n\n// Caller-owned handle — you close it\nhandle := (File open: \"data.bin\" mode: #read) unwrap\n(handle seek: 16) unwrap\nheader := (handle read: 4) unwrap\nhandle close",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-299",
-      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "raise",
-        "throw"
-      ],
-      "source": "(File open: \"notes.txt\" mode: #read do: [:handle |\n  handle close.\n  handle read: 1        // => Result error: FileHandle 'read:' is closed\n]) unwrap",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3049,7 +3049,47 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
+      "id": "docs-beamtalk-language-features-block-300",
+      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Block scope — the handle is closed however the block exits\n(File open: \"events.log\" mode: #append do: [:handle |\n  handle writeLine: \"an event\".\n  handle sync\n]) unwrap\n\n// Caller-owned handle — you close it\nhandle := (File open: \"data.bin\" mode: #read) unwrap\n(handle seek: 16) unwrap\nheader := (handle read: 4) unwrap\nhandle close",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
       "id": "docs-beamtalk-language-features-block-301",
+      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "exception",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "raise",
+        "throw"
+      ],
+      "source": "(File open: \"notes.txt\" mode: #read do: [:handle |\n  handle close.\n  handle read: 1        // => Result error: FileHandle 'read:' is closed\n]) unwrap",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-303",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3067,7 +3107,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-302",
+      "id": "docs-beamtalk-language-features-block-304",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3082,7 +3122,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-303",
+      "id": "docs-beamtalk-language-features-block-305",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3092,7 +3132,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-304",
+      "id": "docs-beamtalk-language-features-block-306",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3110,7 +3150,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-307",
+      "id": "docs-beamtalk-language-features-block-309",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3133,16 +3173,6 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-308",
-      "title": "Reading and Writing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache at: \"key\" ifPresent: [:v | v + 1]  // => 43 (evaluate block if present; nil if absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false\ncache includes: 42              // => true (scan values)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
       "id": "docs-beamtalk-language-features-block-31",
       "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
       "category": "language-reference",
@@ -3158,7 +3188,17 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-311",
+      "id": "docs-beamtalk-language-features-block-310",
+      "title": "Reading and Writing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache at: \"key\" ifPresent: [:v | v + 1]  // => 43 (evaluate block if present; nil if absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false\ncache includes: 42              // => true (scan values)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-313",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3168,7 +3208,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-312",
+      "id": "docs-beamtalk-language-features-block-314",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3191,7 +3231,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-314",
+      "id": "docs-beamtalk-language-features-block-316",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3206,7 +3246,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-315",
+      "id": "docs-beamtalk-language-features-block-317",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3216,7 +3256,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-317",
+      "id": "docs-beamtalk-language-features-block-319",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3229,7 +3269,27 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-318",
+      "id": "docs-beamtalk-language-features-block-32",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Read field\ncurrent := self.value\n\n// Write field\nself.value := 10\n\n// Explicit assignment\nself.value := self.value + 1\nself.count := self.count - delta\nself.total := self.total * factor",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-320",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3252,7 +3312,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-319",
+      "id": "docs-beamtalk-language-features-block-321",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3280,27 +3340,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-32",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Read field\ncurrent := self.value\n\n// Write field\nself.value := 10\n\n// Explicit assignment\nself.value := self.value + 1\nself.count := self.count - delta\nself.total := self.total * factor",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-320",
+      "id": "docs-beamtalk-language-features-block-322",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3328,7 +3368,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-323",
+      "id": "docs-beamtalk-language-features-block-325",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3359,7 +3399,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-324",
+      "id": "docs-beamtalk-language-features-block-326",
       "title": "Shared Tests — Abstract Test Cases (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3387,7 +3427,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-325",
+      "id": "docs-beamtalk-language-features-block-327",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -45819,6 +45859,46 @@
       "explanation": "TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method uses `ClassName slot: value` syntax inside a class method body.  This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter."
     },
     {
+      "id": "stdlib-test-fixtures-telemetry-event-collector",
+      "title": "TelemetryEventCollector",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Server",
+        "TelemetryEventCollector",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "extends",
+        "field",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "handleInfo:",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "iterate",
+        "iteration",
+        "loop",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "property",
+        "received",
+        "returnFromSpan",
+        "set",
+        "subclassing",
+        "telemetry_event_collector"
+      ],
+      "source": "// BT-4025: collects the raw `{Event, Ref, Measurements, Metadata}` messages\n// sent by the Erlang-side `telemetry_test` handler, so TelemetryTest can check\n// exactly what a plain Erlang handler receives from `Telemetry execute:` and\n// `Telemetry span:`. `returnFromSpan` checks a `^` out of a span inside an\n// actor method (the state-carrying NLR shape).\n\nServer subclass: TelemetryEventCollector\n  state: received = #()\n\n  handleInfo: msg => self.received := self.received add: msg\n\n  received => self.received\n\n  returnFromSpan =>\n    Telemetry\n      span: #(#bt4025, #actornlr)\n      metadata: #{}\n      do: [^7]\n    0",
+      "explanation": "BT-4025: collects the raw `{Event, Ref, Measurements, Metadata}` messages sent by the Erlang-side `telemetry_test` handler, so TelemetryTest can check exactly what a plain Erlang handler receives from `Telemetry execute:` and `Telemetry span:`. `returnFromSpan` checks a `^` out of a span inside an actor method (the state-carrying NLR shape)."
+    },
+    {
       "id": "stdlib-test-fixtures-terminate-actor",
       "title": "TerminateActor",
       "category": "stdlib-fixtures",
@@ -53850,6 +53930,82 @@
       ],
       "source": "// Tests the System class — getEnv:, getEnv:default:, osPlatform, osFamily,\n// architecture, hostname, erlangVersion, pid, and type-error validation\n\nTestCase subclass: SystemTest\n\n  testSetEnvAndUnsetEnv =>\n    // setEnv:value: sets an environment variable and returns true\n    self assert: (System setEnv: \"BT_TEST_SET_ENV_BT\" value: \"hello\") equals: true\n    // getEnv: can read the value back\n    self assert: (System getEnv: \"BT_TEST_SET_ENV_BT\") equals: \"hello\"\n    // setEnv:value: overwrites existing values\n    self assert: (System setEnv: \"BT_TEST_SET_ENV_BT\" value: \"updated\") equals: true\n    self assert: (System getEnv: \"BT_TEST_SET_ENV_BT\") equals: \"updated\"\n    // unsetEnv: removes the variable and returns true\n    self assert: (System unsetEnv: \"BT_TEST_SET_ENV_BT\") equals: true\n    self assert: (System getEnv: \"BT_TEST_SET_ENV_BT\") equals: nil\n    // unsetEnv: on non-existent var still returns true\n    self assert: (System unsetEnv: \"BT_TEST_NEVER_SET_XYZ\") equals: true\n    // setEnv:value: raises #type_error for non-String name\n    @expect type\n    self should: [System setEnv: 42 value: \"x\"] raise: #type_error\n    // setEnv:value: raises #type_error for non-String value\n    @expect type\n    self should: [System setEnv: \"x\" value: 42] raise: #type_error\n    // unsetEnv: raises #type_error for non-String argument\n    @expect type\n    self should: [System unsetEnv: 42] raise: #type_error\n\n  testSystemEnvironmentAndPlatform =>\n    self assert: ((System getEnv: \"PATH\") class =:= String)\n    // Reading a non-existent env var returns nil\n    self assert: (System getEnv: \"BEAMTALK_TEST_NONEXISTENT_VAR_XYZ\") equals: nil\n    // Non-existent var returns the default\n    self assert: (System getEnv: \"BEAMTALK_TEST_NONEXISTENT_VAR_XYZ\" default: \"fallback\") equals: \"fallback\"\n    // Existing var returns the actual value (not the default)\n    self deny: ((System getEnv: \"PATH\" default: \"nope\") =:= \"nope\")\n    // osPlatform returns a string\n    self assert: (System osPlatform class =:= String)\n    // Platform is one of the known values\n    self assert: (#(\"linux\", \"darwin\", \"win32\") includes: System osPlatform)\n    // osFamily returns a string\n    self assert: (System osFamily class =:= String)\n    // Family is one of the known values\n    self assert: (#(\"unix\", \"win32\") includes: System osFamily)\n    // architecture returns a non-empty string\n    self assert: (System architecture class =:= String)\n    // --- architecture ---\n    self assert: (System architecture length > 0)\n    // hostname returns a non-empty string\n    self assert: (System hostname class =:= String)\n    // --- hostname ---\n    self assert: (System hostname length > 0)\n    // erlangVersion returns a non-empty string\n    self assert: (System erlangVersion class =:= String)\n    // --- erlangVersion ---\n    self assert: (System erlangVersion length > 0)\n    // pid returns a positive integer\n    self assert: (System pid class =:= Integer)\n    // --- pid ---\n    self assert: (System pid > 0)\n    // getEnv: requires String argument\n    @expect type\n    self should: [System getEnv: 42] raise: #type_error\n    // getEnv:default: validates both arguments\n    @expect type\n    self should: [System getEnv: 42 default: \"fallback\"] raise: #type_error\n    // --- error cases ---\n    @expect type\n    self should: [System getEnv: \"PATH\" default: 42] raise: #type_error\n\n  testUniqueId =>\n    // uniqueId returns a positive integer\n    self assert: (System uniqueId class =:= Integer)\n    // uniqueId is positive\n    self assert: (System uniqueId > 0)\n    // uniqueId is monotonically increasing\n    id1 := System uniqueId\n    id2 := System uniqueId\n    self assert: (id2 > id1)\n\n  // --- ADR 0099 §3: System halt: (two-tier exit, VM tier) ---\n  // `beamtalk test` runs no workspace, so nothing owns the node and every halt: call is refused before\n  // it can reach erlang:halt — these tests never halt the runner.\n  testHaltNonIntegerRaisesTypeError =>\n    @expect type\n    self should: [System halt: \"one\"] raise: #type_error\n\n  testHaltOutOfRangeRaisesError =>\n    // A value outside POSIX 0..255 is a wrong *value*, not a wrong *type*.\n    self should: [System halt: 999] raise: #invalid_argument\n\n  testHaltInSharedWorkspaceRefuses =>\n    // Not node-owning → refused (directs the caller to Program exit:), never halts.\n    self should: [System halt: 0] raise: #unsupported\n\n  testHaltUnaryInSharedWorkspaceRefuses =>\n    self should: [System halt] raise: #unsupported",
       "explanation": "Tests the System class — getEnv:, getEnv:default:, osPlatform, osFamily, architecture, hostname, erlangVersion, pid, and type-error validation"
+    },
+    {
+      "id": "stdlib-test-telemetry-test",
+      "title": "TelemetryTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "TelemetryTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "if not",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop",
+        "map",
+        "mapping",
+        "member",
+        "mutate",
+        "mutation",
+        "negation",
+        "object",
+        "process",
+        "property",
+        "recordSpan:",
+        "returnFromSpan",
+        "serial",
+        "set",
+        "setUp",
+        "subclassing",
+        "tearDown",
+        "telemetry_test",
+        "testAttachBadHandlerIdIsTypeError",
+        "testAttachRuntimeHandlerIdIsRefused",
+        "testAttachToAllEmptyIsTypeError",
+        "testBeamtalkHandlerReceivesNameAndMaps",
+        "testDetachBadIdIsTypeError",
+        "testDetachIsIdempotent",
+        "testDetachRuntimeHandlerIsRefused",
+        "testDetachedHandlerNoLongerRuns",
+        "testDuplicateAttachIsHandlerExists",
+        "testEmptyEventNameIsTypeError",
+        "testErlangHandlerReceivesExactNameAndMaps",
+        "testErlangHandlerSeesSpanEvents",
+        "testExecuteWithNoHandlerAnswersNil",
+        "testNonDictionaryMetadataIsTypeError",
+        "testNonListEventNameIsTypeError",
+        "testNonLocalReturnFromSpanEmitsStopNotException",
+        "testNonLocalReturnFromSpanInActorMethodEmitsStop",
+        "testNonSymbolEventNameIsTypeError",
+        "testNonSymbolMeasurementKeyIsTypeError",
+        "testRaisingHandlerIsDetachedAndEmitterUnaffected",
+        "testSpanAnswersBlockValueAndEmitsStartStop",
+        "testSpanBadPrefixIsTypeError",
+        "testSpanRaiseEmitsExceptionAndReraisesUnchanged",
+        "testSpanReraisesOriginalErrorKind",
+        "testStringHandlerId",
+        "transform",
+        "unless"
+      ],
+      "source": "// BT-4025: the Telemetry facade (ADR 0069 amendment) — execute:, span:,\n// attach:/attach:toAll:/detach: over the bundled `telemetry` library.\n//\n// Beamtalk handlers record what they receive in an Ets table: a handler runs\n// in the emitting process (here, the test process) and, being a stored block,\n// cannot assign the test's locals.\n//\n// Fixture: stdlib/test/fixtures/telemetry_event_collector.bt (receives the\n// messages sent by the Erlang-side `telemetry_test` handler).\n\nTestCase subclass: TelemetryTest\n  field: table = nil\n\n  class serial -> Boolean => true\n\n  setUp => self withTable: (Ets new: #telemetryTestEvents type: #set)\n\n  tearDown =>\n    Telemetry detach: #telemetryTest\n    Telemetry detach: \"telemetry-test-string\"\n    self.table isNil ifFalse: [[self.table delete] on: Error do: [:e | nil]]\n\n  /// Attach a recording handler to the span events under `prefix`, keyed by\n  /// the last event-name element (#start / #stop / #exception).\n  recordSpan: prefix =>\n    t := self.table\n    names := #(#start, #stop, #exception) collect: [:suffix |\n      prefix add: suffix\n    ]\n    (Telemetry\n      attach: #telemetryTest\n      toAll: names\n      do: [:event :measurements :metadata |\n        t at: event last put: #(measurements, metadata)\n      ]) unwrap\n\n  // === execute:measurements:metadata: ===\n  testErlangHandlerReceivesExactNameAndMaps =>\n    collector := TelemetryEventCollector spawn\n    @expect unresolved_ffi\n    ref := Erlang telemetry_test attach_event_handlers: collector pid with: #(#(#bt4025, #erl))\n    self\n      assert: (Telemetry\n        execute: #(#bt4025, #erl)\n        measurements: #{#count => 3}\n        metadata: #{#key => \"k\", \"str\" => 1})\n      equals: nil\n    msgs := collector received\n    self assert: msgs size equals: 1\n    msg := msgs first\n    self assert: (msg at: 1) equals: #(#bt4025, #erl)\n    self assert: (msg at: 3) equals: #{#count => 3}\n    self assert: (msg at: 4) equals: #{#key => \"k\", \"str\" => 1}\n    @expect unresolved_ffi\n    Erlang telemetry detach: ref\n    collector stop\n\n  testBeamtalkHandlerReceivesNameAndMaps =>\n    t := self.table\n    (Telemetry\n      attach: #telemetryTest\n      to: #(#bt4025, #bt)\n      do: [:event :measurements :metadata |\n        t at: #got put: #(event, measurements, metadata)\n      ]) unwrap\n    Telemetry\n      execute: #(#bt4025, #bt)\n      measurements: #{#n => 1}\n      metadata: #{#who => \"me\"}\n    got := t at: #got\n    self assert: (got at: 1) equals: #(#bt4025, #bt)\n    self assert: (got at: 2) equals: #{#n => 1}\n    self assert: (got at: 3) equals: #{#who => \"me\"}\n\n  testExecuteWithNoHandlerAnswersNil =>\n    self\n      assert: (Telemetry\n        execute: #(#bt4025, #nobody)\n        measurements: #{}\n        metadata: #{})\n      equals: nil\n\n  // === span:metadata:do: ===\n  testSpanAnswersBlockValueAndEmitsStartStop =>\n    self recordSpan: #(#bt4025, #span)\n    self\n      assert: (Telemetry\n        span: #(#bt4025, #span)\n        metadata: #{#job => 1}\n        do: [6 * 7])\n      equals: 42\n    start := self.table at: #start\n    stop := self.table at: #stop\n    self assert: ((start at: 1) includesKey: #monotonic_time)\n    self assert: ((start at: 1) includesKey: #system_time)\n    self assert: ((stop at: 1) at: #duration) >= 0\n    self assert: ((stop at: 2) at: #job) equals: 1\n    // start and stop share one span context\n    self assert: ((stop at: 2) at: #telemetry_span_context) equals: ((start at: 2) at: #telemetry_span_context)\n    self assert: (self.table at: #exception) equals: nil\n\n  testErlangHandlerSeesSpanEvents =>\n    collector := TelemetryEventCollector spawn\n    @expect unresolved_ffi\n    ref := Erlang telemetry_test attach_event_handlers: collector pid with: #(#(#bt4025, #espan, #start), #(#bt4025, #espan, #stop))\n    self\n      assert: (Telemetry\n        span: #(#bt4025, #espan)\n        metadata: #{}\n        do: [#done])\n      equals: #done\n    names := collector received collect: [:m | m at: 1]\n    self assert: names equals: #(#(#bt4025, #espan, #start), #(#bt4025, #espan, #stop))\n    @expect unresolved_ffi\n    Erlang telemetry detach: ref\n    collector stop\n\n  testSpanRaiseEmitsExceptionAndReraisesUnchanged =>\n    self recordSpan: #(#bt4025, #boom)\n    text := [\n      Telemetry\n        span: #(#bt4025, #boom)\n        metadata: #{#job => 2}\n        do: [Error signal: \"span boom\"]\n    ] on: Error do: [:e | e message]\n    self assert: text equals: \"span boom\"\n    exception := self.table at: #exception\n    self assert: ((exception at: 1) at: #duration) >= 0\n    self assert: ((exception at: 2) at: #kind) equals: #error\n    self assert: ((exception at: 2) at: #job) equals: 2\n    self assert: ((exception at: 2) includesKey: #stacktrace)\n    self assert: (self.table at: #stop) equals: nil\n\n  testSpanReraisesOriginalErrorKind =>\n    self\n      should: [\n        Telemetry\n          span: #(#bt4025, #empty)\n          metadata: #{}\n          do: [#() first]\n      ]\n      raise: #empty_collection\n\n  testNonLocalReturnFromSpanEmitsStopNotException =>\n    self recordSpan: #(#bt4025, #nlr)\n    self assert: self returnFromSpan equals: 99\n    self deny: (self.table at: #stop) isNil\n    self assert: (self.table at: #exception) equals: nil\n\n  testNonLocalReturnFromSpanInActorMethodEmitsStop =>\n    self recordSpan: #(#bt4025, #actornlr)\n    collector := TelemetryEventCollector spawn\n    self assert: collector returnFromSpan equals: 7\n    self deny: (self.table at: #stop) isNil\n    self assert: (self.table at: #exception) equals: nil\n    collector stop\n\n  returnFromSpan =>\n    Telemetry\n      span: #(#bt4025, #nlr)\n      metadata: #{}\n      do: [^99]\n    0\n\n  // === attach / detach ===\n  testDuplicateAttachIsHandlerExists =>\n    first := Telemetry\n      attach: #telemetryTest\n      to: #(#bt4025, #dup)\n      do: [:e :m :md | nil]\n    self assert: first isOk\n    second := Telemetry\n      attach: #telemetryTest\n      to: #(#bt4025, #dup)\n      do: [:e :m :md | nil]\n    self assert: second isError\n    self assert: second error kind equals: #handler_exists\n\n  testStringHandlerId =>\n    self\n      assert: (Telemetry\n        attach: \"telemetry-test-string\"\n        to: #(#bt4025, #str)\n        do: [:e :m :md | nil]) isOk\n    self assert: (Telemetry detach: \"telemetry-test-string\") equals: nil\n\n  testDetachIsIdempotent =>\n    (Telemetry\n      attach: #telemetryTest\n      to: #(#bt4025, #det)\n      do: [:e :m :md | nil]) unwrap\n    self assert: (Telemetry detach: #telemetryTest) equals: nil\n    self assert: (Telemetry detach: #telemetryTest) equals: nil\n    self assert: (Telemetry detach: #neverAttached) equals: nil\n\n  testDetachBadIdIsTypeError =>\n    @expect type\n    self should: [Telemetry detach: 42] raise: #type_error\n\n  testDetachRuntimeHandlerIsRefused =>\n    self should: [\n      Telemetry detach: #beamtalk_trace_store_dispatch_stop\n    ] raise: #reserved_name\n\n  testAttachRuntimeHandlerIdIsRefused =>\n    self\n      should: [\n        Telemetry\n          attach: #beamtalk_trace_store_dispatch_stop\n          to: #(#bt4025, #r)\n          do: [:e :m :md | nil]\n      ]\n      raise: #reserved_name\n\n  testDetachedHandlerNoLongerRuns =>\n    t := self.table\n    (Telemetry\n      attach: #telemetryTest\n      to: #(#bt4025, #off)\n      do: [:e :m :md | t at: #ran put: true]) unwrap\n    Telemetry detach: #telemetryTest\n    Telemetry\n      execute: #(#bt4025, #off)\n      measurements: #{}\n      metadata: #{}\n    self assert: (t at: #ran) equals: nil\n\n  testRaisingHandlerIsDetachedAndEmitterUnaffected =>\n    t := self.table\n    (Telemetry\n      attach: #telemetryTest\n      to: #(#bt4025, #bad)\n      do: [:e :m :md |\n        t at: #calls increment: 1\n        Error signal: \"handler boom\"\n      ]) unwrap\n    self\n      assert: (Telemetry\n        execute: #(#bt4025, #bad)\n        measurements: #{}\n        metadata: #{})\n      equals: nil\n    self\n      assert: (Telemetry\n        execute: #(#bt4025, #bad)\n        measurements: #{}\n        metadata: #{})\n      equals: nil\n    // telemetry detached it after the first raise\n    self assert: (t at: #calls) equals: 1\n    // ...so the id is free again\n    self\n      assert: (Telemetry\n        attach: #telemetryTest\n        to: #(#bt4025, #bad)\n        do: [:e :m :md | nil]) isOk\n\n  // === Argument errors ===\n  testEmptyEventNameIsTypeError =>\n    self\n      should: [\n        Telemetry\n          execute: #()\n          measurements: #{}\n          metadata: #{}\n      ]\n      raise: #type_error\n\n  testNonSymbolEventNameIsTypeError =>\n    self\n      should: [\n        Telemetry\n          execute: #(#ok, \"no\")\n          measurements: #{}\n          metadata: #{}\n      ]\n      raise: #type_error\n\n  testNonListEventNameIsTypeError =>\n    @expect type\n    self\n      should: [\n        Telemetry\n          execute: #a\n          measurements: #{}\n          metadata: #{}\n      ]\n      raise: #type_error\n\n  testNonSymbolMeasurementKeyIsTypeError =>\n    self\n      should: [\n        Telemetry\n          execute: #(#bt4025, #m)\n          measurements: #{\"count\" => 1}\n          metadata: #{}\n      ]\n      raise: #type_error\n\n  testNonDictionaryMetadataIsTypeError =>\n    @expect type\n    self\n      should: [\n        Telemetry\n          execute: #(#bt4025, #m)\n          measurements: #{}\n          metadata: 3\n      ]\n      raise: #type_error\n\n  testSpanBadPrefixIsTypeError =>\n    self\n      should: [\n        Telemetry\n          span: #()\n          metadata: #{}\n          do: [1]\n      ]\n      raise: #type_error\n\n  testAttachBadHandlerIdIsTypeError =>\n    @expect type\n    self\n      should: [\n        Telemetry\n          attach: 42\n          to: #(#bt4025, #x)\n          do: [:e :m :md | nil]\n      ]\n      raise: #type_error\n\n  testAttachToAllEmptyIsTypeError =>\n    self\n      should: [\n        Telemetry\n          attach: #telemetryTest\n          toAll: #()\n          do: [:e :m :md | nil]\n      ]\n      raise: #type_error",
+      "explanation": "BT-4025: the Telemetry facade (ADR 0069 amendment) — execute:, span:, attach:/attach:toAll:/detach: over the bundled `telemetry` library.  Beamtalk handlers record what they receive in an Ets table: a handler runs in the emitting process (here, the test process) and, being a stored block, cannot assign the test's locals.  Fixture: stdlib/test/fixtures/telemetry_event_collector.bt (receives the messages sent by the Erlang-side `telemetry_test` handler)."
     },
     {
       "id": "stdlib-test-test-case-assertion-test",
