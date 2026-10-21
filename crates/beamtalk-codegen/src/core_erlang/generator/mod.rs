@@ -155,8 +155,11 @@ pub struct CoreErlangGenerator {
     /// is a throw, so the cleanup (run from the `catch`) cannot see what the
     /// protected block wrote unless the throw carries it: [`Self::nlr_throw_slot`]
     /// reads these locals at the `^` and wraps them with the real state slot.
-    /// Empty outside a protected block, and inside a closure (which may run
-    /// after the `ensure:` has finished).
+    /// Empty outside a protected block. A closure written in a protected block
+    /// still captures (it is lowered where it is written), so a `^` in one throws a
+    /// wrapper that may reach another `ensure:`: its catch takes only a throw
+    /// carrying its own activation's NLR token, and the NLR boundary unwraps any
+    /// wrapper that outlives its `ensure:` ([`NlrCatchVars::ens_unwrap`]).
     pub(in crate::core_erlang) nlr_capture: Vec<String>,
     /// BT-3947: the id of each `ensure:` producer whose protected block is being
     /// lowered and that captures locals, innermost last. A `^`'s wrapper carries

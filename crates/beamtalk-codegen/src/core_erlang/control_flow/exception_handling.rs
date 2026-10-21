@@ -1446,6 +1446,20 @@ impl CoreErlangGenerator {
         let slot_var = self.fresh_temp_var("EnsSlot");
         let locals_var = self.fresh_temp_var("EnsLocals");
         let entry_var = self.fresh_temp_var("NlrEntry");
+        // The wrapper's id is only unique per module, and the throw may come from
+        // another class's method or an outer activation of this one running a
+        // closure: take only a throw that carries THIS activation's NLR token. A
+        // foreign one falls through to the ordinary path and reaches its own frame.
+        let token_guard = match self.current_nlr_token() {
+            Some(token) => docvec![
+                "call 'erlang':'=:='(",
+                leaf::var(tok_var.clone()),
+                ", ",
+                leaf::var(token.clone()),
+                ")"
+            ],
+            None => Document::Str("'false'"),
+        };
         docs.push(docvec![
             "case {",
             leaf::var(type_var.to_string()),
@@ -1461,7 +1475,9 @@ impl CoreErlangGenerator {
             leaf::var(slot_var.clone()),
             ", ",
             leaf::var(locals_var.clone()),
-            "}}}> when 'true' -> let ",
+            "}}}> when ",
+            token_guard,
+            " -> let ",
             leaf::var(entry_var.clone()),
             " = {",
             leaf::var(val_var.clone()),
