@@ -2341,13 +2341,19 @@ impl TypeChecker {
             )
         };
 
-        let exception_expr = if is_exception(Some(receiver_ty)) && is_symbol_literal(arg) {
-            receiver
-        } else if is_exception(arg_ty) && is_symbol_literal(receiver) {
-            arg
-        } else {
-            return;
-        };
+        let (exception_expr, exception_ty) =
+            if is_exception(Some(receiver_ty)) && is_symbol_literal(arg) {
+                (receiver, Some(receiver_ty))
+            } else if is_exception(arg_ty) && is_symbol_literal(receiver) {
+                (arg, arg_ty)
+            } else {
+                return;
+            };
+        // A structured Beamtalk error (an `Error` subclass, e.g. a shim's
+        // `#beamtalk_error{}`) usually records no raw `reason`; its Symbol
+        // tag is `kind`. Only a plain `Exception` is purely an FFI wrapper.
+        let is_plain_exception = matches!(exception_ty,
+            Some(InferredType::Known { class_name, .. }) if class_name.as_str() == "Exception");
 
         let render = |e: &Expression| crate::unparse::unparse_expression(e).to_pretty_string();
         // Appending the unary `reason` binds tighter than a binary/keyword
@@ -2379,7 +2385,14 @@ impl TypeChecker {
                 span,
             )
             .with_category(DiagnosticCategory::Type)
-            .with_hint(format!("did you mean `{suggestion}`?")),
+            .with_hint(if is_plain_exception {
+                format!("did you mean `{suggestion}`?")
+            } else {
+                format!(
+                    "did you mean `{suggestion}`? For a structured Beamtalk error, \
+                     compare its `kind` instead"
+                )
+            }),
         );
     }
 

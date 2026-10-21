@@ -160,7 +160,10 @@ fn exception_subclass_and_non_literal_operands() {
     assert_eq!(hits.len(), 1, "{warned:#?}");
     assert_eq!(
         hits[0].hint.as_deref(),
-        Some("did you mean `e reason == #oops`?")
+        Some(
+            "did you mean `e reason == #oops`? For a structured Beamtalk error, \
+             compare its `kind` instead"
+        )
     );
 
     let not_literal = check("    s := #oops\n    [nil] on: Exception do: [:e | e =:= s]");
@@ -187,4 +190,42 @@ fn warning_is_suppressible_with_expect_type() {
     let mut diags = checker.take_diagnostics();
     crate::compilation::diagnostics_policy::apply_expect_directives(&module, &mut diags);
     assert!(exception_symbol_warnings(&diags).is_empty(), "{diags:#?}");
+}
+
+/// A runtime shim specced `{ok, T} | {error, #beamtalk_error{}}` reads back as
+/// `Result(T, Error)`, so the stdlib convention of declaring a wrapper
+/// `-> Result(T, Error)` type-checks, while the same declaration over a
+/// raw-reason (`Result(T, Exception)`) spec is a mismatch: `Exception` is
+/// wider than `Error`.
+#[test]
+fn error_declared_wrapper_matches_only_beamtalk_error_specs() {
+    let run = |wire: &str| {
+        let mut reg = NativeTypeRegistry::new();
+        reg.register_module(
+            "shim",
+            vec![FunctionSignature {
+                name: "count".to_string(),
+                arity: 0,
+                params: vec![],
+                return_type: map_type_name(wire),
+                provenance: TypeProvenance::Extracted,
+                line: None,
+            }],
+        );
+        let module = parse_source(
+            "typed Object subclass: Wrap\n  count -> Result(Integer, Error) =>\n    \
+             (Erlang shim) count",
+        );
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.set_native_type_registry(reg);
+        checker.check_module(&module, &hierarchy);
+        checker
+            .take_diagnostics()
+            .into_iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .count()
+    };
+    assert_eq!(run("Result(Integer, Error)"), 0);
+    assert_eq!(run("Result(Integer, Exception)"), 1);
 }

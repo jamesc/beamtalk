@@ -174,7 +174,7 @@ flush_transcript() ->
 %% NOTE: this union contains the atom `error`, which `beamtalk_spec_reader`'s
 %% ADR-0076 ok/error Result recognition (`classify_union_branches/4`) intercepts
 %% as a bare error branch. As a result the spec reader emits
-%% `Result(Dynamic, Nil) | Symbol` for `logLevel/0` rather than the singleton
+%% `Result(Dynamic, Exception) | Symbol` for `logLevel/0` rather than the singleton
 %% union it produces for `error`-free enumerations like `logFormat/0`
 %% (`text | json` -> `#text | #json`). The user-facing `Logger logLevel`
 %% return type is therefore carried by the source annotation in

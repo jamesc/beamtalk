@@ -1279,8 +1279,10 @@ format_result_type(OkType, ErrTypes) ->
 %% `Exception` in general. When every error branch's reason is a
 %% `#beamtalk_error{}` record (the runtime shims' `{error, #beamtalk_error{}}`
 %% specs), it is `Error`: `beamtalk_exception_handler:wrap/1` turns that record
-%% into its `kind_to_class/1` class, all of which are `Error` subclasses. This
-%% keeps the stdlib's `-> Result(Self, Error)` wrappers over those shims exact.
+%% into its `kind_to_class/1` class, all of which are `Error` subclasses (or
+%% into the record's own `class` when that names an exception class, which for
+%% the runtime shims is an `Error` subclass too). This keeps the stdlib's
+%% `-> Result(Self, Error)` wrappers over those shims exact.
 -spec ffi_result_error_type([tuple() | nil]) -> binary().
 ffi_result_error_type([_ | _] = ErrTypes) ->
     case lists:all(fun is_beamtalk_error_record_type/1, ErrTypes) of
