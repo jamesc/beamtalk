@@ -1609,7 +1609,7 @@ impl CoreErlangGenerator {
     /// `stmt` that thread a local, as `(site span, locals)`, for
     /// [`threaded_ir::verify_producer_sites_threaded`] once the body is built:
     /// [`Self::body_producer_site_exprs`] narrowed to the sites
-    /// [`Self::producer_locals_at_site`] names a producer. Read just before
+    /// [`Self::producer_site_locals`] names a producer. Read just before
     /// `stmt` is lowered, so a local an earlier statement bound is live. Empty
     /// in the REPL, whose producers adopt the bindings map. Shared by the
     /// Tier 2 block body and the Letrec and fold bodies, so every frame body
@@ -1626,11 +1626,30 @@ impl CoreErlangGenerator {
         self.body_producer_site_exprs(stmt, fold, arm)
             .into_iter()
             .filter_map(|site| {
-                let site = site.unwrap_parens();
-                self.producer_locals_at_site(site)
-                    .map(|locals| (site.span(), locals))
+                self.producer_site_locals(site)
+                    .map(|locals| (site.unwrap_parens().span(), locals))
             })
             .collect()
+    }
+
+    /// BT-4014: the locals the construct at the producer site `site` threads
+    /// when it is a local-threading producer there, as
+    /// `ProducerSiteNotThreaded` reads it at every frame: a loop, fold,
+    /// conditional or exception construct ([`Self::producer_locals_at_site`]),
+    /// or a value-position local assignment (BT-3910, whose carrier is a
+    /// `ConstructTuple` at its own span), which threads its outermost target.
+    /// `None` for anything else.
+    pub(super) fn producer_site_locals(&self, site: &Expression) -> Option<Vec<String>> {
+        if let Some(locals) = self.producer_locals_at_site(site.unwrap_parens()) {
+            return Some(locals);
+        }
+        if !self.is_local_assignment_producer(site) {
+            return None;
+        }
+        beamtalk_core::semantic_analysis::block_facts::assignments_outside_blocks(site)
+            .into_iter()
+            .max_by_key(|(_, span)| span.len())
+            .map(|(local, _)| vec![local.to_string()])
     }
 
     /// Runs `f` (a loop or fold body's lowering) with the body's own

@@ -2753,39 +2753,29 @@ impl CoreErlangGenerator {
         expr: &Expression,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<Option<String>> {
-        use beamtalk_core::semantic_analysis::block_facts::{
-            assignments_outside_blocks, sequenced_operand_sites,
-        };
+        // Read before the statement is lowered, by the one rule every frame
+        // reads (`producer_site_locals`).
         let sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> =
-            sequenced_operand_sites(expr)
+            beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(expr)
                 .into_iter()
                 .filter_map(|site| {
-                    if let Some(locals) = self.local_producer_locals(site) {
-                        return Some((site.span(), locals));
-                    }
-                    // A value-position local assignment at the site (BT-3910)
-                    // is a producer too: its carrier is a `ConstructTuple` at
-                    // its own span. Its local is the outermost assignment's.
-                    if !self.is_local_assignment_producer(site) {
-                        return None;
-                    }
-                    assignments_outside_blocks(site)
-                        .into_iter()
-                        .max_by_key(|(_, span)| span.len())
-                        .map(|(local, _)| (site.span(), vec![local.to_string()]))
+                    self.producer_site_locals(site)
+                        .map(|locals| (site.span(), locals))
                 })
                 .collect();
         let start = stmts.len();
         let result = self.lower_root_statement_with_producer_in_place(expr, stmts)?;
-        if result.is_some() {
-            let errors = threaded_ir::verify_producer_sites_threaded(&stmts[start..], &sites);
-            self.report_threaded_ir_verify_errors(
-                &errors,
-                "method-root statement's local-threading producer whose rebinds are not \
-                 spliced into the method body",
-                expr.span(),
-            );
-        }
+        // Checked whether or not the statement took the producer path: a
+        // statement whose sites hold a producer but which the gate above sends
+        // to the opaque lowering (`None`, nothing pushed) is the same trapped
+        // rebind, reported rather than left to `erlc`.
+        let errors = threaded_ir::verify_producer_sites_threaded(&stmts[start..], &sites);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "method-root statement's local-threading producer whose rebinds are not \
+             spliced into the method body",
+            expr.span(),
+        );
         Ok(result)
     }
 

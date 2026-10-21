@@ -55,23 +55,32 @@ const PRODUCERS: &[&str] = &[
 /// as an argument of a send to the class by name, and in an arm and a loop body
 /// frame of its own (followed by a read of `n` in that frame). (A class-side closure that
 /// writes an outer local is a structured rejection, BT-3743.)
-const POSITIONS: &[&str] = &[
-    "    self take: (PROD)\n",
-    "    self take: 1 with: (PROD)\n",
-    "    self take: (PROD) with: n\n",
-    "    self take: n with: (PROD)\n",
-    "    self take: (PROD) with: (self take: 2)\n",
-    "    self take: (self take: (PROD))\n",
-    "    self take: (PROD) + 1\n",
-    "    self take: ((PROD) printString)\n",
-    "    x := self take: (PROD)\n    x\n",
-    "    self take: (self take: 1) with: (PROD)\n",
-    "    OperandProducerProbe take: (PROD)\n",
-    "    (self isAlive: 1) ifTrue: [self take: (PROD)]\n",
-    "    (self isAlive: 1) ifTrue: [self take: (PROD). self take: n] ifFalse: [0]\n",
-    "    #(1, 2) do: [:e | self take: (PROD)]\n",
-    "    #(1, 2) do: [:e | self take: (PROD). self take: n]\n",
-    "    (self take: (PROD)) printString\n",
+///
+/// Each with whether the producer is a direct argument of the statement's
+/// own self-send (the shape `ClassSendOperandsInPlace` reverts).
+const POSITIONS: &[(&str, bool)] = &[
+    ("    self take: (PROD)\n", true),
+    ("    self take: 1 with: (PROD)\n", true),
+    ("    self take: (PROD) with: n\n", true),
+    ("    self take: n with: (PROD)\n", true),
+    ("    self take: (PROD) with: (self take: 2)\n", true),
+    ("    self take: (self take: (PROD))\n", false),
+    ("    self take: (PROD) + 1\n", false),
+    ("    self take: ((PROD) printString)\n", false),
+    ("    x := self take: (PROD)\n    x\n", false),
+    ("    self take: (self take: 1) with: (PROD)\n", true),
+    ("    OperandProducerProbe take: (PROD)\n", false),
+    ("    (self isAlive: 1) ifTrue: [self take: (PROD)]\n", false),
+    (
+        "    (self isAlive: 1) ifTrue: [self take: (PROD). self take: n] ifFalse: [0]\n",
+        false,
+    ),
+    ("    #(1, 2) do: [:e | self take: (PROD)]\n", false),
+    (
+        "    #(1, 2) do: [:e | self take: (PROD). self take: n]\n",
+        false,
+    ),
+    ("    (self take: (PROD)) printString\n", false),
 ];
 
 /// Class-variable writes of the class-side contexts (`classState: f`).
@@ -144,6 +153,7 @@ fn rows(ctx: &Context) -> Vec<(String, String)> {
     let class_var = ctx.class_side && ctx.header.contains("classState: f");
     let positions = POSITIONS
         .iter()
+        .map(|(position, _)| position)
         .chain(CLASS_VAR_POSITIONS.iter().filter(|_| class_var));
     let mut out = Vec::new();
     for (p, position) in positions.enumerate() {
@@ -174,14 +184,26 @@ fn passes(src: &str) -> bool {
     .is_ok()
 }
 
+/// The context named `name`.
+fn context(name: &str) -> &'static Context {
+    CONTEXTS
+        .iter()
+        .find(|c| c.name == name)
+        .expect("a known context")
+}
+
 /// The instance-side twin of a row: the same statement in a plain `Object`
 /// instance method.
 fn twin_outcome(stmt: &str) -> Result<FieldCodegen, String> {
-    codegen_outcome(&module(&CONTEXTS[4], &method(&CONTEXTS[4], 0, stmt)))
+    let object = context("object");
+    codegen_outcome(&module(object, &method(object, 0, stmt)))
 }
 
-/// The fold producers of [`PRODUCERS`] (`do:`, `collect:`, `inject:into:`).
-const FOLD_PRODUCERS: std::ops::Range<usize> = 4..7;
+/// Whether `producer` is one of [`PRODUCERS`]' folds (`do:`, `collect:`,
+/// `inject:into:`), each over a literal array.
+fn is_fold_producer(producer: &str) -> bool {
+    producer.starts_with("#(1, 2) ")
+}
 
 /// PIN-BUG BT-4089: in an actor class method, a fold that writes a local in
 /// value position (any of [`POSITIONS`]) repacks its locals into the ambient
@@ -191,9 +213,9 @@ const FOLD_PRODUCERS: std::ops::Range<usize> = 4..7;
 /// for BT-4089 flips the pin and drops this skip.
 fn pinned_bt4089(ctx: &Context, stmt: &str) -> bool {
     ctx.name == "actor_class_side"
-        && PRODUCERS[FOLD_PRODUCERS]
+        && PRODUCERS
             .iter()
-            .any(|producer| stmt.contains(producer))
+            .any(|producer| is_fold_producer(producer) && stmt.contains(producer))
 }
 
 #[test]
@@ -201,7 +223,7 @@ fn pin_bug_bt4089_actor_class_side_fold_in_value_position() {
     if !super::erlc_available() {
         return;
     }
-    let ctx = &CONTEXTS[1];
+    let ctx = context("actor_class_side");
     let src = module(
         ctx,
         &method(ctx, 0, "    x := #(1, 2) collect: [:e | n := n + e]\n"),
@@ -276,15 +298,12 @@ fn class_side_operand_producers_compile() {
 #[cfg(debug_assertions)]
 #[test]
 fn class_side_operand_producers_report_the_pre_fix_lowering() {
-    // The positions whose producer is a direct argument of the statement's own
-    // self-send (the shape the fault reverts).
-    const DIRECT: &[usize] = &[0, 1, 2, 3, 4, 9];
     let mut missed = Vec::new();
     let mut checked = 0;
     for ctx in CONTEXTS.iter().filter(|c| c.class_side) {
-        for &p in DIRECT {
+        for (position, _) in POSITIONS.iter().filter(|(_, direct)| *direct) {
             for producer in PRODUCERS {
-                let stmt = POSITIONS[p].replace("PROD", producer);
+                let stmt = position.replace("PROD", producer);
                 if pinned_bt4089(ctx, &stmt) {
                     continue;
                 }
