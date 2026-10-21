@@ -175,6 +175,11 @@ const VALUE_POSITIONS: &[&str] = &[
     "self isAlive: (C) printString size",
     "x := 0. x := C. x",
     "(n > 5) ifTrue: [^ C]",
+    // The RHS of a field write and of a destructuring statement (`A` is the
+    // conditional answering a two-element array): the arm's C6 -> C1 and C9
+    // reroutes (`is_conditional_with_sequenced_receiver`).
+    "self.f := C",
+    "#(a, b) := A. self.f := a + b",
 ];
 
 /// BT-4000: the conditional in value position (every [`VALUE_POSITIONS`]
@@ -189,8 +194,9 @@ fn loop_body_conditional_receiver_value_positions_compile() {
         for (r, receiver) in RECEIVERS.iter().enumerate() {
             for (a, arm) in ARMS.iter().enumerate() {
                 let cond = format!("{receiver} ifTrue: [{arm}. 1] ifFalse: [2]");
+                let pair = format!("{receiver} ifTrue: [{arm}. #(1, 2)] ifFalse: [#(3, 4)]");
                 for (v, wrap) in VALUE_POSITIONS.iter().enumerate() {
-                    let stmt = wrap.replace('C', &cond);
+                    let stmt = wrap.replace('C', &cond).replace('A', &pair);
                     let m = method("", methods.len(), &lp.replace('S', &stmt));
                     if phase0_rejects(&format!("{HEADER}{HELPERS}{m}")) {
                         continue;
