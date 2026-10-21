@@ -65,36 +65,12 @@ impl OperatorGuard {
     }
 }
 
-/// How the compiler lowers a binary selector structurally, i.e. without
-/// dispatching it as a message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::core_erlang) enum StructuralBinary {
-    /// `>>`: method lookup (`generate_message_send`).
-    MethodLookup,
-    /// `**`: `math:pow` (`generate_power_op`).
-    Power,
-    /// `++`: list/string concatenation (`generate_concat_op`).
-    Concat,
-    /// Remainder and the equality/identity operators (ADR 0002): a bare Erlang BIF.
-    Bif(&'static str),
-}
-
-/// The one table of structurally lowered binary selectors. Both lowering sites
-/// (`generate_message_send` for `>>`, `generate_binary_op` for the rest) and
-/// [`is_structurally_lowered_binary`] key off it.
-pub(in crate::core_erlang) fn structural_binary(op: &str) -> Option<StructuralBinary> {
-    match op {
-        ">>" => Some(StructuralBinary::MethodLookup),
-        "**" => Some(StructuralBinary::Power),
-        "++" => Some(StructuralBinary::Concat),
-        "%" => Some(StructuralBinary::Bif("rem")),
-        "==" => Some(StructuralBinary::Bif("==")),
-        "=:=" => Some(StructuralBinary::Bif("=:=")), // Strict equality (ADR 0002)
-        "/=" => Some(StructuralBinary::Bif("/=")),   // Loose inequality (ADR 0002)
-        "=/=" => Some(StructuralBinary::Bif("=/=")), // Strict inequality (ADR 0002)
-        _ => None,
-    }
-}
+// The structurally lowered binary selectors live in `beamtalk-core`
+// (`state_threading_selectors`), below both codegen and the block analysis that
+// classifies which sends may run user code (ADR 0137).
+pub(in crate::core_erlang) use beamtalk_core::state_threading_selectors::{
+    StructuralBinary, structural_binary,
+};
 
 /// Whether the binary selector `op` is lowered structurally by the compiler
 /// ([`structural_binary`]) rather than dispatched as a message. Every other

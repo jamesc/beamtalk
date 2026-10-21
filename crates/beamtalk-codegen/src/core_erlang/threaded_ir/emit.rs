@@ -280,9 +280,66 @@ pub(in crate::core_erlang) fn render(
                 docs.push(render(body, ctx));
             }
             ThreadedStmt::NlrThrow { .. } => docs.push(render_nlr_throw(stmt, ctx)),
+            ThreadedStmt::SyncedCall {
+                store,
+                call,
+                result,
+                load,
+                ..
+            } => docs.push(render_synced_call(
+                store,
+                call,
+                result.as_deref(),
+                load.as_ref(),
+                ctx,
+            )),
         }
     }
     Document::Vec(docs)
+}
+
+/// The actor-state cell's process-dictionary key (`beamtalk_actor_state`'s
+/// `CELL`). The one Rust definition the bracket renders with.
+pub(in crate::core_erlang) const ACTOR_STATE_CELL: &str = "$bt_actor_state";
+
+/// Renders one [`ThreadedStmt::SyncedCall`] (ADR 0137 §1): the store of
+/// `store` to the cell, the call, and (unless the call is store-only) the
+/// reload of the cell as `load`.
+fn render_synced_call(
+    store: &VersionedVar,
+    call: &Document<'static>,
+    result: Option<&str>,
+    load: Option<&VersionedVar>,
+    ctx: &RenderCtx,
+) -> Document<'static> {
+    let store_name = ctx.resolve_prefix(store);
+    let mut parts: Vec<Document<'static>> = vec![docvec![
+        "let _ = call 'erlang':'put'(",
+        leaf::atom(ACTOR_STATE_CELL),
+        ", ",
+        leaf::var(store_name),
+        ") in ",
+    ]];
+    match result {
+        Some(result) => parts.push(docvec![
+            "let ",
+            leaf::var(result.to_string()),
+            " = ",
+            call.clone(),
+            " in "
+        ]),
+        None => parts.push(call.clone()),
+    }
+    if let Some(load) = load {
+        parts.push(docvec![
+            "let ",
+            leaf::var(ctx.resolve_prefix(load)),
+            " = call 'erlang':'get'(",
+            leaf::atom(ACTOR_STATE_CELL),
+            ") in "
+        ]);
+    }
+    Document::Vec(parts)
 }
 
 /// Renders one [`ThreadedStmt::NlrThrow`]: `let R = call
@@ -908,6 +965,12 @@ fn final_loop_arg_identities(
                 ThreadedStmt::Bind { source, target, .. } if *source == current => {
                     Some(target.clone())
                 }
+                // ADR 0137: a bracket's reload steps the `State` chain like a `Bind`.
+                ThreadedStmt::SyncedCall {
+                    store,
+                    load: Some(load),
+                    ..
+                } if *store == current => Some(load.clone()),
                 // ADR 0131 §2: a member rebind of a `DirectParams`/`Hybrid`/
                 // `TupleAcc` frame joins the chain exactly like a `Bind`.
                 ThreadedStmt::LocalRebind {

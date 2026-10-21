@@ -177,7 +177,9 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
         // exactly like a `Bind`'s (`RebindLowering::version_step`), so the
         // gap scan counts it as the producer it is.
         let step = match stmt {
-            ThreadedStmt::Bind { target, source, .. } => Some((target, source)),
+            ThreadedStmt::Bind { .. } | ThreadedStmt::SyncedCall { .. } => stmt
+                .version_step()
+                .map(|(target, source, _)| (target, source)),
             ThreadedStmt::LocalRebind { lowering, .. } => lowering
                 .version_step()
                 .map(|(source, target)| (target, source)),
@@ -385,6 +387,15 @@ pub(in crate::core_erlang) fn opaque_escapes(
                     at: *span,
                 })
             }
+            // ADR 0137: a bracket's reload is a `State` step like a `Bind`'s.
+            ThreadedStmt::SyncedCall {
+                load: Some(load),
+                span,
+                ..
+            } => Some(VerifyError::StateEffectEscapesExpression {
+                prefix: load.prefix.clone(),
+                at: *span,
+            }),
             ThreadedStmt::LocalRebind { local, span, .. } if include_locals => {
                 Some(VerifyError::StateEffectEscapesExpression {
                     prefix: VersionPrefix::Local(local.clone()),

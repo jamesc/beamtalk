@@ -145,6 +145,7 @@ pub mod selector_mangler;
 mod sequencing;
 mod spec_codegen;
 mod supervisor_codegen;
+mod synced_call;
 mod threaded_expr;
 mod threaded_ir;
 mod threading_analysis;
@@ -382,7 +383,10 @@ impl CoreErlangGenerator {
                     let state_doc = if self.in_class_method() {
                         leaf::atom("nil")
                     } else if self.context == CodeGenContext::Actor {
-                        leaf::var(self.current_state_var())
+                        // A direct-params loop binds no `StateAcc`: its body cannot
+                        // write `State`, so the throw carries the state the loop
+                        // captured on entry (BT-3562's `current_field_read_state_var`).
+                        leaf::var(self.current_field_read_state_var())
                     } else {
                         leaf::var(self.current_self_var())
                     };
