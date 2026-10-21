@@ -1,0 +1,71 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4049: process primitives — `Pid>>send:`, `Reference new`,
+// `Actor>>processLabel:` / `processLabel`.
+//
+// Fixtures: stdlib/test/fixtures/handle_info_counter.bt
+//           stdlib/test/fixtures/process_label_actor.bt
+
+TestCase subclass: ProcessPrimitivesTest
+
+  // === Pid>>send: ===
+  testPidSendReachesHandleInfo =>
+    server := HandleInfoCounter spawn
+    server pid send: #tick
+    server pid send: #tick
+    self assert: server getCount equals: 2
+    server pid send: {#ready, 42}
+    self assert: server getLastMsg equals: {#ready, 42}
+    server stop
+
+  testPidSendAnswersNil =>
+    server := HandleInfoCounter spawn
+    self assert: (server pid send: #tick) equals: nil
+    server stop
+
+  testPidSendToDeadPidIsANoOp =>
+    server := HandleInfoCounter spawn
+    pid := server pid
+    server stop
+    self deny: pid isAlive
+    self assert: (pid send: #tick) equals: nil
+
+  // === Reference new ===
+  testReferenceNewAnswersAReference =>
+    self assert: Reference new class equals: Reference
+
+  testReferenceNewIsUnique =>
+    a := Reference new
+    b := Reference new
+    self deny: a =:= b
+    self assert: a =/= b
+    self assert: a =:= a
+
+  testReferenceNewIsUsableAsDictionaryKey =>
+    a := Reference new
+    b := Reference new
+    d := (Dictionary new at: a put: 1) at: b put: 2
+    self assert: d size equals: 2
+    self assert: (d at: a) equals: 1
+    self assert: (d at: b) equals: 2
+
+  // === Actor>>processLabel: / processLabel ===
+  testProcessLabelIsNilByDefault =>
+    actor := ProcessLabelActor spawn
+    self assert: actor processLabel equals: nil
+    self assert: actor ownLabel equals: nil
+    actor stop
+
+  testProcessLabelRoundTripsFromInside =>
+    actor := ProcessLabelActor spawn
+    self assert: (actor labelSelfWith: {#connection, 7}) equals: nil
+    self assert: actor ownLabel equals: {#connection, 7}
+    self assert: actor processLabel equals: {#connection, 7}
+    actor stop
+
+  testProcessLabelLabelsTheActorNotTheCaller =>
+    actor := ProcessLabelActor spawn
+    actor processLabel: #worker
+    self assert: ((Erlang proc_lib) get_label: actor pid) equals: #worker
+    actor stop
