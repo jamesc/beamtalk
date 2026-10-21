@@ -28,7 +28,7 @@ See also: beamtalk_compiled_method_ops for CompiledMethod field access
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([resolve/2]).
+-export([resolve/2, instance_method_info/2]).
 
 -type selector() :: atom().
 
@@ -91,6 +91,69 @@ resolve(Other, _Selector) ->
         )
     ),
     beamtalk_error:raise(Error2).
+
+-doc """
+Resolve the `MethodInfo` (the `'__method_info__'` of the `CompiledMethod`
+`resolve/2` would answer) that an instance of `ClassName` runs for `Selector`,
+walking the superclass chain. For dispatch, not reflection: it builds no
+`CompiledMethod` map and never touches `beamtalk_xref` (BT-4071), so a send
+that falls through to `beamtalk_primitive:runtime_instance_method/2` costs a
+cache read, not an xref generation snapshot.
+
+Reads only the per-method records and superclass links each class publishes
+to `beamtalk_class_metadata` (no `gen_server:call`, so it is deadlock-free
+from inside any class process), memoised in `beamtalk_class_derived_cache`.
+`beamtalk_class_metadata:put_method_records/3` and `delete/1` invalidate that
+cache, so a method added, replaced or removed at runtime is seen by the next
+send.
+
+Returns:
+- `{ok, Info}` -- the nearest class in the chain that defines `Selector`.
+- `not_found` -- no class in the chain defines it.
+- `unpublished` -- some class on the way up has no published reflection yet
+  (mid-`init/1`, or unregistered), or the chain is deeper than
+  `?MAX_HIERARCHY_DEPTH`; the caller must use the authoritative pid-based
+  `resolve/2`. Never cached.
+""".
+-spec instance_method_info(atom(), selector()) -> {ok, map()} | not_found | unpublished.
+instance_method_info(ClassName, Selector) ->
+    beamtalk_class_derived_cache:fetch(
+        {instance_method_info, ClassName, Selector},
+        fun() ->
+            case published_method_info(ClassName, Selector) of
+                unpublished -> {nocache, unpublished};
+                Result -> {cache, Result}
+            end
+        end
+    ).
+
+-spec published_method_info(atom(), selector()) -> {ok, map()} | not_found | unpublished.
+published_method_info(ClassName, Selector) ->
+    StepFun = fun(Name, _Depth) ->
+        case beamtalk_class_metadata:lookup_method_record(Name, instance, Selector) of
+            {ok, #{info := Info}} ->
+                {found, {ok, Info}};
+            not_found ->
+                %% A miss is only authoritative once the class has published
+                %% its method records (`publish_reflection/1` writes the
+                %% instance-method selector list alongside them).
+                case beamtalk_class_metadata:lookup_instance_methods(Name) of
+                    {ok, _} ->
+                        case beamtalk_class_metadata:lookup_superclass(Name) of
+                            {ok, Root} when Root =:= none; Root =:= nil -> not_found;
+                            {ok, Super} -> {next, Super};
+                            not_found -> {found, unpublished}
+                        end;
+                    not_found ->
+                        {found, unpublished}
+                end
+        end
+    end,
+    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, Result} -> Result;
+        not_found -> not_found;
+        {max_depth_exceeded, _} -> unpublished
+    end.
 
 -doc """
 Resolve a method, walking the superclass chain if not found locally.

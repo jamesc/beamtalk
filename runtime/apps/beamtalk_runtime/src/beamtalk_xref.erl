@@ -35,6 +35,8 @@ Storage layout (all `protected, named_table, {read_concurrency, true}`):
 - `beamtalk_xref_senders` (bag): selector → call sites
 - `beamtalk_xref_references` (bag): class → reference sites
 - `xref_class_gen` (set): class → current generation
+- `xref_gen_epoch` (set): one `{epoch, N}` row, bumped before every write
+  to `xref_class_gen` (see `read_stable/2`)
 - `beamtalk_xref_state_vars` (set): {class, var name} → declaration line.
   Unlike the method tables, this has no generation/sweep
   machinery: instance variables are never hot-patched one at a time (there
@@ -104,6 +106,10 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 -define(SENDERS_TABLE, beamtalk_xref_senders).
 -define(REFERENCES_TABLE, beamtalk_xref_references).
 -define(CLASS_GEN_TABLE, xref_class_gen).
+%% One-row `set`: `{epoch, N}`, bumped before every change to
+%% `xref_class_gen` so a whole-index reader detects a racing publish with two
+%% O(1) reads instead of two full copies of `xref_class_gen` (BT-4071).
+-define(GEN_EPOCH_TABLE, xref_gen_epoch).
 -define(STATE_VARS_TABLE, beamtalk_xref_state_vars).
 
 %% Bound on `read_stable/1` revalidation retries (Phase 4). Converges
@@ -568,7 +574,7 @@ senders_of(Selector) when is_atom(Selector) ->
         undefined ->
             [];
         _ ->
-            {Snapshot, Sites} = read_stable(fun() ->
+            {Snapshot, Sites} = read_stable(all, fun() ->
                 [Site || {_Sel, Site} <- ets:lookup(?SENDERS_TABLE, Selector)]
             end),
             live_gen_sites(Sites, Snapshot)
@@ -910,7 +916,7 @@ references_to(Class) when is_atom(Class) ->
         undefined ->
             [];
         _ ->
-            {Snapshot, Sites} = read_stable(fun() ->
+            {Snapshot, Sites} = read_stable(all, fun() ->
                 [Site || {_Cls, Site} <- ets:lookup(?REFERENCES_TABLE, Class)]
             end),
             live_gen_sites(Sites, Snapshot)
@@ -955,7 +961,7 @@ implementors_of(Selector) when is_atom(Selector) ->
             %% per-row `gen` is available for the current-generation filter,
             %% under a stable gen snapshot so a concurrent reload cannot make
             %% the rows and the gens disagree.
-            {Snapshot, Rows} = read_stable(fun() ->
+            {Snapshot, Rows} = read_stable(all, fun() ->
                 ets:match_object(?METHODS_TABLE, {{'_', '_', Selector}, '_'})
             end),
             lists:usort([
@@ -1009,7 +1015,7 @@ defined_selectors(Class, ClassSide) when is_atom(Class), is_boolean(ClassSide) -
             %% under one stable snapshot so a concurrent reload cannot strand
             %% the filter on a generation whose rows the fetch missed or whose
             %% rows the sweep removed mid-read.
-            {Snapshot, Rows} = read_stable(fun() ->
+            {Snapshot, Rows} = read_stable({class, Class}, fun() ->
                 ets:match_object(?METHODS_TABLE, {{Class, ClassSide, '_'}, '_'})
             end),
             lists:usort([
@@ -1054,7 +1060,7 @@ defined_selectors_bt() ->
                 %% (Phase 4) — mirrors `implementors_of/1`, but spans
                 %% every class so each row is filtered against its own class's
                 %% generation in the snapshot.
-                {Snapshot, Rows} = read_stable(fun() ->
+                {Snapshot, Rows} = read_stable(all, fun() ->
                     ets:match_object(?METHODS_TABLE, {{'_', '_', '_'}, '_'})
                 end),
                 [
@@ -1102,7 +1108,7 @@ all_sends_bt() ->
                 %% snapshot so the per-site `gen` is available, then keep only
                 %% sites whose owner is still loaded and whose generation is live
                 %% (mirrors `defined_selectors_bt/0`, but over senders).
-                {Snapshot, Rows} = read_stable(fun() ->
+                {Snapshot, Rows} = read_stable(all, fun() ->
                     ets:tab2list(?SENDERS_TABLE)
                 end),
                 [
@@ -1142,7 +1148,7 @@ all_sent_selectors_bt() ->
             undefined ->
                 [];
             _ ->
-                {Snapshot, Rows} = read_stable(fun() ->
+                {Snapshot, Rows} = read_stable(all, fun() ->
                     ets:tab2list(?SENDERS_TABLE)
                 end),
                 lists:usort([
@@ -1177,7 +1183,7 @@ callers_of_native_module(Module) when is_atom(Module) ->
         undefined ->
             [];
         _ ->
-            {Snapshot, Rows} = read_stable(fun() ->
+            {Snapshot, Rows} = read_stable(all, fun() ->
                 %% O(total sends): the senders table is keyed by sent selector,
                 %% not target_module, so this read scans the whole table — unlike
                 %% senders_of/1 / references_to/1 which do keyed O(callers) lookups.
@@ -1249,7 +1255,7 @@ method_info(Class, ClassSide, Selector) when
         undefined ->
             undefined;
         _ ->
-            {Snapshot, Rows} = read_stable(fun() ->
+            {Snapshot, Rows} = read_stable({class, Class}, fun() ->
                 ets:lookup(?METHODS_TABLE, {Class, ClassSide, Selector})
             end),
             case [Info || {_Key, Info} <- Rows, is_live_gen(Class, Info, Snapshot)] of
@@ -1262,9 +1268,9 @@ method_info(Class, ClassSide, Selector) when
 Return the protocol `Class`'s `{ClassSide, Selector}` method was flattened
 from (ADR 0127 §12), or `nil` if it has no `protocol` provenance row — either
 because the class wrote it itself, or because the selector isn't indexed at
-all. Backs `CompiledMethod origin` (`beamtalk_object_class`'s `{method, _}` /
-`{class_method, _}` handlers embed this in the `'__origin__'` map key at
-construction time) and, indirectly via `beamtalk_behaviour_intrinsics`, the
+all. Backs `CompiledMethod origin` (read lazily by
+`beamtalk_compiled_method_ops`, never at `CompiledMethod` construction, so
+method resolution for dispatch makes no xref read -- BT-4071) and, indirectly via `beamtalk_behaviour_intrinsics`, the
 `removeSelector:`/`renameSelector:to:` refusals on a protocol-provided
 selector (ADR 0127 §11).
 
@@ -1421,39 +1427,58 @@ current_gen(Class) ->
 Run `Fetch` against ETS under a *stable* generation snapshot, returning
 `{Snapshot, Result}`.
 
+`Scope` names the classes whose generations the caller filters by:
+`{class, Class}` for a read about one class (`method_info/3`,
+`defined_selectors/2`), or `all` for a read whose rows can belong to any
+class. The snapshot only covers that scope, so a one-class read costs two
+O(1) lookups rather than copying `xref_class_gen` (BT-4071: `method_info/3`
+used to copy the whole table twice per call).
+
 The lock-free atomicity protocol (ADR 0087 §Atomicity). Writers insert a new
 generation's rows BEFORE publishing the gen bump, and the async sweep only
-ever reclaims *strictly older* generations. So if the `xref_class_gen`
-snapshot is identical immediately before and immediately after `Fetch` runs,
-no publish completed during the fetch, and therefore:
+ever reclaims *strictly older* generations. So if no publish to an in-scope
+class completed while `Fetch` ran, then:
 
 - every row carrying a snapshot gen was already installed before the fetch
   began (insert-before-publish), so the fetch cannot miss a live row; and
 - no row carrying a snapshot gen was swept during the fetch (the sweep that
   removes generation `G` only runs once `G` is no longer current, i.e. only
-  after a later publish — which would have changed the snapshot).
+  after a later publish — which the check would have seen).
 
-If the snapshot changed across the fetch, a publish raced us; we retry, up to
-`?READ_STABLE_RETRIES` times. Retries converge almost immediately because the
-fetch is a single ETS read while each racing write is a full gen_server
-round-trip; the bound only guards against a pathological write storm and
-caps CPU spin. On the (practically unreachable) final attempt we accept the
-last fetch paired with its *post*-fetch snapshot — still a correct filter for
-any row installed before that snapshot, never a hang. `Fetch` MUST be
-side-effect-free (it may run several times).
+How "no publish completed" is checked depends on the scope:
+
+- `{class, Class}`: `Class`'s generation is read before and after `Fetch`;
+  only that class's gen is consulted by the caller's filter.
+- `all`: the `xref_gen_epoch` counter is read before and after `Fetch` plus
+  one copy of `xref_class_gen` taken between `Fetch` and the second epoch
+  read. Writers bump the epoch *before* touching `xref_class_gen`
+  (`publish_gen/2`, `do_purge_class/1`), so a gen change visible in that copy
+  was preceded by an epoch bump that either landed before the first epoch read
+  (its rows were inserted before the fetch) or makes the two epoch reads
+  differ (retry).
+
+If a publish raced us we retry, up to `?READ_STABLE_RETRIES` times. Retries
+converge almost immediately because the fetch is a single ETS read while each
+racing write is a full gen_server round-trip; the bound only guards against a
+pathological write storm and caps CPU spin. On the (practically unreachable)
+final attempt we accept the fetch paired with a snapshot taken *before* it.
+`Fetch` MUST be side-effect-free (it may run several times).
 """.
--spec read_stable(fun(() -> T)) -> {gen_snapshot(), T} when T :: term().
-read_stable(Fetch) ->
+-spec read_stable({class, class_name()} | all, fun(() -> T)) -> {gen_snapshot(), T} when
+    T :: term().
+read_stable(Scope, Fetch) ->
     case ets:whereis(?CLASS_GEN_TABLE) of
         undefined ->
             {#{}, Fetch()};
         _ ->
-            read_stable_loop(Fetch, ?READ_STABLE_RETRIES)
+            read_stable_loop(Scope, Fetch, ?READ_STABLE_RETRIES)
     end.
 
--spec read_stable_loop(fun(() -> T), non_neg_integer()) -> {gen_snapshot(), T} when
+-spec read_stable_loop({class, class_name()} | all, fun(() -> T), non_neg_integer()) ->
+    {gen_snapshot(), T}
+when
     T :: term().
-read_stable_loop(Fetch, 0) ->
+read_stable_loop(Scope, Fetch, 0) ->
     %% Exhausted retries — pin the snapshot BEFORE the fetch. Because writers
     %% insert a generation's rows before publishing its gen bump, a fetch taken
     %% at or after this snapshot observes a superset of every row the snapshot's
@@ -1462,21 +1487,46 @@ read_stable_loop(Fetch, 0) ->
     %% *post*-fetch snapshot instead could race a publish and filter the older
     %% fetch as if its rows were stale, yielding a false empty/partial view.
     %% Reachable only under a sustained write storm.
-    Snapshot = gen_snapshot(),
+    Snapshot = gen_snapshot(Scope),
     Result = Fetch(),
     {Snapshot, Result};
-read_stable_loop(Fetch, Retries) ->
-    Before = gen_snapshot(),
+read_stable_loop({class, _} = Scope, Fetch, Retries) ->
+    Before = gen_snapshot(Scope),
     Result = Fetch(),
-    After = gen_snapshot(),
-    case Before =:= After of
-        true -> {Before, Result};
-        false -> read_stable_loop(Fetch, Retries - 1)
+    case gen_snapshot(Scope) of
+        Before -> {Before, Result};
+        _ -> read_stable_loop(Scope, Fetch, Retries - 1)
+    end;
+read_stable_loop(all, Fetch, Retries) ->
+    EpochBefore = gen_epoch(),
+    Result = Fetch(),
+    Snapshot = gen_snapshot(all),
+    case gen_epoch() of
+        EpochBefore -> {Snapshot, Result};
+        _ -> read_stable_loop(all, Fetch, Retries - 1)
     end.
 
--spec gen_snapshot() -> gen_snapshot().
-gen_snapshot() ->
+-spec gen_snapshot({class, class_name()} | all) -> gen_snapshot().
+gen_snapshot({class, Class}) ->
+    #{Class => current_gen(Class)};
+gen_snapshot(all) ->
     maps:from_list(ets:tab2list(?CLASS_GEN_TABLE)).
+
+%% The `xref_gen_epoch` counter (0 when the table is absent, e.g. mid-restart).
+-spec gen_epoch() -> non_neg_integer().
+gen_epoch() ->
+    try
+        ets:lookup_element(?GEN_EPOCH_TABLE, epoch, 2, 0)
+    catch
+        error:badarg -> 0
+    end.
+
+%% Bump `xref_gen_epoch`. Called by the owning gen_server *before* every write
+%% to `xref_class_gen` (see `read_stable/2`).
+-spec bump_gen_epoch() -> ok.
+bump_gen_epoch() ->
+    _ = ets:update_counter(?GEN_EPOCH_TABLE, epoch, 1, {epoch, 0}),
+    ok.
 
 -doc """
 Whether `Info`/site map's `gen` is the live generation for `Class` per the
@@ -1581,7 +1631,7 @@ log_xref_miss(Class, Query) ->
 init([]) ->
     beamtalk_logging_config:set_domain(runtime),
 
-    %% Create the five ETS tables, owned by this process. Heir is undefined
+    %% Create the six ETS tables, owned by this process. Heir is undefined
     %% per the acceptance criteria — tables die with the process, supervisor
     %% restart triggers re-population from the next round of register_class/0
     %% calls (or from miss-policy fallback once Phase 3 lands).
@@ -1595,10 +1645,17 @@ init([]) ->
     %% rows outright rather than versioning them, so at most one row per
     %% {Class, Name} ever exists.
     ?STATE_VARS_TABLE = ets:new(?STATE_VARS_TABLE, SetOpts),
+    ?GEN_EPOCH_TABLE = ets:new(?GEN_EPOCH_TABLE, SetOpts),
+    true = ets:insert(?GEN_EPOCH_TABLE, {epoch, 0}),
 
     ?LOG_INFO("xref started", #{
         tables => [
-            ?METHODS_TABLE, ?SENDERS_TABLE, ?REFERENCES_TABLE, ?CLASS_GEN_TABLE, ?STATE_VARS_TABLE
+            ?METHODS_TABLE,
+            ?SENDERS_TABLE,
+            ?REFERENCES_TABLE,
+            ?CLASS_GEN_TABLE,
+            ?STATE_VARS_TABLE,
+            ?GEN_EPOCH_TABLE
         ]
     }),
     {ok, #state{}}.
@@ -1733,6 +1790,7 @@ filtering by `current_gen` observe the just-installed rows.
 """.
 -spec publish_gen(class_name(), gen()) -> ok.
 publish_gen(Class, Gen) ->
+    ok = bump_gen_epoch(),
     true = ets:insert(?CLASS_GEN_TABLE, {Class, Gen}),
     ok.
 
@@ -1899,6 +1957,8 @@ non-existent literal-map `match_delete` form.
 """.
 -spec do_purge_class(class_name()) -> ok.
 do_purge_class(Class) ->
+    %% Epoch first: a whole-index `read_stable/2` that overlaps this purge retries.
+    ok = bump_gen_epoch(),
     %% Methods are keyed by {Class, ClassSide, Selector} — direct key match.
     true = ets:match_delete(?METHODS_TABLE, {{Class, '_', '_'}, '_'}),
     %% Senders / references — match on the value map's owner field.

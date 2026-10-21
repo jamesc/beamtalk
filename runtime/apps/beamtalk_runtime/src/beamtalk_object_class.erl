@@ -693,13 +693,12 @@ compiled_method_map(ClassName, Side, Selector, Info, Source, Sig, Doc) ->
         '__signature__' => Sig,
         '__method_info__' => Info,
         '__doc__' => Doc,
-        %% ADR 0127 §12: `CompiledMethod origin` -- the protocol this method was
-        %% flattened from, or nil for a method the class wrote itself. Sourced
-        %% from `beamtalk_xref`'s `origin` field (`beamtalk_xref_methods` rows
-        %% carry `provenance := protocol, origin`), not a separate store. v1
-        %% has no class-side provided methods (ADR 0127 §13), so this reads nil
-        %% for every class-side method today; kept for shape parity.
-        '__origin__' => beamtalk_xref:method_origin(ClassName, Side =:= class, Selector)
+        %% ADR 0127 §12: `CompiledMethod origin` is looked up lazily from these
+        %% two keys by `beamtalk_compiled_method_ops` when reflection asks for
+        %% it. It is never computed here: this constructor also serves method
+        %% resolution, and an xref read per resolution cost ~20 us (BT-4071).
+        '__defining_class__' => ClassName,
+        '__side__' => Side
     }.
 
 %% The class name for a pid, from the node-local reverse index (no message).

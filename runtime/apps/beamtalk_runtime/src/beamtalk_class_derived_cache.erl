@@ -32,15 +32,19 @@ ETS read.
   `{tagged_class_dispatch, Class}` entry, so one hit answers everything.
 
 Keys are caller-chosen terms; namespace them with a leading tag
-(`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`).
+(`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`,
+`{instance_method_info, Class, Selector}` — the last is
+`beamtalk_method_resolver:instance_method_info/2`, the dispatch-time method
+lookup behind `beamtalk_primitive:runtime_instance_method/2`, BT-4071).
 
 ## Invalidation
 
-Every write that can change a class's `module` or `superclass` —
-`beamtalk_class_metadata:insert/5` (class `init/1`), `merge_identity/5` (hot
-reload, redefinition) and `delete/1` (removal, `terminate/2`), plus the
-(re)creation of the metadata table itself — calls `invalidate/0` *after*
-the write has landed. Invalidation is global, not per class: a derived fact
+Every write that can change a class's `module`, `superclass` or published
+method records — `beamtalk_class_metadata:insert/5` (class `init/1`),
+`merge_identity/5` (hot reload, redefinition), `put_method_records/3` (every
+`publish_reflection/1`: `init/1`, `put_method`, reload; BT-4071) and
+`delete/1` (removal, `terminate/2`), plus the (re)creation of the metadata
+table itself — calls `invalidate/0` *after* the write has landed. Invalidation is global, not per class: a derived fact
 about class C can depend on any of C's ancestors' rows, and class writes are
 rare (load / reload time), so a global flush is both correct and cheap.
 
