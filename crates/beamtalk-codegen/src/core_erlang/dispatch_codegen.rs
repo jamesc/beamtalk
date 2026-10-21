@@ -390,11 +390,10 @@ impl CoreErlangGenerator {
             // (`try_handle_self_dispatch` / `try_handle_class_method_self_send`)
             // instead of the operator lowering. The threaded positions already route it through
             // `generate_self_dispatch` via `is_dispatching_actor_self_send`.
-            let actor_self_dispatch = (self.in_class_method()
-                || self.context == CodeGenContext::Actor)
-                && super::expr_shape::is_self_identifier(receiver)
-                && super::expr_shape::binary_self_send_dispatches(op);
-            if !actor_self_dispatch {
+            // BT-4005: an own-class reference (`C + x` inside `C`'s class
+            // method) is the dispatching self too, and reaches
+            // `try_handle_class_reference`'s direct class-side call.
+            if !super::expr_shape::binary_send_dispatches_to_self(&self.shape_ctx(), receiver, op) {
                 let doc = self.generate_binary_op(op, receiver, arguments)?;
                 return Ok(doc);
             }
@@ -1007,7 +1006,7 @@ impl CoreErlangGenerator {
             // the current class, use direct dispatch (same as `self` sends) to avoid
             // deadlock. The class actor is already processing the outer call, so
             // routing through class_send would deadlock on gen_server:call.
-            if self.in_class_method() && name.name == self.class_name() && pkg.is_none() {
+            if super::expr_shape::is_own_class_reference(&self.shape_ctx(), receiver) {
                 // ADR 0118 phase 5b: reached through ordinary
                 // `generate_expression`/`generate_message_send` (not
                 // `threaded_expression`'s own producer recognition), so the

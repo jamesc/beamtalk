@@ -339,8 +339,10 @@ impl ClassCtx<'_> {
     fn own_class_receiver(&self, receiver: &Expression) -> Option<bool> {
         match receiver.unwrap_parens() {
             Expression::Identifier(id) if id.name == "self" => Some(false),
-            Expression::ClassReference { name, package, .. }
-                if package.is_none() && name.name == self.class_name =>
+            own if crate::semantic_analysis::block_facts::is_own_class_reference(
+                own,
+                self.class_name,
+            ) =>
             {
                 Some(true)
             }

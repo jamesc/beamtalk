@@ -15,21 +15,21 @@ TestCase subclass: ServerHandleInfoTest
   // === Basic handleInfo: dispatch ===
   testServerReceivesTickMessage =>
     server := HandleInfoCounter spawn
-    Erlang erlang send: server pid msg: #tick
+    server pid send: #tick
     self assert: server getCount equals: 1
     server stop
 
   testServerReceivesMultipleTicks =>
     server := HandleInfoCounter spawn
-    Erlang erlang send: server pid msg: #tick
-    Erlang erlang send: server pid msg: #tick
-    Erlang erlang send: server pid msg: #tick
+    server pid send: #tick
+    server pid send: #tick
+    server pid send: #tick
     self assert: server getCount equals: 3
     server stop
 
   testServerHandlesNonTickMessage =>
     server := HandleInfoCounter spawn
-    Erlang erlang send: server pid msg: #something_else
+    server pid send: #something_else
     self assert: server getLastMsg equals: #something_else
     server stop
 
@@ -38,14 +38,14 @@ TestCase subclass: ServerHandleInfoTest
     actor := PlainActorForInfoTest spawn
     actor increment
     self assert: actor getCount equals: 1
-    Erlang erlang send: actor pid msg: #tick
+    actor pid send: #tick
     self assert: actor getCount equals: 1
     actor stop
 
   testServerIsAliveAfterUnknownMessage =>
     server := HandleInfoCounter spawn
     self assert: server isAlive
-    Erlang erlang send: server pid msg: #anything
+    server pid send: #anything
     server getCount  // flush: queues behind #anything in mailbox (FIFO) before isAlive check
     self assert: server isAlive
     server stop
@@ -57,7 +57,7 @@ TestCase subclass: ServerHandleInfoTest
       #tableName => #handleInfoCrash
     }
     server onExit: [:reason | table at: #exitReason put: reason]
-    Erlang erlang send: server pid msg: #crash
+    server pid send: #crash
     50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
     self deny: server isAlive
     // gen_server exits with {Error, Stacktrace}; the error is the one raised.
@@ -73,7 +73,7 @@ TestCase subclass: ServerHandleInfoTest
     table := Ets new: #handleInfoCrashPlain type: #set
     server := FailingPlainHandleInfoServer spawn
     server onExit: [:reason | table at: #exitReason put: reason]
-    Erlang erlang send: server pid msg: #anything
+    server pid send: #anything
     50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
     self deny: server isAlive
     self assert: ((table at: #exitReason) at: 1) message equals: "deliberate plain handleInfo: error"
@@ -82,7 +82,7 @@ TestCase subclass: ServerHandleInfoTest
   testSupervisedServerRestartsAfterHandleInfoError =>
     sup := (FailingHandleInfoSup supervise) unwrap
     server :: FailingHandleInfoServer := (sup which: FailingHandleInfoServer) unwrap
-    Erlang erlang send: server pid msg: #crash
+    server pid send: #crash
     50 timesRepeat: [server isAlive ifTrue: [Timer sleep: 10]]
     self deny: server isAlive
     restarted := (sup which: FailingHandleInfoServer) unwrap

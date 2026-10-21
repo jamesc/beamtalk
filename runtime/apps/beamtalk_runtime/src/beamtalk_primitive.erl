@@ -837,12 +837,44 @@ naming convention blindly — a class name that doesn't correspond to a
 loaded `bt@stdlib@…` module (e.g. a typo, or a class removed from stdlib)
 falls back to `undefined`, matching `module_for_value/1`'s prior behaviour
 for anything outside its hand-written table.
+
+This sits on the dynamic-send hot path for every tagged-map Value instance,
+so it must not reach `code_server` for a class that is already known
+(BT-4053). Resolution order:
+
+1. `erlang:module_loaded/1` on the `bt@stdlib@…` candidate — a BIF, no
+   message send. Every loaded stdlib class answers here.
+2. The class's registered module from `beamtalk_class_metadata` (one ETS
+   read). A registered class whose module is *not* the stdlib candidate — a
+   package class (`bt@catalina@handler_result`), a workspace class
+   (`bt@point`) or a module-less builder class — has no stdlib dispatch
+   module, so the answer is `undefined` without probing the code path.
+   That row is written by the class gen_server at `init/1` and on every
+   hot reload (`merge_identity/5`) and removed in `terminate/2`, so this is
+   not a cache that can go stale on redefinition.
+3. Only for a class with no metadata row (unregistered, or a stdlib module
+   on disk that has not been loaded yet) fall back to `code:ensure_loaded/1`,
+   a `code_server` round trip.
 """.
 -spec stdlib_module_for_tagged_class(atom()) -> atom() | undefined.
 stdlib_module_for_tagged_class(ClassName) ->
     Candidate = beamtalk_module_name:to_stdlib_module_atom(ClassName),
-    case code:ensure_loaded(Candidate) of
-        {module, _} -> Candidate;
+    case erlang:module_loaded(Candidate) of
+        true ->
+            Candidate;
+        false ->
+            case beamtalk_class_metadata:lookup_module(ClassName) of
+                {ok, Candidate} -> loaded_module_or_undefined(Candidate);
+                {ok, _OtherModule} -> undefined;
+                not_found -> loaded_module_or_undefined(Candidate)
+            end
+    end.
+
+-doc "`Module` if it is loaded or loadable from the code path, else `undefined`.".
+-spec loaded_module_or_undefined(atom()) -> atom() | undefined.
+loaded_module_or_undefined(Module) ->
+    case code:ensure_loaded(Module) of
+        {module, _} -> Module;
         {error, _} -> undefined
     end.
 
@@ -855,8 +887,8 @@ value_type_send(Self, Class, Selector, Args) ->
         false ->
             ok
     end,
+    %% class_name_to_module/1 has already loaded Module if it is loadable.
     Module = class_name_to_module(Class),
-    code:ensure_loaded(Module),
     case erlang:function_exported(Module, dispatch, 3) of
         true ->
             Module:dispatch(Selector, Args, Self);
@@ -995,8 +1027,8 @@ is_ivar_method(_) ->
 -doc "Check if a value type responds to a selector.".
 -spec value_type_responds_to(atom(), atom()) -> boolean().
 value_type_responds_to(Class, Selector) ->
+    %% class_name_to_module/1 has already loaded Module if it is loadable.
     Module = class_name_to_module(Class),
-    code:ensure_loaded(Module),
     case erlang:function_exported(Module, has_method, 1) of
         true ->
             Module:has_method(Selector);
@@ -1016,29 +1048,75 @@ value_type_responds_to(Class, Selector) ->
 -doc """
 Convert a CamelCase class name atom to a module name atom (ADR 0016).
 
-First tries the static naming convention (bt@{snake_case}).
-If that module is not loaded, falls back to the class registry to
-resolve package-qualified module names (e.g. bt@{package}@{snake_case}).
-This fallback enables `beamtalk test` to dispatch on package classes.
+Resolves, in order (BT-4053 — this runs on every dynamic send to a Value
+instance, so the common case must not touch `code_server`):
+
+1. The static naming convention (`bt@{snake_case}`), if that module is
+   already loaded — `erlang:module_loaded/1`, a BIF.
+2. The class's registered module from `beamtalk_class_metadata` — one ETS
+   read. This is how package-qualified (`bt@{package}@{snake_case}`) and
+   stdlib (`bt@stdlib@{snake_case}`) classes resolve. The row is maintained
+   by the class gen_server itself (written at `init/1`, updated by
+   `merge_identity/5` on hot reload or redefinition, deleted in
+   `terminate/2`), so there is no separate cache to invalidate.
+3. Cold path, for a class with no metadata row: `code:ensure_loaded/1` on
+   the static name, then the class registry, then the static name as a
+   last resort (the caller's `function_exported/3` checks then fail and it
+   falls through to the Object protocol / `does_not_understand`).
+
+The returned module is loaded if it is loadable at all, so callers need no
+`code:ensure_loaded/1` of their own. A module-less (builder-built) class
+registers its own class name as its module (`beamtalk_object_class:init/1`'s
+default); that is never a real module, so it is returned without a load
+attempt.
 """.
 -spec class_name_to_module(atom()) -> atom().
 class_name_to_module(Class) when is_atom(Class) ->
     StaticModule = static_class_module_name(Class),
-    case code:is_loaded(StaticModule) of
-        {file, _} ->
+    case erlang:module_loaded(StaticModule) of
+        true ->
             StaticModule;
         false ->
-            %% Module not yet loaded — try loading it
-            case code:ensure_loaded(StaticModule) of
-                {module, _} ->
-                    StaticModule;
-                {error, _} ->
-                    %% Fall back to class registry for package-qualified modules
-                    case beamtalk_class_registry:whereis_class(Class) of
-                        undefined -> StaticModule;
-                        ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
-                    end
+            case beamtalk_class_metadata:lookup_module(Class) of
+                {ok, Module} -> ensure_registered_module_loaded(Class, Module);
+                not_found -> class_name_to_module_cold(Class, StaticModule)
             end
+    end.
+
+-doc "Cold path of `class_name_to_module/1` for a class with no metadata row.".
+-spec class_name_to_module_cold(atom(), atom()) -> atom().
+class_name_to_module_cold(Class, StaticModule) ->
+    case code:ensure_loaded(StaticModule) of
+        {module, _} ->
+            StaticModule;
+        {error, _} ->
+            %% Fall back to class registry for package-qualified modules
+            case beamtalk_class_registry:whereis_class(Class) of
+                undefined ->
+                    StaticModule;
+                ClassPid ->
+                    ensure_registered_module_loaded(
+                        Class, beamtalk_object_class:module_name_safe(ClassPid)
+                    )
+            end
+    end.
+
+-doc """
+Return a registered class's module, loading it first only if it is a real,
+not-yet-loaded module. Loaded modules (the normal case: a compiled class
+registers itself from its module's `on_load`) and module-less classes (whose
+registered "module" is the class name itself) never reach `code_server`.
+""".
+-spec ensure_registered_module_loaded(atom(), atom()) -> atom().
+ensure_registered_module_loaded(Class, Class) ->
+    Class;
+ensure_registered_module_loaded(_Class, Module) ->
+    case erlang:module_loaded(Module) of
+        true ->
+            Module;
+        false ->
+            _ = code:ensure_loaded(Module),
+            Module
     end.
 
 -doc """

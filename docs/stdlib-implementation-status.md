@@ -571,6 +571,8 @@ audit) are now real `class sealed new` / `new:` declarations on `actor.bt` — b
 | `stop` | intrinsic | ✅ | Gracefully stop this actor (`gen_server:stop`) |
 | `kill` | intrinsic | ✅ | Forcefully kill this actor (`exit(Pid, kill)`) |
 | `isAlive` | intrinsic | ✅ | Check if this actor's process is still alive |
+| `processLabel:` | pure BT (Erlang FFI) | ✅ | Label this actor's process (`proc_lib:set_label/1`) |
+| `processLabel` | pure BT (Erlang FFI) | ✅ | This actor's process label, or `nil` (`proc_lib:get_label/1`) |
 
 ### File (`stdlib/src/file.bt`)
 

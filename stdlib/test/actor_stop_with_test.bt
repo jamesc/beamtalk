@@ -16,7 +16,7 @@ TestCase subclass: ActorStopWithTest
     server := StopWithServer spawnWith: #{#tableName => #stopWithHandleInfo}
     server onExit: [:reason | table at: #exitReason put: reason]
     expected := {#shutdown, #peer_closed}
-    Erlang erlang send: server pid msg: #close
+    server pid send: #close
     50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
     self deny: server isAlive
     self assert: (table at: #reason) equals: expected
@@ -79,7 +79,7 @@ TestCase subclass: ActorStopWithTest
 
   testUnrelatedInfoMessageDoesNotStop =>
     server := StopWithServer spawn
-    Erlang erlang send: server pid msg: #tick
+    server pid send: #tick
     self assert: server handled equals: 1
     self assert: server isAlive
     server stop
