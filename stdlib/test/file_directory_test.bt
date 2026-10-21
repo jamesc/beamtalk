@@ -118,8 +118,8 @@ TestCase subclass: FileDirectoryTest
   testListDirectoryEnotdir =>
     // A path whose parent component is a regular file hits the enotdir branch
     // of file:list_dir (distinct from the filelib:is_regular fast path).
-    self assert: (File writeAll: "target/bt-test-tmp/fdt/not_a_dir_component.txt" contents: "x") isOk // => _
-    self assert: (File listDirectory: "target/bt-test-tmp/fdt/not_a_dir_component.txt/sub") isError // => _
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/not_a_dir_component.txt" contents: "x") isOk  // => _
+    self assert: (File listDirectory: "target/bt-test-tmp/fdt/not_a_dir_component.txt/sub") isError  // => _
 
   testListDirectoryAbsolutePath =>
     // Absolute paths now accepted (ADR 0063)
