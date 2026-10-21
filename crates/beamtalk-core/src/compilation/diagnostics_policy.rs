@@ -81,7 +81,7 @@ pub enum DiagnosticsTableError {
     /// A `[diagnostics]` key is not one of the recognised kebab-case categories.
     #[error(
         "[diagnostics] has unknown category '{key}' — expected one of: {}",
-        DIAGNOSTIC_CATEGORY_KEYS.join(", ")
+        diagnostic_category_keys()
     )]
     UnknownCategory {
         /// The offending key as written in the manifest.
@@ -109,66 +109,72 @@ pub enum DiagnosticsTableError {
     },
 }
 
-/// Maps a `[diagnostics]` table key (kebab-case) to its [`DiagnosticCategory`].
+/// Every valid `[diagnostics]` table key (kebab-case) and the
+/// [`DiagnosticCategory`] it configures — the single table both key lookup
+/// ([`diagnostic_category_from_kebab`]) and the "expected one of ..." error
+/// message are built from.
 ///
-/// Mirrors the `Debug`-derived `PascalCase` variant names
-/// (`crate::source_analysis::DiagnosticCategory`), converted to kebab-case
-/// for TOML key ergonomics (e.g. `UnresolvedClass` → `unresolved-class`).
+/// Each key is the `Debug`-derived `PascalCase` variant name converted to
+/// kebab-case for TOML key ergonomics (e.g. `UnresolvedClass` →
+/// `unresolved-class`), except where a word is kept whole
+/// (`HandleInfoNoCatchAll` → `handleinfo-no-catch-all`, after the selector).
+/// Categories that are not user-configurable (`InternalVerifier`, the ADR
+/// 0131 local-threading errors) have no key.
+const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
+    ("dnu", DiagnosticCategory::Dnu),
+    ("type", DiagnosticCategory::Type),
+    ("unused", DiagnosticCategory::Unused),
+    ("empty-body", DiagnosticCategory::EmptyBody),
+    ("lint", DiagnosticCategory::Lint),
+    ("dead-assignment", DiagnosticCategory::DeadAssignment),
+    ("extension-conflict", DiagnosticCategory::ExtensionConflict),
+    ("deprecation", DiagnosticCategory::Deprecation),
+    ("actor-new", DiagnosticCategory::ActorNew),
+    ("visibility", DiagnosticCategory::Visibility),
+    ("unresolved-class", DiagnosticCategory::UnresolvedClass),
+    ("unresolved-ffi", DiagnosticCategory::UnresolvedFfi),
+    ("arity-mismatch", DiagnosticCategory::ArityMismatch),
+    ("shadowed-class", DiagnosticCategory::ShadowedClass),
+    ("type-annotation", DiagnosticCategory::TypeAnnotation),
+    ("inheritance", DiagnosticCategory::Inheritance),
+    ("sendability", DiagnosticCategory::Sendability),
+    (
+        "native-declaration-location",
+        DiagnosticCategory::NativeDeclarationLocation,
+    ),
+    (
+        "file-class-name-mismatch",
+        DiagnosticCategory::FileClassNameMismatch,
+    ),
+    (
+        "definite-assignment",
+        DiagnosticCategory::DefiniteAssignment,
+    ),
+    ("unguarded-late-read", DiagnosticCategory::UnguardedLateRead),
+    ("class-state-abroad", DiagnosticCategory::ClassStateAbroad),
+    (
+        "handleinfo-no-catch-all",
+        DiagnosticCategory::HandleInfoNoCatchAll,
+    ),
+];
+
+/// Maps a `[diagnostics]` table key (kebab-case) to its [`DiagnosticCategory`].
 fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
-    Some(match key {
-        "dnu" => DiagnosticCategory::Dnu,
-        "type" => DiagnosticCategory::Type,
-        "unused" => DiagnosticCategory::Unused,
-        "empty-body" => DiagnosticCategory::EmptyBody,
-        "lint" => DiagnosticCategory::Lint,
-        "dead-assignment" => DiagnosticCategory::DeadAssignment,
-        "extension-conflict" => DiagnosticCategory::ExtensionConflict,
-        "deprecation" => DiagnosticCategory::Deprecation,
-        "actor-new" => DiagnosticCategory::ActorNew,
-        "visibility" => DiagnosticCategory::Visibility,
-        "unresolved-class" => DiagnosticCategory::UnresolvedClass,
-        "unresolved-ffi" => DiagnosticCategory::UnresolvedFfi,
-        "arity-mismatch" => DiagnosticCategory::ArityMismatch,
-        "shadowed-class" => DiagnosticCategory::ShadowedClass,
-        "type-annotation" => DiagnosticCategory::TypeAnnotation,
-        "inheritance" => DiagnosticCategory::Inheritance,
-        "sendability" => DiagnosticCategory::Sendability,
-        "native-declaration-location" => DiagnosticCategory::NativeDeclarationLocation,
-        "file-class-name-mismatch" => DiagnosticCategory::FileClassNameMismatch,
-        "definite-assignment" => DiagnosticCategory::DefiniteAssignment,
-        "unguarded-late-read" => DiagnosticCategory::UnguardedLateRead,
-        "class-state-abroad" => DiagnosticCategory::ClassStateAbroad,
-        _ => return None,
-    })
+    DIAGNOSTIC_CATEGORY_TABLE
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, category)| *category)
 }
 
-/// All valid `[diagnostics]` table keys, in the same order as
-/// [`diagnostic_category_from_kebab`] — used to build the "did you mean one
-/// of ..." error message for an unrecognised key.
-const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
-    "dnu",
-    "type",
-    "unused",
-    "empty-body",
-    "lint",
-    "dead-assignment",
-    "extension-conflict",
-    "deprecation",
-    "actor-new",
-    "visibility",
-    "unresolved-class",
-    "unresolved-ffi",
-    "arity-mismatch",
-    "shadowed-class",
-    "type-annotation",
-    "inheritance",
-    "sendability",
-    "native-declaration-location",
-    "file-class-name-mismatch",
-    "definite-assignment",
-    "unguarded-late-read",
-    "class-state-abroad",
-];
+/// All valid `[diagnostics]` table keys, comma-separated, in table order —
+/// for the "expected one of ..." error message on an unrecognised key.
+fn diagnostic_category_keys() -> String {
+    DIAGNOSTIC_CATEGORY_TABLE
+        .iter()
+        .map(|(k, _)| *k)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// Return a human-readable TOML type name for error messages.
 fn value_type_name(value: &toml::Value) -> &'static str {
@@ -1067,10 +1073,11 @@ file-class-name-mismatch = "error"
 definite-assignment = "error"
 unguarded-late-read = "error"
 class-state-abroad = "off"
+handleinfo-no-catch-all = "error"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
-        assert_eq!(table.len(), DIAGNOSTIC_CATEGORY_KEYS.len());
+        assert_eq!(table.len(), DIAGNOSTIC_CATEGORY_TABLE.len());
         assert_eq!(
             table[&DiagnosticCategory::Dnu],
             DiagnosticSeverityOverride::Hint
@@ -1083,6 +1090,28 @@ class-state-abroad = "off"
             table[&DiagnosticCategory::DefiniteAssignment],
             DiagnosticSeverityOverride::Error
         );
+    }
+
+    #[test]
+    fn diagnostic_category_table_keys_name_their_category() {
+        // Each `[diagnostics]` key spells its category's variant name
+        // (hyphens dropped, case-folded), and no key or category repeats —
+        // so a new row can't silently point a key at the wrong category.
+        let mut keys = std::collections::BTreeSet::new();
+        let mut categories = std::collections::BTreeSet::new();
+        for (key, category) in DIAGNOSTIC_CATEGORY_TABLE {
+            assert_eq!(
+                key.replace('-', ""),
+                format!("{category:?}").to_lowercase(),
+                "key `{key}` does not spell {category:?}"
+            );
+            assert!(keys.insert(*key), "duplicate key `{key}`");
+            assert!(
+                categories.insert(*category),
+                "duplicate category {category:?}"
+            );
+            assert_eq!(diagnostic_category_from_kebab(key), Some(*category));
+        }
     }
 
     #[test]
