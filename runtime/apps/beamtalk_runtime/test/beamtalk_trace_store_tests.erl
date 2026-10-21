@@ -1826,6 +1826,23 @@ retired_stats_fold_correctly_test_() ->
         ]
     end}.
 
+non_pid_metadata_is_dropped_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {"a non-pid `pid` is dropped and cannot crash the trace store",
+            ?_test(begin
+                StorePid = whereis(beamtalk_trace_store),
+                [
+                    ?assertEqual(
+                        ok,
+                        beamtalk_trace_store:record_dispatch(Bad, increment, 1, ok, sync, 'Counter')
+                    )
+                 || Bad <- [not_a_pid, {some_name, node()}, 42]
+                ],
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
+                ?assertEqual(StorePid, whereis(beamtalk_trace_store))
+            end)}
+    end}.
+
 -doc "Spawn a process that waits for `stop`.".
 idle_process() ->
     spawn(fun() ->

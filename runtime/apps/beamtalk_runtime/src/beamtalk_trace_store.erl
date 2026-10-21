@@ -38,11 +38,13 @@ retires the pid on its `DOWN`. That covers every way an actor ends (stop,
 kill, untrapped exit signal, lost remote node) and rows a caller re-creates
 after the actor died. Retiring only in the gen_server serializes every fold
 with `grow_counters/2` and `clear/0`, which also run there. Retiring is
-idempotent: rows are claimed with `ets:take/2`. A caller still mid-write to a slot as it is released can, in a
-microseconds-wide window, add one dispatch to the slot's next owner; slots are
-zeroed when allocated, not when released. `clear/0` releases every slot rather
-than replacing the atomics array, so the array never shrinks: it stays at the
-peak number of live keys.
+idempotent: rows are claimed with `ets:take/2`. A caller still mid-write to a
+slot as it is released can, in a microseconds-wide window, add one dispatch to
+the slot's next owner; slots are zeroed when allocated, not when released.
+`clear/0` releases every slot rather than replacing the atomics array, so the
+array never shrinks: it stays at the peak number of live keys. Only pids get
+aggregates: a non-pid `pid` in telemetry metadata is dropped, since it cannot
+be monitored.
 
 ETS tables name `beamtalk_ets_heir` as heir for crash resilience and are
 reclaimed from it on restart.
@@ -197,7 +199,11 @@ Record a dispatch aggregate (called from telemetry handler, NOT via gen_server).
 This runs in the calling process for lock-free performance.
 Class comes from telemetry metadata — the authoritative source.
 """.
--spec record_dispatch(pid(), atom(), non_neg_integer(), atom(), atom(), atom()) -> ok.
+-spec record_dispatch(term(), atom(), non_neg_integer(), atom(), atom(), atom()) -> ok.
+record_dispatch(Pid, _Selector, _Duration, _Outcome, _Mode, _Class) when not is_pid(Pid) ->
+    %% Malformed metadata (the function is exported and any code can emit the
+    %% event): a non-pid cannot be monitored, so its rows could never retire.
+    ok;
 record_dispatch(Pid, Selector, Duration, Outcome, Mode, Class) ->
     %% A missing table (the gen_server mid-restart, or a hot upgrade whose new
     %% code runs before code_change/3 creates the new tables) must not raise:
@@ -562,7 +568,7 @@ handle_call(_Request, _From, State) ->
 
 handle_cast({vm_measurements, Measurements}, State) ->
     {noreply, State#state{vm_stats = Measurements}};
-handle_cast({track_pid, Pid}, #state{monitors = Monitors} = State) ->
+handle_cast({track_pid, Pid}, #state{monitors = Monitors} = State) when is_pid(Pid) ->
     case maps:is_key(Pid, Monitors) of
         true ->
             {noreply, State};
@@ -957,7 +963,9 @@ loses or predates the monitors). A pid that died meanwhile gets an immediate
 rearm_monitors() ->
     Monitor = fun
         (Pid, Acc) when is_map_key(Pid, Acc) -> Acc;
-        (Pid, Acc) -> Acc#{Pid => erlang:monitor(process, Pid)}
+        (Pid, Acc) when is_pid(Pid) -> Acc#{Pid => erlang:monitor(process, Pid)};
+        %% Rows written before non-pids were rejected: never monitorable.
+        (_NotPid, Acc) -> Acc
     end,
     WithKeys = ets:foldl(fun({Pid, _Selector}, Acc) -> Monitor(Pid, Acc) end, #{}, ?AGG_PID_KEYS),
     ets:foldl(fun({Pid, _Class}, Acc) -> Monitor(Pid, Acc) end, WithKeys, ?AGG_CLASS).
