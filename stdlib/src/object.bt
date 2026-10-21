@@ -405,7 +405,9 @@ ProtoObject subclass: Object
   /// Integer isKindOf: Class     // => true (Integer class inherits from Class)
   /// ```
   isKindOf: aClass :: Behaviour -> Boolean =>
-    self class includesBehaviour: aClass
+    // `self class includesBehaviour: aClass`, answered from the class table
+    // in the caller rather than by messaging class processes (BT-4065).
+    (Erlang beamtalk_behaviour_intrinsics) objectIsKindOf: self of: aClass
 
   // === Error handling & dispatch ===
 

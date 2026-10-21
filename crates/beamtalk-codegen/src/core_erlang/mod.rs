@@ -518,9 +518,14 @@ impl CoreErlangGenerator {
     }
 
     /// Builds the `<ClassPid> when 'true' -> let ClassModName =
-    /// module_name(ClassPid) in {'beamtalk_object', Tag, ClassModName,
+    /// module_name_safe(ClassPid) in {'beamtalk_object', Tag, ClassModName,
     /// ClassPid}` case clause shared by both `whereis_class`-resolved
     /// branches of [`Self::generate_class_reference`] above.
+    ///
+    /// `module_name_safe/1` reads the module from the class metadata table
+    /// (two ETS reads), not by a `gen_server:call` into the class process:
+    /// every class reference in the node (`on: Exception do:`, a class passed
+    /// as an argument) used to queue on that one process (BT-4065).
     pub(in crate::core_erlang) fn class_object_from_registry_clause(
         class_pid_var: &str,
         class_mod_var: &str,
@@ -532,7 +537,7 @@ impl CoreErlangGenerator {
             "> when 'true' -> ",
             "let ",
             leaf::var(class_mod_var.to_string()),
-            " = call 'beamtalk_object_class':'module_name'(",
+            " = call 'beamtalk_object_class':'module_name_safe'(",
             leaf::var(class_pid_var.to_string()),
             ") in ",
             "{'beamtalk_object', ",

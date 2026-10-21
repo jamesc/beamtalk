@@ -26,7 +26,8 @@ derived_cache_test_() ->
         {"a nocache answer is not stored", fun nocache_is_not_stored/0},
         {"a write that lands during a compute makes its result stale",
             fun write_during_compute_is_not_served/0},
-        {"insert, merge_identity and delete each invalidate", fun metadata_writes_invalidate/0}
+        {"insert, merge_identity and delete each invalidate", fun metadata_writes_invalidate/0},
+        {"a superclass cycle terminates (BT-4065)", fun superclass_cycle_terminates/0}
     ]}.
 
 memoises() ->
@@ -68,6 +69,21 @@ metadata_writes_invalidate() ->
         end,
         Writes
     ).
+
+superclass_cycle_terminates() ->
+    %% `isKindOf:` walks the hierarchy on a hot path; a corrupt cyclic chain
+    %% must answer, not loop.
+    A = 'DerivedCacheCycleA',
+    B = 'DerivedCacheCycleB',
+    ok = beamtalk_class_metadata:insert(A, ma, [], B, false),
+    ok = beamtalk_class_metadata:insert(B, mb, [], A, false),
+    try
+        ?assert(beamtalk_class_derived_cache:inherits_from(A, B)),
+        ?assertNot(beamtalk_class_derived_cache:inherits_from(A, 'DerivedCacheCycleMissing'))
+    after
+        beamtalk_class_metadata:delete(A),
+        beamtalk_class_metadata:delete(B)
+    end.
 
 key() ->
     {?MODULE, make_ref()}.

@@ -3152,3 +3152,104 @@ class_rename_selector_protocol_provided_refused_test_() ->
             end)
         ]
     end}.
+
+%%% ============================================================================
+%%% objectIsKindOf/2 (BT-4065) — `self class includesBehaviour: aClass` in the
+%%% caller, from the class table
+%%% ============================================================================
+
+%% The answer `includesBehaviour:` gives: `R == A or: [R allSuperclasses
+%% includes: A]`, with R the receiver's class object.
+includes_behaviour(Receiver, Behaviour) ->
+    R = beamtalk_primitive:class_of_object(Receiver),
+    R =:= Behaviour orelse
+        lists:member(Behaviour, beamtalk_behaviour_intrinsics:classAllSuperclasses(R)).
+
+outcome(F) ->
+    try F() of
+        V -> {value, V}
+    catch
+        C:#{error := #beamtalk_error{kind = K, selector = Sel}} -> {C, K, Sel};
+        C:R -> {C, R}
+    end.
+
+object_is_kind_of_test_() ->
+    Names = ['BT4065Grand', 'BT4065Middle', 'BT4065Bottom', 'BT4065Other'],
+    {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
+        [
+            ?_test(begin
+                {Grand, _} = register_class('BT4065Grand', #{}, #{}),
+                {Middle, _} = register_class_with_super('BT4065Middle', 'BT4065Grand', #{}, #{}),
+                {Bottom, _} = register_class_with_super('BT4065Bottom', 'BT4065Middle', #{}, #{}),
+                {Other, _} = register_class('BT4065Other', #{}, #{}),
+                Classes = [Grand, Middle, Bottom, Other],
+                Metas = [beamtalk_behaviour_intrinsics:classClass(C) || C <- Classes],
+                %% An instance of each class (an actor-style ref), each class
+                %% object and each metaclass object.
+                Instances = [
+                    #beamtalk_object{class = N, class_mod = undefined, pid = self()}
+                 || N <- Names
+                ],
+                Receivers = Instances ++ Classes ++ Metas,
+                Args = Classes ++ Metas,
+                [
+                    ?assertEqual(
+                        {R, A, includes_behaviour(R, A)},
+                        {R, A, beamtalk_behaviour_intrinsics:objectIsKindOf(R, A)}
+                    )
+                 || R <- Receivers, A <- Args
+                ],
+                BottomInstance = lists:nth(3, Instances),
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(BottomInstance, Grand)),
+                ?assertNot(beamtalk_behaviour_intrinsics:objectIsKindOf(BottomInstance, Other)),
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Bottom, lists:nth(1, Metas)))
+            end),
+            ?_test(begin
+                %% Redefining a class's superclass (the metadata write a
+                %% reload makes) is seen at once: the cached hierarchy is
+                %% invalidated by that write.
+                {Grand, _} = register_class('BT4065Grand', #{}, #{}),
+                {_, _} = register_class_with_super('BT4065Bottom', 'BT4065Grand', #{}, #{}),
+                Instance = #beamtalk_object{
+                    class = 'BT4065Bottom', class_mod = undefined, pid = self()
+                },
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Instance, Grand)),
+                ok = beamtalk_class_metadata:merge_identity(
+                    'BT4065Bottom', undefined, undefined, 'Object', undefined
+                ),
+                ?assertNot(beamtalk_behaviour_intrinsics:objectIsKindOf(Instance, Grand)),
+                ok = beamtalk_class_metadata:merge_identity(
+                    'BT4065Bottom', undefined, undefined, 'BT4065Grand', undefined
+                ),
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Instance, Grand))
+            end),
+            ?_test(begin
+                %% A class object from a class process that has since been
+                %% replaced is not canonical, so it is not answered from the
+                %% class table: it takes the original `includesBehaviour:`
+                %% send, and answers (or raises) exactly what that send does.
+                %% (Whether `Behaviour` is loaded depends on which other
+                %% suites ran first, so compare outcomes, not a fixed value.)
+                {Stale, StalePid} = register_class('BT4065Other', #{}, #{}),
+                ok = gen_server:stop(StalePid, normal, 5000),
+                {Fresh, _} = register_class('BT4065Other', #{}, #{}),
+                ?assertNotEqual(StalePid, beamtalk_class_registry:whereis_class('BT4065Other')),
+                Instance = #beamtalk_object{
+                    class = 'BT4065Other', class_mod = undefined, pid = self()
+                },
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Instance, Fresh)),
+                ?assertEqual(
+                    outcome(fun() ->
+                        beamtalk_message_dispatch:send(
+                            beamtalk_primitive:class_of_object(Instance),
+                            'includesBehaviour:',
+                            [Stale]
+                        )
+                    end),
+                    outcome(fun() ->
+                        beamtalk_behaviour_intrinsics:objectIsKindOf(Instance, Stale)
+                    end)
+                )
+            end)
+        ]
+    end}.
