@@ -2398,7 +2398,7 @@ impl CoreErlangGenerator {
             let kind = match kind {
                 BodyExprKind::FieldAssignmentControlFlow
                     if matches!(expr, Expression::Assignment { value, .. }
-                        if self.arm_statement_is_producer(value, arm.is_some())) =>
+                        if self.is_conditional_with_sequenced_receiver(value)) =>
                 {
                     BodyExprKind::FieldAssignment
                 }
@@ -2690,7 +2690,7 @@ impl CoreErlangGenerator {
                 // tuple would hold the receiver's `Bind`s inside it).
                 BodyExprKind::DestructureAssignmentControlFlow
                     if matches!(expr, Expression::DestructureAssignment { value, .. }
-                        if self.arm_statement_is_producer(value, arm.is_some())) =>
+                        if self.is_conditional_with_sequenced_receiver(value)) =>
                 {
                     if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                         let tv = self.threaded_expression(value, frame)?;
