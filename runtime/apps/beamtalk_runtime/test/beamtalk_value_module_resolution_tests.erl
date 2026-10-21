@@ -176,14 +176,19 @@ code_server_calls_during(Fun) ->
         Parent ! {result, self(), catch Fun()}
     end),
     1 = erlang:trace_pattern({code_server, call, 1}, true, [global]),
-    1 = erlang:trace(Worker, true, [call]),
-    Worker ! go,
+    %% Always remove the global trace pattern, even on a timeout, so it never
+    %% leaks into (and slows down) the rest of the EUnit run.
     Result =
-        receive
-            {result, Worker, R} -> R
-        after 5000 -> error(worker_timeout)
+        try
+            1 = erlang:trace(Worker, true, [call]),
+            Worker ! go,
+            receive
+                {result, Worker, R} -> R
+            after 5000 -> error(worker_timeout)
+            end
+        after
+            erlang:trace_pattern({code_server, call, 1}, false, [global])
         end,
-    erlang:trace_pattern({code_server, call, 1}, false, [global]),
     %% Make sure every trace message the worker generated has arrived.
     Ref = erlang:trace_delivered(Worker),
     receive
