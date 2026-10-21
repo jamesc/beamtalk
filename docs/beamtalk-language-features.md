@@ -3516,7 +3516,7 @@ t isActive                                           // => Boolean
 - `to:` takes an Actor (including a Server) or a `Pid`. The message is delivered exactly as `erlang:send/2` would deliver it: a Server receives it in `handleInfo:`, and a plain Actor ignores it.
 - The delay is Integer milliseconds or a `Duration`, as for `after:do:`, up to 4294967295 ms.
 - A one-shot message timer maps to `erlang:send_after/3`, with no extra process; `cancel` is `erlang:cancel_timer/1` and answers `true` only if the message had not been sent yet. `isActive` is `erlang:read_timer/1`. A target on another node uses a small process instead, because `send_after/3` only accepts local targets.
-- A repeating message timer runs in a small process that is **not** linked to the caller. It stops on `cancel`, or when the target dies, so a supervisor-restarted named Server does not inherit the old ticks. Ticks follow fixed deadlines and do not drift.
+- A repeating message timer runs in a small process that is **not** linked to the caller. It stops on `cancel`, or when the target dies, so a supervisor-restarted named Server does not inherit the old ticks. Ticks follow fixed deadlines and do not drift; ticks missed while the system was busy are skipped, not replayed. Because the timer is not tied to its creator, a caller that targets another process owns the Timer: keep it and `cancel` it, or it runs for as long as the target lives.
 - A timer whose target has died does nothing, as in OTP.
 - A message sent just before `cancel` may already be in the mailbox. When a stale tick matters, tag the message (`{#tick, ref}`) and ignore old tags.
 

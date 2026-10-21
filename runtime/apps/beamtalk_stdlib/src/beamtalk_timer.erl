@@ -36,7 +36,10 @@ would, so a Server receives it in `handleInfo:`.
   the creator; it monitors the target (a pid, a registered name or
   `{Name, Node}`) and stops when the target dies, so a restarted named
   Server never inherits its predecessor's ticks. Each tick is scheduled
-  against an absolute monotonic deadline, so intervals do not drift.
+  against an absolute monotonic deadline, so intervals do not drift; ticks
+  missed while the process was descheduled are skipped, not replayed.
+  Because the process is not linked to its creator, a caller that targets
+  another process owns the handle and must `cancel` it.
 
 A target that has died makes the timer a silent no-op, as in OTP. A global
 name is resolved once, when the timer is created. A one-shot timer reference
@@ -335,7 +338,7 @@ send_once(Ms, Dest, Msg) ->
 
 %% Repeating message-timer loop. Stops on cancel or when the monitored
 %% target dies. `Next` is the absolute monotonic deadline of the next tick,
-%% so a slow send never shifts later ticks.
+%% so a slow send never shifts later ticks; missed deadlines are skipped.
 -spec send_loop(
     pos_integer(), pid() | atom() | {atom(), node()}, term(), reference(), integer()
 ) -> ok.
@@ -354,7 +357,11 @@ send_loop(Ms, Dest, Msg, Mon, Next) ->
         catch
             error:badarg -> ok
         end),
-        send_loop(Ms, Dest, Msg, Mon, Next + Ms)
+        %% Skip ticks missed while the process was descheduled instead of
+        %% replaying them as a burst; the phase stays fixed (no drift).
+        Now = erlang:monotonic_time(millisecond),
+        Skipped = max(0, (Now - Next) div Ms),
+        send_loop(Ms, Dest, Msg, Mon, Next + (Skipped + 1) * Ms)
     end.
 
 -spec repeat_loop(integer(), function()) -> ok.

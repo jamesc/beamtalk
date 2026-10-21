@@ -376,7 +376,20 @@ send_every_does_not_drift_test() ->
     timer:sleep(210),
     ?assert(beamtalk_timer:cancel(T)),
     N = count_ticks(0),
-    ?assert(N >= 8 andalso N =< 11).
+    ?assert(N >= 6 andalso N =< 11).
+
+%% Ticks missed while the timer process is descheduled are skipped, not
+%% replayed as a burst.
+send_every_skips_missed_ticks_test() ->
+    T = beamtalk_timer:'send:to:every:'(tick, self(), 20),
+    Pid = maps:get(pid, T),
+    true = erlang:suspend_process(Pid),
+    timer:sleep(200),
+    flush_ticks(),
+    true = erlang:resume_process(Pid),
+    timer:sleep(5),
+    ?assert(beamtalk_timer:cancel(T)),
+    ?assert(count_ticks(0) =< 2).
 
 count_ticks(N) ->
     receive

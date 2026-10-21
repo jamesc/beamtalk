@@ -87,7 +87,10 @@ sealed typed Object subclass: Timer native: beamtalk_timer
   /// `target` is an Actor (including a Server) or a Pid; a Server receives
   /// each message in `handleInfo:`. Runs in a small process that stops on
   /// `cancel`, or when the target dies (a restarted named Server does not
-  /// inherit the ticks). Ticks follow fixed deadlines, so they do not drift.
+  /// inherit the ticks). Ticks follow fixed deadlines, so they do not drift;
+  /// ticks missed while the system was busy are skipped, not replayed. The
+  /// timer is not tied to its creator: when `target` is not `self`, keep the
+  /// Timer and `cancel` it, or it runs for as long as the target lives.
   ///
   /// ## Examples
   /// ```beamtalk
