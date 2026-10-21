@@ -19,6 +19,10 @@ use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{RootMethodKind, group_by_fold_threads};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
+/// The block's tail is `x == 2`, not `x > 2`: with the synced-calls flag on (BT-4020) a
+/// `>` on an untyped operand is a bracketed call, which would thread every fold and make
+/// the corpus vacuous, while `==` is a structural BIF under both settings.
+///
 /// Statements of a `groupBy:` block over `x` (`f` is an outer callable, `n` an
 /// actor field; `self` sends and field writes are actor-only).
 const STATEMENTS: &[(&str, bool)] = &[
@@ -72,7 +76,7 @@ fn group_by_fold_gate_agreement() {
     }
     let mut threaded = [0usize; 2];
     for (stmts, actor_only) in &bodies {
-        let send = format!("items groupBy: [:x | {stmts}. x > 2]");
+        let send = format!("items groupBy: [:x | {stmts}. x == 2]");
         // An actor instance method.
         let src = format!(
             "Actor subclass: Srv\n  state: n = 0\n\n  plain => 0\n\n  run: items with: f =>\n    {send}\n"

@@ -11,11 +11,15 @@ The runtime's single home for emitting and attaching to `telemetry` events
 
 Two audiences share it:
 
-- **The stdlib `Telemetry` facade** (`stdlib/src/telemetry.bt`). Its
-  class-side methods are `@primitive` calls that compile to direct calls into
-  `execute/3`, `span/3`, `attach/3`, `attach_many/3` and `detach/1` — no
-  `(Erlang …)` FFI hop, so no per-call exports lookup (BT-4021). These validate
-  their arguments and raise structured `#beamtalk_error{}`s.
+- **The stdlib `Telemetry` facade** (`stdlib/src/telemetry.bt`). The class
+  is `native: beamtalk_telemetry` and its class-side methods are
+  `self delegate` bodies (ADR 0101, BT-4055), lowered to
+  `beamtalk_erlang_proxy:native_call/4` into `execute/3`, `span/3`,
+  `attach/3`, `attachMany/3` and `detach/1`. The function names follow the
+  `native:` naming rule (the selector's first keyword). These validate their
+  arguments and raise structured `#beamtalk_error{}`s. The module opts out of
+  the proxy's ok/error → `Result` coercion (`beamtalk_ffi_raw_results/0`):
+  `span/3` answers the block's own value, which must come back unchanged.
 - **The runtime itself.** `maybe_span/3` instruments actor dispatch and
   `emit/3` emits the actor lifecycle and distribution events. Both moved
   here from `beamtalk_actor` (`maybe_span/3`, and the emit half of
@@ -37,7 +41,7 @@ stacktrace.
 
 ## Beamtalk handlers
 
-`attach/3` and `attach_many/3` store the Beamtalk block in the handler
+`attach/3` and `attachMany/3` store the Beamtalk block in the handler
 **config** and register the exported `handle_event/4` as the handler fun:
 `telemetry` warns about (and slows down) local funs used as handlers. The
 block runs in the emitting process, and `telemetry` detaches a handler that
@@ -47,11 +51,12 @@ raises (and logs it).
 -include("beamtalk.hrl").
 
 -export([
-    %% stdlib Telemetry facade (@primitive targets)
+    %% stdlib Telemetry facade (`native:` / `self delegate` targets)
     execute/3,
     span/3,
     attach/3,
-    attach_many/3,
+    attachMany/3,
+    beamtalk_ffi_raw_results/0,
     detach/1,
     detach_handler/1,
     %% telemetry handler callback for Beamtalk blocks
@@ -114,8 +119,8 @@ attach(HandlerId, EventName, Block) ->
 `telemetry:attach_many/4` form. `EventNames` is a non-empty list of event
 names. Answers a `Result` like `attach/3`.
 """.
--spec attach_many(term(), term(), term()) -> beamtalk_result:t().
-attach_many(HandlerId, EventNames, Block) ->
+-spec attachMany(term(), term(), term()) -> beamtalk_result:t().
+attachMany(HandlerId, EventNames, Block) ->
     Sel = 'attach:toAll:do:',
     case is_list(EventNames) andalso EventNames =/= [] of
         true ->
@@ -136,7 +141,7 @@ attach_many(HandlerId, EventNames, Block) ->
 `Telemetry detach: handlerId` — idempotent: detaching an unknown id answers
 `nil` too. `HandlerId` must be a Symbol or a String, and the runtime's own
 handler ids (`beamtalk_trace_store`'s) are refused with `reserved_name` here
-and in `attach/3`/`attach_many/3`, so Beamtalk code cannot switch off trace
+and in `attach/3`/`attachMany/3`, so Beamtalk code cannot switch off trace
 capture or squat on a runtime id by accident.
 """.
 -spec detach(term()) -> nil.
@@ -145,6 +150,16 @@ detach(HandlerId) ->
     check_handler_id(HandlerId, Sel),
     check_not_reserved(HandlerId, Sel),
     detach_handler(HandlerId).
+
+-doc """
+Opt out of `beamtalk_erlang_proxy`'s ok/error → `Result` coercion (ADR 0076)
+for the `native_call/4` path. `span/3` answers whatever the user's block
+answers, so a block value of `#ok` or `{error, _}` must come back as is. The
+module's own answers are `nil` and already-built `Result`s, so nothing here
+relies on the coercion.
+""".
+-spec beamtalk_ffi_raw_results() -> true.
+beamtalk_ffi_raw_results() -> true.
 
 -doc """
 Detach any telemetry handler id, unvalidated, for the runtime's own handlers
@@ -162,7 +177,7 @@ detach_handler(HandlerId) ->
 
 -doc """
 `telemetry` handler callback for Beamtalk blocks attached with `attach/3` /
-`attach_many/3`. Calls the block stored in the handler config with the event
+`attachMany/3`. Calls the block stored in the handler config with the event
 name, measurements and metadata, in the emitting process.
 
 - **Re-entrancy:** while a handler is running, a nested emit that reaches the

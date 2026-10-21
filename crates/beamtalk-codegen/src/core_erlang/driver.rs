@@ -84,6 +84,10 @@ pub fn generate_module_surfacing_verifier(
 /// - The module uses unsupported features
 /// - Code generation encounters an internal error
 /// - Formatting fails
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear driver: option plumbing, analysis hand-off, hierarchy set-up, then generation"
+)]
 pub fn generate_module_with_warnings(
     module: &Module,
     options: CodegenOptions,
@@ -105,6 +109,7 @@ pub fn generate_module_with_warnings(
     if let Some(enabled) = options.codegen_diagnostics {
         generator.codegen_diagnostics_enabled = enabled;
     }
+    let _synced_calls_override = generator.apply_synced_calls_option(options.synced_calls);
 
     // Consume the driver's already-computed analysis when supplied
     // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,
@@ -318,8 +323,8 @@ pub fn generate_module_with_warnings(
         generator.generate_value_type_module(module)?
     };
 
+    generator.finish_synced_calls(module.span);
     generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);
-
     Ok(GeneratedModule {
         code: doc.to_pretty_string(),
         warnings: generator.codegen_warnings,

@@ -10,10 +10,12 @@
 %% Rows (each one emit of `[bench, bt4025, event]` with a 1-key measurements
 %% map and a 1-key metadata map):
 %%   raw        telemetry:execute/3
-%%   runtime    beamtalk_telemetry:execute/3 (what the @primitive lowers to)
+%%   runtime    beamtalk_telemetry:execute/3 (the `self delegate` target)
 %%   facade     bt@stdlib@telemetry:'class_execute:measurements:metadata:'/4,
 %%              the function a compiled static `Telemetry execute: ...` send
-%%              direct-calls (sealed, stateless, `class sealed`; ADR 0129)
+%%              direct-calls (sealed, stateless, `class sealed`; ADR 0129).
+%%              Since BT-4055 its body is `self delegate`, i.e.
+%%              beamtalk_erlang_proxy:native_call/4 into the runtime row.
 %%   ffi        beamtalk_erlang_proxy:direct_call(telemetry, execute, [...])
 %% each with 0 handlers and with 1 no-op handler attached.
 %%

@@ -27,6 +27,12 @@
 //! epilogue (`control_flow::body::generate_foldl_loop_body`, the same
 //! addendum's next issue).
 //!
+//! ADR 0137 Phase 2a (BT-4020, behind the synced-calls flag, off by default):
+//! [`ThreadedStmt::SyncedCall`] is the cell bracket around a call that may run
+//! user code — store the threaded `State`, call, reload — and
+//! [`VerifyError::UnbracketedUserCodeSend`] reports a call that was not built
+//! into one (`synced_call.rs`).
+//!
 //! ## Module layout
 //!
 //! This module is split into four submodules, each depending only on the
@@ -89,7 +95,7 @@ pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId, LoopCounter, NlrThrowShape,
     OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId,
-    TryRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // The one family slot order and the `'__local__'` key prefix.

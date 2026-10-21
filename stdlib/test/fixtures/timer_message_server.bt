@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4048 fixture: a Server that counts the timer messages it receives in
+// handleInfo:. `startPeriodic` reschedules itself from each tick, the
+// PeriodicWorker shape from the language docs. See stdlib/test/timer_message_test.bt.
+
+Server subclass: TimerMessageServer
+  state: ticks = 0
+  state: payloads = #()
+  state: timer = nil
+
+  handleInfo: msg =>
+    msg match: [
+      #tick -> self.ticks := self.ticks + 1;
+      #periodic -> self periodic;
+      {#data, n} -> self.payloads := self.payloads add: n;
+      _ -> nil
+    ]
+
+  // Self-rescheduling one-shot timer (the PeriodicWorker pattern).
+  startPeriodic =>
+    self.timer := Timer
+      send: #periodic
+      to: self
+      after: 10
+
+  periodic =>
+    self.ticks := self.ticks + 1
+    self.ticks < 3
+      ifTrue: [
+        self.timer := Timer
+          send: #periodic
+          to: self
+          after: 10
+      ]
+
+  ticks => self.ticks
+
+  payloads => self.payloads

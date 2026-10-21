@@ -37,6 +37,14 @@ pub struct BlockMutationAnalysis {
     pub field_writes: HashSet<String>,
     /// Whether the block contains self-sends (which may mutate actor state).
     pub has_self_sends: bool,
+    /// ADR 0137 (BT-4020): whether the block contains a send to something
+    /// other than `self` that may run user code in the calling process
+    /// ([`send_user_code`], and a binary operator that is not a bare BIF or a
+    /// numeric-literal operation), nested blocks included. Counted as a state
+    /// effect only while the synced-calls switch is on
+    /// ([`crate::synced_calls`]), because such a call is bracketed with a
+    /// store and a reload of the threaded `State`.
+    pub has_user_code_sends: bool,
     /// Selectors sent to `self` anywhere in the block, including inside
     /// nested blocks (e.g. a `do:`/`collect:` argument) — unlike `has_self_sends`,
     /// tracked by name so a caller can distinguish a self-send to a provably
@@ -63,6 +71,19 @@ impl BlockMutationAnalysis {
         !self.field_writes.is_empty() || self.has_self_sends
     }
 
+    /// ADR 0137: whether the block holds a call that is bracketed with a
+    /// store/reload of `State` in an actor instance method (the switch is on
+    /// and the block has a send that may run user code). It threads `State`
+    /// like a state effect does, and cannot keep its fields in pre-extracted
+    /// loop parameters (hybrid mode): the cell must hold the whole `State`
+    /// map at the call. Deliberately not part of [`Self::has_state_effects`]:
+    /// that one is context-free, and a value-type, class-side or REPL block
+    /// has no actor `State` to bracket (the caller knows the context).
+    #[must_use]
+    pub fn has_synced_user_code_sends(&self) -> bool {
+        self.has_user_code_sends && crate::synced_calls::enabled()
+    }
+
     /// Whether a loop or fold over this block is lowered with mutation
     /// threading, in a method of kind `root` (`None`: a top-level expression,
     /// the REPL or a script). The one per-context rule: codegen's
@@ -85,6 +106,25 @@ impl BlockMutationAnalysis {
         root: Option<RootMethodKind>,
         actor_state_eligible: bool,
     ) -> bool {
+        self.needs_mutation_threading_with(
+            root,
+            actor_state_eligible,
+            self.has_synced_user_code_sends(),
+        )
+    }
+
+    /// [`Self::needs_mutation_threading`] with the ADR 0137 bracket decided by
+    /// the caller (`synced`: this block holds a call bracketed with a
+    /// `State` store/reload where it is compiled). Codegen passes its own
+    /// context-aware answer (`synced_calls_active`); the context-free default
+    /// above reads only the global switch.
+    #[must_use]
+    pub fn needs_mutation_threading_with(
+        &self,
+        root: Option<RootMethodKind>,
+        actor_state_eligible: bool,
+        synced: bool,
+    ) -> bool {
         let captured_local_mutation = || {
             self.captured_reads
                 .iter()
@@ -94,7 +134,8 @@ impl BlockMutationAnalysis {
             None => self.has_mutations(),
             Some(RootMethodKind::Class) => captured_local_mutation(),
             Some(RootMethodKind::Actor) => {
-                (actor_state_eligible && self.has_state_effects()) || !self.local_writes.is_empty()
+                (actor_state_eligible && (self.has_state_effects() || synced))
+                    || !self.local_writes.is_empty()
             }
             Some(RootMethodKind::ValueType) => {
                 !self.field_writes.is_empty() || captured_local_mutation()
@@ -710,9 +751,10 @@ fn analyze_expression(
             receiver,
             selector,
             arguments,
+            is_cast,
             ..
         } => {
-            record_send_target(receiver, selector, analysis);
+            record_send_target(receiver, selector, arguments, *is_cast, analysis);
             // on:do:/ensure: run their receiver (the try/protected
             // block) inline too, in the same activation — so it needs the same
             // local_writes propagation as an inline-conditional block argument
@@ -787,6 +829,9 @@ fn analyze_expression(
             if nested_analysis.has_self_sends {
                 analysis.has_self_sends = true;
             }
+            if nested_analysis.has_user_code_sends {
+                analysis.has_user_code_sends = true;
+            }
             analysis
                 .self_send_selectors
                 .extend(nested_analysis.self_send_selectors.iter().cloned());
@@ -807,7 +852,13 @@ fn analyze_expression(
             // x`) must reach `compute_class_var_mutating_selectors`.
             analyze_expression(receiver, analysis, ctx);
             for send in cascade_sends(expr).filter(|s| s.site == SendSite::CascadeLater) {
-                record_send_target(send.receiver, send.selector, analysis);
+                record_send_target(
+                    send.receiver,
+                    send.selector,
+                    send.arguments,
+                    false,
+                    analysis,
+                );
                 for arg in send.arguments {
                     analyze_expression(arg, analysis, ctx);
                 }
@@ -865,6 +916,8 @@ fn analyze_expression(
 fn record_send_target(
     receiver: &Expression,
     selector: &MessageSelector,
+    arguments: &[Expression],
+    is_cast: bool,
     analysis: &mut BlockMutationAnalysis,
 ) {
     if is_self_reference(receiver) {
@@ -872,7 +925,45 @@ fn record_send_target(
         analysis
             .self_send_selectors
             .insert(selector.name().to_string());
+    } else if !is_cast && send_may_run_user_code(receiver, selector, arguments) {
+        analysis.has_user_code_sends = true;
     }
+}
+
+/// ADR 0137: a conservative, syntactic answer to "may this send to something
+/// other than `self` run user code in this process" — a superset of what
+/// codegen brackets (which also knows static operand types), so a construct
+/// that holds a bracketed call is always seen as holding one here. Read off
+/// the shared selector tables ([`send_user_code`],
+/// [`crate::state_threading_selectors::structural_binary`]).
+fn send_may_run_user_code(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> bool {
+    use crate::state_threading_selectors::{SendUserCode, send_user_code, structural_binary};
+    if matches!(receiver, Expression::Super(_)) {
+        return false;
+    }
+    if let MessageSelector::Binary(op) = selector {
+        if structural_binary(op).is_some() {
+            return false;
+        }
+        let numeric_literal = |e: &Expression| {
+            matches!(
+                e.unwrap_parens(),
+                Expression::Literal(
+                    crate::ast::Literal::Integer(..) | crate::ast::Literal::Float(..),
+                    _
+                )
+            )
+        };
+        return !(numeric_literal(receiver) && arguments.first().is_some_and(numeric_literal));
+    }
+    matches!(
+        send_user_code(receiver, selector, arguments),
+        SendUserCode::MayRun | SendUserCode::InlinedOrClosureCall
+    )
 }
 
 /// Adds all variable names bound by `pattern` to `ctx.local_bindings` and
@@ -1031,6 +1122,16 @@ pub fn is_result_try_do(receiver: &Expression, selector_name: &str) -> bool {
         )
 }
 
+/// ADR 0137 (BT-4020): whether a `whileTrue:`/`whileFalse:` `condition` holds
+/// a call bracketed with a `State` store/reload
+/// ([`BlockMutationAnalysis::has_synced_user_code_sends`]). The caller adds it
+/// to [`while_condition_has_state_effects`] in an actor instance method only.
+#[must_use]
+pub fn while_condition_has_synced_user_code_sends(condition: &Expression) -> bool {
+    matches!(condition, Expression::Block(block)
+        if analyze_block(block).has_synced_user_code_sends())
+}
+
 /// ADR 0118 phase 3 / BT-3845: whether a `whileTrue:`/`whileFalse:`
 /// `condition` has state effects (a field write, a self-send, a stored-block
 /// call or an opaque-callable HOM send) that the loop must thread. Only a
@@ -1126,6 +1227,9 @@ fn propagate_inline_block_writes(
         .extend(nested.field_writes.iter().cloned());
     if nested.has_self_sends {
         analysis.has_self_sends = true;
+    }
+    if nested.has_user_code_sends {
+        analysis.has_user_code_sends = true;
     }
     analysis
         .self_send_selectors
@@ -4024,6 +4128,72 @@ mod tests {
 
     fn bare(expr: Expression) -> ExpressionStatement {
         ExpressionStatement::bare(expr)
+    }
+
+    // ─── ADR 0137 (BT-4020): sends that may run user code ───────────────────
+
+    fn analyzed(src: &str) -> BlockMutationAnalysis {
+        use crate::source_analysis::{lex_with_eof, parse};
+        let (module, _) = parse(lex_with_eof(src));
+        let Expression::Block(block) = &module.expressions[0].expression else {
+            panic!("not a block: {src}");
+        };
+        analyze_block(block)
+    }
+
+    #[test]
+    fn a_send_to_another_object_may_run_user_code() {
+        for src in [
+            "[x foo]",
+            "[x printString]",
+            "[a + b]",
+            "[x < 1]",
+            "[xs do: blk]",
+            // A literal-block collection message may be a closure handed to a runtime fold.
+            "[xs do: [:e | e]]",
+        ] {
+            assert!(analyzed(src).has_user_code_sends, "{src}");
+        }
+    }
+
+    #[test]
+    fn intrinsics_inlined_constructs_and_self_sends_do_not_count() {
+        for src in [
+            "[x isNil]",
+            "[x == y]",
+            "[x ifTrue: [1] ifFalse: [2]]",
+            "[1 + 2]",
+            "[self foo]",
+            "[super foo]",
+            "[x foo!]",
+        ] {
+            assert!(!analyzed(src).has_user_code_sends, "{src}");
+        }
+    }
+
+    #[test]
+    fn a_nested_block_contributes_its_user_code_sends() {
+        assert!(analyzed("[xs do: [:e | e foo]]").has_user_code_sends);
+    }
+
+    #[test]
+    fn the_switch_gates_the_state_effect_not_the_fact() {
+        use crate::synced_calls::{SyncedCallsMode, override_mode};
+        let analysis = analyzed("[x foo]");
+        {
+            let _off = override_mode(SyncedCallsMode::Off);
+            assert!(analysis.has_user_code_sends);
+            assert!(!analysis.has_synced_user_code_sends());
+            assert!(!analysis.needs_mutation_threading(Some(RootMethodKind::Actor), true));
+        }
+        let _on = override_mode(SyncedCallsMode::Enforce);
+        assert!(analysis.has_synced_user_code_sends());
+        // `has_state_effects` stays context-free; only the actor root counts the bracket.
+        assert!(!analysis.has_state_effects());
+        assert!(analysis.needs_mutation_threading(Some(RootMethodKind::Actor), true));
+        assert!(!analysis.needs_mutation_threading(Some(RootMethodKind::ValueType), true));
+        assert!(!analysis.needs_mutation_threading(Some(RootMethodKind::Class), true));
+        assert!(!analysis.needs_mutation_threading(None, true));
     }
 
     #[test]
