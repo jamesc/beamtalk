@@ -149,31 +149,6 @@ pub struct CoreErlangGenerator {
     /// loop or arm the closure is *written* in). [`Self::current_frame`] answers
     /// it first; entering a branch context hides it until that context exits.
     pub(in crate::core_erlang) closure_frame: Option<super::threaded_ir::FrameId>,
-    /// BT-3947: the outer locals every `^` thrown from here is to hand back to
-    /// the enclosing `ensure:` cleanup(s) — the threaded set of each `ensure:`
-    /// producer whose protected block is being lowered, innermost last. A `^`
-    /// is a throw, so the cleanup (run from the `catch`) cannot see what the
-    /// protected block wrote unless the throw carries it: [`Self::nlr_throw_slot`]
-    /// reads these locals at the `^` and wraps them with the real state slot.
-    /// Empty outside a protected block. A closure written in a protected block
-    /// still captures (it is lowered where it is written), so a `^` in one throws a
-    /// wrapper that may reach another `ensure:`: its catch takes only a throw
-    /// carrying its own activation's NLR token, and the NLR boundary unwraps any
-    /// wrapper that outlives its `ensure:` ([`NlrCatchVars::ens_unwrap`]).
-    pub(in crate::core_erlang) nlr_capture: Vec<String>,
-    /// BT-3947: the id of each `ensure:` producer whose protected block is being
-    /// lowered and that captures locals, innermost last. A `^`'s wrapper carries
-    /// the innermost id, and an `ensure:`'s catch takes only a wrapper that
-    /// carries its own: a `^` from a closure another `ensure:` built holds that
-    /// construct's locals, not this one's.
-    pub(in crate::core_erlang) nlr_ens_ids: Vec<usize>,
-    /// The next `ensure:` wrapper id (unique across the module, never parked).
-    pub(in crate::core_erlang) nlr_ens_counter: usize,
-    /// BT-3947: whether [`Self::nlr_throw_slot`] wrapped a slot in the body being
-    /// lowered, so its NLR boundary unwraps one ([`NlrCatchVars::ens_unwrap`]).
-    /// Taken (and cleared) when the boundary's catch variables are allocated,
-    /// after the body.
-    pub(in crate::core_erlang) nlr_ens_wrapped: std::cell::Cell<bool>,
     /// The generator's loop-body context — the nine fields (hybrid/direct-params
     /// mode flags, pre-extracted field
     /// variable maps) that only have meaning while compiling a loop body,
@@ -500,10 +475,6 @@ impl CoreErlangGenerator {
             branch_frame_counter: 0,
             active_branch_frame: 0,
             closure_frame: None,
-            nlr_capture: Vec::new(),
-            nlr_ens_ids: Vec::new(),
-            nlr_ens_counter: 0,
-            nlr_ens_wrapped: std::cell::Cell::new(false),
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,

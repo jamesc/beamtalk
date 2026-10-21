@@ -392,22 +392,20 @@ new value to that cleanup: the `^` is a throw, and the cleanup runs from the
 body's writes. The same holds for the statement form `t := t + 1. ^t`
 (measured on a BEAM in class, value-type and actor methods: the cleanup
 reads the old `t`, silently). So a `^` out of the protected block of an
-`ensure:` (at any depth) whose cleanup reads a local that block writes has to
-hand the cleanup that value (BT-3947, lowered in BT-3912): inside a producer's
-protected block the throw's state slot is wrapped as `{'$bt_ens', Id, Slot,
-Locals}`, `Id` a module-unique id of the `ensure:` that built it and `Locals` a map of the `ensure:`'s threaded locals read at the `^`
-(`nlr_throw_slot`); the `ensure:`'s catch takes only a wrapper that carries its own id, unwraps it, runs the cleanup (a
-`BranchArm` frame entered through those locals) and rethrows with the real
-slot, so no NLR boundary ever sees the wrapper. `dead_returned_assignment` stays
-silent when an enclosing `ensure:` cleanup reads the local. 
-The throw can also come from a block value created elsewhere
+`ensure:` (written in that block or in a block literal nested in it) whose
+cleanup reads a local, bound outside the `ensure:`, that block writes stays a
+compile error (`UnmigratedLocalThreading`, BT-3947 lowers it), reported by
+the one recognizer in `validators/local_threading.rs`
+(`report_nlr_out_of_ensure`) with the hint to keep the `^` out of the protected
+block; `dead_returned_assignment` asks the compiler and stays silent inside
+that error's span. The throw can also come from a block value created elsewhere
 (BT-3993; measured stale in a class, a value type and an actor): the protected
 block is treated as possibly holding a `^` when it sends a `value`-family
 message to anything but a block literal (a local, parameter, field, call result
 or collection element), or when a local that is not a constant, a parameter or a
 field (parentheses unwrapped, cascades included) is the receiver or an argument
 of any non-binary send (`b on: Error do: [...]`, `b ensure: [...]`,
-`b whileFalse`, `h run`, `self run: b`). Only that foreign case, and a `^` in a closure (which reads the locals as they were when it was created), stay compile errors (`report_nlr_out_of_ensure`, BT-3912 narrowed it): a `^` written in the protected block itself or in an inlined construct's block is lowered above. A cleanup read counts only for a local
+`b whileFalse`, `h run`, `self run: b`). A cleanup read counts only for a local
 bound outside the `ensure:`, the parameters of enclosing blocks included. The
 static view cannot tell which value is a block, so the rule is fully
 conservative: it over-rejects (for example `assoc value`, `conn close`, or an

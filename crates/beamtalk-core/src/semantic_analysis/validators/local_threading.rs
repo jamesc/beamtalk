@@ -1359,10 +1359,7 @@ fn check_body(
 
 /// BT-3910 / BT-3947 / BT-3993: a non-local return out of the protected block of
 /// an `ensure:` whose cleanup reads a local the protected block writes stays a
-/// compile error when it is not a `^` that codegen lowers (BT-3912: a `^` in
-/// the protected block's own statements or in an inlined construct's block is
-/// lowered, `nlr_throw_slot`; what stays an error is a `^` in a closure and the
-/// block values of BT-3993). The `^` is a throw; the cleanup runs from the `catch`
+/// compile error for now. The `^` is a throw; the cleanup runs from the `catch`
 /// arm over the entry `StateAcc`, with no `LocalRebind` of the protected body's
 /// writes, so the cleanup would read the old value (the correct answer is the
 /// new one). It makes no difference whether the write is the returned value
@@ -1489,34 +1486,11 @@ struct NlrSources {
     constant_locals: BTreeSet<EcoString>,
 }
 
-/// BT-3947 (BT-3912): whether `block` holds a `^` inside a block literal that is
-/// not an inlined construct's block (a stored or passed closure). A `^` written
-/// in the protected block's own statements, or in the blocks of an inlined
-/// construct (a conditional arm, a loop or fold body, a protected body), is
-/// lowered: the throw carries the locals written so far. A closure runs
-/// wherever it is applied and reads the locals as they were when it was
-/// created, so a `^` in one stays a compile error.
-fn closure_holds_return(block: &Block) -> bool {
-    let mut inlined: Vec<crate::source_analysis::Span> = Vec::new();
-    for stmt in &block.body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            if let Some(c) = local_threading_construct(e) {
-                inlined.extend(c.blocks.iter().map(|b| b.span));
-            }
-        });
-    }
+fn block_holds_return(block: &Block) -> bool {
     let mut found = false;
     for stmt in &block.body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            if let Expression::Block(b) = e
-                && !inlined.contains(&b.span)
-            {
-                for inner in &b.body {
-                    crate::ast_walker::walk_expression(&inner.expression, &mut |x| {
-                        found |= matches!(x, Expression::Return { .. });
-                    });
-                }
-            }
+            found |= matches!(e, Expression::Return { .. });
         });
     }
     found
@@ -1532,8 +1506,8 @@ fn closure_holds_return(block: &Block) -> bool {
 /// evaluated. Binary operands are not block hand-overs. `None` when nothing
 /// does.
 fn nlr_cause(protected: &Block, sources: &NlrSources) -> Option<String> {
-    if closure_holds_return(protected) {
-        return Some("holds a non-local return (`^`) in a closure".to_string());
+    if block_holds_return(protected) {
+        return Some("holds a non-local return (`^`)".to_string());
     }
     // A local, parameter or field (parentheses unwrapped) that may hold a
     // block: anything but `self`/`super`, the constants and a local that only

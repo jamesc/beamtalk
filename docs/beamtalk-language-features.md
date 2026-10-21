@@ -3040,7 +3040,7 @@ These combinations are measured and listed in `crates/beamtalk-core/src/semantic
 #[t, (t := 7), t]    // with t = 0: #[0, 7, 7]
 ```
 
-`^t := e` returns `e` after rebinding `t`. Nothing runs after the return that could read `t`, so the write is dead and `beamtalk lint` warns (`dead_returned_assignment`) and suggests `^e`. A `^` out of the protected block of an `ensure:` (`[^t := t + 1] ensure: [t printString]`, and equally `[t := t + 1. ^t] ensure: [t printString]`, or a `^` in a block nested in the protected block) hands the cleanup the locals the block wrote so far ([BT-3947](https://linear.app/beamtalk/issue/BT-3947)): the `^` is a throw, so it carries them, and the `ensure:` runs the cleanup over them before the return goes on. The `dead_returned_assignment` lint stays silent for a `^t := e` whose enclosing `ensure:` cleanup reads `t`.
+`^t := e` returns `e` after rebinding `t`. Nothing runs after the return that could read `t`, so the write is dead and `beamtalk lint` warns (`dead_returned_assignment`) and suggests `^e`. A `^` out of the protected block of an `ensure:` (`[^t := t + 1] ensure: [t printString]`, and equally `[t := t + 1. ^t] ensure: [t printString]`, or a `^` in a block nested in the protected block) is a compile error for now ([BT-3947](https://linear.app/beamtalk/issue/BT-3947)) when the cleanup reads a local the protected block writes: the throw skips the rebind, so the cleanup would read the old `t`. Assigning before the `ensure:` does not help if the `^` stays inside the protected block; keep the `^` out of it (assign inside, return after the `ensure:`).
 
 **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
 

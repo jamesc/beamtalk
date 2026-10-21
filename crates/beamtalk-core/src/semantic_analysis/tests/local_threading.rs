@@ -3707,15 +3707,18 @@ fn a_match_arm_write_to_an_outer_local_is_reported_once() {
     assert_eq!(at_arm.len(), 1, "{at_arm:?}");
 }
 
-/// BT-3947 (BT-3912): a `^` out of the protected block of an `ensure:` whose
-/// cleanup reads a local the block writes is accepted: the `^`'s throw carries
-/// the locals the block wrote so far, so the cleanup reads the new `t`, not the
-/// entry one (measured on a BEAM in a class, a value type and an actor in
-/// `stdlib/test/bt3912ensure_test.bt`). It is the same whether the write is the
-/// returned value (`^t := t + 1`) or a statement before the `^`, and whether the
-/// `^` is in the protected block or a block nested in it.
+/// PIN-BUG BT-3947: a `^` out of the protected block of an `ensure:` whose
+/// cleanup reads a local the block writes is rejected: the cleanup would read
+/// the old `t`, silently (measured on a BEAM in a class, a value type and an
+/// actor: `t := 0. [t := t + 1. ^t] ensure: [sink record: t]` records 0; the
+/// correct answer is 1). It is the same whether the write is the returned
+/// value (`^t := t + 1`) or a statement before the `^`, and whether the `^` is
+/// in the protected block or a block nested in it. BT-3947 lowers it and flips
+/// this to an acceptance test. Without a `^` in the protected block, with a
+/// cleanup that does not read the written local, or for `on:do:` and the
+/// cleanup itself, it is accepted.
 #[test]
-fn a_returned_assignment_inside_an_ensure_protected_block_is_accepted() {
+fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
     for body in [
         "[^t := t + 1] ensure: [t printString]\nt",
         "[[^t := t + 1] on: Error do: [:e | 0]] ensure: [t printString]\nt",
@@ -3729,6 +3732,31 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_accepted() {
         "[#(1, 2) inject: 0 into: [:a :k | t := t + k. a]. ^t] ensure: [t printString]\nt",
         "[1 to: 2 do: [:k | t := t + k]. ^t] ensure: [t printString]\nt",
         "[2 timesRepeat: [t := t + 1]. ^t] ensure: [t printString]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+            assert!(
+                errors[0].message.contains("BT-3947"),
+                "{}",
+                errors[0].message
+            );
+            assert!(
+                errors[0]
+                    .hint
+                    .as_deref()
+                    .is_some_and(|h| h.contains("after the `ensure:`")),
+                "{:?}",
+                errors[0].hint
+            );
+        }
+        let errors = analysis_errors(&format!("{body}\n"), &["t"]);
+        assert!(
+            errors.iter().any(|e| e.message.contains("BT-3947")),
+            "REPL {body}: {errors:?}"
+        );
+    }
+    for body in [
         "[0] ensure: [t printString]\n^t := t + 1",
         "[^t := t + 1] on: Error do: [:e | t]\nt",
         "[0] ensure: [^t := t + 1]\nt",
@@ -3785,8 +3813,18 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
         "t := 0\nh := [^0]\n[t := 1. CvA ap: (h)] ensure: [t printString]\n9",
         "t := 0\nb := [^0]\n[t := 1. b yourself; value] ensure: [t printString]\n9",
         "t := 0\nb := [^0]\n[t := 1. CvA ap: 1; ap: b] ensure: [t printString]\n9",
+        // Locals bound by destructuring or a `match:` pattern are locals of the
+        // enclosing scope too.
+        "{u, w} := {0, 0}\n[u := 5. ^u] ensure: [u printString]\n9",
+        "arr := #[1, 2]\n#[u, w] := arr\n[u := 5. ^u] ensure: [u printString]\n9",
         // A block parameter shadowing a literal-only name is not a constant.
         "k := 3\n#(1) do: [:k | [t := 1. CvA ap: k] ensure: [t printString]]\n9",
+        // An assignment the cleanup might not run does not bind.
+        "x := 1\n[x := 5. ^x] ensure: [false ifTrue: [x := 0]. x printString]\n9",
+        "x := 1\n[x := 5. ^x] ensure: [#() do: [:k | x := 0]. x printString]\n9",
+        // A parameter of an enclosing block is bound in the enclosing scope.
+        "#(1, 2) do: [:x | [x := 5. ^x] ensure: [x printString]]\n9",
+        "[:x | [x := 5. ^x] ensure: [x printString]] value: 1\n9",
     ];
     for body in rejected {
         for src in [in_class(body), in_value(body), in_actor(body)] {
@@ -3841,40 +3879,15 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
     }
 }
 
-/// BT-3947 (BT-3912): the locals a lowered `^` hands the cleanup are the
-/// enclosing scope's whatever bound them: a destructuring, a cleanup that might
-/// not rebind them, a parameter of an enclosing block (BEAM-measured in
-/// `stdlib/test/bt3912ens_binding_test.bt`).
+/// BT-3993: a `match:` pattern variable is a local of the enclosing scope for
+/// the stale-cleanup rule (the arm itself also draws the BT-3743 error).
 #[test]
-fn an_ensure_with_a_lexical_return_reading_any_enclosing_binding_is_accepted() {
-    for body in [
-        "{u, w} := {0, 0}\n[u := 5. ^u] ensure: [u printString]\n9",
-        "arr := #[1, 2]\n#[u, w] := arr\n[u := 5. ^u] ensure: [u printString]\n9",
-        "x := 1\n[x := 5. ^x] ensure: [false ifTrue: [x := 0]. x printString]\n9",
-        "x := 1\n[x := 5. ^x] ensure: [#() do: [:k | x := 0]. x printString]\n9",
-        "#(1, 2) do: [:x | [x := 5. ^x] ensure: [x printString]]\n9",
-        "[:x | [x := 5. ^x] ensure: [x printString]] value: 1\n9",
-    ] {
-        for src in [in_class(body), in_value(body), in_actor(body)] {
-            let errors = analysis_errors(&src, &[]);
-            assert!(
-                errors.iter().all(|e| !e.message.contains("BT-3947")),
-                "{src}: {errors:?}"
-            );
-        }
-    }
-}
-
-/// BT-3993 / BT-3912: a `match:` pattern variable is a local of the enclosing
-/// scope for the stale-cleanup rule; a lexical `^` over it is lowered, so only
-/// the arm's own BT-3743 error (if any) remains.
-#[test]
-fn an_ensure_in_a_match_arm_reading_a_pattern_variable_is_lowered() {
+fn an_ensure_in_a_match_arm_reading_a_pattern_variable_is_rejected() {
     let body = "3 match: [k -> [k := 5. ^k] ensure: [k printString]]\n9";
     for src in [in_class(body), in_value(body), in_actor(body)] {
         let errors = analysis_errors(&src, &[]);
         assert!(
-            errors.iter().all(|e| !e.message.contains("BT-3947")),
+            errors.iter().any(|e| e.message.contains("BT-3947")),
             "{src}: {errors:?}"
         );
     }
@@ -3893,12 +3906,11 @@ fn an_ensure_cleanup_that_binds_its_own_local_is_not_a_stale_read() {
             assert!(errors.is_empty(), "{src}: {errors:?}");
         }
     }
-    // The same shape with `x` bound before the `ensure:` read the entry value
-    // until BT-3912 lowered the `^`; it is accepted now.
+    // The same shape with `x` bound before the `ensure:` is the stale read.
     let body = "x := 1\n[x := 5. ^x] ensure: [x printString]\n9";
     for src in [in_class(body), in_value(body), in_actor(body)] {
         let errors = analysis_errors(&src, &[]);
-        assert!(errors.is_empty(), "{src}: {errors:?}");
+        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
     }
 }
 
