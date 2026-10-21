@@ -20,6 +20,7 @@ TestCase subclass: TelemetryTest
 
   tearDown =>
     Telemetry detach: #telemetryTest
+    Telemetry detach: "telemetry-test-string"
     self.table isNil ifFalse: [[self.table delete] on: Error do: [:e | nil]]
 
   /// Attach a recording handler to the span events under `prefix`, keyed by
@@ -149,6 +150,14 @@ TestCase subclass: TelemetryTest
     self deny: (self.table at: #stop) isNil
     self assert: (self.table at: #exception) equals: nil
 
+  testNonLocalReturnFromSpanInActorMethodEmitsStop =>
+    self recordSpan: #(#bt4025, #actornlr)
+    collector := TelemetryEventCollector spawn
+    self assert: collector returnFromSpan equals: 7
+    self deny: (self.table at: #stop) isNil
+    self assert: (self.table at: #exception) equals: nil
+    collector stop
+
   returnFromSpan =>
     Telemetry
       span: #(#bt4025, #nlr)
@@ -186,6 +195,15 @@ TestCase subclass: TelemetryTest
     self assert: (Telemetry detach: #telemetryTest) equals: nil
     self assert: (Telemetry detach: #telemetryTest) equals: nil
     self assert: (Telemetry detach: #neverAttached) equals: nil
+
+  testDetachBadIdIsTypeError =>
+    @expect type
+    self should: [Telemetry detach: 42] raise: #type_error
+
+  testDetachRuntimeHandlerIsRefused =>
+    self should: [
+      Telemetry detach: #beamtalk_trace_store_dispatch_stop
+    ] raise: #reserved_name
 
   testDetachedHandlerNoLongerRuns =>
     t := self.table

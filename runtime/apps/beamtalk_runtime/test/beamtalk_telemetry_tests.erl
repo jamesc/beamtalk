@@ -38,6 +38,9 @@ telemetry_test_() ->
         fun attach_many_covers_every_event/0,
         fun attach_rejects_bad_arguments/0,
         fun detach_is_idempotent/0,
+        fun detach_rejects_bad_and_reserved_ids/0,
+        fun handler_does_not_reenter_itself/0,
+        fun maybe_span_nlr_emits_stop/0,
         fun raising_handler_is_detached/0,
         fun emit_returns_ok/0,
         fun maybe_span_runs_fun_and_emits_span/0
@@ -214,7 +217,7 @@ attach_stores_block_in_config_with_external_handler() ->
     #{function := Fun, config := Config} = Handler,
     ?assertEqual({type, external}, erlang:fun_info(Fun, type)),
     ?assertEqual(fun beamtalk_telemetry:handle_event/4, Fun),
-    ?assertEqual(#{block => Block}, Config),
+    ?assertEqual(#{block => Block, id => <<"bt4025-config">>}, Config),
     nil = beamtalk_telemetry:detach(<<"bt4025-config">>).
 
 attach_duplicate_is_handler_exists() ->
@@ -302,3 +305,49 @@ maybe_span_runs_fun_and_emits_span() ->
     {[bt4025, ms, stop], _, StopMd} = recv(),
     ?assertMatch(#{a := 2, telemetry_span_context := _}, StopMd),
     telemetry:detach(Id).
+
+maybe_span_nlr_emits_stop() ->
+    %% Actor dispatch spans share run_span/3: an NLR crossing one is a stop.
+    Id = forward([[bt4025, msnlr, stop], [bt4025, msnlr, exception]]),
+    Nlr = {'$bt_nlr', make_ref(), 1, #{}},
+    ?assertEqual(
+        {thrown, Nlr},
+        try
+            beamtalk_telemetry:maybe_span([bt4025, msnlr], #{}, fun() -> throw(Nlr) end)
+        catch
+            throw:T -> {thrown, T}
+        end
+    ),
+    ?assertMatch({[bt4025, msnlr, stop], _, _}, recv()),
+    ?assertEqual(ok, no_more()),
+    telemetry:detach(Id).
+
+detach_rejects_bad_and_reserved_ids() ->
+    ?assertEqual(type_error, kind_of(fun() -> beamtalk_telemetry:detach(42) end)),
+    [
+        ?assertEqual(reserved_name, kind_of(fun() -> beamtalk_telemetry:detach(Reserved) end))
+     || Reserved <- beamtalk_trace_store:telemetry_handler_ids()
+    ],
+    ?assertEqual(nil, beamtalk_telemetry:detach_handler({not_a_symbol, 42})).
+
+handler_does_not_reenter_itself() ->
+    %% A handler whose body emits the event it listens to runs once per
+    %% outer emit instead of recursing.
+    Self = self(),
+    Block = fun(_, _, _) ->
+        Self ! ran,
+        beamtalk_telemetry:execute([bt4025, reenter], #{}, #{})
+    end,
+    #{isOk := true} = beamtalk_telemetry:attach(bt4025_reenter, [bt4025, reenter], Block),
+    nil = beamtalk_telemetry:execute([bt4025, reenter], #{}, #{}),
+    ?assertEqual(1, count_ran(0)),
+    %% still attached, and the guard was cleared
+    ?assertMatch([_], telemetry:list_handlers([bt4025, reenter])),
+    ?assertEqual(undefined, get({'$bt_telemetry_in_handler', bt4025_reenter})),
+    nil = beamtalk_telemetry:detach(bt4025_reenter).
+
+count_ran(N) ->
+    receive
+        ran -> count_ran(N + 1)
+    after 50 -> N
+    end.

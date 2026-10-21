@@ -56,6 +56,10 @@ sealed typed Object subclass: Telemetry
   /// A `^` out of the block is a normal exit, not an exception: the span
   /// emits `stop` and the method returns as usual.
   ///
+  /// The block is passed to another method, so it cannot assign the
+  /// enclosing method's locals or fields (ADR 0133). Use its value instead:
+  /// `n := Telemetry span: prefix metadata: #{} do: [n + 1]`.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// Telemetry span: #(#myapp, #query) metadata: #{#table => #users} do: [3 + 4]
@@ -73,9 +77,16 @@ sealed typed Object subclass: Telemetry
   ///
   /// The handler runs **in the emitting process**, synchronously, so keep it
   /// short. If it raises, `telemetry` logs the error and detaches the handler;
-  /// the emitter is unaffected. Class variables follow ADR 0130's rule for a
-  /// block running away from home: reads see a snapshot and a write raises
-  /// `class_state_unreachable`.
+  /// the emitter is unaffected. A handler is not re-entered: an emit it causes
+  /// itself (say, a send to an actor from a handler on actor dispatch events)
+  /// skips it rather than recursing.
+  ///
+  /// Class variables follow ADR 0130: run away from its home class, the block
+  /// reads a snapshot and a write raises `class_state_unreachable`; run at
+  /// home (an event emitted by its own class's class method), its writes are
+  /// live and are discarded if the handler raises. The block belongs to the
+  /// code that created it: after redefining that class, attach the handler
+  /// again.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -103,6 +114,7 @@ sealed typed Object subclass: Telemetry
     @primitive "telemetryAttachMany"
 
   /// Detach a handler. Idempotent: detaching an unknown id answers nil too.
+  /// The runtime's own handlers (`Tracing`'s) are refused with `#reserved_name`.
   ///
   /// ## Examples
   /// ```beamtalk

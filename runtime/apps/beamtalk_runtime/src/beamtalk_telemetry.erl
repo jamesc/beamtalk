@@ -53,6 +53,7 @@ raises (and logs it).
     attach/3,
     attach_many/3,
     detach/1,
+    detach_handler/1,
     %% telemetry handler callback for Beamtalk blocks
     handle_event/4,
     %% runtime instrumentation (moved from beamtalk_actor, BT-4025)
@@ -132,14 +133,39 @@ attach_many(HandlerId, EventNames, Block) ->
     do_attach(HandlerId, EventNames, Block, Sel).
 
 -doc """
-`Telemetry detach: handlerId` — idempotent: detaching an unknown id (or
-calling it when `telemetry` is not running) answers `nil` too.
-
-The runtime also uses it for its own Erlang-side handler ids (see
-`beamtalk_trace_store`), so it accepts any handler-id term.
+`Telemetry detach: handlerId` — idempotent: detaching an unknown id answers
+`nil` too. `HandlerId` must be a Symbol or a String, and the runtime's own
+handler ids (`beamtalk_trace_store`'s) are refused with `reserved_name`, so
+Beamtalk code cannot switch off trace capture by accident.
 """.
 -spec detach(term()) -> nil.
 detach(HandlerId) ->
+    Sel = 'detach:',
+    check_handler_id(HandlerId, Sel),
+    case lists:member(HandlerId, beamtalk_trace_store:telemetry_handler_ids()) of
+        true ->
+            beamtalk_error:raise(
+                error_with_hint(
+                    reserved_name,
+                    Sel,
+                    iolist_to_binary(
+                        io_lib:format("~tp is a runtime telemetry handler and cannot be detached", [
+                            HandlerId
+                        ])
+                    )
+                )
+            );
+        false ->
+            detach_handler(HandlerId)
+    end.
+
+-doc """
+Detach any telemetry handler id, unvalidated, for the runtime's own handlers
+(`beamtalk_trace_store`). Idempotent, and a no-op when `telemetry` is not
+loaded or its handler table is not running.
+""".
+-spec detach_handler(term()) -> nil.
+detach_handler(HandlerId) ->
     try telemetry:detach(HandlerId) of
         _ -> nil
     catch
@@ -150,14 +176,35 @@ detach(HandlerId) ->
 -doc """
 `telemetry` handler callback for Beamtalk blocks attached with `attach/3` /
 `attach_many/3`. Calls the block stored in the handler config with the event
-name, measurements and metadata. Runs in the emitting process; a raise here
-makes `telemetry` detach the handler.
+name, measurements and metadata, in the emitting process.
+
+- **Re-entrancy:** while a handler is running, a nested emit that reaches the
+  same handler again in this process (a handler on actor dispatch events that
+  itself sends to an actor, say) skips it instead of recursing without bound.
+- **Class variables (ADR 0130 §4):** `telemetry` catches a raising handler and
+  detaches it, so the block runs under `beamtalk_class_vars:protect/1`: if it
+  ran at home and raises, its class-variable writes are discarded.
 """.
--spec handle_event([atom()], map(), map(), #{block := fun((list(), map(), map()) -> term())}) ->
+-spec handle_event([atom()], map(), map(), #{
+    block := fun((list(), map(), map()) -> term()), id := term()
+}) ->
     ok.
-handle_event(EventName, Measurements, Metadata, #{block := Block}) ->
-    _ = Block(EventName, Measurements, Metadata),
-    ok.
+handle_event(EventName, Measurements, Metadata, #{block := Block, id := Id}) ->
+    Key = {'$bt_telemetry_in_handler', Id},
+    case get(Key) of
+        undefined ->
+            put(Key, true),
+            try
+                _ = beamtalk_class_vars:protect(fun() ->
+                    Block(EventName, Measurements, Metadata)
+                end),
+                ok
+            after
+                erase(Key)
+            end;
+        true ->
+            ok
+    end.
 
 %%====================================================================
 %% Runtime instrumentation
@@ -277,7 +324,7 @@ do_attach(HandlerId, EventNames, Block, Sel) ->
     Result =
         try
             telemetry:attach_many(HandlerId, EventNames, fun ?MODULE:handle_event/4, #{
-                block => Block
+                block => Block, id => HandlerId
             })
         catch
             error:undef -> {error, telemetry_unavailable};

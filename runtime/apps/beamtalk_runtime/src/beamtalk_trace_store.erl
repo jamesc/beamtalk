@@ -62,6 +62,7 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
     next_span_id/0,
     %% Health check
     telemetry_attached/0,
+    telemetry_handler_ids/0,
     %% Telemetry handler callbacks
     handle_dispatch_stop/4,
     handle_dispatch_exception/4,
@@ -438,6 +439,10 @@ init([]) ->
     %% pattern in beamtalk_telemetry.erl, so the trace store still degrades
     %% gracefully if it's started outside its OTP application context (e.g.
     %% direct gen_server:start_link/3 in a partial test harness).
+    %% function_exported/3 does not load a module, and in an interactive-mode
+    %% boot nothing may have loaded `telemetry` yet: load it once here, so
+    %% this guard and the beamtalk_telemetry emit guards see it.
+    _ = code:ensure_loaded(telemetry),
     case erlang:function_exported(telemetry, attach, 4) of
         true ->
             attach_telemetry_handlers(),
@@ -728,6 +733,11 @@ telemetry_handlers() ->
         {beamtalk_trace_store_vm_measurements, [vm, memory], fun ?MODULE:handle_vm_measurements/4}
     ].
 
+-doc "The trace store's telemetry handler ids (refused by `Telemetry detach:`).".
+-spec telemetry_handler_ids() -> [atom()].
+telemetry_handler_ids() ->
+    [Id || {Id, _EventName, _Handler} <- telemetry_handlers()].
+
 -doc """
 Attach telemetry event handlers.
 Detach first to handle restarts after crash (terminate/2 not called on kill).
@@ -747,7 +757,7 @@ table not running — `beamtalk_telemetry:detach/1` is idempotent).
 """.
 detach_telemetry_handlers() ->
     lists:foreach(
-        fun({Id, _EventName, _Handler}) -> beamtalk_telemetry:detach(Id) end,
+        fun({Id, _EventName, _Handler}) -> beamtalk_telemetry:detach_handler(Id) end,
         telemetry_handlers()
     ).
 
