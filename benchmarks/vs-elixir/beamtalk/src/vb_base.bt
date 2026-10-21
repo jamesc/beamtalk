@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Superclass half of the inherited-method rows.
+Value subclass: VbBase
+  field: v :: Integer = 1
+
+  base -> Integer => self.v

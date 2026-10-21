@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// The same class method on an open class.
+Object subclass: VbOpenMath
+
+  class double: x :: Integer -> Integer => x * 2

@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Actor counter, paired with the Elixir VeBench.Counter GenServer.
+Actor subclass: VbCounter
+  state: count :: Integer = 0
+
+  increment -> Integer =>
+    self.count := self.count + 1
+    self.count
+
+  count -> Integer => self.count
+
+  // A self-send the class module does not define (BT-4071's path).
+  probe -> Boolean => self hasField: #count

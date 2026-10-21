@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Receiver for the dynamic-send rows (paired with an Elixir protocol).
+Value subclass: VbSquare
+  field: side :: Integer = 3
+
+  area -> Integer => self.side * self.side

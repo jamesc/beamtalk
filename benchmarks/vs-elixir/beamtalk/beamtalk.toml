@@ -1,0 +1,9 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "vs_elixir_bench"
+version = "0.1.0"
+description = "Beamtalk side of the Beamtalk vs Elixir microbenchmarks (benchmarks/vs-elixir)"
+
+[dependencies]

@@ -795,6 +795,13 @@ bench:
     @cargo bench -p beamtalk-core
     @echo "✅ Benchmarks complete (see target/criterion for HTML reports)"
 
+# Beamtalk vs Elixir microbenchmarks in one BEAM node (benchmarks/vs-elixir).
+# MODE is `bench` (markdown table) or `profile` (per-row call counts); ROWS is
+# an optional comma-separated list of row ids. Needs Elixir (.tool-versions).
+[unix]
+bench-vs-elixir MODE="bench" ROUNDS="7" ROWS="":
+    @benchmarks/vs-elixir/run.sh {{MODE}} {{ROUNDS}} {{ROWS}}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════

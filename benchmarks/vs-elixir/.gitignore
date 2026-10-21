@@ -1,0 +1,4 @@
+beamtalk/_build/
+elixir/_build/
+elixir/deps/
+harness/_build/

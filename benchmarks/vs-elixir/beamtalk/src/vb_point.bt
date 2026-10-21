@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// A sealed Value: `p x` has exactly one possible implementation.
+sealed Value subclass: VbPoint
+  field: x :: Integer = 0
+  field: y :: Integer = 0
+
+  sum -> Integer => self.x + self.y

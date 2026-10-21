@@ -1682,3 +1682,14 @@ Apple Silicon, OTP 28, medians.
 - One intended behaviour change: with no export gate in front of the apply, a module exporting
   `'$handle_undefined_function'/2` now handles unknown FFI calls the way it would for a plain Erlang
   caller (the pre-check used to reject them).
+
+## Beamtalk vs Elixir: per-operation overhead on the same BEAM
+
+`benchmarks/vs-elixir/` runs about 40 paired operations (Value getters and
+updates, class-side calls, dynamic and inherited sends, blocks and collection
+iteration, actor call/cast, `on:do:`, `Result`, collections, arithmetic,
+`isKindOf:`) against the equivalent Elixir in one node, and reports
+reductions, heap words and ns per operation, plus what each Beamtalk row
+compiles to and the functions it calls. Run it with `just bench-vs-elixir`.
+Method, results (main at `dc216bf52`), the analysis and the effect of BT-4065
+and BT-4071 are in [`benchmarks/vs-elixir/README.md`](../../benchmarks/vs-elixir/README.md).
