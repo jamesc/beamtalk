@@ -47,11 +47,11 @@ Every write that can change a class's `module`, `superclass` or published
 method records — `beamtalk_class_metadata:insert/5` (class `init/1`),
 `merge_identity/5` (hot reload, redefinition), instance-side
 `put_method_records/3` (every `publish_reflection/1`: `init/1`, `put_method`,
-reload; BT-4071) and
-`delete/1` (removal, `terminate/2`), plus the (re)creation of the metadata
-table itself — calls `invalidate/0` *after* the write has landed. Invalidation is global, not per class: a derived fact
-about class C can depend on any of C's ancestors' rows, and class writes are
-rare (load / reload time), so a global flush is both correct and cheap.
+reload; BT-4071) and `delete/1` (removal, `terminate/2`), plus the
+(re)creation of the metadata table itself — calls `invalidate/0` *after* the
+write has landed. Invalidation is global, not per class: a derived fact about
+class C can depend on any of C's ancestors' rows, and class writes are rare
+(load / reload time), so a global flush is both correct and cheap.
 
 Correctness against concurrent readers comes from a generation counter, not
 from the flush. A reader takes the generation *before* it reads the

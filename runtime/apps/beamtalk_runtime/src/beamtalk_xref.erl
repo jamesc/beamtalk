@@ -1527,11 +1527,24 @@ gen_epoch() ->
     end.
 
 %% Bump `xref_gen_epoch`. Called by the owning gen_server *before* every write
-%% to `xref_class_gen` (see `read_stable/2`).
+%% to `xref_class_gen` (see `read_stable/2`). Creates the table if it is
+%% missing: a `beamtalk_xref` hot-upgraded in place from a version without it
+%% keeps its old tables (`code_change/3` runs no `init/1`), and the writer is
+%% this gen_server, which owns the tables.
 -spec bump_gen_epoch() -> ok.
 bump_gen_epoch() ->
+    case ets:whereis(?GEN_EPOCH_TABLE) of
+        undefined -> ?GEN_EPOCH_TABLE = new_gen_epoch_table();
+        _ -> ok
+    end,
     _ = ets:update_counter(?GEN_EPOCH_TABLE, epoch, 1, {epoch, 0}),
     ok.
+
+-spec new_gen_epoch_table() -> atom().
+new_gen_epoch_table() ->
+    Tab = ets:new(?GEN_EPOCH_TABLE, [set, protected, named_table, {read_concurrency, true}]),
+    true = ets:insert(Tab, {epoch, 0}),
+    Tab.
 
 -doc """
 Whether `Info`/site map's `gen` is the live generation for `Class` per the
@@ -1650,8 +1663,7 @@ init([]) ->
     %% rows outright rather than versioning them, so at most one row per
     %% {Class, Name} ever exists.
     ?STATE_VARS_TABLE = ets:new(?STATE_VARS_TABLE, SetOpts),
-    ?GEN_EPOCH_TABLE = ets:new(?GEN_EPOCH_TABLE, SetOpts),
-    true = ets:insert(?GEN_EPOCH_TABLE, {epoch, 0}),
+    ?GEN_EPOCH_TABLE = new_gen_epoch_table(),
 
     ?LOG_INFO("xref started", #{
         tables => [
