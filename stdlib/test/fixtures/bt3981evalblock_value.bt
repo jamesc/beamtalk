@@ -1,0 +1,1246 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3981: an evaluated block literal that binds a local, writes a field or
+// sends to `self`, in the host/position cells that answer the value.
+// A value-type method answers the value at every position.
+
+Value subclass: Bt3981EvalblockValue
+  field: hits = 0
+
+  ap: b => b value
+
+  peek: v => v
+
+  methodAssignedSimple =>
+    r := [
+      n := 3
+      n
+    ] value
+    r
+
+  methodAssignedLoop =>
+    r := [
+      n := 0
+      #(1, 2) do: [:y | n := n + y]
+      n
+    ] value
+    r
+
+  methodAssignedSeq =>
+    r := [
+      n := 1
+      n := n + 2
+      n
+    ] value
+    r
+
+  methodAssignedSend =>
+    r := [self peek: 3] value
+    r
+
+  methodLastSimple =>
+    [
+      n := 3
+      n
+    ] value
+
+  methodLastLoop =>
+    [
+      n := 0
+      #(1, 2) do: [:y | n := n + y]
+      n
+    ] value
+
+  methodLastSeq =>
+    [
+      n := 1
+      n := n + 2
+      n
+    ] value
+
+  methodLastSend => [self peek: 3] value
+
+  methodNestedSimple =>
+    [
+      [
+        n := 3
+        n
+      ] value
+    ] value
+
+  methodNestedLoop =>
+    [
+      [
+        n := 0
+        #(1, 2) do: [:y | n := n + y]
+        n
+      ] value
+    ] value
+
+  methodNestedSeq =>
+    [
+      [
+        n := 1
+        n := n + 2
+        n
+      ] value
+    ] value
+
+  methodNestedSend => [[self peek: 3] value] value
+
+  methodReturnSimple =>
+    ^[
+      n := 3
+      n
+    ] value
+
+  methodReturnLoop =>
+    ^[
+      n := 0
+      #(1, 2) do: [:y | n := n + y]
+      n
+    ] value
+
+  methodReturnSeq =>
+    ^[
+      n := 1
+      n := n + 2
+      n
+    ] value
+
+  methodReturnSend => ^[self peek: 3] value
+
+  methodArgumentSimple =>
+    #(3)
+      includes: [
+        n := 3
+        n
+      ] value
+
+  methodArgumentLoop =>
+    #(3)
+      includes: [
+        n := 0
+        #(1, 2) do: [:y | n := n + y]
+        n
+      ] value
+
+  methodArgumentSeq =>
+    #(3)
+      includes: [
+        n := 1
+        n := n + 2
+        n
+      ] value
+
+  methodArgumentSend => #(3) includes: [self peek: 3] value
+
+  armAssignedSimple =>
+    flag := true
+    flag
+      ifTrue: [
+        r := [
+          n := 3
+          n
+        ] value
+        r
+      ]
+      ifFalse: [0]
+
+  armAssignedLoop =>
+    flag := true
+    flag
+      ifTrue: [
+        r := [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+        r
+      ]
+      ifFalse: [0]
+
+  armAssignedSeq =>
+    flag := true
+    flag
+      ifTrue: [
+        r := [
+          n := 1
+          n := n + 2
+          n
+        ] value
+        r
+      ]
+      ifFalse: [0]
+
+  armAssignedSend =>
+    flag := true
+    flag
+      ifTrue: [
+        r := [self peek: 3] value
+        r
+      ]
+      ifFalse: [0]
+
+  armLastSimple =>
+    flag := true
+    flag
+      ifTrue: [
+        [
+          n := 3
+          n
+        ] value
+      ]
+      ifFalse: [0]
+
+  armLastLoop =>
+    flag := true
+    flag
+      ifTrue: [
+        [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ]
+      ifFalse: [0]
+
+  armLastSeq =>
+    flag := true
+    flag
+      ifTrue: [
+        [
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ]
+      ifFalse: [0]
+
+  armLastSend =>
+    flag := true
+    flag ifTrue: [[self peek: 3] value] ifFalse: [0]
+
+  armNestedSimple =>
+    flag := true
+    flag
+      ifTrue: [
+        [
+          [
+            n := 3
+            n
+          ] value
+        ] value
+      ]
+      ifFalse: [0]
+
+  armNestedLoop =>
+    flag := true
+    flag
+      ifTrue: [
+        [
+          [
+            n := 0
+            #(1, 2) do: [:y | n := n + y]
+            n
+          ] value
+        ] value
+      ]
+      ifFalse: [0]
+
+  armNestedSeq =>
+    flag := true
+    flag
+      ifTrue: [
+        [
+          [
+            n := 1
+            n := n + 2
+            n
+          ] value
+        ] value
+      ]
+      ifFalse: [0]
+
+  armNestedSend =>
+    flag := true
+    flag ifTrue: [[[self peek: 3] value] value] ifFalse: [0]
+
+  armReturnSimple =>
+    flag := true
+    flag
+      ifTrue: [
+        ^[
+          n := 3
+          n
+        ] value
+      ]
+      ifFalse: [0]
+
+  armReturnLoop =>
+    flag := true
+    flag
+      ifTrue: [
+        ^[
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ]
+      ifFalse: [0]
+
+  armReturnSeq =>
+    flag := true
+    flag
+      ifTrue: [
+        ^[
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ]
+      ifFalse: [0]
+
+  armReturnSend =>
+    flag := true
+    flag ifTrue: [^[self peek: 3] value] ifFalse: [0]
+
+  armArgumentSimple =>
+    flag := true
+    flag
+      ifTrue: [
+        #(3)
+          includes: [
+            n := 3
+            n
+          ] value
+      ]
+      ifFalse: [0]
+
+  armArgumentLoop =>
+    flag := true
+    flag
+      ifTrue: [
+        #(3)
+          includes: [
+            n := 0
+            #(1, 2) do: [:y | n := n + y]
+            n
+          ] value
+      ]
+      ifFalse: [0]
+
+  armArgumentSeq =>
+    flag := true
+    flag
+      ifTrue: [
+        #(3)
+          includes: [
+            n := 1
+            n := n + 2
+            n
+          ] value
+      ]
+      ifFalse: [0]
+
+  armArgumentSend =>
+    flag := true
+    flag ifTrue: [#(3) includes: [self peek: 3] value] ifFalse: [0]
+
+  collectAssignedSimple =>
+    #(1)
+      collect: [:z |
+        r := [
+          n := 3
+          n
+        ] value
+        r
+      ]
+
+  collectAssignedLoop =>
+    #(1)
+      collect: [:z |
+        r := [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+        r
+      ]
+
+  collectAssignedSeq =>
+    #(1)
+      collect: [:z |
+        r := [
+          n := 1
+          n := n + 2
+          n
+        ] value
+        r
+      ]
+
+  collectAssignedSend =>
+    #(1)
+      collect: [:z |
+        r := [self peek: 3] value
+        r
+      ]
+
+  collectLastSimple =>
+    #(1)
+      collect: [:z |
+        [
+          n := 3
+          n
+        ] value
+      ]
+
+  collectLastLoop =>
+    #(1)
+      collect: [:z |
+        [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ]
+
+  collectLastSeq =>
+    #(1)
+      collect: [:z |
+        [
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ]
+
+  collectLastSend => #(1) collect: [:z | [self peek: 3] value]
+
+  collectNestedSimple =>
+    #(1)
+      collect: [:z |
+        [
+          [
+            n := 3
+            n
+          ] value
+        ] value
+      ]
+
+  collectNestedLoop =>
+    #(1)
+      collect: [:z |
+        [
+          [
+            n := 0
+            #(1, 2) do: [:y | n := n + y]
+            n
+          ] value
+        ] value
+      ]
+
+  collectNestedSeq =>
+    #(1)
+      collect: [:z |
+        [
+          [
+            n := 1
+            n := n + 2
+            n
+          ] value
+        ] value
+      ]
+
+  collectNestedSend => #(1) collect: [:z | [[self peek: 3] value] value]
+
+  collectReturnSimple =>
+    #(1)
+      collect: [:z |
+        ^[
+          n := 3
+          n
+        ] value
+      ]
+
+  collectReturnLoop =>
+    #(1)
+      collect: [:z |
+        ^[
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ]
+
+  collectReturnSeq =>
+    #(1)
+      collect: [:z |
+        ^[
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ]
+
+  collectReturnSend => #(1) collect: [:z | ^[self peek: 3] value]
+
+  collectArgumentSimple =>
+    #(1)
+      collect: [:z |
+        #(3)
+          includes: [
+            n := 3
+            n
+          ] value
+      ]
+
+  collectArgumentLoop =>
+    #(1)
+      collect: [:z |
+        #(3)
+          includes: [
+            n := 0
+            #(1, 2) do: [:y | n := n + y]
+            n
+          ] value
+      ]
+
+  collectArgumentSeq =>
+    #(1)
+      collect: [:z |
+        #(3)
+          includes: [
+            n := 1
+            n := n + 2
+            n
+          ] value
+      ]
+
+  collectArgumentSend =>
+    #(1) collect: [:z | #(3) includes: [self peek: 3] value]
+
+  protectedAssignedSimple =>
+    [
+      r := [
+        n := 3
+        n
+      ] value
+      r
+    ] on: Error do: [:e | 0]
+
+  protectedAssignedLoop =>
+    [
+      r := [
+        n := 0
+        #(1, 2) do: [:y | n := n + y]
+        n
+      ] value
+      r
+    ] on: Error do: [:e | 0]
+
+  protectedAssignedSeq =>
+    [
+      r := [
+        n := 1
+        n := n + 2
+        n
+      ] value
+      r
+    ] on: Error do: [:e | 0]
+
+  protectedAssignedSend =>
+    [
+      r := [self peek: 3] value
+      r
+    ] on: Error do: [:e | 0]
+
+  protectedLastSimple =>
+    [
+      [
+        n := 3
+        n
+      ] value
+    ] on: Error do: [:e | 0]
+
+  protectedLastLoop =>
+    [
+      [
+        n := 0
+        #(1, 2) do: [:y | n := n + y]
+        n
+      ] value
+    ] on: Error do: [:e | 0]
+
+  protectedLastSeq =>
+    [
+      [
+        n := 1
+        n := n + 2
+        n
+      ] value
+    ] on: Error do: [:e | 0]
+
+  protectedLastSend => [[self peek: 3] value] on: Error do: [:e | 0]
+
+  protectedNestedSimple =>
+    [
+      [
+        [
+          n := 3
+          n
+        ] value
+      ] value
+    ] on: Error do: [:e | 0]
+
+  protectedNestedLoop =>
+    [
+      [
+        [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ] value
+    ] on: Error do: [:e | 0]
+
+  protectedNestedSeq =>
+    [
+      [
+        [
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ] value
+    ] on: Error do: [:e | 0]
+
+  protectedNestedSend => [[[self peek: 3] value] value] on: Error do: [:e | 0]
+
+  protectedReturnSimple =>
+    [
+      ^[
+        n := 3
+        n
+      ] value
+    ] on: Error do: [:e | 0]
+
+  protectedReturnLoop =>
+    [
+      ^[
+        n := 0
+        #(1, 2) do: [:y | n := n + y]
+        n
+      ] value
+    ] on: Error do: [:e | 0]
+
+  protectedReturnSeq =>
+    [
+      ^[
+        n := 1
+        n := n + 2
+        n
+      ] value
+    ] on: Error do: [:e | 0]
+
+  protectedReturnSend => [^[self peek: 3] value] on: Error do: [:e | 0]
+
+  protectedArgumentSimple =>
+    [
+      #(3)
+        includes: [
+          n := 3
+          n
+        ] value
+    ] on: Error do: [:e | 0]
+
+  protectedArgumentLoop =>
+    [
+      #(3)
+        includes: [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+    ] on: Error do: [:e | 0]
+
+  protectedArgumentSeq =>
+    [
+      #(3)
+        includes: [
+          n := 1
+          n := n + 2
+          n
+        ] value
+    ] on: Error do: [:e | 0]
+
+  protectedArgumentSend =>
+    [#(3) includes: [self peek: 3] value] on: Error do: [:e | 0]
+
+  storedAssignedSimple =>
+    b := [:z |
+      r := [
+        n := 3
+        n
+      ] value
+      r
+    ]
+    b value: 1
+
+  storedAssignedLoop =>
+    b := [:z |
+      r := [
+        n := 0
+        #(1, 2) do: [:y | n := n + y]
+        n
+      ] value
+      r
+    ]
+    b value: 1
+
+  storedAssignedSeq =>
+    b := [:z |
+      r := [
+        n := 1
+        n := n + 2
+        n
+      ] value
+      r
+    ]
+    b value: 1
+
+  storedAssignedSend =>
+    b := [:z |
+      r := [self peek: 3] value
+      r
+    ]
+    b value: 1
+
+  storedLastSimple =>
+    b := [:z |
+      [
+        n := 3
+        n
+      ] value
+    ]
+    b value: 1
+
+  storedLastLoop =>
+    b := [:z |
+      [
+        n := 0
+        #(1, 2) do: [:y | n := n + y]
+        n
+      ] value
+    ]
+    b value: 1
+
+  storedLastSeq =>
+    b := [:z |
+      [
+        n := 1
+        n := n + 2
+        n
+      ] value
+    ]
+    b value: 1
+
+  storedLastSend =>
+    b := [:z | [self peek: 3] value]
+    b value: 1
+
+  storedNestedSimple =>
+    b := [:z |
+      [
+        [
+          n := 3
+          n
+        ] value
+      ] value
+    ]
+    b value: 1
+
+  storedNestedLoop =>
+    b := [:z |
+      [
+        [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ] value
+    ]
+    b value: 1
+
+  storedNestedSeq =>
+    b := [:z |
+      [
+        [
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ] value
+    ]
+    b value: 1
+
+  storedNestedSend =>
+    b := [:z | [[self peek: 3] value] value]
+    b value: 1
+
+  storedReturnSimple =>
+    b := [:z |
+      ^[
+        n := 3
+        n
+      ] value
+    ]
+    b value: 1
+
+  storedReturnLoop =>
+    b := [:z |
+      ^[
+        n := 0
+        #(1, 2) do: [:y | n := n + y]
+        n
+      ] value
+    ]
+    b value: 1
+
+  storedReturnSeq =>
+    b := [:z |
+      ^[
+        n := 1
+        n := n + 2
+        n
+      ] value
+    ]
+    b value: 1
+
+  storedReturnSend =>
+    b := [:z | ^[self peek: 3] value]
+    b value: 1
+
+  storedArgumentSimple =>
+    b := [:z |
+      #(3)
+        includes: [
+          n := 3
+          n
+        ] value
+    ]
+    b value: 1
+
+  storedArgumentLoop =>
+    b := [:z |
+      #(3)
+        includes: [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+    ]
+    b value: 1
+
+  storedArgumentSeq =>
+    b := [:z |
+      #(3)
+        includes: [
+          n := 1
+          n := n + 2
+          n
+        ] value
+    ]
+    b value: 1
+
+  storedArgumentSend =>
+    b := [:z | #(3) includes: [self peek: 3] value]
+    b value: 1
+
+  ffiAssignedSimple =>
+    (Erlang lists)
+      map: [:z |
+        r := [
+          n := 3
+          n
+        ] value
+        r
+      ]
+      with: #(1)
+
+  ffiAssignedLoop =>
+    (Erlang lists)
+      map: [:z |
+        r := [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+        r
+      ]
+      with: #(1)
+
+  ffiAssignedSeq =>
+    (Erlang lists)
+      map: [:z |
+        r := [
+          n := 1
+          n := n + 2
+          n
+        ] value
+        r
+      ]
+      with: #(1)
+
+  ffiAssignedSend =>
+    (Erlang lists)
+      map: [:z |
+        r := [self peek: 3] value
+        r
+      ]
+      with: #(1)
+
+  ffiLastSimple =>
+    (Erlang lists)
+      map: [:z |
+        [
+          n := 3
+          n
+        ] value
+      ]
+      with: #(1)
+
+  ffiLastLoop =>
+    (Erlang lists)
+      map: [:z |
+        [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ]
+      with: #(1)
+
+  ffiLastSeq =>
+    (Erlang lists)
+      map: [:z |
+        [
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ]
+      with: #(1)
+
+  ffiLastSend => (Erlang lists) map: [:z | [self peek: 3] value] with: #(1)
+
+  ffiNestedSimple =>
+    (Erlang lists)
+      map: [:z |
+        [
+          [
+            n := 3
+            n
+          ] value
+        ] value
+      ]
+      with: #(1)
+
+  ffiNestedLoop =>
+    (Erlang lists)
+      map: [:z |
+        [
+          [
+            n := 0
+            #(1, 2) do: [:y | n := n + y]
+            n
+          ] value
+        ] value
+      ]
+      with: #(1)
+
+  ffiNestedSeq =>
+    (Erlang lists)
+      map: [:z |
+        [
+          [
+            n := 1
+            n := n + 2
+            n
+          ] value
+        ] value
+      ]
+      with: #(1)
+
+  ffiNestedSend =>
+    (Erlang lists) map: [:z | [[self peek: 3] value] value] with: #(1)
+
+  ffiReturnSimple =>
+    (Erlang lists)
+      map: [:z |
+        ^[
+          n := 3
+          n
+        ] value
+      ]
+      with: #(1)
+
+  ffiReturnLoop =>
+    (Erlang lists)
+      map: [:z |
+        ^[
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ]
+      with: #(1)
+
+  ffiReturnSeq =>
+    (Erlang lists)
+      map: [:z |
+        ^[
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ]
+      with: #(1)
+
+  ffiReturnSend => (Erlang lists) map: [:z | ^[self peek: 3] value] with: #(1)
+
+  ffiArgumentSimple =>
+    (Erlang lists)
+      map: [:z |
+        #(3)
+          includes: [
+            n := 3
+            n
+          ] value
+      ]
+      with: #(1)
+
+  ffiArgumentLoop =>
+    (Erlang lists)
+      map: [:z |
+        #(3)
+          includes: [
+            n := 0
+            #(1, 2) do: [:y | n := n + y]
+            n
+          ] value
+      ]
+      with: #(1)
+
+  ffiArgumentSeq =>
+    (Erlang lists)
+      map: [:z |
+        #(3)
+          includes: [
+            n := 1
+            n := n + 2
+            n
+          ] value
+      ]
+      with: #(1)
+
+  ffiArgumentSend =>
+    (Erlang lists) map: [:z | #(3) includes: [self peek: 3] value] with: #(1)
+
+  userAssignedSimple =>
+    self
+      ap: [
+        r := [
+          n := 3
+          n
+        ] value
+        r
+      ]
+
+  userAssignedLoop =>
+    self
+      ap: [
+        r := [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+        r
+      ]
+
+  userAssignedSeq =>
+    self
+      ap: [
+        r := [
+          n := 1
+          n := n + 2
+          n
+        ] value
+        r
+      ]
+
+  userAssignedSend =>
+    self
+      ap: [
+        r := [self peek: 3] value
+        r
+      ]
+
+  userLastSimple =>
+    self
+      ap: [
+        [
+          n := 3
+          n
+        ] value
+      ]
+
+  userLastLoop =>
+    self
+      ap: [
+        [
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ]
+
+  userLastSeq =>
+    self
+      ap: [
+        [
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ]
+
+  userLastSend => self ap: [[self peek: 3] value]
+
+  userNestedSimple =>
+    self
+      ap: [
+        [
+          [
+            n := 3
+            n
+          ] value
+        ] value
+      ]
+
+  userNestedLoop =>
+    self
+      ap: [
+        [
+          [
+            n := 0
+            #(1, 2) do: [:y | n := n + y]
+            n
+          ] value
+        ] value
+      ]
+
+  userNestedSeq =>
+    self
+      ap: [
+        [
+          [
+            n := 1
+            n := n + 2
+            n
+          ] value
+        ] value
+      ]
+
+  userNestedSend => self ap: [[[self peek: 3] value] value]
+
+  userReturnSimple =>
+    self
+      ap: [
+        ^[
+          n := 3
+          n
+        ] value
+      ]
+
+  userReturnLoop =>
+    self
+      ap: [
+        ^[
+          n := 0
+          #(1, 2) do: [:y | n := n + y]
+          n
+        ] value
+      ]
+
+  userReturnSeq =>
+    self
+      ap: [
+        ^[
+          n := 1
+          n := n + 2
+          n
+        ] value
+      ]
+
+  userReturnSend => self ap: [^[self peek: 3] value]
+
+  userArgumentSimple =>
+    self
+      ap: [
+        #(3)
+          includes: [
+            n := 3
+            n
+          ] value
+      ]
+
+  userArgumentLoop =>
+    self
+      ap: [
+        #(3)
+          includes: [
+            n := 0
+            #(1, 2) do: [:y | n := n + y]
+            n
+          ] value
+      ]
+
+  userArgumentSeq =>
+    self
+      ap: [
+        #(3)
+          includes: [
+            n := 1
+            n := n + 2
+            n
+          ] value
+      ]
+
+  userArgumentSend => self ap: [#(3) includes: [self peek: 3] value]
+
+  matchArmSimple =>
+    3 match: [
+      3 -> [
+        n := 3
+        n
+      ] value;
+      _ -> 0
+    ]
+
+  matchArmAssigned =>
+    r := 3 match: [
+      3 -> [
+        n := 3
+        n
+      ] value;
+      _ -> 0
+    ]
+    r
+
+  matchArmSend =>
+    3 match: [
+      3 -> [self peek: 3] value;
+      _ -> 0
+    ]

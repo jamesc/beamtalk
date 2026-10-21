@@ -1114,6 +1114,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // Reject sends to a local bound only to `self` in actor methods (BT-3998)
+    validators::check_actor_self_alias_send(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // Warn on redundant assignment (x := x)
     validators::check_redundant_assignment(module, &mut result.diagnostics);
     // Warn on literal boolean conditions (always true / always false)
@@ -1183,6 +1189,16 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // swallow a raised error rather than crashing, so a read that raises
     // `UninitializedStateError` there fails silently.
     validators::check_unguarded_late_reads_in_lifecycle_hooks(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+
+    // Warn on a `handleInfo:` whose body is a `match:` with no catch-all arm
+    // (ADR 0134, BT-3959): an unmatched stray message raises
+    // `#pattern_mismatch` and, since errors in `handleInfo:` crash the
+    // server, takes it down.
+    validators::check_handle_info_catch_all(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,

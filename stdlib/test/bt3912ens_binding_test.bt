@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947): see stdlib/test/fixtures/bt3912ens_binding_{value,actor}.bt.
+
+TestCase subclass: Bt3912EnsBindingTest
+
+  testValueDestructured =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsBindingValue new) destructured: sink) equals: 5
+    self assert: sink items equals: #(5)
+
+  testActorDestructured =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsBindingActor spawn) destructured: sink) equals: 5
+    self assert: sink items equals: #(5)
+
+  testValueBlockParam =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsBindingValue new) blockParam: sink) equals: 5
+    self assert: sink items equals: #(5)
+
+  testActorBlockParam =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsBindingActor spawn) blockParam: sink) equals: 5
+    self assert: sink items equals: #(5)
+
+  testValueConditionalCleanup =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsBindingValue new) conditionalCleanup: sink) equals: 5
+    self assert: sink items equals: #(5)
+
+  testActorConditionalCleanup =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsBindingActor spawn) conditionalCleanup: sink) equals: 5
+    self assert: sink items equals: #(5)
+
+  testValueOwnBinding =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsBindingValue new) ownBinding: sink) equals: 5
+    self assert: sink items equals: #(0)
+
+  testActorOwnBinding =>
+    sink := Bt3912EnsureSink spawn
+    self assert: ((Bt3912EnsBindingActor spawn) ownBinding: sink) equals: 5
+    self assert: sink items equals: #(0)

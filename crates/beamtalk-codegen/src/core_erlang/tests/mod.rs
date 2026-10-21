@@ -226,6 +226,7 @@ mod local_producer_agreement_exception;
 mod local_producer_agreement_lookup;
 mod local_producer_agreement_repl;
 mod local_rebind_verifier_corpus;
+mod loop_body_conditional_receiver_corpus;
 mod loop_body_self_send_operand_corpus;
 mod nlr;
 mod primitives;

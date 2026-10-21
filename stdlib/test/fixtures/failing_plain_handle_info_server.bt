@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3958 fixture: a Server whose handleInfo: raises and which does NOT
+// override `terminate:`, so it does not trap exits (BT-3596) — the crash
+// path without a terminate: hook (ADR 0134). See
+// stdlib/test/server_handle_info_test.bt.
+
+Server subclass: FailingPlainHandleInfoServer
+
+  handleInfo: _msg => Error signal: "deliberate plain handleInfo: error"

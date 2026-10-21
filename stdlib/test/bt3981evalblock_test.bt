@@ -1,0 +1,1143 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3981: runs the cells of fixtures/bt3981evalblock_{actor,value,class}.bt:
+// an evaluated block that binds a local answers the value wherever the compiler
+// accepts it. The actor cells that answered the raw {Value, State} tuple are
+// compile errors (PIN-BUG BT-3947 for the correct answer).
+
+TestCase subclass: Bt3981EvalblockTest
+
+  testActorMethodAssignedSimple =>
+    self assert: (Bt3981EvalblockActor spawn methodAssignedSimple) equals: 3
+
+  testActorMethodAssignedLoop =>
+    self assert: (Bt3981EvalblockActor spawn methodAssignedLoop) equals: 3
+
+  testActorMethodAssignedSeq =>
+    self assert: (Bt3981EvalblockActor spawn methodAssignedSeq) equals: 3
+
+  testActorMethodAssignedSend =>
+    self assert: (Bt3981EvalblockActor spawn methodAssignedSend) equals: 3
+
+  testActorMethodLastSimple =>
+    self assert: (Bt3981EvalblockActor spawn methodLastSimple) equals: 3
+
+  testActorMethodLastLoop =>
+    self assert: (Bt3981EvalblockActor spawn methodLastLoop) equals: 3
+
+  testActorMethodLastSeq =>
+    self assert: (Bt3981EvalblockActor spawn methodLastSeq) equals: 3
+
+  testActorMethodLastSend =>
+    self assert: (Bt3981EvalblockActor spawn methodLastSend) equals: 3
+
+  testActorMethodNestedSimple =>
+    self assert: (Bt3981EvalblockActor spawn methodNestedSimple) equals: 3
+
+  testActorMethodNestedLoop =>
+    self assert: (Bt3981EvalblockActor spawn methodNestedLoop) equals: 3
+
+  testActorMethodNestedSeq =>
+    self assert: (Bt3981EvalblockActor spawn methodNestedSeq) equals: 3
+
+  testActorMethodNestedSend =>
+    self assert: (Bt3981EvalblockActor spawn methodNestedSend) equals: 3
+
+  testActorMethodReturnSimple =>
+    self assert: (Bt3981EvalblockActor spawn methodReturnSimple) equals: 3
+
+  testActorMethodReturnLoop =>
+    self assert: (Bt3981EvalblockActor spawn methodReturnLoop) equals: 3
+
+  testActorMethodReturnSeq =>
+    self assert: (Bt3981EvalblockActor spawn methodReturnSeq) equals: 3
+
+  testActorMethodReturnSend =>
+    self assert: (Bt3981EvalblockActor spawn methodReturnSend) equals: 3
+
+  testActorArmAssignedSimple =>
+    self assert: (Bt3981EvalblockActor spawn armAssignedSimple) equals: 3
+
+  testActorArmAssignedLoop =>
+    self assert: (Bt3981EvalblockActor spawn armAssignedLoop) equals: 3
+
+  testActorArmAssignedSeq =>
+    self assert: (Bt3981EvalblockActor spawn armAssignedSeq) equals: 3
+
+  testActorArmAssignedSend =>
+    self assert: (Bt3981EvalblockActor spawn armAssignedSend) equals: 3
+
+  testActorArmLastSimple =>
+    self assert: (Bt3981EvalblockActor spawn armLastSimple) equals: 3
+
+  testActorArmLastLoop =>
+    self assert: (Bt3981EvalblockActor spawn armLastLoop) equals: 3
+
+  testActorArmLastSeq =>
+    self assert: (Bt3981EvalblockActor spawn armLastSeq) equals: 3
+
+  testActorArmLastSend =>
+    self assert: (Bt3981EvalblockActor spawn armLastSend) equals: 3
+
+  testActorArmNestedSimple =>
+    self assert: (Bt3981EvalblockActor spawn armNestedSimple) equals: 3
+
+  testActorArmNestedLoop =>
+    self assert: (Bt3981EvalblockActor spawn armNestedLoop) equals: 3
+
+  testActorArmNestedSeq =>
+    self assert: (Bt3981EvalblockActor spawn armNestedSeq) equals: 3
+
+  testActorArmNestedSend =>
+    self assert: (Bt3981EvalblockActor spawn armNestedSend) equals: 3
+
+  testActorCollectAssignedSimple =>
+    self assert: (Bt3981EvalblockActor spawn collectAssignedSimple) equals: #(3)
+
+  testActorCollectAssignedLoop =>
+    self assert: (Bt3981EvalblockActor spawn collectAssignedLoop) equals: #(3)
+
+  testActorCollectAssignedSeq =>
+    self assert: (Bt3981EvalblockActor spawn collectAssignedSeq) equals: #(3)
+
+  testActorCollectAssignedSend =>
+    self assert: (Bt3981EvalblockActor spawn collectAssignedSend) equals: #(3)
+
+  testActorCollectLastSimple =>
+    self assert: (Bt3981EvalblockActor spawn collectLastSimple) equals: #(3)
+
+  testActorCollectLastLoop =>
+    self assert: (Bt3981EvalblockActor spawn collectLastLoop) equals: #(3)
+
+  testActorCollectLastSeq =>
+    self assert: (Bt3981EvalblockActor spawn collectLastSeq) equals: #(3)
+
+  testActorCollectLastSend =>
+    self assert: (Bt3981EvalblockActor spawn collectLastSend) equals: #(3)
+
+  testActorCollectNestedSimple =>
+    self assert: (Bt3981EvalblockActor spawn collectNestedSimple) equals: #(3)
+
+  testActorCollectNestedLoop =>
+    self assert: (Bt3981EvalblockActor spawn collectNestedLoop) equals: #(3)
+
+  testActorCollectNestedSeq =>
+    self assert: (Bt3981EvalblockActor spawn collectNestedSeq) equals: #(3)
+
+  testActorCollectNestedSend =>
+    self assert: (Bt3981EvalblockActor spawn collectNestedSend) equals: #(3)
+
+  testActorProtectedAssignedSimple =>
+    self assert: (Bt3981EvalblockActor spawn protectedAssignedSimple) equals: 3
+
+  testActorProtectedAssignedLoop =>
+    self assert: (Bt3981EvalblockActor spawn protectedAssignedLoop) equals: 3
+
+  testActorProtectedAssignedSeq =>
+    self assert: (Bt3981EvalblockActor spawn protectedAssignedSeq) equals: 3
+
+  testActorProtectedAssignedSend =>
+    self assert: (Bt3981EvalblockActor spawn protectedAssignedSend) equals: 3
+
+  testActorMatchArmSimple =>
+    self assert: (Bt3981EvalblockActor spawn matchArmSimple) equals: 3
+
+  testActorMatchArmAssigned =>
+    self assert: (Bt3981EvalblockActor spawn matchArmAssigned) equals: 3
+
+  testActorMatchArmSend =>
+    self assert: (Bt3981EvalblockActor spawn matchArmSend) equals: 3
+
+  testValueMethodAssignedSimple =>
+    self assert: (Bt3981EvalblockValue new methodAssignedSimple) equals: 3
+
+  testValueMethodAssignedLoop =>
+    self assert: (Bt3981EvalblockValue new methodAssignedLoop) equals: 3
+
+  testValueMethodAssignedSeq =>
+    self assert: (Bt3981EvalblockValue new methodAssignedSeq) equals: 3
+
+  testValueMethodAssignedSend =>
+    self assert: (Bt3981EvalblockValue new methodAssignedSend) equals: 3
+
+  testValueMethodLastSimple =>
+    self assert: (Bt3981EvalblockValue new methodLastSimple) equals: 3
+
+  testValueMethodLastLoop =>
+    self assert: (Bt3981EvalblockValue new methodLastLoop) equals: 3
+
+  testValueMethodLastSeq =>
+    self assert: (Bt3981EvalblockValue new methodLastSeq) equals: 3
+
+  testValueMethodLastSend =>
+    self assert: (Bt3981EvalblockValue new methodLastSend) equals: 3
+
+  testValueMethodNestedSimple =>
+    self assert: (Bt3981EvalblockValue new methodNestedSimple) equals: 3
+
+  testValueMethodNestedLoop =>
+    self assert: (Bt3981EvalblockValue new methodNestedLoop) equals: 3
+
+  testValueMethodNestedSeq =>
+    self assert: (Bt3981EvalblockValue new methodNestedSeq) equals: 3
+
+  testValueMethodNestedSend =>
+    self assert: (Bt3981EvalblockValue new methodNestedSend) equals: 3
+
+  testValueMethodReturnSimple =>
+    self assert: (Bt3981EvalblockValue new methodReturnSimple) equals: 3
+
+  testValueMethodReturnLoop =>
+    self assert: (Bt3981EvalblockValue new methodReturnLoop) equals: 3
+
+  testValueMethodReturnSeq =>
+    self assert: (Bt3981EvalblockValue new methodReturnSeq) equals: 3
+
+  testValueMethodReturnSend =>
+    self assert: (Bt3981EvalblockValue new methodReturnSend) equals: 3
+
+  testValueMethodArgumentSimple =>
+    self assert: (Bt3981EvalblockValue new methodArgumentSimple) equals: true
+
+  testValueMethodArgumentLoop =>
+    self assert: (Bt3981EvalblockValue new methodArgumentLoop) equals: true
+
+  testValueMethodArgumentSeq =>
+    self assert: (Bt3981EvalblockValue new methodArgumentSeq) equals: true
+
+  testValueMethodArgumentSend =>
+    self assert: (Bt3981EvalblockValue new methodArgumentSend) equals: true
+
+  testValueArmAssignedSimple =>
+    self assert: (Bt3981EvalblockValue new armAssignedSimple) equals: 3
+
+  testValueArmAssignedLoop =>
+    self assert: (Bt3981EvalblockValue new armAssignedLoop) equals: 3
+
+  testValueArmAssignedSeq =>
+    self assert: (Bt3981EvalblockValue new armAssignedSeq) equals: 3
+
+  testValueArmAssignedSend =>
+    self assert: (Bt3981EvalblockValue new armAssignedSend) equals: 3
+
+  testValueArmLastSimple =>
+    self assert: (Bt3981EvalblockValue new armLastSimple) equals: 3
+
+  testValueArmLastLoop =>
+    self assert: (Bt3981EvalblockValue new armLastLoop) equals: 3
+
+  testValueArmLastSeq =>
+    self assert: (Bt3981EvalblockValue new armLastSeq) equals: 3
+
+  testValueArmLastSend =>
+    self assert: (Bt3981EvalblockValue new armLastSend) equals: 3
+
+  testValueArmNestedSimple =>
+    self assert: (Bt3981EvalblockValue new armNestedSimple) equals: 3
+
+  testValueArmNestedLoop =>
+    self assert: (Bt3981EvalblockValue new armNestedLoop) equals: 3
+
+  testValueArmNestedSeq =>
+    self assert: (Bt3981EvalblockValue new armNestedSeq) equals: 3
+
+  testValueArmNestedSend =>
+    self assert: (Bt3981EvalblockValue new armNestedSend) equals: 3
+
+  testValueArmReturnSimple =>
+    self assert: (Bt3981EvalblockValue new armReturnSimple) equals: 3
+
+  testValueArmReturnLoop =>
+    self assert: (Bt3981EvalblockValue new armReturnLoop) equals: 3
+
+  testValueArmReturnSeq =>
+    self assert: (Bt3981EvalblockValue new armReturnSeq) equals: 3
+
+  testValueArmReturnSend =>
+    self assert: (Bt3981EvalblockValue new armReturnSend) equals: 3
+
+  testValueArmArgumentSimple =>
+    self assert: (Bt3981EvalblockValue new armArgumentSimple) equals: true
+
+  testValueArmArgumentLoop =>
+    self assert: (Bt3981EvalblockValue new armArgumentLoop) equals: true
+
+  testValueArmArgumentSeq =>
+    self assert: (Bt3981EvalblockValue new armArgumentSeq) equals: true
+
+  testValueArmArgumentSend =>
+    self assert: (Bt3981EvalblockValue new armArgumentSend) equals: true
+
+  testValueCollectAssignedSimple =>
+    self assert: (Bt3981EvalblockValue new collectAssignedSimple) equals: #(3)
+
+  testValueCollectAssignedLoop =>
+    self assert: (Bt3981EvalblockValue new collectAssignedLoop) equals: #(3)
+
+  testValueCollectAssignedSeq =>
+    self assert: (Bt3981EvalblockValue new collectAssignedSeq) equals: #(3)
+
+  testValueCollectAssignedSend =>
+    self assert: (Bt3981EvalblockValue new collectAssignedSend) equals: #(3)
+
+  testValueCollectLastSimple =>
+    self assert: (Bt3981EvalblockValue new collectLastSimple) equals: #(3)
+
+  testValueCollectLastLoop =>
+    self assert: (Bt3981EvalblockValue new collectLastLoop) equals: #(3)
+
+  testValueCollectLastSeq =>
+    self assert: (Bt3981EvalblockValue new collectLastSeq) equals: #(3)
+
+  testValueCollectLastSend =>
+    self assert: (Bt3981EvalblockValue new collectLastSend) equals: #(3)
+
+  testValueCollectNestedSimple =>
+    self assert: (Bt3981EvalblockValue new collectNestedSimple) equals: #(3)
+
+  testValueCollectNestedLoop =>
+    self assert: (Bt3981EvalblockValue new collectNestedLoop) equals: #(3)
+
+  testValueCollectNestedSeq =>
+    self assert: (Bt3981EvalblockValue new collectNestedSeq) equals: #(3)
+
+  testValueCollectNestedSend =>
+    self assert: (Bt3981EvalblockValue new collectNestedSend) equals: #(3)
+
+  testValueCollectReturnSimple =>
+    self assert: (Bt3981EvalblockValue new collectReturnSimple) equals: 3
+
+  testValueCollectReturnLoop =>
+    self assert: (Bt3981EvalblockValue new collectReturnLoop) equals: 3
+
+  testValueCollectReturnSeq =>
+    self assert: (Bt3981EvalblockValue new collectReturnSeq) equals: 3
+
+  testValueCollectReturnSend =>
+    self assert: (Bt3981EvalblockValue new collectReturnSend) equals: 3
+
+  testValueCollectArgumentSimple =>
+    self assert: (Bt3981EvalblockValue new collectArgumentSimple) equals: #(true)
+
+  testValueCollectArgumentLoop =>
+    self assert: (Bt3981EvalblockValue new collectArgumentLoop) equals: #(true)
+
+  testValueCollectArgumentSeq =>
+    self assert: (Bt3981EvalblockValue new collectArgumentSeq) equals: #(true)
+
+  testValueCollectArgumentSend =>
+    self assert: (Bt3981EvalblockValue new collectArgumentSend) equals: #(true)
+
+  testValueProtectedAssignedSimple =>
+    self assert: (Bt3981EvalblockValue new protectedAssignedSimple) equals: 3
+
+  testValueProtectedAssignedLoop =>
+    self assert: (Bt3981EvalblockValue new protectedAssignedLoop) equals: 3
+
+  testValueProtectedAssignedSeq =>
+    self assert: (Bt3981EvalblockValue new protectedAssignedSeq) equals: 3
+
+  testValueProtectedAssignedSend =>
+    self assert: (Bt3981EvalblockValue new protectedAssignedSend) equals: 3
+
+  testValueProtectedLastSimple =>
+    self assert: (Bt3981EvalblockValue new protectedLastSimple) equals: 3
+
+  testValueProtectedLastLoop =>
+    self assert: (Bt3981EvalblockValue new protectedLastLoop) equals: 3
+
+  testValueProtectedLastSeq =>
+    self assert: (Bt3981EvalblockValue new protectedLastSeq) equals: 3
+
+  testValueProtectedLastSend =>
+    self assert: (Bt3981EvalblockValue new protectedLastSend) equals: 3
+
+  testValueProtectedNestedSimple =>
+    self assert: (Bt3981EvalblockValue new protectedNestedSimple) equals: 3
+
+  testValueProtectedNestedLoop =>
+    self assert: (Bt3981EvalblockValue new protectedNestedLoop) equals: 3
+
+  testValueProtectedNestedSeq =>
+    self assert: (Bt3981EvalblockValue new protectedNestedSeq) equals: 3
+
+  testValueProtectedNestedSend =>
+    self assert: (Bt3981EvalblockValue new protectedNestedSend) equals: 3
+
+  testValueProtectedReturnSimple =>
+    self assert: (Bt3981EvalblockValue new protectedReturnSimple) equals: 3
+
+  testValueProtectedReturnLoop =>
+    self assert: (Bt3981EvalblockValue new protectedReturnLoop) equals: 3
+
+  testValueProtectedReturnSeq =>
+    self assert: (Bt3981EvalblockValue new protectedReturnSeq) equals: 3
+
+  testValueProtectedReturnSend =>
+    self assert: (Bt3981EvalblockValue new protectedReturnSend) equals: 3
+
+  testValueProtectedArgumentSimple =>
+    self assert: (Bt3981EvalblockValue new protectedArgumentSimple) equals: true
+
+  testValueProtectedArgumentLoop =>
+    self assert: (Bt3981EvalblockValue new protectedArgumentLoop) equals: true
+
+  testValueProtectedArgumentSeq =>
+    self assert: (Bt3981EvalblockValue new protectedArgumentSeq) equals: true
+
+  testValueProtectedArgumentSend =>
+    self assert: (Bt3981EvalblockValue new protectedArgumentSend) equals: true
+
+  testValueStoredAssignedSimple =>
+    self assert: (Bt3981EvalblockValue new storedAssignedSimple) equals: 3
+
+  testValueStoredAssignedLoop =>
+    self assert: (Bt3981EvalblockValue new storedAssignedLoop) equals: 3
+
+  testValueStoredAssignedSeq =>
+    self assert: (Bt3981EvalblockValue new storedAssignedSeq) equals: 3
+
+  testValueStoredAssignedSend =>
+    self assert: (Bt3981EvalblockValue new storedAssignedSend) equals: 3
+
+  testValueStoredLastSimple =>
+    self assert: (Bt3981EvalblockValue new storedLastSimple) equals: 3
+
+  testValueStoredLastLoop =>
+    self assert: (Bt3981EvalblockValue new storedLastLoop) equals: 3
+
+  testValueStoredLastSeq =>
+    self assert: (Bt3981EvalblockValue new storedLastSeq) equals: 3
+
+  testValueStoredLastSend =>
+    self assert: (Bt3981EvalblockValue new storedLastSend) equals: 3
+
+  testValueStoredNestedSimple =>
+    self assert: (Bt3981EvalblockValue new storedNestedSimple) equals: 3
+
+  testValueStoredNestedLoop =>
+    self assert: (Bt3981EvalblockValue new storedNestedLoop) equals: 3
+
+  testValueStoredNestedSeq =>
+    self assert: (Bt3981EvalblockValue new storedNestedSeq) equals: 3
+
+  testValueStoredNestedSend =>
+    self assert: (Bt3981EvalblockValue new storedNestedSend) equals: 3
+
+  testValueStoredReturnSimple =>
+    self assert: (Bt3981EvalblockValue new storedReturnSimple) equals: 3
+
+  testValueStoredReturnLoop =>
+    self assert: (Bt3981EvalblockValue new storedReturnLoop) equals: 3
+
+  testValueStoredReturnSeq =>
+    self assert: (Bt3981EvalblockValue new storedReturnSeq) equals: 3
+
+  testValueStoredReturnSend =>
+    self assert: (Bt3981EvalblockValue new storedReturnSend) equals: 3
+
+  testValueStoredArgumentSimple =>
+    self assert: (Bt3981EvalblockValue new storedArgumentSimple) equals: true
+
+  testValueStoredArgumentLoop =>
+    self assert: (Bt3981EvalblockValue new storedArgumentLoop) equals: true
+
+  testValueStoredArgumentSeq =>
+    self assert: (Bt3981EvalblockValue new storedArgumentSeq) equals: true
+
+  testValueStoredArgumentSend =>
+    self assert: (Bt3981EvalblockValue new storedArgumentSend) equals: true
+
+  testValueFfiAssignedSimple =>
+    self assert: (Bt3981EvalblockValue new ffiAssignedSimple) equals: #(3)
+
+  testValueFfiAssignedLoop =>
+    self assert: (Bt3981EvalblockValue new ffiAssignedLoop) equals: #(3)
+
+  testValueFfiAssignedSeq =>
+    self assert: (Bt3981EvalblockValue new ffiAssignedSeq) equals: #(3)
+
+  testValueFfiAssignedSend =>
+    self assert: (Bt3981EvalblockValue new ffiAssignedSend) equals: #(3)
+
+  testValueFfiLastSimple =>
+    self assert: (Bt3981EvalblockValue new ffiLastSimple) equals: #(3)
+
+  testValueFfiLastLoop =>
+    self assert: (Bt3981EvalblockValue new ffiLastLoop) equals: #(3)
+
+  testValueFfiLastSeq =>
+    self assert: (Bt3981EvalblockValue new ffiLastSeq) equals: #(3)
+
+  testValueFfiLastSend =>
+    self assert: (Bt3981EvalblockValue new ffiLastSend) equals: #(3)
+
+  testValueFfiNestedSimple =>
+    self assert: (Bt3981EvalblockValue new ffiNestedSimple) equals: #(3)
+
+  testValueFfiNestedLoop =>
+    self assert: (Bt3981EvalblockValue new ffiNestedLoop) equals: #(3)
+
+  testValueFfiNestedSeq =>
+    self assert: (Bt3981EvalblockValue new ffiNestedSeq) equals: #(3)
+
+  testValueFfiNestedSend =>
+    self assert: (Bt3981EvalblockValue new ffiNestedSend) equals: #(3)
+
+  testValueFfiReturnSimple =>
+    self assert: (Bt3981EvalblockValue new ffiReturnSimple) equals: 3
+
+  testValueFfiReturnLoop =>
+    self assert: (Bt3981EvalblockValue new ffiReturnLoop) equals: 3
+
+  testValueFfiReturnSeq =>
+    self assert: (Bt3981EvalblockValue new ffiReturnSeq) equals: 3
+
+  testValueFfiReturnSend =>
+    self assert: (Bt3981EvalblockValue new ffiReturnSend) equals: 3
+
+  testValueFfiArgumentSimple =>
+    self assert: (Bt3981EvalblockValue new ffiArgumentSimple) equals: #(true)
+
+  testValueFfiArgumentLoop =>
+    self assert: (Bt3981EvalblockValue new ffiArgumentLoop) equals: #(true)
+
+  testValueFfiArgumentSeq =>
+    self assert: (Bt3981EvalblockValue new ffiArgumentSeq) equals: #(true)
+
+  testValueFfiArgumentSend =>
+    self assert: (Bt3981EvalblockValue new ffiArgumentSend) equals: #(true)
+
+  testValueUserAssignedSimple =>
+    self assert: (Bt3981EvalblockValue new userAssignedSimple) equals: 3
+
+  testValueUserAssignedLoop =>
+    self assert: (Bt3981EvalblockValue new userAssignedLoop) equals: 3
+
+  testValueUserAssignedSeq =>
+    self assert: (Bt3981EvalblockValue new userAssignedSeq) equals: 3
+
+  testValueUserAssignedSend =>
+    self assert: (Bt3981EvalblockValue new userAssignedSend) equals: 3
+
+  testValueUserLastSimple =>
+    self assert: (Bt3981EvalblockValue new userLastSimple) equals: 3
+
+  testValueUserLastLoop =>
+    self assert: (Bt3981EvalblockValue new userLastLoop) equals: 3
+
+  testValueUserLastSeq =>
+    self assert: (Bt3981EvalblockValue new userLastSeq) equals: 3
+
+  testValueUserLastSend =>
+    self assert: (Bt3981EvalblockValue new userLastSend) equals: 3
+
+  testValueUserNestedSimple =>
+    self assert: (Bt3981EvalblockValue new userNestedSimple) equals: 3
+
+  testValueUserNestedLoop =>
+    self assert: (Bt3981EvalblockValue new userNestedLoop) equals: 3
+
+  testValueUserNestedSeq =>
+    self assert: (Bt3981EvalblockValue new userNestedSeq) equals: 3
+
+  testValueUserNestedSend =>
+    self assert: (Bt3981EvalblockValue new userNestedSend) equals: 3
+
+  testValueUserReturnSimple =>
+    self assert: (Bt3981EvalblockValue new userReturnSimple) equals: 3
+
+  testValueUserReturnLoop =>
+    self assert: (Bt3981EvalblockValue new userReturnLoop) equals: 3
+
+  testValueUserReturnSeq =>
+    self assert: (Bt3981EvalblockValue new userReturnSeq) equals: 3
+
+  testValueUserReturnSend =>
+    self assert: (Bt3981EvalblockValue new userReturnSend) equals: 3
+
+  testValueUserArgumentSimple =>
+    self assert: (Bt3981EvalblockValue new userArgumentSimple) equals: true
+
+  testValueUserArgumentLoop =>
+    self assert: (Bt3981EvalblockValue new userArgumentLoop) equals: true
+
+  testValueUserArgumentSeq =>
+    self assert: (Bt3981EvalblockValue new userArgumentSeq) equals: true
+
+  testValueUserArgumentSend =>
+    self assert: (Bt3981EvalblockValue new userArgumentSend) equals: true
+
+  testValueMatchArmSimple =>
+    self assert: (Bt3981EvalblockValue new matchArmSimple) equals: 3
+
+  testValueMatchArmAssigned =>
+    self assert: (Bt3981EvalblockValue new matchArmAssigned) equals: 3
+
+  testValueMatchArmSend =>
+    self assert: (Bt3981EvalblockValue new matchArmSend) equals: 3
+
+  testClassMethodAssignedSimple =>
+    self assert: (Bt3981EvalblockClass methodAssignedSimple) equals: 3
+
+  testClassMethodAssignedLoop =>
+    self assert: (Bt3981EvalblockClass methodAssignedLoop) equals: 3
+
+  testClassMethodAssignedSeq =>
+    self assert: (Bt3981EvalblockClass methodAssignedSeq) equals: 3
+
+  testClassMethodAssignedSend =>
+    self assert: (Bt3981EvalblockClass methodAssignedSend) equals: 3
+
+  testClassMethodLastSimple =>
+    self assert: (Bt3981EvalblockClass methodLastSimple) equals: 3
+
+  testClassMethodLastLoop =>
+    self assert: (Bt3981EvalblockClass methodLastLoop) equals: 3
+
+  testClassMethodLastSeq =>
+    self assert: (Bt3981EvalblockClass methodLastSeq) equals: 3
+
+  testClassMethodLastSend =>
+    self assert: (Bt3981EvalblockClass methodLastSend) equals: 3
+
+  testClassMethodNestedSimple =>
+    self assert: (Bt3981EvalblockClass methodNestedSimple) equals: 3
+
+  testClassMethodNestedLoop =>
+    self assert: (Bt3981EvalblockClass methodNestedLoop) equals: 3
+
+  testClassMethodNestedSeq =>
+    self assert: (Bt3981EvalblockClass methodNestedSeq) equals: 3
+
+  testClassMethodNestedSend =>
+    self assert: (Bt3981EvalblockClass methodNestedSend) equals: 3
+
+  testClassMethodReturnSimple =>
+    self assert: (Bt3981EvalblockClass methodReturnSimple) equals: 3
+
+  testClassMethodReturnLoop =>
+    self assert: (Bt3981EvalblockClass methodReturnLoop) equals: 3
+
+  testClassMethodReturnSeq =>
+    self assert: (Bt3981EvalblockClass methodReturnSeq) equals: 3
+
+  testClassMethodReturnSend =>
+    self assert: (Bt3981EvalblockClass methodReturnSend) equals: 3
+
+  testClassMethodArgumentSimple =>
+    self assert: (Bt3981EvalblockClass methodArgumentSimple) equals: true
+
+  testClassMethodArgumentLoop =>
+    self assert: (Bt3981EvalblockClass methodArgumentLoop) equals: true
+
+  testClassMethodArgumentSeq =>
+    self assert: (Bt3981EvalblockClass methodArgumentSeq) equals: true
+
+  testClassMethodArgumentSend =>
+    self assert: (Bt3981EvalblockClass methodArgumentSend) equals: true
+
+  testClassArmAssignedSimple =>
+    self assert: (Bt3981EvalblockClass armAssignedSimple) equals: 3
+
+  testClassArmAssignedLoop =>
+    self assert: (Bt3981EvalblockClass armAssignedLoop) equals: 3
+
+  testClassArmAssignedSeq =>
+    self assert: (Bt3981EvalblockClass armAssignedSeq) equals: 3
+
+  testClassArmAssignedSend =>
+    self assert: (Bt3981EvalblockClass armAssignedSend) equals: 3
+
+  testClassArmLastSimple =>
+    self assert: (Bt3981EvalblockClass armLastSimple) equals: 3
+
+  testClassArmLastLoop =>
+    self assert: (Bt3981EvalblockClass armLastLoop) equals: 3
+
+  testClassArmLastSeq =>
+    self assert: (Bt3981EvalblockClass armLastSeq) equals: 3
+
+  testClassArmLastSend =>
+    self assert: (Bt3981EvalblockClass armLastSend) equals: 3
+
+  testClassArmNestedSimple =>
+    self assert: (Bt3981EvalblockClass armNestedSimple) equals: 3
+
+  testClassArmNestedLoop =>
+    self assert: (Bt3981EvalblockClass armNestedLoop) equals: 3
+
+  testClassArmNestedSeq =>
+    self assert: (Bt3981EvalblockClass armNestedSeq) equals: 3
+
+  testClassArmNestedSend =>
+    self assert: (Bt3981EvalblockClass armNestedSend) equals: 3
+
+  testClassArmReturnSimple =>
+    self assert: (Bt3981EvalblockClass armReturnSimple) equals: 3
+
+  testClassArmReturnLoop =>
+    self assert: (Bt3981EvalblockClass armReturnLoop) equals: 3
+
+  testClassArmReturnSeq =>
+    self assert: (Bt3981EvalblockClass armReturnSeq) equals: 3
+
+  testClassArmReturnSend =>
+    self assert: (Bt3981EvalblockClass armReturnSend) equals: 3
+
+  testClassArmArgumentSimple =>
+    self assert: (Bt3981EvalblockClass armArgumentSimple) equals: true
+
+  testClassArmArgumentLoop =>
+    self assert: (Bt3981EvalblockClass armArgumentLoop) equals: true
+
+  testClassArmArgumentSeq =>
+    self assert: (Bt3981EvalblockClass armArgumentSeq) equals: true
+
+  testClassArmArgumentSend =>
+    self assert: (Bt3981EvalblockClass armArgumentSend) equals: true
+
+  testClassCollectAssignedSimple =>
+    self assert: (Bt3981EvalblockClass collectAssignedSimple) equals: #(3)
+
+  testClassCollectAssignedLoop =>
+    self assert: (Bt3981EvalblockClass collectAssignedLoop) equals: #(3)
+
+  testClassCollectAssignedSeq =>
+    self assert: (Bt3981EvalblockClass collectAssignedSeq) equals: #(3)
+
+  testClassCollectAssignedSend =>
+    self assert: (Bt3981EvalblockClass collectAssignedSend) equals: #(3)
+
+  testClassCollectLastSimple =>
+    self assert: (Bt3981EvalblockClass collectLastSimple) equals: #(3)
+
+  testClassCollectLastLoop =>
+    self assert: (Bt3981EvalblockClass collectLastLoop) equals: #(3)
+
+  testClassCollectLastSeq =>
+    self assert: (Bt3981EvalblockClass collectLastSeq) equals: #(3)
+
+  testClassCollectLastSend =>
+    self assert: (Bt3981EvalblockClass collectLastSend) equals: #(3)
+
+  testClassCollectNestedSimple =>
+    self assert: (Bt3981EvalblockClass collectNestedSimple) equals: #(3)
+
+  testClassCollectNestedLoop =>
+    self assert: (Bt3981EvalblockClass collectNestedLoop) equals: #(3)
+
+  testClassCollectNestedSeq =>
+    self assert: (Bt3981EvalblockClass collectNestedSeq) equals: #(3)
+
+  testClassCollectNestedSend =>
+    self assert: (Bt3981EvalblockClass collectNestedSend) equals: #(3)
+
+  testClassCollectReturnSimple =>
+    self assert: (Bt3981EvalblockClass collectReturnSimple) equals: 3
+
+  testClassCollectReturnLoop =>
+    self assert: (Bt3981EvalblockClass collectReturnLoop) equals: 3
+
+  testClassCollectReturnSeq =>
+    self assert: (Bt3981EvalblockClass collectReturnSeq) equals: 3
+
+  testClassCollectReturnSend =>
+    self assert: (Bt3981EvalblockClass collectReturnSend) equals: 3
+
+  testClassCollectArgumentSimple =>
+    self assert: (Bt3981EvalblockClass collectArgumentSimple) equals: #(true)
+
+  testClassCollectArgumentLoop =>
+    self assert: (Bt3981EvalblockClass collectArgumentLoop) equals: #(true)
+
+  testClassCollectArgumentSeq =>
+    self assert: (Bt3981EvalblockClass collectArgumentSeq) equals: #(true)
+
+  testClassCollectArgumentSend =>
+    self assert: (Bt3981EvalblockClass collectArgumentSend) equals: #(true)
+
+  testClassProtectedAssignedSimple =>
+    self assert: (Bt3981EvalblockClass protectedAssignedSimple) equals: 3
+
+  testClassProtectedAssignedLoop =>
+    self assert: (Bt3981EvalblockClass protectedAssignedLoop) equals: 3
+
+  testClassProtectedAssignedSeq =>
+    self assert: (Bt3981EvalblockClass protectedAssignedSeq) equals: 3
+
+  testClassProtectedAssignedSend =>
+    self assert: (Bt3981EvalblockClass protectedAssignedSend) equals: 3
+
+  testClassProtectedLastSimple =>
+    self assert: (Bt3981EvalblockClass protectedLastSimple) equals: 3
+
+  testClassProtectedLastLoop =>
+    self assert: (Bt3981EvalblockClass protectedLastLoop) equals: 3
+
+  testClassProtectedLastSeq =>
+    self assert: (Bt3981EvalblockClass protectedLastSeq) equals: 3
+
+  testClassProtectedLastSend =>
+    self assert: (Bt3981EvalblockClass protectedLastSend) equals: 3
+
+  testClassProtectedNestedSimple =>
+    self assert: (Bt3981EvalblockClass protectedNestedSimple) equals: 3
+
+  testClassProtectedNestedLoop =>
+    self assert: (Bt3981EvalblockClass protectedNestedLoop) equals: 3
+
+  testClassProtectedNestedSeq =>
+    self assert: (Bt3981EvalblockClass protectedNestedSeq) equals: 3
+
+  testClassProtectedNestedSend =>
+    self assert: (Bt3981EvalblockClass protectedNestedSend) equals: 3
+
+  testClassProtectedReturnSimple =>
+    self assert: (Bt3981EvalblockClass protectedReturnSimple) equals: 3
+
+  testClassProtectedReturnLoop =>
+    self assert: (Bt3981EvalblockClass protectedReturnLoop) equals: 3
+
+  testClassProtectedReturnSeq =>
+    self assert: (Bt3981EvalblockClass protectedReturnSeq) equals: 3
+
+  testClassProtectedReturnSend =>
+    self assert: (Bt3981EvalblockClass protectedReturnSend) equals: 3
+
+  testClassProtectedArgumentSimple =>
+    self assert: (Bt3981EvalblockClass protectedArgumentSimple) equals: true
+
+  testClassProtectedArgumentLoop =>
+    self assert: (Bt3981EvalblockClass protectedArgumentLoop) equals: true
+
+  testClassProtectedArgumentSeq =>
+    self assert: (Bt3981EvalblockClass protectedArgumentSeq) equals: true
+
+  testClassProtectedArgumentSend =>
+    self assert: (Bt3981EvalblockClass protectedArgumentSend) equals: true
+
+  testClassStoredAssignedSimple =>
+    self assert: (Bt3981EvalblockClass storedAssignedSimple) equals: 3
+
+  testClassStoredAssignedLoop =>
+    self assert: (Bt3981EvalblockClass storedAssignedLoop) equals: 3
+
+  testClassStoredAssignedSeq =>
+    self assert: (Bt3981EvalblockClass storedAssignedSeq) equals: 3
+
+  testClassStoredAssignedSend =>
+    self assert: (Bt3981EvalblockClass storedAssignedSend) equals: 3
+
+  testClassStoredLastSimple =>
+    self assert: (Bt3981EvalblockClass storedLastSimple) equals: 3
+
+  testClassStoredLastLoop =>
+    self assert: (Bt3981EvalblockClass storedLastLoop) equals: 3
+
+  testClassStoredLastSeq =>
+    self assert: (Bt3981EvalblockClass storedLastSeq) equals: 3
+
+  testClassStoredLastSend =>
+    self assert: (Bt3981EvalblockClass storedLastSend) equals: 3
+
+  testClassStoredNestedSimple =>
+    self assert: (Bt3981EvalblockClass storedNestedSimple) equals: 3
+
+  testClassStoredNestedLoop =>
+    self assert: (Bt3981EvalblockClass storedNestedLoop) equals: 3
+
+  testClassStoredNestedSeq =>
+    self assert: (Bt3981EvalblockClass storedNestedSeq) equals: 3
+
+  testClassStoredNestedSend =>
+    self assert: (Bt3981EvalblockClass storedNestedSend) equals: 3
+
+  testClassStoredReturnSimple =>
+    self assert: (Bt3981EvalblockClass storedReturnSimple) equals: 3
+
+  testClassStoredReturnLoop =>
+    self assert: (Bt3981EvalblockClass storedReturnLoop) equals: 3
+
+  testClassStoredReturnSeq =>
+    self assert: (Bt3981EvalblockClass storedReturnSeq) equals: 3
+
+  testClassStoredReturnSend =>
+    self assert: (Bt3981EvalblockClass storedReturnSend) equals: 3
+
+  testClassStoredArgumentSimple =>
+    self assert: (Bt3981EvalblockClass storedArgumentSimple) equals: true
+
+  testClassStoredArgumentLoop =>
+    self assert: (Bt3981EvalblockClass storedArgumentLoop) equals: true
+
+  testClassStoredArgumentSeq =>
+    self assert: (Bt3981EvalblockClass storedArgumentSeq) equals: true
+
+  testClassStoredArgumentSend =>
+    self assert: (Bt3981EvalblockClass storedArgumentSend) equals: true
+
+  testClassFfiAssignedSimple =>
+    self assert: (Bt3981EvalblockClass ffiAssignedSimple) equals: #(3)
+
+  testClassFfiAssignedLoop =>
+    self assert: (Bt3981EvalblockClass ffiAssignedLoop) equals: #(3)
+
+  testClassFfiAssignedSeq =>
+    self assert: (Bt3981EvalblockClass ffiAssignedSeq) equals: #(3)
+
+  testClassFfiAssignedSend =>
+    self assert: (Bt3981EvalblockClass ffiAssignedSend) equals: #(3)
+
+  testClassFfiLastSimple =>
+    self assert: (Bt3981EvalblockClass ffiLastSimple) equals: #(3)
+
+  testClassFfiLastLoop =>
+    self assert: (Bt3981EvalblockClass ffiLastLoop) equals: #(3)
+
+  testClassFfiLastSeq =>
+    self assert: (Bt3981EvalblockClass ffiLastSeq) equals: #(3)
+
+  testClassFfiLastSend =>
+    self assert: (Bt3981EvalblockClass ffiLastSend) equals: #(3)
+
+  testClassFfiNestedSimple =>
+    self assert: (Bt3981EvalblockClass ffiNestedSimple) equals: #(3)
+
+  testClassFfiNestedLoop =>
+    self assert: (Bt3981EvalblockClass ffiNestedLoop) equals: #(3)
+
+  testClassFfiNestedSeq =>
+    self assert: (Bt3981EvalblockClass ffiNestedSeq) equals: #(3)
+
+  testClassFfiNestedSend =>
+    self assert: (Bt3981EvalblockClass ffiNestedSend) equals: #(3)
+
+  testClassFfiReturnSimple =>
+    self assert: (Bt3981EvalblockClass ffiReturnSimple) equals: 3
+
+  testClassFfiReturnLoop =>
+    self assert: (Bt3981EvalblockClass ffiReturnLoop) equals: 3
+
+  testClassFfiReturnSeq =>
+    self assert: (Bt3981EvalblockClass ffiReturnSeq) equals: 3
+
+  testClassFfiReturnSend =>
+    self assert: (Bt3981EvalblockClass ffiReturnSend) equals: 3
+
+  testClassFfiArgumentSimple =>
+    self assert: (Bt3981EvalblockClass ffiArgumentSimple) equals: #(true)
+
+  testClassFfiArgumentLoop =>
+    self assert: (Bt3981EvalblockClass ffiArgumentLoop) equals: #(true)
+
+  testClassFfiArgumentSeq =>
+    self assert: (Bt3981EvalblockClass ffiArgumentSeq) equals: #(true)
+
+  testClassFfiArgumentSend =>
+    self assert: (Bt3981EvalblockClass ffiArgumentSend) equals: #(true)
+
+  testClassUserAssignedSimple =>
+    self assert: (Bt3981EvalblockClass userAssignedSimple) equals: 3
+
+  testClassUserAssignedLoop =>
+    self assert: (Bt3981EvalblockClass userAssignedLoop) equals: 3
+
+  testClassUserAssignedSeq =>
+    self assert: (Bt3981EvalblockClass userAssignedSeq) equals: 3
+
+  testClassUserAssignedSend =>
+    self assert: (Bt3981EvalblockClass userAssignedSend) equals: 3
+
+  testClassUserLastSimple =>
+    self assert: (Bt3981EvalblockClass userLastSimple) equals: 3
+
+  testClassUserLastLoop =>
+    self assert: (Bt3981EvalblockClass userLastLoop) equals: 3
+
+  testClassUserLastSeq =>
+    self assert: (Bt3981EvalblockClass userLastSeq) equals: 3
+
+  testClassUserLastSend =>
+    self assert: (Bt3981EvalblockClass userLastSend) equals: 3
+
+  testClassUserNestedSimple =>
+    self assert: (Bt3981EvalblockClass userNestedSimple) equals: 3
+
+  testClassUserNestedLoop =>
+    self assert: (Bt3981EvalblockClass userNestedLoop) equals: 3
+
+  testClassUserNestedSeq =>
+    self assert: (Bt3981EvalblockClass userNestedSeq) equals: 3
+
+  testClassUserNestedSend =>
+    self assert: (Bt3981EvalblockClass userNestedSend) equals: 3
+
+  testClassUserReturnSimple =>
+    self assert: (Bt3981EvalblockClass userReturnSimple) equals: 3
+
+  testClassUserReturnLoop =>
+    self assert: (Bt3981EvalblockClass userReturnLoop) equals: 3
+
+  testClassUserReturnSeq =>
+    self assert: (Bt3981EvalblockClass userReturnSeq) equals: 3
+
+  testClassUserReturnSend =>
+    self assert: (Bt3981EvalblockClass userReturnSend) equals: 3
+
+  testClassUserArgumentSimple =>
+    self assert: (Bt3981EvalblockClass userArgumentSimple) equals: true
+
+  testClassUserArgumentLoop =>
+    self assert: (Bt3981EvalblockClass userArgumentLoop) equals: true
+
+  testClassUserArgumentSeq =>
+    self assert: (Bt3981EvalblockClass userArgumentSeq) equals: true
+
+  testClassUserArgumentSend =>
+    self assert: (Bt3981EvalblockClass userArgumentSend) equals: true
+
+  testClassMatchArmSimple =>
+    self assert: (Bt3981EvalblockClass matchArmSimple) equals: 3
+
+  testClassMatchArmAssigned =>
+    self assert: (Bt3981EvalblockClass matchArmAssigned) equals: 3
+
+  testClassMatchArmSend =>
+    self assert: (Bt3981EvalblockClass matchArmSend) equals: 3
+
+  testActorFoldAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn foldAssignsOuter) equals: 3
+
+  testActorFoldArmAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn foldArmAssignsOuter) equals: 3
+
+  testActorFoldWritesThenArm =>
+    self assert: (Bt3981EvalblockActor spawn foldWritesThenArm) equals: 3
+
+  testActorCollectAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn collectAssignsOuter) equals: 3
+
+  testActorInjectAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn injectAssignsOuter) equals: 3
+
+  testActorSelectAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn selectAssignsOuter) equals: 3
+
+  testActorDetectAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn detectAssignsOuter) equals: 3
+
+  testActorCollectArmE =>
+    self assert: (Bt3981EvalblockActor spawn collectArmE) equals: 3
+
+  testActorInjectArmAssign =>
+    self assert: (Bt3981EvalblockActor spawn injectArmAssign) equals: 3
+
+  testActorInjectLastValue =>
+    self assert: (Bt3981EvalblockActor spawn injectLastValue) equals: 3
+
+  testActorInjectNonLastValue =>
+    self assert: (Bt3981EvalblockActor spawn injectNonLastValue) equals: 1
+
+  testActorSelectNonLastValue =>
+    self assert: (Bt3981EvalblockActor spawn selectNonLastValue) equals: 1
+
+  testActorSelectLastValue =>
+    self assert: (Bt3981EvalblockActor spawn selectLastValue) equals: 1
+
+  testActorDetectNonLastValue =>
+    self assert: (Bt3981EvalblockActor spawn detectNonLastValue) equals: 1
+
+  testActorDetectLastValue =>
+    self assert: (Bt3981EvalblockActor spawn detectLastValue) equals: 1
+
+  testActorDetectIfNoneBlock =>
+    self assert: (Bt3981EvalblockActor spawn detectIfNoneBlock) equals: 3
+
+  testActorAndArm =>
+    self assert: (Bt3981EvalblockActor spawn andArm) equals: true
+
+  testActorAndArmLast =>
+    self assert: (Bt3981EvalblockActor spawn andArmLast) equals: true
+
+  testActorIfNilArm =>
+    self assert: (Bt3981EvalblockActor spawn ifNilArm) equals: 3
+
+  testActorIfNotNilArm =>
+    self assert: (Bt3981EvalblockActor spawn ifNotNilArm) equals: 3
+
+  testActorIfTrueOnlyArm =>
+    self assert: (Bt3981EvalblockActor spawn ifTrueOnlyArm) equals: 3
+
+  testActorIfFalseArm =>
+    self assert: (Bt3981EvalblockActor spawn ifFalseArm) equals: 3
+
+  testActorNested2Statement =>
+    self assert: (Bt3981EvalblockActor spawn nested2Statement) equals: 3
+
+  testActorNested2Assigned =>
+    self assert: (Bt3981EvalblockActor spawn nested2Assigned) equals: 3
+
+  testActorNested3Statement =>
+    self assert: (Bt3981EvalblockActor spawn nested3Statement) equals: 3
+
+  testActorNested2InCollect =>
+    self assert: (Bt3981EvalblockActor spawn nested2InCollect) equals: 3
+
+  testActorStoredArmLast =>
+    self assert: (Bt3981EvalblockActor spawn storedArmLast) equals: 3
+
+  testActorStoredArmAssigned =>
+    self assert: (Bt3981EvalblockActor spawn storedArmAssigned) equals: 3
+
+  testActorFfiArmLast =>
+    self assert: (Bt3981EvalblockActor spawn ffiArmLast) equals: 3
+
+  testActorUserArmLast =>
+    self assert: (Bt3981EvalblockActor spawn userArmLast) equals: 3
+
+  testActorStoredNonLast =>
+    self assert: (Bt3981EvalblockActor spawn storedNonLast) equals: 7
+
+  testActorFfiNonLast =>
+    self assert: (Bt3981EvalblockActor spawn ffiNonLast) equals: #(7)
+
+  testActorUserNonLast =>
+    self assert: (Bt3981EvalblockActor spawn userNonLast) equals: 7
+
+  testActorDoLastStatement =>
+    self assert: (Bt3981EvalblockActor spawn doLastStatement) equals: 3
+
+  testActorProtectedNonLast =>
+    self assert: (Bt3981EvalblockActor spawn protectedNonLast) equals: 7
+
+  testActorHandlerNonLast =>
+    self assert: (Bt3981EvalblockActor spawn handlerNonLast) equals: 7
+
+  testActorCleanupNonLast =>
+    self assert: (Bt3981EvalblockActor spawn cleanupNonLast) equals: 7
+
+  testActorFoldArmNonLast =>
+    self assert: (Bt3981EvalblockActor spawn foldArmNonLast) equals: 3
+
+  testActorWhileBodyLast =>
+    self assert: (Bt3981EvalblockActor spawn whileBodyLast) equals: 1
+
+  testActorWhileBodyNonLast =>
+    self assert: (Bt3981EvalblockActor spawn whileBodyNonLast) equals: 1
+
+  testActorWhileBodyAssigned =>
+    self assert: (Bt3981EvalblockActor spawn whileBodyAssigned) equals: 1
+
+  testActorCountedLastStatement =>
+    self assert: (Bt3981EvalblockActor spawn countedLastStatement) equals: 3
+
+  testActorTimesLastStatement =>
+    self assert: (Bt3981EvalblockActor spawn timesLastStatement) equals: 3
+
+  testActorCountedAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn countedAssignsOuter) equals: 3
+
+  testActorTimesAssignsOuter =>
+    self assert: (Bt3981EvalblockActor spawn timesAssignsOuter) equals: 3

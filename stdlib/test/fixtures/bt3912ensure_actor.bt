@@ -24,7 +24,7 @@ Actor subclass: Bt3912EnsureActor
   inArm: sink x: x =>
     t := 0
     [
-      x
+      x =:= 1
         ifTrue: [
           t := 5
           ^t
@@ -82,7 +82,7 @@ Actor subclass: Bt3912EnsureActor
       [
         t := 1
         ^t
-      ] ensure: [sink record: t]
+      ] ensure: [t := t + 1]
     ] ensure: [sink record: t + 10]
 
   cleanupWrites: sink =>

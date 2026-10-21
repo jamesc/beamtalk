@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture (BT-3960 / ADR 0134): records the reason an `onExit:` observer
+// receives, so a later REPL turn can read it after the watched actor is gone.
+
+Actor subclass: E2EExitRecorder
+  state: reason = nil
+
+  record: aReason => self.reason := aReason
+
+  reason => self.reason

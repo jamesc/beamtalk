@@ -17,12 +17,12 @@ TestCase subclass: Bt3912EnsureTest
 
   testInArm0 =>
     sinks := #[Bt3912EnsureSink spawn, Bt3912EnsureSink spawn, Bt3912EnsureSink spawn]
-    self assert: #[(Bt3912EnsureClass inArm: (sinks at: 1) x: true), ((Bt3912EnsureValue new) inArm: (sinks at: 2) x: true), ((Bt3912EnsureActor spawn) inArm: (sinks at: 3) x: true)] equals: #[5, 5, 5]
+    self assert: #[(Bt3912EnsureClass inArm: (sinks at: 1) x: 1), ((Bt3912EnsureValue new) inArm: (sinks at: 2) x: 1), ((Bt3912EnsureActor spawn) inArm: (sinks at: 3) x: 1)] equals: #[5, 5, 5]
     self assert: #[(sinks at: 1) items, (sinks at: 2) items, (sinks at: 3) items] equals: #[#(5), #(5), #(5)]
 
   testInArm1 =>
     sinks := #[Bt3912EnsureSink spawn, Bt3912EnsureSink spawn, Bt3912EnsureSink spawn]
-    self assert: #[(Bt3912EnsureClass inArm: (sinks at: 1) x: false), ((Bt3912EnsureValue new) inArm: (sinks at: 2) x: false), ((Bt3912EnsureActor spawn) inArm: (sinks at: 3) x: false)] equals: #[9, 9, 9]
+    self assert: #[(Bt3912EnsureClass inArm: (sinks at: 1) x: 0), ((Bt3912EnsureValue new) inArm: (sinks at: 2) x: 0), ((Bt3912EnsureActor spawn) inArm: (sinks at: 3) x: 0)] equals: #[9, 9, 9]
     self assert: #[(sinks at: 1) items, (sinks at: 2) items, (sinks at: 3) items] equals: #[#(9), #(9), #(9)]
 
   testInCollect0 =>
@@ -48,7 +48,7 @@ TestCase subclass: Bt3912EnsureTest
   testNested0 =>
     sinks := #[Bt3912EnsureSink spawn, Bt3912EnsureSink spawn, Bt3912EnsureSink spawn]
     self assert: #[(Bt3912EnsureClass nested: (sinks at: 1)), ((Bt3912EnsureValue new) nested: (sinks at: 2)), ((Bt3912EnsureActor spawn) nested: (sinks at: 3))] equals: #[1, 1, 1]
-    self assert: #[(sinks at: 1) items, (sinks at: 2) items, (sinks at: 3) items] equals: #[#(1, 11), #(1, 11), #(1, 11)]
+    self assert: #[(sinks at: 1) items, (sinks at: 2) items, (sinks at: 3) items] equals: #[#(12), #(12), #(12)]
 
   testCleanupWrites0 =>
     sinks := #[Bt3912EnsureSink spawn, Bt3912EnsureSink spawn, Bt3912EnsureSink spawn]

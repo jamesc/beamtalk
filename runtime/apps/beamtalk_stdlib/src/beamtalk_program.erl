@@ -215,8 +215,8 @@ program_package_error(Kind, Message, Hint) ->
 
 -doc """
 Is the caller an actor's `gen_server` process, mid-dispatch (off any harness's
-call chain)? Actor dispatch stashes its state under `'$bt_actor_state'`.
+call chain)? Actor dispatch installs the actor-state cell (`beamtalk_actor_state`).
 """.
 -spec in_actor() -> boolean().
 in_actor() ->
-    get('$bt_actor_state') =/= undefined.
+    beamtalk_actor_state:installed().

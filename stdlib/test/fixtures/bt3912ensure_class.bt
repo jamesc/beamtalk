@@ -24,7 +24,7 @@ Object subclass: Bt3912EnsureClass
   class inArm: sink x: x =>
     t := 0
     [
-      x
+      x =:= 1
         ifTrue: [
           t := 5
           ^t
@@ -82,7 +82,7 @@ Object subclass: Bt3912EnsureClass
       [
         t := 1
         ^t
-      ] ensure: [sink record: t]
+      ] ensure: [t := t + 1]
     ] ensure: [sink record: t + 10]
 
   class cleanupWrites: sink =>

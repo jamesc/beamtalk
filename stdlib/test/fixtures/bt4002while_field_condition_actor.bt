@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4002: the actor control for `whileTrue:`/`whileFalse:` loops whose
+// condition writes a field (the actor `State` already carried it), plus a
+// condition that writes a local the body reads, which failed `erlc` (the body
+// read the condition closure's own binding). See
+// stdlib/test/bt4002while_field_condition_test.bt.
+
+Actor subclass: Bt4002WhileFieldConditionActor
+  state: n = 0
+  state: m = 0
+
+  reproB =>
+    k := 0
+    [
+      self.n := self.n + 1
+      self.n < 3
+    ] whileTrue: [k := k + 1]
+    #[k, self.n]
+
+  localAndField =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      self.n := self.n + t
+      self.n < 6
+    ] whileTrue: [u := u + t]
+    #[t, u, self.n]
+
+  bodyWritesField =>
+    [
+      self.n := self.n + 1
+      self.n < 5
+    ] whileTrue: [self.m := self.m + self.n]
+    #[self.n, self.m]

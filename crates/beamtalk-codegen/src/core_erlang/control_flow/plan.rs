@@ -593,8 +593,10 @@ impl ThreadingPlan {
         // through its own recursive tail call. Letrec-shaped plans only
         // (`allow_direct_params`): a `Foldl*` plan opts in afterwards through
         // `with_value_self_slot`, only for the folds `SELF_THREADING_FOLDS` names.
+        // BT-4002: a `whileTrue:`/`whileFalse:` condition that writes a field
+        // produces the family too, so the loop carries the union.
         let threads_value_self_answer =
-            allow_direct_params && generator.loop_body_threads_value_self(body);
+            allow_direct_params && generator.letrec_loop_threads_value_self(condition, body);
 
         // ADR 0122 Decision 2/3: see `Self::derived_threaded_families`.
         let threaded_families = Self::derived_threaded_families(threads_value_self_answer);
@@ -1100,8 +1102,21 @@ impl ThreadingPlan {
         &self,
         generator: &mut CoreErlangGenerator,
     ) -> Vec<Document<'static>> {
+        self.generate_unpack_of(generator, &self.threaded_locals)
+    }
+
+    /// [`Self::generate_unpack_at_iteration_start`] for `locals` only: binds
+    /// each to its generic loop name and, in `StateAcc` mode, reads it from the
+    /// current `StateAcc`. BT-4002: a `whileTrue:`/`whileFalse:` condition that
+    /// writes a threaded local hands it back in the `StateAcc` its closure
+    /// returns, so the body re-reads it from there.
+    pub fn generate_unpack_of(
+        &self,
+        generator: &mut CoreErlangGenerator,
+        locals: &[String],
+    ) -> Vec<Document<'static>> {
         let mut docs = Vec::new();
-        for var_name in &self.threaded_locals {
+        for var_name in locals {
             let core_var = CoreErlangGenerator::to_core_erlang_var(var_name);
             generator.bind_var(var_name, &core_var);
             if !self.use_direct_params && !self.use_hybrid_params {

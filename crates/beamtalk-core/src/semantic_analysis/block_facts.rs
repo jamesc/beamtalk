@@ -121,6 +121,24 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
     analyze_statements(&block.body, &mut ctx)
 }
 
+/// BT-3981 (ADR 0133 Phase 3): whether a block literal that writes no local
+/// bound outside it, inlined where it is sent (`groupBy:`'s fold, an evaluated
+/// `[...] value`), is lowered as a state-threading block in a method of kind
+/// `root` (`None`: the REPL): the block yields a `{Value, State}` pair that
+/// the site must unpack. The one gate `group_by_fold_threads` and the
+/// `EvaluatedBlockValue` residual check read; codegen's
+/// `needs_mutation_threading` (with `State` always eligible in an actor
+/// instance method) is the rule.
+#[must_use]
+pub fn inline_block_threads(block: &Block, root: Option<RootMethodKind>) -> bool {
+    analyze_block(block).needs_mutation_threading(root, true)
+        // The REPL also threads a block that writes a binding anywhere, a
+        // nested construct's block included (codegen's
+        // `repl_blocks_write_bindings`, BT-3823): every name is a binding
+        // there.
+        || (root.is_none() && !threaded_block_writes(&[block], &|_| true).is_empty())
+}
+
 /// Analyzes a method body (top-level statements, not wrapped in a
 /// `Block`) the same way [`analyze_block`] analyzes a block body — used by
 /// the class-var-mutating-selector purity check (`compute_class_var_mutating_selectors`)

@@ -326,6 +326,75 @@ impl CoreErlangGenerator {
         self.find_value_self_mutating_stmt(body).is_some()
     }
 
+    /// BT-4002: whether a `whileTrue:`/`whileFalse:` `condition` block writes a
+    /// value-type field the loop threads as its `SelfVt` family. The same
+    /// top-level detector as the body ([`Self::loop_body_threads_value_self`]),
+    /// run on the condition block: a condition is a block of statements whose
+    /// last is the boolean, so a bare `self.f := ...` statement in it is the
+    /// shape a body's is. Not a block (a variable holding one) is never.
+    pub(in crate::core_erlang) fn loop_condition_threads_value_self(
+        &self,
+        condition: &Expression,
+    ) -> bool {
+        // Test-only fault injection: the pre-BT-4002 body-only answer, so the
+        // verifier's `ConditionFamilyNotCarried` is shown to fire on a real
+        // compile (`tests/while_condition_carrier_corpus.rs`).
+        #[cfg(test)]
+        if super::super::threaded_expr::fault::active()
+            == Some(super::super::threaded_expr::fault::LocalRebindFault::BodyOnlyLoopFamilies)
+        {
+            return false;
+        }
+        matches!(condition, Expression::Block(cond) if self.loop_body_threads_value_self(cond))
+    }
+
+    /// BT-4002: the condition-side twin of the loop body's per-statement
+    /// rejections. A `whileTrue:`/`whileFalse:` condition carries a value-type
+    /// field write only as a bare top-level statement
+    /// ([`Self::loop_condition_threads_value_self`]), exactly as a body does,
+    /// so a write anywhere else in the condition (a conditional arm, an `and:`
+    /// block, an assignment's or a send's value, a nested loop) is the same
+    /// structured error the body gives it: the nested loop's
+    /// `ValueSelfMutationLostAcrossNestedLoop`, then
+    /// [`Self::reject_unthreadable_value_self_field_write`]. Unrejected, the
+    /// write was dropped every iteration (the loop never ended) or tripped the
+    /// verifier.
+    pub(in crate::core_erlang) fn reject_unthreadable_condition_field_writes(
+        &self,
+        condition: &Expression,
+    ) -> Result<()> {
+        let Expression::Block(cond) = condition else {
+            return Ok(());
+        };
+        for expr in super::super::util::collect_body_exprs(&cond.body) {
+            if let Some(mutation) = self.nested_loop_lost_value_self_mutation(expr) {
+                return Err(CodeGenError::ValueSelfMutationLostAcrossNestedLoop {
+                    mutation,
+                    location: self.location_label(expr.span()),
+                });
+            }
+            self.reject_unthreadable_value_self_field_write(expr, self.is_field_assignment(expr))?;
+        }
+        Ok(())
+    }
+
+    /// BT-4002: whether a `Letrec` loop threads the value-type `SelfVt` family:
+    /// the union of what its condition and its body produce (the ADR 0131
+    /// invariant: a loop's carried families are those its condition and body
+    /// produce). The one answer `ThreadingPlan::new_impl` and the loop's
+    /// result consumers (`vt_loop_threaded_families`,
+    /// `is_while_with_vt_local_threading`) read, so the tuple a loop builds and
+    /// the tuple its consumer unpacks cannot disagree. `condition` is `None`
+    /// for a counted loop.
+    pub(in crate::core_erlang) fn letrec_loop_threads_value_self(
+        &self,
+        condition: Option<&Expression>,
+        body: &beamtalk_core::ast::Block,
+    ) -> bool {
+        self.loop_body_threads_value_self(body)
+            || condition.is_some_and(|c| self.loop_condition_threads_value_self(c))
+    }
+
     /// BT-3827: whether `expr` is a fold whose literal body writes a value-type
     /// field and which carries that `Self` through its accumulator
     /// ([`ThreadingPlan::with_value_self_slot`], [`super::family_slots::FoldFamilySlots`]).
@@ -570,7 +639,29 @@ impl CoreErlangGenerator {
         if !matches!(shape, NestedLoopShape::Letrec) {
             return None;
         }
-        let mutating_stmt = self.find_value_self_mutating_stmt(body)?;
+        // BT-4002: a nested `whileTrue:`/`whileFalse:` threads the `Self` its
+        // condition writes as well as its body's, so either is lost here.
+        let condition_block = match expr.unwrap_parens() {
+            Expression::MessageSend {
+                receiver, selector, ..
+            } if matches!(
+                selector.well_known(),
+                Some(
+                    beamtalk_core::ast::WellKnownSelector::WhileTrue
+                        | beamtalk_core::ast::WellKnownSelector::WhileFalse
+                )
+            ) =>
+            {
+                match receiver.as_ref() {
+                    Expression::Block(cond) => Some(cond),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let mutating_stmt = self
+            .find_value_self_mutating_stmt(body)
+            .or_else(|| condition_block.and_then(|c| self.find_value_self_mutating_stmt(c)))?;
         let Expression::Assignment { target, .. } = mutating_stmt else {
             return None;
         };

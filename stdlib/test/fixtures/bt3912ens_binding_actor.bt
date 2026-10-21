@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947): the actor column of bt3912ens_binding_value.bt.
+
+Actor subclass: Bt3912EnsBindingActor
+  state: n = 0
+
+  destructured: sink =>
+    {u, _} := {0, 0}
+    [
+      u := 5
+      ^u
+    ] ensure: [sink record: u]
+
+  blockParam: sink =>
+    #(1, 2)
+      do: [:x |
+        [
+          x := 5
+          ^x
+        ] ensure: [sink record: x]
+      ]
+    9
+
+  conditionalCleanup: sink =>
+    x := 1
+    [
+      x := 5
+      ^x
+    ]
+      ensure: [
+        x < 0 ifTrue: [x := 0]
+        sink record: x
+      ]
+
+  ownBinding: sink =>
+    [
+      x := 5
+      ^x
+    ]
+      ensure: [
+        x := 0
+        sink record: x
+      ]

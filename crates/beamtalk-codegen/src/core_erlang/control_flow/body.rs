@@ -440,7 +440,8 @@ impl CoreErlangGenerator {
                     expr, plan, is_last, frame, span, &mut stmts,
                 )?;
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                let (binding_docs, _) = self
+                    .generate_destructure_bindings_sequenced(pattern, value, frame, &mut stmts)?;
                 for d in binding_docs {
                     stmts.push(ThreadedStmt::Statement(d, span));
                 }
@@ -860,8 +861,8 @@ impl CoreErlangGenerator {
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                 has_plain_lets = true;
-                let (binding_docs, rhs_var) =
-                    self.generate_destructure_bindings_with_value(pattern, value)?;
+                let (binding_docs, rhs_var) = self
+                    .generate_destructure_bindings_sequenced(pattern, value, frame, &mut stmts)?;
                 for d in binding_docs {
                     stmts.push(ThreadedStmt::Statement(d, span));
                 }

@@ -385,7 +385,7 @@ pub struct CoreErlangGenerator {
     pub(in crate::core_erlang) current_method_selector: Option<String>,
     /// ADR 0065: Whether the current class is a Server subclass.
     /// When true, `generate_handle_info` dispatches to `handleInfo:` with
-    /// log-and-continue error semantics instead of the default ignore-all stub.
+    /// crash-on-error semantics (ADR 0134) instead of the default ignore-all stub.
     pub(in crate::core_erlang) is_server_subclass: bool,
     /// Pre-computed direct-call eligible class methods.
     ///

@@ -115,8 +115,12 @@ fn test_handle_continue_runs_queued_continuation_like_a_cast() {
         step.contains("'safe_dispatch'(CastSelector, CastArgs, State)"),
         "Got:\n{step}"
     );
-    // Shares the cast error arms, which drop the queue on a dispatch error.
-    assert!(step.contains(DISCARD_CONTINUATIONS), "Got:\n{step}");
+    // Shares the cast error arms, which crash the actor on a dispatch error
+    // (BT-3958, ADR 0134).
+    assert!(
+        step.contains("call 'beamtalk_exception_handler':'reraise'(CastError)"),
+        "Got:\n{step}"
+    );
 }
 
 /// BT-3992: startup ends when `initialize` returns. `init/1` hands the
@@ -157,10 +161,13 @@ fn test_initialize_step_acks_starter_after_pending_actions() {
     );
 }
 
-/// BT-3968: every dispatch-error arm drops the continuation queue — the
-/// failed dispatch's state rolls back, so its follow-ups are void.
+/// BT-3968: `handle_call`'s dispatch-error arm drops the continuation queue —
+/// the failed dispatch's state rolls back, so its follow-ups are void. The
+/// no-reply error arms (`handle_cast`, `handle_info`, and the continuation
+/// step that reuses the cast case) re-raise instead, crashing the actor
+/// (BT-3958, ADR 0134), which drops the whole queue.
 #[test]
-fn test_dispatch_error_arms_discard_continuations() {
+fn test_dispatch_error_arms_discard_continuations_or_crash() {
     let code = generate(
         concat!(
             "Server subclass: Discarder\n\n",
@@ -177,15 +184,32 @@ fn test_dispatch_error_arms_discard_continuations() {
         call[err_arm..].contains(DISCARD_CONTINUATIONS),
         "handle_call's error arm must discard. Got:\n{call}"
     );
-    for header in ["'handle_cast'/2 = fun", "'handle_info'/2 = fun"] {
+    for (header, prefix) in [
+        ("'handle_cast'/2 = fun", "Cast"),
+        ("'handle_info'/2 = fun", "Info"),
+        ("'handle_continue'/2 = fun", "Cast"),
+    ] {
         let body = extract_core_fn(&code, header).expect(header);
-        // Both no-reply error arms (triple + plain) discard.
-        assert_eq!(
-            body.matches(DISCARD_CONTINUATIONS).count() % 2,
-            0,
-            "{header} must discard in both no-reply error arms. Got:\n{body}"
+        // Both no-reply error arms (triple + plain) raise the error as a
+        // wrapped Exception object (an `error`-class raise, so gen_server
+        // never takes a throw as the callback's return value); none logs
+        // and carries on.
+        let wrap = format!(
+            "call 'beamtalk_exception_handler':'ensure_wrapped'({prefix}Type, {prefix}Reason, {prefix}BuiltStack)"
         );
-        assert!(body.contains(DISCARD_CONTINUATIONS), "Got:\n{body}");
+        let triple = format!("primop 'raw_raise'('error', {prefix}Exception, {prefix}Stacktrace)");
+        let plain = format!("call 'beamtalk_exception_handler':'reraise'({prefix}Error)");
+        assert!(body.contains(&wrap), "{header}: {wrap}. Got:\n{body}");
+        assert!(body.contains(&triple), "{header}: {triple}. Got:\n{body}");
+        assert!(body.contains(&plain), "{header}: {plain}. Got:\n{body}");
+        assert!(
+            !body.contains(DISCARD_CONTINUATIONS),
+            "{header} must not discard and continue. Got:\n{body}"
+        );
+        assert!(
+            !body.contains("'logger':'warning'"),
+            "{header} must not log and continue. Got:\n{body}"
+        );
     }
 }
 

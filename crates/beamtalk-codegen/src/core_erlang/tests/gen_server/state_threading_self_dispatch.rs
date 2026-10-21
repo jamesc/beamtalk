@@ -436,12 +436,14 @@ fn bt3415_early_return_reply_state_threads_the_conditionals_own_mutation() {
     // a real `ThreadedValue` producer whose prelude — including the
     // receiver's own hoisted `flagTrue` dispatch — splices into the `^`
     // arm's `single_sequenced_child` sequencing, so the reply correctly
-    // carries the prelude's own final version: `State1` from the
-    // receiver's hoisted `flagTrue` dispatch, then `State2` from
-    // `control_flow_tuple_to_threaded_value`'s own wrap of the
-    // `ifTrue:ifFalse:` construct's `{Value, NewState}` tuple (matching
+    // carries the prelude's own final version — instead of the discarding
+    // `State`. BT-4000: the receiver is sequenced ahead of the conditional
+    // (`conditional_receiver_operand`), so its `flagTrue` dispatch binds
+    // `State1` in the `^` arm's own frame; the arms are pure, so the
+    // conditional then lowers as a plain send over the sequenced receiver
+    // and `State1` is the final version (matching
     // `bt3415_early_return_reply_state_follows_the_prelude_when_there_is_one`'s
-    // shape) — instead of the discarding `State`.
+    // shape).
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  go: i =>\n    ^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])\n    0\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -451,10 +453,10 @@ fn bt3415_early_return_reply_state_threads_the_conditionals_own_mutation() {
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
-        code.contains("{'reply', _ReturnValue, State2}"),
-        "the reply must carry the prelude's final State2 (flagTrue's own \
-         mutation, threaded through the conditional receiver, then the \
-         conditional's own wrap), not the stale pre-conditional State. Got:\n{code}"
+        code.contains("{'reply', _ReturnValue, State1}"),
+        "the reply must carry the prelude's final State1 (flagTrue's own \
+         mutation, threaded through the conditional receiver), not the stale \
+         pre-conditional State. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt3415_early_return_post_prelude_state", &code);
 }
@@ -1027,25 +1029,23 @@ fn threading_gates_agree_on_fixture_set() {
 }
 
 #[test]
-#[should_panic(expected = "ThreadedIr verify")]
-#[cfg(debug_assertions)]
-fn bt3414_bare_and_inside_if_true_branch_inside_do_body_panics_verifier() {
+fn bt3414_bare_and_inside_if_true_branch_inside_do_body_threads_state() {
     // `items do: [:x | x > 0 ifTrue: [(self flagTrue) and: [true]] ifFalse:
-    // [nil]]` — a bare-receiver `and:` (self-send as its receiver) inside an
-    // `ifTrue:` branch, itself inside a `do:` loop body. The conditional
-    // branch's own ThreadedIr frame and the enclosing loop body's frame both
-    // end up producing a Bind for the same version: `NonLinearVersion`.
-    // Confirmed still panicking after ADR 0118 phase 2b (loop-body
-    // consumers): this statement routes through
-    // `lower_foldl_body`'s separate `control_flow_has_mutations`
-    // branch (an inline conditional with mutations, not any of phase 2b's
-    // three consumers), so neither phase touches it. Left open for a later
-    // phase.
+    // [nil]]` — a bare-receiver `and:` (self-send as its receiver) as the last
+    // statement of an `ifTrue:` arm, itself inside a `do:` loop body. This
+    // used to panic the verifier (`NonLinearVersion`): the arm compiled the
+    // `and:` as a raw `{Value, State}` tuple whose document held the
+    // receiver's own `State` `Bind`, so the arm's unpack read a version no
+    // `Bind` of the arm produced. BT-4000: the arm lowers the `and:` through
+    // `threaded_expression` (`arm_statement_is_producer`), which sequences the
+    // receiver ahead into the arm (`conditional_receiver_operand`).
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    #(1) do: [:x |\n      x > 0\n        ifTrue: [(self flagTrue) and: [true]]\n        ifFalse: [nil]\n    ]\n    self.count\n\n  internal flagTrue =>\n    self.count := self.count + 1\n    true\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let _ = generate_module(
+    let code = generate_module(
         &module,
         CodegenOptions::new("bt3414_bare_and_in_if_true_inside_do_body"),
-    );
+    )
+    .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    assert_compiles_through_erlc("bt3414_bare_and_in_if_true_inside_do_body", &code);
 }

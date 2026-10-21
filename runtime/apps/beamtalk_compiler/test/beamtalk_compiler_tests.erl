@@ -120,9 +120,8 @@ compile_file_succeeds() ->
     %% Module name should follow ADR 0016 naming
     ModuleName = maps:get(module_name, Result),
     ?assert(binary:match(ModuleName, <<"bt@">>) =/= nomatch),
-    %% Classes list should contain TestCounter
     Classes = maps:get(classes, Result),
-    ?assert(length(Classes) > 0).
+    ?assertMatch([#{name := <<"TestCounter">>}], Classes).
 
 compile_file_stdlib_mode() ->
     Source = <<"Object subclass: StdlibTest\n  value => 42">>,

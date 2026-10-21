@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3912 (BT-3947): a `^` out of an `ensure:` protected block hands the cleanup
+// the locals written so far whatever bound the local: a destructuring, a
+// parameter of an enclosing block, or a first assignment in the protected block;
+// a cleanup that binds its own copy first reads that. The actor column is
+// bt3912ens_binding_actor.bt; answers are in bt3912ens_binding_test.bt.
+
+Value subclass: Bt3912EnsBindingValue
+
+  destructured: sink =>
+    {u, _} := {0, 0}
+    [
+      u := 5
+      ^u
+    ] ensure: [sink record: u]
+
+  blockParam: sink =>
+    #(1, 2)
+      do: [:x |
+        [
+          x := 5
+          ^x
+        ] ensure: [sink record: x]
+      ]
+    9
+
+  conditionalCleanup: sink =>
+    x := 1
+    [
+      x := 5
+      ^x
+    ]
+      ensure: [
+        x < 0 ifTrue: [x := 0]
+        sink record: x
+      ]
+
+  ownBinding: sink =>
+    [
+      x := 5
+      ^x
+    ]
+      ensure: [
+        x := 0
+        sink record: x
+      ]

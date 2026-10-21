@@ -11,17 +11,6 @@
 Actor subclass: Bt3971Actor
   state: hits = 0
 
-  assigned =>
-    (Erlang lists)
-      map: [:x |
-        r := [
-          n := 3
-          n
-        ] value
-        r
-      ]
-      with: #(1)
-
   notLast =>
     (Erlang lists)
       map: [:x |

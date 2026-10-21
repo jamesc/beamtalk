@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3958 fixture: supervises one FailingHandleInfoServer, restarted when a
+// handleInfo: error crashes it (ADR 0134). See
+// stdlib/test/server_handle_info_test.bt.
+
+Supervisor subclass: FailingHandleInfoSup
+
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  childSpecs -> List =>
+    #(FailingHandleInfoServer supervisionSpec withRestart: #permanent)

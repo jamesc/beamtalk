@@ -701,6 +701,21 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// needs no prelude — see the sibling `counter` field, above,
         /// unaffected by this phase).
         condition: Vec<ThreadedStmt>,
+        /// BT-4002: the storage families (`SelfVt`) whose version the
+        /// condition advanced while it was lowered, read off the generator's
+        /// version counters around the condition's lowering (never off the
+        /// extraction that hands it back, like
+        /// [`ConstructTuple`](Self::ConstructTuple)'s `families`). The
+        /// condition runs in its own closure, so each such family must be
+        /// handed back into the loop's frame by a `Bind` in `condition`
+        /// sourced from one of the loop's own `produces` seeds; otherwise the
+        /// write dies with the closure
+        /// ([`VerifyError::ConditionFamilyNotCarried`](super::verify::VerifyError::ConditionFamilyNotCarried)).
+        /// The actor `State` (and REPL bindings) ride the `StateAcc` map the
+        /// condition already hands back, so they never appear here. Empty
+        /// for a counted loop, which has no condition block. Rendering
+        /// ignores it.
+        condition_families: Vec<VersionPrefix>,
         /// The condition's own final boolean value — pure with respect to
         /// `condition`, exactly like [`ThreadedValue::value`] is pure with
         /// respect to its `prelude`. The case's scrutinee.

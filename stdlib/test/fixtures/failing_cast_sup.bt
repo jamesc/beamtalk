@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3958 fixture: supervises one FailingCastActor, restarted when a raising
+// `!` cast crashes it (ADR 0134). See stdlib/test/actor_cast_error_test.bt.
+
+Supervisor subclass: FailingCastSup
+
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  childSpecs -> List =>
+    #(FailingCastActor supervisionSpec withRestart: #permanent)
