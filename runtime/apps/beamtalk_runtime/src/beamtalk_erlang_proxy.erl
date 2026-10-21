@@ -272,6 +272,10 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
 -doc """
 Auto-coerce binary args to charlists and retry once on `badarg`.
 
+No retry when an argument is a fun: re-running the call would re-run that
+code (a Beamtalk block's side effects would happen twice), so the `badarg` is
+raised as a `type_error` instead (BT-4055).
+
 Many Erlang functions (os:cmd/1, file:read_file/1, …) expect charlists but
 Beamtalk strings are binaries. Applies the same unified catch policy on the
 retry; if the retry still fails (or no binary args were coercible) the error is
@@ -286,7 +290,9 @@ discarded, the same rule `beamtalk_class_vars:protect/1` applies (BT-3728).
 ) -> term().
 maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack, Snap) ->
     CoercedArgs = coerce_binaries_to_charlists(Args),
-    case CoercedArgs =/= Args of
+    %% Never retry a call that was passed a fun (a Beamtalk block): the retry
+    %% would run caller code a second time, side effects included (BT-4055).
+    case CoercedArgs =/= Args andalso not lists:any(fun erlang:is_function/1, Args) of
         true ->
             beamtalk_class_vars:restore(Snap),
             %% bt-catcher-audit: converted - restores the pre-call snapshot before retrying; the
@@ -612,14 +618,20 @@ is_ffi_target_undef(_Module, _FunName, _Arity, _Stack) ->
     false.
 
 -doc """
-True when an exception was raised in compiled Beamtalk code (a `bt@` module)
-that the FFI target ran, such as a Beamtalk block passed in as an argument.
+True when an exception was raised in compiled Beamtalk code (a `bt@` class
+module, or a REPL/inspector evaluation module) that the FFI target ran, such as
+a Beamtalk block passed in as an argument.
 
 Scans the stacktrace from the raise point toward the caller. Reaching a `bt@`
 frame first means Beamtalk code raised it, directly or through a runtime helper
 it called. Reaching the target module or this proxy first means Erlang code
 raised it (the target, or a stock module it called), so the FFI classification
 applies. A stacktrace with neither is classified as before.
+
+Best effort: a tail call out of Beamtalk code into a raising Erlang function, or
+a raise more than `backtrace_depth` frames below the block, hides the Beamtalk
+frame, and the error is then classified as the call's. `maybe_retry_badarg/7`
+does not rely on this: it never retries a call that was passed a fun.
 """.
 -spec raised_in_beamtalk_code(atom(), list()) -> boolean().
 raised_in_beamtalk_code(_Target, []) ->
@@ -629,12 +641,24 @@ raised_in_beamtalk_code(Target, [{Target, _, _, _} | _]) ->
 raised_in_beamtalk_code(_Target, [{?MODULE, _, _, _} | _]) ->
     false;
 raised_in_beamtalk_code(Target, [{Module, _, _, _} | Rest]) when is_atom(Module) ->
-    case atom_to_binary(Module, utf8) of
-        <<"bt@", _/binary>> -> true;
-        _ -> raised_in_beamtalk_code(Target, Rest)
+    case is_compiled_beamtalk_module(atom_to_binary(Module, utf8)) of
+        true -> true;
+        false -> raised_in_beamtalk_code(Target, Rest)
     end;
 raised_in_beamtalk_code(Target, [_ | Rest]) ->
     raised_in_beamtalk_code(Target, Rest).
+
+%% Modules the Beamtalk compiler emits: classes (`bt@…`) and the per-evaluation
+%% modules for REPL and inspector code (`beamtalk_repl_eval_<N>`,
+%% `beamtalk_inspector_eval_<N>`, see `beamtalk_repl_eval`).
+-spec is_compiled_beamtalk_module(binary()) -> boolean().
+is_compiled_beamtalk_module(<<"bt@", _/binary>>) ->
+    true;
+is_compiled_beamtalk_module(<<"beamtalk_repl_eval_", D, _/binary>>) when D >= $0, D =< $9 -> true;
+is_compiled_beamtalk_module(<<"beamtalk_inspector_eval_", D, _/binary>>) when D >= $0, D =< $9 ->
+    true;
+is_compiled_beamtalk_module(_) ->
+    false.
 
 -doc """
 Raise a structured error for an FFI target that is not callable.

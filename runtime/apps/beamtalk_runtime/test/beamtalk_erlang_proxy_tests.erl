@@ -1529,7 +1529,9 @@ direct_call_tracks_hot_reload_and_purge_test() ->
 %% `boom/1` raises the given error reason, `count_badarg/0` counts its runs in
 %% the process dictionary and raises `badarg`.
 load_bt_raiser() ->
-    Mod = 'bt@bt4055@raiser',
+    load_bt_raiser('bt@bt4055@raiser').
+
+load_bt_raiser(Mod) ->
     {ok, Mod, Bin} = compile:forms(
         [
             {attribute, 1, module, Mod},
@@ -1556,7 +1558,7 @@ load_bt_raiser() ->
         []
     ),
     _ = code:purge(Mod),
-    {module, Mod} = code:load_binary(Mod, "bt@bt4055@raiser.erl", Bin),
+    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".erl", Bin),
     Mod.
 
 unload_bt_raiser(Mod) ->
@@ -1609,4 +1611,43 @@ native_call_erlang_error_is_still_classified_test() ->
         ?assert(false)
     catch
         error:#{error := Err} -> ?assertEqual(type_error, Err#beamtalk_error.kind)
+    end.
+
+native_call_block_error_from_repl_eval_module_is_unchanged_test() ->
+    %% REPL and inspector code compiles to `beamtalk_repl_eval_<N>` /
+    %% `beamtalk_inspector_eval_<N>`, not `bt@…`; it is Beamtalk code too.
+    lists:foreach(
+        fun(Name) ->
+            Mod = load_bt_raiser(Name),
+            try
+                Block = fun(_) -> Mod:boom(badarith) end,
+                ?assertError(
+                    badarith,
+                    beamtalk_erlang_proxy:native_call(lists, foreach, [Block, [1]], {'X', 'y:'})
+                )
+            after
+                unload_bt_raiser(Mod)
+            end
+        end,
+        ['beamtalk_repl_eval_4055', 'beamtalk_inspector_eval_4055']
+    ).
+
+native_call_badarg_with_fun_arg_is_not_retried_test() ->
+    %% Even when the stack shows no Beamtalk frame, a call that was passed a fun
+    %% is never retried: the retry would run the fun again.
+    put(bt4055_runs, 0),
+    try
+        Block = fun(_) ->
+            put(bt4055_runs, get(bt4055_runs) + 1),
+            erlang:error(badarg)
+        end,
+        try
+            beamtalk_erlang_proxy:native_call(lists, foreach, [Block, [<<"x">>]], {'X', 'y:'}),
+            ?assert(false)
+        catch
+            error:#{error := Err} -> ?assertEqual(type_error, Err#beamtalk_error.kind)
+        end,
+        ?assertEqual(1, get(bt4055_runs))
+    after
+        erase(bt4055_runs)
     end.

@@ -2447,9 +2447,10 @@ mod tests {
                 classes.insert(class.name.name.to_string(), facade);
             }
         }
-        if classes.is_empty() {
-            return;
-        }
+        assert!(
+            classes.contains_key("Integer") && classes.contains_key("Protocol"),
+            "stdlib/src did not parse: the facade guard would check nothing"
+        );
 
         let offenders: Vec<&str> = REGISTRY
             .iter()
