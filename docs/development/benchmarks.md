@@ -1601,3 +1601,6 @@ Apple Silicon, OTP 28, medians.
   stack frame is the FFI target, so unknown-function, wrong-arity and module-not-loaded errors are
   unchanged. An `undef` raised inside the callee (another MFA on top) is now wrapped as the canonical
   `runtime_error` ("Undefined function: m:f/n") instead of being misreported as the FFI target missing.
+- One intended behaviour change: with no export gate in front of the apply, a module exporting
+  `'$handle_undefined_function'/2` now handles unknown FFI calls the way it would for a plain Erlang
+  caller (the pre-check used to reject them).
