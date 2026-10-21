@@ -17,6 +17,13 @@
 /// with negligible overhead (~150ns/call). Detailed trace events
 /// require explicit enable/disable.
 ///
+/// To retire a dead actor's aggregates, the trace store monitors every
+/// actor once it has handled a message (armed asynchronously after that
+/// first message). So an actor's `monitored_by` includes the trace store's
+/// pid, and it can appear between two snapshots. Code and tests that
+/// inspect monitors should match the monitors they care about, not compare
+/// the whole `monitored_by` list.
+///
 /// Tracing observes actor dispatch. To emit or attach to your own
 /// application events on the `telemetry` bus, use `Telemetry`.
 ///
