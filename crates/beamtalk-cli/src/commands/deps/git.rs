@@ -165,16 +165,10 @@ pub fn resolve_git_dep(
 fn clone_repo(name: &str, url: &str, target: &Utf8Path) -> Result<()> {
     validate_git_url(name, url)?;
 
-    let output = Command::new("git")
-        .args([
-            "-c",
-            "protocol.ext.allow=never",
-            "clone",
-            "--quiet",
-            "--",
-            url,
-            target.as_str(),
-        ])
+    let Some(mut cmd) = clone_command(url, target) else {
+        miette::bail!("Invalid checkout path '{target}' for dependency '{name}'");
+    };
+    let output = cmd
         .output()
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to execute 'git clone' for dependency '{name}'"))?;
@@ -189,6 +183,41 @@ fn clone_repo(name: &str, url: &str, target: &Utf8Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Build the `git clone` command for [`clone_repo`], or `None` if `target`
+/// has no final path component to clone into.
+///
+/// The command runs with an explicit `current_dir` (`target`'s parent, which
+/// the caller has already created) instead of inheriting the process cwd. The
+/// cwd is process-global and a child captures it at spawn time: if another
+/// thread has temporarily moved the cwd into a directory that it then deletes
+/// (as the `#[serial(cwd)]` unit tests do — `serial` only orders them among
+/// themselves, not against this code), the child starts in a vanished
+/// directory and git fails with "Unable to read current working directory"
+/// (BT-4016). The destination is passed relative to that `current_dir`, so it
+/// lands in the same place whether `target` is absolute or relative.
+fn clone_command(url: &str, target: &Utf8Path) -> Option<Command> {
+    let dest = target.file_name()?;
+    // An empty parent means `target` is a bare relative name, which can only
+    // be relative to the process cwd.
+    let parent = target
+        .parent()
+        .filter(|p| !p.as_str().is_empty())
+        .unwrap_or(Utf8Path::new("."));
+
+    let mut cmd = Command::new("git");
+    cmd.args([
+        "-c",
+        "protocol.ext.allow=never",
+        "clone",
+        "--quiet",
+        "--",
+        url,
+        dest,
+    ])
+    .current_dir(parent);
+    Some(cmd)
 }
 
 /// Transports a dependency URL may legitimately use.
@@ -368,6 +397,28 @@ mod tests {
     use super::*;
     use crate::commands::util::to_forward_slash;
     use tempfile::TempDir;
+
+    /// Regression (BT-4016): `git clone` must not inherit the process cwd,
+    /// which a concurrently running `#[serial(cwd)]` test may have pointed at
+    /// a tempdir it is about to delete.
+    #[test]
+    fn test_clone_command_pins_cwd_to_target_parent() {
+        let cmd =
+            clone_command("file:///repo", Utf8Path::new("/project/_build/deps/my_dep")).unwrap();
+        assert_eq!(
+            cmd.get_current_dir(),
+            Some(std::path::Path::new("/project/_build/deps"))
+        );
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args.last().unwrap(), &"my_dep");
+    }
+
+    #[test]
+    fn test_clone_command_bare_relative_target_clones_into_cwd() {
+        let cmd = clone_command("file:///repo", Utf8Path::new("my_dep")).unwrap();
+        assert_eq!(cmd.get_current_dir(), Some(std::path::Path::new(".")));
+        assert!(clone_command("file:///repo", Utf8Path::new("/")).is_none());
+    }
 
     /// Create a bare git repo with a single commit, a tag, and a branch.
     /// Returns (`repo_dir_tempdir`, `repo_url`, `commit_sha`).

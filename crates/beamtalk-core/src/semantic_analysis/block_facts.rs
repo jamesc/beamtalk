@@ -255,8 +255,11 @@ pub fn compute_class_var_mutating_selectors(
     mutating
 }
 
-/// Whether `receiver` is the unqualified class reference `class_name`.
-fn is_own_class_reference(receiver: &Expression, class_name: &str) -> bool {
+/// Whether `receiver` is the unqualified class reference `class_name`: the
+/// one own-class-receiver shape the class-side rules share (here, and
+/// codegen's `expr_shape::is_own_class_reference`, BT-4005).
+#[must_use]
+pub fn is_own_class_reference(receiver: &Expression, class_name: &str) -> bool {
     matches!(
         receiver,
         Expression::ClassReference { name, package, .. }

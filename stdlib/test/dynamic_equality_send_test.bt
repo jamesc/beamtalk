@@ -27,8 +27,8 @@ TestCase subclass: DynamicEqualitySendTest
   testPidRespondsToEquals => self assert: (Erlang erlang self respondsTo: #'==')
 
   testReferencePerformEquals =>
-    r := Erlang erlang make_ref
-    other := Erlang erlang make_ref
+    r := Reference new
+    other := Reference new
     self assert: (r perform: #'==' withArguments: #(r))
     self deny: (r perform: #'==' withArguments: #(other))
 

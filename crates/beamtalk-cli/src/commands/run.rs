@@ -818,7 +818,10 @@ mod tests {
         temp.path().to_string_lossy().to_string()
     }
 
-    // Helper: temporarily set CWD for tests that need a manifest in "."
+    // Helper: temporarily set CWD for tests that need a manifest in ".".
+    // The cwd is process-global, so every caller must be `#[serial(cwd)]`.
+    // That only orders them against each other — code exercised by
+    // unannotated parallel tests must not depend on the process cwd (BT-4016).
     fn with_project_dir<F: FnOnce() -> R, R>(dir: &std::path::Path, f: F) -> R {
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir).unwrap();

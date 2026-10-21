@@ -147,6 +147,13 @@ pub(super) mod fault {
         /// so the condition closure answers only its boolean and the write
         /// dies with it (`ConditionFamilyNotCarried` over a `Local` family).
         ConditionWritesNotCarried,
+        /// BT-4017: a fold body statement that `thread_ahead` would register
+        /// unwrapped takes the fold's raw `{Value, StateAcc}` unpack instead,
+        /// as before BT-4017. With a non-literal block argument the
+        /// conditional is a plain send, so the unpack raises `badarg` at run
+        /// time; the verifier and `erlc` cannot see a run-time value's shape,
+        /// so the corpus's codegen-shape check is what catches it.
+        FoldRawTupleUnpack,
     }
 
     thread_local! {
