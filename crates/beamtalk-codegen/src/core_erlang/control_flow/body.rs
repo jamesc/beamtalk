@@ -943,8 +943,11 @@ impl CoreErlangGenerator {
                         &self.semantic_facts,
                     ))
             {
-                // Inline conditional with mutations returns {Result, NewStateAcc}.
-                // Unpack element(2) so subsequent iterations see the updated StateAcc.
+                // A construct with mutations that answers {Result, NewStateAcc}
+                // (e.g. a nested loop or fold threading no local). Unpack element(2)
+                // so subsequent iterations see the updated StateAcc. BT-4017: a
+                // statement whose value `thread_ahead` registers unwrapped never
+                // reaches here (`fold_statement_threads_ahead` above).
                 // This applies to ALL foldl body kinds (do:, collect:, select:, reject:,
                 // inject:into:), not just do: — otherwise mutations inside conditionals
                 // nested within collect:/select:/etc. are silently lost.

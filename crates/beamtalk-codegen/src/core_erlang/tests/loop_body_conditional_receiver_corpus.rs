@@ -366,6 +366,19 @@ fn block_arg_method(prelude: &str, i: usize, body: &str) -> String {
     format!("  probe{i}: blk =>\n{prelude}    n := 3\n    {body}\n    n\n")
 }
 
+/// Fold-body statements this change also reroutes that have no sequenced
+/// receiver: an inline-threaded conditional over a plain receiver whose arm
+/// writes a field, and a `match:` whose arm does. The pre-BT-4017 fold body
+/// sent them to the raw-tuple unpack too (correct there: they are
+/// producers whose element 2 is the new state); they now go through
+/// `thread_ahead` like every other `thread_ahead_unwraps` statement.
+const PLAIN_RECEIVER_STATEMENTS: &[&str] = &[
+    "(n > 0) ifTrue: [self.f := self.f + 1]",
+    "(n > 0) ifTrue: [self.f := self.f + 1] ifFalse: [nil]",
+    "(n > 0) and: [self.f := self.f + 1. true]",
+    "n match: [3 -> self.f := self.f + 1; _ -> 0]",
+];
+
 /// `(name, method body)` rows: every fold kind x receiver x fold statement,
 /// and every other frame of [`LOOPS`] x receiver x non-literal-block
 /// conditional (BT-4000 fixed those; pinned here so they stay fixed).
@@ -381,6 +394,9 @@ fn block_arg_rows() -> Vec<(String, String)> {
                     fold.replace("{S}", &stmt.replace("{R}", receiver)),
                 ));
             }
+        }
+        for (s, stmt) in PLAIN_RECEIVER_STATEMENTS.iter().enumerate() {
+            out.push((format!("fold{l} plain{s} raw"), fold.replace("{S}", stmt)));
         }
     }
     for (l, lp) in LOOPS.iter().enumerate() {

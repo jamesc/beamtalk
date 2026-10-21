@@ -58,6 +58,16 @@ Actor subclass: Bt4017FoldBodyBlockArgActor
     r := #(1, 2, 3) collect: [:e | (self tick) ifTrue: [self.f := self.f + e] ifFalse: [0]]
     #[r last, self.f, self.ticks]
 
+  // A plain receiver with a field-writing arm, and a `match:` whose arm
+  // writes a field: also lowered through `thread_ahead` now.
+  collectPlainArm =>
+    r := #(1, 2, 3) collect: [:e | (e > 1) ifTrue: [self.f := self.f + e] ifFalse: [0]]
+    #[r last, self.f]
+
+  doMatch =>
+    #(1, 2, 3) do: [:e | e match: [2 -> self.f := self.f + 10; _ -> 0]]
+    self.f
+
   selectFieldArm =>
     r := #(1, 2, 3)
       select: [:e |

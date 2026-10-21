@@ -32,6 +32,12 @@ TestCase subclass: Bt4017FoldBodyBlockArgTest
   testCollectFieldArm =>
     self assert: Bt4017FoldBodyBlockArgActor spawn collectFieldArm equals: #[5, 5, 3]
 
+  testCollectPlainArm =>
+    self assert: Bt4017FoldBodyBlockArgActor spawn collectPlainArm equals: #[5, 5]
+
+  testDoMatch =>
+    self assert: Bt4017FoldBodyBlockArgActor spawn doMatch equals: 10
+
   testSelectFieldArm =>
     self assert: Bt4017FoldBodyBlockArgActor spawn selectFieldArm equals: #[2, 2, 3]
 
