@@ -281,8 +281,10 @@ resolve_class_object(ClassName) when is_atom(ClassName) ->
 -doc "Compute the Erlang registry name for a class.".
 -spec registry_name(class_name()) -> atom().
 registry_name(ClassName) ->
+    %% Binary concatenation rather than a string and `list_to_atom/1`: this
+    %% runs on every `whereis_class/1`, i.e. every class reference (BT-4065).
     % elp:fixme W0023 intentional atom creation
-    list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)).
+    binary_to_atom(<<"beamtalk_class_", (atom_to_binary(ClassName, utf8))/binary>>, utf8).
 
 %%====================================================================
 %% Process Group & ETS Bootstrap
@@ -698,18 +700,37 @@ gen_server calls. No process messaging needed — pure ETS reads.
 
 Returns true if ClassName is equal to or a subclass of Ancestor.
 Returns false if the class is not in the hierarchy table (safe during bootstrap).
-Used by beamtalk_exception_handler for hierarchy-aware matching.
+Used by beamtalk_exception_handler for hierarchy-aware matching, and (via
+`beamtalk_class_derived_cache:inherits_from/2`) by `isKindOf:`.
+
+Walked with `beamtalk_hierarchy:walk_ancestors/3`, bounded by
+`?MAX_HIERARCHY_DEPTH` like every other ancestor walk: a superclass cycle in
+the metadata answers `false` (with a warning) rather than looping forever on
+a hot dispatch path.
 """.
 -spec inherits_from(class_name() | none, class_name()) -> boolean().
-inherits_from(none, _Ancestor) ->
-    false;
-inherits_from(ClassName, Ancestor) when ClassName =:= Ancestor ->
-    true;
 inherits_from(ClassName, Ancestor) ->
-    case beamtalk_class_metadata:lookup_superclass(ClassName) of
-        not_found -> false;
-        {ok, none} -> false;
-        {ok, SuperclassName} -> inherits_from(SuperclassName, Ancestor)
+    Step = fun
+        (Name, _Depth) when Name =:= Ancestor ->
+            {found, true};
+        (Name, _Depth) ->
+            case beamtalk_class_metadata:lookup_superclass(Name) of
+                {ok, Super} -> {next, Super};
+                not_found -> not_found
+            end
+    end,
+    case beamtalk_hierarchy:walk_ancestors(ClassName, Step, ?MAX_HIERARCHY_DEPTH) of
+        {found, true} ->
+            true;
+        not_found ->
+            false;
+        {max_depth_exceeded, At} ->
+            ?LOG_WARNING(
+                "inherits_from: max hierarchy depth ~p exceeded at ~p looking for ~p — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, At, Ancestor],
+                #{domain => [beamtalk, runtime]}
+            ),
+            false
     end.
 
 -doc """
@@ -851,14 +872,13 @@ process dies, which is the whole point — we need this for crash recovery.
 """.
 -spec class_name_for_pid(pid()) -> {ok, class_name()} | not_found.
 class_name_for_pid(Pid) ->
-    case ets:info(beamtalk_class_pids) of
-        undefined ->
-            not_found;
-        _ ->
-            case ets:lookup(beamtalk_class_pids, Pid) of
-                [{_, ClassName}] -> {ok, ClassName};
-                [] -> not_found
-            end
+    %% A missing table raises badarg; no `ets:info/1` existence probe on this
+    %% hot path (class references, `isKindOf:`, dynamic class sends).
+    try ets:lookup(beamtalk_class_pids, Pid) of
+        [{_, ClassName}] -> {ok, ClassName};
+        [] -> not_found
+    catch
+        error:badarg -> not_found
     end.
 
 %%====================================================================

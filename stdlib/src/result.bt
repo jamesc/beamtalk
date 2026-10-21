@@ -51,7 +51,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// Result ok: "hello"     // => Result ok: "hello"
   /// Result ok: nil         // => Result ok: nil
   /// ```
-  class ok: value :: T -> Result(T, E) => self delegate
+  class sealed ok: value :: T -> Result(T, E) => self delegate
 
   /// Create a failed Result wrapping an error reason (class method).
   ///
@@ -65,7 +65,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// Result error: Error new    // => Result error: <Error>
   /// ```
   /// To capture a raised exception as a Result, use `Result tryDo: [Error signal: "oops"]`.
-  class error: reason :: E -> Result(T, E) => self delegate
+  class sealed error: reason :: E -> Result(T, E) => self delegate
 
   /// Evaluate a block and return a Result (class method).
   ///
@@ -91,7 +91,7 @@ sealed typed Value subclass: Result(T, E) native: beamtalk_result
   /// Result fromTuple: {#ok, 42}       // => Result ok: 42
   /// Result fromTuple: {#error, #oops} // => Result error: ...
   /// ```
-  class fromTuple: tuple :: Tuple -> Result(T, E) => self delegate
+  class sealed fromTuple: tuple :: Tuple -> Result(T, E) => self delegate
 
   // ===== Instance Methods — Querying =====
 
