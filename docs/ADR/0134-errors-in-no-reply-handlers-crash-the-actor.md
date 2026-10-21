@@ -51,7 +51,7 @@ Server subclass: EchoConnection
     (Erlang inet) setopts: s with: #(Tuple withAll: #(#active, #once))
 ```
 
-> **Note (BT-4024):** the examples here were corrected after acceptance. A `match:` arm body of the form `pattern -> [ ... ]` is a Block value that never runs (and fails to compile when it writes a field), so multi-statement arms now call a method.
+> **Note (BT-4024):** the examples here were corrected after acceptance. A `match:` arm body of the form `pattern -> [ ... ]` is a Block value that never runs (and fails to compile when it writes a field or sends to `self`), so multi-statement arms now call a method.
 
 If `process:` raises, today the actor survives with its pre-call state — but the socket's `{active, once}` was consumed by the message that arrived and is never re-armed. The connection hangs forever: no close, no crash report, no supervisor restart, nothing for the operator to see beyond one `warning` line. The same shape applies to any `Server` that drives an external resource from `handleInfo:`: a GenStage-style producer that stops producing, a monitor that never re-monitors, a timer loop that never re-schedules.
 

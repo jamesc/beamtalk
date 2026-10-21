@@ -43,6 +43,7 @@ abstract Actor subclass: Server
   ///   ]
   /// ```
   ///
-  /// An arm body is an expression: `#tick -> [self doWork]` answers the
-  /// block without running it. Call a method from the arm instead.
+  /// An arm body is an expression: `#tick -> [self doWork]` would answer the
+  /// block without running it (in an actor, a block that sends to `self` or
+  /// writes a field is a compile error). Call a method from the arm instead.
   handleInfo: _msg => nil
