@@ -172,8 +172,9 @@ functions that call OTP APIs from the caller's process context.
     "initialize did not return within 5 s. A supervisor waits for each actor "
     "child's initialize, so a synchronous call from initialize to the child's "
     "supervisor or any ancestor (which:, childWithId:, children, a send to a "
-    "sibling not yet started) blocks until this timeout (ADR 0135 hang rule). "
-    "Move such calls, and slow setup, into a continueWith: step."
+    "sibling not yet started), or to the actor or class that is starting the "
+    "supervisor or calling startChild, blocks until this timeout (ADR 0135 "
+    "hang rule). Move such calls, and slow setup, into a continueWith: step."
 >>).
 %% ADR 0135 §2: hint for a configuration method that messaged its own
 %% supervisor (OTP `calling_self`) while it was still in `init/1`.
@@ -820,6 +821,9 @@ message — becomes the hint of the start error, with the original error in
 start_failed_error(Kind, ClassName, Selector, #beamtalk_error{} = Cause) ->
     Error0 = beamtalk_error:new(Kind, ClassName, Selector, cause_hint(Cause)),
     beamtalk_error:with_details(Error0, #{cause => Cause});
+start_failed_error(Kind, ClassName, Selector, {initialize_failed, #beamtalk_error{} = Cause}) ->
+    %% BT-4033: an actor child whose `initialize` failed (start_actor_child/3).
+    start_failed_error(Kind, ClassName, Selector, Cause);
 start_failed_error(
     Kind, ClassName, Selector, {shutdown, {failed_to_start_child, _Id, _Inner}} = Reason
 ) ->
@@ -834,6 +838,8 @@ start_failed_error(Kind, ClassName, Selector, Reason) ->
 %% `failed_to_start_child` wrappers (Root -> MidSup -> Pool), if there is one.
 -spec nested_start_cause(term()) -> {ok, #beamtalk_error{}} | none.
 nested_start_cause(#beamtalk_error{} = Cause) ->
+    {ok, Cause};
+nested_start_cause({initialize_failed, #beamtalk_error{} = Cause}) ->
     {ok, Cause};
 nested_start_cause({shutdown, {failed_to_start_child, _Id, Inner}}) ->
     nested_start_cause(Inner);
@@ -1945,13 +1951,12 @@ startChild(Self, Args, Name) ->
                     }),
                     announce_child_added(SupClass, ChildClass, ChildPid),
                     {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
-                {error, #beamtalk_error{kind = Kind} = Err} when
-                    Kind =:= name_registered; Kind =:= type_error; Kind =:= reserved_name
-                ->
+                {error, #beamtalk_error{} = Err} ->
                     %% `'spawnAs'/3` already returns a structured error for
                     %% name_registered/type_error/reserved_name — re-attribute
                     %% it to this call site rather than wrapping it again. A
-                    %% failed `initialize` (BT-4033) falls through to
+                    %% failed `initialize` arrives as `{initialize_failed, _}`
+                    %% (BT-4033, start_actor_child/3) and falls through to
                     %% `#child_start_failed` below, with its error as the cause.
                     ?LOG_ERROR("DynamicSupervisor named child start failed", #{
                         supervisor => SupClass,
@@ -2683,25 +2688,33 @@ start_actor_child(ChildModule, Args, Name) ->
         {error, Reason} -> {error, actor_child_start_error(ChildModule, Reason)}
     end.
 
-%% BT-4033: the reason a supervised actor child's start failed, as a
-%% `#beamtalk_error{}` whenever there is one to find, so the parent's
+%% BT-4033: the reason a supervised actor child's start failed.
+%%
+%% A top-level `#beamtalk_error{}` is the start's own error (`spawnAs/3`'s
+%% `#name_registered`, `#reserved_name`, `#type_error`) and is kept as it is.
+%% A failed `initialize` becomes `{initialize_failed, Error}`, with the
+%% `#beamtalk_error{}` lifted out of its stop reason, so the parent's
 %% `#supervisor_start_failed` / `#child_start_failed` hint carries the
-%% child's own error (`start_failed_error/4` uses its hint). An init timeout
-%% names the ADR 0135 hang rule. A reason with no structured error (a
-%% hand-written gen_server's own stop reason) is kept as it is.
+%% child's own error (`start_failed_error/4` unwraps it) and the error's kind
+%% is never mistaken for the start's own (an `initialize` that itself hits a
+%% `#name_registered`). An init timeout names the ADR 0135 hang rule. A stop
+%% reason with no structured error (a hand-written gen_server's own) is kept.
 -spec actor_child_start_error(module(), term()) -> term().
+actor_child_start_error(_ChildModule, #beamtalk_error{} = Error) ->
+    Error;
 actor_child_start_error(ChildModule, timeout) ->
-    beamtalk_error:new(
-        instantiation_error,
-        child_class_name(ChildModule),
-        initialize,
-        ?ACTOR_CHILD_INIT_TIMEOUT_HINT
-    );
+    {initialize_failed,
+        beamtalk_error:new(
+            instantiation_error,
+            child_class_name(ChildModule),
+            initialize,
+            ?ACTOR_CHILD_INIT_TIMEOUT_HINT
+        )};
 actor_child_start_error(_ChildModule, Reason) ->
     %% The stop reason of a raising `initialize` nests the error in an
     %% exception object and `{Error, Stacktrace}` / `{error, _}` tuples.
     case beamtalk_error:extract_beamtalk_error(Reason, 3) of
-        #beamtalk_error{} = Error -> Error;
+        #beamtalk_error{} = Error -> {initialize_failed, Error};
         undefined -> Reason
     end.
 

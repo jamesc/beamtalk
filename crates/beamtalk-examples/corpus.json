@@ -34297,7 +34297,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// BT-4033: a static Supervisor whose anonymous child calls it from\n// `initialize` (breaks the ADR 0135 hang rule).\n\nSupervisor subclass: Bt4033InitCallerSup\n\n  childSpecs => #((Bt4033InitParentCaller supervisionSpec withArgs: #{#parent => self}))",
+      "source": "// BT-4033: a static Supervisor whose anonymous child calls it from\n// `initialize` (breaks the ADR 0135 hang rule).\n\nSupervisor subclass: Bt4033InitCallerSup\n\n  childSpecs =>\n    #((Bt4033InitParentCaller supervisionSpec withArgs: #{#parent => self}))",
       "explanation": "BT-4033: a static Supervisor whose anonymous child calls it from `initialize` (breaks the ADR 0135 hang rule)."
     },
     {
@@ -34331,6 +34331,57 @@
       "explanation": "BT-4033: an actor whose `initialize` itself calls its parent supervisor synchronously — the ADR 0135 hang rule: the parent is blocked waiting for this `initialize`, so the call stalls until the 5 s init timeout and the start fails."
     },
     {
+      "id": "stdlib-test-fixtures-bt4033name-taker",
+      "title": "Bt4033NameTaker",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "Bt4033NameTaker",
+        "actor",
+        "async",
+        "bt4033name_taker",
+        "concurrent",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "if not",
+        "inherit",
+        "inheritance",
+        "initialize",
+        "instance variable",
+        "member",
+        "negation",
+        "process",
+        "property",
+        "subclassing",
+        "unless"
+      ],
+      "source": "// BT-4033: an actor whose `initialize` spawns another one under the name in\n// `other` (when set) and unwraps the result, so a taken name raises\n// `#name_registered` from inside `initialize`.\n\nActor subclass: Bt4033NameTaker\n  state: other = nil\n\n  initialize =>\n    self.other isNil ifFalse: [(Bt4033NameTaker spawnAs: self.other) unwrap]",
+      "explanation": "BT-4033: an actor whose `initialize` spawns another one under the name in `other` (when set) and unwraps the result, so a taken name raises `#name_registered` from inside `initialize`."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4033name-taker-pool",
+      "title": "Bt4033NameTakerPool",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4033NameTakerPool",
+        "DynamicSupervisor",
+        "bt4033name_taker_pool",
+        "childClass",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "object",
+        "restart",
+        "subclassing",
+        "supervision"
+      ],
+      "source": "// BT-4033: a DynamicSupervisor over Bt4033NameTaker.\n\nDynamicSupervisor(Bt4033NameTaker) subclass: Bt4033NameTakerPool\n\n  childClass => Bt4033NameTaker",
+      "explanation": "BT-4033: a DynamicSupervisor over Bt4033NameTaker."
+    },
+    {
       "id": "stdlib-test-fixtures-bt4033named-sup",
       "title": "Bt4033NamedSup",
       "category": "stdlib-fixtures",
@@ -34348,7 +34399,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// BT-4033: a static Supervisor whose `withName:` child fails its `initialize`.\n\nSupervisor subclass: Bt4033NamedSup\n\n  childSpecs =>\n    #((Bt4033Opener supervisionSpec withName: #bt4033_opener withArgs: #{#port => 1}))",
+      "source": "// BT-4033: a static Supervisor whose `withName:` child fails its `initialize`.\n\nSupervisor subclass: Bt4033NamedSup\n\n  childSpecs =>\n    #((Bt4033Opener supervisionSpec withName: #bt4033_opener withArgs: #{\n      #port => 1\n    }))",
       "explanation": "BT-4033: a static Supervisor whose `withName:` child fails its `initialize`."
     },
     {
@@ -34417,7 +34468,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// BT-4033: the issue repro — a static Supervisor whose anonymous\n// `withArgs:` child fails its `initialize`.\n\nSupervisor subclass: Bt4033Sup\n\n  childSpecs =>\n    #((Bt4033Opener supervisionSpec withId: #o withRestart: #transient withArgs: #{#port => 1}))",
+      "source": "// BT-4033: the issue repro — a static Supervisor whose anonymous\n// `withArgs:` child fails its `initialize`.\n\nSupervisor subclass: Bt4033Sup\n\n  childSpecs =>\n    #((Bt4033Opener supervisionSpec\n      withId: #o\n      withRestart: #transient\n      withArgs: #{#port => 1}))",
       "explanation": "BT-4033: the issue repro — a static Supervisor whose anonymous `withArgs:` child fails its `initialize`."
     },
     {
@@ -34438,7 +34489,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "// BT-4033: an anonymous child whose first continuation (requested in\n// `initialize`) calls this supervisor — the documented place for a first\n// parent call. The supervisor is no longer waiting on the child by then.\n\nSupervisor subclass: Bt4033UnnamedCallerSup\n\n  childSpecs => #((Bt3992ParentCaller supervisionSpec withArgs: #{#parent => self}))",
+      "source": "// BT-4033: an anonymous child whose first continuation (requested in\n// `initialize`) calls this supervisor — the documented place for a first\n// parent call. The supervisor is no longer waiting on the child by then.\n\nSupervisor subclass: Bt4033UnnamedCallerSup\n\n  childSpecs =>\n    #((Bt3992ParentCaller supervisionSpec withArgs: #{#parent => self}))",
       "explanation": "BT-4033: an anonymous child whose first continuation (requested in `initialize`) calls this supervisor — the documented place for a first parent call. The supervisor is no longer waiting on the child by then."
     },
     {
@@ -52307,10 +52358,11 @@
         "testFailingChildInitializeIsAResultErrorForSupervise",
         "testFailingNamedChildInitializeFailsSupervisorStart",
         "testFailingPoolChildInitializeFailsStartChild",
+        "testNamedPoolChildInitializeErrorIsChildStartFailed",
         "testUnnamedChildContinuationMayCallParent"
       ],
-      "source": "// BT-4033: a supervised actor child's start returns only once its\n// `initialize` has returned, as `Actor spawn` does (BT-3992) and as OTP\n// `init/1` does. An `initialize` that raises fails the child's start, and so\n// the parent's start, instead of the child crash-looping after the parent\n// reported success.\n//\n// Fixtures: stdlib/test/fixtures/bt4033opener.bt\n//           stdlib/test/fixtures/bt4033sup.bt\n//           stdlib/test/fixtures/bt4033named_sup.bt\n//           stdlib/test/fixtures/bt4033opener_pool.bt\n//           stdlib/test/fixtures/bt4033unnamed_caller_sup.bt\n//           stdlib/test/fixtures/bt4033init_parent_caller.bt\n//           stdlib/test/fixtures/bt4033init_caller_sup.bt\n//           stdlib/test/fixtures/bt3992parent_caller.bt (BT-3992)\n\nTestCase subclass: SupervisedActorAwaitedStartTest\n\n  // The issue repro: `spawn` raises at once, with the child's error in the\n  // hint, and leaves no supervisor behind to crash-loop.\n  testFailingChildInitializeFailsSupervisorSpawn =>\n    start := DateTime monotonicNow\n    e := [Bt4033Sup spawn] on: Error do: [:ex | ex]\n    self assert: DateTime monotonicNow - start < 4000000000\n    self assert: e kind equals: #supervisor_start_failed\n    self assert: (e hint includesSubstring: \"eaddrinuse\")\n    self assert: Bt4033Sup current equals: nil\n\n  testFailingChildInitializeIsAResultErrorForSupervise =>\n    r := Bt4033Sup supervise\n    self assert: r error kind equals: #supervisor_start_failed\n    self assert: (r error hint includesSubstring: \"eaddrinuse\")\n    self assert: Bt4033Sup current equals: nil\n\n  testFailingChildInitializeIsAResultErrorForSpawnAs =>\n    r := Bt4033Sup spawnAs: #bt4033_sup\n    self assert: r error kind equals: #supervisor_start_failed\n    self assert: (r error hint includesSubstring: \"eaddrinuse\")\n    self assert: (Bt4033Sup named: #bt4033_sup) error kind equals: #name_not_registered\n\n  testFailingNamedChildInitializeFailsSupervisorStart =>\n    r := Bt4033NamedSup supervise\n    self assert: r error kind equals: #supervisor_start_failed\n    self assert: (r error hint includesSubstring: \"eaddrinuse\")\n    self assert: (Bt4033Opener named: #bt4033_opener) error kind equals: #name_not_registered\n\n  testFailingPoolChildInitializeFailsStartChild =>\n    pool := Bt4033OpenerPool spawn\n    r := pool startChild: #{#port => 1}\n    self assert: r error kind equals: #child_start_failed\n    self assert: (r error hint includesSubstring: \"eaddrinuse\")\n    plain := pool startChild\n    self assert: plain error kind equals: #child_start_failed\n    named := pool startChild: #{#port => 1} name: #bt4033_pool_opener\n    self assert: named error kind equals: #child_start_failed\n    self assert: (named error hint includesSubstring: \"eaddrinuse\")\n    self assert: pool count equals: 0\n    self assert: pool isAlive\n    pool stop\n\n  // A continuation requested in `initialize` runs after the start returned,\n  // so its synchronous call to the parent neither hangs nor fails the start.\n  testUnnamedChildContinuationMayCallParent =>\n    start := DateTime monotonicNow\n    sup := Bt4033UnnamedCallerSup spawn\n    self assert: DateTime monotonicNow - start < 4000000000\n    child :: Bt3992ParentCaller := (sup which: Bt3992ParentCaller) unwrap\n    50 timesRepeat: [child parentCount isNil ifTrue: [Timer sleep: 20]]\n    self assert: child parentCount equals: 1\n    sup stop\n\n  // The hang rule: `initialize` calling its parent blocks until the 5 s init\n  // timeout (the parent is waiting for that `initialize`), and the start\n  // fails with a hint that names the rule.\n  testChildInitializeCallingParentFailsStartNamingHangRule =>\n    r := Bt4033InitCallerSup supervise\n    self assert: r error kind equals: #supervisor_start_failed\n    self assert: (r error hint includesSubstring: \"hang rule\")\n    self assert: (r error hint includesSubstring: \"continueWith:\")",
-      "explanation": "BT-4033: a supervised actor child's start returns only once its `initialize` has returned, as `Actor spawn` does (BT-3992) and as OTP `init/1` does. An `initialize` that raises fails the child's start, and so the parent's start, instead of the child crash-looping after the parent reported success.  Fixtures: stdlib/test/fixtures/bt4033opener.bt           stdlib/test/fixtures/bt4033sup.bt           stdlib/test/fixtures/bt4033named_sup.bt           stdlib/test/fixtures/bt4033opener_pool.bt           stdlib/test/fixtures/bt4033unnamed_caller_sup.bt           stdlib/test/fixtures/bt4033init_parent_caller.bt           stdlib/test/fixtures/bt4033init_caller_sup.bt           stdlib/test/fixtures/bt3992parent_caller.bt (BT-3992)"
+      "source": "// BT-4033: a supervised actor child's start returns only once its\n// `initialize` has returned, as `Actor spawn` does (BT-3992) and as OTP\n// `init/1` does. An `initialize` that raises fails the child's start, and so\n// the parent's start, instead of the child crash-looping after the parent\n// reported success.\n//\n// Fixtures: stdlib/test/fixtures/bt4033opener.bt\n//           stdlib/test/fixtures/bt4033sup.bt\n//           stdlib/test/fixtures/bt4033named_sup.bt\n//           stdlib/test/fixtures/bt4033opener_pool.bt\n//           stdlib/test/fixtures/bt4033unnamed_caller_sup.bt\n//           stdlib/test/fixtures/bt4033init_parent_caller.bt\n//           stdlib/test/fixtures/bt4033init_caller_sup.bt\n//           stdlib/test/fixtures/bt4033name_taker.bt\n//           stdlib/test/fixtures/bt4033name_taker_pool.bt\n//           stdlib/test/fixtures/bt3992parent_caller.bt (BT-3992)\n\nTestCase subclass: SupervisedActorAwaitedStartTest\n\n  // The issue repro: `spawn` raises at once, with the child's error in the\n  // hint, and leaves no supervisor behind to crash-loop.\n  testFailingChildInitializeFailsSupervisorSpawn =>\n    start := DateTime monotonicNow\n    e := [Bt4033Sup spawn] on: Error do: [:ex | ex]\n    self assert: DateTime monotonicNow - start < 4000000000\n    self assert: e kind equals: #supervisor_start_failed\n    self assert: (e hint includesSubstring: \"eaddrinuse\")\n    self assert: Bt4033Sup current equals: nil\n\n  testFailingChildInitializeIsAResultErrorForSupervise =>\n    r := Bt4033Sup supervise\n    self assert: r error kind equals: #supervisor_start_failed\n    self assert: (r error hint includesSubstring: \"eaddrinuse\")\n    self assert: Bt4033Sup current equals: nil\n\n  testFailingChildInitializeIsAResultErrorForSpawnAs =>\n    r := Bt4033Sup spawnAs: #bt4033_sup\n    self assert: r error kind equals: #supervisor_start_failed\n    self assert: (r error hint includesSubstring: \"eaddrinuse\")\n    self assert: (Bt4033Sup named: #bt4033_sup) error kind equals: #name_not_registered\n\n  testFailingNamedChildInitializeFailsSupervisorStart =>\n    r := Bt4033NamedSup supervise\n    self assert: r error kind equals: #supervisor_start_failed\n    self assert: (r error hint includesSubstring: \"eaddrinuse\")\n    self assert: (Bt4033Opener named: #bt4033_opener) error kind equals: #name_not_registered\n\n  testFailingPoolChildInitializeFailsStartChild =>\n    pool := Bt4033OpenerPool spawn\n    r := pool startChild: #{#port => 1}\n    self assert: r error kind equals: #child_start_failed\n    self assert: (r error hint includesSubstring: \"eaddrinuse\")\n    plain := pool startChild\n    self assert: plain error kind equals: #child_start_failed\n    named := pool startChild: #{#port => 1} name: #bt4033_pool_opener\n    self assert: named error kind equals: #child_start_failed\n    self assert: (named error hint includesSubstring: \"eaddrinuse\")\n    self assert: pool count equals: 0\n    self assert: pool isAlive\n    pool stop\n\n  // An `initialize` that itself hits `#name_registered` is a failed child\n  // start, not a taken name for the pool child.\n  testNamedPoolChildInitializeErrorIsChildStartFailed =>\n    taken := (Bt4033NameTaker spawnAs: #bt4033_taken) unwrap\n    pool := Bt4033NameTakerPool spawn\n    r := pool startChild: #{#other => #bt4033_taken} name: #bt4033_pool_taker\n    self assert: r error kind equals: #child_start_failed\n    self assert: (Bt4033NameTaker named: #bt4033_pool_taker) error kind equals: #name_not_registered\n    pool stop\n    taken stop\n\n  // A continuation requested in `initialize` runs after the start returned,\n  // so its synchronous call to the parent neither hangs nor fails the start.\n  testUnnamedChildContinuationMayCallParent =>\n    start := DateTime monotonicNow\n    sup := Bt4033UnnamedCallerSup spawn\n    self assert: DateTime monotonicNow - start < 4000000000\n    child :: Bt3992ParentCaller := (sup which: Bt3992ParentCaller) unwrap\n    50 timesRepeat: [child parentCount isNil ifTrue: [Timer sleep: 20]]\n    self assert: child parentCount equals: 1\n    sup stop\n\n  // The hang rule: `initialize` calling its parent blocks until the 5 s init\n  // timeout (the parent is waiting for that `initialize`), and the start\n  // fails with a hint that names the rule.\n  testChildInitializeCallingParentFailsStartNamingHangRule =>\n    r := Bt4033InitCallerSup supervise\n    self assert: r error kind equals: #supervisor_start_failed\n    self assert: (r error hint includesSubstring: \"hang rule\")\n    self assert: (r error hint includesSubstring: \"continueWith:\")",
+      "explanation": "BT-4033: a supervised actor child's start returns only once its `initialize` has returned, as `Actor spawn` does (BT-3992) and as OTP `init/1` does. An `initialize` that raises fails the child's start, and so the parent's start, instead of the child crash-looping after the parent reported success.  Fixtures: stdlib/test/fixtures/bt4033opener.bt           stdlib/test/fixtures/bt4033sup.bt           stdlib/test/fixtures/bt4033named_sup.bt           stdlib/test/fixtures/bt4033opener_pool.bt           stdlib/test/fixtures/bt4033unnamed_caller_sup.bt           stdlib/test/fixtures/bt4033init_parent_caller.bt           stdlib/test/fixtures/bt4033init_caller_sup.bt           stdlib/test/fixtures/bt4033name_taker.bt           stdlib/test/fixtures/bt4033name_taker_pool.bt           stdlib/test/fixtures/bt3992parent_caller.bt (BT-3992)"
     },
     {
       "id": "stdlib-test-supervision-class-method-test",

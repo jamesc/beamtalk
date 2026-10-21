@@ -14,6 +14,8 @@
 //           stdlib/test/fixtures/bt4033unnamed_caller_sup.bt
 //           stdlib/test/fixtures/bt4033init_parent_caller.bt
 //           stdlib/test/fixtures/bt4033init_caller_sup.bt
+//           stdlib/test/fixtures/bt4033name_taker.bt
+//           stdlib/test/fixtures/bt4033name_taker_pool.bt
 //           stdlib/test/fixtures/bt3992parent_caller.bt (BT-3992)
 
 TestCase subclass: SupervisedActorAwaitedStartTest
@@ -59,6 +61,17 @@ TestCase subclass: SupervisedActorAwaitedStartTest
     self assert: pool count equals: 0
     self assert: pool isAlive
     pool stop
+
+  // An `initialize` that itself hits `#name_registered` is a failed child
+  // start, not a taken name for the pool child.
+  testNamedPoolChildInitializeErrorIsChildStartFailed =>
+    taken := (Bt4033NameTaker spawnAs: #bt4033_taken) unwrap
+    pool := Bt4033NameTakerPool spawn
+    r := pool startChild: #{#other => #bt4033_taken} name: #bt4033_pool_taker
+    self assert: r error kind equals: #child_start_failed
+    self assert: (Bt4033NameTaker named: #bt4033_pool_taker) error kind equals: #name_not_registered
+    pool stop
+    taken stop
 
   // A continuation requested in `initialize` runs after the start returned,
   // so its synchronous call to the parent neither hangs nor fails the start.
