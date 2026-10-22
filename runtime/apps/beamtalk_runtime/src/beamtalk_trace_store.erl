@@ -12,43 +12,48 @@ Trace store gen_server for actor observability (ADR 0069 Phase 1).
 Owns ETS tables and atomics refs for lock-free aggregate tracking and
 opt-in trace event capture. The gen_server handles queries and lifecycle
 but is NOT in the write path — all writes happen in the calling process
-via atomics:add/3, CAS loops, and ets:insert/2.
+via atomics:add/3, CAS loops, and ets:insert_new/2 on a key miss.
 
-Storage layout:
-- beamtalk_agg_index (ETS set): {Pid, Selector} → {Key, CounterRef, SlotBase}
-  (live actors only)
-- beamtalk_agg_class (ETS set): Pid → Class (live actors only)
-- beamtalk_agg_pid_keys (ETS bag): Pid → Selector, one row per agg_index key,
-  so an actor's rows can be found without scanning agg_index
-- beamtalk_agg_retired (ETS set): {Class, Selector} → {Key, CounterRef, SlotBase},
-  the folded-in stats of actors that have died (bounded by classes × selectors)
+Storage layout (BT-4103):
+- beamtalk_agg_class_stats (ETS set): {Class, Selector} → {Key, CounterRef,
+  SlotBase}. The always-on aggregates, bounded by classes × selectors. Rows
+  are never deleted once created; `clear/0` zeroes their slots in place and
+  readers skip zero-call rows.
+- beamtalk_agg_pid (ETS set): {Pid, Selector} → {Key, CounterRef, SlotBase,
+  Class}. Per-actor aggregates, written only while tracing is enabled and
+  dropped on `disable/0`. Bounded by `?MAX_PID_KEYS`; new keys past the cap
+  are not tracked until the sweep reclaims dead pids' rows.
+- beamtalk_agg_pid_keys (ETS bag): Pid → Selector, one row per agg_pid key,
+  so an actor's rows (and dead pids) are found without scanning agg_pid
 - beamtalk_agg_free_slots (ETS set): {SlotBase} for atomics slots released by
-  retired actors, reused before the slot allocator bumps
+  swept pid rows, reused before the slot allocator bumps. Only pid rows use
+  it, so it is idle unless tracing is enabled.
 - beamtalk_trace_events (ETS ordered_set): composite key → trace event
 - atomics ref in persistent_term: lock-free aggregate increments + CAS min/max (~50ns)
 - persistent_term toggle: beamtalk_tracing_enabled (true | false)
 
-Actor retirement (BT-4066): per-pid aggregates would otherwise keep one row per
-{Pid, Selector} for every actor ever seen. When an actor dies its rows are
-folded into the per-{Class, Selector} retired rollup and deleted, and their
-atomics slots go on the free list for reuse. The tables and the atomics array
-then scale with live actors (plus the bounded rollup), not with actor churn.
-The gen_server arms a monitor whenever a pid gets a new aggregate row, and
-retires the pid on its `DOWN`. That covers every way an actor ends (stop,
-kill, untrapped exit signal, lost remote node) and rows a caller re-creates
-after the actor died. Retiring only in the gen_server serializes every fold
-with `grow_counters/2` and `clear/0`, which also run there. Retiring is
-idempotent: rows are claimed with `ets:take/2`. A caller still mid-write to a
-slot as it is released can, in a microseconds-wide window, add one dispatch to
-the slot's next owner; slots are zeroed when allocated, not when released.
-`clear/0` releases every slot rather than replacing the atomics array, so the
+No monitors, no retirement (BT-4103): per-pid rows used to be folded into a
+per-class rollup on each actor's `DOWN` (BT-4066), which monitored every actor
+and put ~2 messages per short-lived actor through this gen_server. Now the
+class table carries the always-on totals directly — it needs no per-actor
+machinery at all — and the enabled-only pid table is swept for dead pids by
+the periodic sweep timer (off the dispatch path), with no monitors armed. An
+actor's `monitored_by` is never touched by the trace store. Sweeping claims
+rows with `ets:take/2`. A caller still mid-write to a slot as it is released
+can, in a microseconds-wide window, add one dispatch to the slot's next
+owner; slots are zeroed when allocated, not when released. `clear/0` zeroes
+the class slots in place rather than replacing the atomics array, so the
 array never shrinks: it stays at the peak number of live keys. Only pids get
-aggregates: a non-pid `pid` in telemetry metadata is dropped, since it cannot
-be monitored.
+aggregates: a non-pid `pid` in telemetry metadata is dropped, since per-actor
+rows are keyed by pid and malformed keys would poison the stats readers.
 
 ETS tables name `beamtalk_ets_heir` as heir for crash resilience and are
 reclaimed from it on restart.
 Atomics refs stored in persistent_term survive gen_server crashes.
+
+Upgrading from a pre-BT-4103 store resets the aggregates (the old per-pid
+index and retired rollup are deleted once, on first boot) but keeps the
+captured trace events.
 
 See also: docs/ADR/0069-actor-observability-and-tracing.md
 """.
@@ -106,7 +111,7 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
     code_change/3
 ]).
 
-%% Atomics slot offsets (per {Pid, Selector} entry)
+%% Atomics slot offsets (per aggregate key: {Class, Selector} or {Pid, Selector})
 -define(SLOT_CALLS, 1).
 -define(SLOT_OK, 2).
 -define(SLOT_ERRORS, 3).
@@ -121,12 +126,16 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 -define(MIN_SENTINEL, 4611686018427387903).
 
 %% Table names
--define(AGG_INDEX, beamtalk_agg_index).
--define(AGG_CLASS, beamtalk_agg_class).
+-define(AGG_CLASS_STATS, beamtalk_agg_class_stats).
+-define(AGG_PID, beamtalk_agg_pid).
 -define(AGG_PID_KEYS, beamtalk_agg_pid_keys).
--define(AGG_RETIRED, beamtalk_agg_retired).
 -define(AGG_FREE_SLOTS, beamtalk_agg_free_slots).
 -define(TRACE_EVENTS, beamtalk_trace_events).
+
+%% Pre-BT-4103 aggregate tables, deleted once on upgrade (see
+%% reset_aggregates_after_upgrade/0). Trace events keep their table and shape
+%% and are preserved across the upgrade.
+-define(RETIRED_AGG_TABLES, [beamtalk_agg_index, beamtalk_agg_class, beamtalk_agg_retired]).
 
 %% persistent_term keys
 -define(PT_ENABLED, beamtalk_tracing_enabled).
@@ -141,14 +150,15 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 -define(INITIAL_COUNTER_SIZE, 8000).
 -define(EVICTION_INTERVAL_MS, 1000).
 -define(EVICTION_PERCENT, 10).
+%% Cap on enabled-only per-{Pid, Selector} aggregate keys (BT-4103). New keys
+%% past the cap are not tracked until the sweep reclaims dead pids' rows. A
+%% soft cap: two callers racing past it can overshoot by a row each.
+-define(MAX_PID_KEYS, 100000).
 
 -record(state, {
     sweep_timer :: reference() | undefined,
     %% VM stats from telemetry_poller
-    vm_stats = #{} :: map(),
-    %% Actors with live aggregate rows, monitored so their rows are retired
-    %% when they die (BT-4066).
-    monitors = #{} :: #{pid() => reference()}
+    vm_stats = #{} :: map()
 }).
 
 %%====================================================================
@@ -160,12 +170,18 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
--doc "Enable trace event capture. Aggregates are always on.".
+-doc """
+Enable trace event capture and per-actor aggregate stats.
+Class/selector aggregates are always on.
+""".
 -spec enable() -> ok.
 enable() ->
     gen_server:call(?MODULE, enable).
 
--doc "Disable trace event capture.".
+-doc """
+Disable trace event capture. Drops the per-actor aggregate stats;
+class/selector aggregates keep accumulating.
+""".
 -spec disable() -> ok.
 disable() ->
     gen_server:call(?MODULE, disable).
@@ -204,8 +220,8 @@ record_dispatch(Pid, Selector, _Duration, _Outcome, _Mode, Class) when
     not is_pid(Pid); not is_atom(Selector); not is_atom(Class)
 ->
     %% Malformed metadata (the function is exported and any code can emit the
-    %% event): a non-pid cannot be monitored, so its rows could never retire;
-    %% a non-atom class or selector would poison the stats readers.
+    %% event): per-actor rows are keyed by pid, and a non-atom class or
+    %% selector would poison the stats readers. Drop the sample.
     ok;
 record_dispatch(Pid, Selector, Duration, Outcome, Mode, Class) ->
     %% A missing table (the gen_server mid-restart, or a hot upgrade whose new
@@ -218,13 +234,20 @@ record_dispatch(Pid, Selector, Duration, Outcome, Mode, Class) ->
     end.
 
 do_record_dispatch(Pid, Selector, Duration, Outcome, _Mode, Class) ->
-    %% Store Pid→Class mapping from telemetry metadata so actor_stats
-    %% shows correct class names instead of relying on instance registry lookup.
-    case Class of
-        unknown -> ok;
-        _ -> ets:insert(?AGG_CLASS, {Pid, Class})
-    end,
-    {AtomicsRef, SlotBase} = ensure_counter_slot(Pid, Selector),
+    %% Always-on aggregates, keyed by {Class, Selector} only: no per-pid ETS
+    %% write, no message to the gen_server, no monitor (BT-4103).
+    {ClassRef, ClassBase} = ensure_class_slot(Class, Selector),
+    add_sample(ClassRef, ClassBase, Duration, Outcome),
+    %% Per-actor detail only while tracing is enabled.
+    case is_enabled() of
+        true ->
+            {PidRef, PidBase} = ensure_pid_slot(Pid, Selector, Class),
+            add_sample(PidRef, PidBase, Duration, Outcome);
+        false ->
+            ok
+    end.
+
+add_sample(AtomicsRef, SlotBase, Duration, Outcome) ->
     atomics:add(AtomicsRef, SlotBase + ?SLOT_CALLS, 1),
     atomics:add(AtomicsRef, SlotBase + ?SLOT_TOTAL_DURATION, Duration),
     case Outcome of
@@ -294,12 +317,18 @@ export_traces(Opts) when is_map(Opts) ->
 export_traces(_) ->
     {error, badarg}.
 
--doc "Get aggregate stats for all actors.".
+-doc """
+Get aggregate stats: per-{Class, Selector} entries always, plus per-actor
+entries while tracing is enabled.
+""".
 -spec get_stats() -> map().
 get_stats() ->
     gen_server:call(?MODULE, get_stats).
 
--doc "Get aggregate stats for a specific actor pid.".
+-doc """
+Get aggregate stats for a specific actor pid. Answers `#{}` unless tracing
+is enabled.
+""".
 -spec get_stats(pid()) -> map().
 get_stats(Pid) ->
     gen_server:call(?MODULE, {get_stats, Pid}).
@@ -445,9 +474,8 @@ handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
     %% Record trace event with mode => lifecycle, duration 0 (instantaneous)
     EventMeta = maps:without([pid, class], Metadata),
     record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop),
-    %% No retirement here, even on stop: the actor's rows are retired by the
-    %% trace store's monitor when the actor is gone, in the gen_server, where
-    %% folds are serialized with grows and clear/0 (BT-4066).
+    %% No cleanup here, even on stop: the class aggregates accumulate, and a
+    %% pid row for this actor (tracing enabled) is swept once it is dead.
     ok.
 
 -doc """
@@ -506,13 +534,8 @@ init([]) ->
     %% Start periodic sweep timer
     TimerRef = start_sweep_timer(),
 
-    %% Monitors do not survive a restart; re-arm them for every actor whose
-    %% rows did (via the ETS heir).
-    backfill_pid_keys(),
-    Monitors = rearm_monitors(),
-
     ?LOG_INFO("Trace store started", #{}),
-    {ok, #state{sweep_timer = TimerRef, monitors = Monitors}}.
+    {ok, #state{sweep_timer = TimerRef}}.
 
 handle_call(enable, _From, State) ->
     persistent_term:put(?PT_ENABLED, true),
@@ -520,6 +543,7 @@ handle_call(enable, _From, State) ->
     {reply, ok, State};
 handle_call(disable, _From, State) ->
     persistent_term:put(?PT_ENABLED, false),
+    drop_pid_data(),
     ?LOG_INFO("Trace capture disabled", #{}),
     {reply, ok, State};
 handle_call(clear, _From, State) ->
@@ -571,14 +595,6 @@ handle_call(_Request, _From, State) ->
 
 handle_cast({vm_measurements, Measurements}, State) ->
     {noreply, State#state{vm_stats = Measurements}};
-handle_cast({track_pid, Pid}, #state{monitors = Monitors} = State) when is_pid(Pid) ->
-    case maps:is_key(Pid, Monitors) of
-        true ->
-            {noreply, State};
-        false ->
-            MRef = erlang:monitor(process, Pid),
-            {noreply, State#state{monitors = Monitors#{Pid => MRef}}}
-    end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -586,14 +602,6 @@ handle_info(sweep_eviction, State) ->
     do_sweep_eviction(),
     TimerRef = start_sweep_timer(),
     {noreply, State#state{sweep_timer = TimerRef}};
-handle_info({'DOWN', MRef, process, Pid, _Reason}, #state{monitors = Monitors} = State) ->
-    NewMonitors =
-        case Monitors of
-            #{Pid := MRef} -> maps:remove(Pid, Monitors);
-            _ -> Monitors
-        end,
-    safe_retire_pid(Pid),
-    {noreply, State#state{monitors = NewMonitors}};
 handle_info({'ETS-TRANSFER', TableName, _FromPid, _HeirData}, State) ->
     %% `beamtalk_ets_heir` handed a table back during init (ensure_ets_tables/0).
     ?LOG_DEBUG("Reclaimed ETS table from heir", #{table => TableName}),
@@ -610,17 +618,18 @@ terminate(_Reason, State) ->
     ok.
 
 code_change(OldVsn, State, Extra) ->
-    %% Ensure new ETS tables (e.g. beamtalk_agg_class) exist after live upgrade.
+    %% Ensure new ETS tables exist after live upgrade (old aggregate tables
+    %% are reset by ensure_ets_tables/0).
     ensure_ets_tables(),
     beamtalk_hot_reload:code_change(OldVsn, upgrade_state(State), Extra).
 
 -doc """
-Migrate a pre-BT-4066 state record (no `monitors` field): index the existing
-rows by pid and monitor their actors, so they are retired like new ones.
+Migrate an old state record: pre-BT-4066 `{state, Sweep, Vm}` is already the
+current shape, and the BT-4066 `{state, Sweep, Vm, Monitors}` drops its
+monitors (BT-4103 arms none).
 """.
-upgrade_state({state, SweepTimer, VmStats}) ->
-    backfill_pid_keys(),
-    #state{sweep_timer = SweepTimer, vm_stats = VmStats, monitors = rearm_monitors()};
+upgrade_state({state, SweepTimer, VmStats, _Monitors}) ->
+    #state{sweep_timer = SweepTimer, vm_stats = VmStats};
 upgrade_state(State) ->
     State.
 
@@ -633,14 +642,36 @@ Create the ETS tables, or reclaim them from `beamtalk_ets_heir` when they
 survived the previous trace store's death (crash resilience, ADR 0069).
 """.
 ensure_ets_tables() ->
+    reset_aggregates_after_upgrade(),
     Opts = [named_table, public, {write_concurrency, true}, {read_concurrency, true}],
-    ok = beamtalk_ets_heir:ensure_table(?AGG_INDEX, [set | Opts]),
-    ok = beamtalk_ets_heir:ensure_table(?AGG_CLASS, [set | Opts]),
+    ok = beamtalk_ets_heir:ensure_table(?AGG_CLASS_STATS, [set | Opts]),
+    ok = beamtalk_ets_heir:ensure_table(?AGG_PID, [set | Opts]),
     ok = beamtalk_ets_heir:ensure_table(?AGG_PID_KEYS, [bag | Opts]),
-    ok = beamtalk_ets_heir:ensure_table(?AGG_RETIRED, [set | Opts]),
     ok = beamtalk_ets_heir:ensure_table(?AGG_FREE_SLOTS, [set | Opts]),
     ok = beamtalk_ets_heir:ensure_table(?TRACE_EVENTS, [ordered_set | Opts]),
     ok.
+
+-doc """
+Reset the aggregates once when booting over pre-BT-4103 tables: the old
+per-pid index, pid→class map and retired rollup have no counterpart in the
+new layout, and their rows reference slots of an array layout we no longer
+share, so they are deleted along with the free list and the counters start
+fresh. Trace events keep their table and are preserved. A same-version
+restart finds no retired tables and reclaims everything from the heir.
+""".
+reset_aggregates_after_upgrade() ->
+    case lists:any(fun(T) -> ets:whereis(T) =/= undefined end, ?RETIRED_AGG_TABLES) of
+        false ->
+            ok;
+        true ->
+            ?LOG_INFO("Resetting pre-BT-4103 aggregate tables", #{}),
+            lists:foreach(
+                fun(T) -> catch ets:delete(T) end,
+                ?RETIRED_AGG_TABLES ++
+                    [?AGG_CLASS_STATS, ?AGG_PID, ?AGG_PID_KEYS, ?AGG_FREE_SLOTS]
+            ),
+            fresh_counters()
+    end.
 
 -doc "Ensure atomics ref and slot allocator exist in persistent_term.".
 ensure_counters() ->
@@ -648,13 +679,7 @@ ensure_counters() ->
         _Ref -> ok
     catch
         error:badarg ->
-            Ref = atomics:new(?INITIAL_COUNTER_SIZE, [{signed, true}]),
-            persistent_term:put(?PT_COUNTERS, Ref),
-            %% Atomic slot allocator — single atomics ref with 1 element for the next slot base.
-            %% atomics:add_get/3 is truly atomic, preventing concurrent slot collisions.
-            Allocator = atomics:new(1, [{signed, false}]),
-            atomics:put(Allocator, 1, 1),
-            persistent_term:put(?PT_SLOT_ALLOCATOR, Allocator)
+            fresh_counters()
     end,
     %% Span ID counter for causal trace linking.
     %% Monotonically incrementing integers, one atomics:add_get/3 per span (~10ns).
@@ -665,6 +690,20 @@ ensure_counters() ->
             SpanIdRef = atomics:new(1, [{signed, false}]),
             persistent_term:put(?PT_SPAN_ID_COUNTER, SpanIdRef)
     end.
+
+-doc """
+Create a fresh counters array and slot allocator, replacing any previous
+ones. Only a code upgrade (which deletes the aggregate tables first) or a
+fresh boot may call this: every live row references the current array.
+""".
+fresh_counters() ->
+    Ref = atomics:new(?INITIAL_COUNTER_SIZE, [{signed, true}]),
+    persistent_term:put(?PT_COUNTERS, Ref),
+    %% Atomic slot allocator — single atomics ref with 1 element for the next slot base.
+    %% atomics:add_get/3 is truly atomic, preventing concurrent slot collisions.
+    Allocator = atomics:new(1, [{signed, false}]),
+    atomics:put(Allocator, 1, 1),
+    persistent_term:put(?PT_SLOT_ALLOCATOR, Allocator).
 
 -doc "Initialise persistent_term defaults.".
 init_persistent_terms() ->
@@ -686,55 +725,75 @@ init_persistent_terms() ->
 %%====================================================================
 
 -doc """
-Get or allocate atomics slots for a {Pid, Selector} pair.
-Called from the write path (calling process), not the gen_server.
-Every new row asks the gen_server to monitor the pid, so the rows are
-retired when the actor dies (BT-4066).
+Get or allocate atomics slots for a {Class, Selector} pair (the always-on
+aggregates). Called from the write path (calling process), not the gen_server.
+Class rows are sticky — never deleted, never released — so their slots come
+from the bump allocator only and the free list stays off the always-on path.
 """.
--spec ensure_counter_slot(pid(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
-ensure_counter_slot(Pid, Selector) ->
-    Key = {Pid, Selector},
-    case ets:lookup(?AGG_INDEX, Key) of
+-spec ensure_class_slot(atom(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
+ensure_class_slot(Class, Selector) ->
+    Key = {Class, Selector},
+    case ets:lookup(?AGG_CLASS_STATS, Key) of
         [{_Key, AtomicsRef, SlotBase}] ->
             {AtomicsRef, SlotBase};
         [] ->
-            case allocate_counter_slot(?AGG_INDEX, Key) of
-                {AtomicsRef, SlotBase, new} ->
-                    track_pid_key(Pid, Selector),
-                    {AtomicsRef, SlotBase};
-                {AtomicsRef, SlotBase, existing} ->
-                    {AtomicsRef, SlotBase};
-                {AtomicsRef, SlotBase, dummy} ->
-                    %% No row, but record_dispatch/6 may have added an
-                    %% agg_class row: still monitor the pid so it is removed.
-                    track_pid(Pid),
+            MakeRow = fun(Ref, Base) -> {Key, Ref, Base} end,
+            case allocate_counter_slot(?AGG_CLASS_STATS, Key, MakeRow, bump) of
+                {AtomicsRef, SlotBase, _} ->
                     {AtomicsRef, SlotBase}
             end
     end.
 
 -doc """
-Get or allocate the retired-rollup slots for a {Class, Selector} pair.
-The rollup is keyed by class, so it is bounded by classes × selectors.
-Only called from the gen_server, which grows the array inline, so it never
-gets a dummy slot.
+Get or allocate atomics slots for a {Pid, Selector} pair (per-actor detail,
+written only while tracing is enabled). The table is capped at
+`?MAX_PID_KEYS`: past the cap new keys are not tracked (a dummy slot absorbs
+their writes) until the sweep reclaims dead pids' rows. Freed slots are
+recycled through the free list, so the array stays at its peak.
 """.
--spec ensure_retired_slot(atom(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
-ensure_retired_slot(Class, Selector) ->
-    Key = {Class, Selector},
-    case ets:lookup(?AGG_RETIRED, Key) of
-        [{_Key, AtomicsRef, SlotBase}] ->
-            {AtomicsRef, SlotBase};
+-spec ensure_pid_slot(pid(), atom(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
+ensure_pid_slot(Pid, Selector, Class) ->
+    Key = {Pid, Selector},
+    case ets:lookup(?AGG_PID, Key) of
+        [Row] ->
+            row_slots(Row);
         [] ->
-            {AtomicsRef, SlotBase, _} = allocate_counter_slot(?AGG_RETIRED, Key),
-            {AtomicsRef, SlotBase}
+            ensure_pid_slot_capped(Key, Pid, Selector, Class)
+    end.
+
+ensure_pid_slot_capped(Key, Pid, Selector, Class) ->
+    case ets:info(?AGG_PID, size) >= ?MAX_PID_KEYS of
+        true ->
+            {atomics:new(?SLOTS_PER_KEY, [{signed, true}]), 0};
+        false ->
+            MakeRow = fun(Ref, Base) -> {Key, Ref, Base, Class} end,
+            case allocate_counter_slot(?AGG_PID, Key, MakeRow, free_list) of
+                {AtomicsRef, SlotBase, new} ->
+                    true = ets:insert(?AGG_PID_KEYS, {Pid, Selector}),
+                    {AtomicsRef, SlotBase};
+                {AtomicsRef, SlotBase, _} ->
+                    {AtomicsRef, SlotBase}
+            end
     end.
 
 -doc """
-Allocate atomics slots for `Key` in `Table` (agg_index or agg_retired).
+The slot pointer of an aggregate row. Class rows are `{Key, Ref, Base}` and
+pid rows are `{Key, Ref, Base, Class}`: the ref and base sit at positions 2
+and 3 in both, so the slot machinery below is shape-agnostic.
+""".
+row_slots({_Key, AtomicsRef, SlotBase}) ->
+    {AtomicsRef, SlotBase};
+row_slots({_Key, AtomicsRef, SlotBase, _Class}) ->
+    {AtomicsRef, SlotBase}.
 
-The slot base comes from the free list when a retired actor released one,
-otherwise from the bump allocator. The slots are zeroed before use, since a
-reused slot still holds its previous owner's counts. The row is inserted with
+-doc """
+Allocate atomics slots for `Key` in `Table`, building the row with `MakeRow`.
+
+With `free_list` the slot base comes from the free list when a swept pid row
+released one, otherwise from the bump allocator; with `bump` it always comes
+from the bump allocator (class rows are never released, so they never need
+the free list). The slots are zeroed before use, since a reused slot still
+holds its previous owner's counts. The row is inserted with
 `ets:insert_new/2`: when two processes observe the same key first, the loser
 hands its slot back and uses the winner's row, so no slot leaks. Answers
 `new` when this call created the row, `existing` when it lost that race, and
@@ -742,24 +801,29 @@ hands its slot back and uses the winner's row, so no slot leaks. Answers
 dummy ref absorbs writes, because observability must never crash the actor
 being observed.
 """.
--spec allocate_counter_slot(atom(), term()) ->
+-spec allocate_counter_slot(atom(), term(), fun(), bump | free_list) ->
     {atomics:atomics_ref(), non_neg_integer(), new | existing | dummy}.
-allocate_counter_slot(Table, Key) ->
-    SlotBase = take_slot(),
+allocate_counter_slot(Table, Key, MakeRow, SlotSource) ->
+    SlotBase =
+        case SlotSource of
+            bump -> allocate_next_slot();
+            free_list -> take_slot()
+        end,
     case ensure_capacity(SlotBase) of
         {ok, AtomicsRef} ->
             reset_slot(AtomicsRef, SlotBase),
-            case ets:insert_new(Table, {Key, AtomicsRef, SlotBase}) of
+            case ets:insert_new(Table, MakeRow(AtomicsRef, SlotBase)) of
                 true ->
                     {repoint_if_grown(Table, Key, AtomicsRef, SlotBase), SlotBase, new};
                 false ->
                     release_slot(SlotBase),
                     case ets:lookup(Table, Key) of
-                        [{_Key, WinnerRef, WinnerBase}] ->
+                        [WinnerRow] ->
+                            {WinnerRef, WinnerBase} = row_slots(WinnerRow),
                             {WinnerRef, WinnerBase, existing};
                         [] ->
-                            %% The winner's row was retired in between — retry.
-                            allocate_counter_slot(Table, Key)
+                            %% The winner's row was swept in between — retry.
+                            allocate_counter_slot(Table, Key, MakeRow, SlotSource)
                     end
             end;
         error ->
@@ -893,9 +957,9 @@ grow_counters(OldRef, OldSize) ->
     %% Copy existing values
     copy_counters(OldRef, NewRef, 1, OldSize),
     persistent_term:put(?PT_COUNTERS, NewRef),
-    %% Update all index entries to point to new ref
-    update_counter_refs(?AGG_INDEX, NewRef),
-    update_counter_refs(?AGG_RETIRED, NewRef),
+    %% Update all aggregate rows to point to new ref
+    update_counter_refs(?AGG_CLASS_STATS, NewRef),
+    update_counter_refs(?AGG_PID, NewRef),
     NewRef.
 
 -doc "Copy atomics values from old ref to new ref.".
@@ -911,13 +975,15 @@ copy_counters(OldRef, NewRef, Idx, MaxIdx) ->
 
 -doc """
 Re-point every row of a slot table at a new counter ref. `update_element`
-leaves a row that was retired meanwhile deleted, where a re-insert would
+leaves a row that was swept meanwhile deleted, where a re-insert would
 resurrect it.
 """.
 update_counter_refs(Table, NewRef) ->
+    %% The ref sits at element 2 in both class rows ({Key, Ref, Base}) and
+    %% pid rows ({Key, Ref, Base, Class}).
     ets:foldl(
-        fun({Key, _OldRef, _SlotBase}, Acc) ->
-            _ = ets:update_element(Table, Key, {2, NewRef}),
+        fun(Row, Acc) ->
+            _ = ets:update_element(Table, element(1, Row), {2, NewRef}),
             Acc
         end,
         ok,
@@ -925,138 +991,10 @@ update_counter_refs(Table, NewRef) ->
     ).
 
 %%====================================================================
-%% Internal: Actor retirement (BT-4066)
+%% Internal: Class resolution for health queries
 %%====================================================================
 
--doc """
-Record that `Pid` owns the agg_index row for `Selector`, and ask the
-gen_server to monitor `Pid`. Every new row asks, not only a pid's first:
-a row a late caller creates after the pid's `DOWN` was handled must arm a
-fresh monitor (whose immediate `DOWN` retires it). The gen_server keeps one
-monitor per pid, and a new row is rare (once per {Pid, Selector}).
-""".
-track_pid_key(Pid, Selector) ->
-    true = ets:insert(?AGG_PID_KEYS, {Pid, Selector}),
-    track_pid(Pid).
-
-track_pid(Pid) ->
-    gen_server:cast(?MODULE, {track_pid, Pid}).
-
--doc """
-Rebuild agg_pid_keys from agg_index, for rows written before it existed
-(a hot upgrade from a trace store without it). Idempotent: the table is a bag
-of unique {Pid, Selector} pairs.
-""".
-backfill_pid_keys() ->
-    ets:foldl(
-        fun({{Pid, Selector}, _Ref, _SlotBase}, Acc) ->
-            true = ets:insert(?AGG_PID_KEYS, {Pid, Selector}),
-            Acc
-        end,
-        ok,
-        ?AGG_INDEX
-    ).
-
--doc """
-Monitor every pid that has aggregate rows (after a restart or upgrade, which
-loses or predates the monitors). A pid that died meanwhile gets an immediate
-`DOWN` and is retired.
-""".
--spec rearm_monitors() -> #{pid() => reference()}.
-rearm_monitors() ->
-    Monitor = fun
-        (Pid, Acc) when is_map_key(Pid, Acc) -> Acc;
-        (Pid, Acc) when is_pid(Pid) -> Acc#{Pid => erlang:monitor(process, Pid)};
-        %% Rows written before non-pids were rejected: never monitorable.
-        (_NotPid, Acc) -> Acc
-    end,
-    WithKeys = ets:foldl(fun({Pid, _Selector}, Acc) -> Monitor(Pid, Acc) end, #{}, ?AGG_PID_KEYS),
-    ets:foldl(fun({Pid, _Class}, Acc) -> Monitor(Pid, Acc) end, WithKeys, ?AGG_CLASS).
-
--doc "Retire `Pid`, never raising: the gen_server must not crash on a `DOWN`.".
--spec safe_retire_pid(pid()) -> ok.
-safe_retire_pid(Pid) ->
-    try
-        retire_pid(Pid)
-    catch
-        Kind:Reason ->
-            ?LOG_WARNING("Failed to retire actor aggregates", #{
-                pid => Pid, kind => Kind, reason => Reason
-            }),
-            ok
-    end.
-
--doc """
-Fold a dead actor's per-pid aggregates into the per-{Class, Selector} retired
-rollup, delete its rows, and release its atomics slots for reuse.
-
-Runs only in the gen_server (on the pid's `DOWN`), so every fold is
-serialized with `grow_counters/2` and `clear/0`: the rollup slot it adds into
-cannot move to a new array or be released and reused mid-fold. Idempotent:
-each row is claimed with `ets:take/2`, and a pid with nothing left (a repeated
-`DOWN` from a re-armed monitor) costs one `ets:take/2`.
-""".
--spec retire_pid(pid()) -> ok.
-retire_pid(Pid) ->
-    case ets:take(?AGG_PID_KEYS, Pid) of
-        [] ->
-            ok;
-        Keys ->
-            Class = class_for_pid(Pid),
-            lists:foreach(fun({_Pid, Selector}) -> retire_key(Class, Pid, Selector) end, Keys)
-    end,
-    ets:delete(?AGG_CLASS, Pid),
-    ok.
-
-retire_key(Class, Pid, Selector) ->
-    case ets:take(?AGG_INDEX, {Pid, Selector}) of
-        [{_Key, AtomicsRef, SlotBase}] ->
-            case atomics:get(AtomicsRef, SlotBase + ?SLOT_CALLS) of
-                0 ->
-                    ok;
-                _ ->
-                    {RetiredRef, RetiredBase} = ensure_retired_slot(Class, Selector),
-                    fold_slot(AtomicsRef, SlotBase, RetiredRef, RetiredBase)
-            end,
-            release_slot(SlotBase),
-            ok;
-        [] ->
-            ok
-    end.
-
--doc "Add one slot group's counts into another (sums, then min/max).".
-fold_slot(FromRef, FromBase, ToRef, ToBase) ->
-    lists:foreach(
-        fun(Offset) ->
-            case atomics:get(FromRef, FromBase + Offset) of
-                0 -> ok;
-                Val -> atomics:add(ToRef, ToBase + Offset, Val)
-            end
-        end,
-        [?SLOT_CALLS, ?SLOT_OK, ?SLOT_ERRORS, ?SLOT_TIMEOUTS, ?SLOT_TOTAL_DURATION]
-    ),
-    case atomics:get(FromRef, FromBase + ?SLOT_MIN_DURATION) of
-        ?MIN_SENTINEL -> ok;
-        Min -> cas_min(ToRef, ToBase + ?SLOT_MIN_DURATION, Min)
-    end,
-    cas_max(
-        ToRef, ToBase + ?SLOT_MAX_DURATION, atomics:get(FromRef, FromBase + ?SLOT_MAX_DURATION)
-    ).
-
--doc """
-The class atom to roll a retiring pid up under: the telemetry-reported class,
-else the instance registry, else `unknown`.
-""".
--spec class_for_pid(pid()) -> atom().
-class_for_pid(Pid) ->
-    try ets:lookup(?AGG_CLASS, Pid) of
-        [{_, Class}] -> Class;
-        [] -> class_from_registry(Pid)
-    catch
-        error:badarg -> class_from_registry(Pid)
-    end.
-
--doc "Fallback: resolve the class atom from beamtalk_instance_registry, else `unknown`.".
+-doc "Resolve the class atom from beamtalk_instance_registry, else `unknown`.".
 -spec class_from_registry(pid()) -> atom().
 class_from_registry(Pid) ->
     try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
@@ -1133,7 +1071,7 @@ configure_poller() ->
 start_sweep_timer() ->
     erlang:send_after(?EVICTION_INTERVAL_MS, self(), sweep_eviction).
 
--doc "Evict oldest events if over the soft bound.".
+-doc "Evict oldest events if over the soft bound; sweep dead pids' pid rows.".
 do_sweep_eviction() ->
     MaxEvents = max_events(),
     Size = ets:info(?TRACE_EVENTS, size),
@@ -1144,7 +1082,57 @@ do_sweep_eviction() ->
             delete_oldest_n(?TRACE_EVENTS, ToDelete);
         false ->
             ok
+    end,
+    case is_enabled() of
+        %% The pid table is empty unless tracing is enabled (disable/0 drops
+        %% it), so there is nothing to sweep while disabled.
+        true -> sweep_dead_pids();
+        false -> ok
     end.
+
+-doc """
+Delete the pid rows of dead actors, releasing their slots (BT-4103). This is
+what bounds the enabled-only pid table: no monitors are armed, so a dead
+pid's rows linger until this sweep (at most one eviction interval). Each row
+is claimed with `ets:take/2`: a row a caller re-creates for the pid afterwards
+(a late dispatch for a dead actor) stays until the next sweep.
+""".
+sweep_dead_pids() ->
+    case ets:info(?AGG_PID, size) of
+        0 ->
+            ok;
+        _ ->
+            Pids = lists:usort(
+                ets:foldl(fun({Pid, _Selector}, Acc) -> [Pid | Acc] end, [], ?AGG_PID_KEYS)
+            ),
+            lists:foreach(fun sweep_pid_rows/1, Pids)
+    end.
+
+sweep_pid_rows(Pid) ->
+    case erlang:is_process_alive(Pid) of
+        true ->
+            ok;
+        false ->
+            Keys = ets:take(?AGG_PID_KEYS, Pid),
+            lists:foreach(
+                fun({_Pid, Selector}) ->
+                    case ets:take(?AGG_PID, {Pid, Selector}) of
+                        [{_Key, _Ref, SlotBase, _Class}] -> release_slot(SlotBase);
+                        [] -> ok
+                    end
+                end,
+                Keys
+            )
+    end.
+
+-doc """
+Drop all per-actor aggregate data: every pid row's slot is claimed with
+`ets:take/2` and released to the free list. Runs in the gen_server on
+`disable/0` and as part of `clear/0`.
+""".
+drop_pid_data() ->
+    ets:delete_all_objects(?AGG_PID_KEYS),
+    take_all_and_release(?AGG_PID).
 
 -doc "Delete the N oldest entries from an ordered_set.".
 delete_oldest_n(_Table, 0) ->
@@ -1354,57 +1342,79 @@ sanitize_value(V) -> iolist_to_binary(io_lib:format("~p", [V])).
 -doc """
 Get aggregate stats, optionally filtered by Pid.
 
-Unfiltered, the map also holds one `<<"retired:Class">>` entry per class whose
-actors have died, carrying their folded-in method stats (`retired => true`).
-A dead actor's own pid entry is gone once it is retired (BT-4066).
+Unfiltered, the map holds one `<<"class:Class">>` entry per {Class, Selector}
+seen (the always-on aggregates), plus — only while tracing is enabled — one
+entry per pid with per-actor detail. Filtered by pid, it holds that actor's
+entry while tracing is enabled and `#{}` otherwise. Rows whose slots were
+zeroed by `clear/0` but kept (class rows are never deleted) read as zero
+calls and are skipped, so a cleared store reports `#{}`.
 """.
 do_get_stats(undefined) ->
-    Live = ets:foldl(
-        fun({{Pid, Selector}, CounterRef, SlotBase}, Acc) ->
-            add_method_stats(
-                list_to_binary(pid_to_list(Pid)),
-                fun() -> #{class => lookup_class_for_pid(Pid), methods => #{}} end,
+    ClassEntries = ets:foldl(
+        fun({{Class, Selector}, CounterRef, SlotBase}, Acc) ->
+            ClassBin = atom_to_binary(Class, utf8),
+            add_method_stats_nonzero(
+                <<"class:", ClassBin/binary>>,
+                fun() -> #{class => ClassBin, methods => #{}} end,
                 Selector,
                 read_counter_stats(CounterRef, SlotBase),
                 Acc
             )
         end,
         #{},
-        ?AGG_INDEX
+        ?AGG_CLASS_STATS
     ),
-    ets:foldl(
-        fun({{Class, Selector}, CounterRef, SlotBase}, Acc) ->
-            ClassBin = atom_to_binary(Class, utf8),
-            add_method_stats(
-                <<"retired:", ClassBin/binary>>,
-                fun() -> #{class => ClassBin, retired => true, methods => #{}} end,
-                Selector,
-                read_counter_stats(CounterRef, SlotBase),
-                Acc
-            )
-        end,
-        Live,
-        ?AGG_RETIRED
-    );
-do_get_stats(FilterPid) ->
-    lists:foldl(
-        fun({Pid, Selector}, Acc) ->
-            case ets:lookup(?AGG_INDEX, {Pid, Selector}) of
-                [{_Key, CounterRef, SlotBase}] ->
-                    add_method_stats(
+    case is_enabled() of
+        true ->
+            ets:foldl(
+                fun({{Pid, Selector}, CounterRef, SlotBase, Class}, Acc) ->
+                    add_method_stats_nonzero(
                         list_to_binary(pid_to_list(Pid)),
-                        fun() -> #{class => lookup_class_for_pid(Pid), methods => #{}} end,
+                        fun() -> #{class => atom_to_binary(Class, utf8), methods => #{}} end,
                         Selector,
                         read_counter_stats(CounterRef, SlotBase),
                         Acc
-                    );
-                [] ->
-                    Acc
-            end
-        end,
-        #{},
-        ets:lookup(?AGG_PID_KEYS, FilterPid)
-    ).
+                    )
+                end,
+                ClassEntries,
+                ?AGG_PID
+            );
+        false ->
+            ClassEntries
+    end;
+do_get_stats(FilterPid) ->
+    case is_enabled() of
+        false ->
+            %% Per-actor detail exists only while tracing is enabled.
+            #{};
+        true ->
+            lists:foldl(
+                fun({Pid, Selector}, Acc) ->
+                    case ets:lookup(?AGG_PID, {Pid, Selector}) of
+                        [{_Key, CounterRef, SlotBase, Class}] ->
+                            add_method_stats_nonzero(
+                                list_to_binary(pid_to_list(Pid)),
+                                fun() ->
+                                    #{class => atom_to_binary(Class, utf8), methods => #{}}
+                                end,
+                                Selector,
+                                read_counter_stats(CounterRef, SlotBase),
+                                Acc
+                            );
+                        [] ->
+                            Acc
+                    end
+                end,
+                #{},
+                ets:lookup(?AGG_PID_KEYS, FilterPid)
+            )
+    end.
+
+-doc "Add one selector's stats unless it has zero calls (a cleared-kept row).".
+add_method_stats_nonzero(_EntryKey, _NewEntry, _Selector, #{calls := 0}, Acc) ->
+    Acc;
+add_method_stats_nonzero(EntryKey, NewEntry, Selector, Stats, Acc) ->
+    add_method_stats(EntryKey, NewEntry, Selector, Stats, Acc).
 
 -doc "Add one selector's stats under `EntryKey`, creating the entry with `NewEntry`.".
 add_method_stats(EntryKey, NewEntry, Selector, Stats, Acc) ->
@@ -1449,41 +1459,29 @@ read_counter_stats(AtomicsRef, SlotBase) ->
     }.
 
 -doc """
-Collect all method stats as a flat list for sorting: one entry per live
-{Pid, Selector}, plus one per retired {Class, Selector} rollup
-(`pid => <<"retired">>`, `retired => true`).
+Collect all method stats as a flat list for sorting: one entry per
+{Class, Selector} (the always-on aggregates), with no pid — a class entry
+covers every actor of that class. Zero-call rows (cleared but kept) are
+skipped.
 """.
 collect_method_stats() ->
-    Live = ets:foldl(
-        fun({{Pid, Selector}, CounterRef, SlotBase}, Acc) ->
-            Stats = read_counter_stats(CounterRef, SlotBase),
-            [
-                Stats#{
-                    pid => list_to_binary(pid_to_list(Pid)),
-                    class => lookup_class_for_pid(Pid),
-                    selector => Selector
-                }
-                | Acc
-            ]
-        end,
-        [],
-        ?AGG_INDEX
-    ),
     ets:foldl(
         fun({{Class, Selector}, CounterRef, SlotBase}, Acc) ->
-            Stats = read_counter_stats(CounterRef, SlotBase),
-            [
-                Stats#{
-                    pid => <<"retired">>,
-                    class => atom_to_binary(Class, utf8),
-                    selector => Selector,
-                    retired => true
-                }
-                | Acc
-            ]
+            case read_counter_stats(CounterRef, SlotBase) of
+                #{calls := 0} ->
+                    Acc;
+                Stats ->
+                    [
+                        Stats#{
+                            class => atom_to_binary(Class, utf8),
+                            selector => Selector
+                        }
+                        | Acc
+                    ]
+            end
         end,
-        Live,
-        ?AGG_RETIRED
+        [],
+        ?AGG_CLASS_STATS
     ).
 
 -doc "Top N methods by average duration (descending).".
@@ -1537,19 +1535,26 @@ do_error_methods(Limit) ->
     ),
     lists:sublist(Sorted, Limit).
 
--doc "Top N actors by message queue length (live snapshot).".
+-doc """
+Top N actors by message queue length (live snapshot). Scans the instance
+registry, so it covers every live actor whether or not tracing is enabled —
+unregistered processes never appear.
+""".
 do_bottlenecks(Limit) ->
-    %% Get all unique pids from the agg index
-    Pids = lists:usort(
-        ets:foldl(
-            fun({{Pid, _Sel}, _Ref, _Slot}, Acc) -> [Pid | Acc] end,
-            [],
-            ?AGG_INDEX
-        )
+    %% Get all unique {Class, Pid} pairs from the instance registry.
+    Pairs = lists:usort(
+        try
+            ets:foldl(
+                fun({Class, Pid}, Acc) -> [{Class, Pid} | Acc] end, [], beamtalk_instance_registry
+            )
+        catch
+            %% Registry table missing (partial harness): no actors to report.
+            error:badarg -> []
+        end
     ),
     %% Get queue depths for live processes
     WithQueue = lists:filtermap(
-        fun(Pid) ->
+        fun({Class, Pid}) ->
             case erlang:is_process_alive(Pid) of
                 true ->
                     case erlang:process_info(Pid, [message_queue_len, memory]) of
@@ -1560,7 +1565,7 @@ do_bottlenecks(Limit) ->
                             Mem = proplists:get_value(memory, Info, 0),
                             {true, #{
                                 actor => list_to_binary(pid_to_list(Pid)),
-                                class => lookup_class_for_pid(Pid),
+                                class => atom_to_binary(Class, utf8),
                                 queue_depth => QLen,
                                 memory_kb => Mem div 1024
                             }}
@@ -1569,7 +1574,7 @@ do_bottlenecks(Limit) ->
                     false
             end
         end,
-        Pids
+        Pairs
     ),
     Sorted = lists:sort(
         fun(A, B) -> maps:get(queue_depth, A) >= maps:get(queue_depth, B) end,
@@ -1579,6 +1584,7 @@ do_bottlenecks(Limit) ->
 
 -doc "Live health for a specific actor.".
 do_actor_health(Pid) ->
+    ClassBin = atom_to_binary(class_from_registry(Pid), utf8),
     case erlang:is_process_alive(Pid) of
         true ->
             case
@@ -1589,14 +1595,14 @@ do_actor_health(Pid) ->
                 undefined ->
                     #{
                         pid => list_to_binary(pid_to_list(Pid)),
-                        class => lookup_class_for_pid(Pid),
+                        class => ClassBin,
                         status => dead,
                         error => <<"process not alive">>
                     };
                 Info ->
                     #{
                         pid => list_to_binary(pid_to_list(Pid)),
-                        class => lookup_class_for_pid(Pid),
+                        class => ClassBin,
                         status => proplists:get_value(status, Info),
                         queue_depth => proplists:get_value(message_queue_len, Info, 0),
                         memory_kb => proplists:get_value(memory, Info, 0) div 1024,
@@ -1606,7 +1612,7 @@ do_actor_health(Pid) ->
         false ->
             #{
                 pid => list_to_binary(pid_to_list(Pid)),
-                class => lookup_class_for_pid(Pid),
+                class => ClassBin,
                 status => dead,
                 error => <<"process not alive">>
             }
@@ -1654,15 +1660,6 @@ to_binary_keys(Map) when is_map(Map) ->
         Map
     ).
 
--doc """
-Resolve actor class name from the aggregate class table.
-The agg class table is populated from telemetry metadata — the authoritative
-source — during record_dispatch/6. Falls back to instance registry lookup.
-""".
--spec lookup_class_for_pid(pid()) -> binary().
-lookup_class_for_pid(Pid) ->
-    atom_to_binary(class_for_pid(Pid), utf8).
-
 %%====================================================================
 %% Internal: Clear
 %%====================================================================
@@ -1672,24 +1669,38 @@ do_clear() ->
     %% Clear trace events
     ets:delete_all_objects(?TRACE_EVENTS),
     %% Clear the aggregates. The atomics array and slot allocator are kept:
-    %% each row's slot is claimed with ets:take/2 and released to the free
-    %% list (slots are zeroed on reuse). Resetting the allocator instead would
-    %% let a slot held by a concurrent writer or retirer be handed out twice
-    %% (BT-4066). pid_keys goes first, so a row allocated mid-clear is either
-    %% taken here or keeps both its rows.
-    ets:delete_all_objects(?AGG_PID_KEYS),
-    ets:delete_all_objects(?AGG_CLASS),
-    take_all_and_release(?AGG_INDEX),
-    take_all_and_release(?AGG_RETIRED),
+    %% class rows stay (their slots are zeroed in place, and readers skip
+    %% zero-call rows), while pid rows are dropped and their slots released
+    %% for reuse. Resetting the allocator instead would let a slot held by a
+    %% concurrent writer be handed out twice. A dispatch racing the zeroing
+    %% lands in a zeroed slot, so clear-during-traffic is approximate — the
+    %% same tolerance class `clear/0` always had.
+    zero_class_slots(),
+    drop_pid_data(),
     ok.
 
--doc "Remove every row of a slot table, releasing each claimed slot.".
+-doc "Zero every class-stats slot in place, keeping the rows.".
+zero_class_slots() ->
+    ets:foldl(
+        fun({_Key, CounterRef, SlotBase}, Acc) ->
+            reset_slot(CounterRef, SlotBase),
+            Acc
+        end,
+        ok,
+        ?AGG_CLASS_STATS
+    ).
+
+-doc """
+Remove every row of a slot table, releasing each claimed slot. The slot base
+sits at element 3 in both class rows ({Key, Ref, Base}) and pid rows
+({Key, Ref, Base, Class}).
+""".
 take_all_and_release(Table) ->
-    Keys = ets:foldl(fun({Key, _Ref, _SlotBase}, Acc) -> [Key | Acc] end, [], Table),
+    Keys = ets:foldl(fun(Row, Acc) -> [element(1, Row) | Acc] end, [], Table),
     lists:foreach(
         fun(Key) ->
             case ets:take(Table, Key) of
-                [{_Key, _Ref, SlotBase}] -> release_slot(SlotBase);
+                [Taken] -> release_slot(element(3, Taken));
                 [] -> ok
             end
         end,

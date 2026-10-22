@@ -217,12 +217,22 @@ query_with_data_test_() ->
                     beamtalk_trace_store:record_dispatch(
                         TestPid, increment, 5000, ok, sync, 'Counter'
                     ),
+                    %% Always-on class entry while disabled ...
                     Stats = beamtalk_tracing:stats(),
+                    ?assert(maps:is_key(<<"class:Counter">>, Stats)),
+                    ClassStats = maps:get(<<"class:Counter">>, Stats),
+                    Methods = maps:get(<<"methods">>, ClassStats),
+                    ?assert(maps:is_key(<<"increment">>, Methods)),
+                    ?assertEqual(#{}, beamtalk_tracing:statsFor(TestPid)),
+                    %% ... plus the per-actor entry once enabled.
+                    beamtalk_tracing:enable(),
+                    beamtalk_trace_store:record_dispatch(
+                        TestPid, increment, 5000, ok, sync, 'Counter'
+                    ),
                     PidKey = list_to_binary(pid_to_list(TestPid)),
-                    ?assert(maps:is_key(PidKey, Stats)),
-                    PidStats = maps:get(PidKey, Stats),
-                    Methods = maps:get(<<"methods">>, PidStats),
-                    ?assert(maps:is_key(<<"increment">>, Methods))
+                    PidStats = beamtalk_tracing:statsFor(TestPid),
+                    ?assert(maps:is_key(PidKey, PidStats)),
+                    beamtalk_tracing:disable()
                 end)},
             {"tracesFor returns events after record_trace_event",
                 ?_test(begin

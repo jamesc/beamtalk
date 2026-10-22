@@ -53,17 +53,25 @@ direct_insert_and_query_test_() ->
                     TestPid, increment, 5000, ok, sync, 'Counter'
                 ),
 
-                %% Check stats
-                Stats = beamtalk_trace_store:get_stats(),
-                PidKey = list_to_binary(pid_to_list(TestPid)),
-                ?assertMatch(#{PidKey := _}, Stats),
-                PidStats = maps:get(PidKey, Stats),
-                Methods = maps:get(<<"methods">>, PidStats),
-                IncStats = maps:get(<<"increment">>, Methods),
+                %% Always-on class entry, and no per-actor entry while disabled
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),
+                #{<<"methods">> := #{<<"increment">> := IncStats}} =
+                    class_entry(<<"Counter">>),
                 ?assertEqual(1, maps:get(<<"calls">>, IncStats)),
                 ?assertEqual(1, maps:get(<<"ok">>, IncStats)),
                 ?assertEqual(0, maps:get(<<"errors">>, IncStats)),
-                ?assertEqual(5000, maps:get(<<"total_duration_ns">>, IncStats))
+                ?assertEqual(5000, maps:get(<<"total_duration_ns">>, IncStats)),
+
+                %% Enabled, the per-actor entry appears too
+                beamtalk_trace_store:enable(),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, increment, 7000, ok, sync, 'Counter'
+                ),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
+                #{PidKey := #{<<"methods">> := #{<<"increment">> := PidInc}}} =
+                    beamtalk_trace_store:get_stats(TestPid),
+                ?assertEqual(1, maps:get(<<"calls">>, PidInc)),
+                ?assertEqual(7000, maps:get(<<"total_duration_ns">>, PidInc))
             end)
         ]
     end}.
@@ -75,36 +83,38 @@ direct_insert_and_query_test_() ->
 class_in_actor_stats_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
-            {"class from telemetry metadata appears in get_stats",
+            {"class from telemetry metadata keys the always-on entry",
                 ?_test(begin
                     TestPid = self(),
                     beamtalk_trace_store:record_dispatch(
                         TestPid, increment, 5000, ok, sync, 'EventStore'
                     ),
-                    Stats = beamtalk_trace_store:get_stats(),
-                    PidKey = list_to_binary(pid_to_list(TestPid)),
-                    PidStats = maps:get(PidKey, Stats),
-                    ?assertEqual(<<"EventStore">>, maps:get(<<"class">>, PidStats))
+                    Entry = class_entry(<<"EventStore">>),
+                    ?assertEqual(<<"EventStore">>, maps:get(<<"class">>, Entry)),
+                    ?assertMatch(
+                        #{<<"increment">> := #{<<"calls">> := 1}},
+                        maps:get(<<"methods">>, Entry)
+                    )
                 end)},
-            {"class unknown when not provided uses fallback",
+            {"unknown class aggregates under class:unknown",
                 ?_test(begin
-                    %% Use a live pid that won't be in agg_class table to
-                    %% verify the fallback to instance registry. (It must be
-                    %% live: a dead pid's rows are retired — BT-4066.)
-                    OtherPid = spawn(fun() ->
-                        receive
-                            stop -> ok
-                        end
-                    end),
+                    TestPid = self(),
                     beamtalk_trace_store:record_dispatch(
-                        OtherPid, increment, 5000, ok, sync, unknown
+                        TestPid, increment, 5000, ok, sync, unknown
                     ),
-                    Stats = beamtalk_trace_store:get_stats(),
-                    PidKey = list_to_binary(pid_to_list(OtherPid)),
-                    PidStats = maps:get(PidKey, Stats),
-                    OtherPid ! stop,
-                    %% Class=unknown not stored in agg_class, falls back to registry → unknown
-                    ?assertEqual(<<"unknown">>, maps:get(<<"class">>, PidStats))
+                    Entry = class_entry(<<"unknown">>),
+                    ?assertEqual(<<"unknown">>, maps:get(<<"class">>, Entry))
+                end)},
+            {"per-actor entry carries the telemetry class while enabled",
+                ?_test(begin
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    beamtalk_trace_store:record_dispatch(
+                        TestPid, increment, 5000, ok, sync, 'EventStore'
+                    ),
+                    PidKey = list_to_binary(pid_to_list(TestPid)),
+                    #{PidKey := PidStats} = beamtalk_trace_store:get_stats(TestPid),
+                    ?assertEqual(<<"EventStore">>, maps:get(<<"class">>, PidStats))
                 end)},
             {"class appears in collect_method_stats via slow_methods",
                 ?_test(begin
@@ -234,6 +244,7 @@ counters_aggregates_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
+                beamtalk_trace_store:enable(),
                 TestPid = self(),
 
                 %% Record multiple dispatches
@@ -243,7 +254,7 @@ counters_aggregates_test_() ->
                     TestPid, increment, 3000, error, sync, 'Counter'
                 ),
 
-                %% Check aggregated stats
+                %% Check aggregated per-actor stats
                 Stats = beamtalk_trace_store:get_stats(TestPid),
                 PidKey = list_to_binary(pid_to_list(TestPid)),
                 PidStats = maps:get(PidKey, Stats),
@@ -255,7 +266,13 @@ counters_aggregates_test_() ->
                 ?assertEqual(6000, maps:get(<<"total_duration_ns">>, IncStats)),
                 ?assertEqual(2000, maps:get(<<"avg_duration_ns">>, IncStats)),
                 ?assertEqual(1000, maps:get(<<"min_duration_ns">>, IncStats)),
-                ?assertEqual(3000, maps:get(<<"max_duration_ns">>, IncStats))
+                ?assertEqual(3000, maps:get(<<"max_duration_ns">>, IncStats)),
+
+                %% The always-on class entry carries the same totals
+                #{<<"methods">> := #{<<"increment">> := ClassInc}} =
+                    class_entry(<<"Counter">>),
+                ?assertEqual(3, maps:get(<<"calls">>, ClassInc)),
+                ?assertEqual(6000, maps:get(<<"total_duration_ns">>, ClassInc))
             end)
         ]
     end}.
@@ -448,7 +465,12 @@ bottlenecks_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
-                %% Create a process and record dispatches for it
+                %% bottlenecks/1 scans the instance registry, so it needs no
+                %% dispatches and works whether or not tracing is enabled.
+                case whereis(beamtalk_object_instances) of
+                    undefined -> {ok, _} = beamtalk_object_instances:start_link();
+                    _ -> ok
+                end,
                 Self = self(),
                 Pid = spawn(fun() ->
                     Self ! ready,
@@ -459,17 +481,40 @@ bottlenecks_test_() ->
                 receive
                     ready -> ok
                 end,
+                ok = beamtalk_object_instances:register('Counter', Pid),
+                try
+                    Result = beamtalk_trace_store:bottlenecks(10),
+                    ?assert(is_list(Result)),
+                    %% Our registered process should be in the list
+                    PidBin = list_to_binary(pid_to_list(Pid)),
+                    Pids = [maps:get(<<"actor">>, R) || R <- Result],
+                    ?assert(lists:member(PidBin, Pids)),
+                    [Entry] = [R || R <- Result, maps:get(<<"actor">>, R) =:= PidBin],
+                    ?assertEqual(<<"Counter">>, maps:get(<<"class">>, Entry)),
 
-                beamtalk_trace_store:record_dispatch(Pid, test_method, 100, ok, sync, 'Counter'),
-
-                Result = beamtalk_trace_store:bottlenecks(10),
-                ?assert(is_list(Result)),
-                %% Our spawned process should be in the list
-                PidBin = list_to_binary(pid_to_list(Pid)),
-                Pids = [maps:get(<<"actor">>, R) || R <- Result],
-                ?assert(lists:member(PidBin, Pids)),
-
-                Pid ! stop
+                    %% An unregistered process with dispatches never appears
+                    Ghost = spawn(fun() ->
+                        Self ! ghost_ready,
+                        receive
+                            stop -> ok
+                        end
+                    end),
+                    receive
+                        ghost_ready -> ok
+                    end,
+                    beamtalk_trace_store:record_dispatch(
+                        Ghost, test_method, 100, ok, sync, 'Counter'
+                    ),
+                    Result2 = beamtalk_trace_store:bottlenecks(1000),
+                    GhostBin = list_to_binary(pid_to_list(Ghost)),
+                    ?assertNot(
+                        lists:member(GhostBin, [maps:get(<<"actor">>, R) || R <- Result2])
+                    ),
+                    Ghost ! stop
+                after
+                    beamtalk_object_instances:unregister('Counter', Pid),
+                    Pid ! stop
+                end
             end)
         ]
     end}.
@@ -500,10 +545,10 @@ telemetry_dispatch_stop_handler_test_() ->
                     #{}
                 ),
 
-                %% Verify aggregate was recorded
-                Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = list_to_binary(pid_to_list(TestPid)),
-                ?assertMatch(#{PidKey := _}, Stats)
+                %% Verify the always-on class aggregate was recorded
+                #{<<"methods">> := #{<<"increment">> := IncStats}} =
+                    class_entry(<<"Counter">>),
+                ?assertEqual(1, maps:get(<<"calls">>, IncStats))
             end)
         ]
     end}.
@@ -535,11 +580,9 @@ telemetry_dispatch_exception_handler_test_() ->
                     #{}
                 ),
 
-                %% Verify error was recorded
-                Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = list_to_binary(pid_to_list(TestPid)),
-                PidStats = maps:get(PidKey, Stats),
-                MethodStats = maps:get(<<"badmethod">>, maps:get(<<"methods">>, PidStats)),
+                %% Verify error was recorded in the always-on class entry
+                #{<<"methods">> := #{<<"badmethod">> := MethodStats}} =
+                    class_entry(<<"Counter">>),
                 ?assertEqual(1, maps:get(<<"errors">>, MethodStats))
             end)
         ]
@@ -678,7 +721,7 @@ serialized_counter_grow_test_() ->
             ?_test(begin
                 %% Fill up counter slots to trigger a grow.
                 %% Initial size is 8000 slots, 8 per key = 1000 keys before grow.
-                %% Record enough unique {Pid, Selector} keys to force a grow.
+                %% Record enough unique {Class, Selector} keys to force a grow.
                 TestPid = self(),
                 lists:foreach(
                     fun(I) ->
@@ -689,10 +732,7 @@ serialized_counter_grow_test_() ->
                     lists:seq(1, 1010)
                 ),
                 %% Verify the atomics grew — stats should have all 1010 methods
-                Stats = beamtalk_trace_store:get_stats(),
-                PidKey = list_to_binary(pid_to_list(TestPid)),
-                PidStats = maps:get(PidKey, Stats),
-                Methods = maps:get(<<"methods">>, PidStats),
+                #{<<"methods">> := Methods} = class_entry(<<"Counter">>),
                 ?assert(maps:size(Methods) >= 1010)
             end)
         ]
@@ -706,32 +746,39 @@ min_max_duration_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
+                beamtalk_trace_store:enable(),
                 TestPid = self(),
+                PidKey = list_to_binary(pid_to_list(TestPid)),
+                PidPing = fun() ->
+                    #{PidKey := #{<<"methods">> := #{<<"ping">> := S}}} =
+                        beamtalk_trace_store:get_stats(TestPid),
+                    S
+                end,
+                ClassPing = fun() ->
+                    #{<<"methods">> := #{<<"ping">> := S}} = class_entry(<<"Counter">>),
+                    S
+                end,
 
                 %% Single call — min and max should be the same
                 beamtalk_trace_store:record_dispatch(TestPid, ping, 5000, ok, sync, 'Counter'),
-                Stats1 = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = list_to_binary(pid_to_list(TestPid)),
-                PidStats1 = maps:get(PidKey, Stats1),
-                PingStats1 = maps:get(<<"ping">>, maps:get(<<"methods">>, PidStats1)),
-                ?assertEqual(5000, maps:get(<<"min_duration_ns">>, PingStats1)),
-                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PingStats1)),
+                ?assertEqual(5000, maps:get(<<"min_duration_ns">>, PidPing())),
+                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PidPing())),
+                ?assertEqual(5000, maps:get(<<"min_duration_ns">>, ClassPing())),
+                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, ClassPing())),
 
                 %% Add a faster call — min should decrease, max stays
                 beamtalk_trace_store:record_dispatch(TestPid, ping, 1000, ok, sync, 'Counter'),
-                Stats2 = beamtalk_trace_store:get_stats(TestPid),
-                PidStats2 = maps:get(PidKey, Stats2),
-                PingStats2 = maps:get(<<"ping">>, maps:get(<<"methods">>, PidStats2)),
-                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, PingStats2)),
-                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PingStats2)),
+                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, PidPing())),
+                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PidPing())),
+                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, ClassPing())),
+                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, ClassPing())),
 
                 %% Add a slower call — max should increase, min stays
                 beamtalk_trace_store:record_dispatch(TestPid, ping, 11000, ok, sync, 'Counter'),
-                Stats3 = beamtalk_trace_store:get_stats(TestPid),
-                PidStats3 = maps:get(PidKey, Stats3),
-                PingStats3 = maps:get(<<"ping">>, maps:get(<<"methods">>, PidStats3)),
-                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, PingStats3)),
-                ?assertEqual(11000, maps:get(<<"max_duration_ns">>, PingStats3))
+                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, PidPing())),
+                ?assertEqual(11000, maps:get(<<"max_duration_ns">>, PidPing())),
+                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, ClassPing())),
+                ?assertEqual(11000, maps:get(<<"max_duration_ns">>, ClassPing()))
             end)
         ]
     end}.
@@ -745,6 +792,7 @@ min_max_concurrent_test_() ->
         [
             {timeout, 30,
                 ?_test(begin
+                    beamtalk_trace_store:enable(),
                     TestPid = self(),
 
                     %% Pre-allocate the slot with an initial dispatch to avoid the
@@ -813,6 +861,7 @@ clear_resets_min_sentinel_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
+                beamtalk_trace_store:enable(),
                 TestPid = self(),
 
                 %% Record a dispatch to establish min/max
@@ -835,7 +884,9 @@ clear_resets_min_sentinel_test_() ->
                 %% Stats should be empty
                 ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
 
-                %% Record a new dispatch — min should be set fresh, not stuck
+                %% Record a new dispatch — min should be set fresh, not stuck.
+                %% The class row is kept (zeroed in place) while the pid row
+                %% is dropped and re-created: both must reset the sentinel.
                 beamtalk_trace_store:record_dispatch(
                     TestPid, sentinel_check, 8000, ok, sync, 'Counter'
                 ),
@@ -846,7 +897,11 @@ clear_resets_min_sentinel_test_() ->
                     maps:get(<<"methods">>, PidStats2)
                 ),
                 ?assertEqual(8000, maps:get(<<"min_duration_ns">>, MethodStats2)),
-                ?assertEqual(8000, maps:get(<<"max_duration_ns">>, MethodStats2))
+                ?assertEqual(8000, maps:get(<<"max_duration_ns">>, MethodStats2)),
+                #{<<"methods">> := #{<<"sentinel_check">> := ClassStats}} =
+                    class_entry(<<"Counter">>),
+                ?assertEqual(8000, maps:get(<<"min_duration_ns">>, ClassStats)),
+                ?assertEqual(8000, maps:get(<<"max_duration_ns">>, ClassStats))
             end)
         ]
     end}.
@@ -1464,6 +1519,7 @@ timeout_and_cast_outcome_test_() ->
         [
             {"timeout outcome increments timeout counter",
                 ?_test(begin
+                    beamtalk_trace_store:enable(),
                     TestPid = self(),
                     beamtalk_trace_store:record_dispatch(
                         TestPid, slow_method, 50000, timeout, sync, 'Counter'
@@ -1479,6 +1535,7 @@ timeout_and_cast_outcome_test_() ->
                 end)},
             {"cast outcome increments ok counter",
                 ?_test(begin
+                    beamtalk_trace_store:enable(),
                     TestPid = self(),
                     beamtalk_trace_store:record_dispatch(
                         TestPid, async_method, 1000, cast, async, 'Counter'
@@ -1586,10 +1643,10 @@ tracing_disabled_skips_events_test_() ->
                         Metadata,
                         #{}
                     ),
-                    %% Aggregates should still be recorded
-                    Stats = beamtalk_trace_store:get_stats(TestPid),
-                    ?assertNotEqual(#{}, Stats),
-                    %% But no trace events
+                    %% Class aggregates should still be recorded, but no
+                    %% per-actor entry and no trace events
+                    ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),
+                    ?assertNotEqual(#{}, beamtalk_trace_store:get_stats()),
                     ?assertEqual([], beamtalk_trace_store:get_traces())
                 end)}
         ]
@@ -1610,6 +1667,10 @@ unknown_request_test_() ->
         ]
     end}.
 
+-doc "Fetch the `class:Class` entry of `get_stats/0` (the always-on aggregates).".
+class_entry(ClassBin) ->
+    maps:get(<<"class:", ClassBin/binary>>, beamtalk_trace_store:get_stats()).
+
 -doc "Generate a unique temporary export path.".
 tmp_export_path(Tag) ->
     iolist_to_binary([
@@ -1621,10 +1682,8 @@ tmp_export_path(Tag) ->
     ]).
 
 %%====================================================================
-%% Test: Dead actors' aggregates are retired, not leaked (BT-4066)
+%% Test: Churn bounds without monitors (BT-4103)
 %%====================================================================
-
--define(AGG_TABLES, [beamtalk_agg_index, beamtalk_agg_class, beamtalk_agg_pid_keys]).
 
 churn_setup() ->
     setup(),
@@ -1634,14 +1693,18 @@ churn_setup() ->
         _ -> ok
     end,
     beamtalk_trace_store:clear(),
+    beamtalk_trace_store:disable(),
     ok.
 
--doc "Per-pid table sizes plus the atomics array size.".
+-doc "Aggregate table sizes plus the atomics array size.".
 agg_footprint() ->
     Counters = persistent_term:get(beamtalk_trace_counters),
     #{size := AtomicsSize} = atomics:info(Counters),
     #{
-        tables => [{T, ets:info(T, size)} || T <- ?AGG_TABLES],
+        class_stats => ets:info(beamtalk_agg_class_stats, size),
+        pid => ets:info(beamtalk_agg_pid, size),
+        pid_keys => ets:info(beamtalk_agg_pid_keys, size),
+        free_slots => ets:info(beamtalk_agg_free_slots, size),
         atomics_size => AtomicsSize
     }.
 
@@ -1661,11 +1724,13 @@ wait_until(Fun, Tries) ->
 -doc """
 Start a real Counter actor, send it one message, then end it: a normal
 `gen_server:stop` (runs `terminate/2`, emitting the lifecycle `stop` event)
-or, when `Kill` is true, an untrapped `kill` (no `terminate/2`). Either way the
-trace store's monitor retires it.
+or, when `Kill` is true, an untrapped `kill` (no `terminate/2`).
 """.
 churn_one_actor(Kill) ->
     {ok, Pid} = test_counter:start(0),
+    %% Register like a compiled actor spawn does, so dispatch telemetry
+    %% attributes to 'Counter' (the registry is unregistered on death).
+    ok = beamtalk_object_instances:register('Counter', Pid),
     ?assertEqual(0, beamtalk_actor:sync_send(Pid, getValue, [])),
     MRef = erlang:monitor(process, Pid),
     case Kill of
@@ -1677,46 +1742,84 @@ churn_one_actor(Kill) ->
     after 5000 -> ?assert(false)
     end.
 
-retired_class_entry(Class) ->
-    maps:get(<<"retired:", Class/binary>>, beamtalk_trace_store:get_stats(), undefined).
-
-actor_churn_returns_to_baseline_test_() ->
+actor_churn_stays_flat_test_() ->
     {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
         {timeout, 120,
             ?_test(begin
-                %% Warm up: the first retirements create the bounded
-                %% per-{Class, Selector} rollup rows.
+                %% Tracing stays disabled: the always-on path only.
+                ?assertNot(beamtalk_trace_store:is_enabled()),
+                %% Warm up: the first dispatches create the bounded
+                %% per-{Class, Selector} rows.
                 lists:foreach(fun(I) -> churn_one_actor(I rem 2 =:= 0) end, lists:seq(1, 4)),
-                wait_until(fun() ->
-                    [S || {_, S} <- maps:get(tables, agg_footprint())] =:= [0, 0, 0]
-                end),
                 Baseline = agg_footprint(),
-                RetiredBaseline = ets:info(beamtalk_agg_retired, size),
                 #{<<"methods">> := #{<<"getValue">> := #{<<"calls">> := WarmCalls}}} =
-                    retired_class_entry(<<"Counter">>),
+                    class_entry(<<"Counter">>),
 
-                %% 1500 actors x ~3 keys each would need ~4500 slot groups
-                %% without slot reuse: far past the initial 1000, so the
-                %% unchanged atomics size proves the slots are recycled.
                 N = 1500,
                 lists:foreach(fun(I) -> churn_one_actor(I rem 3 =:= 0) end, lists:seq(1, N)),
 
-                wait_until(fun() -> agg_footprint() =:= Baseline end),
+                %% No per-actor state exists, the class table only holds the
+                %% handful of {Counter, Selector} rows, and the atomics array
+                %% never grew: the footprint is identical to baseline.
                 ?assertEqual(Baseline, agg_footprint()),
-                ?assertEqual(RetiredBaseline, ets:info(beamtalk_agg_retired, size)),
-                %% Every dispatch is still counted, in the class rollup.
+                ?assertEqual(0, maps:get(pid, agg_footprint())),
+                ?assertEqual(0, maps:get(pid_keys, agg_footprint())),
+                %% Every dispatch is still counted, in the class entry.
                 #{<<"methods">> := #{<<"getValue">> := GetValue}} =
-                    retired_class_entry(<<"Counter">>),
+                    class_entry(<<"Counter">>),
                 ?assertEqual(WarmCalls + N, maps:get(<<"calls">>, GetValue)),
-                ?assertEqual(WarmCalls + N, maps:get(<<"ok">>, GetValue))
+                ?assertEqual(WarmCalls + N, maps:get(<<"ok">>, GetValue)),
+
+                %% The trace store holds no monitors and arms none on actors.
+                StorePid = whereis(beamtalk_trace_store),
+                ?assertEqual([], element(2, erlang:process_info(StorePid, monitors))),
+                {ok, Live} = test_counter:start(0),
+                ok = beamtalk_object_instances:register('Counter', Live),
+                ?assertEqual(0, beamtalk_actor:sync_send(Live, getValue, [])),
+                {monitored_by, MonitoredBy} = erlang:process_info(Live, monitored_by),
+                ?assertNot(lists:member(StorePid, MonitoredBy)),
+                gen_server:stop(Live)
             end)}
     end}.
 
-retired_stats_fold_correctly_test_() ->
+million_actor_churn_stays_flat_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {timeout, 600,
+            ?_test(begin
+                %% 1M short-lived actors through the always-on path (disabled).
+                %% Dead pids are fine: the write path never checks liveness,
+                %% and while disabled nothing is keyed by pid at all.
+                ?assertNot(beamtalk_trace_store:is_enabled()),
+                %% Warm up with the loop's key so the baseline includes its
+                %% row, then clear so the loop's own count is exact.
+                beamtalk_trace_store:record_dispatch(
+                    self(), churned, 1, ok, sync, 'Counter'
+                ),
+                beamtalk_trace_store:clear(),
+                Baseline = agg_footprint(),
+                N = 1000000,
+                lists:foreach(
+                    fun(_) ->
+                        Pid = spawn(fun() -> ok end),
+                        beamtalk_trace_store:record_dispatch(
+                            Pid, churned, 1, ok, sync, 'Counter'
+                        )
+                    end,
+                    lists:seq(1, N)
+                ),
+                ?assertEqual(Baseline, agg_footprint()),
+                #{<<"methods">> := #{<<"churned">> := Churned}} =
+                    class_entry(<<"Counter">>),
+                ?assertEqual(N, maps:get(<<"calls">>, Churned))
+            end)}
+    end}.
+
+per_actor_stats_need_tracing_test_() ->
     {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
         [
-            {"dead actors fold into the class rollup; live actors keep per-pid stats",
+            {"class totals survive actor death; per-pid rows are swept",
                 ?_test(begin
+                    beamtalk_trace_store:enable(),
                     Spawn = fun() ->
                         spawn(fun() ->
                             receive
@@ -1736,59 +1839,92 @@ retired_stats_fold_correctly_test_() ->
                     Record(Dead1, 2000, ok),
                     Record(Dead1, 4000, error),
                     Record(Dead2, 500, timeout),
+
+                    %% While all three live, stats holds the class entry plus
+                    %% one entry per pid.
+                    Stats0 = beamtalk_trace_store:get_stats(),
+                    LiveKey = list_to_binary(pid_to_list(Live)),
+                    ?assertEqual(
+                        4, maps:size(Stats0)
+                    ),
+                    #{<<"methods">> := #{<<"increment">> := LiveInc}} =
+                        maps:get(LiveKey, Stats0),
+                    ?assertEqual(1, maps:get(<<"calls">>, LiveInc)),
+                    ?assertEqual(1000, maps:get(<<"total_duration_ns">>, LiveInc)),
+
                     Dead1 ! stop,
                     Dead2 ! stop,
+                    %% No monitors: the sweep (1s timer) reclaims the dead
+                    %% pids' rows once they are gone.
                     wait_until(fun() ->
                         beamtalk_trace_store:get_stats(Dead1) =:= #{} andalso
                             beamtalk_trace_store:get_stats(Dead2) =:= #{}
                     end),
+                    ?assertEqual(1, ets:info(beamtalk_agg_pid_keys, size)),
 
-                    Stats = beamtalk_trace_store:get_stats(),
-                    LiveKey = list_to_binary(pid_to_list(Live)),
-                    ?assertEqual(
-                        [LiveKey, <<"retired:Counter">>], lists:sort(maps:keys(Stats))
-                    ),
-                    #{<<"methods">> := #{<<"increment">> := LiveInc}} = maps:get(LiveKey, Stats),
-                    ?assertEqual(1, maps:get(<<"calls">>, LiveInc)),
-                    ?assertEqual(1000, maps:get(<<"total_duration_ns">>, LiveInc)),
-
-                    Retired = maps:get(<<"retired:Counter">>, Stats),
-                    ?assertEqual(<<"Counter">>, maps:get(<<"class">>, Retired)),
-                    ?assertEqual(true, maps:get(<<"retired">>, Retired)),
-                    #{<<"methods">> := #{<<"increment">> := Inc}} = Retired,
-                    ?assertEqual(3, maps:get(<<"calls">>, Inc)),
-                    ?assertEqual(1, maps:get(<<"ok">>, Inc)),
+                    %% The class entry kept every dispatch across the deaths.
+                    #{<<"methods">> := #{<<"increment">> := Inc}} =
+                        class_entry(<<"Counter">>),
+                    ?assertEqual(4, maps:get(<<"calls">>, Inc)),
+                    ?assertEqual(2, maps:get(<<"ok">>, Inc)),
                     ?assertEqual(1, maps:get(<<"errors">>, Inc)),
                     ?assertEqual(1, maps:get(<<"timeouts">>, Inc)),
-                    ?assertEqual(6500, maps:get(<<"total_duration_ns">>, Inc)),
-                    ?assertEqual(6500 div 3, maps:get(<<"avg_duration_ns">>, Inc)),
+                    ?assertEqual(7500, maps:get(<<"total_duration_ns">>, Inc)),
+                    ?assertEqual(7500 div 4, maps:get(<<"avg_duration_ns">>, Inc)),
                     ?assertEqual(500, maps:get(<<"min_duration_ns">>, Inc)),
                     ?assertEqual(4000, maps:get(<<"max_duration_ns">>, Inc)),
 
-                    %% The method queries see the rollup as one entry.
+                    %% The method queries see one class entry with no pid.
                     Hot = beamtalk_trace_store:hot_methods(10),
-                    [RetiredHot] = [H || H <- Hot, maps:get(<<"pid">>, H) =:= <<"retired">>],
-                    ?assertEqual(3, maps:get(<<"calls">>, RetiredHot)),
-                    ?assertEqual(<<"Counter">>, maps:get(<<"class">>, RetiredHot)),
+                    [CounterHot] = [
+                        H
+                     || H <- Hot, maps:get(<<"class">>, H) =:= <<"Counter">>
+                    ],
+                    ?assertEqual(4, maps:get(<<"calls">>, CounterHot)),
+                    ?assertNot(maps:is_key(<<"pid">>, CounterHot)),
                     [TopError | _] = beamtalk_trace_store:error_methods(10),
-                    ?assertEqual(<<"retired">>, maps:get(<<"pid">>, TopError)),
+                    ?assertNot(maps:is_key(<<"pid">>, TopError)),
                     [Slowest | _] = beamtalk_trace_store:slow_methods(10, max_duration_ns),
                     ?assertEqual(4000, maps:get(<<"max_duration_ns">>, Slowest)),
 
-                    %% A later death adds to the same rollup row.
+                    %% A later death changes nothing in the class entry but
+                    %% removes the last pid row.
                     Record(Live, 100, ok),
                     Live ! stop,
                     wait_until(fun() -> beamtalk_trace_store:get_stats(Live) =:= #{} end),
                     #{<<"methods">> := #{<<"increment">> := Inc2}} =
-                        retired_class_entry(<<"Counter">>),
+                        class_entry(<<"Counter">>),
                     ?assertEqual(5, maps:get(<<"calls">>, Inc2)),
                     ?assertEqual(7600, maps:get(<<"total_duration_ns">>, Inc2)),
                     ?assertEqual(100, maps:get(<<"min_duration_ns">>, Inc2)),
-                    ?assertEqual(1, ets:info(beamtalk_agg_retired, size))
+                    ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
+                    ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size))
                 end)},
-            {"a stop event does not retire a live actor; its exit does",
+            {"disable drops the per-actor rows; the class entry stays",
                 ?_test(begin
+                    %% Cases share one setup: start clean.
                     beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
+                    Pid = idle_process(),
+                    beamtalk_trace_store:record_dispatch(Pid, increment, 10, ok, sync, 'Counter'),
+                    PidKey = list_to_binary(pid_to_list(Pid)),
+                    ?assertMatch(
+                        #{PidKey := _}, beamtalk_trace_store:get_stats(Pid)
+                    ),
+                    beamtalk_trace_store:disable(),
+                    ?assertEqual(#{}, beamtalk_trace_store:get_stats(Pid)),
+                    ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
+                    ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size)),
+                    #{<<"methods">> := #{<<"increment">> := Inc}} =
+                        class_entry(<<"Counter">>),
+                    ?assertEqual(1, maps:get(<<"calls">>, Inc)),
+                    Pid ! stop
+                end)},
+            {"a stop event does not sweep a live actor; its exit does",
+                ?_test(begin
+                    %% Cases share one setup: start clean.
+                    beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
                     Self = self(),
                     Pid = spawn(fun() ->
                         beamtalk_trace_store:record_dispatch(
@@ -1816,9 +1952,9 @@ retired_stats_fold_correctly_test_() ->
                     ?assertMatch(#{<<"increment">> := #{<<"calls">> := 1}}, LiveMethods),
                     Pid ! stop,
                     wait_until(fun() -> beamtalk_trace_store:get_stats(Pid) =:= #{} end),
-                    #{<<"methods">> := Methods} = retired_class_entry(<<"Counter">>),
+                    #{<<"methods">> := Methods} = class_entry(<<"Counter">>),
                     ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"increment">>, Methods)),
-                    %% The crash shows up as an error on the rolled-up `stop`.
+                    %% The crash shows up as an error on the class `stop`.
                     ?assertMatch(
                         #{<<"calls">> := 1, <<"errors">> := 1}, maps:get(<<"stop">>, Methods)
                     )
@@ -1861,16 +1997,17 @@ idle_process() ->
         end
     end).
 
-late_rows_after_retirement_test_() ->
+sweep_reclaims_dead_pid_rows_test_() ->
     {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
-        {"rows a caller creates after the pid was retired are retired too",
+        {"rows a caller re-creates for a dead pid are swept again",
             ?_test(begin
+                beamtalk_trace_store:enable(),
                 Pid = idle_process(),
                 beamtalk_trace_store:record_dispatch(Pid, first, 10, ok, sync, 'Late'),
                 Pid ! stop,
-                wait_until(fun() -> ets:info(beamtalk_agg_index, size) =:= 0 end),
-                %% Callers report dispatches for the dead pid after its DOWN
-                %% was handled, from two processes at once.
+                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                %% Callers report dispatches for the dead pid after it was
+                %% swept, from two processes at once.
                 Parent = self(),
                 Writers = [
                     spawn(fun() ->
@@ -1886,21 +2023,23 @@ late_rows_after_retirement_test_() ->
                  || W <- Writers
                 ],
                 wait_until(fun() ->
-                    [S || {_, S} <- maps:get(tables, agg_footprint())] =:= [0, 0, 0]
+                    ets:info(beamtalk_agg_pid, size) =:= 0 andalso
+                        ets:info(beamtalk_agg_pid_keys, size) =:= 0
                 end),
-                #{<<"methods">> := Methods} = retired_class_entry(<<"Late">>),
+                #{<<"methods">> := Methods} = class_entry(<<"Late">>),
                 ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"first">>, Methods)),
                 ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"foo">>, Methods)),
                 ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"bar">>, Methods))
             end)}
     end}.
 
-concurrent_retire_during_grow_test_() ->
+concurrent_alloc_during_grow_and_clear_test_() ->
     {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
         {timeout, 60,
             ?_test(begin
-                %% 700 live actors x 2 keys = 1400 keys: past the initial
-                %% 1000, so the array grows while actors are dying.
+                beamtalk_trace_store:enable(),
+                %% 700 live actors x 2 keys = 1400 pid keys: past the initial
+                %% 1000, so the array grows under concurrent allocation.
                 N = 700,
                 Parent = self(),
                 Pids = [idle_process() || _ <- lists:seq(1, N)],
@@ -1918,9 +2057,9 @@ concurrent_retire_during_grow_test_() ->
                     end
                  || W <- Writers
                 ],
-                %% Retire them all concurrently with a writer burst of 1200
-                %% more keys, which grows the array while the gen_server and
-                %% the burst both allocate (retired rollup rows and keys).
+                %% A burst of 1200 more keys on one pid while the others die
+                %% and the sweep reclaims them: allocation, grow and sweep
+                %% run concurrently.
                 [P ! stop || P <- Pids],
                 Burst = idle_process(),
                 [
@@ -1932,19 +2071,21 @@ concurrent_retire_during_grow_test_() ->
                 ],
                 Burst ! stop,
                 wait_until(fun() ->
-                    [S || {_, S} <- maps:get(tables, agg_footprint())] =:= [0, 0, 0]
+                    ets:info(beamtalk_agg_pid, size) =:= 0 andalso
+                        ets:info(beamtalk_agg_pid_keys, size) =:= 0
                 end),
+                %% The class entry holds every dispatch exactly once.
                 #{<<"methods">> := #{<<"alpha">> := Alpha, <<"beta">> := Beta}} =
-                    retired_class_entry(<<"Grow">>),
+                    class_entry(<<"Grow">>),
                 ?assertMatch(#{<<"calls">> := N, <<"ok">> := N}, Alpha),
                 ?assertEqual(10 * N, maps:get(<<"total_duration_ns">>, Alpha)),
                 ?assertMatch(#{<<"calls">> := N, <<"errors">> := N}, Beta),
                 ?assertEqual(30 * N, maps:get(<<"total_duration_ns">>, Beta)),
 
                 %% Every slot is accounted for exactly once: on the free list
-                %% or held by a retired rollup row, never both.
+                %% or held by a class row, never both.
                 Free = [B || {B} <- ets:tab2list(beamtalk_agg_free_slots)],
-                Held = [B || {_, _, B} <- ets:tab2list(beamtalk_agg_retired)],
+                Held = [B || {_, _, B} <- ets:tab2list(beamtalk_agg_class_stats)],
                 ?assertEqual([], [B || B <- Held, lists:member(B, Free)]),
                 ?assertEqual(length(Held), length(lists:usort(Held))),
 
@@ -1955,7 +2096,10 @@ concurrent_retire_during_grow_test_() ->
                     beamtalk_trace_store:record_dispatch(Live, Sel, 5, ok, sync, 'Grow')
                  || Sel <- [one, two, three]
                 ],
-                Bases = [B || {{P, _}, _, B} <- ets:tab2list(beamtalk_agg_index), P =:= Live],
+                Bases = [
+                    B
+                 || {{P, _}, _, B, _} <- ets:tab2list(beamtalk_agg_pid), P =:= Live
+                ],
                 ?assertEqual(3, length(lists:usort(Bases))),
                 #{<<"methods">> := LiveMethods} =
                     maps:get(
@@ -1968,5 +2112,53 @@ concurrent_retire_during_grow_test_() ->
                  || S <- [<<"one">>, <<"two">>, <<"three">>]
                 ],
                 Live ! stop
+            end)}
+    end}.
+
+upgrade_resets_aggregates_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {"pre-BT-4103 tables are reset on restart; trace events survive",
+            ?_test(begin
+                case whereis(beamtalk_ets_heir) of
+                    undefined -> {ok, _} = beamtalk_ets_heir:start_link();
+                    _ -> ok
+                end,
+                %% Restart once so the tables are created with the heir
+                %% option (production-like: they survive the next restart).
+                gen_server:stop(beamtalk_trace_store),
+                timer:sleep(50),
+                {ok, _} = beamtalk_trace_store:start_link(),
+                %% Seed current-version data plus one trace event.
+                beamtalk_trace_store:enable(),
+                beamtalk_trace_store:record_dispatch(self(), ping, 1, ok, sync, 'Counter'),
+                beamtalk_trace_store:record_trace_event(
+                    self(), 'Counter', ping, sync, 1, ok, #{}, stop
+                ),
+                ?assertNotEqual(#{}, beamtalk_trace_store:get_stats()),
+                ?assertEqual(1, length(beamtalk_trace_store:get_traces())),
+
+                %% Simulate the old layout's tables surviving (e.g. held by
+                %% the heir across a code upgrade).
+                ets:new(beamtalk_agg_index, [named_table, public, set]),
+                ets:new(beamtalk_agg_class, [named_table, public, set]),
+                ets:new(beamtalk_agg_retired, [named_table, public, set]),
+
+                %% Restart the store over the old tables.
+                gen_server:stop(beamtalk_trace_store),
+                timer:sleep(50),
+                {ok, _} = beamtalk_trace_store:start_link(),
+
+                %% Old tables are gone, the new ones are empty and functional,
+                %% and the trace event survived via the heir.
+                ?assertEqual(undefined, ets:whereis(beamtalk_agg_index)),
+                ?assertEqual(undefined, ets:whereis(beamtalk_agg_class)),
+                ?assertEqual(undefined, ets:whereis(beamtalk_agg_retired)),
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
+                ?assertEqual(0, ets:info(beamtalk_agg_class_stats, size)),
+                ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
+                ?assertEqual(1, length(beamtalk_trace_store:get_traces())),
+                beamtalk_trace_store:record_dispatch(self(), pong, 1, ok, sync, 'Counter'),
+                #{<<"methods">> := #{<<"pong">> := Pong}} = class_entry(<<"Counter">>),
+                ?assertEqual(1, maps:get(<<"calls">>, Pong))
             end)}
     end}.
