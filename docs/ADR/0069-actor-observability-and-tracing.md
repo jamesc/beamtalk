@@ -1,7 +1,7 @@
 # ADR 0069: Actor Observability and Tracing
 
 ## Status
-Accepted | Implemented (2026-03-21). Amended 2026-10-21 (BT-4025): Beamtalk code can emit and attach to application `telemetry` events through a `Telemetry` facade; see "Amendment (2026-10-21): application events (BT-4025)" below.
+Accepted | Implemented (2026-03-21). Amended 2026-10-21 (BT-4025): Beamtalk code can emit and attach to application `telemetry` events through a `Telemetry` facade; see "Amendment (2026-10-21): application events (BT-4025)" below. Amended 2026-10-22 (BT-4103): always-on aggregates are keyed by `{Class, Selector}` and per-actor detail exists only while tracing is enabled; the per-actor monitor and retirement are gone — see "Amendment (2026-10-22): class-keyed always-on aggregates (BT-4103)" below.
 
 ## Amendment (2026-10-21): application events (BT-4025)
 
@@ -33,6 +33,46 @@ A new stdlib class, `Telemetry` (`stdlib/src/telemetry.bt`), is a sealed, statel
 - **Exporters stay Erlang-side.** StatsD, Prometheus and OpenTelemetry bridges are still attached in Erlang. Attaching from Beamtalk exists mainly for tests and in-image consumers.
 
 A user class named `Telemetry` now shadows the stdlib class and gets the usual shadowing warning. Catalina had already renamed its own class to `CatalinaTelemetry`.
+
+## Amendment (2026-10-22): class-keyed always-on aggregates (BT-4103)
+
+This amendment withdraws the BT-4066 retirement design (per-pid rows folded into a rollup on each actor's `DOWN`, the trace store monitoring every actor) and the `"retired:<Class>"` / `pid => "retired"` stats shapes. The `telemetry` event bus, the trace-event ring buffer, the `Tracing` method surface and the `Telemetry` facade are unchanged.
+
+### Why
+
+The BT-4051 release-gate verdict (2026-10-21, 7 rounds at load 5.9–7.7): the trace store's always-on handlers cost **71%** of Catalina's accept throughput (accept_tcp: 8,689 vs 30,361 conn/s detached; Thousand Island 31,955), and 51% at 128 clients. Detached, Catalina is at 0.95–1.03× TI. The gen_server itself is only ~1.4% of node reductions — the cost is the per-actor work done in callers:
+
+- every dispatch writes a per-pid ETS row (`Pid → Class`) plus its per-`{Pid, Selector}` aggregate row;
+- each actor's first message casts `track_pid` to one gen_server (~2 messages per short-lived actor into a single process: ~60k msgs/s at TI's accept rate);
+- every new actor races for the same free-list head (`ets:first` + `ets:take` on `beamtalk_agg_free_slots`), which halves the accept rate once slots start being recycled ("node aging");
+- every actor that has handled a message is monitored by the trace store, an observable `monitored_by` side effect (catalina#21).
+
+Per-pid counters for every process, always on, are also not how OTP does it: Erlang and Elixir emit `telemetry` events for handlers to aggregate, and per-process detail comes on demand (`recon`, `observer`, `process_info`).
+
+### Decision
+
+- **Always-on aggregates keyed by `{Class, Selector}` only** (`beamtalk_agg_class_stats`), updated in the caller with lock-free atomics. No per-pid ETS write, no gen_server call or cast, no monitor on the dispatch path. Class rows are sticky: `clear/0` zeroes their slots in place and readers skip zero-call rows, so the table is bounded by classes × selectors and a cleared store still reports `#{}`.
+- **Per-actor stats only while tracing is enabled** (`beamtalk_agg_pid`, capped at 100,000 keys). New keys past the cap are not tracked until room frees up. Dead pids' rows are reclaimed by the existing 1 s sweep (an `is_process_alive` check in the gen_server — no monitors, off the dispatch path). `disable/0` drops the whole pid table.
+- **`bottlenecks:` scans the instance registry** instead of the aggregate index, so it covers every live actor whether or not tracing is enabled. `healthFor:`/`systemHealth` are unchanged (live `process_info` snapshots).
+- **Upgrading resets the aggregates** (the old per-pid index, pid→class map and retired rollup are deleted once on first boot) but keeps the captured trace events.
+
+### API shapes
+
+| Query | Tracing off | Tracing on |
+|---|---|---|
+| `stats` | one `"class:<Class>"` entry per class | plus one entry per pid with per-actor detail |
+| `statsFor:` | `#{}` | the actor's entry (`#{}` for unknown actors) |
+| `slowMethods:` / `hotMethods:` / `errorMethods:` | one entry per `{Class, Selector}`, no `pid` key | same (always-on data) |
+| `bottlenecks:` / `healthFor:` / `systemHealth` | unchanged live snapshots | unchanged |
+
+The empty-values convention is kept deliberately: `traces` already answers `[]` when disabled and `statsFor:` already answered `#{}` for unknown actors, so polling callers (MCP `actor-stats`, LSP) keep working with no new error kind.
+
+### Consequences
+
+- A dispatch from a never-before-seen actor costs ~96 ns (was ~2.3 µs); steady-state dispatch ~91 ns, the full telemetry handler ~119 ns (`runtime/perf/bench_trace_dispatch.escript`; see `docs/development/benchmarks.md`). Enabled mode costs more per dispatch (~155 ns steady-state, two aggregate writes) — opt-in debugging overhead, as before.
+- Memory is flat under churn: 1M short-lived actors leave every aggregate table and the atomics array exactly at baseline (pinned by test).
+- No `monitored_by` side effect, ever; the `monitored_by` guidance added for BT-4066 (jamesc/beamtalk#4506) is revised out of `Tracing`'s docs.
+- Consumers that matched `"retired:<Class>"` keys or `pid => "retired"` entries must match `"class:<Class>"` keys instead (MCP tool descriptions updated; no MCP/LSP structural change — stats pass through opaquely).
 
 ## Context
 
@@ -427,7 +467,7 @@ This approach reduces implementation effort (3 tools vs 10), avoids API surface 
 
 - **Trace events**: Bounded by ring buffer (100k default). Oldest dropped on overflow via batch eviction. Explicit `Tracing clear` resets.
 - **Aggregate stats**: Persist until `Tracing clear`. Size is proportional to unique `{Pid, Selector}` combinations of **live** actors plus one rollup row per `{Class, Selector}` seen, not to call volume or actor churn.
-- **Actor death**: Trace events for dead actors are **retained** for post-mortem analysis. Their aggregate stats are retained too, folded into a per-`{Class, Selector}` rollup: `Tracing stats` reports it under a `"retired:<Class>"` key (`retired => true`), and `slowMethods:`/`hotMethods:`/`errorMethods:` report it as entries with `pid => "retired"`. Per-pid stats for a dead actor are not kept (`statsFor:` a dead actor answers `#{}`). *(Amended by BT-4066: originally per-pid stats were kept forever, which leaked one row per `{Pid, Selector}` for every actor in a long-running server.)* The dead pid's rows are retired by the trace store gen_server on the `DOWN` of a monitor it arms when the actor gets aggregate rows, so actors that die without `terminate/2` (kill, untrapped exit) are covered too, and every fold is serialized with counter-array grows and `Tracing clear`. The retired pid's atomics slots go on a free list and are reused, so the counters array does not keep doubling. A visible side effect: every actor that has handled a message is monitored by the trace store (the monitor is armed asynchronously after its first message), so its `monitored_by` includes the trace store's pid. Code and tests that inspect an actor's monitors must match the ones they care about rather than compare the whole `monitored_by` list (catalina's `SocketTest` hit exactly this).
+- **Actor death**: *(Superseded by the BT-4103 amendment above: no retirement, no monitors; class entries accumulate across deaths and dead pids' enabled-only rows are swept.)* Trace events for dead actors are **retained** for post-mortem analysis. Their aggregate stats are retained too, folded into a per-`{Class, Selector}` rollup: `Tracing stats` reports it under a `"retired:<Class>"` key (`retired => true`), and `slowMethods:`/`hotMethods:`/`errorMethods:` report it as entries with `pid => "retired"`. Per-pid stats for a dead actor are not kept (`statsFor:` a dead actor answers `#{}`). *(Amended by BT-4066: originally per-pid stats were kept forever, which leaked one row per `{Pid, Selector}` for every actor in a long-running server.)* The dead pid's rows are retired by the trace store gen_server on the `DOWN` of a monitor it arms when the actor gets aggregate rows, so actors that die without `terminate/2` (kill, untrapped exit) are covered too, and every fold is serialized with counter-array grows and `Tracing clear`. The retired pid's atomics slots go on a free list and are reused, so the counters array does not keep doubling. A visible side effect: every actor that has handled a message is monitored by the trace store (the monitor is armed asynchronously after its first message), so its `monitored_by` includes the trace store's pid. Code and tests that inspect an actor's monitors must match the ones they care about rather than compare the whole `monitored_by` list (catalina's `SocketTest` hit exactly this).
 - **`beamtalk_trace_store` gen_server**: Supervised under `beamtalk_runtime_sup`. Owns ETS tables (created with `{heir, HeirPid, undefined}`, where `HeirPid` is the `beamtalk_ets_heir` process) and counter references (stored in `persistent_term`). On gen_server crash: ETS ownership transfers to `beamtalk_ets_heir` via the `heir` mechanism, counters survive in `persistent_term`. The restarted gen_server takes its tables back from the heir (`beamtalk_ets_heir:reclaim/1`) — **no data loss on process crash**. Only a full VM crash (SIGKILL, OOM) loses data.
 
 ### Future: Block-Scoped Profiling

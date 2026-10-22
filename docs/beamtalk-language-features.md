@@ -6084,8 +6084,8 @@ The `Tracing` class provides actor observability and performance telemetry. It i
 
 Two levels of instrumentation are available:
 
-- **Always-on aggregates** — per-actor, per-method call counts and durations with negligible overhead (~150ns/call). No setup required.
-- **Detailed trace events** — individual call/return/error records captured to a ring buffer. Requires explicit `Tracing enable`.
+- **Always-on aggregates** — per-class, per-method call counts and durations with negligible overhead (~120ns/call). No setup required.
+- **Detailed trace events** — individual call/return/error records captured to a ring buffer. Requires explicit `Tracing enable`. Enabling also collects per-actor detail (see below).
 
 ### Tracing Lifecycle
 
@@ -6098,7 +6098,8 @@ Tracing enable
 Tracing isEnabled
 // => true
 
-// Disable trace capture (aggregates continue)
+// Disable trace capture (class aggregates continue;
+// per-actor detail is dropped)
 Tracing disable
 // => nil
 
@@ -6109,14 +6110,15 @@ Tracing clear
 
 ### Aggregate Stats (Always-On)
 
-Aggregate stats are collected for every actor dispatch, even when trace capture is disabled. They include call counts, total duration, min/max/average times, and error counts.
+Aggregate stats are collected for every actor dispatch, even when trace capture is disabled. They include call counts, total duration, min/max/average times, and error counts. Stats are keyed by class: one `"class:<Class>"` entry per class with per-method figures. While tracing is enabled, `stats` additionally holds one entry per pid with live actors' per-actor detail.
 
 ```beamtalk
-// All per-actor, per-method stats
+// All stats: class entries always, plus per-actor entries while enabled
 Tracing stats
-// => #{...}  (Dictionary keyed by actor/selector)
+// => #{...}  (Dictionary keyed by "class:<Class>", and by pid while enabled)
 
-// Stats for a specific actor
+// Stats for a specific actor (only collected while tracing is enabled;
+// answers #{} when tracing is off)
 Tracing statsFor: myCounter
 // => #{...}
 ```
@@ -6156,7 +6158,8 @@ Tracing hotMethods: 10
 Tracing errorMethods: 5
 // => #(...)
 
-// Top N actors by message queue length (live snapshot)
+// Top N actors by message queue length (live snapshot over every
+// registered actor, whether or not tracing is enabled)
 Tracing bottlenecks: 5
 // => #(...)
 ```
@@ -6197,8 +6200,8 @@ c := Counter spawn
 10 timesRepeat: [c increment]
 
 // 2. Check always-on aggregates (no enable needed)
-Tracing statsFor: c
-// => #{increment => #{count => 10, avg_us => 42, ...}, ...}
+(Tracing stats at: "class:Counter") at: "methods"
+// => #{"increment" => #{calls => 10, ...}, ...}
 
 // 3. Enable trace capture for detailed events
 Tracing enable
