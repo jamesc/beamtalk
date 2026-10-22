@@ -216,8 +216,10 @@ A block is at home when a callback of its own actor is running in the current
 process, tested as `Self#beamtalk_object.pid =:= self()` with the cell
 present *and owned by that same actor*. While a nested away `super_send/5`
 runs, the cell holds the other actor's state, so a host block running inside
-the call is away: its reads answer its capture and its writes raise
-`actor_state_unreachable`. Otherwise away, a field read answers the block's
+the call is away: its reads answer its capture, its writes raise
+`actor_state_unreachable`, and its self-sends raise `deadlock_detected`
+(the host's callback is blocked in that call, so the send could never be
+served). Otherwise away, a field read answers the block's
 capture, a write raises `actor_state_unreachable`, and a self-send is a
 message to the actor's pid.
 If the actor is blocked in the call that carried the block away,

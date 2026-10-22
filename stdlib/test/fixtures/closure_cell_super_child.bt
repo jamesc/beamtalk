@@ -41,3 +41,5 @@ ClosureCellSuperBase subclass: ClosureCellSuperChild
   runSuperApplyOnOwnRead: superBlk => superBlk value: [self.n]
 
   runSuperApplyOnOwnWrite: superBlk => superBlk value: [self.n := 99]
+
+  runSuperApplyOnOwnSelfSend: superBlk => superBlk value: [self n]

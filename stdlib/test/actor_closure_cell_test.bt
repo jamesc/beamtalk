@@ -182,3 +182,15 @@ TestCase subclass: ActorClosureCellTest
     ] raise: #actor_state_unreachable
     self assert: b n equals: 0
     self assert: a n equals: 0
+
+  // A self-send from a host block running inside an away `super` cannot be
+  // served (the host's callback is blocked in that call): it raises
+  // `deadlock_detected` instead of misreporting the live actor as dead.
+  testAwaySuperRunningHostSelfSendRaisesDeadlock =>
+    a := ClosureCellSuperChild spawn
+    b := ClosureCellSuperChild spawn
+    self should: [
+      b runSuperApplyOnOwnSelfSend: a superApplyBlock
+    ] raise: #deadlock_detected
+    self assert: b n equals: 0
+    self assert: a n equals: 0

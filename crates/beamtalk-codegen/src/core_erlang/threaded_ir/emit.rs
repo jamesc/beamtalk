@@ -1245,24 +1245,35 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
 }
 
 #[cfg(test)]
-mod cell_key_conformance {
-    /// The cell key crosses the Rust/Erlang boundary: generated code reaches
-    /// the cell only through `beamtalk_actor_state:store/1` and `:take/0`, and
-    /// `beamtalk_actor_state.erl` owns the key. This reads the Erlang
-    /// `-define(CELL, ...)` so a change to the owned key stays visible here
-    /// (CLAUDE.md). Edit the Erlang module (the owner) when this fails.
+mod cell_helper_conformance {
+    /// Generated code reaches the cell only through
+    /// `beamtalk_actor_state:store/1` and `:take/0`; this reads the Erlang
+    /// `-export([...])` so removing or renaming either helper fails here
+    /// instead of at runtime (CLAUDE.md). Edit the Erlang module (the owner)
+    /// when this fails.
     #[test]
-    fn the_cell_key_matches_the_runtime_define() {
+    fn the_runtime_exports_the_cell_helpers_codegen_emits() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../runtime/apps/beamtalk_runtime/src/beamtalk_actor_state.erl"
         );
         let src = std::fs::read_to_string(path).expect("read beamtalk_actor_state.erl");
-        let define = src
+        let export: Vec<String> = src
             .lines()
-            .find_map(|line| line.trim().strip_prefix("-define(CELL, "))
-            .expect("a `-define(CELL, ...)` in beamtalk_actor_state.erl");
-        let atom = define.trim_end_matches(").").trim().trim_matches('\'');
-        assert_eq!(atom, "$bt_actor_state");
+            .skip_while(|line| !line.trim_start().starts_with("-export(["))
+            .skip(1)
+            .take_while(|line| !line.trim_start().starts_with("])."))
+            .map(|line| line.trim().trim_end_matches(',').to_string())
+            .collect();
+        assert!(
+            !export.is_empty(),
+            "no -export block found in beamtalk_actor_state.erl"
+        );
+        for helper in ["store/1", "take/0"] {
+            assert!(
+                export.iter().any(|entry| entry == helper),
+                "beamtalk_actor_state.erl must export {helper}; generated code calls it"
+            );
+        }
     }
 }
