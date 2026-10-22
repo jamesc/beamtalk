@@ -127,7 +127,7 @@ pub(crate) fn generate_proto_object_bif(
         }
         "doesNotUnderstand:args:" => {
             let selector_var = super::param(params, 0, "_Selector");
-            let hint = super::core_erlang_binary_string(
+            let hint = leaf::binary_lit(
                 "Check spelling or use 'respondsTo:' to verify method exists",
             );
             Some(docvec![

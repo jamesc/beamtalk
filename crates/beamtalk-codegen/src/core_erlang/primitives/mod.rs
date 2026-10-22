@@ -277,26 +277,6 @@ pub(crate) fn build_error_doc(
     ]
 }
 
-/// Encodes a string as a Core Erlang binary literal.
-///
-/// Core Erlang represents binaries as: `#{#<byte>(8,1,'integer',['unsigned'|['big']]), ...}#`
-pub(crate) fn core_erlang_binary_string(s: &str) -> Document<'static> {
-    if s.is_empty() {
-        return Document::Str("#{}#");
-    }
-    let mut parts: Vec<Document<'static>> = vec![Document::Str("#{")];
-    for (i, b) in s.bytes().enumerate() {
-        if i > 0 {
-            parts.push(Document::Str(","));
-        }
-        parts.push(Document::Str("#<"));
-        parts.push(leaf::int_lit(i64::from(b)));
-        parts.push(Document::Str(">(8,1,'integer',['unsigned'|['big']])"));
-    }
-    parts.push(Document::Str("}#"));
-    Document::Vec(parts)
-}
-
 /// Converts an `Option<Document>` to an `Option<String>` for test assertions.
 #[cfg(test)]
 pub(crate) fn doc_to_string(doc: Option<Document<'_>>) -> Option<String> {
@@ -2130,22 +2110,6 @@ mod tests {
     }
 
     #[test]
-    fn test_core_erlang_binary_string_empty() {
-        let doc = core_erlang_binary_string("");
-        assert_eq!(doc.to_pretty_string(), "#{}#");
-    }
-
-    #[test]
-    fn test_core_erlang_binary_string_single_byte() {
-        // 'a' = 97
-        let doc = core_erlang_binary_string("a");
-        assert_eq!(
-            doc.to_pretty_string(),
-            "#{#<97>(8,1,'integer',['unsigned'|['big']])}#"
-        );
-    }
-
-    #[test]
     fn test_is_runtime_dispatched_primitive() {
         // Allowlisted call-site-intercepted operations.
         assert!(is_runtime_dispatched_primitive("ProtoObject", "class"));
@@ -2215,16 +2179,6 @@ mod tests {
         assert_eq!(
             local,
             Some("call 'beamtalk_object_class':'local_call'(Self, Sel, Args)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_core_erlang_binary_string_multi_byte() {
-        // "hi" = bytes [104, 105]
-        let doc = core_erlang_binary_string("hi");
-        assert_eq!(
-            doc.to_pretty_string(),
-            "#{#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']])}#"
         );
     }
 
