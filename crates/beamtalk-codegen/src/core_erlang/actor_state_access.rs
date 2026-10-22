@@ -64,6 +64,46 @@ impl ActorClosure {
     }
 }
 
+/// Every `beamtalk_actor_state` helper codegen emits, as `(name, arity)`.
+///
+/// Each emitter below references its entry here (never a fresh string
+/// literal), and `cell_helper_conformance` checks every entry against the
+/// runtime's `-export` blocks — renaming or unexporting a helper fails the
+/// build instead of failing with `undef` at runtime.
+pub(in crate::core_erlang) mod actor_state_helper {
+    pub const INSTALL: (&str, u32) = ("install", 1);
+    pub const UNINSTALL: (&str, u32) = ("uninstall", 1);
+    pub const TAKE: (&str, u32) = ("take", 0);
+    pub const STORE: (&str, u32) = ("store", 1);
+    pub const SNAPSHOT: (&str, u32) = ("snapshot", 0);
+    pub const RESTORE: (&str, u32) = ("restore", 1);
+    pub const CALL_FOREIGN: (&str, u32) = ("call_foreign", 3);
+    pub const REFRESH: (&str, u32) = ("refresh", 2);
+    pub const CAPTURE: (&str, u32) = ("capture", 2);
+    pub const VIEW: (&str, u32) = ("view", 2);
+    pub const GET: (&str, u32) = ("get", 3);
+    pub const PUT: (&str, u32) = ("put", 3);
+    pub const SUPER_SEND: (&str, u32) = ("super_send", 5);
+
+    /// Every helper above, for the export conformance check.
+    #[cfg(test)]
+    pub const ALL: &[(&str, u32)] = &[
+        INSTALL,
+        UNINSTALL,
+        TAKE,
+        STORE,
+        SNAPSHOT,
+        RESTORE,
+        CALL_FOREIGN,
+        REFRESH,
+        CAPTURE,
+        VIEW,
+        GET,
+        PUT,
+        SUPER_SEND,
+    ];
+}
+
 /// The one emitter of a `call 'beamtalk_actor_state':'<function>'(Self, <args>..)`.
 fn actor_state_call(function: &str, args: Vec<Document<'static>>) -> Document<'static> {
     let mut parts: Vec<Document<'static>> = vec![
@@ -157,7 +197,10 @@ impl CoreErlangGenerator {
                 "let ",
                 leaf::var(capture),
                 " = ",
-                actor_state_call("capture", vec![leaf::var(outer.capture().to_string())]),
+                actor_state_call(
+                    actor_state_helper::CAPTURE.0,
+                    vec![leaf::var(outer.capture().to_string())],
+                ),
                 " in ",
                 fun
             ]);
@@ -176,7 +219,7 @@ impl CoreErlangGenerator {
         let capture = self
             .actor_closure_capture()
             .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()));
-        actor_state_call("view", vec![capture])
+        actor_state_call(actor_state_helper::VIEW.0, vec![capture])
     }
 
     /// A read of field `name` inside an actor closure.
@@ -184,7 +227,10 @@ impl CoreErlangGenerator {
         let capture = self
             .actor_closure_capture()
             .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()));
-        actor_state_call("get", vec![leaf::atom(name.to_string()), capture])
+        actor_state_call(
+            actor_state_helper::GET.0,
+            vec![leaf::atom(name.to_string()), capture],
+        )
     }
 
     /// A `super` send inside an actor closure:
@@ -199,7 +245,7 @@ impl CoreErlangGenerator {
             .actor_closure_capture()
             .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()));
         actor_state_call(
-            "super_send",
+            actor_state_helper::SUPER_SEND.0,
             vec![
                 capture,
                 leaf::atom(class_name.to_string()),
@@ -224,7 +270,9 @@ impl CoreErlangGenerator {
             CellBoundary::Snapshot(snapshot) => docvec![
                 "let ",
                 leaf::var(snapshot.name().to_string()),
-                " = call 'beamtalk_actor_state':'snapshot'() in "
+                " = call 'beamtalk_actor_state':'",
+                actor_state_helper::SNAPSHOT.0,
+                "'() in "
             ],
         }
     }
@@ -243,7 +291,9 @@ impl CoreErlangGenerator {
                 ]
             }
             CellBoundary::Snapshot(snapshot) => docvec![
-                "do call 'beamtalk_actor_state':'restore'(",
+                "do call 'beamtalk_actor_state':'",
+                actor_state_helper::RESTORE.0,
+                "'(",
                 leaf::var(snapshot.name().to_string()),
                 ") "
             ],
@@ -285,7 +335,7 @@ impl CoreErlangGenerator {
             leaf::var(ok_var),
             " = ",
             actor_state_call(
-                "put",
+                actor_state_helper::PUT.0,
                 vec![leaf::atom(name.to_string()), leaf::var(val_var.clone())]
             ),
             " in ",

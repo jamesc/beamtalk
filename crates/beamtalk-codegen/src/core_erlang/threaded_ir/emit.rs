@@ -6,6 +6,7 @@
 //! three narrow accessors, never through a raw field or an AST-directed
 //! emission path. Depends only on [`super::ir`]; nothing here verifies IR.
 
+use super::super::actor_state_access::actor_state_helper;
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, FrameId,
@@ -343,7 +344,13 @@ pub(in crate::core_erlang) fn take_cell_store_emitted() -> bool {
 /// the host process.
 pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
     CELL_STORE_EMITTED.with(|c| c.set(true));
-    docvec!["call 'beamtalk_actor_state':'store'(", state, ")"]
+    docvec![
+        "call 'beamtalk_actor_state':'",
+        actor_state_helper::STORE.0,
+        "'(",
+        state,
+        ")"
+    ]
 }
 
 /// Renders one [`ThreadedStmt::SyncedCall`] (ADR 0137 §1): the store of
@@ -376,7 +383,9 @@ fn render_synced_call(
         parts.push(docvec![
             "let ",
             leaf::var(ctx.resolve_prefix(load)),
-            " = call 'beamtalk_actor_state':'take'() in "
+            " = call 'beamtalk_actor_state':'",
+            actor_state_helper::TAKE.0,
+            "'() in "
         ]);
     }
     Document::Vec(parts)
@@ -1246,33 +1255,48 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
 
 #[cfg(test)]
 mod cell_helper_conformance {
-    /// Generated code reaches the cell only through
-    /// `beamtalk_actor_state:store/1` and `:take/0`; this reads the Erlang
-    /// `-export([...])` so removing or renaming either helper fails here
-    /// instead of at runtime (CLAUDE.md). Edit the Erlang module (the owner)
-    /// when this fails.
+    use crate::core_erlang::actor_state_access::actor_state_helper;
+
+    /// Every `beamtalk_actor_state` helper codegen emits must be exported by
+    /// the runtime: generated code calls them, so removing or renaming one
+    /// fails here instead of with `undef` at runtime. The expected set lives
+    /// in one place (`actor_state_helper::ALL`), which the emitters
+    /// themselves reference, so the list cannot drift from what is actually
+    /// emitted. All `-export` blocks in the module are collected, so a helper
+    /// moved to a second block is still found (CLAUDE.md). Edit the Erlang
+    /// module (the owner) when this fails.
     #[test]
-    fn the_runtime_exports_the_cell_helpers_codegen_emits() {
+    fn the_runtime_exports_every_emitted_cell_helper() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../runtime/apps/beamtalk_runtime/src/beamtalk_actor_state.erl"
         );
         let src = std::fs::read_to_string(path).expect("read beamtalk_actor_state.erl");
-        let export: Vec<String> = src
-            .lines()
-            .skip_while(|line| !line.trim_start().starts_with("-export(["))
-            .skip(1)
-            .take_while(|line| !line.trim_start().starts_with("])."))
-            .map(|line| line.trim().trim_end_matches(',').to_string())
-            .collect();
+        let mut exported = std::collections::BTreeSet::new();
+        let mut in_export = false;
+        for line in src.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("-export([") {
+                in_export = true;
+                continue;
+            }
+            if in_export {
+                if trimmed.starts_with("]).") || trimmed.starts_with("]);") {
+                    in_export = false;
+                    continue;
+                }
+                exported.insert(trimmed.trim_end_matches(',').to_string());
+            }
+        }
         assert!(
-            !export.is_empty(),
+            !exported.is_empty(),
             "no -export block found in beamtalk_actor_state.erl"
         );
-        for helper in ["store/1", "take/0"] {
+        for (name, arity) in actor_state_helper::ALL {
+            let entry = format!("{name}/{arity}");
             assert!(
-                export.iter().any(|entry| entry == helper),
-                "beamtalk_actor_state.erl must export {helper}; generated code calls it"
+                exported.contains(&entry),
+                "beamtalk_actor_state.erl must export {entry}; generated code calls it"
             );
         }
     }

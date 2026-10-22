@@ -9,6 +9,7 @@
 //! `handle_cast/2`, `handle_call/3`, `handle_info/2`, `code_change/3`,
 //! and `terminate/2`.
 
+use super::super::actor_state_access::actor_state_helper;
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
@@ -1031,7 +1032,10 @@ impl CoreErlangGenerator {
                         "let ",
                         leaf::var(old_state_var.clone()),
                         " = ",
-                        actor_state_call("install", leaf::var(in_state_var.clone())),
+                        actor_state_call(
+                            actor_state_helper::INSTALL.0,
+                            leaf::var(in_state_var.clone()),
+                        ),
                         " in",
                     ],
                     line(),
@@ -1049,7 +1053,10 @@ impl CoreErlangGenerator {
                         "let ",
                         leaf::var(restore_ok_var.clone()),
                         " = ",
-                        actor_state_call("uninstall", leaf::var(old_state_var.clone())),
+                        actor_state_call(
+                            actor_state_helper::UNINSTALL.0,
+                            leaf::var(old_state_var.clone()),
+                        ),
                         " in",
                     ],
                     line(),
@@ -1372,7 +1379,10 @@ impl CoreErlangGenerator {
         docvec![
             line(),
             "let _OldState = ",
-            actor_state_call("install", leaf::var("State".to_string())),
+            actor_state_call(
+                actor_state_helper::INSTALL.0,
+                leaf::var("State".to_string()),
+            ),
             " in",
         ]
     }
@@ -1383,7 +1393,10 @@ impl CoreErlangGenerator {
         docvec![
             line(),
             "let _RestoreOk = ",
-            actor_state_call("uninstall", leaf::var("_OldState".to_string())),
+            actor_state_call(
+                actor_state_helper::UNINSTALL.0,
+                leaf::var("_OldState".to_string()),
+            ),
             " in",
             line(),
             "let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in",
