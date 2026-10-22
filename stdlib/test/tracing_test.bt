@@ -122,12 +122,39 @@ TestCase subclass: TracingTest
   // === Stats (empty when no dispatches recorded) ===
   testStatsReturnsEmptyDictionary => self assert: Tracing stats equals: #{}
 
+  testStatsHasClassEntryWhileDisabled =>
+    // BT-4103: class/selector aggregates are always on. Spawning while
+    // disabled still records the lifecycle start under "class:Counter".
+    c := Counter spawn
+    Timer sleep: 50
+    stats := Tracing stats
+    self deny: stats isEmpty
+    entry := stats at: "class:Counter"
+    self assert: (entry at: "class") equals: "Counter"
+    self deny: ((entry at: "methods") isEmpty)
+    c stop
+
   testStatsForActorIncludesLifecycleStart =>
     // BT-1638: Compiled actors emit lifecycle start telemetry in init,
-    // so statsFor: a freshly spawned actor includes a "start" entry.
+    // so statsFor: a freshly spawned actor includes a "start" entry —
+    // but only while tracing is enabled (BT-4103).
+    Tracing enable
     c := Counter spawn
+    Timer sleep: 50
     stats := Tracing statsFor: c
     self deny: stats isEmpty
+    c stop
+
+  testStatsForReturnsEmptyWhenDisabled =>
+    // BT-4103: per-actor detail exists only while tracing is enabled.
+    // Disable drops it; the class entry survives.
+    Tracing enable
+    Tracing clear
+    c := Counter spawn
+    Timer sleep: 50
+    Tracing disable
+    self deny: Tracing stats isEmpty
+    self assert: (Tracing statsFor: c) equals: #{}
     c stop
 
   // === BT-1638: Lifecycle telemetry from compiled actors ===
@@ -176,9 +203,16 @@ TestCase subclass: TracingTest
   testErrorMethodsReturnsEmptyList =>
     self assert: (Tracing errorMethods: 5) equals: #()
 
-  testBottlenecksReturnsEmptyList =>
-    // No actors with recorded dispatches, so bottlenecks is empty
-    self assert: (Tracing bottlenecks: 5) equals: #()
+  testBottlenecksListsLiveActors =>
+    // BT-4103: bottlenecks scans the instance registry, so it lists live
+    // actors whether or not tracing is enabled or they dispatched.
+    c := Counter spawn
+    Timer sleep: 50
+    top := Tracing bottlenecks: 100
+    counters := top select: [:e | (e at: "class") == "Counter"]
+    self deny: counters isEmpty
+    self assert: ((counters first at: "queue_depth") >= 0)
+    c stop
 
   // === Live health ===
   testHealthForLiveActor =>
