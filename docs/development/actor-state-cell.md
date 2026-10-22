@@ -169,13 +169,23 @@ Phase 2a adds a test that drives every arm of a generated `dispatch/4` and
 checks that each one either is a compiled clause or calls `call_foreign/3`.
 
 `call_foreign/3` stores `State` to the cell, invokes the fun with it, and
-returns the fun's own `{reply, R, NewState}`. A native method or extension
-fun that runs a block must read the block's writes back from the cell
-(`beamtalk_actor_state:get/2`) before it answers; one that runs no block, or
-never writes state, needs no change. Phase 2b audits the few that run blocks.
-In debug builds `call_foreign/3` asserts that if the cell changed during the
-call, the returned `NewState` reflects the change, so a native that forgets
-fails its tests instead of dropping a write.
+returns the fun's own `{reply, R, NewState}` unless the cell changed during the
+call (always on, every build): if the answer is the exact entry state, the cell
+holds the only writes (a stored block run by an inherited `Object` method such as
+`ifNotNil:` reached through `perform:withArguments:`) and the answer carries the
+cell's state; if the answer is a different state and the cell changed to
+something else, `call_foreign/3` raises `actor_state_conflict`; an answer equal
+to the cell (a compiled callee that stored and threaded the same version) or an
+unchanged cell passes through. A native method or extension fun that runs a block
+should still read the block's writes back from the cell
+(`beamtalk_actor_state:get/2`) before it answers.
+
+Phase 2b audit of what runs blocks behind a foreign exit: the only inherited
+methods that evaluate a caller-supplied block are `Object>>ifNotNil:`,
+`ifNil:ifNotNil:` and `ifNotNil:ifNil:` (compiled Beamtalk in `object.bt`; `ifNil:`
+never runs its block), plus `perform:withArguments:` reaching them. Both shapes
+are covered by `closure_cell_foreign_exit.bt`. No other native or extension fun
+in the runtime evaluates a block against the actor's state.
 
 The helper does not reconcile the cell with the answer; ADR 0137's
 Alternatives Considered says why.
@@ -446,7 +456,7 @@ the cell as its new state (`take/0`) and `adapt/1` stores a native's
 
 **Phase 2a (L).** Align `beamtalk_actor_state`'s moduledoc and `adapt/1`
 with the amended convention: the method's `{reply, R, NewState}` is the new
-state. Add `call_foreign/3` with its debug-build assertion, and route every
+state. Add `call_foreign/3` (always on: it adopts the cell or raises `actor_state_conflict`), and route every
 non-compiled arm of `dispatch/4` (§2) through it, with the test that drives
 every arm. Reword the `actor_state_unreachable` hint, which today says a
 block "run after the method returned" is away; a block run in a later

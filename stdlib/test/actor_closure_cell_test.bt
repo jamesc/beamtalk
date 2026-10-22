@@ -116,3 +116,19 @@ TestCase subclass: ActorClosureCellTest
     rec := ClosureCellRecorder spawn
     c selfSendError: rec
     self assert: rec last equals: 1
+
+  // A stored block run by a foreign `dispatch/4` exit keeps its write.
+  testStoredBlockRunByPerformKeepsItsWrite =>
+    c := ClosureCellForeignExit spawn
+    self assert: c viaPerform equals: 9
+    self assert: c n equals: 9
+
+  testStoredBlockRunByPerformWithTwoBlocksKeepsItsWrite =>
+    c := ClosureCellForeignExit spawn
+    self assert: c viaPerformTwoBlocks equals: 11
+    self assert: c n equals: 11
+
+  testStoredBlockRunDirectlyKeepsItsWrite =>
+    c := ClosureCellForeignExit spawn
+    self assert: c direct equals: 7
+    self assert: c n equals: 7

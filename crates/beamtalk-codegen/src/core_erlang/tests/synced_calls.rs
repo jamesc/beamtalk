@@ -224,3 +224,16 @@ fn an_early_return_out_of_a_direct_params_loop_compiles_through_erlc() {
     super::assert_compiles_through_erlc("test", &out);
     assert_eq!(enforce_report(src), None);
 }
+
+/// A method that built a bracket leaves the cell at the last stored version, so its
+/// reply stores the final `State` back; a method without a bracket does not.
+#[test]
+fn a_bracketed_method_stores_its_final_state_on_exit() {
+    let with = compile(
+        "Actor subclass: Probe\n  state: n = 0\n\n  poke: other =>\n    other process.\n    self.n := 1\n",
+    );
+    assert!(with.contains("_ExitReply"), "{with}");
+    let without = compile("Actor subclass: Probe\n  state: n = 0\n\n  bump => self.n := 1\n");
+    assert!(!without.contains("_ExitReply"), "{without}");
+    super::assert_compiles_through_erlc("test", &with);
+}

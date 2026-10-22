@@ -267,17 +267,88 @@ call_foreign_accepts_a_native_that_reads_a_blocks_writes_back_test() ->
         erlang:erase('$bt_actor_state')
     end.
 
-call_foreign_fails_a_native_that_drops_a_blocks_writes_test() ->
+call_foreign_adopts_the_cell_when_the_answer_is_the_entry_state_test() ->
     State = #{n => 1},
-    %% the block wrote the cell, but the native answers the state it was given
+    %% a block the callee ran wrote the cell, but the callee answers the state it was
+    %% given: the cell holds the only writes
     Fun = fun() ->
         erlang:put('$bt_actor_state', #{n => 2}),
         {reply, ok, State}
     end,
     try
-        ?assertError(
-            {actor_state_not_reflected, State, #{n := 2}},
-            beamtalk_actor_state:call_foreign(State, Fun, [])
+        ?assertEqual({reply, ok, #{n => 2}}, beamtalk_actor_state:call_foreign(State, Fun, []))
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_adopts_the_cell_for_other_answer_shapes_test() ->
+    State = #{n => 1},
+    Write = fun() -> erlang:put('$bt_actor_state', #{n => 2}) end,
+    try
+        ?assertEqual(
+            {noreply, #{n => 2}},
+            beamtalk_actor_state:call_foreign(
+                State,
+                fun() ->
+                    Write(),
+                    {noreply, State}
+                end,
+                []
+            )
+        ),
+        ?assertEqual(
+            {error, boom, #{n => 2}},
+            beamtalk_actor_state:call_foreign(
+                State,
+                fun() ->
+                    Write(),
+                    {error, boom, State}
+                end,
+                []
+            )
+        )
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_passes_the_answer_through_when_the_cell_is_unchanged_test() ->
+    State = #{n => 1},
+    try
+        ?assertEqual(
+            {reply, ok, #{n => 3}},
+            beamtalk_actor_state:call_foreign(State, fun() -> {reply, ok, #{n => 3}} end, [])
+        ),
+        ?assertEqual(
+            {reply, ok, State},
+            beamtalk_actor_state:call_foreign(State, fun() -> {reply, ok, State} end, [])
+        )
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_accepts_an_answer_equal_to_the_cell_test() ->
+    State = #{n => 1},
+    %% a compiled callee that stored a version and threaded the same version
+    Fun = fun() ->
+        erlang:put('$bt_actor_state', #{n => 2}),
+        {reply, ok, #{n => 2}}
+    end,
+    try
+        ?assertEqual({reply, ok, #{n => 2}}, beamtalk_actor_state:call_foreign(State, Fun, []))
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_raises_a_conflict_when_both_the_answer_and_the_cell_changed_test() ->
+    State = #{n => 1},
+    Fun = fun() ->
+        erlang:put('$bt_actor_state', #{n => 2}),
+        {reply, ok, #{n => 3}}
+    end,
+    try
+        ?assertEqual(
+            actor_state_conflict,
+            kind_of(fun() -> beamtalk_actor_state:call_foreign(State, Fun, []) end)
         )
     after
         erlang:erase('$bt_actor_state')

@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): a stored block handed to a foreign exit of
+// `dispatch/4` (an inherited runtime method reached through `perform:`) writes
+// the actor's field; `call_foreign/3` answers the state the block wrote.
+
+Actor subclass: ClosureCellForeignExit
+  state: n = 2
+
+  n => self.n
+
+  viaPerform =>
+    b := [:x | self.n := 9]
+    self perform: #ifNotNil: withArguments: #(b)
+    self.n
+
+  viaPerformTwoBlocks =>
+    b := [:x | self.n := 11]
+    self perform: #ifNil:ifNotNil: withArguments: #([0], b)
+    self.n
+
+  direct =>
+    b := [:x | self.n := 7]
+    self ifNotNil: b
+    self.n

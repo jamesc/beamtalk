@@ -179,42 +179,72 @@ view(Self, Capture) ->
 Run a `dispatch/4` exit that is not a compiled Beamtalk method (ADR 0137 §2): a
 native method, an ADR 0066 extension fun, the inherited `Object`/`ProtoObject`
 walk, `doesNotUnderstand:`. The code behind it is Erlang that does not bracket
-what it calls, and it may run one of this actor's blocks, which reads and writes
-the cell. So `State` is stored to the cell first, `Fun` is applied to `Args`, and
-`Fun`'s own answer (`{reply, Result, NewState}`, `{error, Reason}`, ...) is
-returned unchanged: a native that runs a block reads the block's writes back
-from the cell (`get/2`, `take/0`) before it answers. There is no reconciliation
-of the cell with the answer (ADR 0137, Alternatives Considered).
+what it calls, and it may run one of this actor's blocks (a stored block handed to
+`perform:withArguments:`) or send back to `self`, which reads and writes the cell.
+So `State` is stored to the cell first and `Fun` is applied to `Args`. Always on,
+in every build.
 
-A test build (`TEST` defined) checks the one mistake a native can make: when the cell changed during the call (a block it ran
-wrote a field) and the answer hands back the state it was given, the native
-dropped the block's writes, and it fails its test instead of dropping them
-silently. (A compiled method reached through the inherited walk legitimately
-leaves an older version of its own threaded state in the cell, so a changed cell
-alone proves nothing.)
+What the answer carries is checked against the cell, never reconciled by guesswork:
+
+  * the cell is unchanged since entry: the answer passes through;
+  * the fun answers the exact state it was given and the cell changed: nothing in
+    the callee advanced its own state, so the cell holds the only writes (a block it
+    ran wrote them) and the answer carries the cell's state instead;
+  * the fun answers a different state and the cell changed to something else: both
+    changed and neither is the other's ancestor, so it raises `actor_state_conflict`
+    rather than lose either set of writes (an answer equal to the cell is not a
+    conflict: a compiled callee that stored and then threaded the same version).
 """.
 -spec call_foreign(map(), fun(), [term()]) -> term().
 call_foreign(State, Fun, Args) when is_map(State), is_function(Fun, length(Args)) ->
     erlang:put(?CELL, State),
-    Answer = apply(Fun, Args),
-    assert_reflects_cell(State, Answer),
+    reflect_cell(State, apply(Fun, Args)).
+
+-spec reflect_cell(map(), term()) -> term().
+reflect_cell(Entry, {reply, Result, Answered}) when is_map(Answered) ->
+    {reply, Result, reflect_state(Entry, Answered)};
+reflect_cell(Entry, {noreply, Answered}) when is_map(Answered) ->
+    {noreply, reflect_state(Entry, Answered)};
+reflect_cell(Entry, {error, Reason, Answered}) when is_map(Answered) ->
+    {error, Reason, reflect_state(Entry, Answered)};
+reflect_cell(_Entry, Answer) ->
     Answer.
 
--ifdef(TEST).
--spec assert_reflects_cell(map(), term()) -> ok.
-assert_reflects_cell(Entry, {reply, _Result, Entry}) ->
+-spec reflect_state(map(), map()) -> map().
+reflect_state(Entry, Answered) ->
     case erlang:get(?CELL) of
-        Entry -> ok;
-        Cell when is_map(Cell) -> erlang:error({actor_state_not_reflected, Entry, Cell});
-        _ -> ok
-    end;
-assert_reflects_cell(_Entry, _Answer) ->
-    ok.
--else.
--spec assert_reflects_cell(map(), term()) -> ok.
-assert_reflects_cell(_Entry, _Answer) ->
-    ok.
--endif.
+        Cell when is_map(Cell), Cell =/= Entry, Cell =/= Answered ->
+            case Answered =:= Entry of
+                true -> Cell;
+                false -> raise_conflict(Entry)
+            end;
+        _ ->
+            Answered
+    end.
+
+-spec raise_conflict(map()) -> no_return().
+raise_conflict(Entry) ->
+    Class = maps:get('$beamtalk_class', Entry, unknown),
+    Error0 = beamtalk_error:new(actor_state_conflict, Class),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary(
+            io_lib:format(
+                "~s's state was changed twice by one call: a block it ran wrote a field "
+                "and the method also answered a different state",
+                [Class]
+            )
+        )
+    ),
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            Error1,
+            <<
+                "A native method or extension that runs a block must read the block's "
+                "writes back from the cell before it answers."
+            >>
+        )
+    ).
 
 -doc """
 `Acc` with its fields replaced by the cell, keeping the codegen-internal

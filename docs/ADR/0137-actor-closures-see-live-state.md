@@ -234,8 +234,12 @@ a block that leaves it sees a copy and cannot write.
 exact. The process dictionary holds the state only while a callback runs and
 only across calls into code that may run a block. A native actor method or
 extension fun that runs user blocks must read the block's writes from the cell
-before answering, and a debug-build assertion catches one that does not; one
-that runs no blocks needs no change. A block reading fields in a later
+before answering. `call_foreign/3` checks it in every build: if the fun
+answers the exact state it was given while the cell changed (a stored block it
+ran wrote a field, as for `perform: #ifNotNil: withArguments: #(b)`), the answer
+carries the cell's state; if it answered a different state and the cell changed
+to something else, it raises `actor_state_conflict` instead of losing either
+set of writes. A native that runs no blocks needs no change. A block reading fields in a later
 message is a departure from `fun` capture semantics.
 
 **Production operator.** `sys:get_state/1`, `sys:replace_state/2`, hot code
@@ -339,7 +343,8 @@ in another process.
   (10.4 ns with 18 schedulers, just over the gate).
 - The protocol has two homes: compiled code and `call_foreign/3`. A native
   method or extension fun that runs a block must read the block's writes from
-  the cell; only a debug-build assertion checks it.
+  the cell; `call_foreign/3` adopts the cell's state when the answer is the
+  entry state and raises `actor_state_conflict` when both changed.
 - Some errors move from compile time to run time. The lint sees only blocks
   passed directly to `Timer`, another actor or a non-direct class method.
 - A synchronous self-send from a block running in another process that is

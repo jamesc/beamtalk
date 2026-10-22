@@ -304,7 +304,7 @@ impl CoreErlangGenerator {
         // already produced the try/catch itself; the letrec is a Document-level
         // wrapper around that, unchanged from `wrap_actor_body_with_nlr_catch`'s
         // own `needs_letrec` shape.
-        if needs_letrec && nlr_token_var.is_some() {
+        let body = if needs_letrec && nlr_token_var.is_some() {
             docvec![
                 "letrec '__nlr_body'/0 = fun () ->\n",
                 rendered_body,
@@ -312,7 +312,8 @@ impl CoreErlangGenerator {
             ]
         } else {
             rendered_body
-        }
+        };
+        self.with_exit_store(body)
     }
 
     /// (ADR 0111 Addendum 4/6): lowering-only counterpart of the old

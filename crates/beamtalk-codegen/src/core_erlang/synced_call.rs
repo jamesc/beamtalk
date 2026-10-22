@@ -44,6 +44,8 @@ use super::threaded_ir::{
     VersionedVar,
 };
 use super::{CodeGenContext, CoreErlangGenerator};
+use crate::core_erlang::docvec;
+use crate::core_erlang::leaf;
 use beamtalk_cerl_doc::Document;
 use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::source_analysis::Span;
@@ -194,6 +196,10 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// How many bracket windows enclose the code being compiled. A call
     /// compiled inside one runs between a store and a reload.
     pub(in crate::core_erlang) window_depth: usize,
+    /// A bracket was built since the last method body was rendered: that method
+    /// leaves the cell at the version it stored last, so its reply stores the
+    /// final `State` back before it returns (`exit_store_doc`).
+    pub(in crate::core_erlang) method_bracketed: bool,
     /// Calls that may run user code compiled outside every window.
     pub(in crate::core_erlang) gaps: Vec<UnbracketedSend>,
     /// The class of a conditional with a `super` send in a branch
@@ -206,6 +212,7 @@ impl SyncedCallState {
     pub(in crate::core_erlang) fn new() -> Self {
         Self {
             window_depth: 0,
+            method_bracketed: false,
             gaps: Vec::new(),
             inlined_classes: std::cell::RefCell::default(),
         }
@@ -256,13 +263,6 @@ impl CoreErlangGenerator {
             // Outside a method body (a `state:` default, built while the state
             // map itself is being made) there is no `State` to store.
             && self.current_method_selector.is_some()
-    }
-
-    /// Whether the code being compiled is inside a Tier 1 closure body. Such
-    /// a body holds no threaded `State`: it reads the cell directly (ADR 0137
-    /// §3), so a call in it has nothing to store or reload.
-    fn in_cell_resident_closure(&self) -> bool {
-        self.in_cell_closure()
     }
 
     /// The kind of region being compiled, for the report.
@@ -425,10 +425,10 @@ impl CoreErlangGenerator {
     }
 
     /// Whether `receiver selector` is statically a `no_user_code` primitive
-    /// (ADR 0137 §4): the receiver's inferred class is a sealed stdlib class whose
-    /// method for `selector` is a primitive the stdlib marked `no_user_code`.
-    /// Sealed classes cannot be subclassed, so no override can run user code; the
-    /// build-stdlib check guarantees every argument is a primitive type.
+    /// (ADR 0137 §4): the receiver's inferred class has a method for `selector`
+    /// that is a primitive the stdlib marked `no_user_code`. `build-stdlib` rejects
+    /// the mark unless the declaring class is `sealed` (no override can run user
+    /// code) and every parameter is a primitive value type.
     fn is_no_user_code_send(&self, receiver: &Expression, selector: &MessageSelector) -> bool {
         use beamtalk_core::semantic_analysis::InferredType;
         // Only a type the compiler derived (a literal, a constructor): a declared
@@ -587,7 +587,7 @@ impl CoreErlangGenerator {
         is_cast: bool,
         at: Span,
     ) {
-        if !self.synced_calls_active() || self.in_cell_resident_closure() {
+        if !self.synced_calls_active() || self.in_cell_closure() {
             return;
         }
         // A send to `self` is noted where its dispatch is built
@@ -637,12 +637,13 @@ impl CoreErlangGenerator {
         span: Span,
     ) -> ThreadedStmt {
         if !self.synced_calls_active()
-            || self.in_cell_resident_closure()
+            || self.in_cell_closure()
             || !super::expr_shape::selector_dispatches_via_self(selector)
             || self.classify_self_send(selector) != UserCodeCall::SelfViaDefaultArm
         {
             return ThreadedStmt::Statement(call, span);
         }
+        self.synced.method_bracketed = true;
         ThreadedStmt::SyncedCall {
             store,
             call,
@@ -661,7 +662,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) {
-        if !self.synced_calls_active() || self.in_cell_resident_closure() {
+        if !self.synced_calls_active() || self.in_cell_closure() {
             return;
         }
         // A selector an intrinsic claims (`error:`, `class`, ...) is not a dispatch.
@@ -689,7 +690,7 @@ impl CoreErlangGenerator {
         span: Span,
     ) -> Document<'static> {
         if !self.synced_calls_active()
-            || self.in_cell_resident_closure()
+            || self.in_cell_closure()
             || self.classify_super_send(selector) != UserCodeCall::SelfViaDefaultArm
         {
             return call;
@@ -699,6 +700,7 @@ impl CoreErlangGenerator {
             self.state_version(),
             self.current_frame(),
         );
+        self.synced.method_bracketed = true;
         let node = ThreadedStmt::SyncedCall {
             store,
             call,
@@ -761,6 +763,41 @@ impl CoreErlangGenerator {
     }
 }
 
+impl CoreErlangGenerator {
+    /// Wraps a rendered method body: when the method built a bracket, the cell holds
+    /// the version stored last (older than the `State` the method answers once it
+    /// threads on), so the reply stores its final `State` back. Every compiled
+    /// callee then hands `call_foreign/3` an answer equal to the cell, which is what
+    /// lets it tell a block's write from a compiled method's own history.
+    pub(in crate::core_erlang) fn with_exit_store(
+        &mut self,
+        body: Document<'static>,
+    ) -> Document<'static> {
+        if !std::mem::take(&mut self.synced.method_bracketed) {
+            return body;
+        }
+        let reply = self.fresh_temp_var("ExitReply");
+        let state = self.fresh_temp_var("ExitState");
+        docvec![
+            "let ",
+            leaf::var(reply.clone()),
+            " = ",
+            body,
+            " in case ",
+            leaf::var(reply.clone()),
+            " of <{'reply', _, ",
+            leaf::var(state.clone()),
+            "}> when 'true' -> let _ = ",
+            super::threaded_ir::cell_put_call(leaf::var(state)),
+            " in ",
+            leaf::var(reply.clone()),
+            " <_> when 'true' -> ",
+            leaf::var(reply),
+            " end",
+        ]
+    }
+}
+
 /// Proof that a bracket window was opened for an expression
 /// ([`CoreErlangGenerator::open_sync_window`]).
 #[derive(Debug, Clone, Copy)]
@@ -813,7 +850,7 @@ impl CoreErlangGenerator {
     /// may run user code. The pure predicate behind the window and behind
     /// `subexpr_needs_prelude`'s mirror of it.
     pub(in crate::core_erlang) fn is_sync_site(&self, inner: &Expression) -> bool {
-        if !self.synced_calls_active() || self.in_cell_resident_closure() {
+        if !self.synced_calls_active() || self.in_cell_closure() {
             return false;
         }
         #[cfg(test)]
@@ -903,6 +940,7 @@ impl CoreErlangGenerator {
         self.next_state_var();
         let load = VersionedVar::new(VersionPrefix::State, self.state_version(), frame);
         let result = self.fresh_temp_var("Synced");
+        self.synced.method_bracketed = true;
         prelude.push(ThreadedStmt::SyncedCall {
             store,
             call,

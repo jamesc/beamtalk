@@ -78,6 +78,9 @@ struct NoUserCodeMark {
     /// The pragma is a selector-based primitive (a structural intrinsic is
     /// compiler-generated code, not a runtime call, and takes no mark).
     selector_based: bool,
+    /// The class declaring the primitive is `sealed`: nothing can subclass it and
+    /// override the method, so a statically known receiver class is exact.
+    class_sealed: bool,
     /// Each parameter's simple annotated type name; `None` when it is untyped or
     /// not a plain class name.
     parameter_types: Vec<Option<String>>,
@@ -136,6 +139,7 @@ impl PrimitiveBindingTable {
                                 class_name: class_name.clone(),
                                 selector: selector.clone(),
                                 selector_based: *is_quoted,
+                                class_sealed: class.is_sealed,
                                 parameter_types: method
                                     .parameters
                                     .iter()
@@ -193,6 +197,11 @@ impl PrimitiveBindingTable {
             if !mark.selector_based {
                 problems.push(format!(
                     "{at}: `no_user_code` is only valid on a selector-based `@primitive`"
+                ));
+            }
+            if !mark.class_sealed {
+                problems.push(format!(
+                    "{at}: `no_user_code` is only valid on a `sealed` class (a subclass could override the primitive with user code)"
                 ));
             }
             for (index, parameter) in mark.parameter_types.iter().enumerate() {
@@ -410,24 +419,28 @@ mod tests {
             class_name: "List".into(),
             selector: "includes:".into(),
             selector_based: true,
+            class_sealed: true,
             parameter_types: vec![None],
         });
         table.marks.push(NoUserCodeMark {
             class_name: "List".into(),
             selector: "at:".into(),
             selector_based: true,
+            class_sealed: false,
             parameter_types: vec![Some("Integer".into())],
         });
         table.marks.push(NoUserCodeMark {
             class_name: "Block".into(),
             selector: "value".into(),
             selector_based: false,
+            class_sealed: true,
             parameter_types: vec![],
         });
         let problems = table.check_no_user_code_marks();
-        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert_eq!(problems.len(), 3, "{problems:?}");
         assert!(problems[0].contains("List >> includes:"));
-        assert!(problems[1].contains("Block >> value"));
+        assert!(problems[1].contains("List >> at:") && problems[1].contains("sealed"));
+        assert!(problems[2].contains("Block >> value"));
     }
 
     #[test]
