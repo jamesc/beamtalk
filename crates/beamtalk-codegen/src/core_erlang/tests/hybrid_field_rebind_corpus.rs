@@ -158,29 +158,20 @@ fn hybrid_field_rebind_is_verified_in_every_loop_and_container(loops: &[(&str, &
     // the hybrid loop's own body statements and plain block bodies render the `Field`
     // parameter; pin that those do, so a change that stops reaching it fails here.
     //
-    // With the synced-calls flag on (BT-4020) a body holding a call that may run user code
-    // (these bodies add and compare untyped locals) cannot keep its fields in loop
-    // parameters, so hybrid mode is refused by design: the same cases must then NOT reach
-    // it, which pins the refusal instead (the programs still verify and compile above).
-    let flag_on = beamtalk_core::synced_calls::enabled();
+    //
+    // A guarded operator's slow path is not a call that makes a loop thread `State` (the
+    // adds and compares of these bodies keep hybrid mode, ADR 0137 § Cost and gates), so
+    // the pins reach the rebind exactly as they did before the bracket existed.
     for expected in REACHES_THE_REBIND {
         let (loop_name, _) = expected.split_once(" / ").expect("`loop / container`");
         if !loops.iter().any(|(name, _)| *name == loop_name) {
             continue;
         }
         let missed = not_reached.iter().any(|name| name == expected);
-        if flag_on {
-            assert!(
-                missed,
-                "{expected} reaches the hybrid field rebind with the synced-calls flag on, \
-                 where a body holding a bracketed call must refuse hybrid mode"
-            );
-        } else {
-            assert!(
-                !missed,
-                "{expected} no longer reaches the hybrid field rebind (not reached: {not_reached:?})"
-            );
-        }
+        assert!(
+            !missed,
+            "{expected} no longer reaches the hybrid field rebind (not reached: {not_reached:?})"
+        );
     }
 }
 

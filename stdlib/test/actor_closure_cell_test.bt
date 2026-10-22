@@ -1,0 +1,106 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): actor closures read and write the actor state
+
+TestCase subclass: ActorClosureCellTest
+
+  testAddTwice =>
+    c := ClosureCellCounter spawn
+    self assert: c addTwice equals: 2
+
+  testArmTick =>
+    c := ClosureCellCounter spawn
+    c arm
+    self assert: c tick equals: 10
+    self assert: c tick equals: 20
+
+  testPeek =>
+    c := ClosureCellCounter spawn
+    self assert: c peek equals: 9
+
+  testReadTwice =>
+    c := ClosureCellCounter spawn
+    self assert: c readTwice equals: 0
+
+  testPeekVia =>
+    c := ClosureCellCounter spawn
+    self assert: (c peekVia: ClosureCellRunner spawn) equals: 0
+    self assert: c n equals: 99
+
+  testPokeVia =>
+    c := ClosureCellCounter spawn
+    self should: [
+      c pokeVia: ClosureCellRunner spawn
+    ] raise: #actor_state_unreachable
+
+  testSelfSendInBlock =>
+    c := ClosureCellCounter spawn
+    self assert: c selfSendInBlock equals: 2
+
+  testAliasSend =>
+    c := ClosureCellCounter spawn
+    self assert: c aliasSend equals: 5
+
+  testAliasBump =>
+    c := ClosureCellCounter spawn
+    self assert: c aliasBump equals: 2
+
+  testEnsureCleanupSeesTheBodysWritesOnANormalExit =>
+    c := ClosureCellEnsure spawn
+    self assert: c normalExit equals: 5
+
+  testEnsureCleanupSeesTheBodysWritesAfterAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    rec := ClosureCellRecorder spawn
+    self assert: (c earlyReturn: rec) equals: 1
+    self assert: rec last equals: 7
+
+  testEnsureCleanupSeesTheBodysLexicalWritesAfterAnError =>
+    c := ClosureCellEnsure spawn
+    rec := ClosureCellRecorder spawn
+    c errorExit: rec
+    self assert: rec last equals: 9
+
+  testEnsureCleanupSeesTheStateAtEntryAfterAnError =>
+    c := ClosureCellEnsure spawn
+    rec := ClosureCellRecorder spawn
+    c entryState: rec
+    self assert: rec last equals: 3
+
+  // BT-3988: `on:do:` / `ensure:` in a closure whose body self-sends answers the
+  // plain result, in open and sealed actors.
+  testOnDoInAClosureWithASelfSend =>
+    self assert: ClosureCellP spawn run equals: #(0, 0, 0)
+
+  testOnDoInAClosureWithASelfSendSealed =>
+    self assert: ClosureCellSealedP spawn run equals: #(0, 0, 0)
+
+  testEnsureInAClosureWithASelfSend =>
+    self assert: ClosureCellP spawn runEnsure equals: #(0, 0, 0)
+
+  testEnsureInAClosureWithASelfSendSealed =>
+    self assert: ClosureCellSealedP spawn runEnsure equals: #(0, 0, 0)
+
+  testOnDoInAClosureWithAWritingSelfSend =>
+    p := ClosureCellP spawn
+    self assert: p runWriting equals: #(1, 2, 3)
+    self assert: p total equals: 3
+
+  testOnDoInAClosureWithAWritingSelfSendSealed =>
+    p := ClosureCellSealedP spawn
+    self assert: p runWriting equals: #(1, 2, 3)
+    self assert: p total equals: 3
+
+  // A state-changing `super` send in a loop body keeps its change.
+  testSuperSendInAWhileLoop =>
+    self assert: ClosureCellSuperChild spawn whileLoop equals: 3
+
+  testSuperSendInAToDoLoop =>
+    self assert: ClosureCellSuperChild spawn toDoLoop equals: 3
+
+  testSuperSendInATimesRepeatLoop =>
+    self assert: ClosureCellSuperChild spawn timesLoop equals: 3
+
+  testSuperSendInADoLoop =>
+    self assert: ClosureCellSuperChild spawn doLoop equals: 3

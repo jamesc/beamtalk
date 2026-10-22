@@ -452,27 +452,32 @@ impl CoreErlangGenerator {
     fn on_do_catch_boundary(
         &mut self,
         vars: OnDoCatchVars,
+        pre_region_state: &str,
         try_region: TryRegion,
         span: beamtalk_core::source_analysis::Span,
         handler: Document<'static>,
     ) -> Document<'static> {
+        let cell = self.on_do_cell_boundary(&vars.ex_class_var, pre_region_state);
         let snapshot = vars.snapshot_var.clone();
+        let mut steps = vec![CatchStep::ClassVarRestore { snapshot }];
+        // ADR 0137 §5: the cell's half, restored right after the class
+        // variables and before the exception is wrapped.
+        steps.extend(cell.clone().map(CatchStep::CellRestore));
+        steps.extend([
+            CatchStep::WrapException,
+            CatchStep::ClassFilter,
+            CatchStep::FilterHandler(handler),
+            CatchStep::FilterMiss,
+        ]);
         let node = ThreadedStmt::OnDoCatch {
             vars: Box::new(vars),
             entry: Some(CatchEntry::ClassVarSnapshot),
+            cell,
             try_region,
             clauses: vec![
                 CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
                 CatchClause::NlrPassThrough(NlrThrowShape::Tuple3),
-                CatchClause::NonNlr {
-                    steps: vec![
-                        CatchStep::ClassVarRestore { snapshot },
-                        CatchStep::WrapException,
-                        CatchStep::ClassFilter,
-                        CatchStep::FilterHandler(handler),
-                        CatchStep::FilterMiss,
-                    ],
-                },
+                CatchClause::NonNlr { steps },
             ],
             span,
         };
@@ -513,7 +518,7 @@ impl CoreErlangGenerator {
     /// construct's result-unpacking side (`threaded_locals_of`)
     /// keys on. ADR 0130 §3: class variables are not threaded, so a class-
     /// variable write or a self-send never selects this strategy.
-    fn block_needs_exception_threading(&self, block: &Block) -> bool {
+    pub(in crate::core_erlang) fn block_needs_exception_threading(&self, block: &Block) -> bool {
         let analysis = block_analysis::analyze_block(block);
         self.needs_mutation_threading(&analysis)
             // ADR 0130 §3: a class method threads only its outer locals (class
@@ -523,7 +528,7 @@ impl CoreErlangGenerator {
             // local, so the construct must produce that tuple in the same case,
             // including for a write-only local that `needs_mutation_threading`
             // does not count.
-            || (self.in_class_method() && !self.branch_threaded_locals(&[block]).is_empty())
+            || (self.threads_no_actor_state() && !self.branch_threaded_locals(&[block]).is_empty())
             // BT-3823: in the REPL, a block that writes a binding anywhere,
             // a nested loop or fold included (`analyze_block` does not see
             // through one), is inlined over the bindings map: a REPL arm whose
@@ -584,8 +589,10 @@ impl CoreErlangGenerator {
 
         let handler_apply =
             Self::make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);
+        let pre_region_state = self.current_field_read_state_var();
         let catch_boundary = self.on_do_catch_boundary(
             catch_vars,
+            &pre_region_state,
             TryRegion {
                 body: docvec!["apply ", leaf::var(block_var.clone()), " () "],
                 result_var,
@@ -1000,8 +1007,16 @@ impl CoreErlangGenerator {
         // `try` and the class filter end to end: NLR pass-through, restore,
         // wrap, filter, this handler, the `'false'` re-raise and the
         // exhaustive fallback.
+        // (A frame with no `State` chain holds a private scratch map as its outer
+        // state; the cell's pre-region version is then the enclosing `State`.)
+        let pre_region_state = if current_state.starts_with('~') {
+            self.current_field_read_state_var()
+        } else {
+            current_state.clone()
+        };
         docs.push(self.on_do_catch_boundary(
             catch_vars,
+            &pre_region_state,
             TryRegion {
                 body: Document::Vec(try_docs),
                 result_var: state_after_try,
@@ -1264,21 +1279,40 @@ impl CoreErlangGenerator {
             .as_slice()
             .first()
             .map_or(0, |prefix| self.family_version(prefix));
+        // ADR 0137 §5: entering the `ensure:` stores the current `State` to the
+        // cell, so a closure the protected body runs reads it, and the cleanup an
+        // error runs starts from it.
+        let cell_boundary = self.synced_calls_active() && !current_state.starts_with('~');
+        let entry_store = if cell_boundary {
+            docvec![
+                "let _ = ",
+                threaded_ir::cell_put_call(leaf::var("StateAcc")),
+                " in "
+            ]
+        } else {
+            Document::Nil
+        };
         let mut docs: Vec<Document<'static>> = vec![docvec![
             seed_doc,
             "let StateAcc = ",
             leaf::var(base_state),
-            " in try ",
+            " in ",
+            entry_store,
+            "try ",
         ]];
 
-        // Generate try body with state threading
-        let (try_result_var, try_final, try_slot) = self.push_exception_arm(
+        // Generate try body with state threading; every field write in it also
+        // stores to the cell (write-through).
+        self.ensure_write_through += usize::from(cell_boundary);
+        let try_arm = self.push_exception_arm(
             &mut docs,
             receiver_block,
             &families,
             outer_version,
             arm.as_ref(),
-        )?;
+        );
+        self.ensure_write_through -= usize::from(cell_boundary);
+        let (try_result_var, try_final, try_slot) = try_arm?;
         // Return {Result, State[, Family]} from try body
         docs.push(self.close_exception_result_tuple(
             try_result_var,
@@ -1315,6 +1349,15 @@ impl CoreErlangGenerator {
             "> -> ",
         ]);
 
+        // ADR 0137 §5: the cleanup of a failed body starts from the cell, which
+        // holds the state at entry plus the body's own writes made before the
+        // error (and a `^` stores before it throws), keeping the locals the
+        // arm's scratch map seeded.
+        if cell_boundary {
+            docs.push(docvec![
+                "let StateAcc = call 'beamtalk_actor_state':'refresh'(Self, StateAcc) in "
+            ]);
+        }
         // Cleanup body generates state mutations that are discarded (re-raise
         // follows) — including any extra-family version it mints: this path
         // re-raises rather than returning a tuple, so it has no trailing
@@ -1394,6 +1437,7 @@ impl CoreErlangGenerator {
         // No source span: this is the generically-dispatched `onDo` body.
         self.on_do_catch_boundary(
             catch_vars,
+            "State",
             TryRegion {
                 body: docvec!["apply ", Document::Str(self_var), " () "],
                 result_var,

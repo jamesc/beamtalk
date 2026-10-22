@@ -369,9 +369,20 @@ Detail per phase is in the design note.
   callback wrappers.
 - **Phase 2a (L, BT-4009).** `call_foreign/3`, `SyncedCall` and the verifier,
   driven to zero misses over every corpus before 2b starts.
-- **Phase 2b (L).** Closures on the cell, `ensure:`/`on:do:`/`^` stores,
-  `no_user_code` marks, the native audit, and a generated BEAM-run corpus as
-  the exit gate.
+- **Phase 2b (L, done: BT-4009).** Closures on the cell, `ensure:`/`on:do:`/`^`
+  stores, `no_user_code` marks, the native audit, and a generated BEAM-run corpus
+  as the exit gate. The synced-calls flag is gone. The module ABI marker is
+  `class_var_abi` (the one marker the runtime gates on), bumped from 1 to 2.
+  The exit gate is `scripts/gen-actor-closure-matrix.py`: 260 at-home cells
+  (block shape x send kind x position, including `^`, stored and passed
+  blocks) and 6 away cells, each with an expected value from the generator's own
+  model, all passing on a BEAM. Findings the corpus forced, each fixed in the
+  node that owns it: a read-only `[...] value` that was left unbracketed;
+  an `on:do:`/`ensure:` in operand position that leaked its `{Value, State}`
+  pair (it is now a producer with an empty local set); and a `super` send in a
+  block or loop body, which now runs against the cell, bracketed by the call that
+  runs it. The shapes the surviving validator rows still reject are not in the
+  corpus; those rows go in Phase 3.
 - **Phase 3 (M).** Delete the rejections and guards; update the language
   guide.
 - **Phase 4 (S).** The `actor-state-abroad` lint and the amendment notes in

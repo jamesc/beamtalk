@@ -306,15 +306,20 @@ fn bt3396_self_dispatch_after_order_unsafe_operand_is_sequenced_behind_a_temp() 
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     let code = &generated.code;
+    // (ADR 0137: the earlier operand may run user code, so it is bound by its
+    // bracket, `_Synced`, rather than a bare temp.)
     let temp_at = code
         .find("let _Tmp")
+        .or_else(|| code.find("let _Synced"))
         .unwrap_or_else(|| panic!("the earlier `x printString` must be temp-bound. Got:\n{code}"));
     let dispatch_at = code
         .find("'safe_dispatch'('bumpCount'")
         .unwrap_or_else(|| panic!("the self-send must be dispatched. Got:\n{code}"));
-    let bind_at = code
-        .find("let State1 = call 'erlang':'element'(2, _SD")
-        .unwrap_or_else(|| panic!("the dispatch's NewState must be threaded. Got:\n{code}"));
+    let bind_at = regex::Regex::new(r"let State\d+ = call 'erlang':'element'\(2, _SD")
+        .unwrap()
+        .find(code)
+        .unwrap_or_else(|| panic!("the dispatch's NewState must be threaded. Got:\n{code}"))
+        .start();
     assert!(
         temp_at < dispatch_at && dispatch_at < bind_at,
         "order must be: temp for `x printString`, then the dispatch, then its State Bind. Got:\n{code}"
@@ -324,7 +329,9 @@ fn bt3396_self_dispatch_after_order_unsafe_operand_is_sequenced_behind_a_temp() 
         "the temp must hold the `x printString` send itself. Got:\n{code}"
     );
     assert!(
-        code.contains("{'reply', _Result, State1}"),
+        regex::Regex::new(r"\{'reply', _Result, State\d+\}")
+            .unwrap()
+            .is_match(code),
         "the reply must carry the post-dispatch state. Got:\n{code}"
     );
     assert!(
@@ -358,13 +365,16 @@ fn bt3415_binary_operand_self_send_after_raising_operand_is_sequenced_in_method_
     let code = &generated.code;
     let temp_at = code
         .find("let _Tmp")
+        .or_else(|| code.find("let _Synced"))
         .unwrap_or_else(|| panic!("`items at: idx` must be temp-bound. Got:\n{code}"));
     let dispatch_at = code
         .find("'safe_dispatch'('bump'")
         .unwrap_or_else(|| panic!("`bump` must be dispatched. Got:\n{code}"));
-    let bind_at = code
-        .find("let State1 = call 'erlang':'element'(2, _SD")
-        .unwrap_or_else(|| panic!("`bump`'s NewState must be threaded. Got:\n{code}"));
+    let bind_at = regex::Regex::new(r"let State\d+ = call 'erlang':'element'\(2, _SD")
+        .unwrap()
+        .find(code)
+        .unwrap_or_else(|| panic!("`bump`'s NewState must be threaded. Got:\n{code}"))
+        .start();
     assert!(
         temp_at < dispatch_at && dispatch_at < bind_at,
         "order must be: temp for `at:`, then the dispatch, then its State Bind. Got:\n{code}"
@@ -375,7 +385,9 @@ fn bt3415_binary_operand_self_send_after_raising_operand_is_sequenced_in_method_
         "the sequenced self-send is dispatched exactly once. Got:\n{code}"
     );
     assert!(
-        code.contains("{'reply', _Result, State1}"),
+        regex::Regex::new(r"\{'reply', _Result, State\d+\}")
+            .unwrap()
+            .is_match(code),
         "the method must reply with the post-dispatch state. Got:\n{code}"
     );
     assert!(
@@ -423,6 +435,28 @@ fn bt3415_ffi_receiver_is_not_sequenced_but_its_self_send_argument_is() {
     assert_compiles_through_erlc("bt3415_ffi_receiver_not_sequenced", &code);
 }
 
+/// The `^` reply carries the `State` the last self-dispatch of the prelude bound
+/// (the version number moves with the brackets ADR 0137 puts ahead of it).
+fn assert_reply_carries_the_last_dispatch_state(code: &str, what: &str) {
+    let version = |name: &str| name.trim_start_matches("State").parse::<usize>().unwrap();
+    let last_dispatch = regex::Regex::new(r"let (State\d+) = call 'erlang':'element'\(2, _SD")
+        .unwrap()
+        .captures_iter(code)
+        .last()
+        .unwrap_or_else(|| panic!("the prelude must bind a State. Got:\n{code}"))[1]
+        .to_string();
+    let replied = regex::Regex::new(r"\{'reply', _ReturnValue, (State\d+)\}")
+        .unwrap()
+        .captures(code)
+        .unwrap_or_else(|| panic!("the method must reply with a State. Got:\n{code}"))[1]
+        .to_string();
+    assert!(
+        version(&replied) >= version(&last_dispatch),
+        "the reply must carry {what}: it carries {replied}, the last dispatch bound \
+         {last_dispatch}. Got:\n{code}"
+    );
+}
+
 #[test]
 fn bt3415_early_return_reply_state_threads_the_conditionals_own_mutation() {
     // ADR 0118 phase 4: `^ 1 + ((self flagTrue) ifTrue: [1] ifFalse: [2])` —
@@ -452,11 +486,10 @@ fn bt3415_early_return_reply_state_threads_the_conditionals_own_mutation() {
         CodegenOptions::new("bt3415_early_return_post_prelude_state"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
-    assert!(
-        code.contains("{'reply', _ReturnValue, State1}"),
-        "the reply must carry the prelude's final State1 (flagTrue's own \
-         mutation, threaded through the conditional receiver), not the stale \
-         pre-conditional State. Got:\n{code}"
+    assert_reply_carries_the_last_dispatch_state(
+        &code,
+        "the prelude's final State (flagTrue's own mutation, threaded through \
+         the conditional receiver), not the stale pre-conditional State",
     );
     assert_compiles_through_erlc("bt3415_early_return_post_prelude_state", &code);
 }
@@ -474,10 +507,7 @@ fn bt3415_early_return_reply_state_follows_the_prelude_when_there_is_one() {
         CodegenOptions::new("bt3415_early_return_prelude_state"),
     )
     .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
-    assert!(
-        code.contains("{'reply', _ReturnValue, State1}"),
-        "the reply must carry the prelude's State1. Got:\n{code}"
-    );
+    assert_reply_carries_the_last_dispatch_state(&code, "the prelude's State");
     assert_compiles_through_erlc("bt3415_early_return_prelude_state", &code);
 }
 

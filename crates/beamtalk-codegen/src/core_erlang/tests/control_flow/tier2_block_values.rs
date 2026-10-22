@@ -39,7 +39,7 @@ fn test_immediately_invoked_literal_block_value_keyword_with_field_mutation_comp
 }
 
 #[test]
-fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
+fn test_block_returned_from_method_with_field_mutation_compiles_against_the_cell() {
     // `^[self.total := self.total + 1]` — a block *returned as a value*
     // (never invoked in this method) is not caught by any of the semantic-analysis
     // passes that guard field mutations in blocks (they only flag blocks that are
@@ -54,13 +54,10 @@ fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
         &module,
         crate::core_erlang::CodegenOptions::new("test"),
     );
+    let code = result.expect("a field-writing block compiles (ADR 0137)");
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
-        ),
-        "A field-mutating block returned as a value must be a compile-time error \
-         (BT-2792), not silently accepted. Got: {result:?}"
+        code.contains("call 'beamtalk_actor_state':'put'("),
+        "the block writes the actor's field through the cell. Got:\n{code}"
     );
 }
 
@@ -73,7 +70,7 @@ fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
 /// call of the same actor, `self.h := [self.n := self.n + 1]`, is the shape
 /// that works: `adr0131section6escape_test.bt` `testActorStoredFieldWriter`.)
 #[test]
-fn test_escaping_field_writing_actor_block_is_compile_error_in_every_shape() {
+fn test_escaping_field_writing_actor_block_compiles_against_the_cell_in_every_shape() {
     for body in [
         "^[self.total := self.total + 1]",
         "[self.total := self.total + 1]",
@@ -90,12 +87,10 @@ fn test_escaping_field_writing_actor_block_is_compile_error_in_every_shape() {
             &module,
             crate::core_erlang::CodegenOptions::new("test"),
         );
+        let code = result.unwrap_or_else(|e| panic!("{body}: {e:?}"));
         assert!(
-            matches!(
-                result,
-                Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
-            ),
-            "{body}: an escaping field-writing actor block must not compile. Got: {result:?}"
+            code.contains("call 'beamtalk_actor_state':'put'("),
+            "{body}: the escaping block writes the actor's field through the cell. Got:\n{code}"
         );
     }
 }
@@ -214,37 +209,28 @@ fn test_bt2808_cascade_on_tier2_local_var_compiles_and_threads_state() {
         &module,
         crate::core_erlang::CodegenOptions::new("test"),
     )
-    .expect("cascade of safe value: sends on a Tier 2 local var must compile (BT-2808)");
+    .expect("cascade of safe value: sends on a stored block must compile (BT-2808)");
 
-    // Both cascaded `value:` sends must apply the block with a threaded state
-    // argument, and each must unpack its own {Result, NewState} tuple — not
-    // just the first message (which would silently drop the second mutation).
-    let apply_count = regex::Regex::new(r"apply _Fun\w* \(_item\w*, \w*State\w*\)")
-        .unwrap()
-        .find_iter(&code)
-        .count();
-    assert_eq!(
-        apply_count, 2,
-        "both cascaded value: sends must apply the block with a threaded \
-         state argument. Got: {code}"
+    // ADR 0137: `blk` writes only a field, so it is an ordinary closure over the
+    // actor's state, not a Tier 2 block: it writes the cell, and each of the two
+    // cascaded `value:` sends is a call that may run it, bracketed with a store
+    // and a reload of the threaded `State`. The cascade is one call: one bracket
+    // holds both sends.
+    assert!(
+        code.contains("call 'beamtalk_actor_state':'put'("),
+        "the block writes the field through the cell. Got: {code}"
     );
-    let element1_count = regex::Regex::new(r"call 'erlang':'element'\(1, _\w+\)")
-        .unwrap()
-        .find_iter(&code)
-        .count();
-    let element2_count = regex::Regex::new(r"call 'erlang':'element'\(2, _\w+\)")
-        .unwrap()
-        .find_iter(&code)
+    let stores = code
+        .matches("call 'erlang':'put'('$bt_actor_state'")
         .count();
     assert!(
-        element1_count >= 2 && element2_count >= 2,
-        "each cascaded value: send's {{Result, NewState}} tuple must be \
-         unpacked separately so both mutations thread through. Got: {code}"
+        stores >= 1 && code.matches("'send'(_Receiver").count() >= 2,
+        "the cascaded value: sends must be bracketed (found {stores} stores). Got: {code}"
     );
 }
 
 #[test]
-fn test_bt2797_local_tier2_block_never_invoked_again_is_still_compile_error() {
+fn test_bt2797_local_field_writing_block_never_invoked_again_compiles() {
     // Regression guard: `blk := [block needing Tier 2]` where `blk` is
     // never referenced again in the rest of the method — here because the
     // assignment is the method's *last* statement, so the raw Tier 2 fun value
@@ -264,19 +250,15 @@ fn test_bt2797_local_tier2_block_never_invoked_again_is_still_compile_error() {
         &module,
         crate::core_erlang::CodegenOptions::new("test"),
     );
+    let code = result.expect("a field-writing block compiles (ADR 0137)");
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
-        ),
-        "A Tier 2 block stored in a local var and never invoked again (so it \
-         escapes as the method's implicit return value) must remain a \
-         compile-time error. Got: {result:?}"
+        code.contains("call 'beamtalk_actor_state':'put'("),
+        "the block writes the actor's field through the cell. Got:\n{code}"
     );
 }
 
 #[test]
-fn test_bt2797_local_tier2_block_invoked_inside_nested_do_block_is_still_compile_error() {
+fn test_bt2797_local_field_writing_block_invoked_inside_nested_do_block_compiles() {
     // Regression guard: `blk value: item` found
     // only *inside* a nested block literal (here, the `do:` iteration block)
     // must NOT be treated as a safe use, even though it looks identical to a
@@ -294,19 +276,15 @@ fn test_bt2797_local_tier2_block_invoked_inside_nested_do_block_is_still_compile
         &module,
         crate::core_erlang::CodegenOptions::new("test"),
     );
+    let code = result.expect("a field-writing block compiles (ADR 0137)");
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
-        ),
-        "A Tier 2 local block invoked only from inside a nested `do:` block \
-         must remain a compile-time error, not silently-broken Core Erlang. \
-         Got: {result:?}"
+        code.contains("call 'beamtalk_actor_state':'put'("),
+        "the block writes the actor's field through the cell. Got:\n{code}"
     );
 }
 
 #[test]
-fn test_bt2797_local_tier2_block_invoked_inside_nested_if_true_block_is_still_compile_error() {
+fn test_bt2797_local_field_writing_block_invoked_inside_nested_if_true_block_compiles() {
     // Regression guard: same as the `do:` case
     // above, but for a `ifTrue:` control-flow block — the other concrete
     // trigger the reviewer flagged.
@@ -317,14 +295,10 @@ fn test_bt2797_local_tier2_block_invoked_inside_nested_if_true_block_is_still_co
         &module,
         crate::core_erlang::CodegenOptions::new("test"),
     );
+    let code = result.expect("a field-writing block compiles (ADR 0137)");
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
-        ),
-        "A Tier 2 local block invoked only from inside a nested `ifTrue:` \
-         block must remain a compile-time error, not a silent state-mutation \
-         loss at runtime. Got: {result:?}"
+        code.contains("call 'beamtalk_actor_state':'put'("),
+        "the block writes the actor's field through the cell. Got:\n{code}"
     );
 }
 
@@ -352,7 +326,7 @@ fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_c
     assert!(
         matches!(
             result,
-            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+            Err(CodeGenError::LocalMutationInStoredClosure { .. })
         ),
         "a block stored in a field that also captures and mutates an outer \
          local must still be rejected at compile time — promoting it would \
@@ -363,7 +337,7 @@ fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_c
 }
 
 #[test]
-fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_is_compile_error() {
+fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_compiles() {
     // verification, acceptance criterion 5: a field-mutating block
     // held in a local var and passed as a *non-literal* argument to a
     // self-send — `self applyBlock: blk to: x`, where `blk` was assigned
@@ -388,14 +362,10 @@ fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_is_compile_er
         &module,
         crate::core_erlang::CodegenOptions::new("test"),
     );
+    let code = result.expect("a field-writing block compiles (ADR 0137)");
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
-        ),
-        "A field-mutating block passed as a non-literal argument to a \
-         self-send must be a compile-time error, not code that compiles but \
-         risks badarity at runtime. Got: {result:?}"
+        code.contains("call 'beamtalk_actor_state':'put'("),
+        "the block writes the actor's field through the cell. Got:\n{code}"
     );
 }
 
@@ -537,7 +507,7 @@ fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() 
     // the `try` now instead of inlined directly as `erlang:'+'`'s 2nd arg.
     assert!(
         regex::Regex::new(
-            r"let _BinRight\w* = let _T2SubTuple\w* = .*apply.*in call 'erlang':'element'\(1, _T2SubTuple\w*\) in try call 'erlang':'\+'\("
+            r"let _Synced\w* = let _T2SubTuple\w* = .*apply.*in call 'erlang':'element'\(1, _T2SubTuple\w*\) in .*let _BinRight\w* = _Synced\w* in try call 'erlang':'\+'\("
         )
         .unwrap()
         .is_match(&code),

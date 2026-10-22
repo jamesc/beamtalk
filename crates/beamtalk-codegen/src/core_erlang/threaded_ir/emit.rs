@@ -8,9 +8,9 @@
 
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter,
-    NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode, TryRegion, ValueRef,
-    VersionPrefix, VersionedVar,
+    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, FrameId,
+    LoopCounter, NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode,
+    TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -256,10 +256,17 @@ pub(in crate::core_erlang) fn render(
             ThreadedStmt::OnDoCatch {
                 vars,
                 entry,
+                cell,
                 try_region,
                 clauses,
                 ..
-            } => docs.push(render_on_do_catch(vars, *entry, try_region, clauses)),
+            } => docs.push(render_on_do_catch(
+                vars,
+                *entry,
+                cell.as_ref(),
+                try_region,
+                clauses,
+            )),
             ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
                 "let ",
                 leaf::var(carrier.clone()),
@@ -315,6 +322,19 @@ pub(in crate::core_erlang) fn render(
 /// `CELL`). The one Rust definition the bracket renders with.
 pub(in crate::core_erlang) const ACTOR_STATE_CELL: &str = "$bt_actor_state";
 
+/// `call 'erlang':'put'('$bt_actor_state', <state>)`: the one emitter of the
+/// cell store, shared by the [`ThreadedStmt::SyncedCall`] bracket and the
+/// `on:do:` cell boundary (`actor_state_access.rs`).
+pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
+    docvec![
+        "call 'erlang':'put'(",
+        leaf::atom(ACTOR_STATE_CELL),
+        ", ",
+        state,
+        ")"
+    ]
+}
+
 /// Renders one [`ThreadedStmt::SyncedCall`] (ADR 0137 §1): the store of
 /// `store` to the cell, the call, and (unless the call is store-only) the
 /// reload of the cell as `load`.
@@ -327,11 +347,9 @@ fn render_synced_call(
 ) -> Document<'static> {
     let store_name = ctx.resolve_prefix(store);
     let mut parts: Vec<Document<'static>> = vec![docvec![
-        "let _ = call 'erlang':'put'(",
-        leaf::atom(ACTOR_STATE_CELL),
-        ", ",
-        leaf::var(store_name),
-        ") in ",
+        "let _ = ",
+        cell_put_call(leaf::var(store_name)),
+        " in ",
     ]];
     match result {
         Some(result) => parts.push(docvec![
@@ -510,6 +528,7 @@ fn render_local_rebind(
 fn render_on_do_catch(
     vars: &OnDoCatchVars,
     entry: Option<CatchEntry>,
+    cell: Option<&CellBoundary>,
     try_region: &TryRegion,
     clauses: &[CatchClause],
 ) -> Document<'static> {
@@ -526,8 +545,13 @@ fn render_on_do_catch(
         }
         None => Document::Nil,
     };
+    let cell_entry_doc = match cell {
+        Some(boundary) => CoreErlangGenerator::cell_boundary_entry_doc(boundary),
+        None => Document::Nil,
+    };
     let mut docs: Vec<Document<'static>> = vec![docvec![
         entry_doc,
+        cell_entry_doc,
         "try ",
         try_region.body.clone(),
         "of ",
@@ -588,6 +612,9 @@ fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static
     match step {
         CatchStep::ClassVarRestore { snapshot } => {
             CoreErlangGenerator::class_var_restore_doc(snapshot)
+        }
+        CatchStep::CellRestore(boundary) => {
+            CoreErlangGenerator::cell_boundary_restore_doc(boundary)
         }
         CatchStep::WrapException => docvec![
             "let ",
@@ -1111,17 +1138,35 @@ fn render_bind(
     let target_name = ctx.resolve_prefix(target);
     let source_name = ctx.resolve_prefix(source);
     match op {
-        BindOp::Put { field, value } => docvec![
-            "let ",
-            leaf::var(target_name),
-            " = call 'maps':'put'(",
-            leaf::atom(field.clone()),
-            ", ",
-            render_value(value, ctx),
-            ", ",
-            leaf::var(source_name),
-            ") in ",
-        ],
+        BindOp::Put { field, value } => {
+            let put = docvec![
+                "let ",
+                leaf::var(target_name.clone()),
+                " = call 'maps':'put'(",
+                leaf::atom(field.clone()),
+                ", ",
+                render_value(value, ctx),
+                ", ",
+                leaf::var(source_name),
+                ") in ",
+            ];
+            // ADR 0137 §5: inside an `ensure:` protected body a field write also
+            // stores the new version to the cell (a local's scratch key is not a
+            // field).
+            if ctx.generator.ensure_write_through > 0
+                && target.prefix == VersionPrefix::State
+                && !field.starts_with(super::ir::LOCAL_STATE_KEY_PREFIX)
+            {
+                docvec![
+                    put,
+                    "let _ = ",
+                    cell_put_call(leaf::var(target_name)),
+                    " in "
+                ]
+            } else {
+                put
+            }
+        }
         BindOp::Unpack { field } => docvec![
             "let ",
             leaf::var(target_name),
@@ -1173,4 +1218,28 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
         leaf::var(ctx.resolve_prefix(state)),
         "}"
     ]
+}
+
+#[cfg(test)]
+mod cell_key_conformance {
+    use super::ACTOR_STATE_CELL;
+
+    /// The cell key crosses the Rust/Erlang boundary: the emitter writes it into
+    /// generated code and `beamtalk_actor_state.erl` owns the cell. This reads the
+    /// Erlang `-define(CELL, ...)` so the two cannot drift (CLAUDE.md). Edit the
+    /// Erlang module (the owner) when this fails.
+    #[test]
+    fn the_cell_key_matches_the_runtime_define() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../runtime/apps/beamtalk_runtime/src/beamtalk_actor_state.erl"
+        );
+        let src = std::fs::read_to_string(path).expect("read beamtalk_actor_state.erl");
+        let define = src
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("-define(CELL, "))
+            .expect("a `-define(CELL, ...)` in beamtalk_actor_state.erl");
+        let atom = define.trim_end_matches(").").trim().trim_matches('\'');
+        assert_eq!(atom, ACTOR_STATE_CELL);
+    }
 }

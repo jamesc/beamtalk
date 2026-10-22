@@ -826,10 +826,10 @@ self.y := self.x + 1
 self.y
 ```
 
-**Limitation:** Field assignments (`self.x :=`) in stored closures are a compile error — they require control-flow context for state threading. A closure that assigns an outer local may not be stored at all: a block may assign a captured variable only where it is written directly as the argument of a control-flow construct or a compiler-known collection message (`do:`, `inject:into:`, `on:do:`, ...), and a block that is stored, returned, placed in a collection literal or passed to any other method is rejected at the assignment ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), see [What Works and What Doesn't](#what-works-and-what-doesnt)). Have the block answer the new value and assign it where the block is called.
+**Limitation:** In an actor instance method a block reads and writes the actor's fields live, wherever it is made and run (see [Actor Blocks See Live State](#actor-blocks-see-live-state)). In a value-type or class method, field assignments (`self.x :=`) in stored closures are still a compile error — they require control-flow context for state threading. A closure that assigns an outer local may not be stored at all: a block may assign a captured variable only where it is written directly as the argument of a control-flow construct or a compiler-known collection message (`do:`, `inject:into:`, `on:do:`, ...), and a block that is stored, returned, placed in a collection literal or passed to any other method is rejected at the assignment ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), see [What Works and What Doesn't](#what-works-and-what-doesnt)). Have the block answer the new value and assign it where the block is called.
 
 ```beamtalk
-// ❌ ERROR: field assignment inside stored closure
+// ❌ ERROR in a value-type or class method; works in an actor instance method (ADR 0137)
 nestedBlock := [:m | self.x := m]
 
 // ✅ Field mutation in control flow blocks
@@ -2805,7 +2805,7 @@ The compiler uses a two-tier optimization for block mutations:
 - **Tier 1 (stdlib control flow):** `whileTrue:`, `do:`, `collect:`, `timesRepeat:`, etc. — inlined tail-recursive loops with versioned state variables. Zero overhead.
 - **Tier 2 (user-defined methods):** All other methods accepting blocks — universal `{Result, StateAcc}` protocol. Pure blocks have no overhead; stateful blocks pay ~65ns per invocation.
 
-**Local variable mutations** work in the blocks of control-flow messages (the table below, conditionals, `on:do:`/`ensure:`, `Result tryDo:`), written directly as the message's argument, in every method kind and in the REPL, including when the construct is an operand of a larger expression. A block that assigns a captured local and escapes (stored, returned, or passed to any other method, the actor's own methods included) is a compile error ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), which amends ADR 0041's "local mutations work in all blocks"; see [What Works and What Doesn't](#what-works-and-what-doesnt)). The Tier 2 protocol remains inside the stdlib's own collection messages for dynamic receivers. **Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures.
+**Local variable mutations** work in the blocks of control-flow messages (the table below, conditionals, `on:do:`/`ensure:`, `Result tryDo:`), written directly as the message's argument, in every method kind and in the REPL, including when the construct is an operand of a larger expression. A block that assigns a captured local and escapes (stored, returned, or passed to any other method, the actor's own methods included) is a compile error ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), which amends ADR 0041's "local mutations work in all blocks"; see [What Works and What Doesn't](#what-works-and-what-doesnt)). The Tier 2 protocol remains inside the stdlib's own collection messages for dynamic receivers. **Field mutations** (`self.x :=`) in an actor instance method work in every block, stored or not ([Actor Blocks See Live State](#actor-blocks-see-live-state)); in value-type and class methods they require control-flow context and are a compile error in stored closures.
 
 ### Control Flow Constructs
 
@@ -2927,7 +2927,7 @@ processItems =>
 
 A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). A block literal that assigns a captured local and is passed as an Erlang FFI argument (`Erlang lists foreach: [:e \| t := t + e] with: xs`) is the same compile error (BT-3917): Erlang calls it as a plain fun and the write would be dropped. Return the value from the block and use the call's result instead (ADR 0041 §Erlang Interop Boundary); a block that only reads captured variables is fine. The same holds for object state: a block that assigns `self.field` (an actor or value-type field, or a class variable in a class method) and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; an actor field write through a `sealed` method of the same class, ADR 0132's BT-1140 path, is no longer accepted). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
 
-**An actor block that reads a field may not escape either** (BT-3952, [ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md) amendment). A block captures the actor's state when it is made, so in an actor instance method a block that reads `self.total` (or reflectively, `self fieldAt: #total`) and is passed to a message sent to `self` or `super` (the actor's own method, a cascade to `self` included), stored in a field, returned, placed in a collection literal, or answered by a collection operation's block would see the value from when it was made, not what the actor has written since. That is a compile error, reported at the read: `` `self.total` is read in a block that runs later; it would see the value from when the block was made ``. The check is conservative: it cannot tell a callee that runs the block before any write (which would answer right) from one that runs it after. A block bound to a local is followed through the local (an alias `c := b` and a capture by an escaping block such as `^[b value]` included): an escape of the local is an error, and calling it (`b value`) is an error once a `self.field :=` write or any send to `self`/`super` may have come between the binding and the call, or when the call sits in a block (a loop body) that contains one; calling it with nothing in between is accepted. After such a change any use of the local counts, handing it to another object included, and a change written inside a stored block counts where that block is written; a loop condition counts as changing the state when its body does. A block that sends any message to `self` or `super` (a getter `self total` dispatches against the same captured state; any send counts, `self class` included) is likewise an error, reported at the send, when it is stored (assigned to a field, returned, placed in a collection literal, answered by a collection operation, or bound to a local that does one of these); a block passed directly to the actor's own method may send to `self`, and so may the later call of a local-bound block. Compute the value first and capture it (`t := self total`, then `[t]`). Pass the value in instead (`[:v | ...]`, with the method that runs the block doing `block value: self.total`), or read the field after the call. Not followed: a block that reaches the actor through a message answer (`b := self makeBlock`) or a collection. Blocks run in place (`ifTrue:`, `do:`, `detect:ifNone:` and the other collection messages sent to a non-self receiver), blocks passed to another object, class methods (class variables are read live at home, ADR 0130 §3) and value types are unaffected.
+**An actor block that reads a field may escape** (ADR 0137, BT-4009; this retires the BT-3952 restriction of ADR 0133's amendment). In an actor instance method a block reads the actor's fields as they are when it runs, not when it was made; see [Actor Blocks See Live State](#actor-blocks-see-live-state). Some other rejections for actor blocks in this section (the `[...] value` and local-threading rows listed in `validators/local_threading.rs`) remain until BT-4010.
 
 These lookup handlers are lowered inline, behind a runtime check that the receiver is a `Dictionary`: a handler that writes an outer local sent to anything else (an `Ets`, a value-type instance with its own `at:ifAbsent:`, a user class) raises a structured `type_error` instead of dropping the write. A receiver statically known not to be a `Dictionary` (`self`/`super` outside one, or an inferred type that is a known other class such as `Ets`) keeps the compile error. In a closure that is not inlined (a stored block, a block passed to another method) the enclosing block escapes, and in the REPL the handler is still a compile error.
 
@@ -3042,18 +3042,32 @@ These combinations are measured and listed in `crates/beamtalk-core/src/semantic
 
 `^t := e` returns `e` after rebinding `t`. Nothing runs after the return that could read `t`, so the write is dead and `beamtalk lint` warns (`dead_returned_assignment`) and suggests `^e`. A `^` out of the protected block of an `ensure:` (`[^t := t + 1] ensure: [t printString]`, and equally `[t := t + 1. ^t] ensure: [t printString]`, or a `^` in a block nested in the protected block) is a compile error for now ([BT-3947](https://linear.app/beamtalk/issue/BT-3947)) when the cleanup reads a local the protected block writes: the throw skips the rebind, so the cleanup would read the old `t`. Assigning before the `ensure:` does not help if the `^` stays inside the protected block; keep the `^` out of it (assign inside, return after the `ensure:`).
 
-**Field mutations** (`self.x :=`) require control-flow context and are a compile error in stored closures:
+### Actor Blocks See Live State
+
+In an actor instance method (ADR 0137) a block that reads or writes `self.field`, or sends to `self`, sees and changes the actor's current state, wherever the block is made and wherever it runs: a loop body, an `on:do:` or `ensure:` body, a block with a `^`, a block stored in a field and run by a later message, or a block passed to one of the actor's own methods.
 
 ```beamtalk
-// ❌ ERROR: Field assignment in stored closure
-badBlock =>
-    myBlock := [self.value := self.value + 1]
-    // ERROR: Cannot assign to field 'value' inside a stored closure.
+Actor subclass: Counter
+  state: n = 0
+  state: onTick = nil
 
-// ✅ CORRECT: Field mutation in control flow
-increment =>
-    10 timesRepeat: [self.value := self.value + 1]  // ✅ Works!
+  twice: aBlock =>
+    aBlock value
+    aBlock value
+
+  addTwice =>
+    self twice: [self.n := self.n + 1]
+    self.n                      // 2
+
+  arm => self.onTick := [self.n := self.n + 10]
+  tick =>
+    self.onTick value
+    self.n                      // 10, then 20
 ```
+
+A block *at home* (running in the actor's own process, inside one of its messages) reads and writes the live fields. A block that has been carried *away* to another process (handed to another actor, or run by a task) reads the fields as they were when the block was created; a **write** from there raises `actor_state_unreachable`, and a send to `self` from there is an ordinary message to the actor. `on:do:` restores the actor's fields to their values on entry to the protected block when it handles an error; `ensure:` cleanups see every write the protected block made before it ended; a `^` stores its writes before it leaves. Blocks that **assign a captured local** are still governed by ADR 0133's rule above.
+
+Some older rejections remain until BT-4010 deletes their validator rows: an inlined `[...] value` that writes a field or sends to `self` as the argument of another message in an actor method (BT-3981, until BT-3947), the local-threading rows listed at the end of the [Capturing Variables](#what-works-and-what-doesnt) discussion, and field writes in stored closures of value-type and class methods. Those messages say so when they fire.
 
 ### Why This Design?
 
@@ -3061,41 +3075,20 @@ increment =>
 |----------|-----------|
 | **Universal** | Local variable mutations work in every control-flow block — no whitelist; a block with no way back is a compile error, not a lost write |
 | **Smalltalk-like** | Natural iteration patterns work; a user-defined HOM takes a block that answers a value (ADR 0133) |
-| **Safe** | Field mutations in stored closures are caught at compile time |
+| **Safe** | In value-type and class methods, field mutations in stored closures are caught at compile time; in actors they see live state (ADR 0137) |
 | **Good DX** | Clear errors with fix suggestions |
 | **BEAM-idiomatic** | Compiles to tail recursion + state threading |
 | **Performant** | Stdlib hot paths are zero overhead (Tier 1); user HOMs ~65ns (Tier 2) |
 
 ### Error Messages
 
-When you accidentally assign to a field inside a stored closure, the compiler provides guidance:
+In a value-type or class method, a field assignment inside a stored closure is a compile error that suggests moving the mutation into a method of its own:
 
 ```beamtalk
-// This won't compile — stored closure can't mutate fields
-myBlock := [:item | self.sum := self.sum + item]
-items do: myBlock
+addToSum: item => self.sum := self.sum + item
 ```
 
-```text
-Error: Cannot assign to field 'sum' inside a stored closure.
-
-Field assignments require immediate execution context for state threading.
-
-Fix: Extract the mutation into a method:
-  // Instead of:
-  myBlock := [:item | self.sum := self.sum + item].
-  items do: myBlock.
-
-  // Use a method:
-  addToSum: item => self.sum := self.sum + item.
-  items do: [:item | self addToSum: item].
-```
-
-The `addTo{Field}:` method fix is offered because it's the only rewrite that's
-valid everywhere this diagnostic fires — writing the block inline
-(`items do: [:item | self.sum := self.sum + item]`) only threads correctly for
-an `Actor subclass:` method. The identical inline rewrite is itself rejected
-in a `Value subclass:` or class method, so it isn't offered as a fix here.
+The same assignment in an actor instance method compiles and writes the live field.
 
 ---
 

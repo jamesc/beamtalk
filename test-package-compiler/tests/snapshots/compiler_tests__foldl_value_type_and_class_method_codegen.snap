@@ -135,7 +135,7 @@ let _temp19 = _coll18 in let _temp20 = case call 'erlang':'is_list'(_temp19) of 
       'initialize_assigns' => [],
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -183,7 +183,7 @@ let _temp19 = _coll18 in let _temp20 = case call 'erlang':'is_list'(_temp19) of 
       'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~
                 }~
@@ -221,7 +221,7 @@ let _temp19 = _coll18 in let _temp20 = case call 'erlang':'is_list'(_temp19) of 
       'initialize_assigns' => [],
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~
 

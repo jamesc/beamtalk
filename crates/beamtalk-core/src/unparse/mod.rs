@@ -1382,6 +1382,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             is_quoted,
             is_intrinsic,
             is_inferred,
+            no_user_code,
             ..
         } => {
             let directive = if *is_intrinsic {
@@ -1389,13 +1390,18 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             } else {
                 "@primitive"
             };
-            if *is_inferred {
+            let pragma = if *is_inferred {
                 // Bare `@primitive` — selector inferred from the method.
                 docvec![directive]
             } else if *is_quoted {
                 docvec![directive, " \"", leaf::string_content(name), "\""]
             } else {
                 docvec![directive, " ", leaf::ident(name)]
+            };
+            if *no_user_code {
+                docvec![pragma, " no_user_code"]
+            } else {
+                pragma
             }
         }
         Expression::StringInterpolation { segments, .. } => unparse_string_interpolation(segments),

@@ -13,9 +13,7 @@ use super::super::method_frame::{
 };
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::sequencing::PrecompiledScope;
-use super::super::{
-    CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis, threaded_ir,
-};
+use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, threaded_ir};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::fname;
@@ -383,9 +381,11 @@ impl CoreErlangGenerator {
                 continue;
             };
             let captured_mutations = Self::captured_mutations_for_block(block);
-            let needs_tier2 = !captured_mutations.is_empty()
-                || (self.context == CodeGenContext::Actor
-                    && !block_analysis::analyze_block(block).field_writes.is_empty());
+            // ADR 0137: only a block that mutates a captured local is Tier 2. A
+            // block that writes a field is an ordinary closure over the actor's
+            // state (`actor_state_access.rs`); one that does both stays Tier 2,
+            // whose `StateAcc` is the caller's `State`.
+            let needs_tier2 = !captured_mutations.is_empty();
             if !needs_tier2 {
                 continue;
             }
@@ -3103,7 +3103,10 @@ impl CoreErlangGenerator {
                     // Block literal with field mutations (actor state threading)
                     if self.context != super::super::CodeGenContext::ValueType {
                         let analysis = super::super::block_analysis::analyze_block(block);
-                        if self.needs_mutation_threading(&analysis) {
+                        // The same gate the evaluated-block lowering and the
+                        // bracket classification use (ADR 0137): a block that only
+                        // reads state or calls out is a closure on the cell.
+                        if self.value_block_needs_threading(&analysis) {
                             return true;
                         }
                     }

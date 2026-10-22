@@ -86,6 +86,7 @@ fn catch_all_dnu_true_for_unquoted_primitive_body() {
         is_quoted: false,
         is_intrinsic: true,
         is_inferred: false,
+        no_user_code: false,
         span: s(),
     })])]);
     assert!(class_has_catch_all_dnu(&class));
@@ -100,6 +101,7 @@ fn catch_all_dnu_false_for_quoted_primitive_body() {
         is_quoted: true,
         is_intrinsic: false,
         is_inferred: false,
+        no_user_code: false,
         span: s(),
     })])]);
     assert!(!class_has_catch_all_dnu(&class));

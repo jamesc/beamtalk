@@ -124,11 +124,12 @@ fn test_match_arm_cascade_tier2_value_call_compiles_without_double_wrapping() {
 
     eprintln!("Generated code for match: arm cascade tier2 value: call:\n{code}");
 
+    // ADR 0137: `blk` writes only a field, so it is a closure over the actor's
+    // state rather than a Tier 2 block; the cascade's two sends are calls that run
+    // it, and it writes the field through the cell.
     assert!(
-        code.contains("'maps':'put'('total'"),
-        "the cascade's own internal codegen must still generate the \
-         maps:put mutation (even though the match: arm wrapper below \
-         discards it, per the BT-2814 limitation documented above). Got:\n{code}"
+        code.contains("call 'beamtalk_actor_state':'put'("),
+        "the block's own field write must still be generated. Got:\n{code}"
     );
 
     assert_compiles_through_erlc("ctr", &code);

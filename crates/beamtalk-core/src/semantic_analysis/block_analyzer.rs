@@ -64,57 +64,6 @@ impl Analyser {
         // Emit diagnostics for mutations based on block context
         for mutation in &mutations {
             match &mutation.kind {
-                MutationKind::Field { name } => {
-                    // Field assignments in Passed blocks are supported via
-                    // Tier 2 state threading — the actor State IS the StateAcc, so
-                    // field reads/writes inside the block propagate back to the caller.
-                    //
-                    // A block that writes a field and is stored into an
-                    // instance field (`self.field := [block]`) is not flagged
-                    // here: the ADR 0133 escaping-block validator
-                    // (`validators/local_threading.rs`, BT-3922) rejects it, so
-                    // codegen never sees one (BT-3986 removed its runtime
-                    // Tier 1/Tier 2 discrimination).
-                    //
-                    // Error: Field assignment in blocks stored into a *local
-                    // variable* remains flagged here — codegen's
-                    // `prescan_tier2_local_vars` can prove per-method that a
-                    // specific local's later uses are safe, but this pass has no
-                    // equivalent whole-body lookahead, so it stays conservative.
-                    //
-                    // The field-stored exemption
-                    // is only safe when the block does NOT also capture and
-                    // mutate an outer local. `generate_block_stateful` reads a
-                    // captured local's `'__local__<var>'` key from the calling
-                    // method's `StateAcc` with a fallback to the value closed
-                    // over at block-*definition* time — correct for a block
-                    // invoked from the same method, but wrong here: a
-                    // field-stored block can be invoked from a *different*
-                    // method whose `StateAcc` never had that key seeded, so the
-                    // fallback silently returns the stale definition-time value
-                    // forever, and the key then leaks into the actor's
-                    // persistent gen_server state once the call site merges the
-                    // returned `NewState` back in. Keep flagging the mixed case
-                    // so it still hits the same compile-time diagnostic as a
-                    // captured-local-only stored block.
-                    let has_captured_local_mutations = mutations
-                        .iter()
-                        .any(|m| matches!(m.kind, MutationKind::CapturedVariable { .. }));
-                    let is_field_stored =
-                        matches!(parent_context, Some(ExprContext::FieldAssignment))
-                            && !has_captured_local_mutations;
-                    if matches!(context, BlockContext::Stored) && !is_field_stored {
-                        self.result.diagnostics.push(Diagnostic::error(
-                            format!(
-                                "cannot assign to field '{name}' inside a stored closure\n\
-                                 \n\
-                                 = help: field assignments require immediate execution context\n\
-                                 = help: use control flow directly: `items do: [:item | self.{name} := value]`"
-                            ),
-                            mutation.span,
-                        ).with_hint("Inline the block at the call site, or extract the field assignment into a separate method"));
-                    }
-                }
                 MutationKind::CapturedVariable { name } => {
                     // ADR 0041 Phase 3: Captured variable mutations in Stored/Passed
                     // blocks are supported via the Tier 2 stateful block protocol.
@@ -137,17 +86,9 @@ impl Analyser {
                     // already is above (`has_captured_local_mutations`) — just for the
                     // captured-local-only case that arm never reaches.
                     //
-                    // Only fire for the captured-local-ONLY case: when a field write
-                    // *also* exists in the same block, the Field arm above already emits
-                    // its own diagnostic for this exact mix (that's what its
-                    // `has_captured_local_mutations` check is for), so skip here to avoid
-                    // reporting two separate errors for one closure.
-                    let has_field_mutation = mutations
-                        .iter()
-                        .any(|m| matches!(m.kind, MutationKind::Field { .. }));
-                    if matches!(parent_context, Some(ExprContext::FieldAssignment))
-                        && !has_field_mutation
-                    {
+                    // Fires whether or not the block also writes a field (ADR 0137:
+                    // the field write is legal, the captured local is not).
+                    if matches!(parent_context, Some(ExprContext::FieldAssignment)) {
                         self.result.diagnostics.push(Diagnostic::error(
                             format!(
                                 "cannot mutate captured variable '{name}' inside a closure stored in a field\n\
@@ -160,11 +101,17 @@ impl Analyser {
                         ).with_hint("Store the mutated value in a field, or extract the block and the variable into the same method"));
                     }
                 }
-                MutationKind::LocalVariable { .. } => {
-                    // A block-local variable (defined AND used only inside the block, not
-                    // captured from an outer scope) never escapes the block invocation —
-                    // no state threading is needed, so no diagnostic applies in any context.
-                }
+                // ADR 0137: a block that writes a field of `self` is legal wherever
+                // it is written. In an actor it writes the actor's state through the
+                // cell when it runs inside the actor and raises
+                // `actor_state_unreachable` from another process; a value-type block
+                // that stores or returns such a write is the ADR 0133 escaping-block
+                // validator's (`validators/local_threading.rs`, BT-3922).
+                //
+                // A block-local variable (defined AND used only inside the block, not
+                // captured from an outer scope) never escapes the block invocation,
+                // so no diagnostic applies to it in any context either.
+                MutationKind::Field { .. } | MutationKind::LocalVariable { .. } => {}
             }
         }
 
@@ -417,16 +364,19 @@ mod tests {
     }
 
     #[test]
-    fn field_mutation_in_stored_block_produces_error() {
+    fn field_mutation_in_stored_block_is_not_this_pass_error() {
+        // ADR 0137: a block that writes a field of `self` is legal wherever it
+        // is written; an actor's writes go through the cell, and the escaping
+        // value-type write is the ADR 0133 validator's (`local_threading.rs`).
         let src = "Object subclass: Foo\n  state: x = 0\n  bar =>\n    f := [self.x := 1].\n    f";
         let module = parse_bt(src);
         let result = analyse(&module);
         assert!(
-            result
+            !result
                 .diagnostics
                 .iter()
                 .any(|d| d.message.contains("cannot assign to field")),
-            "Expected field-in-stored-block error, got: {:?}",
+            "No field-in-stored-block error from the block analyser, got: {:?}",
             result.diagnostics
         );
     }
@@ -452,11 +402,9 @@ mod tests {
 
     #[test]
     fn bt2809_mixed_field_and_captured_local_in_field_stored_block_produces_one_error() {
-        // Code review follow-up: a field-stored block with BOTH a field write and
-        // a captured-local mutation must produce exactly ONE diagnostic (the
-        // Field arm's "cannot assign to field"), not two — the CapturedVariable
-        // arm's own diagnostic is for the captured-local-ONLY case; firing both
-        // for the same closure would be confusing, redundant double-reporting.
+        // A field-stored block with BOTH a field write and a captured-local
+        // mutation produces exactly ONE diagnostic: the captured local is the
+        // problem (ADR 0137 made the field write legal).
         let src = "Actor subclass: Ctr\n  state: total = 0\n\n  setup =>\n    count := 0\n    self.callback := [:n | self.total := n. count := count + n]\n";
         let module = parse_bt(src);
         let result = analyse(&module);
@@ -470,8 +418,8 @@ mod tests {
         assert!(
             result.diagnostics[0]
                 .message
-                .contains("cannot assign to field"),
-            "Expected the field-write diagnostic to be the one reported, got: {:?}",
+                .contains("cannot mutate captured variable"),
+            "Expected the captured-local diagnostic to be the one reported, got: {:?}",
             result.diagnostics
         );
     }

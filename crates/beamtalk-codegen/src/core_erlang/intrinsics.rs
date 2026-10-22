@@ -260,7 +260,8 @@ impl CoreErlangGenerator {
         // arm; `beamtalk_core`'s `repl_evaluated_block`).
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
-            if self.needs_mutation_threading(&analysis) || self.repl_blocks_write_bindings(&[block])
+            if self.value_block_needs_threading(&analysis)
+                || self.repl_blocks_write_bindings(&[block])
             {
                 let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
                 return Ok(Some(doc));
@@ -477,7 +478,8 @@ impl CoreErlangGenerator {
         // as above).
         if let Expression::Block(block) = receiver {
             let analysis = block_analysis::analyze_block(block);
-            if self.needs_mutation_threading(&analysis) || self.repl_blocks_write_bindings(&[block])
+            if self.value_block_needs_threading(&analysis)
+                || self.repl_blocks_write_bindings(&[block])
             {
                 let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
                 return Ok(Some(doc));
@@ -2989,6 +2991,18 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         blocks: &[&Block],
     ) -> bool {
+        self.conditional_blocks_need_threading(blocks)
+            || self.conditional_receiver_needs_threading(receiver)
+    }
+
+    /// The block half of [`Self::conditional_needs_mutation_threading`]: does
+    /// any branch block need the inline mutation-threading path. The receiver
+    /// half is sequenced ahead of the conditional (and so changes once it has
+    /// been); the conditional proper is lowered on this half alone.
+    pub(in crate::core_erlang) fn conditional_blocks_need_threading(
+        &self,
+        blocks: &[&Block],
+    ) -> bool {
         blocks.iter().any(|block| {
             // shares `block_arg_needs_threading`'s block-body check
             // (block-local/field mutations plus a cross-scope list-op
@@ -3000,7 +3014,7 @@ impl CoreErlangGenerator {
             self.block_arg_needs_threading(block)
                 || (self.in_loop_body
                     && !self.block_profile_or_analyze(block).local_writes.is_empty())
-        }) || self.conditional_receiver_needs_threading(receiver)
+        })
     }
 
     /// Tries to generate inline `logger:log/3` calls for Logger class sends.

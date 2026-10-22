@@ -17,7 +17,7 @@ use beamtalk_core::source_analysis::Span;
 /// primitive-type test whose `'true'` branch is the bare Erlang BIF and whose
 /// `'false'` branch is the message send — and differ only in the test.
 #[derive(Clone, Copy)]
-enum OperatorGuard {
+pub(in crate::core_erlang) enum OperatorGuard {
     /// `+ - * /`: `is_number` → bare BIF; anything else → message dispatch.
     Arithmetic,
     /// `< > <= >=`: primitive-comparable (`is_number` or `is_binary`) → bare
@@ -167,14 +167,7 @@ impl CoreErlangGenerator {
         //     it reaches its own `<` or raises `does_not_understand` (BT-3924).
         // `%`/`**`/equality are not message-dispatched here.
         let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
-        let is_comparison = matches!(op, "<" | ">" | "<=" | ">=");
-        let guard = if is_arithmetic && !self.receiver_is_statically_numeric(left) {
-            Some(OperatorGuard::Arithmetic)
-        } else if is_comparison && !self.receiver_is_statically_comparable(left) {
-            Some(OperatorGuard::Comparison)
-        } else {
-            None
-        };
+        let guard = self.operator_guard(op, left);
 
         // ADR 0116: number-on-the-left coercion. Every arithmetic call
         // site that can reach a bare BIF with the *left* operand numeric (the
@@ -271,6 +264,28 @@ impl CoreErlangGenerator {
     /// `self.extra` in `self.total + self.extra` reaches the `try`/`catch` and a
     /// non-numeric `extra` dispatches to `plusFromNumber:` (closing the
     /// BT-3266 gap).
+    /// The runtime guard the dispatchable operator `op` needs when its receiver
+    /// `left` is not statically a builtin, or `None` when the bare BIF is right
+    /// (a literal or suitably typed receiver, or an operator that is not message
+    /// dispatched). The one rule behind `generate_binary_op` and the cell-bracket
+    /// classification (`classify_binary`): the guard's dispatching branch is where
+    /// user code can run.
+    pub(in crate::core_erlang) fn operator_guard(
+        &self,
+        op: &str,
+        left: &Expression,
+    ) -> Option<OperatorGuard> {
+        let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
+        let is_comparison = matches!(op, "<" | ">" | "<=" | ">=");
+        if is_arithmetic && !self.receiver_is_statically_numeric(left) {
+            Some(OperatorGuard::Arithmetic)
+        } else if is_comparison && !self.receiver_is_statically_comparable(left) {
+            Some(OperatorGuard::Comparison)
+        } else {
+            None
+        }
+    }
+
     pub(in crate::core_erlang) fn receiver_is_statically_numeric(&self, expr: &Expression) -> bool {
         use beamtalk_core::ast::Literal;
         match expr {

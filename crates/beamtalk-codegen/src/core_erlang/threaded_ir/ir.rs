@@ -882,6 +882,16 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// it; `None` exists so `verify()` rejects a node that forgets the
         /// snapshot instead of `erlc` failing on an unbound variable.
         entry: Option<CatchEntry>,
+        /// ADR 0137 §5: the actor-state cell's half of the boundary, set in an
+        /// actor instance method and in an actor closure (`None` elsewhere: a
+        /// class method, a value type, the REPL have no cell). The entry makes
+        /// the cell current for the region's closures and the catch restores
+        /// the region's pre-state before anything else runs. When set,
+        /// [`verify`](super::verify::verify) reports
+        /// [`VerifyError::CatchWithoutStateRestore`] unless the non-NLR clause
+        /// has the matching [`CatchStep::CellRestore`] right after the
+        /// class-variable restore.
+        cell: Option<CellBoundary>,
         try_region: TryRegion,
         clauses: Vec<CatchClause>,
         span: Span,
@@ -1099,8 +1109,9 @@ pub(in crate::core_erlang) enum UserCodeRegion {
     Other,
 }
 
+#[cfg(test)]
 impl UserCodeRegion {
-    /// The name a count report groups by.
+    /// The name the invariant probe groups its sites by.
     pub(in crate::core_erlang) const fn label(self) -> &'static str {
         match self {
             Self::MethodRoot => "method-root",
@@ -1450,6 +1461,19 @@ pub(in crate::core_erlang) enum CatchEntry {
     ClassVarSnapshot,
 }
 
+/// How an `on:do:` catch boundary treats the actor-state cell (ADR 0137 §5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum CellBoundary {
+    /// Method level: the method's threaded `State` (the named variable, the
+    /// version before the region) is stored to the cell on entry, so the
+    /// region's closures run against it, and stored again by the catch, so a
+    /// closure or callee in the handler sees the pre-region state.
+    PreState(ErlangVar),
+    /// Inside an actor closure there is no threaded `State`: the cell is
+    /// snapshotted on entry (the named variable) and the catch restores it.
+    Snapshot(ErlangVar),
+}
+
 /// The protected region of an [`ThreadedStmt::OnDoCatch`]: `try <body> of
 /// <result_var> -> <result_var>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1475,6 +1499,10 @@ pub(in crate::core_erlang) enum CatchClause {
 pub(in crate::core_erlang) enum CatchStep {
     /// `do beamtalk_class_vars:restore(Snap)` — must come first.
     ClassVarRestore { snapshot: ErlangVar },
+    /// ADR 0137 §5: the cell's restore ([`CellBoundary`]) — must come right
+    /// after the class-variable restore, before the exception is wrapped and
+    /// the handler runs.
+    CellRestore(CellBoundary),
     /// Wrap the raw `{Type, Error, Stack}` as an exception object.
     WrapException,
     /// `matches_class` and the opening of its `'true'` arm. Must be followed

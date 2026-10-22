@@ -41,7 +41,8 @@ cell to its value at entry before re-raising.
 
 ## Dependencies
 
-A leaf of the object system: it depends only on `beamtalk_error`.
+It depends on `beamtalk_error`, and on `beamtalk_dispatch` and `beamtalk_actor`
+only for `super_send/5` and `refresh/2`, which call them.
 """.
 
 -include("beamtalk.hrl").
@@ -50,10 +51,16 @@ A leaf of the object system: it depends only on `beamtalk_error`.
     install/1,
     take/0,
     uninstall/1,
+    snapshot/0,
+    restore/1,
     installed/0,
     adapt/1,
     get/2,
     get/3,
+    view/2,
+    refresh/2,
+    call_foreign/3,
+    super_send/5,
     put/3,
     has/2,
     has/3,
@@ -104,6 +111,20 @@ uninstall(Old) when is_map(Old) ->
     erlang:put(?CELL, Old),
     ok.
 
+-doc """
+The cell as it is now (`undefined` outside a callback): the catch boundary of an
+`on:do:` inside a block takes one on entry (ADR 0137 §5) and `restore/1`s it when
+an error is caught, so the handler sees the state from before the protected region.
+""".
+-spec snapshot() -> cell().
+snapshot() ->
+    erlang:get(?CELL).
+
+-doc "Put the cell back to a `snapshot/0` (an error caught inside a block discards the writes of its region).".
+-spec restore(cell()) -> ok.
+restore(Snapshot) ->
+    uninstall(Snapshot).
+
 -doc "True when a callback's cell is installed in this process.".
 -spec installed() -> boolean().
 installed() ->
@@ -141,6 +162,101 @@ get(Self, Name, Capture) ->
     case at_home(Self) of
         {true, State} -> maps:get(Name, State, nil);
         false -> maps:get(Name, away_capture(Self, Name, Capture), nil)
+    end.
+
+-doc """
+The state map a block's reads see: the cell at home, else the creation-time
+`Capture` (raises `actor_state_unreachable` when `none`).
+""".
+-spec view(#beamtalk_object{}, capture()) -> map().
+view(Self, Capture) ->
+    case at_home(Self) of
+        {true, State} -> State;
+        false -> away_capture(Self, '_', Capture)
+    end.
+
+-doc """
+Run a `dispatch/4` exit that is not a compiled Beamtalk method (ADR 0137 §2): a
+native method, an ADR 0066 extension fun, the inherited `Object`/`ProtoObject`
+walk, `doesNotUnderstand:`. The code behind it is Erlang that does not bracket
+what it calls, and it may run one of this actor's blocks, which reads and writes
+the cell. So `State` is stored to the cell first, `Fun` is applied to `Args`, and
+`Fun`'s own answer (`{reply, Result, NewState}`, `{error, Reason}`, ...) is
+returned unchanged: a native that runs a block reads the block's writes back
+from the cell (`get/2`, `take/0`) before it answers. There is no reconciliation
+of the cell with the answer (ADR 0137, Alternatives Considered).
+
+A test build (`TEST` defined) checks the one mistake a native can make: when the cell changed during the call (a block it ran
+wrote a field) and the answer hands back the state it was given, the native
+dropped the block's writes, and it fails its test instead of dropping them
+silently. (A compiled method reached through the inherited walk legitimately
+leaves an older version of its own threaded state in the cell, so a changed cell
+alone proves nothing.)
+""".
+-spec call_foreign(map(), fun(), [term()]) -> term().
+call_foreign(State, Fun, Args) when is_map(State), is_function(Fun, length(Args)) ->
+    erlang:put(?CELL, State),
+    Answer = apply(Fun, Args),
+    assert_reflects_cell(State, Answer),
+    Answer.
+
+-ifdef(TEST).
+-spec assert_reflects_cell(map(), term()) -> ok.
+assert_reflects_cell(Entry, {reply, _Result, Entry}) ->
+    case erlang:get(?CELL) of
+        Entry -> ok;
+        Cell when is_map(Cell) -> erlang:error({actor_state_not_reflected, Entry, Cell});
+        _ -> ok
+    end;
+assert_reflects_cell(_Entry, _Answer) ->
+    ok.
+-else.
+-spec assert_reflects_cell(map(), term()) -> ok.
+assert_reflects_cell(_Entry, _Answer) ->
+    ok.
+-endif.
+
+-doc """
+`Acc` with its fields replaced by the cell, keeping the codegen-internal
+`__local__` scratch keys it carries (`beamtalk_actor:strip_local_temps/1` names
+them). The state an `ensure:` cleanup of a failed body starts from: the cell
+holds the state at entry plus the writes the body made before the error. Away
+from home (no cell) `Acc` unchanged.
+""".
+-spec refresh(#beamtalk_object{}, map()) -> map().
+refresh(Self, Acc) ->
+    case at_home(Self) of
+        {true, Cell} ->
+            Fields = beamtalk_actor:strip_local_temps(Acc),
+            maps:merge(Cell, maps:without(maps:keys(Fields), Acc));
+        false ->
+            Acc
+    end.
+
+-doc """
+A `super` send from a block: run the superclass method of `Class` for `Selector`
+against the cell at home (storing its new state back, answering its value);
+away, against the creation-time `Capture`, where a method that changes state
+raises `actor_state_unreachable` (a block abroad cannot write the actor).
+""".
+-spec super_send(#beamtalk_object{}, capture(), atom(), atom(), [term()]) -> term().
+super_send(Self, Capture, Class, Selector, Args) ->
+    case at_home(Self) of
+        {true, State} ->
+            case beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
+                {reply, Result, NewState} ->
+                    erlang:put(?CELL, NewState),
+                    Result;
+                {error, Error} ->
+                    beamtalk_error:raise(Error)
+            end;
+        false ->
+            State = away_capture(Self, Selector, Capture),
+            case beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
+                {reply, Result, State} -> Result;
+                {reply, _Result, _Changed} -> raise_unreachable(Self, Selector, write);
+                {error, Error} -> beamtalk_error:raise(Error)
+            end
     end.
 
 -doc "Write field `Name` at home; raises `actor_state_unreachable` away.".

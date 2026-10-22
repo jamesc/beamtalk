@@ -978,7 +978,9 @@ impl CoreErlangGenerator {
         &self,
     ) -> Option<beamtalk_core::semantic_analysis::block_facts::RootMethodKind> {
         use beamtalk_core::semantic_analysis::block_facts::RootMethodKind;
-        if self.in_class_method() {
+        // ADR 0137 §3: an actor closure threads no `State`, like a class method
+        // (locals through a fresh scratch map, fields in place).
+        if self.in_class_method() || self.in_cell_closure() {
             Some(RootMethodKind::Class)
         } else if self.in_actor_instance_context() {
             Some(RootMethodKind::Actor)
@@ -1015,6 +1017,19 @@ impl CoreErlangGenerator {
             return None;
         }
         let Some(set) = self.threaded_locals_of(expr) else {
+            // ADR 0137: an actor `on:do:`/`ensure:` whose blocks thread `State`
+            // (they write a field, send to `self`, or read state the method holds
+            // ahead of the cell) answers `{Value, State}`; at any position it is a
+            // producer with an empty local set, so its consumer reads the value back.
+            if kind == beamtalk_core::semantic_analysis::block_facts::RootMethodKind::Actor
+                && self.context == crate::core_erlang::CodeGenContext::Actor
+                && !self.threads_no_actor_state()
+                && arms
+                    .iter()
+                    .any(|block| self.block_needs_exception_threading(block))
+            {
+                return Some(Vec::new());
+            }
             // No outer local is written: the core rule alone decides whether a
             // field-only value-type exception is a producer (an empty set).
             return beamtalk_core::semantic_analysis::block_facts::exception_producer_writes(
@@ -1102,7 +1117,7 @@ impl CoreErlangGenerator {
     /// `on:do:`/`ensure:`), whose element 2 is the next `State`.
     pub(super) fn construct_tuple_locals(&self, expr: &Expression) -> Option<Vec<String>> {
         let yields_tuple =
-            if self.in_class_method() || self.context == super::CodeGenContext::ValueType {
+            if self.threads_no_actor_state() || self.context == super::CodeGenContext::ValueType {
                 self.expr_yields_vt_threaded_tuple(expr)
             } else {
                 self.in_actor_instance_context()

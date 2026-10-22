@@ -160,6 +160,7 @@ fn test_return_type_skip_primitive_methods() {
                 is_quoted: true,
                 is_intrinsic: false,
                 is_inferred: false,
+                no_user_code: false,
                 span: span(),
             })],
             TypeAnnotation::Simple(ident("Integer")),

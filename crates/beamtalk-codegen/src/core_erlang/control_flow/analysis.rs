@@ -136,7 +136,10 @@ impl CoreErlangGenerator {
     /// context, which is never `ValueType`/`Actor`).
     pub(in crate::core_erlang) fn eligible_families(&self) -> Vec<VersionPrefix> {
         let mut eligible = Vec::with_capacity(1);
-        if matches!(self.context, CodeGenContext::Actor) && !self.in_class_method() {
+        if matches!(self.context, CodeGenContext::Actor)
+            && !self.in_class_method()
+            && !self.in_cell_closure()
+        {
             eligible.push(VersionPrefix::State);
         }
         if matches!(self.context, CodeGenContext::ValueType) && !self.in_class_method() {

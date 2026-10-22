@@ -2086,6 +2086,7 @@ mod tests {
             is_quoted: true,
             is_intrinsic: false,
             is_inferred: false,
+            no_user_code: false,
             span: Span::new(0, 22),
         };
         let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None, None);
@@ -2107,6 +2108,7 @@ mod tests {
             is_quoted: false,
             is_intrinsic: false,
             is_inferred: false,
+            no_user_code: false,
             span: Span::new(0, 15),
         };
         let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None, None);

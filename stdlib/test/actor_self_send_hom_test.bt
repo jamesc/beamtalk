@@ -60,19 +60,18 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: (pool collect: [:x | x * 2]) equals: #(2, 4, 6, 8)
     self assert: (pool select: [:x | x > 2]) equals: #(3, 4)
 
-  // BT-3936 (ADR 0133 § Error examples): a block that assigns nothing, but
-  // whose self-send (`record:`) changes a field, passed through `self do:`
-  // (case A; `SelfSendHomPool`'s `recordAll` is the same shape). The block is
-  // a plain closure and cannot return the new State, so the self-send
-  // compares the callee's returned State with the State it was dispatched
-  // against and raises `stateful_block_dispatch` instead of answering 0.
-  testSelfSendStateChangeThroughSelfSendDoRaises =>
+  // BT-3936 / ADR 0137: a block that assigns nothing, but whose self-send
+  // (`record:`) changes a field, passed through `self do:` (case A;
+  // `SelfSendHomPool`'s `recordAll` is the same shape). The block is a plain
+  // closure; it runs inside the actor, so the self-send is a message to the
+  // actor's own `record:` on the live state and the change is kept.
+  testSelfSendStateChangeThroughSelfSendDoKeepsTheChange =>
     pool := SelfSendHomPool spawn
-    self should: [pool recordAll] raise: #stateful_block_dispatch
+    self assert: pool recordAll equals: 10
 
-  testSelfSendStateChangeThroughPlainSelfSendDoRaises =>
+  testSelfSendStateChangeThroughPlainSelfSendDoKeepsTheChange =>
     pool := SelfSendHomPlainPool spawn
-    self should: [pool recordAll] raise: #stateful_block_dispatch
+    self assert: pool recordAll equals: 6
 
   // A read-only self-send in the same block position compares equal and
   // answers normally.

@@ -663,9 +663,21 @@ impl CoreErlangGenerator {
                             line(),
                             "%% instead of crashing the actor on an unmatched result.",
                             line(),
-                            "case call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, ",
-                            leaf::atom(class_name.to_string()),
-                            ", Args, Self, State) of",
+                            "%% ADR 0137 §2: the extension fun is Erlang that does not bracket",
+                            line(),
+                            "%% what it calls, so it runs through call_foreign/3.",
+                            line(),
+                            "case ",
+                            Self::call_foreign_doc(
+                                "invoke_extension",
+                                6,
+                                docvec![
+                                    "ExtFun, OtherSelector, ",
+                                    leaf::atom(class_name.to_string()),
+                                    ", Args, Self, State"
+                                ],
+                            ),
+                            " of",
                             nest(
                                 INDENT,
                                 docvec![
@@ -691,6 +703,20 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// `call 'beamtalk_actor_state':'call_foreign'(State, <fun beamtalk_dispatch:name/arity>, [args])`:
+    /// a `dispatch/4` exit that is not a compiled method (ADR 0137 §2).
+    fn call_foreign_doc(function: &str, arity: i64, args: Document<'static>) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', ",
+            leaf::atom(function.to_string()),
+            ", ",
+            leaf::int_lit(arity),
+            "), [",
+            args,
+            "])"
+        ]
+    }
+
     /// Generates the hierarchy walk via `beamtalk_dispatch:super`, falling back to DNU.
     ///
     /// `beamtalk_dispatch:super/5` returns `{error, #beamtalk_error{}}`
@@ -707,9 +733,18 @@ impl CoreErlangGenerator {
         docvec![
             "%% ADR 0006: Try hierarchy walk before DNU",
             line(),
-            "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, ",
-            leaf::atom(class_name.to_string()),
-            ") of",
+            "%% ADR 0137 §2: inherited runtime methods run through call_foreign/3.",
+            line(),
+            "case ",
+            Self::call_foreign_doc(
+                "super",
+                5,
+                docvec![
+                    "OtherSelector, Args, Self, State, ",
+                    leaf::atom(class_name.to_string())
+                ],
+            ),
+            " of",
             nest(
                 INDENT,
                 docvec![

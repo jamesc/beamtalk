@@ -525,27 +525,31 @@ impl CoreErlangGenerator {
             let elem_var = Self::to_core_erlang_var(elem_param);
 
             // A closed `fun`: its body's state-version bumps (BT-3737: a
-            // conditional with a block-local write) must not leak out.
-            let body_doc = self.with_closed_fun_scope(|this| {
-                // Bind in swapped order: foldl's first param is Elem, second is Acc
-                if let Some(param) = body_block.parameters.get(1) {
-                    this.bind_var(&param.name, &elem_var);
-                }
-                if let Some(param) = body_block.parameters.first() {
-                    this.bind_var(&param.name, &acc_var);
-                }
-                this.generate_block_body(body_block)
-            })?;
+            // conditional with a block-local write) must not leak out. It is an
+            // actor closure (ADR 0137 §3): it reads the cell, and the call to
+            // `lists:foldl` is the bracket.
+            self.with_actor_closure(|this| {
+                let body_doc = this.with_closed_fun_scope(|this| {
+                    // Bind in swapped order: foldl's first param is Elem, second is Acc
+                    if let Some(param) = body_block.parameters.get(1) {
+                        this.bind_var(&param.name, &elem_var);
+                    }
+                    if let Some(param) = body_block.parameters.first() {
+                        this.bind_var(&param.name, &acc_var);
+                    }
+                    this.generate_block_body(body_block)
+                })?;
 
-            // fun (Elem, Acc) -> <body>
-            docvec![
-                "fun (",
-                leaf::var(elem_var),
-                ", ",
-                leaf::var(acc_var),
-                ") -> ",
-                body_doc,
-            ]
+                // fun (Elem, Acc) -> <body>
+                Ok(docvec![
+                    "fun (",
+                    leaf::var(elem_var.clone()),
+                    ", ",
+                    leaf::var(acc_var.clone()),
+                    ") -> ",
+                    body_doc,
+                ])
+            })?
         } else {
             // Non-literal callable: wrap to swap args at runtime.
             let body_var = self.fresh_temp_var("temp");

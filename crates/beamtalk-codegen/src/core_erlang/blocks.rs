@@ -143,7 +143,9 @@ impl CoreErlangGenerator {
     /// ADR 0130 §5: a block literal that reads a class variable binds its
     /// creation-time capture around the `fun` ([`Self::with_class_var_capture`]).
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
-        self.with_class_var_capture(block, |this| this.generate_block_fun(block))
+        self.with_actor_closure(|this| {
+            this.with_class_var_capture(block, |this| this.generate_block_fun(block))
+        })
     }
 
     /// [`Self::generate_block`] without the class-variable capture binding: the
@@ -176,8 +178,18 @@ impl CoreErlangGenerator {
         // ADR 0130 §3: not in a class method, where `self.x :=` can only name a
         // class variable and is an in-place `put` that needs no threading, so a
         // block may write class variables wherever it runs.
+        // ADR 0137: not in an actor instance method either, where the block
+        // writes the actor's state through the cell.
         if !analysis.field_writes.is_empty() && !self.in_class_method() {
-            Self::validate_stored_closure(&analysis, || self.location_label(block.span))?;
+            if self.cell_closures_apply() {
+                // The field write is legal; a captured local the block also
+                // mutates is not (ADR 0133: nothing hands it back).
+                let mut locals_only = analysis.clone();
+                locals_only.field_writes.clear();
+                Self::validate_stored_closure(&locals_only, || self.location_label(block.span))?;
+            } else {
+                Self::validate_stored_closure(&analysis, || self.location_label(block.span))?;
+            }
         }
 
         let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
@@ -273,6 +285,10 @@ impl CoreErlangGenerator {
         block: &Block,
         captured_vars: &[String],
     ) -> Result<Document<'static>> {
+        // Not an actor closure in cell mode (ADR 0137 §3): a Tier 2 `fun` takes
+        // the caller's `State` as its `StateAcc` argument and answers it back
+        // (`{Result, NewStateAcc}`), the convention of a compiled method, so it
+        // threads fields and locals through that map like one.
         self.with_class_var_capture(block, |this| {
             this.generate_block_stateful_fun(block, captured_vars)
         })
@@ -287,6 +303,10 @@ impl CoreErlangGenerator {
         self.push_scope();
         // Track block nesting so self-cast sends route through the mailbox
         self.block_depth += 1;
+        // A Tier 2 body is its own bracket scope: a window open around the call
+        // this block is an operand of does not cover the body's own sends, so they
+        // are checked against the body's brackets (ADR 0137).
+        let outer_window_depth = std::mem::replace(&mut self.synced.window_depth, 0);
         // A Tier 2 `fun` returns `{Result, StateAccN}`: it carries State back.
         let outer_drops_state = std::mem::replace(&mut self.closure_drops_state, false);
 
@@ -393,6 +413,7 @@ impl CoreErlangGenerator {
         });
         // Ensure block_depth and scope are restored even on error.
         self.closure_drops_state = outer_drops_state;
+        self.synced.window_depth = outer_window_depth;
         self.block_depth -= 1;
         self.pop_scope();
         // Stateful blocks are also closed `fun (...) -> {Result, NewStateAcc}`
@@ -820,7 +841,7 @@ impl CoreErlangGenerator {
         //
         // A class method threads nothing (ADR 0130 §3): `value` is compiled as
         // an ordinary expression and bound, with no prelude of its own.
-        if self.in_class_method() {
+        if self.threads_no_actor_state() {
             let val_doc = self.expression_doc(value)?;
             self.bind_var(var_name, &core_var);
             return Ok(docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",]);

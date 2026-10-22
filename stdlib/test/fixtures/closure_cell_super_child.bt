@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): a state-changing `super` send in a loop body.
+
+ClosureCellSuperBase subclass: ClosureCellSuperChild
+
+  bump => super bump
+
+  whileLoop =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        super bump
+        i := i + 1
+      ]
+    self.n
+
+  toDoLoop =>
+    1 to: 3 do: [:i | super bump]
+    self.n
+
+  timesLoop =>
+    3 timesRepeat: [super bump]
+    self.n
+
+  doLoop =>
+    #(1, 2, 3) do: [:e | super bump]
+    self.n

@@ -49,7 +49,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// #[1, 2, 3] size              // => 3
   /// #[] size                     // => 0
   /// ```
-  size -> Integer => @primitive
+  size -> Integer => @primitive no_user_code
 
   /// Test if the array has no elements.
   ///
@@ -58,7 +58,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// #[] isEmpty                  // => true
   /// #[1] isEmpty                 // => false
   /// ```
-  isEmpty -> Boolean => @primitive
+  isEmpty -> Boolean => @primitive no_user_code
 
   /// Return the element at the given 1-based index.
   ///

@@ -4458,8 +4458,8 @@ bt3596_default_handle_info_still_ignores_unknown_messages_test() ->
 %%% BT-3967: stopWith: / deferred self-stop
 
 %% Self-stop requests are only deferred inside a dispatching callback, which
-%% is marked by the stashed '$bt_actor_state'. Run Fun as if inside one, and
-%% always clean both pdict keys so a failing assertion cannot leak a pending
+%% is marked by an installed actor-state cell. Run Fun as if inside one, and
+%% always clean the cell and the pending actions so a failing assertion cannot leak a pending
 %% stop into later tests.
 in_dispatch(Fun) ->
     beamtalk_actor_state:install(#{value => 0}),

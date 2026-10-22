@@ -36,6 +36,9 @@ pub(super) struct ShapeCtx<'a> {
     pub(super) context: CodeGenContext,
     /// [`CoreErlangGenerator::in_class_method`].
     pub(super) in_class_method: bool,
+    /// [`CoreErlangGenerator::in_cell_closure`]: inside an actor closure, which
+    /// has no threaded `State` (ADR 0137 §3).
+    pub(super) in_cell_closure: bool,
     /// [`CoreErlangGenerator::class_var_names`].
     pub(super) class_var_names: &'a HashSet<String>,
     /// [`CoreErlangGenerator::class_method_selectors`].
@@ -55,6 +58,7 @@ impl CoreErlangGenerator {
         ShapeCtx {
             context: self.context,
             in_class_method: self.in_class_method(),
+            in_cell_closure: self.in_cell_closure(),
             class_var_names: self.class_var_names(),
             class_method_selectors: self.class_method_selectors(),
             class_name: self.class_name(),
@@ -269,7 +273,7 @@ pub(super) fn is_super_message_send(expr: &Expression) -> bool {
 /// so folding it in here removes the one hand-listed exception rather than
 /// adding a new special case.
 pub(super) fn is_actor_self_send(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
-    if ctx.context != CodeGenContext::Actor || ctx.in_class_method {
+    if ctx.context != CodeGenContext::Actor || ctx.in_class_method || ctx.in_cell_closure {
         return false;
     }
     if let Expression::MessageSend {
@@ -355,7 +359,8 @@ pub(super) fn binary_send_dispatches_to_self(
         return false;
     }
     if is_self_identifier(receiver) {
-        return ctx.in_class_method || ctx.context == CodeGenContext::Actor;
+        return ctx.in_class_method
+            || (ctx.context == CodeGenContext::Actor && !ctx.in_cell_closure);
     }
     is_own_class_reference(ctx, receiver)
 }
@@ -484,7 +489,7 @@ pub(super) fn is_error_message_send(expr: &Expression) -> bool {
 /// Checks if an expression is `self fieldAt: <name> put: <value>` in actor context.
 /// These need state threading via maps:put, similar to field assignments.
 pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
-    if ctx.context != CodeGenContext::Actor {
+    if ctx.context != CodeGenContext::Actor || ctx.in_cell_closure {
         return false;
     }
     if let Expression::MessageSend {
@@ -517,7 +522,7 @@ pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> boo
 /// class method (`ctx.in_class_method`): a `classState:` slot lives in the
 /// class process (ADR 0130), not `State`.
 pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
-    if ctx.context != CodeGenContext::Actor || ctx.in_class_method {
+    if ctx.context != CodeGenContext::Actor || ctx.in_class_method || ctx.in_cell_closure {
         return false;
     }
     if let Expression::MessageSend {
@@ -584,13 +589,13 @@ impl CoreErlangGenerator {
     /// where `self.x := v` writes a class variable through a plain expression
     /// (`generate_field_assignment`) and is never a state-threaded producer.
     pub(super) fn is_field_assignment(&self, expr: &Expression) -> bool {
-        !self.in_class_method() && is_field_assignment(expr)
+        !self.in_class_method() && !self.in_cell_closure() && is_field_assignment(expr)
     }
 
     /// See [`field_assignment_name`]; `None` in a class method (see
     /// [`Self::is_field_assignment`]).
     pub(super) fn field_assignment_name<'e>(&self, expr: &'e Expression) -> Option<&'e str> {
-        if self.in_class_method() {
+        if self.in_class_method() || self.in_cell_closure() {
             return None;
         }
         field_assignment_name(expr)
@@ -602,7 +607,7 @@ impl CoreErlangGenerator {
         &self,
         rhs: &'e Expression,
     ) -> Option<&'e Expression> {
-        if self.in_class_method() {
+        if self.in_class_method() || self.in_cell_closure() {
             return None;
         }
         local_assign_field_write(rhs)

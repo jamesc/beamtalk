@@ -124,7 +124,7 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```beamtalk
   /// (Binary serialize: 42) size   // => _
   /// ```
-  size -> Integer => @primitive
+  size -> Integer => @primitive no_user_code
 
   // Left as bare `Block` (not `Block(Integer, Object)`): String subclasses
   // Binary but overrides `do:` with grapheme-String elements, not bytes.

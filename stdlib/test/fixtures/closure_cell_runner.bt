@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): actor closures read and write the actor state
+
+Actor subclass: ClosureCellRunner
+
+  run: aBlock => aBlock value
+
+  collect: xs run: aBlock => xs collect: [:e | aBlock value: e]

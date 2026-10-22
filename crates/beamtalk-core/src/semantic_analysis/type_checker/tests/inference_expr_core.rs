@@ -464,6 +464,7 @@ fn infer_expr_primitive_is_dynamic() {
         is_quoted: false,
         is_intrinsic: false,
         is_inferred: false,
+        no_user_code: false,
         span: span(),
     };
     let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);

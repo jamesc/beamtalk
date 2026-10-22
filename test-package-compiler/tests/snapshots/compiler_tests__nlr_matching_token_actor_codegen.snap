@@ -107,15 +107,9 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                     {'noreply', InitCleanState}
                 <{'$bt_continue', [{CastSelector, CastArgs}|ContRest]}> when 'true' ->
                     let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in
-                    let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                    let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                    let _OldState = call 'beamtalk_actor_state':'install'(State) in
                     let _CastDispatchResult = call 'nlr_matching_token_actor':'safe_dispatch'(CastSelector, CastArgs, State) in
-                    let _RestoreOk = case _OldState of
-                        <'undefined'> when 'true' ->
-                            call 'erlang':'erase'('$bt_actor_state')
-                        <_Prev> when 'true' ->
-                            call 'erlang':'put'('$bt_actor_state', _Prev)
-                    end in
+                    let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                     let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                     case _CastDispatchResult of
                         <{'reply', _CastResult, CastNewState}> when 'true' ->
@@ -150,15 +144,9 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                 let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in
                 case call 'beamtalk_actor':'mailbox_continuation_check'(CastSelector, CastArgs) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _CastDispatchResult = call 'nlr_matching_token_actor':'safe_dispatch'(CastSelector, CastArgs, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
@@ -178,15 +166,9 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
             <{'cast', CastSelector, CastArgs}> when 'true' ->
                 case call 'beamtalk_actor':'mailbox_continuation_check'(CastSelector, CastArgs) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _CastDispatchResult = call 'nlr_matching_token_actor':'safe_dispatch'(CastSelector, CastArgs, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
@@ -223,15 +205,9 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                 let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in
                 case call 'beamtalk_actor':'mailbox_continuation_check'(Selector, Args) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _DispatchResult = call 'nlr_matching_token_actor':'safe_dispatch'(Selector, Args, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
@@ -259,15 +235,9 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
             <{Selector, Args}> when 'true' ->
                 case call 'beamtalk_actor':'mailbox_continuation_check'(Selector, Args) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _DispatchResult = call 'nlr_matching_token_actor':'safe_dispatch'(Selector, Args, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
@@ -336,12 +306,12 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                     letrec '__nlr_body'/0 = fun () ->
     let _NlrToken6 = call 'erlang':'make_ref'() in
                         try
-                    let _seq7 = let _temp8 = _coll5 in let _temp9 = fun (_each10) -> call 'beamtalk_message_dispatch':'send'(let _BinLeft11 = _each10 in let _BinRight12 = _threshold4 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft11), call 'erlang':'is_binary'(_BinLeft11)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft11, _BinRight12) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft11, '>', [_BinRight12]) <_BinOpNoMatch13> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch13}) end, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken6, _each10, State})]) in case call 'erlang':'is_list'(_temp8) of <'true'> when 'true' -> call 'lists':'foreach'(_temp9, _temp8) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp8, 'do:', [_temp9]) end in let _Result = 0 in {'reply', _Result, State}
-                        of _NlrResult14 -> _NlrResult14
-                        catch <_NlrCls15, _NlrErr16, _NlrStk17> ->
-                          case {_NlrCls15, _NlrErr16} of
-                            <{'throw', {'$bt_nlr', _CatchTok18, _NlrVal19, _NlrState20}}> when call 'erlang':'=:='(_CatchTok18, _NlrToken6) -> {'reply', _NlrVal19, _NlrState20}
-                            <_OtherPair21> when 'true' -> primop 'raw_raise'(_NlrCls15, _NlrErr16, _NlrStk17)
+                    let _ = call 'erlang':'put'('$bt_actor_state', State) in let _Synced15 = let _temp8 = _coll5 in let _temp9 = fun (_each10) -> call 'beamtalk_message_dispatch':'send'(let _BinLeft11 = _each10 in let _BinRight12 = _threshold4 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft11), call 'erlang':'is_binary'(_BinLeft11)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft11, _BinRight12) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft11, '>', [_BinRight12]) <_BinOpNoMatch13> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch13}) end, 'ifTrue:', [let _ASCapture14 = call 'beamtalk_actor_state':'capture'(Self, State) in fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken6, _each10, call 'beamtalk_actor_state':'view'(Self, _ASCapture14)})]) in case call 'erlang':'is_list'(_temp8) of <'true'> when 'true' -> call 'lists':'foreach'(_temp9, _temp8) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp8, 'do:', [_temp9]) end in let State1 = call 'erlang':'get'('$bt_actor_state') in let _seq7 = _Synced15 in let _Result = 0 in {'reply', _Result, State1}
+                        of _NlrResult16 -> _NlrResult16
+                        catch <_NlrCls17, _NlrErr18, _NlrStk19> ->
+                          case {_NlrCls17, _NlrErr18} of
+                            <{'throw', {'$bt_nlr', _CatchTok20, _NlrVal21, _NlrState22}}> when call 'erlang':'=:='(_CatchTok20, _NlrToken6) -> {'reply', _NlrVal21, _NlrState22}
+                            <_OtherPair23> when 'true' -> primop 'raw_raise'(_NlrCls17, _NlrErr18, _NlrStk19)
                           end
                     in apply '__nlr_body'/0 ()
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
@@ -369,7 +339,9 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                     %% own {error, E, State} contract (state rolled back, as for a
                     %% crashing method body) so handle_call replies with it
                     %% instead of crashing the actor on an unmatched result.
-                    case call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'NlrActor', Args, Self, State) of
+                    %% ADR 0137 §2: the extension fun is Erlang that does not bracket
+                    %% what it calls, so it runs through call_foreign/3.
+                    case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'invoke_extension', 6), [ExtFun, OtherSelector, 'NlrActor', Args, Self, State]) of
                         <{'reply', ExtResult, ExtState}> when 'true' ->
                             {'reply', ExtResult, ExtState}
                         <{'error', ExtError}> when 'true' ->
@@ -377,7 +349,8 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                     end
                 <'not_found'> when 'true' ->
                     %% ADR 0006: Try hierarchy walk before DNU
-                    case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'NlrActor') of
+                    %% ADR 0137 §2: inherited runtime methods run through call_foreign/3.
+                    case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'super', 5), [OtherSelector, Args, Self, State, 'NlrActor']) of
                         <{'reply', InheritedResult, InheritedState}> when 'true' ->
                             {'reply', InheritedResult, InheritedState}
                         <{'error', DispatchError}> when 'true' ->
@@ -461,7 +434,7 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'initialize_assigns' => [],
       'method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~
 
@@ -502,7 +475,7 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'initialize_assigns' => [],
       'method_info' => ~{'findFirstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'

@@ -139,7 +139,7 @@ call 'maps':'get'('eventId', Self)
       'initialize_assigns' => [],
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~
         }~
@@ -187,7 +187,7 @@ call 'maps':'get'('eventId', Self)
       'initialize_assigns' => [],
       'method_info' => ~{'simpleAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'parametricAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => {'generic', 'Result', ['Integer', 'Error']}, 'is_sealed' => 'false', 'visibility' => 'public'}~, 'unionAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~
                 }~
@@ -225,7 +225,7 @@ call 'maps':'get'('eventId', Self)
       'initialize_assigns' => [],
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~
 

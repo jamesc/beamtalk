@@ -394,6 +394,9 @@ impl CoreErlangGenerator {
                             ") ",
                             "end",
                         ])
+                    } else if self.in_cell_closure() {
+                        // ADR 0137 §3: an actor closure reads a bare field through the cell.
+                        Ok(self.cell_field_read_doc(id.name.as_str()))
                     } else {
                         Ok(docvec![
                             "call 'maps':'get'(",
@@ -606,6 +609,17 @@ impl CoreErlangGenerator {
         state_var: Document<'static>,
         declared_type: Option<beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType>,
     ) -> Document<'static> {
+        self.generate_late_field_read_of(field_name, state_var, declared_type)
+    }
+
+    /// [`Self::generate_late_field_read`] over any state-map expression (a
+    /// threaded `State` variable, or an actor closure's cell view).
+    fn generate_late_field_read_of(
+        &mut self,
+        field_name: &str,
+        state_var: Document<'static>,
+        declared_type: Option<beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType>,
+    ) -> Document<'static> {
         let class_name = self.class_name();
         let selector = self
             .current_method_selector
@@ -702,6 +716,23 @@ impl CoreErlangGenerator {
                 // direct-params loop resolves to the captured pre-loop state
                 // variable instead of an unbound `StateAcc` (BT-3562) — see
                 // that accessor's own doc comment.
+                // ADR 0137 §3: inside an actor closure a field is read through
+                // the cell (the creation-time capture away from home).
+                if self.in_cell_closure() {
+                    if is_late {
+                        let declared_type = self
+                            .class_hierarchy
+                            .as_ref()
+                            .and_then(|h| h.state_field_type(&class_name, field.name.as_str()));
+                        let view = self.cell_view_doc();
+                        return Ok(self.generate_late_field_read_of(
+                            field.name.as_str(),
+                            view,
+                            declared_type,
+                        ));
+                    }
+                    return Ok(self.cell_field_read_doc(field.name.as_str()));
+                }
                 let state_var = match self.context {
                     super::CodeGenContext::ValueType => self.current_self_var(),
                     super::CodeGenContext::Actor => self.current_field_read_state_var(),
@@ -789,6 +820,12 @@ impl CoreErlangGenerator {
             }
             let value_doc = self.expression_doc(value)?;
             return Ok(self.class_var_write_doc(field_name, value_doc));
+        }
+        // ADR 0137 §3: an actor closure writes a field in place, through the
+        // cell; the assignment answers the assigned value and rebinds nothing.
+        if self.in_cell_closure() {
+            let value_doc = self.expression_doc(value)?;
+            return Ok(self.cell_field_write_doc(field_name, value_doc));
         }
         let (site, frame) = (
             FieldWriteSite::for_context(self.context),

@@ -2190,8 +2190,8 @@ exited (timeout, or the actor died with some other reason first).
 -spec stop_actor(pid(), term(), timeout()) -> ok | {exit, term()}.
 stop_actor(ActorPid, Reason, Timeout) when ActorPid =:= self() ->
     %% Defer only inside a dispatching callback — the same guard as the
-    %% Layer 1 self-send fast path in sync_send/3. '$bt_actor_state' is
-    %% stashed by every callback wrapped with apply_pending_actions/1, so a
+    %% Layer 1 self-send fast path in sync_send/3. The actor-state cell is
+    %% installed by every callback wrapped with apply_pending_actions/1, so a
     %% request recorded here is guaranteed to be consumed. Anywhere else
     %% (e.g. a hand-written native gen_server) there is nothing to consume
     %% it, so fall through and let gen_server:stop/3 fail visibly
@@ -2389,8 +2389,8 @@ returns and before the next mailbox message (see apply_pending_actions/1).
 
 Raises in the caller — never silently drops the request:
 - `invalid_continuation` when `Pid` is not the calling process, or it is
-  but no wrapped dispatching callback is running (`'$bt_actor_state'` is
-  undefined), since nothing would consume the request — the same guard as
+  but no wrapped dispatching callback is running (`beamtalk_actor_state:installed/0`
+  is `false`), since nothing would consume the request — the same guard as
   stop_actor/3's deferred self-stop;
 - `type_error` when the selector is not a Symbol or the arguments are not a
   List;

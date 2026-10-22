@@ -107,15 +107,9 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
                     {'noreply', InitCleanState}
                 <{'$bt_continue', [{CastSelector, CastArgs}|ContRest]}> when 'true' ->
                     let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in
-                    let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                    let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                    let _OldState = call 'beamtalk_actor_state':'install'(State) in
                     let _CastDispatchResult = call 'trait_flattened_actor_user':'safe_dispatch'(CastSelector, CastArgs, State) in
-                    let _RestoreOk = case _OldState of
-                        <'undefined'> when 'true' ->
-                            call 'erlang':'erase'('$bt_actor_state')
-                        <_Prev> when 'true' ->
-                            call 'erlang':'put'('$bt_actor_state', _Prev)
-                    end in
+                    let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                     let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                     case _CastDispatchResult of
                         <{'reply', _CastResult, CastNewState}> when 'true' ->
@@ -150,15 +144,9 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
                 let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in
                 case call 'beamtalk_actor':'mailbox_continuation_check'(CastSelector, CastArgs) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _CastDispatchResult = call 'trait_flattened_actor_user':'safe_dispatch'(CastSelector, CastArgs, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
@@ -178,15 +166,9 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
             <{'cast', CastSelector, CastArgs}> when 'true' ->
                 case call 'beamtalk_actor':'mailbox_continuation_check'(CastSelector, CastArgs) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _CastDispatchResult = call 'trait_flattened_actor_user':'safe_dispatch'(CastSelector, CastArgs, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
@@ -223,15 +205,9 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
                 let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in
                 case call 'beamtalk_actor':'mailbox_continuation_check'(Selector, Args) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _DispatchResult = call 'trait_flattened_actor_user':'safe_dispatch'(Selector, Args, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
@@ -259,15 +235,9 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
             <{Selector, Args}> when 'true' ->
                 case call 'beamtalk_actor':'mailbox_continuation_check'(Selector, Args) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _DispatchResult = call 'trait_flattened_actor_user':'safe_dispatch'(Selector, Args, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
@@ -333,11 +303,11 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
         <'greeting'> when 'true' ->
             let _Result = #{#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']])}# in {'reply', _Result, State}
         <'bump'> when 'true' ->
-            let _Val4 = ( let _BinLeft5 = call 'maps':'get'('greetingCount', State) in let _BinRight6 = 1 in case call 'erlang':'is_number'(_BinLeft5) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft5, _BinRight6) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft5, '+', [_BinRight6]) <_BinOpNoMatch7> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch7}) end -| [16, {'file', "main.bt"}] ) in let State1 = call 'maps':'put'('greetingCount', _Val4, State) in {'reply', _Val4, State1}
+            let _ = call 'erlang':'put'('$bt_actor_state', State) in let _Synced7 = ( let _BinLeft4 = call 'maps':'get'('greetingCount', State) in let _BinRight5 = 1 in case call 'erlang':'is_number'(_BinLeft4) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft4, _BinRight5) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft4, '+', [_BinRight5]) <_BinOpNoMatch6> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch6}) end -| [16, {'file', "main.bt"}] ) in let State1 = call 'erlang':'get'('$bt_actor_state') in let _Val8 = _Synced7 in let State2 = call 'maps':'put'('greetingCount', _Val8, State1) in {'reply', _Val8, State2}
         <'greet'> when 'true' ->
-            let _SD8 = case let _SDArgs12 = [] in let _ClassMod11 = call 'maps':'get'('__class_mod__', State, 'trait_flattened_actor_user') in case call 'erlang':'function_exported'(_ClassMod11, 'safe_dispatch', 4) of <'true'> when 'true' -> call _ClassMod11:'safe_dispatch'('greeting', _SDArgs12, Self, State) <_> when 'true' -> call _ClassMod11:'safe_dispatch'('greeting', _SDArgs12, State) end of <{'reply', _SDResult9, _SDState10}> when 'true' -> {_SDResult9, _SDState10} <{'error', {'$bt_nlr', _SDErrorNlrTok13, _SDErrorNlrVal14, _SDErrorNlrSt15}, _}> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _SDErrorNlrTok13, _SDErrorNlrVal14, _SDErrorNlrSt15}) <{'error', {_SDErrorType16, _SDErrorReason17, _SDErrorStack18}, _}> when 'true' -> let _SDErrorClass20 = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in call 'beamtalk_exception_handler':'reraise'(_SDErrorType16, _SDErrorReason17, _SDErrorStack18, ~{'selector' => 'greeting', 'class' => _SDErrorClass20}~) <{'error', _SDErrorPlain19, _}> when 'true' -> call 'beamtalk_error':'raise'(_SDErrorPlain19) <_SDErrorNoMatch21> when 'true' -> call 'erlang':'error'({'case_clause', _SDErrorNoMatch21}) end in let State1 = call 'erlang':'element'(2, _SD8) in {'reply', call 'erlang':'element'(1, _SD8), State1}
+            let _SD9 = case let _SDArgs13 = [] in let _ClassMod12 = call 'maps':'get'('__class_mod__', State, 'trait_flattened_actor_user') in case call 'erlang':'function_exported'(_ClassMod12, 'safe_dispatch', 4) of <'true'> when 'true' -> call _ClassMod12:'safe_dispatch'('greeting', _SDArgs13, Self, State) <_> when 'true' -> call _ClassMod12:'safe_dispatch'('greeting', _SDArgs13, State) end of <{'reply', _SDResult10, _SDState11}> when 'true' -> {_SDResult10, _SDState11} <{'error', {'$bt_nlr', _SDErrorNlrTok14, _SDErrorNlrVal15, _SDErrorNlrSt16}, _}> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _SDErrorNlrTok14, _SDErrorNlrVal15, _SDErrorNlrSt16}) <{'error', {_SDErrorType17, _SDErrorReason18, _SDErrorStack19}, _}> when 'true' -> let _SDErrorClass21 = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in call 'beamtalk_exception_handler':'reraise'(_SDErrorType17, _SDErrorReason18, _SDErrorStack19, ~{'selector' => 'greeting', 'class' => _SDErrorClass21}~) <{'error', _SDErrorPlain20, _}> when 'true' -> call 'beamtalk_error':'raise'(_SDErrorPlain20) <_SDErrorNoMatch22> when 'true' -> call 'erlang':'error'({'case_clause', _SDErrorNoMatch22}) end in let State1 = call 'erlang':'element'(2, _SD9) in {'reply', call 'erlang':'element'(1, _SD9), State1}
         <'greetingWidth'> when 'true' ->
-            let _SD22 = case let _SDArgs26 = [] in let _ClassMod25 = call 'maps':'get'('__class_mod__', State, 'trait_flattened_actor_user') in case call 'erlang':'function_exported'(_ClassMod25, 'safe_dispatch', 4) of <'true'> when 'true' -> call _ClassMod25:'safe_dispatch'('greeting', _SDArgs26, Self, State) <_> when 'true' -> call _ClassMod25:'safe_dispatch'('greeting', _SDArgs26, State) end of <{'reply', _SDResult23, _SDState24}> when 'true' -> {_SDResult23, _SDState24} <{'error', {'$bt_nlr', _SDErrorNlrTok27, _SDErrorNlrVal28, _SDErrorNlrSt29}, _}> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _SDErrorNlrTok27, _SDErrorNlrVal28, _SDErrorNlrSt29}) <{'error', {_SDErrorType30, _SDErrorReason31, _SDErrorStack32}, _}> when 'true' -> let _SDErrorClass34 = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in call 'beamtalk_exception_handler':'reraise'(_SDErrorType30, _SDErrorReason31, _SDErrorStack32, ~{'selector' => 'greeting', 'class' => _SDErrorClass34}~) <{'error', _SDErrorPlain33, _}> when 'true' -> call 'beamtalk_error':'raise'(_SDErrorPlain33) <_SDErrorNoMatch35> when 'true' -> call 'erlang':'error'({'case_clause', _SDErrorNoMatch35}) end in let State1 = call 'erlang':'element'(2, _SD22) in let _Result = ( let _BinLeft36 = ( call 'beamtalk_message_dispatch':'send'(( call 'erlang':'element'(1, _SD22) -| [11, {'file', "greetable.bt"}] ), 'size', []) -| [11, {'file', "greetable.bt"}] ) in let _BinRight37 = 1 in case call 'erlang':'is_number'(_BinLeft36) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft36, _BinRight37) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft36, '+', [_BinRight37]) <_BinOpNoMatch38> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch38}) end -| [11, {'file', "greetable.bt"}] ) in {'reply', _Result, State1}
+            let _SD23 = case let _SDArgs27 = [] in let _ClassMod26 = call 'maps':'get'('__class_mod__', State, 'trait_flattened_actor_user') in case call 'erlang':'function_exported'(_ClassMod26, 'safe_dispatch', 4) of <'true'> when 'true' -> call _ClassMod26:'safe_dispatch'('greeting', _SDArgs27, Self, State) <_> when 'true' -> call _ClassMod26:'safe_dispatch'('greeting', _SDArgs27, State) end of <{'reply', _SDResult24, _SDState25}> when 'true' -> {_SDResult24, _SDState25} <{'error', {'$bt_nlr', _SDErrorNlrTok28, _SDErrorNlrVal29, _SDErrorNlrSt30}, _}> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _SDErrorNlrTok28, _SDErrorNlrVal29, _SDErrorNlrSt30}) <{'error', {_SDErrorType31, _SDErrorReason32, _SDErrorStack33}, _}> when 'true' -> let _SDErrorClass35 = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in call 'beamtalk_exception_handler':'reraise'(_SDErrorType31, _SDErrorReason32, _SDErrorStack33, ~{'selector' => 'greeting', 'class' => _SDErrorClass35}~) <{'error', _SDErrorPlain34, _}> when 'true' -> call 'beamtalk_error':'raise'(_SDErrorPlain34) <_SDErrorNoMatch36> when 'true' -> call 'erlang':'error'({'case_clause', _SDErrorNoMatch36}) end in let State1 = call 'erlang':'element'(2, _SD23) in let _ = call 'erlang':'put'('$bt_actor_state', State1) in let _Synced37 = ( call 'beamtalk_message_dispatch':'send'(( call 'erlang':'element'(1, _SD23) -| [11, {'file', "greetable.bt"}] ), 'size', []) -| [11, {'file', "greetable.bt"}] ) in let State2 = call 'erlang':'get'('$bt_actor_state') in let _ = call 'erlang':'put'('$bt_actor_state', State2) in let _Synced41 = ( let _BinLeft38 = _Synced37 in let _BinRight39 = 1 in case call 'erlang':'is_number'(_BinLeft38) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft38, _BinRight39) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft38, '+', [_BinRight39]) <_BinOpNoMatch40> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch40}) end -| [11, {'file', "greetable.bt"}] ) in let State3 = call 'erlang':'get'('$bt_actor_state') in let _Result = _Synced41 in {'reply', _Result, State3}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
             let ExtLookup = try call 'beamtalk_extensions':'lookup'('Greeter', OtherSelector)
@@ -361,7 +331,9 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
                     %% own {error, E, State} contract (state rolled back, as for a
                     %% crashing method body) so handle_call replies with it
                     %% instead of crashing the actor on an unmatched result.
-                    case call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'Greeter', Args, Self, State) of
+                    %% ADR 0137 §2: the extension fun is Erlang that does not bracket
+                    %% what it calls, so it runs through call_foreign/3.
+                    case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'invoke_extension', 6), [ExtFun, OtherSelector, 'Greeter', Args, Self, State]) of
                         <{'reply', ExtResult, ExtState}> when 'true' ->
                             {'reply', ExtResult, ExtState}
                         <{'error', ExtError}> when 'true' ->
@@ -369,7 +341,8 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
                     end
                 <'not_found'> when 'true' ->
                     %% ADR 0006: Try hierarchy walk before DNU
-                    case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'Greeter') of
+                    %% ADR 0137 §2: inherited runtime methods run through call_foreign/3.
+                    case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'super', 5), [OtherSelector, Args, Self, State, 'Greeter']) of
                         <{'reply', InheritedResult, InheritedState}> when 'true' ->
                             {'reply', InheritedResult, InheritedState}
                         <{'error', DispatchError}> when 'true' ->
@@ -453,7 +426,7 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
       'initialize_assigns' => [],
       'method_info' => ~{'greeting' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'greet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'greetingWidth' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~
 
@@ -494,7 +467,7 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
       'initialize_assigns' => [],
       'method_info' => ~{'greeting' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'greet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'greetingWidth' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'

@@ -170,7 +170,7 @@ pub struct CoreErlangGenerator {
     /// returns `{Result, StateAccN}`, so it does carry it (false).
     pub(in crate::core_erlang) closure_drops_state: bool,
     /// ADR 0137 Phase 2a (BT-4020): the cell bracket's mode and bookkeeping
-    /// (`synced_call.rs`). Inert unless the synced-calls flag is on.
+    /// (`synced_call.rs`). Inert outside an actor instance method.
     pub(in crate::core_erlang) synced: super::synced_call::SyncedCallState,
     /// ADR 0130 §5: the Core Erlang variable holding the class-variable
     /// capture of the innermost enclosing block literal that reads a class
@@ -179,6 +179,16 @@ pub struct CoreErlangGenerator {
     /// every class-variable read's miss path lowers to the 3-arity
     /// captured-fallback helper with this variable.
     pub(in crate::core_erlang) class_var_capture: Option<String>,
+    /// ADR 0137 Phase 2b: the innermost enclosing actor closure being lowered
+    /// (`None` at method level). Inside one, field access and self-sends go
+    /// through the actor-state cell (`actor_state_access.rs`), not a threaded
+    /// `State`, exactly as a class method's class-variable access is in place.
+    pub(in crate::core_erlang) actor_closure: Option<super::actor_state_access::ActorClosure>,
+    /// ADR 0137 §5: how many `ensure:` protected bodies enclose the code being
+    /// lowered in an actor instance method. While non-zero, every field write
+    /// also stores the new `State` to the cell (write-through), so the cleanup
+    /// an error runs sees the writes the body made before it failed.
+    pub(in crate::core_erlang) ensure_write_through: usize,
     /// BT-3719: the per-method class-variable key binding. While a
     /// class-method body is being lowered (`class_method_body_doc`) the `CVKey`
     /// variable is minted lazily at the first inlined class-variable access and
@@ -482,8 +492,10 @@ impl CoreErlangGenerator {
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
             closure_drops_state: false,
-            synced: super::synced_call::SyncedCallState::new(beamtalk_core::synced_calls::mode()),
+            synced: super::synced_call::SyncedCallState::new(),
             class_var_capture: None,
+            actor_closure: None,
+            ensure_write_through: 0,
             class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,
             protocol_sources: std::collections::HashMap::new(),

@@ -1,20 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3936 (ADR 0133 § Error examples): a self-send compiled inside a closure
-//! cannot hand the callee's `State` back, so every such dispatch must carry
-//! the `=:=` guard that raises `stateful_block_dispatch` when the callee
-//! changed it. This corpus generates actor shapes (self-send kind x block host
-//! x open/sealed class x callee) and checks, for each, that the number of
-//! guards in the generated module equals the number of self-sends written
-//! inside a closure: none missing (a silent drop), none extra (a spurious
-//! raise on a send that threads State normally).
+//! BT-3936 / ADR 0137: a self-send compiled inside a closure used to carry the
+//! `=:=` guard that raised `stateful_block_dispatch` when the callee changed
+//! `State` (a closure could not hand it back). Under the live-state model an
+//! actor closure runs against the actor-state cell, so the callee's change is
+//! kept and no guard exists anywhere in the generated code. This corpus
+//! generates actor shapes (self-send kind x block host x open/sealed class x
+//! callee) and checks, for each, that the module holds no guard.
 //!
 //! `super` sends (BT-3985) are checked the same way by
-//! `every_super_send_in_a_closure_is_guarded_and_no_other_is`.
+//! `no_super_send_in_a_closure_is_guarded`.
 //!
-//! The behavioural side (state-changing sends raise, read-only ones answer) is
-//! `stdlib/test/closure_self_send_matrix_test.bt`.
+//! The behavioural side (state-changing sends keep their change) is
+//! `stdlib/test/closure_self_send_matrix_test.bt` and
+//! `stdlib/test/actor_closure_matrix_test.bt`.
 
 use super::compile;
 
@@ -69,42 +69,19 @@ fn guards(src: &str) -> usize {
     out.matches(GUARD).count()
 }
 
-/// Number of self-sends written in `body` (each host template instantiates the
-/// kind expression once per `{B}`).
-fn sends(template: &str) -> usize {
-    template.matches("{B}").count()
-}
-
 #[test]
-fn every_self_send_in_a_closure_is_guarded_and_no_other_is() {
+fn no_self_send_in_a_closure_is_guarded() {
     let mut checked = 0;
     for header in ["Actor subclass:", "sealed Actor subclass:"] {
+        // The class machinery itself mentions the atom; a send adds none.
         let baseline = guards(&actor(header, "1"));
-        // A sealed class emits each method body more than once (the standalone
-        // `__sealed_` function and the `dispatch/4` clause), so the guard count
-        // per self-send is a per-class multiplier, at least 1.
-        let per_send = guards(&actor(header, "self each: [:x | self peek]")) - baseline;
-        assert!(
-            per_send >= 1,
-            "{header}: a closure self-send must be guarded"
-        );
         for (kind, expr) in KINDS {
-            for (host, template) in CLOSURE_HOSTS {
+            for (host, template) in CLOSURE_HOSTS.iter().chain(INLINED_HOSTS) {
                 let body = template.replace("{B}", expr);
-                let n = guards(&actor(header, &body)) - baseline;
                 assert_eq!(
-                    n,
-                    sends(template) * per_send,
-                    "{header} {kind} in {host}: one guard per self-send inside a closure\n{body}"
-                );
-                checked += 1;
-            }
-            for (host, template) in INLINED_HOSTS {
-                let body = template.replace("{B}", expr);
-                let n = guards(&actor(header, &body)) - baseline;
-                assert_eq!(
-                    n, 0,
-                    "{header} {kind} in {host}: an inlined position threads State, no guard\n{body}"
+                    guards(&actor(header, &body)),
+                    baseline,
+                    "{header} {kind} in {host}: an actor closure runs on the cell, no guard\n{body}"
                 );
                 checked += 1;
             }
@@ -137,35 +114,26 @@ fn super_actor(header: &str, body: &str) -> String {
 }
 
 #[test]
-fn every_super_send_in_a_closure_is_guarded_and_no_other_is() {
-    // The instance `super` path (`beamtalk_dispatch:super/5`) dispatches
-    // against the current State like a self-send, so inside a Tier 1 closure
-    // it carries the same guard. A method-level `super` send threads State
-    // (no guard); a `super` in a Value or class method has no State at all.
+fn no_super_send_in_a_closure_is_guarded() {
+    // A `super` send in a closure runs the superclass method against the cell
+    // (`beamtalk_actor_state:super_send/5`), so its change is kept: no guard.
     let mut checked = 0;
     for header in ["Base subclass:", "sealed Base subclass:"] {
         let baseline = guards(&super_actor(header, "1"));
-        let per_send = guards(&super_actor(header, "self each: [:x | super peek: x]")) - baseline;
-        assert!(
-            per_send >= 1,
-            "{header}: a closure super-send must be guarded"
-        );
         for (kind, expr) in SUPER_KINDS {
             for (host, template) in CLOSURE_HOSTS {
                 let body = template.replace("{B}", expr);
-                let n = guards(&super_actor(header, &body)) - baseline;
                 assert_eq!(
-                    n,
-                    sends(template) * per_send,
-                    "{header} {kind} in {host}: one guard per super-send inside a closure\n{body}"
+                    guards(&super_actor(header, &body)),
+                    baseline,
+                    "{header} {kind} in {host}: a closure super-send runs on the cell\n{body}"
                 );
                 checked += 1;
             }
-            let body = expr.to_string();
-            let n = guards(&super_actor(header, &body)) - baseline;
             assert_eq!(
-                n, 0,
-                "{header} {kind}: a method-level super-send threads State, no guard\n{body}"
+                guards(&super_actor(header, expr)),
+                baseline,
+                "{header} {kind}: a method-level super-send threads State, no guard"
             );
             checked += 1;
         }
@@ -208,7 +176,7 @@ fn value_types_and_class_methods_have_no_guard() {
 }
 
 #[test]
-fn a_tier2_closure_carries_state_back_so_its_self_sends_are_not_guarded() {
+fn a_tier2_closure_carries_state_back_and_no_closure_is_guarded() {
     // A block stored in a local that writes a captured local is a Tier 2 `fun`
     // (`StateAcc` in, `{Result, StateAccN}` out): the self-send's new `State`
     // is returned to the caller, so the guard (which exists for closures that
@@ -232,13 +200,16 @@ fn a_tier2_closure_carries_state_back_so_its_self_sends_are_not_guarded() {
         guards(&tier2("1")),
         "a Tier 2 closure carries State back; no guard"
     );
-    // The same self-send in a plain Tier 1 closure is guarded.
+    // The same self-send in a plain Tier 1 closure is not guarded either: the
+    // closure runs on the actor-state cell (ADR 0137).
     let tier1 = "Actor subclass: P
   state: total = 0
   each: blk => #(1, 2) collect: blk
   peek: x => self.total + x
   run => self each: [:x | self peek: x]
 ";
-    let tier1_baseline = tier1.replace("[:x | self peek: x]", "[:x | x]");
-    assert!(guards(tier1) > guards(&tier1_baseline));
+    assert_eq!(
+        guards(tier1),
+        guards(&tier1.replace("[:x | self peek: x]", "[:x | x]"))
+    );
 }

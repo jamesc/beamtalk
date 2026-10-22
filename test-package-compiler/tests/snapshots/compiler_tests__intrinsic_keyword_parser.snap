@@ -49,6 +49,7 @@ Module {
                                 is_quoted: false,
                                 is_intrinsic: true,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 242,
                                     end: 263,
@@ -93,6 +94,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: true,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 275,
                                     end: 292,

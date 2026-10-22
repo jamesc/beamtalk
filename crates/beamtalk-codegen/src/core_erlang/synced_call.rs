@@ -6,9 +6,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Everything here is behind a codegen flag that is **off by default**; with
-//! it off no state is recorded and no output changes. With it on, an actor
-//! instance method brackets every call that may run one of this actor's
+//! An actor instance method brackets every call that may run one of this actor's
 //! blocks or methods in this process with a [`ThreadedStmt::SyncedCall`]:
 //! store the threaded `State` to the actor-state cell, make the call, reload
 //! the cell as the next `State` version. A call that is not bracketed is a
@@ -34,14 +32,12 @@
 //! brackets what it runs itself), and the dispatching branch of an operator
 //! guard.
 //!
-//! ## Modes
+//! ## Verification
 //!
-//! `BEAMTALK_SYNCED_CALLS` selects the mode (`beamtalk_core::synced_calls`):
-//! unset or `0` is [`SyncMode::Off`]; `count` records gaps without failing,
-//! appending one line per gap to the file `BEAMTALK_SYNCED_CALLS_REPORT`
-//! names (the count-by-region tool for BT-4020); anything else is
-//! [`SyncMode::Enforce`], where a gap is a verifier finding (a hard failure
-//! in debug builds).
+//! A call outside every bracket is a [`VerifyError::UnbracketedUserCodeSend`]
+//! (a hard failure in debug builds). The invariant probe
+//! (`tests/synced_call_sites_corpus.rs`) compiles generated programs in a
+//! count-only test mode that records each gap's codegen site instead.
 
 use super::threaded_ir::{
     FrameId, ThreadedStmt, ThreadedValue, UserCodeRegion, ValueRef, VerifyError, VersionPrefix,
@@ -53,19 +49,13 @@ use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::source_analysis::Span;
 use beamtalk_core::state_threading_selectors::{SendUserCode, send_user_code};
 
-/// Environment variable naming the file `count` mode appends its report to.
-pub const SYNCED_CALLS_REPORT_ENV: &str = "BEAMTALK_SYNCED_CALLS_REPORT";
-
-/// Whether and how the bracket is built (`beamtalk_core::synced_calls`).
-pub(in crate::core_erlang) use beamtalk_core::synced_calls::SyncedCallsMode as SyncMode;
-
 /// A call that may run user code, compiled outside every bracket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) struct UnbracketedSend {
     pub(in crate::core_erlang) selector: String,
     pub(in crate::core_erlang) region: UserCodeRegion,
     pub(in crate::core_erlang) at: Span,
-    /// Count mode only: the codegen site (`file:function`) that compiled the
+    /// Probe only: the codegen site (`file:function`) that compiled the
     /// call outside a `ThreadedIr` frame, and the codegen frames above it.
     pub(in crate::core_erlang) site: GapSite,
 }
@@ -99,11 +89,37 @@ thread_local! {
 
 #[cfg(test)]
 thread_local! {
-    /// Every gap a count-mode compile on this thread recorded.
+    /// Count-only mode (the invariant probe): gaps and other verifier findings
+    /// are recorded, not failed on.
+    static COUNT_ONLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Restores count-only mode on drop.
+#[cfg(test)]
+#[derive(Debug)]
+pub(in crate::core_erlang) struct CountOnly(bool);
+
+#[cfg(test)]
+impl Drop for CountOnly {
+    fn drop(&mut self) {
+        COUNT_ONLY.with(|c| c.set(self.0));
+    }
+}
+
+/// Puts the current thread in count-only mode until the guard drops.
+#[cfg(test)]
+pub(in crate::core_erlang) fn count_only() -> CountOnly {
+    CountOnly(COUNT_ONLY.with(|c| c.replace(true)))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Every gap a count-only compile on this thread recorded.
     pub(in crate::core_erlang) static SITE_LOG: std::cell::RefCell<Vec<SiteRecord>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
+#[cfg(test)]
 /// Frames that are plumbing every expression passes through, never the owning
 /// lowering: skipped when naming a gap's site.
 const PLUMBING_FRAMES: &[&str] = &[
@@ -121,7 +137,8 @@ const PLUMBING_FRAMES: &[&str] = &[
 ];
 
 /// The `file:function` site of the code generator frame that compiled the
-/// current call (count mode; a backtrace per gap is too slow for anything else).
+/// current call (count-only mode; a backtrace per gap is too slow otherwise).
+#[cfg(test)]
 pub(in crate::core_erlang) fn capture_site() -> GapSite {
     let text = std::backtrace::Backtrace::force_capture().to_string();
     let mut frames: Vec<(String, String)> = Vec::new();
@@ -174,30 +191,23 @@ pub(in crate::core_erlang) fn capture_site() -> GapSite {
 /// The generator's bracket bookkeeping.
 #[derive(Debug)]
 pub(in crate::core_erlang) struct SyncedCallState {
-    pub(in crate::core_erlang) mode: SyncMode,
     /// How many bracket windows enclose the code being compiled. A call
     /// compiled inside one runs between a store and a reload.
     pub(in crate::core_erlang) window_depth: usize,
     /// Calls that may run user code compiled outside every window.
     pub(in crate::core_erlang) gaps: Vec<UnbracketedSend>,
-    /// Brackets built (for the report's denominator).
-    pub(in crate::core_erlang) brackets: usize,
-    /// Count mode: other verifier findings the flag-on lowering tripped,
-    /// as `label\tkind\tposition` report lines.
-    pub(in crate::core_erlang) other_findings: Vec<String>,
-    /// Self-sends that may reach `dispatch/4`'s default arm (bracketed or not).
-    pub(in crate::core_erlang) default_arm_sends: usize,
+    /// The class of a conditional with a `super` send in a branch
+    /// ([`CoreErlangGenerator::classify_inlined`]), decided once per send.
+    pub(in crate::core_erlang) inlined_classes:
+        std::cell::RefCell<std::collections::HashMap<Span, UserCodeCall>>,
 }
 
 impl SyncedCallState {
-    pub(in crate::core_erlang) fn new(mode: SyncMode) -> Self {
+    pub(in crate::core_erlang) fn new() -> Self {
         Self {
-            mode,
             window_depth: 0,
             gaps: Vec::new(),
-            brackets: 0,
-            other_findings: Vec::new(),
-            default_arm_sends: 0,
+            inlined_classes: std::cell::RefCell::default(),
         }
     }
 }
@@ -224,30 +234,21 @@ pub(in crate::core_erlang) enum UserCodeCall {
 }
 
 impl CoreErlangGenerator {
-    /// Applies [`CodegenOptions::with_synced_calls`](super::CodegenOptions::with_synced_calls)
-    /// (`None`: keep the environment's mode). The block analysis reads the same
-    /// switch, so an explicit option is held for it too, for as long as the
-    /// returned guard lives.
-    pub(in crate::core_erlang) fn apply_synced_calls_option(
-        &mut self,
-        option: Option<bool>,
-    ) -> Option<beamtalk_core::synced_calls::OverrideGuard> {
-        let enabled = option?;
-        self.synced.mode = if enabled {
-            SyncMode::Enforce
-        } else {
-            SyncMode::Off
-        };
-        Some(beamtalk_core::synced_calls::override_mode(self.synced.mode))
-    }
-
     /// Whether the bracket is being built and checked for the code being
-    /// compiled: the flag is on and this is an actor instance method (a
+    /// compiled: this is an actor instance method (a
     /// class method and a value type thread no actor `State`; the REPL has
     /// none).
     pub(in crate::core_erlang) fn synced_calls_active(&self) -> bool {
-        self.synced.mode != SyncMode::Off
-            && self.context == CodeGenContext::Actor
+        self.synced_calls_scope() && !self.in_cell_closure()
+    }
+
+    /// Whether the code being compiled is in the scope the cell protocol covers
+    /// (an actor instance method body, closures included): the context test
+    /// behind both [`Self::synced_calls_active`] (a threaded body, where calls
+    /// are bracketed) and [`Self::cell_closures_apply`] (a closure, which reads
+    /// the cell directly and brackets nothing).
+    pub(in crate::core_erlang) fn synced_calls_scope(&self) -> bool {
+        self.context == CodeGenContext::Actor
             && !self.in_class_method()
             && !self.is_repl_mode()
             // A compiled class (not a legacy workspace block body).
@@ -261,7 +262,7 @@ impl CoreErlangGenerator {
     /// a body holds no threaded `State`: it reads the cell directly (ADR 0137
     /// §3), so a call in it has nothing to store or reload.
     fn in_cell_resident_closure(&self) -> bool {
-        self.block_depth > 0 && self.closure_drops_state
+        self.in_cell_closure()
     }
 
     /// The kind of region being compiled, for the report.
@@ -318,10 +319,21 @@ impl CoreErlangGenerator {
             })
     }
 
+    /// Whether a `super` send compiled now is in a position that threads no
+    /// `State` (a block or loop body of an actor instance method): it runs the
+    /// superclass method against the cell, bracketed like any call that may run
+    /// user code (ADR 0137 §3). At the method root it threads `State` itself.
+    pub(in crate::core_erlang) fn super_send_uses_cell(&self) -> bool {
+        self.synced_calls_active() && (self.block_depth > 0 || self.in_loop_body)
+    }
+
     /// A `super` send resolves from the superclass: a compiled actor method
     /// there is explicit threading, anything else (an `Object` method, a
     /// native one, DNU) may reach `dispatch/4`'s default arm.
     fn classify_super_send(&self, selector: &MessageSelector) -> UserCodeCall {
+        if self.super_send_uses_cell() {
+            return UserCodeCall::Yes;
+        }
         let compiled = self.class_hierarchy.as_ref().is_some_and(|hierarchy| {
             let Some(superclass) = hierarchy
                 .get_class(&self.class_name())
@@ -385,8 +397,12 @@ impl CoreErlangGenerator {
         {
             return self.classify_self_send(selector);
         }
+        if self.is_no_user_code_send(receiver, selector) {
+            return UserCodeCall::No;
+        }
         match send_user_code(receiver, selector, arguments) {
-            SendUserCode::Never | SendUserCode::Inlined => UserCodeCall::No,
+            SendUserCode::Never => UserCodeCall::No,
+            SendUserCode::Inlined => self.classify_inlined(selector, arguments),
             SendUserCode::MayRun => UserCodeCall::Yes,
             // A fold the block analysis threads is lowered in place (its
             // statements are bracketed where they are compiled); one it does
@@ -401,6 +417,114 @@ impl CoreErlangGenerator {
                     UserCodeCall::Yes
                 }
             }
+            // A loop is lowered in place when it carries something, else its
+            // blocks are closures handed to the runtime (cell closures): a
+            // call, bracketed when a block touches the actor's state.
+            SendUserCode::LoopOrClosureCall => self.classify_loop(receiver, selector, arguments),
+        }
+    }
+
+    /// Whether `receiver selector` is statically a `no_user_code` primitive
+    /// (ADR 0137 §4): the receiver's inferred class is a sealed stdlib class whose
+    /// method for `selector` is a primitive the stdlib marked `no_user_code`.
+    /// Sealed classes cannot be subclassed, so no override can run user code; the
+    /// build-stdlib check guarantees every argument is a primitive type.
+    fn is_no_user_code_send(&self, receiver: &Expression, selector: &MessageSelector) -> bool {
+        use beamtalk_core::semantic_analysis::InferredType;
+        let Some(InferredType::Known { class_name, .. }) = self.type_map.get(receiver.span())
+        else {
+            return false;
+        };
+        self.primitive_bindings
+            .is_no_user_code(class_name.as_str(), selector.name().as_str())
+    }
+
+    /// A construct the compiler lowers in place is not a call. The exception is
+    /// a conditional that does not thread `State` (a `super` send is not a
+    /// state effect, BT-3995) with a `super` send in a branch: it is a real send
+    /// with closure arguments, and the `super` send in the closure reads and
+    /// writes the cell, so the send is bracketed.
+    fn classify_inlined(
+        &self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> UserCodeCall {
+        if !beamtalk_core::state_threading_selectors::is_conditional_selector(
+            selector.name().as_str(),
+        ) {
+            return UserCodeCall::No;
+        }
+        let blocks: Vec<&beamtalk_core::ast::Block> = arguments
+            .iter()
+            .filter_map(|a| match a.unwrap_parens() {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        if !blocks.iter().any(|block| Self::block_sends_to_super(block)) {
+            return UserCodeCall::No;
+        }
+        // Decided once per send: whether the conditional threads can change as
+        // its receiver is sequenced ahead, and the window, the gap note and the
+        // lowering must agree.
+        let key = blocks[0].span;
+        if let Some(class) = self.synced.inlined_classes.borrow().get(&key) {
+            return *class;
+        }
+        let class = if self.conditional_blocks_need_threading(&blocks) {
+            UserCodeCall::No
+        } else {
+            UserCodeCall::Yes
+        };
+        self.synced.inlined_classes.borrow_mut().insert(key, class);
+        class
+    }
+
+    /// The class of a loop with literal blocks ([`SendUserCode::LoopOrClosureCall`]).
+    fn classify_loop(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> UserCodeCall {
+        // An evaluated literal block (`[...] value`): in place when it threads,
+        // else a closure applied by the runtime.
+        if selector
+            .well_known()
+            .is_some_and(beamtalk_core::ast::well_known::WellKnownSelector::is_block_value)
+        {
+            if let Expression::Block(block) = receiver {
+                if self.value_block_needs_threading(&self.block_profile_or_analyze(block)) {
+                    return UserCodeCall::No;
+                }
+            }
+        }
+        let blocks: Vec<&beamtalk_core::ast::Block> = std::iter::once(receiver)
+            .chain(arguments.iter())
+            .filter_map(|e| match e.unwrap_parens() {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        let carried = blocks
+            .iter()
+            .any(|block| self.loop_body_has_carried_mutations(block))
+            || matches!(receiver, Expression::Block(_))
+                && arguments.iter().any(|a| match a.unwrap_parens() {
+                    Expression::Block(body) => {
+                        self.while_condition_has_carried_effects(receiver, Some(body))
+                    }
+                    _ => false,
+                });
+        if carried {
+            UserCodeCall::No
+        } else if blocks
+            .iter()
+            .any(|block| self.block_touches_actor_state(block))
+        {
+            UserCodeCall::Yes
+        } else {
+            UserCodeCall::No
         }
     }
 
@@ -431,22 +555,18 @@ impl CoreErlangGenerator {
         let Some(right) = arguments.first() else {
             return UserCodeCall::Yes;
         };
-        if arithmetic {
-            if self.receiver_is_statically_numeric(left)
-                && self.receiver_is_statically_numeric(right)
-            {
-                UserCodeCall::No
-            } else {
-                UserCodeCall::GuardedOperator
-            }
-        } else if comparison {
-            if self.receiver_is_statically_comparable(left) {
-                UserCodeCall::No
-            } else {
-                UserCodeCall::GuardedOperator
-            }
+        if !arithmetic && !comparison {
+            return UserCodeCall::Yes;
+        }
+        // The guard rule is `operators.rs`'s (`operator_guard`); an arithmetic
+        // operator with a bare-BIF receiver still reaches the number-on-the-left
+        // coercion (a user `plusFromNumber:`) when its right operand is not
+        // statically numeric (ADR 0116).
+        let coercion = arithmetic && !self.receiver_is_statically_numeric(right);
+        if self.operator_guard(op, left).is_some() || coercion {
+            UserCodeCall::GuardedOperator
         } else {
-            UserCodeCall::Yes
+            UserCodeCall::No
         }
     }
 
@@ -475,38 +595,29 @@ impl CoreErlangGenerator {
         if matches!(class, UserCodeCall::No | UserCodeCall::CompiledSelfSend) {
             return;
         }
+        // A guarded operator's slow path runs unbracketed in a loop that holds
+        // no whole `State` ([`Self::synced_call_value`]).
+        if class == UserCodeCall::GuardedOperator && self.loop_holds_no_whole_state() {
+            return;
+        }
         if self.synced.window_depth > 0 {
             return;
         }
         self.record_gap(selector.name().to_string(), at);
     }
 
-    /// In [`SyncMode::Count`], tallies a verifier finding for the report
-    /// instead of failing on it; answers whether it did.
-    pub(in crate::core_erlang) fn note_counted_verify_errors(
-        &mut self,
-        errors: &[VerifyError],
-        label: &str,
-        at: Span,
-    ) -> bool {
-        if self.synced.mode != SyncMode::Count {
-            return false;
-        }
-        let kind = errors
-            .iter()
-            .map(|e| {
-                format!("{e:?}")
-                    .split([' ', '{'])
-                    .next()
-                    .unwrap_or("")
-                    .to_string()
-            })
-            .collect::<Vec<_>>()
-            .join("+");
-        self.synced
-            .other_findings
-            .push(format!("{label}\t{kind}\t{}", at.start()));
-        true
+    /// In count-only test mode, accepts a verifier finding instead of failing
+    /// on it; answers whether it did.
+    #[cfg(test)]
+    #[allow(clippy::unused_self)]
+    pub(in crate::core_erlang) fn note_counted_verify_errors(&self) -> bool {
+        COUNT_ONLY.with(std::cell::Cell::get)
+    }
+
+    #[cfg(not(test))]
+    #[allow(clippy::unused_self)]
+    pub(in crate::core_erlang) fn note_counted_verify_errors(&self) -> bool {
+        false
     }
 
     /// The statement of a self-dispatch prelude: the dispatch `call` itself, or
@@ -526,8 +637,6 @@ impl CoreErlangGenerator {
         {
             return ThreadedStmt::Statement(call, span);
         }
-        self.synced.default_arm_sends += 1;
-        self.synced.brackets += 1;
         ThreadedStmt::SyncedCall {
             store,
             call,
@@ -555,7 +664,6 @@ impl CoreErlangGenerator {
         {
             return;
         }
-        self.synced.default_arm_sends += 1;
         if self.synced.window_depth == 0 {
             let at = arguments.first().map(Expression::span).unwrap_or_default();
             self.record_gap(format!("{} (self, default arm)", selector.name()), at);
@@ -580,13 +688,11 @@ impl CoreErlangGenerator {
         {
             return call;
         }
-        self.synced.default_arm_sends += 1;
         let store = VersionedVar::new(
             VersionPrefix::State,
             self.state_version(),
             self.current_frame(),
         );
-        self.synced.brackets += 1;
         let node = ThreadedStmt::SyncedCall {
             store,
             call,
@@ -601,11 +707,14 @@ impl CoreErlangGenerator {
     /// Records one gap.
     pub(in crate::core_erlang) fn record_gap(&mut self, selector: String, at: Span) {
         let region = self.user_code_region();
-        let site = if self.synced.mode == SyncMode::Count {
+        #[cfg(test)]
+        let site = if COUNT_ONLY.with(std::cell::Cell::get) {
             capture_site()
         } else {
             GapSite::default()
         };
+        #[cfg(not(test))]
+        let site = GapSite::default();
         self.synced.gaps.push(UnbracketedSend {
             selector,
             region,
@@ -614,79 +723,35 @@ impl CoreErlangGenerator {
         });
     }
 
-    /// Reports the gaps recorded while compiling the module: a verifier
-    /// finding in [`SyncMode::Enforce`], a report line in [`SyncMode::Count`].
+    /// Reports the gaps recorded while compiling the module as verifier
+    /// findings (or, in count-only test mode, logs them for the probe).
     pub(in crate::core_erlang) fn finish_synced_calls(&mut self, module_span: Span) {
-        if self.synced.mode == SyncMode::Off {
-            return;
-        }
         let gaps = std::mem::take(&mut self.synced.gaps);
-        match self.synced.mode {
-            SyncMode::Off => {}
-            SyncMode::Count => {
-                #[cfg(test)]
-                SITE_LOG.with(|log| {
-                    log.borrow_mut().extend(gaps.iter().map(|g| SiteRecord {
-                        site: g.site.site.clone(),
-                        chain: g.site.chain.clone(),
-                        selector: g.selector.clone(),
-                        region: g.region,
-                    }));
-                });
-                self.write_synced_calls_report(&gaps);
-            }
-            SyncMode::Enforce => {
-                let errors: Vec<VerifyError> = gaps
-                    .iter()
-                    .map(|g| VerifyError::UnbracketedUserCodeSend {
-                        selector: g.selector.clone(),
-                        region: g.region,
-                        at: g.at,
-                    })
-                    .collect();
-                self.report_threaded_ir_verify_errors(
-                    &errors,
-                    "call that may run user code outside a SyncedCall",
-                    module_span,
-                );
-            }
+        #[cfg(test)]
+        if COUNT_ONLY.with(std::cell::Cell::get) {
+            SITE_LOG.with(|log| {
+                log.borrow_mut().extend(gaps.iter().map(|g| SiteRecord {
+                    site: g.site.site.clone(),
+                    chain: g.site.chain.clone(),
+                    selector: g.selector.clone(),
+                    region: g.region,
+                }));
+            });
+            return;
         }
-    }
-
-    fn write_synced_calls_report(&self, gaps: &[UnbracketedSend]) {
-        use std::io::Write as _;
-        let Some(path) = std::env::var_os(SYNCED_CALLS_REPORT_ENV) else {
-            return;
-        };
-        let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        else {
-            return;
-        };
-        let module = &self.module_name;
-        let _ = writeln!(
-            file,
-            "MODULE\t{module}\tbrackets={}\tgaps={}\tdefault_arm_self_sends={}",
-            self.synced.brackets,
-            gaps.len(),
-            self.synced.default_arm_sends
+        let errors: Vec<VerifyError> = gaps
+            .iter()
+            .map(|g| VerifyError::UnbracketedUserCodeSend {
+                selector: g.selector.clone(),
+                region: g.region,
+                at: g.at,
+            })
+            .collect();
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "call that may run user code outside a SyncedCall",
+            module_span,
         );
-        for finding in &self.synced.other_findings {
-            let _ = writeln!(file, "VERIFY\t{module}\t{finding}");
-        }
-        for gap in gaps {
-            let _ = writeln!(
-                file,
-                "GAP\t{module}\t{}\t{}\t{}\t{}\t{}",
-                gap.region.label(),
-                gap.selector,
-                gap.at.start(),
-                gap.site.site,
-                gap.site.chain
-            );
-        }
     }
 }
 
@@ -723,7 +788,11 @@ impl CoreErlangGenerator {
                 ..
             } => self.classify_send(receiver, selector, arguments, *is_cast),
             Expression::Cascade { receiver, .. } => {
-                if super::expr_shape::is_self_identifier(receiver) {
+                // The cascade's receiver is its folded first send; the shared
+                // receiver is that send's own receiver.
+                if super::expr_shape::is_self_identifier(
+                    beamtalk_core::ast_walker::cascade_shared_receiver(receiver),
+                ) {
                     UserCodeCall::No
                 } else {
                     UserCodeCall::Yes
@@ -752,6 +821,7 @@ impl CoreErlangGenerator {
         // for itself when it may reach the default arm).
         if matches!(inner, Expression::MessageSend { receiver, .. }
             if matches!(receiver.unwrap_parens(), Expression::Super(_)))
+            && !self.super_send_uses_cell()
         {
             return false;
         }
@@ -786,15 +856,16 @@ impl CoreErlangGenerator {
             self.record_gap(Self::send_label(expr), span);
             return tv;
         };
-        let state_not_authoritative = (self.loop_mode.in_direct_params_loop
-            && !self.loop_mode.in_hybrid_loop)
-            || !self.loop_mode.hybrid_readonly_field_params.is_empty()
-            || !self.loop_mode.hybrid_mutated_fields.is_empty();
-        if state_not_authoritative {
+        if self.loop_holds_no_whole_state() {
             // The loop's `fun` binds no whole `State` to store (direct
             // params), or holds fields in pre-extracted parameters (hybrid):
-            // the loop has to thread one (its owning node's job).
-            self.record_gap(Self::send_label(expr), span);
+            // the loop has to thread one (its owning node's job). Except for
+            // a guarded operator, whose slow path is not worth a threaded
+            // loop (the block analysis does not count it, see
+            // `send_may_run_user_code`): it runs unbracketed here.
+            if self.classify_expr(expr.unwrap_parens()) != UserCodeCall::GuardedOperator {
+                self.record_gap(Self::send_label(expr), span);
+            }
             return ThreadedValue {
                 prelude: tv.prelude,
                 value: ValueRef::Doc(call),
@@ -833,11 +904,27 @@ impl CoreErlangGenerator {
             load: Some(load),
             span,
         });
-        self.synced.brackets += 1;
         ThreadedValue {
             prelude,
             value: ValueRef::Var(result),
         }
+    }
+
+    /// Whether the loop being compiled has no whole `State` to store: a
+    /// direct-params loop binds none, a hybrid loop holds fields in
+    /// pre-extracted parameters and a tuple-accumulator fold carries only locals.
+    fn loop_holds_no_whole_state(&self) -> bool {
+        use super::threaded_ir::{RebindFrameKind, ThreadingMode};
+        (self.loop_mode.in_direct_params_loop && !self.loop_mode.in_hybrid_loop)
+            || !self.loop_mode.hybrid_readonly_field_params.is_empty()
+            || !self.loop_mode.hybrid_mutated_fields.is_empty()
+            // A loop frame whose parameters or accumulator carry only locals.
+            || matches!(
+                self.rebind_frames.get(&self.current_frame()).map(|f| &f.kind),
+                Some(RebindFrameKind::Loop(
+                    ThreadingMode::TupleAcc(_) | ThreadingMode::DirectParams | ThreadingMode::Hybrid
+                ))
+            )
     }
 
     /// The selector (or `cascade`) naming `expr` in a gap report.

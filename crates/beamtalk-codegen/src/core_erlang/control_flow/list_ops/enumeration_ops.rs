@@ -173,7 +173,7 @@ impl CoreErlangGenerator {
     /// which the value-type statement classifier reads too). So the fold is
     /// re-projected exactly when the site that compiles it unpacks it.
     fn enumeration_yields_construct_tuple(&self, original_send: &Expression) -> bool {
-        (self.in_class_method() || matches!(self.context, CodeGenContext::ValueType))
+        (self.threads_no_actor_state() || matches!(self.context, CodeGenContext::ValueType))
             && !self.loop_mode.in_direct_params_loop
             && self.construct_tuple_locals(original_send).is_some()
     }
@@ -373,13 +373,17 @@ impl CoreErlangGenerator {
         inject_body.extend(inlined_body(&element_block.body));
         inject_body.push(ident("false", span));
 
+        // The fold's block is not the user's element block, whose span it would
+        // otherwise share: the block profile lookup (`block_profile_or_analyze`) is
+        // keyed by span, and the user's block holds no separator write.
+        let fold_block_span = Span::new(span.start(), span.end().saturating_add(1));
         let inject_send = inject_into(
             receiver.clone(),
             ident("true", span),
             block_expr(
                 &[first_name.as_str(), elem_name.as_str()],
                 inject_body,
-                span,
+                fold_block_span,
             ),
             span,
         );

@@ -2626,13 +2626,13 @@ fn section6_escaping_blocks_that_write_no_outer_local_are_accepted() {
     }
 }
 
-/// BT-3922 (ADR 0133, the rule's other half): a block that assigns `self.field`
-/// (an actor or value-type field, or a class variable in a class method) and
-/// escapes gets the same diagnostic as one that assigns a captured local,
-/// reported at the assignment. This flips BT-3806 item 4, where §6 accepted
-/// these and codegen rejected only some shapes.
+/// BT-3922 (ADR 0133) rejected an escaping block that assigns `self.field`; ADR
+/// 0137 lifts it for an actor field and a class variable: the block writes the
+/// actor's state through the cell when it runs inside the actor, and a write
+/// from another process raises `actor_state_unreachable` at run time. A
+/// value-type method cannot assign a slot, so the error there is not this one.
 #[test]
-fn section6_escaping_block_that_writes_a_field_is_an_error() {
+fn section6_escaping_block_that_writes_a_field_is_accepted_in_an_actor_and_a_class() {
     for body in [
         "^[self.n := self.n + 1]",
         "b := [self.n := self.n + 1]\n^b",
@@ -2641,39 +2641,26 @@ fn section6_escaping_block_that_writes_a_field_is_an_error() {
         "self foo: [self.n := self.n + 1]\nnil",
         "^[:x | #(1) do: [:y | self.n := y]]",
     ] {
-        // A value-type method cannot assign a slot: that error already covers
-        // the write, so §6 stays silent there.
-        assert_eq!(section6_errors(&in_value(body)), 0, "{body}");
-        for src in [in_class(body), in_actor(body)] {
-            let diags = adr0131_diagnostics(&src);
-            let d = diags
-                .iter()
-                .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
-                .unwrap_or_else(|| panic!("{src}: {diags:?}"));
-            assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
-            assert!(
-                d.message.contains("`self.n` is assigned in a block"),
-                "{d:?}"
-            );
-            assert!(
-                src[d.span.start() as usize..].starts_with("self.n :="),
-                "reported at the assignment: {src}"
+        for src in [in_value(body), in_class(body), in_actor(body)] {
+            assert_eq!(
+                section6_errors(&src),
+                0,
+                "{src}: {:?}",
+                adr0131_diagnostics(&src)
             );
         }
     }
 }
 
-/// BT-3922: a block literal stored straight into a field that assigns a field
-/// (not a captured local, which is the block analyzer's BT-2809 error) is
-/// reported here in class and actor methods (a value-type method's slot
+/// ADR 0137: a block literal stored straight into a field that assigns a field
+/// is accepted in class and actor methods (a value-type method's slot
 /// assignment is the "Cannot assign to slot" error).
 #[test]
-fn section6_field_stored_literal_that_writes_a_field_is_an_error() {
+fn section6_field_stored_literal_that_writes_a_field_is_accepted() {
     let body = "self.h := [:x | self.n := self.n + x]\nnil";
-    for src in [in_class(body), in_actor(body)] {
-        assert_eq!(section6_errors(&src), 1, "{src}");
+    for src in [in_class(body), in_actor(body), in_value(body)] {
+        assert_eq!(section6_errors(&src), 0, "{src}");
     }
-    assert_eq!(section6_errors(&in_value(body)), 0);
 }
 
 /// BT-3922: in a class method a `Dictionary` lookup handler that writes only a
@@ -2684,20 +2671,20 @@ fn section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape() {
     for (body, actor_errors) in [
         (
             "self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]\nnil",
-            1,
+            0,
         ),
         (
             "x := self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. 0]\n^x",
-            1,
+            0,
         ),
         // One diagnostic per writing handler.
         (
             "self.cache at: 1 ifPresent: [:v | self.hits := self.hits + 1. v] ifAbsent: [self.misses := 1. nil]\nnil",
-            2,
+            0,
         ),
         (
             "^self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]",
-            1,
+            0,
         ),
     ] {
         let src = in_class(body);
@@ -2707,9 +2694,10 @@ fn section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape() {
             "{src}: {:?}",
             adr0131_diagnostics(&src)
         );
-        // An actor method runs the handler as a closure and the field write
-        // is dropped, so the handler is an escape there; a value-type method
-        // cannot assign a slot, and that error already covers the write.
+        // ADR 0137: an actor method runs the handler as a closure over the
+        // cell, so its field write is kept and the handler is no escape; a
+        // value-type method cannot assign a slot, and that error already
+        // covers the write.
         let src = in_actor(body);
         assert_eq!(
             section6_errors(&src),
@@ -2744,15 +2732,13 @@ fn section6_field_write_in_testcase_and_object_methods_is_an_error() {
     }
 }
 
-/// BT-3952 (ADR 0133 amendment): in an actor instance method a block that reads
-/// `self.field` and is handed to the actor's own method, stored, returned or
-/// placed in a literal sees the `State` from when it was made, so it is an
-/// error at the read. Measured on a BEAM: the self-send answers stale when the
-/// callee writes the field before running the block, the stored, returned and
-/// literal shapes when a write follows; no static rule tells the right-answering
-/// cases apart, so every one is rejected.
+/// BT-3952 (ADR 0133 amendment) rejected every actor block that reads
+/// `self.field` and escapes, because it saw the `State` from when it was made.
+/// ADR 0137: such a block reads the actor's current fields when it runs inside
+/// the actor (and the values it was made with elsewhere), so every one of
+/// these shapes compiles.
 #[test]
-fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
+fn section6_actor_block_that_reads_a_field_and_escapes_is_accepted() {
     for body in [
         "self foo: [self.n]\nnil",
         "super foo: [self.n]\nnil",
@@ -2813,21 +2799,11 @@ fn section6_actor_block_that_reads_a_field_and_escapes_is_an_error() {
         "b := [self.n]\nself.items do: [:x | self bump. b value]\nnil",
     ] {
         let src = in_actor(body);
-        let diags = adr0131_diagnostics(&src);
-        let d = diags
-            .iter()
-            .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
-            .unwrap_or_else(|| panic!("{src}: {diags:?}"));
-        assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
-        assert!(
-            d.message.contains("is read in a block that runs later"),
-            "{d:?}"
-        );
-        assert!(
-            ["self.", "self fieldAt:", "super fieldAt:", "b value"]
-                .iter()
-                .any(|at| src[d.span.start() as usize..].starts_with(at)),
-            "reported at the read: {src}"
+        assert_eq!(
+            section6_errors(&src),
+            0,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
         );
     }
 }
@@ -2897,14 +2873,13 @@ fn section6_actor_block_that_reads_a_field_in_place_is_not_an_error() {
     }
 }
 
-/// BT-3952: a block that sends to `self` or `super` dispatches against the
-/// `State` it captured (measured: a stored and a returned `[self total]` both
-/// answered the old value), so when it is stored, returned or placed in a
-/// literal (directly or through a local) it is an error at the send. A block
-/// passed to the actor's own method (BT-3936's runtime check covers it), run
-/// in place, or called through a local later is not.
+/// BT-3952 rejected a stored, returned or placed block that sends to `self` or
+/// `super`, because it dispatched against the `State` it captured. ADR 0137: a
+/// self-send in a block is a message to the actor on its live state when the
+/// block runs inside the actor (and a message to the actor elsewhere), so
+/// every one of these shapes compiles.
 #[test]
-fn section6_actor_block_that_sends_to_self_and_is_stored_is_an_error() {
+fn section6_actor_block_that_sends_to_self_and_is_stored_is_accepted() {
     for body in [
         "^[self total]",
         "^[super total]",
@@ -2921,21 +2896,11 @@ fn section6_actor_block_that_sends_to_self_and_is_stored_is_an_error() {
         "b := [self total]\nc := b\n^c",
     ] {
         let src = in_actor(body);
-        let diags = adr0131_diagnostics(&src);
-        let d = diags
-            .iter()
-            .find(|d| d.category == Some(DiagnosticCategory::Tier2BlockNoReturnChannel))
-            .unwrap_or_else(|| panic!("{src}: {diags:?}"));
-        assert_eq!(section6_errors(&src), 1, "{src}: {diags:?}");
-        assert!(
-            d.message.contains("is sent in a block that runs later"),
-            "{d:?}"
-        );
-        assert!(
-            ["self ", "super ", "b value"]
-                .iter()
-                .any(|at| src[d.span.start() as usize..].starts_with(at)),
-            "reported at the send: {src}"
+        assert_eq!(
+            section6_errors(&src),
+            0,
+            "{src}: {:?}",
+            adr0131_diagnostics(&src)
         );
     }
     for body in [
@@ -2980,14 +2945,13 @@ fn section6_in_place_field_writes_are_not_escapes() {
             assert_eq!(section6_errors(&src), 0, "{src}");
         }
     }
-    // BT-3952: a returned block that only READS a field is no write, but in an
-    // actor it reads the `State` it was made with: an error there (the read
-    // rule), still none in a class method (live class variables, ADR 0130 §3)
-    // or a value type (fields never change).
+    // A returned block that only READS a field is no write and no error
+    // anywhere (ADR 0137: an actor block reads the live fields inside the
+    // actor, a class method reads live class variables, ADR 0130 §3).
     let body = "^[:x | x + self.n]";
     assert_eq!(section6_errors(&in_class(body)), 0);
     assert_eq!(section6_errors(&in_value(body)), 0);
-    assert_eq!(section6_errors(&in_actor(body)), 1);
+    assert_eq!(section6_errors(&in_actor(body)), 0);
 }
 
 #[test]

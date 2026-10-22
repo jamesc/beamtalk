@@ -1,0 +1,57 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): actor closures read and write the actor state
+
+Actor subclass: ClosureCellCounter
+  state: n = 0
+  state: onTick = nil
+
+  twice: aBlock =>
+    aBlock value
+    aBlock value
+
+  n => self.n
+
+  addTwice =>
+    self twice: [self.n := self.n + 1]
+    self.n
+
+  arm => self.onTick := [self.n := self.n + 10]
+
+  tick =>
+    self.onTick value
+    self.n
+
+  peek =>
+    b := [self.n]
+    self.n := 9
+    b value
+
+  readTwice =>
+    self twice: [self.n printString]
+    self.n
+
+  peekVia: other =>
+    b := [self.n]
+    self.n := 99
+    other run: b
+
+  pokeVia: other => other run: [self.n := 0]
+
+  bump => self.n := self.n + 1
+
+  selfSendInBlock =>
+    self twice: [self bump]
+    self.n
+
+  aliasSend =>
+    other := self
+    self.n := 5
+    other n
+
+  aliasBump =>
+    other := self
+    other bump
+    other bump
+    self.n

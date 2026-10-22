@@ -105,16 +105,21 @@ fn test_bt1290_local_var_captured_by_nested_timer_block() {
     );
     let code = codegen(src);
     // Y (CoreErlang name for y) must appear inside the nested fun's argument list
+    // (ADR 0137: the closure's self-send is a message to `Self`).
     assert!(
-        code.contains("let _SDArgs") && code.contains("= [Y] in"),
+        code.contains("'send'(Self, 'use:', [Y])"),
         "Y should be captured by nested block. Got:\n{code}"
     );
     // The foldl lambda must use `let _ = <Timer_expr> in StateAcc`, not bare `<Timer_expr> in StateAcc`
     // Timer is now a direct call (no class_registry lookup), so check
     // for the `let _ =` wrapping of the Timer class method call.
+    // (ADR 0137: the call that runs user code is bracketed, so it is bound by the
+    // bracket and the value discarded after the reload.)
     assert!(
-        code.contains("let _ = call 'bt@stdlib@timer':'class_after:do:'"),
-        "Last expr in do: body with plain lets must use let _ = binding. Got:\n{code}"
+        code.contains("call 'bt@stdlib@timer':'class_after:do:'")
+            && code.contains("let _Synced")
+            && code.contains("let _ = _Synced"),
+        "Last expr in do: body with plain lets must be bound, not left bare. Got:\n{code}"
     );
 }
 
@@ -156,8 +161,10 @@ fn test_bt1290_field_mutation_then_general_last_expr() {
     // Timer is now a direct call (no class_registry lookup), so check
     // for the `let _ =` wrapping of the Timer class method call.
     assert!(
-        code.contains("let _ = call 'bt@stdlib@timer':'class_after:do:'"),
-        "Last expr after field mutation must use let _ = binding. Got:\n{code}"
+        code.contains("call 'bt@stdlib@timer':'class_after:do:'")
+            && code.contains("let _Synced")
+            && code.contains("let _ = _Synced"),
+        "Last expr after field mutation must be bound, not left bare. Got:\n{code}"
     );
 }
 
@@ -1938,7 +1945,8 @@ fn test_each_with_index_wrong_arity_field_mutating_block_is_compile_error() {
     // dispatch/lists:foldl shape of successful codegen). When a block that
     // falls through eachWithIndex:'s arity guard *also* mutates self.<field>,
     // it reaches generate_block's generic fallback and must now be rejected at
-    // compile time — not silently produce Core Erlang erlc rejects.
+    // compile time — not silently produce Core Erlang erlc rejects. ADR 0137:
+    // the block is an actor closure that writes the field through the cell.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | self.total := self.total + x]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
@@ -1946,13 +1954,10 @@ fn test_each_with_index_wrong_arity_field_mutating_block_is_compile_error() {
         &module,
         crate::core_erlang::CodegenOptions::new("test"),
     );
+    let code = result.expect("a field-writing block compiles (ADR 0137)");
     assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
-        ),
-        "A field-mutating block that falls through eachWithIndex:'s arity guard must be a \
-         compile-time error (BT-2792), not silently accepted. Got: {result:?}"
+        code.contains("call 'beamtalk_actor_state':'put'("),
+        "the block writes the field through the cell. Got:\n{code}"
     );
 }
 

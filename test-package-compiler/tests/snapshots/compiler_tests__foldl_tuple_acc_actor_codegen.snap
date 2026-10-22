@@ -107,15 +107,9 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
                     {'noreply', InitCleanState}
                 <{'$bt_continue', [{CastSelector, CastArgs}|ContRest]}> when 'true' ->
                     let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in
-                    let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                    let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                    let _OldState = call 'beamtalk_actor_state':'install'(State) in
                     let _CastDispatchResult = call 'foldl_tuple_acc_actor':'safe_dispatch'(CastSelector, CastArgs, State) in
-                    let _RestoreOk = case _OldState of
-                        <'undefined'> when 'true' ->
-                            call 'erlang':'erase'('$bt_actor_state')
-                        <_Prev> when 'true' ->
-                            call 'erlang':'put'('$bt_actor_state', _Prev)
-                    end in
+                    let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                     let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                     case _CastDispatchResult of
                         <{'reply', _CastResult, CastNewState}> when 'true' ->
@@ -150,15 +144,9 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
                 let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in
                 case call 'beamtalk_actor':'mailbox_continuation_check'(CastSelector, CastArgs) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _CastDispatchResult = call 'foldl_tuple_acc_actor':'safe_dispatch'(CastSelector, CastArgs, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
@@ -178,15 +166,9 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
             <{'cast', CastSelector, CastArgs}> when 'true' ->
                 case call 'beamtalk_actor':'mailbox_continuation_check'(CastSelector, CastArgs) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _CastDispatchResult = call 'foldl_tuple_acc_actor':'safe_dispatch'(CastSelector, CastArgs, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
@@ -223,15 +205,9 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
                 let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in
                 case call 'beamtalk_actor':'mailbox_continuation_check'(Selector, Args) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _DispatchResult = call 'foldl_tuple_acc_actor':'safe_dispatch'(Selector, Args, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
@@ -259,15 +235,9 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
             <{Selector, Args}> when 'true' ->
                 case call 'beamtalk_actor':'mailbox_continuation_check'(Selector, Args) of
                     <'ok'> when 'true' ->
-                        let _OldState = call 'erlang':'get'('$bt_actor_state') in
-                        let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in
+                        let _OldState = call 'beamtalk_actor_state':'install'(State) in
                         let _DispatchResult = call 'foldl_tuple_acc_actor':'safe_dispatch'(Selector, Args, State) in
-                        let _RestoreOk = case _OldState of
-                            <'undefined'> when 'true' ->
-                                call 'erlang':'erase'('$bt_actor_state')
-                            <_Prev> when 'true' ->
-                                call 'erlang':'put'('$bt_actor_state', _Prev)
-                        end in
+                        let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
@@ -339,7 +309,7 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
         <'countedCollect:'> when 'true' ->
             case Args of
                 <[_coll21]> when 'true' ->
-                    let Count = 0 in let _Tuple22 = let _temp24 = _coll21 in let _temp25 = case call 'erlang':'is_list'(_temp24) of <'true'> when 'true' -> _temp24 <'false'> when 'true' -> call 'beamtalk_collection':'to_list_for_threading'(_temp24, 'collect:') end in let _temp26 = fun (Each, _AccSt27) -> let AccList = call 'erlang':'element'(1, _AccSt27) in let Count = call 'erlang':'element'(2, _AccSt27) in let _Count31 = let _BinLeft28 = Count in let _BinRight29 = 1 in case call 'erlang':'is_number'(_BinLeft28) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft28, _BinRight29) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft28, '+', [_BinRight29]) <_BinOpNoMatch30> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch30}) end in let _CollectItem32 = let _BinLeft33 = Each in let _BinRight34 = 2 in case call 'erlang':'is_number'(_BinLeft33) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft33, _BinRight34) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft33, '*', [_BinRight34]) <_BinOpNoMatch35> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch35}) end in {[_CollectItem32 | AccList], _Count31} in let _FoldResult36 = call 'lists':'foldl'(_temp26, { [], Count}, _temp25) in let _RevList37 = call 'erlang':'element'(1, _FoldResult36) in let _FinalList38 = call 'lists':'reverse'(_RevList37) in let _ListLikeResult39 = call 'beamtalk_collection':'from_list_like'(_temp24, _FinalList38) in let Count = call 'erlang':'element'(2, _FoldResult36) in let _PkSt40 = call 'maps':'put'('__local__count', Count, State) in {_ListLikeResult39, _PkSt40} in let _Result23 = call 'erlang':'element'(1, _Tuple22) in let State1 = call 'erlang':'element'(2, _Tuple22) in {'reply', _Result23, State1}
+                    let Count = 0 in let _Tuple22 = let _temp24 = _coll21 in let _temp25 = case call 'erlang':'is_list'(_temp24) of <'true'> when 'true' -> _temp24 <'false'> when 'true' -> call 'beamtalk_collection':'to_list_for_threading'(_temp24, 'collect:') end in let _temp26 = fun (Each, _AccSt27) -> let AccList = call 'erlang':'element'(1, _AccSt27) in let Count = call 'erlang':'element'(2, _AccSt27) in let _Count31 = let _BinLeft28 = Count in let _BinRight29 = 1 in case call 'erlang':'is_number'(_BinLeft28) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft28, _BinRight29) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft28, '+', [_BinRight29]) <_BinOpNoMatch30> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch30}) end in let _CollectItem35 = let _BinLeft32 = Each in let _BinRight33 = 2 in case call 'erlang':'is_number'(_BinLeft32) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft32, _BinRight33) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft32, '*', [_BinRight33]) <_BinOpNoMatch34> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch34}) end in {[_CollectItem35 | AccList], _Count31} in let _FoldResult36 = call 'lists':'foldl'(_temp26, { [], Count}, _temp25) in let _RevList37 = call 'erlang':'element'(1, _FoldResult36) in let _FinalList38 = call 'lists':'reverse'(_RevList37) in let _ListLikeResult39 = call 'beamtalk_collection':'from_list_like'(_temp24, _FinalList38) in let Count = call 'erlang':'element'(2, _FoldResult36) in let _PkSt40 = call 'maps':'put'('__local__count', Count, State) in {_ListLikeResult39, _PkSt40} in let _Result23 = call 'erlang':'element'(1, _Tuple22) in let State1 = call 'erlang':'element'(2, _Tuple22) in {'reply', _Result23, State1}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <'countedSelect:'> when 'true' ->
@@ -357,25 +327,25 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
         <'totalInject:'> when 'true' ->
             case Args of
                 <[_coll81]> when 'true' ->
-                    let _Result = let _temp82 = _coll81 in let _temp83 = case call 'erlang':'is_list'(_temp82) of <'true'> when 'true' -> _temp82 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp82) end in let _temp84 = 0 in let _temp85 = fun (Each, Acc) -> let _BinLeft86 = Acc in let _BinRight87 = Each in case call 'erlang':'is_number'(_BinLeft86) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft86, _BinRight87) of <_BinCoerceTry88> -> _BinCoerceTry88 catch <_BinCoerceType89, _BinCoerceError90, _BinCoerceStack91> -> case {_BinCoerceType89, _BinCoerceError90} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight87) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType89, _BinCoerceError90, _BinCoerceStack91) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight87, 'plusFromNumber:', [_BinLeft86], '+') <_BinCoerceNoMatch93> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch93}) end <_BinCoerceOther92> when 'true' -> primop 'raw_raise'(_BinCoerceType89, _BinCoerceError90, _BinCoerceStack91) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft86, '+', [_BinRight87]) <_BinOpNoMatch94> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch94}) end in call 'lists':'foldl'(_temp85, _temp84, _temp83) in {'reply', _Result, State}
+                    let _ = call 'erlang':'put'('$bt_actor_state', State) in let _Synced95 = let _temp82 = _coll81 in let _temp83 = case call 'erlang':'is_list'(_temp82) of <'true'> when 'true' -> _temp82 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp82) end in let _temp84 = 0 in let _temp85 = fun (Each, Acc) -> let _BinLeft86 = Acc in let _BinRight87 = Each in case call 'erlang':'is_number'(_BinLeft86) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft86, _BinRight87) of <_BinCoerceTry88> -> _BinCoerceTry88 catch <_BinCoerceType89, _BinCoerceError90, _BinCoerceStack91> -> case {_BinCoerceType89, _BinCoerceError90} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight87) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType89, _BinCoerceError90, _BinCoerceStack91) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight87, 'plusFromNumber:', [_BinLeft86], '+') <_BinCoerceNoMatch93> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch93}) end <_BinCoerceOther92> when 'true' -> primop 'raw_raise'(_BinCoerceType89, _BinCoerceError90, _BinCoerceStack91) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft86, '+', [_BinRight87]) <_BinOpNoMatch94> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch94}) end in call 'lists':'foldl'(_temp85, _temp84, _temp83) in let State1 = call 'erlang':'get'('$bt_actor_state') in let _Result = _Synced95 in {'reply', _Result, State1}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <'firstOver:in:'> when 'true' ->
             case Args of
-                <[_threshold95, _coll96]> when 'true' ->
-                    let Count = 0 in let _Tuple97 = let _temp99 = _coll96 in let _temp100 = case call 'erlang':'is_list'(_temp99) of <'true'> when 'true' -> _temp99 <'false'> when 'true' -> call 'beamtalk_collection':'to_list_for_threading'(_temp99, 'detect:ifNone:') end in let _temp101 = fun (Each, _AccSt102) -> let FoundItem = call 'erlang':'element'(1, _AccSt102) in let FoundFlag = call 'erlang':'element'(2, _AccSt102) in case FoundFlag of <'true'> when 'true' -> _AccSt102 <_> when 'true' -> let Count = call 'erlang':'element'(3, _AccSt102) in let _Count107 = let _BinLeft104 = Count in let _BinRight105 = 1 in case call 'erlang':'is_number'(_BinLeft104) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft104, _BinRight105) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft104, '+', [_BinRight105]) <_BinOpNoMatch106> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch106}) end in let _Pred103 = let _BinLeft108 = Each in let _BinRight109 = _threshold95 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft108), call 'erlang':'is_binary'(_BinLeft108)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft108, _BinRight109) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft108, '>', [_BinRight109]) <_BinOpNoMatch110> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch110}) end in case _Pred103 of <'true'> when 'true' -> {Each, 'true', _Count107} <'false'> when 'true' -> {FoundItem, FoundFlag, _Count107} end end in let _FoldResult111 = call 'lists':'foldl'(_temp101, {'nil', 'false', Count}, _temp100) in let _FoundItem112 = call 'erlang':'element'(1, _FoldResult111) in let _FoundFlag113 = call 'erlang':'element'(2, _FoldResult111) in let Count = call 'erlang':'element'(3, _FoldResult111) in let _PkSt114 = call 'maps':'put'('__local__count', Count, State) in case _FoundFlag113 of <'true'> when 'true' -> {_FoundItem112, _PkSt114} <'false'> when 'true' -> let StateAcc = _PkSt114 in let _BranchResult115 = -1 in {_BranchResult115, StateAcc} <_DetectNoMatch116> when 'true' -> call 'erlang':'error'({'case_clause', _DetectNoMatch116}) end in let _Result98 = call 'erlang':'element'(1, _Tuple97) in let State1 = call 'erlang':'element'(2, _Tuple97) in {'reply', _Result98, State1}
+                <[_threshold96, _coll97]> when 'true' ->
+                    let Count = 0 in let _Tuple98 = let _temp100 = _coll97 in let _temp101 = case call 'erlang':'is_list'(_temp100) of <'true'> when 'true' -> _temp100 <'false'> when 'true' -> call 'beamtalk_collection':'to_list_for_threading'(_temp100, 'detect:ifNone:') end in let _temp102 = fun (Each, _AccSt103) -> let FoundItem = call 'erlang':'element'(1, _AccSt103) in let FoundFlag = call 'erlang':'element'(2, _AccSt103) in case FoundFlag of <'true'> when 'true' -> _AccSt103 <_> when 'true' -> let Count = call 'erlang':'element'(3, _AccSt103) in let _Count108 = let _BinLeft105 = Count in let _BinRight106 = 1 in case call 'erlang':'is_number'(_BinLeft105) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft105, _BinRight106) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft105, '+', [_BinRight106]) <_BinOpNoMatch107> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch107}) end in let _Pred104 = let _BinLeft109 = Each in let _BinRight110 = _threshold96 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft109), call 'erlang':'is_binary'(_BinLeft109)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft109, _BinRight110) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft109, '>', [_BinRight110]) <_BinOpNoMatch111> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch111}) end in case _Pred104 of <'true'> when 'true' -> {Each, 'true', _Count108} <'false'> when 'true' -> {FoundItem, FoundFlag, _Count108} end end in let _FoldResult112 = call 'lists':'foldl'(_temp102, {'nil', 'false', Count}, _temp101) in let _FoundItem113 = call 'erlang':'element'(1, _FoldResult112) in let _FoundFlag114 = call 'erlang':'element'(2, _FoldResult112) in let Count = call 'erlang':'element'(3, _FoldResult112) in let _PkSt115 = call 'maps':'put'('__local__count', Count, State) in case _FoundFlag114 of <'true'> when 'true' -> {_FoundItem113, _PkSt115} <'false'> when 'true' -> let StateAcc = _PkSt115 in let _BranchResult116 = -1 in {_BranchResult116, StateAcc} <_DetectNoMatch117> when 'true' -> call 'erlang':'error'({'case_clause', _DetectNoMatch117}) end in let _Result99 = call 'erlang':'element'(1, _Tuple98) in let State1 = call 'erlang':'element'(2, _Tuple98) in {'reply', _Result99, State1}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <'anyOver:in:'> when 'true' ->
             case Args of
-                <[_threshold117, _coll118]> when 'true' ->
-                    let Count = 0 in let _Tuple119 = let _temp121 = _coll118 in let _temp122 = case call 'erlang':'is_list'(_temp121) of <'true'> when 'true' -> _temp121 <'false'> when 'true' -> call 'beamtalk_collection':'to_list_for_threading'(_temp121, 'anySatisfy:') end in let _temp123 = fun (Each, _AccSt124) -> let BoolAcc = call 'erlang':'element'(1, _AccSt124) in case BoolAcc of <'true'> when 'true' -> _AccSt124 <_> when 'true' -> let Count = call 'erlang':'element'(2, _AccSt124) in let _Count129 = let _BinLeft126 = Count in let _BinRight127 = 1 in case call 'erlang':'is_number'(_BinLeft126) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft126, _BinRight127) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft126, '+', [_BinRight127]) <_BinOpNoMatch128> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch128}) end in let _Pred125 = let _BinLeft130 = Each in let _BinRight131 = _threshold117 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft130), call 'erlang':'is_binary'(_BinLeft130)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft130, _BinRight131) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft130, '>', [_BinRight131]) <_BinOpNoMatch132> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch132}) end in case _Pred125 of <'true'> when 'true' -> {'true', _Count129} <'false'> when 'true' -> {BoolAcc, _Count129} end end in let _FoldResult133 = call 'lists':'foldl'(_temp123, {'false', Count}, _temp122) in let _BoolResult134 = call 'erlang':'element'(1, _FoldResult133) in let Count = call 'erlang':'element'(2, _FoldResult133) in let _PkSt135 = call 'maps':'put'('__local__count', Count, State) in {_BoolResult134, _PkSt135} in let _Result120 = call 'erlang':'element'(1, _Tuple119) in let State1 = call 'erlang':'element'(2, _Tuple119) in {'reply', _Result120, State1}
+                <[_threshold118, _coll119]> when 'true' ->
+                    let Count = 0 in let _Tuple120 = let _temp122 = _coll119 in let _temp123 = case call 'erlang':'is_list'(_temp122) of <'true'> when 'true' -> _temp122 <'false'> when 'true' -> call 'beamtalk_collection':'to_list_for_threading'(_temp122, 'anySatisfy:') end in let _temp124 = fun (Each, _AccSt125) -> let BoolAcc = call 'erlang':'element'(1, _AccSt125) in case BoolAcc of <'true'> when 'true' -> _AccSt125 <_> when 'true' -> let Count = call 'erlang':'element'(2, _AccSt125) in let _Count130 = let _BinLeft127 = Count in let _BinRight128 = 1 in case call 'erlang':'is_number'(_BinLeft127) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft127, _BinRight128) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft127, '+', [_BinRight128]) <_BinOpNoMatch129> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch129}) end in let _Pred126 = let _BinLeft131 = Each in let _BinRight132 = _threshold118 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft131), call 'erlang':'is_binary'(_BinLeft131)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft131, _BinRight132) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft131, '>', [_BinRight132]) <_BinOpNoMatch133> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch133}) end in case _Pred126 of <'true'> when 'true' -> {'true', _Count130} <'false'> when 'true' -> {BoolAcc, _Count130} end end in let _FoldResult134 = call 'lists':'foldl'(_temp124, {'false', Count}, _temp123) in let _BoolResult135 = call 'erlang':'element'(1, _FoldResult134) in let Count = call 'erlang':'element'(2, _FoldResult134) in let _PkSt136 = call 'maps':'put'('__local__count', Count, State) in {_BoolResult135, _PkSt136} in let _Result121 = call 'erlang':'element'(1, _Tuple120) in let State1 = call 'erlang':'element'(2, _Tuple120) in {'reply', _Result121, State1}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <'takeUnder:in:'> when 'true' ->
             case Args of
-                <[_threshold136, _coll137]> when 'true' ->
-                    let Count = 0 in let _Tuple138 = let _temp140 = _coll137 in let _temp141 = case call 'erlang':'is_list'(_temp140) of <'true'> when 'true' -> _temp140 <'false'> when 'true' -> call 'beamtalk_collection':'to_list_for_threading'(_temp140, 'takeWhile:') end in let _temp142 = fun (Each, _AccSt143) -> let AccList = call 'erlang':'element'(1, _AccSt143) in let StillTaking = call 'erlang':'element'(2, _AccSt143) in let Count = call 'erlang':'element'(3, _AccSt143) in let _Count148 = let _BinLeft145 = Count in let _BinRight146 = 1 in case call 'erlang':'is_number'(_BinLeft145) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft145, _BinRight146) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft145, '+', [_BinRight146]) <_BinOpNoMatch147> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch147}) end in let _Pred144 = let _BinLeft149 = Each in let _BinRight150 = _threshold136 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft149), call 'erlang':'is_binary'(_BinLeft149)) of <'true'> when 'true' -> call 'erlang':'<'(_BinLeft149, _BinRight150) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft149, '<', [_BinRight150]) <_BinOpNoMatch151> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch151}) end in case StillTaking of <'false'> when 'true' -> {AccList, 'false', _Count148} <'true'> when 'true' -> case _Pred144 of <'true'> when 'true' -> {[Each | AccList], 'true', _Count148} <'false'> when 'true' -> {AccList, 'false', _Count148} end end in let _FoldResult152 = call 'lists':'foldl'(_temp142, { [], 'true', Count}, _temp141) in let _RevList153 = call 'erlang':'element'(1, _FoldResult152) in let _FinalList154 = call 'lists':'reverse'(_RevList153) in let Count = call 'erlang':'element'(3, _FoldResult152) in let _PkSt155 = call 'maps':'put'('__local__count', Count, State) in {_FinalList154, _PkSt155} in let _Result139 = call 'erlang':'element'(1, _Tuple138) in let State1 = call 'erlang':'element'(2, _Tuple138) in {'reply', _Result139, State1}
+                <[_threshold137, _coll138]> when 'true' ->
+                    let Count = 0 in let _Tuple139 = let _temp141 = _coll138 in let _temp142 = case call 'erlang':'is_list'(_temp141) of <'true'> when 'true' -> _temp141 <'false'> when 'true' -> call 'beamtalk_collection':'to_list_for_threading'(_temp141, 'takeWhile:') end in let _temp143 = fun (Each, _AccSt144) -> let AccList = call 'erlang':'element'(1, _AccSt144) in let StillTaking = call 'erlang':'element'(2, _AccSt144) in let Count = call 'erlang':'element'(3, _AccSt144) in let _Count149 = let _BinLeft146 = Count in let _BinRight147 = 1 in case call 'erlang':'is_number'(_BinLeft146) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft146, _BinRight147) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft146, '+', [_BinRight147]) <_BinOpNoMatch148> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch148}) end in let _Pred145 = let _BinLeft150 = Each in let _BinRight151 = _threshold137 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft150), call 'erlang':'is_binary'(_BinLeft150)) of <'true'> when 'true' -> call 'erlang':'<'(_BinLeft150, _BinRight151) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft150, '<', [_BinRight151]) <_BinOpNoMatch152> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch152}) end in case StillTaking of <'false'> when 'true' -> {AccList, 'false', _Count149} <'true'> when 'true' -> case _Pred145 of <'true'> when 'true' -> {[Each | AccList], 'true', _Count149} <'false'> when 'true' -> {AccList, 'false', _Count149} end end in let _FoldResult153 = call 'lists':'foldl'(_temp143, { [], 'true', Count}, _temp142) in let _RevList154 = call 'erlang':'element'(1, _FoldResult153) in let _FinalList155 = call 'lists':'reverse'(_RevList154) in let Count = call 'erlang':'element'(3, _FoldResult153) in let _PkSt156 = call 'maps':'put'('__local__count', Count, State) in {_FinalList155, _PkSt156} in let _Result140 = call 'erlang':'element'(1, _Tuple139) in let State1 = call 'erlang':'element'(2, _Tuple139) in {'reply', _Result140, State1}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <OtherSelector> when 'true' ->
@@ -401,7 +371,9 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
                     %% own {error, E, State} contract (state rolled back, as for a
                     %% crashing method body) so handle_call replies with it
                     %% instead of crashing the actor on an unmatched result.
-                    case call 'beamtalk_dispatch':'invoke_extension'(ExtFun, OtherSelector, 'FoldTupleAccCtr', Args, Self, State) of
+                    %% ADR 0137 §2: the extension fun is Erlang that does not bracket
+                    %% what it calls, so it runs through call_foreign/3.
+                    case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'invoke_extension', 6), [ExtFun, OtherSelector, 'FoldTupleAccCtr', Args, Self, State]) of
                         <{'reply', ExtResult, ExtState}> when 'true' ->
                             {'reply', ExtResult, ExtState}
                         <{'error', ExtError}> when 'true' ->
@@ -409,7 +381,8 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
                     end
                 <'not_found'> when 'true' ->
                     %% ADR 0006: Try hierarchy walk before DNU
-                    case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'FoldTupleAccCtr') of
+                    %% ADR 0137 §2: inherited runtime methods run through call_foreign/3.
+                    case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'super', 5), [OtherSelector, Args, Self, State, 'FoldTupleAccCtr']) of
                         <{'reply', InheritedResult, InheritedState}> when 'true' ->
                             {'reply', InheritedResult, InheritedState}
                         <{'error', DispatchError}> when 'true' ->
@@ -493,7 +466,7 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
       'initialize_assigns' => [],
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'countedCollect:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'countedSelect:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'countedReject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'firstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'anyOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'takeUnder:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~
 
@@ -534,7 +507,7 @@ module 'foldl_tuple_acc_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
       'initialize_assigns' => [],
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'countedCollect:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'countedSelect:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'countedReject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'firstOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'anyOver:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'takeUnder:in:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 1,
+      'class_var_abi' => 2,
       'direct_class_methods' => ~{}~
     }~,
             'isConstructible' => 'false'

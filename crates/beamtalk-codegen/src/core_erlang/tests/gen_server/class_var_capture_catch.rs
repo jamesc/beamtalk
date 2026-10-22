@@ -233,9 +233,15 @@ fn assert_catch_boundary_order(text: &str, expected_catches: usize) {
         })
         .collect();
     assert_eq!(anchors.len(), expected_catches, "{text}");
+    // (ADR 0137 §5: an actor method or closure also takes its cell boundary
+    // between the snapshot and the `try`.)
     assert_eq!(
-        text.matches("call 'beamtalk_class_vars':'snapshot'() in try")
-            .count(),
+        regex::Regex::new(
+            r"call 'beamtalk_class_vars':'snapshot'\(\) in (let _ = call 'erlang':'put'\('\$bt_actor_state', \w+\) in |let \w+ = call 'beamtalk_actor_state':'snapshot'\(\) in )?try"
+        )
+        .unwrap()
+        .find_iter(text)
+        .count(),
         expected_catches,
         "a snapshot immediately precedes every try: {text}"
     );

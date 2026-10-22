@@ -1,15 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Fixture that triggers a compile error: an Actor method makes a
-// state-changing send to a local bound only to `self` (BT-3998). The change is
-// lost when the message ends. Used by
-// tests/repl-protocol/cases/adr0133_escaping_block.btscript via @load-error.
+// Fixture: an Actor method makes a state-changing send to a local bound to
+// `self` (BT-3998). Under ADR 0137 the change is kept. Used by
+// tests/repl-protocol/cases/adr0133_escaping_block.btscript via @load.
 
 Actor subclass: Bt3998SelfAliasWriteError
   state: x = 0
 
   setX: v => self.x := v
+
+  getX => self.x
 
   writeThroughAlias =>
     other := self

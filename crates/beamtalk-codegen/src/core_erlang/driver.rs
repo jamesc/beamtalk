@@ -109,7 +109,6 @@ pub fn generate_module_with_warnings(
     if let Some(enabled) = options.codegen_diagnostics {
         generator.codegen_diagnostics_enabled = enabled;
     }
-    let _synced_calls_override = generator.apply_synced_calls_option(options.synced_calls);
 
     // Consume the driver's already-computed analysis when supplied
     // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,

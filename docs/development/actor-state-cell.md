@@ -401,9 +401,16 @@ The oracle (BT-3950) settles the rows that mix actor state with locals. Phase 0
 ran it with the flag on and off and every cell agreed, because the matrix
 probes local threading and the prototype did not change it, so they are
 decided after Phase 2b: `RESIDUAL_DENY_SET` `EvaluatedBlockValue` (BT-3981,
-with its PIN-BUGs in `bt3971test.bt` and `bt3939tier2inlined_test.bt`) and
-`GroupByValue`, and the roughly 15 `DENY_SET` rows marked `stateful`, 11 of
-them for actors.
+with its PIN-BUGs in `bt3971test.bt` and `bt3939tier2inlined_test.bt`) and the
+roughly 15 `DENY_SET` rows marked `stateful`, 11 of them for actors.
+(`GroupByValue` is gone: ADR 0133 Phase 3, BT-3912, deleted that residual.)
+
+Phase 2b (BT-4009) result: the generated corpus
+(`scripts/gen-actor-closure-matrix.py`, 260 at-home and 6 away cells) agrees with
+the rule for every shape it generates, on a BEAM. The corpus leaves out the
+shapes the surviving validator rows still reject (an inlined `[...] value` that
+writes a field or sends to `self` as a message argument; the local-threading
+rows), so those rows stay until Phase 3 (BT-4010) deletes them.
 
 These stay because method bodies and plain self-sends still thread: the
 `State` family, the actor frame mode, the `{reply, R, State}` method
@@ -467,7 +474,7 @@ writes from the cell before answering. Optionally skip the store when no
 field write happened since the last sync (§7). The exit gate is a generated
 actor-field-closure corpus (block shape × send kind × at home or away ×
 position), compiled and run on a BEAM, with every case answering what the
-rule in ADR 0137 says. Remove the flag and bump the module ABI marker.
+rule in ADR 0137 says. Remove the flag and bump the module ABI marker (done in BT-4009: `class_var_abi` is the one marker, now 2).
 
 **Phase 3 (M).** Delete the §8 table and whatever the oracle confirms
 after Phase 2b. In `docs/beamtalk-language-features.md`, replace the BT-3922

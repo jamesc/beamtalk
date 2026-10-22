@@ -640,6 +640,14 @@ pub enum SendUserCode {
     /// generator's to judge (it knows whether the fold is threaded); the
     /// block analysis counts it, conservatively, as one.
     InlinedOrClosureCall,
+    /// A loop with literal blocks (`whileTrue:`, `to:do:`, `timesRepeat:`,
+    /// `repeat`, ...), or an evaluated literal block (`[...] value`): lowered in place when its body carries something (a
+    /// threaded local or an actor state effect), otherwise handed to the
+    /// runtime with its blocks as closures, which run in this process. Unlike
+    /// [`Self::InlinedOrClosureCall`] it is not a send to an unknown receiver,
+    /// so the block analysis does not count it as one that runs user code
+    /// (the blocks' own sends are counted); codegen judges the call.
+    LoopOrClosureCall,
     /// Anything else: bracket it. This is the default (ADR 0137 §2): a
     /// primitive that takes a block or can dispatch to user code for some
     /// argument, a non-inlined `value`, `perform:`, a send to an unknown or
@@ -676,7 +684,7 @@ pub fn send_user_code(
         }
         if wk.is_block_value() {
             return if is_block(receiver) {
-                SendUserCode::Inlined
+                SendUserCode::LoopOrClosureCall
             } else {
                 SendUserCode::MayRun
             };
@@ -720,13 +728,32 @@ pub fn send_user_code(
         let args_inlined = state_threaded_block_arg_indices(name)
             .iter()
             .all(|&i| arguments.get(i).is_some_and(is_block));
-        return if receiver_inlined && args_inlined {
-            SendUserCode::Inlined
-        } else {
+        return if !(receiver_inlined && args_inlined) {
             SendUserCode::MayRun
+        } else if is_loop_selector(name) {
+            SendUserCode::LoopOrClosureCall
+        } else {
+            SendUserCode::Inlined
         };
     }
     SendUserCode::MayRun
+}
+
+/// Whether `name` is a loop message whose literal blocks codegen lowers in
+/// place only when the loop carries something ([`SendUserCode::LoopOrClosureCall`]).
+fn is_loop_selector(name: &str) -> bool {
+    matches!(
+        name,
+        "whileTrue:"
+            | "whileFalse:"
+            | "whileTrue"
+            | "whileFalse"
+            | "timesRepeat:"
+            | "timesRepeat"
+            | "repeat"
+            | "to:do:"
+            | "to:by:do:"
+    )
 }
 
 // ─── Structurally lowered binary selectors (shared leaf, BT-4020) ───────────
@@ -1329,16 +1356,28 @@ mod tests {
         for src in [
             "x ifTrue: [1] ifFalse: [2]",
             "x ifNil: [1]",
-            "[x] whileTrue: [y]",
-            "5 timesRepeat: [y]",
-            "1 to: 3 do: [:i | i]",
-            "[1] value",
-            "[:a | a] value: 1",
             "[x] on: Error do: [:e | 0]",
             "[x] ensure: [y]",
         ] {
             assert_eq!(classify(src), SendUserCode::Inlined, "{src}");
         }
+    }
+
+    #[test]
+    fn a_loop_with_literal_blocks_is_inlined_or_a_closure_call() {
+        for src in [
+            "[x] whileTrue: [y]",
+            "[x] whileFalse: [y]",
+            "5 timesRepeat: [y]",
+            "1 to: 3 do: [:i | i]",
+            "1 to: 9 by: 2 do: [:i | i]",
+            "[x] repeat",
+            "[1] value",
+            "[:a | a] value: 1",
+        ] {
+            assert_eq!(classify(src), SendUserCode::LoopOrClosureCall, "{src}");
+        }
+        assert_eq!(classify("5 timesRepeat: b"), SendUserCode::MayRun);
     }
 
     #[test]
