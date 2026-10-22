@@ -196,10 +196,6 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// How many bracket windows enclose the code being compiled. A call
     /// compiled inside one runs between a store and a reload.
     pub(in crate::core_erlang) window_depth: usize,
-    /// A bracket was built since the last method body was rendered: that method
-    /// leaves the cell at the version it stored last, so its reply stores the
-    /// final `State` back before it returns (`exit_store_doc`).
-    pub(in crate::core_erlang) method_bracketed: bool,
     /// Calls that may run user code compiled outside every window.
     pub(in crate::core_erlang) gaps: Vec<UnbracketedSend>,
     /// The class of a conditional with a `super` send in a branch
@@ -212,7 +208,6 @@ impl SyncedCallState {
     pub(in crate::core_erlang) fn new() -> Self {
         Self {
             window_depth: 0,
-            method_bracketed: false,
             gaps: Vec::new(),
             inlined_classes: std::cell::RefCell::default(),
         }
@@ -643,7 +638,6 @@ impl CoreErlangGenerator {
         {
             return ThreadedStmt::Statement(call, span);
         }
-        self.synced.method_bracketed = true;
         ThreadedStmt::SyncedCall {
             store,
             call,
@@ -700,7 +694,6 @@ impl CoreErlangGenerator {
             self.state_version(),
             self.current_frame(),
         );
-        self.synced.method_bracketed = true;
         let node = ThreadedStmt::SyncedCall {
             store,
             call,
@@ -764,21 +757,21 @@ impl CoreErlangGenerator {
 }
 
 impl CoreErlangGenerator {
-    /// Wraps a rendered method body: when the method built a bracket, the cell holds
+    /// Wraps a rendered method body: when the method stored to the cell, the cell holds
     /// the version stored last (older than the `State` the method answers once it
-    /// threads on), so the reply stores its final `State` back. Every compiled
+    /// threads on; every store goes through `cell_put_call`), so the reply stores its final `State` back. Every compiled
     /// callee then hands `call_foreign/3` an answer equal to the cell, which is what
     /// lets it tell a block's write from a compiled method's own history.
     pub(in crate::core_erlang) fn with_exit_store(
         &mut self,
         body: Document<'static>,
     ) -> Document<'static> {
-        if !std::mem::take(&mut self.synced.method_bracketed) {
+        if !super::threaded_ir::take_cell_store_emitted() {
             return body;
         }
         let reply = self.fresh_temp_var("ExitReply");
         let state = self.fresh_temp_var("ExitState");
-        docvec![
+        let doc = docvec![
             "let ",
             leaf::var(reply.clone()),
             " = ",
@@ -794,7 +787,10 @@ impl CoreErlangGenerator {
             " <_> when 'true' -> ",
             leaf::var(reply),
             " end",
-        ]
+        ];
+        // The exit store is itself a cell store; it must not mark the next method.
+        super::threaded_ir::take_cell_store_emitted();
+        doc
     }
 }
 
@@ -940,7 +936,6 @@ impl CoreErlangGenerator {
         self.next_state_var();
         let load = VersionedVar::new(VersionPrefix::State, self.state_version(), frame);
         let result = self.fresh_temp_var("Synced");
-        self.synced.method_bracketed = true;
         prelude.push(ThreadedStmt::SyncedCall {
             store,
             call,

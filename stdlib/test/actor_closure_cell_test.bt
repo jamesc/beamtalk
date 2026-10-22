@@ -132,3 +132,18 @@ TestCase subclass: ActorClosureCellTest
     c := ClosureCellForeignExit spawn
     self assert: c direct equals: 7
     self assert: c n equals: 7
+
+  testCompiledMethodWithOnDoStoreReachedByPerformKeepsFinalState =>
+    c := ClosureCellForeignExit spawn
+    self assert: c runStores equals: 3
+    self assert: c n equals: 3
+
+  testCompiledMethodWithEnsureStoreReachedByPerformKeepsFinalState =>
+    c := ClosureCellForeignExit spawn
+    self assert: c runStoresEnsure equals: 5
+    self assert: c n equals: 5
+
+  testCompiledMethodWithEarlyReturnStoreReachedByPerform =>
+    c := ClosureCellForeignExit spawn
+    self assert: c runStoresEarlyReturn equals: 6
+    self assert: c n equals: 6

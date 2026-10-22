@@ -89,7 +89,7 @@ pub(super) use build::{
     build_family_construct_tuple, build_family_local_threading_prelude,
     build_local_threading_prelude, build_method_body, opaque_escapes, stepping_local_rebinds,
 };
-pub(super) use emit::{RenderCtx, cell_put_call, render, render_value};
+pub(super) use emit::{RenderCtx, cell_put_call, render, render_value, take_cell_store_emitted};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{

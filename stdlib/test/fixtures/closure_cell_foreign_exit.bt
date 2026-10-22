@@ -24,3 +24,29 @@ Actor subclass: ClosureCellForeignExit
     b := [:x | self.n := 7]
     self ifNotNil: b
     self.n
+
+  // Compiled methods that store to the cell without a bracketed send (`on:do:`,
+  // `ensure:`, `^`) still leave the cell at their final state when reached
+  // through a foreign exit.
+  stores =>
+    self.n := 1
+    [self.n := 2] on: Error do: [:e | 0]
+    self.n := 3
+
+  storesEnsure =>
+    [self.n := 4] ensure: [nil]
+    self.n := 5
+
+  storesEarlyReturn =>
+    self.n := 6
+    [^self.n] ensure: [nil]
+
+  runStores =>
+    self perform: #stores
+    self.n
+
+  runStoresEnsure =>
+    self perform: #storesEnsure
+    self.n
+
+  runStoresEarlyReturn => self perform: #storesEarlyReturn

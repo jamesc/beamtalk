@@ -322,10 +322,25 @@ pub(in crate::core_erlang) fn render(
 /// `CELL`). The one Rust definition the bracket renders with.
 pub(in crate::core_erlang) const ACTOR_STATE_CELL: &str = "$bt_actor_state";
 
-/// `call 'erlang':'put'('$bt_actor_state', <state>)`: the one emitter of the
-/// cell store, shared by the [`ThreadedStmt::SyncedCall`] bracket and the
-/// `on:do:` cell boundary (`actor_state_access.rs`).
+thread_local! {
+    /// A cell store was emitted since the last [`take_cell_store_emitted`].
+    static CELL_STORE_EMITTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether any cell store was emitted since the last call, and clears the mark.
+/// A method that stored an intermediate `State` leaves the cell older than its
+/// answer, so its reply stores the final `State` back (`with_exit_store`). The
+/// mark is set by [`cell_put_call`], the one emitter of every store, so a new
+/// store site cannot be missed. A stale mark only adds a harmless exit store.
+pub(in crate::core_erlang) fn take_cell_store_emitted() -> bool {
+    CELL_STORE_EMITTED.with(std::cell::Cell::take)
+}
+
+/// `call 'erlang':'put'('$bt_actor_state', <state>)`: the one emitter of every
+/// cell store: the [`ThreadedStmt::SyncedCall`] bracket, the `on:do:` and
+/// `ensure:` boundaries, the `^` pre-throw store and the exit store.
 pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
+    CELL_STORE_EMITTED.with(|c| c.set(true));
     docvec![
         "call 'erlang':'put'(",
         leaf::atom(ACTOR_STATE_CELL),
