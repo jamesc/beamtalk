@@ -33,6 +33,28 @@ first_stop_request_wins_test_() ->
         ]
     end}.
 
+%% flush_loggers/0 is exported and can be called directly in EUnit. The default
+%% OTP logger configuration includes at least the 'default' handler (logger_std_h),
+%% so the first arm fires and calls logger_std_h:filesync/1. The second arm
+%% fires when a handler with a different module is present (e.g. the test-only
+%% beamtalk_noop_log_handler below).
+flush_loggers_returns_ok_test() ->
+    ?assertEqual(ok, beamtalk_script_harness:flush_loggers()).
+
+flush_loggers_skips_non_std_handler_test_() ->
+    HandlerId = beamtalk_flush_loggers_noop_test_handler,
+    {setup,
+        fun() ->
+            ok = logger:add_handler(HandlerId, beamtalk_noop_log_handler, #{}),
+            HandlerId
+        end,
+        fun(Id) ->
+            _ = logger:remove_handler(Id)
+        end,
+        fun(_Id) ->
+            [?_assertEqual(ok, beamtalk_script_harness:flush_loggers())]
+        end}.
+
 %% The decoupled case: a stop is requested from a process that is not on the
 %% entry's call chain, then the entry completes normally (implicit status 0). The
 %% harness must defer (block) instead of halting the VM with 0.

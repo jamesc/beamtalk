@@ -217,6 +217,13 @@
 - Fix: a Tier 2 block that rebinds a body-local variable in an inner loop is now a compile error instead of silently dropping the write (BT-3939, #4425)
 - Fix: an actor inline-block local in a direct loop body is now a compile error instead of crashing `erlc` (BT-3948, #4444)
 - Writing-block collection messages now also guard against runtime extensions and `species` overrides — `stateful_block_dispatch` is raised when a runtime extension overrides a collection selector or when the class overrides `species` (BT-3951, #4432)
+- Fix: a while loop (or fold, conditional, `on:do:`, assignment) in a self-send argument position in a class method no longer fails `erlc` with an unbound variable (BT-4014, #4505)
+- Fix: a binding written in a `whileTrue:`/`whileFalse:` condition at the REPL is now carried across iterations instead of being silently dropped or crashing `erlc` (BT-4015, #4500)
+- Fix: an own-class reference with a binary selector (e.g. `C + 1`) inside a class method no longer re-enters the class's own gen_server, avoiding a deadlock or `dispatch_error` (BT-4005, #4496)
+- Fix: a conditional with a self-send receiver and a non-literal block argument in an actor fold body no longer raises `badarg` (BT-4017, #4488)
+- Fix: `self new` / `self new:` / `self spawn` / `self class` / `self error:` inside a direct-called `class sealed` method no longer raises `badarg` — the receiver is now correctly resolved as the calling class (BT-4029, #4489)
+- Fix: a conditional whose receiver is a self-send in a Letrec loop body no longer trips `UnboundVersion State1` — the state variable is now correctly threaded across the call boundary (BT-4000, #4484)
+- Fix: a field write in a `whileTrue:`/`whileFalse:` condition of a value type is now correctly carried across iterations instead of being silently dropped (BT-4002, #4476)
 
 ### Runtime
 
@@ -231,6 +238,13 @@
 - Fix: `^super ...` with a field-writing conditional argument no longer trips `StateEffectEscapesExpression` (BT-3819, #4303)
 - Fix: compiler panic (`StateAccLoopWithoutLocals`) on a class/value-type counted loop whose body holds a non-producer conditional with a nested loop writing an arm-local — the loop/fold plan no longer selects a locals-less `StateAcc` when the threaded set is empty (BT-3834, #4320)
 - Fix: wrapper-block locals (e.g. a loop variable `i` introduced by an `ensure:` block) incorrectly counted as outer cross-scope writes, causing a codegen panic in class methods with certain fold/`ensure:`/`whileTrue:` nesting patterns (BT-3848, #4310)
+- **Beamtalk-compiled modules now export `module_info/0,1` (BT-4067, #4507)** — all compiled modules (classes, actors, values, protocols, extensions, REPL snippets) now include the standard `module_info/0,1` exports that OTP tools expect, so `eprof`, `tprof`, `fprof` and observer no longer crash with `undef` on any node running Beamtalk code.
+- **`self hasField:` no longer copies the generation table per call (BT-4071, #4503)** — `hasField:` dispatch and general instance-method resolution no longer resolve through the xref index, eliminating a per-call copy of the generation table. Method dispatch is now a direct walk over published method records.
+- **Class references, `isKindOf:` and `Result ok:/error:` no longer call class processes (BT-4065, #4504)** — class literal references, `isKindOf:` tests, and `Result ok:`/`error:` unwrapping now use ETS reads or intrinsics instead of gen_server calls to class processes, eliminating a serialization bottleneck.
+- Fix trace-store aggregates leaking one ETS row (~540 bytes) per `{Pid, Selector}` for every actor — dead actors' rows are now retired and their atomics slots reused (BT-4066, #4502)
+- Fix dynamic sends to a Value instance rebuilding the class's module name from strings on every call — resolved module names are now cached (BT-4064, #4501)
+- Fix dynamic sends to a package Value instance calling `code:ensure_loaded` on nonexistent modules — resolution now uses `erlang:module_loaded/1` BIF plus ETS metadata instead of code_server round trips (BT-4053, #4494)
+- Fix inline FFI calls (e.g. `Erlang erlang monotonic_time`) re-reading `module_info(exports)` on every call — the export list is now cached, saving ~12–15 µs per call (BT-4021, #4487)
 
 ### Internal
 
@@ -277,6 +291,7 @@
 - **`beamtalk test-docs` runs chapter-embedded `TestCase` blocks** — `TestCase subclass:` blocks embedded in learning chapters are now compiled and run by `beamtalk test-docs` (the chapter text is the single source of truth; `<!-- btskip -->` excludes illustrative sketches). Deleted 35 hand-kept fixture copies (BT-3932, #4414)
 - **`beamtalk run` / `repl --node` pin `ERL_EPMD_ADDRESS` to loopback (BT-3987)** — all CLI-spawned `erl` processes now default `ERL_EPMD_ADDRESS` to `127.0.0.1`, preventing `epmd` from binding all network interfaces. A new `erl_spawn_lint` module enforces this invariant (#4465)
 - `beamtalk new` CI template now targets the newest supported OTP major from `otp-support.toml` instead of a hardcoded value (BT-3955, #4428)
+- **`just bench-vs-elixir` microbenchmark suite (#4508)** — a new `benchmarks/vs-elixir/` directory contains side-by-side Beamtalk and Elixir microbenchmarks for comparing dispatch, collection, and concurrency performance. Results are documented in `docs/development/benchmarks.md`.
 
 ### Standard Library
 
