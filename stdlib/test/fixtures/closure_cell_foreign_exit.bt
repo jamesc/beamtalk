@@ -34,8 +34,20 @@ Actor subclass: ClosureCellForeignExit
     self.n := 3
 
   storesEnsure =>
-    [self.n := 4] ensure: [nil]
+    self.n := 4
+    [nil] ensure: [nil]
     self.n := 5
+
+  // Returns to its entry value after storing: without the exit store the stale
+  // cell would replace the answer.
+  storesBackToEntry =>
+    self.n := 1
+    [0] on: Error do: [:e | 0]
+    self.n := 2
+
+  runStoresBackToEntry =>
+    self perform: #storesBackToEntry
+    self.n
 
   storesEarlyReturn =>
     self.n := 6

@@ -9,3 +9,5 @@ Actor subclass: ClosureCellSuperBase
   bump => self.n := self.n + 1
 
   n => self.n
+
+  peekViaPerform => self perform: #n

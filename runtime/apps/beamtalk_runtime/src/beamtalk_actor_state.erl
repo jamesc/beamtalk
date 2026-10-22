@@ -287,10 +287,16 @@ super_send(Self, Capture, Class, Selector, Args) ->
             end;
         false ->
             State = away_capture(Self, Selector, Capture),
-            case beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
+            %% The superclass code stores to this process's cell (`call_foreign/3`,
+            %% `SyncedCall`, exit store); that must not leave another actor's State
+            %% in the cell of the process the block is running in.
+            Saved = snapshot(),
+            try beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
                 {reply, Result, State} -> Result;
                 {reply, _Result, _Changed} -> raise_unreachable(Self, Selector, write);
                 {error, Error} -> beamtalk_error:raise(Error)
+            after
+                uninstall(Saved)
             end
     end.
 

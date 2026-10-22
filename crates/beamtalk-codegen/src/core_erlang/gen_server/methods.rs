@@ -253,6 +253,8 @@ impl CoreErlangGenerator {
             .body
             .first()
             .map_or_else(|| method.span, |s| s.expression.span());
+        // The mark is scoped to one method body (`with_exit_store` takes it).
+        threaded_ir::take_cell_store_emitted();
         let lowered = self.lower_method_definition_body_with_reply(method);
         self.set_current_nlr_token(None);
         let stmts = lowered?;

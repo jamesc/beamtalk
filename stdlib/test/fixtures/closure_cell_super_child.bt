@@ -27,3 +27,7 @@ ClosureCellSuperBase subclass: ClosureCellSuperChild
   doLoop =>
     #(1, 2, 3) do: [:e | super bump]
     self.n
+
+  peekBlock => [super peekViaPerform]
+
+  runBlock: aBlock => aBlock value

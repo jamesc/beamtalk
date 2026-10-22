@@ -147,3 +147,17 @@ TestCase subclass: ActorClosureCellTest
     c := ClosureCellForeignExit spawn
     self assert: c runStoresEarlyReturn equals: 6
     self assert: c n equals: 6
+
+  testCompiledMethodReturningToEntryValueAfterStoreKeepsFinalState =>
+    c := ClosureCellForeignExit spawn
+    self assert: c runStoresBackToEntry equals: 2
+    self assert: c n equals: 2
+
+  testSuperBlockRunByAnotherActorLeavesItsStateAlone =>
+    a := ClosureCellSuperChild spawn
+    a bump
+    a bump
+    b := ClosureCellSuperChild spawn
+    self assert: (b runBlock: a peekBlock) equals: 2
+    self assert: b n equals: 0
+    self assert: a n equals: 2
