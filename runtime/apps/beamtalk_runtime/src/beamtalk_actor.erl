@@ -1549,7 +1549,13 @@ sync_send(ActorPid, Selector, Args) ->
     %% inside a handle_call/handle_cast dispatch), dispatch directly to avoid
     %% gen_server:call deadlock. This catches aliased self-sends like:
     %%   other := self. other fieldNames
-    case ActorPid =:= self() andalso beamtalk_actor_state:installed() of
+    %% The owner check keeps the fast path off a cell holding another actor's
+    %% state (stored by a nested away `super_send/5`): that send takes the
+    %% remote path instead of running with the wrong state.
+    case
+        ActorPid =:= self() andalso
+            beamtalk_actor_state:cell_owner() =:= ActorPid
+    of
         true ->
             self_dispatch(Selector, Args);
         false ->
@@ -1799,7 +1805,12 @@ sync_send(ActorPid, Selector, Args, Timeout) when
     Timeout =:= infinity
 ->
     %% Layer 1: Fast-path for self-sends (same as sync_send/3).
-    case ActorPid =:= self() andalso beamtalk_actor_state:installed() of
+    %% (Owner check: see sync_send/3 — a foreign-owned cell takes the remote
+    %% path rather than dispatching with another actor's state.)
+    case
+        ActorPid =:= self() andalso
+            beamtalk_actor_state:cell_owner() =:= ActorPid
+    of
         true ->
             self_dispatch(Selector, Args);
         false ->

@@ -137,7 +137,11 @@ Method bodies keep threading `State` in locals as today, so a field access in
 a method costs what it costs now. The process-dictionary cell
 `'$bt_actor_state'`, installed by every callback, carries the state only
 across a call that may run user code: the compiler stores the current
-version before such a call and loads it after. A block that runs inside the
+version before such a call and loads it after. The cell is tagged with its
+owner as `{Owner, Map}`: a block is at home only with the cell present *and*
+owned by its own actor, so a block of the host actor running inside a nested
+away `super_send/5` reads its creation-time capture instead of the other
+actor's fields. A block that runs inside the
 actor reads and writes the cell; one that runs elsewhere uses its
 creation-time capture. A self-send to a compiled method of this actor stays
 threaded with no store or load, and methods keep answering
@@ -391,7 +395,13 @@ Detail per phase is in the design note.
   an `on:do:`/`ensure:` in operand position that leaked its `{Value, State}`
   pair (it is now a producer with an empty local set); and a `super` send in a
   block or loop body, which now runs against the cell, bracketed by the call that
-  runs it. The shapes the surviving validator rows still reject are not in the
+  runs it. Review then found one more bleed: while an away `super` runs, the
+  superclass stores another actor's state in the host's cell, and a host
+  block running inside the call read it as its own. The cell now carries its
+  owner (`{Owner, Map}` in `beamtalk_actor_state`), `at_home/1` checks
+  ownership, every store preserves it, and the corpus covers the shape (an
+  away super running one of the host's blocks). The shapes the surviving
+  validator rows still reject are not in the
   corpus; those rows go in Phase 3.
 - **Phase 3 (M).** Delete the rejections and guards; update the language
   guide.

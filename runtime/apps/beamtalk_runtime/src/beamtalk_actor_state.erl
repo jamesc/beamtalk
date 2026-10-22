@@ -12,22 +12,28 @@ Single owner of the actor-state cell and of every access to it (ADR 0137
 
 While one of an actor's `gen_server` callbacks runs user code, the actor's
 state map is installed in the calling process's dictionary under one key (the
-*cell*). The cell exists only inside a callback: `install/1` plants it on
-entry, `take/0` reads it back as the callback's new state on a normal exit,
-and `uninstall/1` restores whatever was there before (an enclosing callback's
-cell, or nothing) on every exit. Between callbacks the `gen_server` state is
-the only copy.
+*cell*), tagged with the owning actor: `{Owner, Map}` where `Owner` is the
+`#beamtalk_object{pid}` the map belongs to. The tag lets `at_home/1` tell
+apart the host actor's own state from another actor's state that nested
+`super_send/5` or `call_foreign/3` machinery stored in this process (ADR 0137
+§2, §5). The cell exists only inside a callback: `install/1` plants it on
+entry, `take/0` reads the map back as the callback's new state on a normal
+exit, and `uninstall/1` restores whatever was there before (an enclosing
+callback's cell, or nothing) on every exit. Between callbacks the
+`gen_server` state is the only copy.
 
 ## At home and away
 
 A block is *at home* when a callback of its own actor is running in the
 current process: `Self#beamtalk_object.pid =:= self()` with the cell
-installed. At home `get/2`, `put/3`, `has/2` and `clear/2` read and write the
-cell. Away (another process, a `Timer`, after the callback returned) the
-3-arity `get/3` and `has/3` answer from the creation-time `capture/2` map, and
-any write raises `actor_state_unreachable`. Pid equality is the test (not the
-class name) because a restarted actor is a new process: a block from the old
-process is not at home in the new one.
+installed *and owned by that same actor*. At home `get/2`, `put/3`, `has/2`
+and `clear/2` read and write the cell. Away (another process, a `Timer`,
+after the callback returned, or while the cell holds another actor's state
+for a nested away `super_send/5`) the 3-arity `get/3` and `has/3` answer from
+the creation-time `capture/2` map, and any write raises
+`actor_state_unreachable`. Pid equality is the test (not the class name)
+because a restarted actor is a new process: a block from the old process is
+not at home in the new one.
 
 ## Callback contract
 
@@ -54,6 +60,8 @@ only for `super_send/5` and `refresh/2`, which call them.
     snapshot/0,
     restore/1,
     installed/0,
+    cell_owner/0,
+    store/1,
     adapt/1,
     get/2,
     get/3,
@@ -73,7 +81,7 @@ only for `super_send/5` and `refresh/2`, which call them.
 
 -define(CELL, '$bt_actor_state').
 
--type cell() :: map() | undefined.
+-type cell() :: {pid() | tuple(), map()} | undefined.
 -type capture() :: none | map().
 -type adapted() :: {reply, term()} | noreply | {error, term()}.
 
@@ -82,13 +90,14 @@ only for `super_send/5` and `refresh/2`, which call them.
 %%====================================================================
 
 -doc """
-Install `State` as the cell and answer what was there before (`undefined`, or
-an enclosing callback's state) for `uninstall/1`.
+Install `State` as the cell, owned by the calling process's actor, and answer
+what was there before (`undefined`, or an enclosing callback's cell) for
+`uninstall/1`.
 """.
 -spec install(map()) -> cell().
 install(State) when is_map(State) ->
     Old = erlang:get(?CELL),
-    erlang:put(?CELL, State),
+    erlang:put(?CELL, {self(), State}),
     Old.
 
 -doc """
@@ -98,7 +107,7 @@ The cell's current map: the callback's new state on a normal exit. Raises
 -spec take() -> map().
 take() ->
     case erlang:get(?CELL) of
-        State when is_map(State) -> State;
+        {_, State} when is_map(State) -> State;
         _ -> raise_no_cell(take)
     end.
 
@@ -107,7 +116,7 @@ take() ->
 uninstall(undefined) ->
     erlang:erase(?CELL),
     ok;
-uninstall(Old) when is_map(Old) ->
+uninstall({_, _} = Old) ->
     erlang:put(?CELL, Old),
     ok.
 
@@ -131,6 +140,38 @@ installed() ->
     erlang:get(?CELL) =/= undefined.
 
 -doc """
+The actor that owns the installed cell (`undefined` when no cell is
+installed). Fast paths that dispatch on the cell's presence (a self-send
+while already inside a callback) compare this against the receiver so a cell
+holding another actor's state — stored by a nested away `super_send/5` —
+never serves as the receiver's own state.
+""".
+-spec cell_owner() -> pid() | tuple() | undefined.
+cell_owner() ->
+    case erlang:get(?CELL) of
+        {Owner, State} when is_map(State) -> Owner;
+        _ -> undefined
+    end.
+
+-doc """
+Store `State` in the cell, keeping the current owner (the actor whose state
+the cell holds); with no cell installed, the calling process's actor becomes
+the owner. Generated bracket stores and `call_foreign/3` go through here so a
+store made while another actor's state is installed (a nested away
+`super_send/5`) keeps that actor's ownership instead of claiming the state
+for the host process.
+""".
+-spec store(map()) -> ok.
+store(State) when is_map(State) ->
+    Owner =
+        case erlang:get(?CELL) of
+            {Current, CurrentState} when is_map(CurrentState) -> Current;
+            _ -> self()
+        end,
+    erlang:put(?CELL, {Owner, State}),
+    ok.
+
+-doc """
 Adapter for code that answers `{reply, R, NewState}`, `{noreply, NewState}` or
 `{error, Reason, State}` (native methods, ADR 0066 extension funs,
 `beamtalk_actor:dispatch/4`). Stores the state in the cell and answers the
@@ -138,13 +179,13 @@ result without it; the callback then returns `take/0`.
 """.
 -spec adapt({reply, term(), map()} | {noreply, map()} | {error, term(), map()}) -> adapted().
 adapt({reply, Result, NewState}) when is_map(NewState) ->
-    erlang:put(?CELL, NewState),
+    store(NewState),
     {reply, Result};
 adapt({noreply, NewState}) when is_map(NewState) ->
-    erlang:put(?CELL, NewState),
+    store(NewState),
     noreply;
 adapt({error, Reason, State}) when is_map(State) ->
-    erlang:put(?CELL, State),
+    store(State),
     {error, Reason}.
 
 %%====================================================================
@@ -202,7 +243,7 @@ can only mean a block wrote the field.
 """.
 -spec call_foreign(map(), fun(), [term()]) -> term().
 call_foreign(State, Fun, Args) when is_map(State), is_function(Fun, length(Args)) ->
-    erlang:put(?CELL, State),
+    store(State),
     reflect_cell(State, apply(Fun, Args)).
 
 -spec reflect_cell(map(), term()) -> term().
@@ -218,7 +259,7 @@ reflect_cell(_Entry, Answer) ->
 -spec reflect_state(map(), map()) -> map().
 reflect_state(Entry, Answered) ->
     case erlang:get(?CELL) of
-        Cell when is_map(Cell), Cell =/= Entry, Cell =/= Answered ->
+        {_, Cell} when is_map(Cell), Cell =/= Entry, Cell =/= Answered ->
             case Answered =:= Entry of
                 true -> Cell;
                 false -> raise_conflict(Entry)
@@ -280,7 +321,7 @@ super_send(Self, Capture, Class, Selector, Args) ->
         {true, State} ->
             case beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
                 {reply, Result, NewState} ->
-                    erlang:put(?CELL, NewState),
+                    store(NewState),
                     Result;
                 {error, Error} ->
                     beamtalk_error:raise(Error)
@@ -288,9 +329,13 @@ super_send(Self, Capture, Class, Selector, Args) ->
         false ->
             State = away_capture(Self, Selector, Capture),
             %% The superclass code stores to this process's cell (`call_foreign/3`,
-            %% `SyncedCall`, exit store); that must not leave another actor's State
-            %% in the cell of the process the block is running in.
+            %% `SyncedCall`, exit store). Tag those stores with the block owner,
+            %% so a block of the host actor running inside the call is away
+            %% (its `at_home/1` sees another owner's state) and reads its
+            %% creation-time capture instead of another actor's fields. The
+            %% host's own cell is restored afterwards.
             Saved = snapshot(),
+            erlang:put(?CELL, {owner_of(Self), State}),
             try beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
                 {reply, Result, State} -> Result;
                 {reply, _Result, _Changed} -> raise_unreachable(Self, Selector, write);
@@ -304,8 +349,7 @@ super_send(Self, Capture, Class, Selector, Args) ->
 -spec put(#beamtalk_object{}, atom(), term()) -> ok.
 put(Self, Name, Value) ->
     State = home_cell(Self, Name, write),
-    erlang:put(?CELL, State#{Name => Value}),
-    ok.
+    store(State#{Name => Value}).
 
 -doc "Whether field `Name` is present, at home; raises `actor_state_unreachable` away.".
 -spec has(#beamtalk_object{}, atom()) -> boolean().
@@ -324,8 +368,7 @@ has(Self, Name, Capture) ->
 -spec clear(#beamtalk_object{}, atom()) -> ok.
 clear(Self, Name) ->
     State = home_cell(Self, Name, write),
-    erlang:put(?CELL, maps:remove(Name, State)),
-    ok.
+    store(maps:remove(Name, State)).
 
 -doc """
 The map a block literal binds at creation: the cell at home, else `Outer` (the
@@ -367,11 +410,14 @@ protect(Fun) ->
 -spec at_home(#beamtalk_object{}) -> {true, map()} | false.
 at_home(#beamtalk_object{pid = Pid}) when Pid =:= self() ->
     case erlang:get(?CELL) of
-        State when is_map(State) -> {true, State};
+        {Owner, State} when is_map(State), Owner =:= Pid -> {true, State};
         _ -> false
     end;
 at_home(#beamtalk_object{}) ->
     false.
+
+-spec owner_of(#beamtalk_object{}) -> pid() | tuple().
+owner_of(#beamtalk_object{pid = Pid}) -> Pid.
 
 -spec home_cell(#beamtalk_object{}, atom(), read | write) -> map().
 home_cell(Self, Name, Mode) ->

@@ -1020,9 +1020,9 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// makes the call, then reloads the cell as the next version `load`:
     ///
     /// ```erlang
-    /// let _ = call 'erlang':'put'('$bt_actor_state', State3) in
+    /// let _ = call 'beamtalk_actor_state':'store'(State3) in
     /// let R = <call> in
-    /// let State4 = call 'erlang':'get'('$bt_actor_state') in
+    /// let State4 = call 'beamtalk_actor_state':'take'() in
     /// ```
     ///
     /// The one node the send emitter builds for such a call; the generator

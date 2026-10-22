@@ -30,9 +30,9 @@ fn a_synced_call_stores_calls_and_reloads() {
     let ir = [synced(state(3, frame), Some(state(4, frame)))];
     assert_eq!(
         lower_and_render(&ir).to_pretty_string(),
-        "let _ = call 'erlang':'put'('$bt_actor_state', State3) in \
+        "let _ = call 'beamtalk_actor_state':'store'(State3) in \
          let _Synced1 = call 'beamtalk_message_dispatch':'send'(Recv, 'do:', [Block]) in \
-         let State4 = call 'erlang':'get'('$bt_actor_state') in "
+         let State4 = call 'beamtalk_actor_state':'take'() in "
     );
 }
 
@@ -50,7 +50,7 @@ fn a_store_only_synced_call_renders_the_statement_verbatim_after_the_store() {
     }];
     assert_eq!(
         lower_and_render(&ir).to_pretty_string(),
-        "let _ = call 'erlang':'put'('$bt_actor_state', State2) in \
+        "let _ = call 'beamtalk_actor_state':'store'(State2) in \
          let _SD1 = call 'm':'dispatch'() in "
     );
 }
@@ -154,8 +154,8 @@ fn a_synced_call_in_a_loop_body_names_the_state_accumulator() {
     let mut ctx = RenderCtx::new(&mut generator);
     let text = render(&ir, &mut ctx).to_pretty_string();
     assert!(
-        text.contains("'put'('$bt_actor_state', StateAcc) in")
-            && text.contains("let StateAcc1 = call 'erlang':'get'('$bt_actor_state')"),
+        text.contains("'store'(StateAcc) in")
+            && text.contains("let StateAcc1 = call 'beamtalk_actor_state':'take'()"),
         "{text}"
     );
 }

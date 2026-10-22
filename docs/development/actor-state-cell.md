@@ -77,16 +77,21 @@ Method bodies keep threading `State` in locals as today. A field read is
 with no process-dictionary access.
 
 The cell `'$bt_actor_state'`, which every callback already installs, carries
-the state across any call that might run one of this actor's blocks. Before
-such a call the compiler emits one store of the current version to the cell;
-after it returns, one load into the next version:
+the state across any call that might run one of this actor's blocks, tagged
+with the owning actor as `{Owner, Map}`. Before such a call the compiler
+emits one store of the current version to the cell; after it returns, one
+load into the next version:
 
 ```erlang
-let _ = call 'erlang':'put'('$bt_actor_state', State3) in
+let _ = call 'beamtalk_actor_state':'store'(State3) in
 let R = call 'beamtalk_message_dispatch':'send'(Recv, 'do:', [Block]) in
-let State4 = call 'erlang':'get'('$bt_actor_state') in
+let State4 = call 'beamtalk_actor_state':'take'() in
 ...
 ```
+
+`store/1` keeps the cell's current owner, so a store made while another
+actor's state is installed (a nested away `super_send/5`) does not claim that
+state for the host process.
 
 A call needs the bracket when it may run user code in this process: a
 `value`-family call on a block that is not inlined, a send with a block
@@ -209,8 +214,12 @@ and the method that emitted the bracket loads its writes when it returns.
 
 A block is at home when a callback of its own actor is running in the current
 process, tested as `Self#beamtalk_object.pid =:= self()` with the cell
-present. Away, a field read answers the block's capture, a write raises
-`actor_state_unreachable`, and a self-send is a message to the actor's pid.
+present *and owned by that same actor*. While a nested away `super_send/5`
+runs, the cell holds the other actor's state, so a host block running inside
+the call is away: its reads answer its capture and its writes raise
+`actor_state_unreachable`. Otherwise away, a field read answers the block's
+capture, a write raises `actor_state_unreachable`, and a self-send is a
+message to the actor's pid.
 If the actor is blocked in the call that carried the block away,
 `check_call_stack/2` raises `deadlock_detected` or the call times out, as for
 any A→B→A cycle. A block passed to a class method is at home only when the

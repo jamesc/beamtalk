@@ -161,3 +161,24 @@ TestCase subclass: ActorClosureCellTest
     self assert: (b runBlock: a peekBlock) equals: 2
     self assert: b n equals: 0
     self assert: a n equals: 2
+
+  // While an away `super` runs, the cell holds the other actor's state: a
+  // block of the host actor running inside the call reads its own capture,
+  // not the other actor's fields.
+  testAwaySuperRunningHostBlockReadsHostField =>
+    a := ClosureCellSuperChild spawn
+    a bump
+    a bump
+    b := ClosureCellSuperChild spawn
+    self assert: (b runSuperApplyOnOwnRead: a superApplyBlock) equals: 0
+    self assert: b n equals: 0
+    self assert: a n equals: 2
+
+  testAwaySuperRunningHostBlockWriteRaises =>
+    a := ClosureCellSuperChild spawn
+    b := ClosureCellSuperChild spawn
+    self should: [
+      b runSuperApplyOnOwnWrite: a superApplyBlock
+    ] raise: #actor_state_unreachable
+    self assert: b n equals: 0
+    self assert: a n equals: 0

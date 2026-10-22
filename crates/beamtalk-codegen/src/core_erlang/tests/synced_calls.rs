@@ -12,7 +12,7 @@ fn compile(src: &str) -> String {
     generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed")
 }
 
-/// How many bracketed calls `out` holds (each is `let _Synced... = put(...)`).
+/// How many bracketed calls `out` holds (each stores through `store/1`).
 fn brackets(out: &str) -> usize {
     count(out, "let _Synced")
 }
@@ -42,8 +42,8 @@ fn a_send_to_another_object_is_stored_called_and_reloaded() {
     assert_eq!(brackets(&on), 1, "{on}");
     // The reload is the next `State` version, bound right after the call.
     assert!(
-        on.contains("call 'erlang':'put'('$bt_actor_state', State) in let _Synced")
-            && on.contains("let State1 = call 'erlang':'get'('$bt_actor_state') in"),
+        on.contains("call 'beamtalk_actor_state':'store'(State) in let _Synced")
+            && on.contains("let State1 = call 'beamtalk_actor_state':'take'() in"),
         "{on}"
     );
 }
@@ -66,9 +66,9 @@ fn a_self_send_that_may_reach_the_default_arm_stores_before_the_dispatch() {
         "Actor subclass: Probe\n  state: n = 0\n\n  a =>\n    self printString.\n    self.n\n";
     let on = compile(src);
     let control = compile("Actor subclass: Probe\n  state: n = 0\n\n  a =>\n    self.n\n");
-    let store = "let _ = call 'erlang':'put'('$bt_actor_state', State) in";
+    let store = "let _ = call 'beamtalk_actor_state':'store'(State) in";
     assert_eq!(count(&on, store), count(&control, store) + 1, "{on}");
-    assert!(!on.contains("let State1 = call 'erlang':'get'"), "{on}");
+    assert!(!on.contains("call 'beamtalk_actor_state':'take'()"), "{on}");
 }
 
 #[test]

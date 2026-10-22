@@ -237,7 +237,7 @@ fn assert_catch_boundary_order(text: &str, expected_catches: usize) {
     // between the snapshot and the `try`.)
     assert_eq!(
         regex::Regex::new(
-            r"call 'beamtalk_class_vars':'snapshot'\(\) in (let _ = call 'erlang':'put'\('\$bt_actor_state', \w+\) in |let \w+ = call 'beamtalk_actor_state':'snapshot'\(\) in )?try"
+            r"call 'beamtalk_class_vars':'snapshot'\(\) in (let _ = call 'beamtalk_actor_state':'store'\(\w+\) in |let \w+ = call 'beamtalk_actor_state':'snapshot'\(\) in )?try"
         )
         .unwrap()
         .find_iter(text)

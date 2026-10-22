@@ -31,3 +31,13 @@ ClosureCellSuperBase subclass: ClosureCellSuperChild
   peekBlock => [super peekViaPerform]
 
   runBlock: aBlock => aBlock value
+
+  // A block that `super`-sends: run by another actor, the send goes away.
+  superApplyBlock => [:blk | super apply: blk]
+
+  // Runs `superBlk` (another actor's block) with a block reading this actor's
+  // own field: while the away super runs, the cell holds the other actor's
+  // state, so this must read the creation-time capture.
+  runSuperApplyOnOwnRead: superBlk => superBlk value: [self.n]
+
+  runSuperApplyOnOwnWrite: superBlk => superBlk value: [self.n := 99]

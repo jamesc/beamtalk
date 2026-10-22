@@ -220,9 +220,7 @@ fn test_bt2808_cascade_on_tier2_local_var_compiles_and_threads_state() {
         code.contains("call 'beamtalk_actor_state':'put'("),
         "the block writes the field through the cell. Got: {code}"
     );
-    let stores = code
-        .matches("call 'erlang':'put'('$bt_actor_state'")
-        .count();
+    let stores = code.matches("call 'beamtalk_actor_state':'store'(").count();
     assert!(
         stores >= 1 && code.matches("'send'(_Receiver").count() >= 2,
         "the cascaded value: sends must be bracketed (found {stores} stores). Got: {code}"

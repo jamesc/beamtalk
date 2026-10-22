@@ -226,6 +226,10 @@ impl CoreErlangGenerator {
         &mut self,
         method: &MethodDefinition,
     ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
+        // Scope the cell-store mark to this one method body: a mark left over
+        // from an earlier (possibly failed) lowering must not leak into this
+        // body, and `with_exit_store` takes it when this body is done.
+        threaded_ir::take_cell_store_emitted();
         let body = super::super::util::collect_body_exprs(&method.body);
         self.lower_body_exprs_with_reply(&body, true)
     }
@@ -253,8 +257,8 @@ impl CoreErlangGenerator {
             .body
             .first()
             .map_or_else(|| method.span, |s| s.expression.span());
-        // The mark is scoped to one method body (`with_exit_store` takes it).
-        threaded_ir::take_cell_store_emitted();
+        // The mark is scoped to one method body by the lowering wrappers
+        // (`with_exit_store` takes it when the body is done).
         let lowered = self.lower_method_definition_body_with_reply(method);
         self.set_current_nlr_token(None);
         let stmts = lowered?;
@@ -330,6 +334,9 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
     ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
+        // Same per-body scoping as `lower_method_definition_body_with_reply`:
+        // legacy clauses lower through here, not through that wrapper.
+        threaded_ir::take_cell_store_emitted();
         let body = super::super::util::collect_body_exprs(&block.body);
         self.lower_body_exprs_with_reply(&body, false)
     }

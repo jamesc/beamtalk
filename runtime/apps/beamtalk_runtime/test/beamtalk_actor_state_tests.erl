@@ -45,7 +45,7 @@ install_take_uninstall_test() ->
 nested_install_restores_enclosing_cell_test() ->
     with_cell(#{a => outer}, fun() ->
         Inner = beamtalk_actor_state:install(#{a => inner}),
-        ?assertEqual(#{a => outer}, Inner),
+        ?assertEqual({self(), #{a => outer}}, Inner),
         ?assertEqual(#{a => inner}, beamtalk_actor_state:take()),
         beamtalk_actor_state:uninstall(Inner),
         ?assertEqual(#{a => outer}, beamtalk_actor_state:take())
@@ -113,6 +113,47 @@ foreign_pid_is_away_even_with_cell_test() ->
         ?assertEqual(#{x => outer}, beamtalk_actor_state:capture(Other, #{x => outer})),
         ?assertEqual(#{x => 1}, beamtalk_actor_state:take())
     end).
+
+%% A cell holding another actor's state (stored by a nested away
+%% `super_send/5`) never counts as home, even for the process that runs in:
+%% the host actor reads its capture, and its writes raise.
+foreign_owned_cell_is_away_for_the_host_test() ->
+    with_cell(#{x => host}, fun() ->
+        Host = self_obj(),
+        %% Simulate the away `super_send/5` entry: another actor's state,
+        %% owned by that actor, installed in this process.
+        ForeignPid = spawn(fun() -> ok end),
+        erlang:put('$bt_actor_state', {ForeignPid, #{x => foreign}}),
+        try
+            ?assertEqual(ForeignPid, beamtalk_actor_state:cell_owner()),
+            ?assertEqual(
+                captured, beamtalk_actor_state:get(Host, x, #{x => captured})
+            ),
+            ?assertEqual(
+                actor_state_unreachable,
+                kind_of(fun() -> beamtalk_actor_state:put(Host, x, 1) end)
+            ),
+            %% A store keeps the foreign owner: the host must not claim it.
+            beamtalk_actor_state:store(#{x => written}),
+            ?assertEqual(ForeignPid, beamtalk_actor_state:cell_owner()),
+            ?assertEqual(
+                captured, beamtalk_actor_state:get(Host, x, #{x => captured})
+            )
+        after
+            %% Restore the host's own cell for `with_cell`'s teardown.
+            erlang:put('$bt_actor_state', {self(), #{x => host}})
+        end
+    end).
+
+store_without_a_cell_claims_the_caller_test() ->
+    ?assertEqual(undefined, beamtalk_actor_state:cell_owner()),
+    beamtalk_actor_state:store(#{x => 1}),
+    try
+        ?assertEqual(self(), beamtalk_actor_state:cell_owner()),
+        ?assertEqual(#{x => 1}, beamtalk_actor_state:take())
+    after
+        erlang:erase('$bt_actor_state')
+    end.
 
 away_read_without_capture_raises_test() ->
     Other = foreign_obj(),
@@ -258,7 +299,7 @@ call_foreign_accepts_a_native_that_reads_a_blocks_writes_back_test() ->
     State = #{n => 1},
     %% a native that ran a block (the block wrote the cell) answers the cell's state
     Fun = fun() ->
-        erlang:put('$bt_actor_state', #{n => 2}),
+        beamtalk_actor_state:store(#{n => 2}),
         {reply, ok, beamtalk_actor_state:take()}
     end,
     try
@@ -272,7 +313,7 @@ call_foreign_adopts_the_cell_when_the_answer_is_the_entry_state_test() ->
     %% a block the callee ran wrote the cell, but the callee answers the state it was
     %% given: the cell holds the only writes
     Fun = fun() ->
-        erlang:put('$bt_actor_state', #{n => 2}),
+        beamtalk_actor_state:store(#{n => 2}),
         {reply, ok, State}
     end,
     try
@@ -283,7 +324,7 @@ call_foreign_adopts_the_cell_when_the_answer_is_the_entry_state_test() ->
 
 call_foreign_adopts_the_cell_for_other_answer_shapes_test() ->
     State = #{n => 1},
-    Write = fun() -> erlang:put('$bt_actor_state', #{n => 2}) end,
+    Write = fun() -> beamtalk_actor_state:store(#{n => 2}) end,
     try
         ?assertEqual(
             {noreply, #{n => 2}},
@@ -330,7 +371,7 @@ call_foreign_accepts_an_answer_equal_to_the_cell_test() ->
     State = #{n => 1},
     %% a compiled callee that stored a version and threaded the same version
     Fun = fun() ->
-        erlang:put('$bt_actor_state', #{n => 2}),
+        beamtalk_actor_state:store(#{n => 2}),
         {reply, ok, #{n => 2}}
     end,
     try
@@ -342,7 +383,7 @@ call_foreign_accepts_an_answer_equal_to_the_cell_test() ->
 call_foreign_raises_a_conflict_when_both_the_answer_and_the_cell_changed_test() ->
     State = #{n => 1},
     Fun = fun() ->
-        erlang:put('$bt_actor_state', #{n => 2}),
+        beamtalk_actor_state:store(#{n => 2}),
         {reply, ok, #{n => 3}}
     end,
     try

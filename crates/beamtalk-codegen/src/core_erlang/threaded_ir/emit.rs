@@ -318,10 +318,6 @@ pub(in crate::core_erlang) fn render(
     Document::Vec(docs)
 }
 
-/// The actor-state cell's process-dictionary key (`beamtalk_actor_state`'s
-/// `CELL`). The one Rust definition the bracket renders with.
-pub(in crate::core_erlang) const ACTOR_STATE_CELL: &str = "$bt_actor_state";
-
 thread_local! {
     /// A cell store was emitted since the last [`take_cell_store_emitted`].
     static CELL_STORE_EMITTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -331,23 +327,23 @@ thread_local! {
 /// A method that stored an intermediate `State` leaves the cell older than its
 /// answer, so its reply stores the final `State` back (`with_exit_store`). The
 /// mark is set by [`cell_put_call`], the one emitter of every store, so a new
-/// store site cannot be missed. A stale mark only adds a harmless exit store.
+/// store site cannot be missed. Both method-body lowering wrappers reset the
+/// mark on entry, so it never leaks from one body (or a failed lowering) into
+/// the next; bodies are never nested, so no inner lowering can consume an
+/// outer body's mark early. A stale mark only adds a harmless exit store.
 pub(in crate::core_erlang) fn take_cell_store_emitted() -> bool {
     CELL_STORE_EMITTED.with(std::cell::Cell::take)
 }
 
-/// `call 'erlang':'put'('$bt_actor_state', <state>)`: the one emitter of every
+/// `call 'beamtalk_actor_state':'store'(<state>)`: the one emitter of every
 /// cell store: the [`ThreadedStmt::SyncedCall`] bracket, the `on:do:` and
-/// `ensure:` boundaries, the `^` pre-throw store and the exit store.
+/// `ensure:` boundaries, the `^` pre-throw store and the exit store. `store/1`
+/// keeps the cell's current owner so a store made while another actor's state
+/// is installed (a nested away `super_send/5`) does not claim that state for
+/// the host process.
 pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
     CELL_STORE_EMITTED.with(|c| c.set(true));
-    docvec![
-        "call 'erlang':'put'(",
-        leaf::atom(ACTOR_STATE_CELL),
-        ", ",
-        state,
-        ")"
-    ]
+    docvec!["call 'beamtalk_actor_state':'store'(", state, ")"]
 }
 
 /// Renders one [`ThreadedStmt::SyncedCall`] (ADR 0137 §1): the store of
@@ -380,9 +376,7 @@ fn render_synced_call(
         parts.push(docvec![
             "let ",
             leaf::var(ctx.resolve_prefix(load)),
-            " = call 'erlang':'get'(",
-            leaf::atom(ACTOR_STATE_CELL),
-            ") in "
+            " = call 'beamtalk_actor_state':'take'() in "
         ]);
     }
     Document::Vec(parts)
@@ -1252,12 +1246,11 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
 
 #[cfg(test)]
 mod cell_key_conformance {
-    use super::ACTOR_STATE_CELL;
-
-    /// The cell key crosses the Rust/Erlang boundary: the emitter writes it into
-    /// generated code and `beamtalk_actor_state.erl` owns the cell. This reads the
-    /// Erlang `-define(CELL, ...)` so the two cannot drift (CLAUDE.md). Edit the
-    /// Erlang module (the owner) when this fails.
+    /// The cell key crosses the Rust/Erlang boundary: generated code reaches
+    /// the cell only through `beamtalk_actor_state:store/1` and `:take/0`, and
+    /// `beamtalk_actor_state.erl` owns the key. This reads the Erlang
+    /// `-define(CELL, ...)` so a change to the owned key stays visible here
+    /// (CLAUDE.md). Edit the Erlang module (the owner) when this fails.
     #[test]
     fn the_cell_key_matches_the_runtime_define() {
         let path = concat!(
@@ -1270,6 +1263,6 @@ mod cell_key_conformance {
             .find_map(|line| line.trim().strip_prefix("-define(CELL, "))
             .expect("a `-define(CELL, ...)` in beamtalk_actor_state.erl");
         let atom = define.trim_end_matches(").").trim().trim_matches('\'');
-        assert_eq!(atom, ACTOR_STATE_CELL);
+        assert_eq!(atom, "$bt_actor_state");
     }
 }
