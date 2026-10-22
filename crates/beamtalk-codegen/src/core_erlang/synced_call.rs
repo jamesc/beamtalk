@@ -431,7 +431,13 @@ impl CoreErlangGenerator {
     /// build-stdlib check guarantees every argument is a primitive type.
     fn is_no_user_code_send(&self, receiver: &Expression, selector: &MessageSelector) -> bool {
         use beamtalk_core::semantic_analysis::InferredType;
-        let Some(InferredType::Known { class_name, .. }) = self.type_map.get(receiver.span())
+        // Only a type the compiler derived (a literal, a constructor): a declared
+        // annotation is not checked at run time, so the value may be any class.
+        let Some(InferredType::Known {
+            class_name,
+            provenance: beamtalk_core::semantic_analysis::TypeProvenance::Inferred(_),
+            ..
+        }) = self.type_map.get(receiver.span())
         else {
             return false;
         };

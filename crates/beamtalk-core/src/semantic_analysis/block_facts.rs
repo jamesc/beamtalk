@@ -923,8 +923,9 @@ fn send_may_run_user_code(
         // the body threads `State`, but never makes a body thread: an
         // arithmetic loop over untyped locals (`sum := sum + i`) must keep its
         // direct parameters, and the slow path reaching a user-defined
-        // operator that runs one of this actor's blocks is the narrow case a
-        // loop with no whole `State` accepts (ADR 0137 § Cost and gates).
+        // operator that touches this actor's fields is the narrow case a
+        // loop with no whole `State` accepts (ADR 0137 Negative consequences,
+        // BT-4121).
         return false;
     }
     match send_user_code(receiver, selector, arguments) {

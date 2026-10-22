@@ -330,6 +330,11 @@ in another process.
 - A missed sync point fails the build.
 
 ### Negative
+- Known gap (BT-4121): a loop that keeps its variables in parameters and holds
+  no whole `State` leaves the slow path of a guarded operator (`acc + m`, where
+  `m` is a user object with its own `+`) unbracketed, so a user `+` that touches
+  this actor's fields runs against a stale cell. Bracketing it would force every
+  arithmetic loop over untyped locals to thread `State`.
 - Every send that may run user code pays a store and a load, about 10 ns
   (10.4 ns with 18 schedulers, just over the gate).
 - The protocol has two homes: compiled code and `call_foreign/3`. A native

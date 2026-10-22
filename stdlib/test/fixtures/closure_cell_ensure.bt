@@ -42,3 +42,28 @@ Actor subclass: ClosureCellEnsure
     self.n := 3
     [[1 / 0] ensure: [rec record: self.n]] on: Error do: [:e | nil]
     self.n
+
+  bump => self.n := self.n + 1
+
+  // Writes kept in loop parameters or made by a compiled self-send reach the
+  // cleanup of a failed body as well.
+  loopError: rec =>
+    [
+      [
+        #(1, 2, 3)
+          do: [:i |
+            self.n := self.n + i
+            i == 2 ifTrue: [1 / 0]
+          ]
+      ] ensure: [rec record: self.n]
+    ] on: Error do: [:e | nil]
+    self.n
+
+  selfSendError: rec =>
+    [
+      [
+        self bump
+        1 / 0
+      ] ensure: [rec record: self.n]
+    ] on: Error do: [:e | nil]
+    self.n

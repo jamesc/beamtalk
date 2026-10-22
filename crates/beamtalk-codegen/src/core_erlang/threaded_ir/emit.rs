@@ -1176,13 +1176,28 @@ fn render_bind(
             leaf::var(source_name),
             ") in ",
         ],
-        BindOp::Direct(value) => docvec![
-            "let ",
-            leaf::var(target_name),
-            " = ",
-            render_value(value, ctx),
-            " in ",
-        ],
+        BindOp::Direct(value) => {
+            let bind = docvec![
+                "let ",
+                leaf::var(target_name.clone()),
+                " = ",
+                render_value(value, ctx),
+                " in ",
+            ];
+            // ADR 0137 §5: a `State` version a compiled self-send hands back inside an
+            // `ensure:` protected body is stored too, so the cleanup of a failed
+            // body sees what the send changed.
+            if ctx.generator.ensure_write_through > 0 && target.prefix == VersionPrefix::State {
+                docvec![
+                    bind,
+                    "let _ = ",
+                    cell_put_call(leaf::var(target_name)),
+                    " in "
+                ]
+            } else {
+                bind
+            }
+        }
     }
 }
 

@@ -160,7 +160,7 @@ fn hybrid_field_rebind_is_verified_in_every_loop_and_container(loops: &[(&str, &
     //
     //
     // A guarded operator's slow path is not a call that makes a loop thread `State` (the
-    // adds and compares of these bodies keep hybrid mode, ADR 0137 § Cost and gates), so
+    // adds and compares of these bodies keep hybrid mode, ADR 0137, BT-4121), so
     // the pins reach the rebind exactly as they did before the bracket existed.
     for expected in REACHES_THE_REBIND {
         let (loop_name, _) = expected.split_once(" / ").expect("`loop / container`");

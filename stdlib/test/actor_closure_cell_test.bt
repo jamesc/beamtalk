@@ -104,3 +104,15 @@ TestCase subclass: ActorClosureCellTest
 
   testSuperSendInADoLoop =>
     self assert: ClosureCellSuperChild spawn doLoop equals: 3
+
+  testEnsureCleanupSeesLoopWritesAfterAnError =>
+    c := ClosureCellEnsure spawn
+    rec := ClosureCellRecorder spawn
+    c loopError: rec
+    self assert: rec last equals: 3
+
+  testEnsureCleanupSeesASelfSendsWriteAfterAnError =>
+    c := ClosureCellEnsure spawn
+    rec := ClosureCellRecorder spawn
+    c selfSendError: rec
+    self assert: rec last equals: 1
