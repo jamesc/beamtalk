@@ -127,9 +127,8 @@ pub(crate) fn generate_proto_object_bif(
         }
         "doesNotUnderstand:args:" => {
             let selector_var = super::param(params, 0, "_Selector");
-            let hint = super::core_erlang_binary_string(
-                "Check spelling or use 'respondsTo:' to verify method exists",
-            );
+            let hint =
+                leaf::binary_lit("Check spelling or use 'respondsTo:' to verify method exists");
             Some(docvec![
                 "let <DnuClass0> = call 'beamtalk_primitive':'class_of'(Self) in\n",
                 "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass0) in\n",
