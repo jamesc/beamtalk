@@ -195,10 +195,10 @@ What the answer carries is checked against the cell, never reconciled by guesswo
     rather than lose either set of writes (an answer equal to the cell is not a
     conflict: a compiled callee that stored and then threaded the same version).
 
-    Invariant: a compiled callee that stored to the cell stores its final `State`
-    on exit. Codegen guarantees it (`with_exit_store`, keyed on `cell_put_call`,
-    the one emitter of every cell store), so "answer equals entry, cell changed"
-    can only mean a block wrote the field.
+Invariant: a compiled callee that stored to the cell stores its final `State`
+on exit. Codegen guarantees it (`with_exit_store`, keyed on `cell_put_call`,
+the one emitter of every cell store), so "answer equals entry, cell changed"
+can only mean a block wrote the field.
 """.
 -spec call_foreign(map(), fun(), [term()]) -> term().
 call_foreign(State, Fun, Args) when is_map(State), is_function(Fun, length(Args)) ->
