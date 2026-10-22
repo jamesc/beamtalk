@@ -205,10 +205,12 @@ TestCase subclass: TracingTest
 
   testBottlenecksListsLiveActors =>
     // BT-4103: bottlenecks scans the instance registry, so it lists live
-    // actors whether or not tracing is enabled or they dispatched.
+    // actors whether or not tracing is enabled or they dispatched. The
+    // limit covers every registered actor: under a full-suite run other
+    // tests' actors outrank an idle counter in a short top-N.
     c := Counter spawn
     Timer sleep: 50
-    top := Tracing bottlenecks: 100
+    top := Tracing bottlenecks: 100000
     counters := top select: [:e | (e at: "class") == "Counter"]
     self deny: counters isEmpty
     self assert: ((counters first at: "queue_depth") >= 0)

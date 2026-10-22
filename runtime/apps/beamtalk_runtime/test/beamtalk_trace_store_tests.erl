@@ -739,6 +739,76 @@ serialized_counter_grow_test_() ->
     end}.
 
 %%====================================================================
+%% Test: Concurrent hits during grow lose nothing (BT-4103)
+%%====================================================================
+
+concurrent_hits_during_grow_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        {timeout, 60,
+            ?_test(begin
+                %% Hammer one class key from many writers while fresh keys
+                %% force a grow underneath: every hit must land exactly once.
+                %% A grow that copied the array would lose hit-path writes
+                %% landing between the copy and the re-pointing; rows keep
+                %% their birth array instead, so there is no window.
+                Self = self(),
+                Hitters = [
+                    spawn(fun() ->
+                        [
+                            beamtalk_trace_store:record_dispatch(
+                                self(), hammered, I, ok, sync, 'Racy'
+                            )
+                         || I <- lists:seq(1, 500)
+                        ],
+                        Self ! {hitter_done, self()}
+                    end)
+                 || _ <- lists:seq(1, 32)
+                ],
+                %% Class rows bump-allocate (never the free list), so this
+                %% many fresh keys guarantees a grow mid-hammering.
+                {_Ref, Size, Alloc} = persistent_term:get(beamtalk_trace_counters),
+                Pos = atomics:get(Alloc, 1),
+                NeedKeys = (Size - Pos) div 8 + 100,
+                Growers = [
+                    spawn(fun() ->
+                        % elp:fixme W0023 intentional atom creation
+                        [
+                            beamtalk_trace_store:record_dispatch(
+                                self(),
+                                list_to_atom(
+                                    "growrace_" ++ integer_to_list(Idx) ++ "_" ++
+                                        integer_to_list(I)
+                                ),
+                                1,
+                                ok,
+                                sync,
+                                'Racy'
+                            )
+                         || I <- lists:seq(1, (NeedKeys + 3) div 4)
+                        ],
+                        Self ! {grower_done, self()}
+                    end)
+                 || Idx <- lists:seq(1, 4)
+                ],
+                [
+                    receive
+                        {hitter_done, H} -> ok
+                    end
+                 || H <- Hitters
+                ],
+                [
+                    receive
+                        {grower_done, G} -> ok
+                    end
+                 || G <- Growers
+                ],
+                #{<<"methods">> := #{<<"hammered">> := Hammered}} =
+                    class_entry(<<"Racy">>),
+                ?assertEqual(32 * 500, maps:get(<<"calls">>, Hammered))
+            end)}
+    end}.
+
+%%====================================================================
 %% Test: Min/max duration tracking
 %%====================================================================
 
@@ -1696,10 +1766,9 @@ churn_setup() ->
     beamtalk_trace_store:disable(),
     ok.
 
--doc "Aggregate table sizes plus the atomics array size.".
+-doc "Aggregate table sizes plus the current counters array size.".
 agg_footprint() ->
-    Counters = persistent_term:get(beamtalk_trace_counters),
-    #{size := AtomicsSize} = atomics:info(Counters),
+    {_Ref, AtomicsSize, _Alloc} = persistent_term:get(beamtalk_trace_counters),
     #{
         class_stats => ets:info(beamtalk_agg_class_stats, size),
         pid => ets:info(beamtalk_agg_pid, size),
@@ -2083,10 +2152,11 @@ concurrent_alloc_during_grow_and_clear_test_() ->
                 ?assertEqual(30 * N, maps:get(<<"total_duration_ns">>, Beta)),
 
                 %% Every slot is accounted for exactly once: on the free list
-                %% or held by a class row, never both.
-                Free = [B || {B} <- ets:tab2list(beamtalk_agg_free_slots)],
-                Held = [B || {_, _, B} <- ets:tab2list(beamtalk_agg_class_stats)],
-                ?assertEqual([], [B || B <- Held, lists:member(B, Free)]),
+                %% or held by a class row, never both. Slots are {Ref, Base}
+                %% pairs: rows keep their birth array across grows.
+                Free = [S || {S} <- ets:tab2list(beamtalk_agg_free_slots)],
+                Held = [{R, B} || {_, R, B} <- ets:tab2list(beamtalk_agg_class_stats)],
+                ?assertEqual([], [S || S <- Held, lists:member(S, Free)]),
                 ?assertEqual(length(Held), length(lists:usort(Held))),
 
                 %% After clear, new keys get distinct, zeroed slots.
@@ -2117,17 +2187,8 @@ concurrent_alloc_during_grow_and_clear_test_() ->
 
 upgrade_resets_aggregates_test_() ->
     {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
-        {"pre-BT-4103 tables are reset on restart; trace events survive",
+        {"pre-BT-4103 tables are reset by code_change; trace events survive",
             ?_test(begin
-                case whereis(beamtalk_ets_heir) of
-                    undefined -> {ok, _} = beamtalk_ets_heir:start_link();
-                    _ -> ok
-                end,
-                %% Restart once so the tables are created with the heir
-                %% option (production-like: they survive the next restart).
-                gen_server:stop(beamtalk_trace_store),
-                timer:sleep(50),
-                {ok, _} = beamtalk_trace_store:start_link(),
                 %% Seed current-version data plus one trace event.
                 beamtalk_trace_store:enable(),
                 beamtalk_trace_store:record_dispatch(self(), ping, 1, ok, sync, 'Counter'),
@@ -2137,19 +2198,27 @@ upgrade_resets_aggregates_test_() ->
                 ?assertNotEqual(#{}, beamtalk_trace_store:get_stats()),
                 ?assertEqual(1, length(beamtalk_trace_store:get_traces())),
 
-                %% Simulate the old layout's tables surviving (e.g. held by
-                %% the heir across a code upgrade).
+                %% Simulate the old layout's tables surviving a code upgrade.
                 ets:new(beamtalk_agg_index, [named_table, public, set]),
                 ets:new(beamtalk_agg_class, [named_table, public, set]),
                 ets:new(beamtalk_agg_retired, [named_table, public, set]),
 
-                %% Restart the store over the old tables.
-                gen_server:stop(beamtalk_trace_store),
-                timer:sleep(50),
-                {ok, _} = beamtalk_trace_store:start_link(),
+                %% Run the release-upgrade path on the live process: no
+                %% restart, so a supervising tree cannot interfere (a restart
+                %% races the supervisor's own restart of the store). The
+                %% resume is unconditional — a suspended store would hang
+                %% every later caller.
+                StorePid = whereis(beamtalk_trace_store),
+                ok = sys:suspend(StorePid),
+                try
+                    ?assertEqual(ok, sys:change_code(StorePid, beamtalk_trace_store, "2", []))
+                after
+                    ok = sys:resume(StorePid)
+                end,
 
-                %% Old tables are gone, the new ones are empty and functional,
-                %% and the trace event survived via the heir.
+                %% Old tables are gone, the aggregates are empty and
+                %% functional, and the trace event survived (its table is
+                %% never touched by the reset).
                 ?assertEqual(undefined, ets:whereis(beamtalk_agg_index)),
                 ?assertEqual(undefined, ets:whereis(beamtalk_agg_class)),
                 ?assertEqual(undefined, ets:whereis(beamtalk_agg_retired)),

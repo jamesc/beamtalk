@@ -1704,13 +1704,14 @@ outside the timed region); `handler` times `handle_dispatch_stop/4` end to end. 
 
 | Row | Before (BT-4066 design) | After (BT-4103) |
 |---|---|---|
-| `hit_dis` (steady-state always-on) | 98.9 | 91.1 |
-| `handler` (full telemetry handler) | 114.3 | 118.7 |
-| `churn_dis` (new actor, disabled) | 2311.2 | 95.8 |
-| `hit_en` (steady-state, enabled) | 95.2 | 154.8 |
-| `churn_en` (new actor, enabled) | 3809.4 | 768.2 |
+| `hit_dis` (steady-state always-on) | 98.9 | 88.6 |
+| `handler` (full telemetry handler) | 114.3 | 114.4 |
+| `churn_dis` (new actor, disabled) | 2311.2 | 95.3 |
+| `hit_en` (steady-state, enabled) | 95.2 | 153.3 |
+| `churn_en` (new actor, enabled) | 3809.4 | 715.5 |
 
-All figures ns/call, medians.
+All figures ns/call, medians. Stable across three after-runs on separate invocations
+(`handler` varied 114–119, `churn_en` 695–768 — run noise; the rest within ±2 ns).
 
 ### Findings
 
@@ -1718,10 +1719,10 @@ All figures ns/call, medians.
   steady-state (~96 ns vs ~2.3 µs before, ~24×), because it hits the existing `{Class, Selector}` row
   instead of allocating a per-pid row, inserting a pid→class row and casting `track_pid`. Steady-state
   dispatch is slightly cheaper too (no per-dispatch pid→class ETS write).
-- The "~150 ns/call" claim now reads ~119 ns for the full handler, ~91 ns for the aggregate write
+- The "~150 ns/call" claim now reads ~114 ns for the full handler, ~89 ns for the aggregate write
   itself. `Tracing`'s doc comment and the language-features guide say ~120 ns.
-- Enabled mode costs more per dispatch than before (~155 ns steady-state: two aggregate writes, class
-  plus pid) — opt-in debugging overhead. Enabled churn is still ~5× cheaper than before (768 ns vs
+- Enabled mode costs more per dispatch than before (~153 ns steady-state: two aggregate writes, class
+  plus pid) — opt-in debugging overhead. Enabled churn is still ~5× cheaper than before (~715 ns vs
   3.8 µs): the class write hits and only the pid row allocates, with no cast and no monitor/DOWN
   traffic in the background.
 - Memory, not just time, is flat: 1M short-lived actors through the always-on path leave every

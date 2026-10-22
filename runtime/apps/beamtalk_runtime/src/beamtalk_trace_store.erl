@@ -29,8 +29,13 @@ Storage layout (BT-4103):
   swept pid rows, reused before the slot allocator bumps. Only pid rows use
   it, so it is idle unless tracing is enabled.
 - beamtalk_trace_events (ETS ordered_set): composite key → trace event
-- atomics ref in persistent_term: lock-free aggregate increments + CAS min/max (~50ns)
+- current array triple in persistent_term: lock-free aggregate increments + CAS min/max (~50ns)
 - persistent_term toggle: beamtalk_tracing_enabled (true | false)
+
+A grow switches to a fresh array of double the size; rows keep their birth
+array forever, so in-flight writers can never lose a sample to a grow (no
+copy, no re-pointing). Old arrays are freed once unreferenced; sticky class
+rows pin their birth array, so retained arrays total at most ~2× peak.
 
 No monitors, no retirement (BT-4103): per-pid rows used to be folded into a
 per-class rollup on each actor's `DOWN` (BT-4066), which monitored every actor
@@ -42,8 +47,7 @@ actor's `monitored_by` is never touched by the trace store. Sweeping claims
 rows with `ets:take/2`. A caller still mid-write to a slot as it is released
 can, in a microseconds-wide window, add one dispatch to the slot's next
 owner; slots are zeroed when allocated, not when released. `clear/0` zeroes
-the class slots in place rather than replacing the atomics array, so the
-array never shrinks: it stays at the peak number of live keys. Only pids get
+the class slots in place rather than replacing the counters. Only pids get
 aggregates: a non-pid `pid` in telemetry metadata is dropped, since per-actor
 rows are keyed by pid and malformed keys would poison the stats readers.
 
@@ -137,11 +141,12 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 %% and are preserved across the upgrade.
 -define(RETIRED_AGG_TABLES, [beamtalk_agg_index, beamtalk_agg_class, beamtalk_agg_retired]).
 
-%% persistent_term keys
+%% persistent_term keys. PT_COUNTERS holds the current array triple
+%% {Ref, Size, BumpAllocator}; rows keep their birth array forever, so a grow
+%% only swaps this triple — nothing is copied or re-pointed.
 -define(PT_ENABLED, beamtalk_tracing_enabled).
 -define(PT_COUNTERS, beamtalk_trace_counters).
 -define(PT_MAX_EVENTS, beamtalk_trace_max_events).
--define(PT_SLOT_ALLOCATOR, beamtalk_trace_slot_allocator).
 -define(PT_SPAN_ID_COUNTER, beamtalk_span_id_counter).
 
 %% Defaults
@@ -550,10 +555,10 @@ handle_call(clear, _From, State) ->
     do_clear(),
     ?LOG_INFO("Trace store cleared", #{}),
     {reply, ok, State};
-handle_call({grow_counters, CallerRef, CallerSize}, _From, State) ->
-    %% Serialized atomics grow to prevent concurrent persistent_term overwrites.
+handle_call({grow_counters, CallerRef}, _From, State) ->
+    %% Serialized counters grow to prevent concurrent persistent_term overwrites.
     %% Check if another caller already grew while we were queued.
-    {reply, grow_if_current(CallerRef, CallerSize), State};
+    {reply, grow_if_current(CallerRef), State};
 handle_call({get_traces, Opts}, _From, State) when is_map(Opts) ->
     Result = do_get_traces(Opts),
     {reply, Result, State};
@@ -694,16 +699,15 @@ ensure_counters() ->
 -doc """
 Create a fresh counters array and slot allocator, replacing any previous
 ones. Only a code upgrade (which deletes the aggregate tables first) or a
-fresh boot may call this: every live row references the current array.
+fresh boot may call this: every live row references its birth array.
 """.
 fresh_counters() ->
     Ref = atomics:new(?INITIAL_COUNTER_SIZE, [{signed, true}]),
-    persistent_term:put(?PT_COUNTERS, Ref),
     %% Atomic slot allocator — single atomics ref with 1 element for the next slot base.
     %% atomics:add_get/3 is truly atomic, preventing concurrent slot collisions.
     Allocator = atomics:new(1, [{signed, false}]),
     atomics:put(Allocator, 1, 1),
-    persistent_term:put(?PT_SLOT_ALLOCATOR, Allocator).
+    persistent_term:put(?PT_COUNTERS, {Ref, ?INITIAL_COUNTER_SIZE, Allocator}).
 
 -doc "Initialise persistent_term defaults.".
 init_persistent_terms() ->
@@ -804,19 +808,14 @@ being observed.
 -spec allocate_counter_slot(atom(), term(), fun(), bump | free_list) ->
     {atomics:atomics_ref(), non_neg_integer(), new | existing | dummy}.
 allocate_counter_slot(Table, Key, MakeRow, SlotSource) ->
-    SlotBase =
-        case SlotSource of
-            bump -> allocate_next_slot();
-            free_list -> take_slot()
-        end,
-    case ensure_capacity(SlotBase) of
-        {ok, AtomicsRef} ->
+    case claim_slot(SlotSource) of
+        {ok, AtomicsRef, SlotBase} ->
             reset_slot(AtomicsRef, SlotBase),
             case ets:insert_new(Table, MakeRow(AtomicsRef, SlotBase)) of
                 true ->
-                    {repoint_if_grown(Table, Key, AtomicsRef, SlotBase), SlotBase, new};
+                    {AtomicsRef, SlotBase, new};
                 false ->
-                    release_slot(SlotBase),
+                    release_slot(AtomicsRef, SlotBase),
                     case ets:lookup(Table, Key) of
                         [WinnerRow] ->
                             {WinnerRef, WinnerBase} = row_slots(WinnerRow),
@@ -827,66 +826,73 @@ allocate_counter_slot(Table, Key, MakeRow, SlotSource) ->
                     end
             end;
         error ->
-            release_slot(SlotBase),
             {atomics:new(?SLOTS_PER_KEY, [{signed, true}]), 0, dummy}
     end.
 
 -doc """
-A grow that ran between reading the atomics ref and inserting the row may have
-copied the slot before it was reset and re-pointed every row before this one
-existed. Re-point the row at the current array, resetting the slot there too.
-Once the current ref is observed the grow's copy is complete, so the loop ends
-when no further grow intervenes. If the grow's own re-pointing already reached
-this row, a writer may have written to the current array before this reset;
-that dispatch is lost (the documented one-dispatch tolerance).
+Claim a slot: from the free list when `SlotSource` is `free_list` and one is
+free, else by bumping the current array's allocator (growing first when the
+array is full). Answers `error` when a grow was needed but the trace store
+did not answer; the caller then uses a dummy slot.
 """.
-repoint_if_grown(Table, Key, AtomicsRef, SlotBase) ->
-    case persistent_term:get(?PT_COUNTERS) of
-        AtomicsRef ->
-            AtomicsRef;
-        CurrentRef ->
-            reset_slot(CurrentRef, SlotBase),
-            _ = ets:update_element(Table, Key, {2, CurrentRef}),
-            repoint_if_grown(Table, Key, CurrentRef, SlotBase)
+-spec claim_slot(bump | free_list) ->
+    {ok, atomics:atomics_ref(), non_neg_integer()} | error.
+claim_slot(free_list) ->
+    case take_slot() of
+        {Ref, Base} -> {ok, Ref, Base};
+        none -> claim_bump_slot()
+    end;
+claim_slot(bump) ->
+    claim_bump_slot().
+
+-doc """
+Bump-allocate from the current array. The base is bounds-checked before use:
+a caller that read a stale triple (a grow switched arrays in between) or
+that genuinely overran the array grows and retries on the fresh array.
+`add_get/3` returns the new value, so the base is the old one.
+""".
+claim_bump_slot() ->
+    {Ref, Size, Alloc} = persistent_term:get(?PT_COUNTERS),
+    Base = atomics:add_get(Alloc, 1, ?SLOTS_PER_KEY) - ?SLOTS_PER_KEY,
+    case Base + ?SLOTS_PER_KEY =< Size of
+        true ->
+            {ok, Ref, Base};
+        false ->
+            grow_and_claim(Ref)
     end.
 
 -doc """
-Answer the current atomics ref once it is large enough to hold `SlotBase`'s
-slots, growing it (serialized through the gen_server) as often as needed.
+Grow past `OldRef`'s array, then bump-allocate from the fresh array. When the
+fresh array is already overrun too (many writers racing past it), grow again:
+arrays double, so the loop ends.
 """.
--spec ensure_capacity(pos_integer()) -> {ok, atomics:atomics_ref()} | error.
-ensure_capacity(SlotBase) ->
-    AtomicsRef = persistent_term:get(?PT_COUNTERS),
-    #{size := AtomicsSize} = atomics:info(AtomicsRef),
-    case SlotBase + ?SLOTS_PER_KEY > AtomicsSize of
-        false ->
-            {ok, AtomicsRef};
-        true ->
-            case request_grow(AtomicsRef, AtomicsSize) of
-                ok -> ensure_capacity(SlotBase);
-                error -> error
-            end
+grow_and_claim(OldRef) ->
+    case request_grow(OldRef) of
+        {ok, {NewRef, NewSize, NewAlloc}} ->
+            Base = atomics:add_get(NewAlloc, 1, ?SLOTS_PER_KEY) - ?SLOTS_PER_KEY,
+            case Base + ?SLOTS_PER_KEY =< NewSize of
+                true ->
+                    {ok, NewRef, Base};
+                false ->
+                    grow_and_claim(NewRef)
+            end;
+        error ->
+            error
     end.
 
 -doc """
-Grow the atomics array. Grows are serialized through the gen_server so
-concurrent grows cannot overwrite each other's persistent_term. When the
-caller is the gen_server itself (retiring a pid from a `DOWN` message), it
-grows directly rather than calling itself.
+Grow the counters, serialized through the gen_server so concurrent grows
+cannot overwrite each other's persistent_term. Answers the current array
+triple. Nothing in the gen_server allocates, so this always calls.
 """.
--spec request_grow(atomics:atomics_ref(), pos_integer()) -> ok | error.
-request_grow(AtomicsRef, AtomicsSize) ->
-    case whereis(?MODULE) =:= self() of
-        true ->
-            _ = grow_if_current(AtomicsRef, AtomicsSize),
-            ok;
-        false ->
-            try gen_server:call(?MODULE, {grow_counters, AtomicsRef, AtomicsSize}, 10000) of
-                _NewRef -> ok
-            catch
-                %% Trace store down, restarting or slow.
-                exit:_ -> error
-            end
+-spec request_grow(atomics:atomics_ref()) ->
+    {ok, {atomics:atomics_ref(), pos_integer(), atomics:atomics_ref()}} | error.
+request_grow(AtomicsRef) ->
+    try gen_server:call(?MODULE, {grow_counters, AtomicsRef}, 10000) of
+        {ok, Triple} -> {ok, Triple}
+    catch
+        %% Trace store down, restarting or slow.
+        exit:_ -> error
     end.
 
 -doc """
@@ -908,87 +914,55 @@ reset_slot(AtomicsRef, SlotBase) ->
     atomics:put(AtomicsRef, SlotBase + ?SLOT_MIN_DURATION, ?MIN_SENTINEL).
 
 -doc """
-Take a slot base: a released one if any, else the next from the allocator.
-`ets:take/2` hands a free slot to exactly one caller; a caller that loses the
-race for the first free slot tries again.
+Take a released slot if one is free. Rows are `{{Ref, Base}}` (the key is the
+slot itself, since slots live in different arrays now); `ets:take/2` hands a
+free slot to exactly one caller, and a caller that loses the race for the
+first free slot tries again.
 """.
--spec take_slot() -> pos_integer().
+-spec take_slot() -> {atomics:atomics_ref(), non_neg_integer()} | none.
 take_slot() ->
     case ets:first(?AGG_FREE_SLOTS) of
         '$end_of_table' ->
-            allocate_next_slot();
-        SlotBase ->
-            case ets:take(?AGG_FREE_SLOTS, SlotBase) of
-                [_] -> SlotBase;
+            none;
+        Key ->
+            case ets:take(?AGG_FREE_SLOTS, Key) of
+                [{Key}] -> Key;
                 [] -> take_slot()
             end
     end.
 
--doc "Put a slot base on the free list for reuse.".
--spec release_slot(non_neg_integer()) -> true.
-release_slot(SlotBase) ->
-    ets:insert(?AGG_FREE_SLOTS, {SlotBase}).
+-doc "Put a slot on the free list for reuse.".
+-spec release_slot(atomics:atomics_ref(), non_neg_integer()) -> true.
+release_slot(AtomicsRef, SlotBase) ->
+    ets:insert(?AGG_FREE_SLOTS, {{AtomicsRef, SlotBase}}).
 
 -doc """
-Atomically allocate the next slot base.
-Uses atomics:add_get/3 for true lock-free atomic allocation — no race condition
-even under concurrent first-observation of different {Pid, Selector} keys.
+Grow the counters unless another caller already has (the current ref is no
+longer `CallerRef`). Answers `{ok, Triple}` with the current array triple.
+Runs in the gen_server.
 """.
-allocate_next_slot() ->
-    Allocator = persistent_term:get(?PT_SLOT_ALLOCATOR),
-    %% add_get returns the NEW value after adding, so subtract to get the old (allocated) base
-    NewVal = atomics:add_get(Allocator, 1, ?SLOTS_PER_KEY),
-    NewVal - ?SLOTS_PER_KEY.
-
--doc """
-Grow the atomics array unless another caller already has (the current ref is
-no longer `CallerRef`). Answers the current ref. Runs in the gen_server.
-""".
-grow_if_current(CallerRef, CallerSize) ->
+grow_if_current(CallerRef) ->
     case persistent_term:get(?PT_COUNTERS) of
-        CallerRef -> grow_counters(CallerRef, CallerSize);
-        CurrentRef -> CurrentRef
+        {CallerRef, _Size, _Alloc} -> {ok, grow_counters()};
+        Current -> {ok, Current}
     end.
 
--doc "Grow the atomics array by doubling its size.".
-grow_counters(OldRef, OldSize) ->
+-doc """
+Grow the counters by switching to a fresh array of double the size. Rows keep
+their birth array forever — nothing is copied and no row is re-pointed — so a
+writer holding a stale ref keeps writing valid counters. Old arrays are freed
+once no row or free-list entry references them; sticky class rows pin their
+birth array, so the retained arrays total at most ~2× the peak size.
+""".
+grow_counters() ->
+    {_OldRef, OldSize, _OldAlloc} = persistent_term:get(?PT_COUNTERS),
     NewSize = OldSize * 2,
     NewRef = atomics:new(NewSize, [{signed, true}]),
-    %% Copy existing values
-    copy_counters(OldRef, NewRef, 1, OldSize),
-    persistent_term:put(?PT_COUNTERS, NewRef),
-    %% Update all aggregate rows to point to new ref
-    update_counter_refs(?AGG_CLASS_STATS, NewRef),
-    update_counter_refs(?AGG_PID, NewRef),
-    NewRef.
-
--doc "Copy atomics values from old ref to new ref.".
-copy_counters(_OldRef, _NewRef, Idx, MaxIdx) when Idx > MaxIdx ->
-    ok;
-copy_counters(OldRef, NewRef, Idx, MaxIdx) ->
-    Val = atomics:get(OldRef, Idx),
-    case Val of
-        0 -> ok;
-        _ -> atomics:put(NewRef, Idx, Val)
-    end,
-    copy_counters(OldRef, NewRef, Idx + 1, MaxIdx).
-
--doc """
-Re-point every row of a slot table at a new counter ref. `update_element`
-leaves a row that was swept meanwhile deleted, where a re-insert would
-resurrect it.
-""".
-update_counter_refs(Table, NewRef) ->
-    %% The ref sits at element 2 in both class rows ({Key, Ref, Base}) and
-    %% pid rows ({Key, Ref, Base, Class}).
-    ets:foldl(
-        fun(Row, Acc) ->
-            _ = ets:update_element(Table, element(1, Row), {2, NewRef}),
-            Acc
-        end,
-        ok,
-        Table
-    ).
+    NewAlloc = atomics:new(1, [{signed, false}]),
+    atomics:put(NewAlloc, 1, 1),
+    New = {NewRef, NewSize, NewAlloc},
+    persistent_term:put(?PT_COUNTERS, New),
+    New.
 
 %%====================================================================
 %% Internal: Class resolution for health queries
@@ -1117,7 +1091,7 @@ sweep_pid_rows(Pid) ->
             lists:foreach(
                 fun({_Pid, Selector}) ->
                     case ets:take(?AGG_PID, {Pid, Selector}) of
-                        [{_Key, _Ref, SlotBase, _Class}] -> release_slot(SlotBase);
+                        [{_Key, Ref, SlotBase, _Class}] -> release_slot(Ref, SlotBase);
                         [] -> ok
                     end
                 end,
@@ -1700,7 +1674,7 @@ take_all_and_release(Table) ->
     lists:foreach(
         fun(Key) ->
             case ets:take(Table, Key) of
-                [Taken] -> release_slot(element(3, Taken));
+                [Taken] -> release_slot(element(2, Taken), element(3, Taken));
                 [] -> ok
             end
         end,

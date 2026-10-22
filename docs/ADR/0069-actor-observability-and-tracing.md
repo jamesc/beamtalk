@@ -51,7 +51,7 @@ Per-pid counters for every process, always on, are also not how OTP does it: Erl
 
 ### Decision
 
-- **Always-on aggregates keyed by `{Class, Selector}` only** (`beamtalk_agg_class_stats`), updated in the caller with lock-free atomics. No per-pid ETS write, no gen_server call or cast, no monitor on the dispatch path. Class rows are sticky: `clear/0` zeroes their slots in place and readers skip zero-call rows, so the table is bounded by classes × selectors and a cleared store still reports `#{}`.
+- **Always-on aggregates keyed by `{Class, Selector}` only** (`beamtalk_agg_class_stats`), updated in the caller with lock-free atomics. No per-pid ETS write, no gen_server call or cast, no monitor on the dispatch path. Class rows are sticky: `clear/0` zeroes their slots in place and readers skip zero-call rows, so the table is bounded by classes × selectors and a cleared store still reports `#{}`. Counters grow by switching to a fresh array of double the size; rows keep their birth array forever, so in-flight writers can never lose a sample to a grow. (The copying grow this replaces — copy the array, then re-point every row — could drop hit-path writes landing between the copy and the re-pointing. Per-pid keys never exposed it: a burst of new actors is all key-misses, and the alloc path re-pointed safely. Class keys make concurrent hits-during-grow the common case, so the race had to go.)
 - **Per-actor stats only while tracing is enabled** (`beamtalk_agg_pid`, capped at 100,000 keys). New keys past the cap are not tracked until room frees up. Dead pids' rows are reclaimed by the existing 1 s sweep (an `is_process_alive` check in the gen_server — no monitors, off the dispatch path). `disable/0` drops the whole pid table.
 - **`bottlenecks:` scans the instance registry** instead of the aggregate index, so it covers every live actor whether or not tracing is enabled. `healthFor:`/`systemHealth` are unchanged (live `process_info` snapshots).
 - **Upgrading resets the aggregates** (the old per-pid index, pid→class map and retired rollup are deleted once on first boot) but keeps the captured trace events.
@@ -69,7 +69,7 @@ The empty-values convention is kept deliberately: `traces` already answers `[]` 
 
 ### Consequences
 
-- A dispatch from a never-before-seen actor costs ~96 ns (was ~2.3 µs); steady-state dispatch ~91 ns, the full telemetry handler ~119 ns (`runtime/perf/bench_trace_dispatch.escript`; see `docs/development/benchmarks.md`). Enabled mode costs more per dispatch (~155 ns steady-state, two aggregate writes) — opt-in debugging overhead, as before.
+- A dispatch from a never-before-seen actor costs ~95 ns (was ~2.3 µs); steady-state dispatch ~89 ns, the full telemetry handler ~114 ns (`runtime/perf/bench_trace_dispatch.escript`; see `docs/development/benchmarks.md`). Enabled mode costs more per dispatch (~153 ns steady-state, two aggregate writes) — opt-in debugging overhead, as before.
 - Memory is flat under churn: 1M short-lived actors leave every aggregate table and the atomics array exactly at baseline (pinned by test).
 - No `monitored_by` side effect, ever; the `monitored_by` guidance added for BT-4066 (jamesc/beamtalk#4506) is revised out of `Tracing`'s docs.
 - Consumers that matched `"retired:<Class>"` keys or `pid => "retired"` entries must match `"class:<Class>"` keys instead (MCP tool descriptions updated; no MCP/LSP structural change — stats pass through opaquely).
