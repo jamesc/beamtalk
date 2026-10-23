@@ -777,5 +777,4 @@ mod tests {
         let result = normalize_inline_assertions(content);
         assert_eq!(result, "x greet: \"hi // => bye\"\n// => ok\n");
     }
-
 }
