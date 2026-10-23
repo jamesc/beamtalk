@@ -135,7 +135,7 @@ find_modules_missing_dir_test() ->
 %%% ============================================================================
 
 sort_modules_empty_test() ->
-    ?assertEqual([], beamtalk_module_activation:sort_modules_by_dependency("/tmp", [])).
+    ?assertEqual([], beamtalk_module_activation:sort_modules_by_dependency(get_tmp_base(), [])).
 
 %%% ============================================================================
 %%% load_app_from_ebin/1 tests
