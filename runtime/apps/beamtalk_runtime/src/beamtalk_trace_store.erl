@@ -241,16 +241,24 @@ record_dispatch(Pid, Selector, Duration, Outcome, Mode, Class) ->
 do_record_dispatch(Pid, Selector, Duration, Outcome, _Mode, Class) ->
     %% Always-on aggregates, keyed by {Class, Selector} only: no per-pid ETS
     %% write, no message to the gen_server, no monitor (BT-4103).
-    {ClassRef, ClassBase} = ensure_class_slot(Class, Selector),
-    add_sample(ClassRef, ClassBase, Duration, Outcome),
+    maybe_add_sample(ensure_class_slot(Class, Selector), Duration, Outcome),
     %% Per-actor detail only while tracing is enabled.
     case is_enabled() of
         true ->
-            {PidRef, PidBase} = ensure_pid_slot(Pid, Selector, Class),
-            add_sample(PidRef, PidBase, Duration, Outcome);
+            maybe_add_sample(ensure_pid_slot(Pid, Selector, Class), Duration, Outcome);
         false ->
             ok
     end.
+
+-doc """
+Add a sample unless the slot lookup answered `dummy` (pid table at cap, or a
+grow the trace store did not answer): the sample is dropped without
+allocating or writing anything.
+""".
+maybe_add_sample({AtomicsRef, SlotBase}, Duration, Outcome) ->
+    add_sample(AtomicsRef, SlotBase, Duration, Outcome);
+maybe_add_sample(dummy, _Duration, _Outcome) ->
+    ok.
 
 add_sample(AtomicsRef, SlotBase, Duration, Outcome) ->
     atomics:add(AtomicsRef, SlotBase + ?SLOT_CALLS, 1),
@@ -630,10 +638,15 @@ code_change(OldVsn, State, Extra) ->
 
 -doc """
 Migrate an old state record: pre-BT-4066 `{state, Sweep, Vm}` is already the
-current shape, and the BT-4066 `{state, Sweep, Vm, Monitors}` drops its
-monitors (BT-4103 arms none).
+current shape, and the BT-4066 `{state, Sweep, Vm, Monitors}` has its monitors
+dismantled (BT-4103 arms none, so inherited ones are released rather than
+left to linger on actors' `monitored_by`).
 """.
-upgrade_state({state, SweepTimer, VmStats, _Monitors}) ->
+upgrade_state({state, SweepTimer, VmStats, Monitors}) when is_map(Monitors) ->
+    lists:foreach(
+        fun({_Pid, MRef}) -> erlang:demonitor(MRef, [flush]) end,
+        maps:to_list(Monitors)
+    ),
     #state{sweep_timer = SweepTimer, vm_stats = VmStats};
 upgrade_state(State) ->
     State.
@@ -678,10 +691,16 @@ reset_aggregates_after_upgrade() ->
             fresh_counters()
     end.
 
--doc "Ensure atomics ref and slot allocator exist in persistent_term.".
+-doc "Ensure the counters triple exists in persistent_term.".
 ensure_counters() ->
     try persistent_term:get(?PT_COUNTERS) of
-        _Ref -> ok
+        {_Ref, _Size, _Alloc} ->
+            ok;
+        %% A stale shape (e.g. the bare ref a pre-BT-4103 store left when
+        %% its tables are already gone): start fresh rather than crash
+        %% callers on a badmatch.
+        _Stale ->
+            fresh_counters()
     catch
         error:badarg ->
             fresh_counters()
@@ -734,7 +753,8 @@ aggregates). Called from the write path (calling process), not the gen_server.
 Class rows are sticky — never deleted, never released — so their slots come
 from the bump allocator only and the free list stays off the always-on path.
 """.
--spec ensure_class_slot(atom(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
+-spec ensure_class_slot(atom(), atom()) ->
+    {atomics:atomics_ref(), non_neg_integer()} | dummy.
 ensure_class_slot(Class, Selector) ->
     Key = {Class, Selector},
     case ets:lookup(?AGG_CLASS_STATS, Key) of
@@ -744,18 +764,21 @@ ensure_class_slot(Class, Selector) ->
             MakeRow = fun(Ref, Base) -> {Key, Ref, Base} end,
             case allocate_counter_slot(?AGG_CLASS_STATS, Key, MakeRow, bump) of
                 {AtomicsRef, SlotBase, _} ->
-                    {AtomicsRef, SlotBase}
+                    {AtomicsRef, SlotBase};
+                dummy ->
+                    dummy
             end
     end.
 
 -doc """
 Get or allocate atomics slots for a {Pid, Selector} pair (per-actor detail,
 written only while tracing is enabled). The table is capped at
-`?MAX_PID_KEYS`: past the cap new keys are not tracked (a dummy slot absorbs
-their writes) until the sweep reclaims dead pids' rows. Freed slots are
-recycled through the free list, so the array stays at its peak.
+`?MAX_PID_KEYS`: past the cap new keys answer `dummy` (their samples are
+dropped without allocating anything) until the sweep reclaims dead pids'
+rows. Freed slots are recycled through the free list.
 """.
--spec ensure_pid_slot(pid(), atom(), atom()) -> {atomics:atomics_ref(), non_neg_integer()}.
+-spec ensure_pid_slot(pid(), atom(), atom()) ->
+    {atomics:atomics_ref(), non_neg_integer()} | dummy.
 ensure_pid_slot(Pid, Selector, Class) ->
     Key = {Pid, Selector},
     case ets:lookup(?AGG_PID, Key) of
@@ -768,15 +791,19 @@ ensure_pid_slot(Pid, Selector, Class) ->
 ensure_pid_slot_capped(Key, Pid, Selector, Class) ->
     case ets:info(?AGG_PID, size) >= ?MAX_PID_KEYS of
         true ->
-            {atomics:new(?SLOTS_PER_KEY, [{signed, true}]), 0};
+            dummy;
         false ->
+            %% The keys entry goes in first: a crash between the two writes
+            %% leaves a keys entry with no row (tolerated: the sweep and the
+            %% readers skip missing rows), never a row the sweep cannot see.
+            %% The bag dedupes the identical object on a lost insert race.
+            true = ets:insert(?AGG_PID_KEYS, {Pid, Selector}),
             MakeRow = fun(Ref, Base) -> {Key, Ref, Base, Class} end,
             case allocate_counter_slot(?AGG_PID, Key, MakeRow, free_list) of
-                {AtomicsRef, SlotBase, new} ->
-                    true = ets:insert(?AGG_PID_KEYS, {Pid, Selector}),
-                    {AtomicsRef, SlotBase};
                 {AtomicsRef, SlotBase, _} ->
-                    {AtomicsRef, SlotBase}
+                    {AtomicsRef, SlotBase};
+                dummy ->
+                    dummy
             end
     end.
 
@@ -801,12 +828,12 @@ holds its previous owner's counts. The row is inserted with
 `ets:insert_new/2`: when two processes observe the same key first, the loser
 hands its slot back and uses the winner's row, so no slot leaks. Answers
 `new` when this call created the row, `existing` when it lost that race, and
-`dummy` when the atomics array could not grow (trace store down or slow); the
-dummy ref absorbs writes, because observability must never crash the actor
-being observed.
+`dummy` when the array could not grow (trace store down or slow); the caller
+drops the sample, because observability must never crash the actor being
+observed.
 """.
 -spec allocate_counter_slot(atom(), term(), fun(), bump | free_list) ->
-    {atomics:atomics_ref(), non_neg_integer(), new | existing | dummy}.
+    {atomics:atomics_ref(), non_neg_integer(), new | existing} | dummy.
 allocate_counter_slot(Table, Key, MakeRow, SlotSource) ->
     case claim_slot(SlotSource) of
         {ok, AtomicsRef, SlotBase} ->
@@ -826,14 +853,14 @@ allocate_counter_slot(Table, Key, MakeRow, SlotSource) ->
                     end
             end;
         error ->
-            {atomics:new(?SLOTS_PER_KEY, [{signed, true}]), 0, dummy}
+            dummy
     end.
 
 -doc """
 Claim a slot: from the free list when `SlotSource` is `free_list` and one is
 free, else by bumping the current array's allocator (growing first when the
 array is full). Answers `error` when a grow was needed but the trace store
-did not answer; the caller then uses a dummy slot.
+did not answer; the caller then drops the sample.
 """.
 -spec claim_slot(bump | free_list) ->
     {ok, atomics:atomics_ref(), non_neg_integer()} | error.
@@ -968,7 +995,11 @@ grow_counters() ->
 %% Internal: Class resolution for health queries
 %%====================================================================
 
--doc "Resolve the class atom from beamtalk_instance_registry, else `unknown`.".
+-doc """
+Resolve the class atom from beamtalk_instance_registry, else `unknown`. A
+full-table scan per call: fine for one actor's health, but batch callers
+should use `bottlenecks/1` (one scan total) rather than polling per actor.
+""".
 -spec class_from_registry(pid()) -> atom().
 class_from_registry(Pid) ->
     try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
@@ -1102,7 +1133,8 @@ sweep_pid_rows(Pid) ->
 -doc """
 Drop all per-actor aggregate data: every pid row's slot is claimed with
 `ets:take/2` and released to the free list. Runs in the gen_server on
-`disable/0` and as part of `clear/0`.
+`disable/0` and as part of `clear/0`. The freed slots stay on the free list
+as a reuse cache: disabling drops the rows but does not shrink the arrays.
 """.
 drop_pid_data() ->
     ets:delete_all_objects(?AGG_PID_KEYS),
@@ -1515,17 +1547,29 @@ registry, so it covers every live actor whether or not tracing is enabled —
 unregistered processes never appear.
 """.
 do_bottlenecks(Limit) ->
-    %% Get all unique {Class, Pid} pairs from the instance registry.
+    %% Get all unique {Class, Pid} pairs from the instance registry,
+    %% deduplicated by pid (a pid registered under two classes must still
+    %% report once).
     Pairs = lists:usort(
         try
             ets:foldl(
-                fun({Class, Pid}, Acc) -> [{Class, Pid} | Acc] end, [], beamtalk_instance_registry
+                fun
+                    ({Class, Pid}, Acc) when is_atom(Class), is_pid(Pid) ->
+                        [{Class, Pid} | Acc];
+                    %% Another writer's malformed row: skip, never crash
+                    %% the query.
+                    (_Row, Acc) ->
+                        Acc
+                end,
+                [],
+                beamtalk_instance_registry
             )
         catch
             %% Registry table missing (partial harness): no actors to report.
             error:badarg -> []
         end
     ),
+    ByPid = maps:values(maps:from_list([{Pid, {Class, Pid}} || {Class, Pid} <- Pairs])),
     %% Get queue depths for live processes
     WithQueue = lists:filtermap(
         fun({Class, Pid}) ->
@@ -1548,7 +1592,7 @@ do_bottlenecks(Limit) ->
                     false
             end
         end,
-        Pairs
+        ByPid
     ),
     Sorted = lists:sort(
         fun(A, B) -> maps:get(queue_depth, A) >= maps:get(queue_depth, B) end,

@@ -515,7 +515,38 @@ bottlenecks_test_() ->
                     beamtalk_object_instances:unregister('Counter', Pid),
                     Pid ! stop
                 end
-            end)
+            end),
+            {"a pid registered under two classes reports once",
+                ?_test(begin
+                    case whereis(beamtalk_object_instances) of
+                        undefined ->
+                            {ok, _} = beamtalk_object_instances:start_link();
+                        _ ->
+                            ok
+                    end,
+                    Self = self(),
+                    Pid = spawn(fun() ->
+                        Self ! ready,
+                        receive
+                            stop -> ok
+                        end
+                    end),
+                    receive
+                        ready -> ok
+                    end,
+                    ok = beamtalk_object_instances:register('Counter', Pid),
+                    ok = beamtalk_object_instances:register('Other', Pid),
+                    try
+                        Result = beamtalk_trace_store:bottlenecks(1000),
+                        PidBin = list_to_binary(pid_to_list(Pid)),
+                        Matches = [R || R <- Result, maps:get(<<"actor">>, R) =:= PidBin],
+                        ?assertEqual(1, length(Matches))
+                    after
+                        beamtalk_object_instances:unregister('Counter', Pid),
+                        beamtalk_object_instances:unregister('Other', Pid),
+                        Pid ! stop
+                    end
+                end)}
         ]
     end}.
 
@@ -611,51 +642,120 @@ enable_disable_toggle_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Gen_server crash recovery (heir)
+%% Test: Crash recovery preserves exact aggregates (heir)
 %%====================================================================
 
-%% Test crash recovery by gracefully stopping and restarting, verifying that
-%% persistent_term data (counters, enabled flag) survives the restart and
-%% ETS tables are recreated. This tests the same recovery path as a crash
-%% without the EUnit process-link complications of kill signals.
-gen_server_crash_recovery_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_State) ->
+%% Killing or gracefully stopping the store must not lose aggregate data:
+%% the ETS tables pass to the heir and the restarted store reclaims them
+%% with exact counts, and the trace events survive too. Both death paths
+%% are pinned. The store is taken direct first (a supervising tree's child
+%% is terminated, so no restart races the assertions) and handed back
+%% afterwards, whatever the ambient suite state.
+crash_recovery_preserves_exact_counts_test_() ->
+    {setup, fun setup/0, fun crash_cleanup/1, fun(_State) ->
         [
-            ?_test(begin
-                TestPid = self(),
-
-                %% Insert data via persistent_term counters
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
-                beamtalk_trace_store:enable(),
-
-                %% Verify data exists
-                StatsBefore = beamtalk_trace_store:get_stats(),
-                ?assertNotEqual(#{}, StatsBefore),
-                ?assert(beamtalk_trace_store:is_enabled()),
-
-                %% Gracefully stop the gen_server (simulates restart after crash)
-                gen_server:stop(beamtalk_trace_store),
-                timer:sleep(50),
-
-                %% Verify persistent_term data survives (this is the key crash
-                %% recovery property — counters and enabled flag persist)
-                ?assert(beamtalk_trace_store:is_enabled()),
-
-                %% Restart
-                case beamtalk_trace_store:start_link() of
-                    {ok, _NewPid} -> ok;
-                    {error, {already_started, _}} -> ok
-                end,
-
-                %% Store should be functional with inherited persistent_terms
-                beamtalk_trace_store:record_dispatch(
-                    TestPid, after_restart, 500, ok, sync, 'Counter'
-                ),
-                StatsAfterRestart = beamtalk_trace_store:get_stats(),
-                ?assertNotEqual(#{}, StatsAfterRestart)
-            end)
+            {"graceful restart preserves aggregates exactly",
+                ?_test(begin
+                    take_store_direct(),
+                    TestPid = seed_crash_test_data(),
+                    gen_server:stop(beamtalk_trace_store),
+                    timer:sleep(50),
+                    {ok, _} = beamtalk_trace_store:start_link(),
+                    assert_seeded_data_intact(TestPid)
+                end)},
+            {"kill preserves aggregates exactly",
+                ?_test(begin
+                    take_store_direct(),
+                    TestPid = seed_crash_test_data(),
+                    StorePid = whereis(beamtalk_trace_store),
+                    %% The store is linked here (direct start above): trap
+                    %% the kill's EXIT instead of dying with it.
+                    process_flag(trap_exit, true),
+                    try
+                        exit(StorePid, kill),
+                        receive
+                            {'EXIT', StorePid, killed} -> ok
+                        after 5000 -> ?assert(false)
+                        end,
+                        {ok, _} = beamtalk_trace_store:start_link(),
+                        assert_seeded_data_intact(TestPid)
+                    after
+                        process_flag(trap_exit, false)
+                    end
+                end)}
         ]
     end}.
+
+-doc """
+Take direct ownership of the trace store however it currently runs: a
+supervising tree's child is terminated (dormant spec, so nothing restarts
+it) and any directly started store is stopped; then the heir is ensured
+and the store started directly, so its tables are heir-protected.
+""".
+take_store_direct() ->
+    case whereis(beamtalk_runtime_sup) of
+        undefined ->
+            ok;
+        SupPid ->
+            _ = catch supervisor:terminate_child(SupPid, beamtalk_trace_store)
+    end,
+    _ = catch gen_server:stop(beamtalk_trace_store),
+    wait_until(fun() -> whereis(beamtalk_trace_store) =:= undefined end),
+    case whereis(beamtalk_ets_heir) of
+        undefined -> {ok, _} = beamtalk_ets_heir:start_link();
+        _ -> ok
+    end,
+    {ok, _} = beamtalk_trace_store:start_link(),
+    ok.
+
+-doc """
+Hand the store back to its supervisor when there is one (whatever ran
+before, the suite state after this test matches it), then clean.
+""".
+crash_cleanup(State) ->
+    case whereis(beamtalk_runtime_sup) of
+        undefined ->
+            ok;
+        SupPid ->
+            _ = catch gen_server:stop(beamtalk_trace_store),
+            timer:sleep(50),
+            case catch supervisor:restart_child(SupPid, beamtalk_trace_store) of
+                {ok, _} ->
+                    ok;
+                _ ->
+                    %% No managed child (or it is already running): a
+                    %% directly started store serves just as well.
+                    case beamtalk_trace_store:start_link() of
+                        {ok, _} -> ok;
+                        {error, {already_started, _}} -> ok
+                    end
+            end
+    end,
+    cleanup(State).
+
+-doc "Seed one dispatch aggregate plus one trace event; answers the test pid.".
+seed_crash_test_data() ->
+    beamtalk_trace_store:clear(),
+    beamtalk_trace_store:enable(),
+    TestPid = self(),
+    beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
+    beamtalk_trace_store:record_trace_event(
+        TestPid, 'Counter', increment, sync, 1000, ok, #{}, stop
+    ),
+    TestPid.
+
+-doc "Assert the seeded dispatch aggregate and trace event survived a restart.".
+assert_seeded_data_intact(TestPid) ->
+    ?assert(beamtalk_trace_store:is_enabled()),
+    #{<<"methods">> := #{<<"increment">> := Inc}} = class_entry(<<"Counter">>),
+    ?assertEqual(1, maps:get(<<"calls">>, Inc)),
+    ?assertEqual(1000, maps:get(<<"total_duration_ns">>, Inc)),
+    PidKey = list_to_binary(pid_to_list(TestPid)),
+    #{PidKey := #{<<"methods">> := #{<<"increment">> := PidInc}}} =
+        beamtalk_trace_store:get_stats(TestPid),
+    ?assertEqual(1, maps:get(<<"calls">>, PidInc)),
+    ?assertEqual(1, length(beamtalk_trace_store:get_traces())),
+    ok.
 
 %%====================================================================
 %% Test: VM measurements handler
@@ -2099,6 +2199,55 @@ sweep_reclaims_dead_pid_rows_test_() ->
                 ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"first">>, Methods)),
                 ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"foo">>, Methods)),
                 ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"bar">>, Methods))
+            end)}
+    end}.
+
+pid_cap_drops_and_recovers_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {timeout, 120,
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                %% Fill the pid table to its cap with live minimal procs
+                %% (~a few hundred MB transiently): live rows are never
+                %% swept, so the at-cap window below is deterministic — no
+                %% sweep tick can invalidate it.
+                N = 100000,
+                Fill = [
+                    spawn(fun() ->
+                        receive
+                            _ -> ok
+                        end
+                    end)
+                 || _ <- lists:seq(1, N)
+                ],
+                lists:foreach(
+                    fun(P) ->
+                        beamtalk_trace_store:record_dispatch(P, capfill, 1, ok, sync, 'Cap')
+                    end,
+                    Fill
+                ),
+                %% Single-threaded fill: exactly at cap, no overshoot.
+                ?assertEqual(N, ets:info(beamtalk_agg_pid, size)),
+                %% A fresh pid past the cap is not tracked ...
+                Ghost = idle_process(),
+                beamtalk_trace_store:record_dispatch(
+                    Ghost, capped_method, 10, ok, sync, 'Cap'
+                ),
+                ?assertEqual([], ets:lookup(beamtalk_agg_pid, {Ghost, capped_method})),
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats(Ghost)),
+                %% ... but its class aggregates still record.
+                #{<<"methods">> := #{<<"capped_method">> := Capped}} =
+                    class_entry(<<"Cap">>),
+                ?assertEqual(1, maps:get(<<"calls">>, Capped)),
+                %% Once the sweep reclaims dead rows there is room again: a
+                %% new pid is tracked.
+                Ghost ! stop,
+                lists:foreach(fun(P) -> exit(P, kill) end, Fill),
+                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                Live = idle_process(),
+                beamtalk_trace_store:record_dispatch(Live, capped_method, 10, ok, sync, 'Cap'),
+                ?assertMatch([_], ets:lookup(beamtalk_agg_pid, {Live, capped_method})),
+                Live ! stop
             end)}
     end}.
 
