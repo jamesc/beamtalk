@@ -65,7 +65,7 @@ owned_exit_on_entry_chain_throws_script_exit_test_() ->
 shared_exit_from_actor_raises_program_exit_outside_entry_test_() ->
     with_caps(?SHARED, [
         fun() ->
-            put('$bt_actor_state', #{}),
+            Old = beamtalk_actor_state:install(#{}),
             try
                 ?assertError(
                     #{
@@ -77,7 +77,7 @@ shared_exit_from_actor_raises_program_exit_outside_entry_test_() ->
                     beamtalk_program:'exit:'(4)
                 )
             after
-                erase('$bt_actor_state')
+                beamtalk_actor_state:uninstall(Old)
             end
         end
     ]).

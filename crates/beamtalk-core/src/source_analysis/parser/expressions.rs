@@ -2411,6 +2411,24 @@ impl Parser {
         (segment_type, signedness, endianness)
     }
 
+    /// Whether the current token is the `no_user_code` mark of a primitive pragma
+    /// (ADR 0137 §4), written on the pragma's own line.
+    fn at_no_user_code_flag(&self) -> bool {
+        matches!(self.current_kind(), TokenKind::Identifier(name) if name.as_str() == "no_user_code")
+            && !self.current_token().has_leading_newline()
+    }
+
+    /// Consumes the optional `no_user_code` mark that ends a primitive pragma;
+    /// answers whether it was there and the pragma's span with it.
+    fn parse_no_user_code_flag(&mut self, span: Span) -> (bool, Span) {
+        if self.at_no_user_code_flag() {
+            let flag = self.advance();
+            (true, span.merge(flag.span()))
+        } else {
+            (false, span)
+        }
+    }
+
     /// Parses a `@primitive` or `@intrinsic` pragma: `@primitive "selector"` or `@intrinsic intrinsicName`.
     ///
     /// The `@primitive`/`@intrinsic` token has already been identified by `parse_primary`.
@@ -2448,7 +2466,8 @@ impl Parser {
         let has_explicit_name = matches!(
             self.current_kind(),
             TokenKind::String(_) | TokenKind::Identifier(_)
-        ) && !self.current_token().has_leading_newline();
+        ) && !self.current_token().has_leading_newline()
+            && !self.at_no_user_code_flag();
 
         if has_explicit_name {
             match self.current_kind() {
@@ -2456,12 +2475,14 @@ impl Parser {
                 TokenKind::String(name) => {
                     let name = name.clone();
                     let end_token = self.advance();
-                    let span = start.merge(end_token.span());
+                    let (no_user_code, span) =
+                        self.parse_no_user_code_flag(start.merge(end_token.span()));
                     Expression::Primitive {
                         name,
                         is_quoted: true,
                         is_intrinsic,
                         is_inferred: false,
+                        no_user_code,
                         span,
                     }
                 }
@@ -2469,12 +2490,14 @@ impl Parser {
                 TokenKind::Identifier(name) => {
                     let name = name.clone();
                     let end_token = self.advance();
-                    let span = start.merge(end_token.span());
+                    let (no_user_code, span) =
+                        self.parse_no_user_code_flag(start.merge(end_token.span()));
                     Expression::Primitive {
                         name,
                         is_quoted: false,
                         is_intrinsic,
                         is_inferred: false,
+                        no_user_code,
                         span,
                     }
                 }
@@ -2494,12 +2517,14 @@ impl Parser {
             // This yields the same AST as the explicit quoted form
             // (`is_quoted: true`), so downstream codegen is identical; only
             // unparsing distinguishes it via `is_inferred`.
+            let (no_user_code, span) = self.parse_no_user_code_flag(start);
             Expression::Primitive {
                 name: selector,
                 is_quoted: true,
                 is_intrinsic,
                 is_inferred: true,
-                span: start,
+                no_user_code,
+                span,
             }
         } else {
             let span = start;

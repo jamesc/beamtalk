@@ -49,7 +49,7 @@ Actor subclass: SelfSendHomPool
   // `stateful_block_dispatch` before). That shape was also the only way to make
   // `do:`'s parameter a promoted Tier 2 position, so `recordAll` below, which
   // BT-3936's case B pinned as a raise, is now the same plain-closure case A as
-  // `SelfSendHomPlainPool`.
+  // `SelfSendHomPlainPool`, and under ADR 0137 keeps its change.
 
   // A block that assigns nothing but sends `record:`, which changes a field.
   record: each => self.total := self.total + each

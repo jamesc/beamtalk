@@ -41,8 +41,7 @@ pub struct BlockMutationAnalysis {
     /// other than `self` that may run user code in the calling process
     /// ([`send_user_code`], and a binary operator that is not a bare BIF or a
     /// numeric-literal operation), nested blocks included. Counted as a state
-    /// effect only while the synced-calls switch is on
-    /// ([`crate::synced_calls`]), because such a call is bracketed with a
+    /// effect in an actor instance method, because such a call is bracketed with a
     /// store and a reload of the threaded `State`.
     pub has_user_code_sends: bool,
     /// Selectors sent to `self` anywhere in the block, including inside
@@ -81,7 +80,7 @@ impl BlockMutationAnalysis {
     /// has no actor `State` to bracket (the caller knows the context).
     #[must_use]
     pub fn has_synced_user_code_sends(&self) -> bool {
-        self.has_user_code_sends && crate::synced_calls::enabled()
+        self.has_user_code_sends
     }
 
     /// Whether a loop or fold over this block is lowered with mutation
@@ -171,7 +170,9 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
 /// instance method) is the rule.
 #[must_use]
 pub fn inline_block_threads(block: &Block, root: Option<RootMethodKind>) -> bool {
-    analyze_block(block).needs_mutation_threading(root, true)
+    // ADR 0137: not the bracket's contribution. An evaluated block holding only
+    // calls that may run user code is a closure the call as a whole brackets.
+    analyze_block(block).needs_mutation_threading_with(root, true, false)
         // The REPL also threads a block that writes a binding anywhere, a
         // nested construct's block included (codegen's
         // `repl_blocks_write_bindings`, BT-3823): every name is a binding
@@ -421,21 +422,6 @@ pub fn value_blocks(expr: &Expression) -> Vec<&Block> {
     visit_returned(expr, ReturnedOperands::ThroughValue, &mut |operand, _| {
         if let Expression::Block(block) = operand {
             found.push(block);
-        }
-    });
-    found
-}
-
-/// The bare local-variable references `expr` may evaluate to, followed as
-/// [`value_blocks`] follows it (`c := b`, `c := x ifTrue: [b] ifFalse: [..]`):
-/// ADR 0131 §6 reads it for a local that aliases a block-valued local
-/// (BT-3859).
-#[must_use]
-pub fn value_locals(expr: &Expression) -> Vec<&crate::ast::Identifier> {
-    let mut found = Vec::new();
-    visit_returned(expr, ReturnedOperands::ThroughValue, &mut |operand, _| {
-        if let Expression::Identifier(id) = operand {
-            found.push(id);
         }
     });
     found
@@ -924,29 +910,41 @@ fn send_may_run_user_code(
     selector: &MessageSelector,
     arguments: &[Expression],
 ) -> bool {
-    use crate::state_threading_selectors::{SendUserCode, send_user_code, structural_binary};
+    use crate::state_threading_selectors::{SendUserCode, send_user_code};
     if matches!(receiver, Expression::Super(_)) {
+        // The superclass method may change state and run a block: in a loop or
+        // closure position it runs against the cell, so the body holds a call
+        // that brackets (ADR 0137 §3, BT-4009).
+        return true;
+    }
+    if matches!(selector, MessageSelector::Binary(_)) {
+        // A binary operator is a guarded BIF: the message send is its rare
+        // slow path (a receiver that is not a number). It is bracketed where
+        // the body threads `State`, but never makes a body thread: an
+        // arithmetic loop over untyped locals (`sum := sum + i`) must keep its
+        // direct parameters, and the slow path reaching a user-defined
+        // operator that touches this actor's fields is the narrow case a
+        // loop with no whole `State` accepts (ADR 0137 Negative consequences,
+        // BT-4121).
         return false;
     }
-    if let MessageSelector::Binary(op) = selector {
-        if structural_binary(op).is_some() {
-            return false;
-        }
-        let numeric_literal = |e: &Expression| {
-            matches!(
-                e.unwrap_parens(),
-                Expression::Literal(
-                    crate::ast::Literal::Integer(..) | crate::ast::Literal::Float(..),
-                    _
-                )
-            )
-        };
-        return !(numeric_literal(receiver) && arguments.first().is_some_and(numeric_literal));
+    match send_user_code(receiver, selector, arguments) {
+        SendUserCode::MayRun => true,
+        // A collection message is a call only when its block is a closure
+        // handed to the runtime. A block that carries something (writes a
+        // captured local or a field, or sends to `self`) is lowered in place
+        // as a threaded fold and is not one (the block's own sends are counted
+        // as the block is analysed).
+        SendUserCode::InlinedOrClosureCall => !arguments.iter().any(|argument| {
+            matches!(argument.unwrap_parens(), Expression::Block(block) if {
+                let analysis = analyze_block(block);
+                !captured_local_mutations_from_analysis(&analysis).is_empty()
+                    || !analysis.field_writes.is_empty()
+                    || analysis.has_self_sends
+            })
+        }),
+        SendUserCode::Never | SendUserCode::Inlined | SendUserCode::LoopOrClosureCall => false,
     }
-    matches!(
-        send_user_code(receiver, selector, arguments),
-        SendUserCode::MayRun | SendUserCode::InlinedOrClosureCall
-    )
 }
 
 /// Adds all variable names bound by `pattern` to `ctx.local_bindings` and
@@ -1046,18 +1044,6 @@ fn collect_pattern_bindings(
 pub(crate) fn is_self_or_super(expr: &Expression) -> bool {
     let expr = expr.unwrap_parens();
     is_self_reference(expr) || matches!(expr, Expression::Super(_))
-}
-
-/// The receiver a cascade sends all its messages to: the parser folds the
-/// first message into `receiver`, so it is that send's own receiver.
-#[must_use]
-pub(crate) fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
-    match receiver {
-        Expression::MessageSend {
-            receiver: shared, ..
-        } => shared,
-        other => other,
-    }
 }
 
 pub(crate) fn is_self_reference(expr: &Expression) -> bool {
@@ -1294,170 +1280,6 @@ pub fn outer_state_writes(block: &Block) -> Vec<OuterLocalWrite> {
     };
     walker.block(block);
     walker.state_writes
-}
-
-/// The spans of the blocks nested in `block` that take a `self` parameter (a
-/// class-builder method body): inside one, `self` is that parameter, not the
-/// enclosing object. `None` when `block` itself takes one.
-fn self_rebound_spans(block: &Block) -> Option<Vec<Span>> {
-    if block.parameters.iter().any(|p| p.name == "self") {
-        return None;
-    }
-    let mut rebound = Vec::new();
-    for stmt in &block.body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            if let Expression::Block(inner) = e {
-                if inner.parameters.iter().any(|p| p.name == "self") {
-                    rebound.push(inner.span);
-                }
-            }
-        });
-    }
-    Some(rebound)
-}
-
-/// ADR 0133 (BT-3952): the first message `block` sends to `self` or `super`
-/// anywhere in its body, nested blocks included: its selector and the span of
-/// the send. A self-send dispatches against the `State` the block captured
-/// when it was made, so it can answer a stale value as `self.field` can.
-pub fn outer_self_send(block: &Block) -> Option<(&'static str, ecow::EcoString, Span)> {
-    let rebound = self_rebound_spans(block)?;
-    let mut found = None;
-    for stmt in &block.body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            if let Expression::MessageSend {
-                receiver,
-                selector,
-                span,
-                ..
-            } = e
-            {
-                if found.is_none()
-                    && is_self_or_super(receiver)
-                    && !rebound
-                        .iter()
-                        .any(|b| b.start() <= span.start() && span.end() <= b.end())
-                {
-                    let word = if matches!(receiver.unwrap_parens(), Expression::Super(_)) {
-                        "super"
-                    } else {
-                        "self"
-                    };
-                    found = Some((word, selector.name(), *span));
-                }
-            }
-        });
-    }
-    found
-}
-
-/// ADR 0133 (BT-3952): the `self.field` reads (and `self fieldAt: k` reads, named
-/// `self fieldAt:` or `super fieldAt:`) `block` makes anywhere in its
-/// body, nested blocks included, first read of each field. An assignment's
-/// target is a write, not a read (`outer_state_writes`); a `self.x` inside the
-/// assigned value is a read. The read-side twin of [`outer_state_writes`].
-pub fn outer_state_reads(block: &Block) -> Vec<OuterLocalWrite> {
-    let mut targets: HashSet<Span> = HashSet::new();
-    let mut reads: Vec<OuterLocalWrite> = Vec::new();
-    let Some(rebound) = self_rebound_spans(block) else {
-        return reads;
-    };
-    for stmt in &block.body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            if let Expression::Assignment { target, .. } = e {
-                if let Expression::FieldAccess { span, .. } = target.as_ref() {
-                    targets.insert(*span);
-                }
-            }
-        });
-    }
-    for stmt in &block.body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            // The reflective read `self fieldAt: k` (or `super fieldAt: k`)
-            // reads the same captured `State` as `self.k`.
-            if let Expression::MessageSend {
-                receiver,
-                selector,
-                span,
-                ..
-            } = e
-            {
-                if selector.name() == "fieldAt:"
-                    && is_self_or_super(receiver)
-                    && !rebound
-                        .iter()
-                        .any(|b| b.start() <= span.start() && span.end() <= b.end())
-                {
-                    let word = if matches!(receiver.unwrap_parens(), Expression::Super(_)) {
-                        "super"
-                    } else {
-                        "self"
-                    };
-                    let name: ecow::EcoString = format!("{word} fieldAt:").into();
-                    if !reads.iter().any(|r| r.name == name) {
-                        reads.push(OuterLocalWrite {
-                            kind: WriteKind::ObjectState,
-                            name,
-                            span: *span,
-                        });
-                    }
-                }
-                return;
-            }
-            let Expression::FieldAccess {
-                receiver,
-                field,
-                span,
-            } = e
-            else {
-                return;
-            };
-            if is_self_reference(receiver.unwrap_parens())
-                && !targets.contains(span)
-                && !rebound
-                    .iter()
-                    .any(|b| b.start() <= span.start() && span.end() <= b.end())
-                && !reads.iter().any(|r| r.name == field.name)
-            {
-                reads.push(OuterLocalWrite {
-                    kind: WriteKind::ObjectState,
-                    name: field.name.clone(),
-                    span: *span,
-                });
-            }
-        });
-    }
-    reads
-}
-
-/// Whether evaluating `expr` itself (not its operands) can change the
-/// actor's `State` (BT-3952): a `self.field :=` write, or a message sent to
-/// `self` or `super` (a user method, `fieldAt:put:`, ... any of which may
-/// write a field). Conservative: every self-send counts.
-#[must_use]
-pub fn may_change_actor_state(expr: &Expression) -> bool {
-    match expr {
-        Expression::Assignment { target, .. } => matches!(
-            target.as_ref(),
-            Expression::FieldAccess { receiver, .. } if is_self_reference(receiver.unwrap_parens())
-        ),
-        Expression::MessageSend { receiver, .. } => is_self_or_super(receiver),
-        Expression::Cascade { receiver, .. } => is_self_or_super(cascade_shared_receiver(receiver)),
-        _ => false,
-    }
-}
-
-/// Whether `block` contains, anywhere (nested blocks included), an expression
-/// that [`may_change_actor_state`].
-#[must_use]
-pub fn block_may_change_actor_state(block: &Block) -> bool {
-    let mut changes = false;
-    for stmt in &block.body {
-        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-            changes |= may_change_actor_state(e);
-        });
-    }
-    changes
 }
 
 /// The names `stmt` itself binds by assignment or destructuring: those not
@@ -4330,9 +4152,9 @@ mod tests {
         for src in [
             "[x foo]",
             "[x printString]",
-            "[a + b]",
-            "[x < 1]",
             "[xs do: blk]",
+            // A superclass method may run user code; in a block it runs on the cell.
+            "[super foo]",
             // A literal-block collection message may be a closure handed to a runtime fold.
             "[xs do: [:e | e]]",
         ] {
@@ -4347,8 +4169,11 @@ mod tests {
             "[x == y]",
             "[x ifTrue: [1] ifFalse: [2]]",
             "[1 + 2]",
+            // A guarded operator's send is a rare slow path, never a call that
+            // makes a body thread (see `send_may_run_user_code`).
+            "[a + b]",
+            "[x < 1]",
             "[self foo]",
-            "[super foo]",
             "[x foo!]",
         ] {
             assert!(!analyzed(src).has_user_code_sends, "{src}");
@@ -4361,16 +4186,8 @@ mod tests {
     }
 
     #[test]
-    fn the_switch_gates_the_state_effect_not_the_fact() {
-        use crate::synced_calls::{SyncedCallsMode, override_mode};
+    fn a_call_is_a_state_effect_only_in_an_actor_root() {
         let analysis = analyzed("[x foo]");
-        {
-            let _off = override_mode(SyncedCallsMode::Off);
-            assert!(analysis.has_user_code_sends);
-            assert!(!analysis.has_synced_user_code_sends());
-            assert!(!analysis.needs_mutation_threading(Some(RootMethodKind::Actor), true));
-        }
-        let _on = override_mode(SyncedCallsMode::Enforce);
         assert!(analysis.has_synced_user_code_sends());
         // `has_state_effects` stays context-free; only the actor root counts the bracket.
         assert!(!analysis.has_state_effects());
@@ -5485,18 +5302,6 @@ mod tests {
             .collect();
         assert_eq!(found, vec!["[1]", "[2]"]);
         assert!(value_blocks(&parse_first_expr("[1] value")).is_empty());
-    }
-
-    #[test]
-    fn value_locals_are_the_locals_a_returned_expression_evaluates_to() {
-        let src = "c ifTrue: [b] ifFalse: [d := e]";
-        let expr = parse_first_expr(src);
-        let found: Vec<String> = value_locals(&expr)
-            .into_iter()
-            .map(|id| span_text(src, id.span))
-            .collect();
-        assert_eq!(found, vec!["b", "e"]);
-        assert!(value_locals(&parse_first_expr("b value")).is_empty());
     }
 
     #[test]

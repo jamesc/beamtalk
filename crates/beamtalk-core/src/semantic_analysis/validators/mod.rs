@@ -45,11 +45,10 @@ mod visibility_validators;
 pub(crate) use class_state_abroad::check_class_state_abroad;
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{
-    check_abstract_instantiation, check_actor_field_mutation_in_closure, check_actor_new_usage,
-    check_actor_self_alias_send, check_cast_on_value_type, check_class_variable_access,
-    check_data_keyword_class_kind, check_handle_scope_on_object, check_new_field_names,
-    check_object_new_usage, check_shape_version_and_migrations, check_value_nil_return,
-    check_value_slot_assignment, check_value_slot_case_collision,
+    check_abstract_instantiation, check_actor_new_usage, check_cast_on_value_type,
+    check_class_variable_access, check_data_keyword_class_kind, check_handle_scope_on_object,
+    check_new_field_names, check_object_new_usage, check_shape_version_and_migrations,
+    check_value_nil_return, check_value_slot_assignment, check_value_slot_case_collision,
 };
 pub(crate) use handleinfo_catch_all_validators::check_handle_info_catch_all;
 pub(crate) use late_slot_validators::check_late_slot_declarations;

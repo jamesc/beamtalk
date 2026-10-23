@@ -52,6 +52,7 @@ fn node_with_entry(entry: Option<CatchEntry>, clauses: Vec<CatchClause>) -> Thre
     ThreadedStmt::OnDoCatch {
         vars: Box::new(vars()),
         entry,
+        cell: None,
         try_region: TryRegion {
             body: beamtalk_cerl_doc::Document::Str("apply Block1 () "),
             result_var: "Result1".to_string(),

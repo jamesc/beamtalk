@@ -112,6 +112,7 @@
 //! - [Gleam Erlang Codegen](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs)
 
 mod actor_codegen;
+mod actor_state_access;
 mod block_analysis;
 mod blocks;
 mod class_builder_source;
@@ -355,7 +356,7 @@ impl CoreErlangGenerator {
                         // carrier, wherever the `^` sits.
                         let prelude_doc = self.verified_root_prelude_doc(&tv.prelude, *span);
                         (prelude_doc, self.threaded_value_doc(&tv.value))
-                    } else if self.in_class_method() {
+                    } else if self.threads_no_actor_state() {
                         // A class method threads nothing (ADR 0130 §3): the
                         // value is compiled as an ordinary expression, with
                         // no prelude of its own.
@@ -383,6 +384,11 @@ impl CoreErlangGenerator {
                     // value, and the slot is `nil`.
                     let state_doc = if self.in_class_method() {
                         leaf::atom("nil")
+                    } else if self.in_cell_closure() {
+                        // ADR 0137 §3: an actor closure holds no threaded
+                        // `State`; the throw carries the actor's current one,
+                        // the cell at home (the creation-time capture away).
+                        self.cell_view_doc()
                     } else if self.context == CodeGenContext::Actor {
                         // A direct-params loop binds no `StateAcc`: its body cannot
                         // write `State`, so the throw carries the state the loop
@@ -397,9 +403,22 @@ impl CoreErlangGenerator {
                         ", ",
                         value_doc,
                         ", ",
-                        state_doc,
+                        state_doc.clone(),
                         "})"
                     ];
+                    // ADR 0137 §5: a `^` stores the current version to the cell
+                    // before the throw, so a closure that runs while it unwinds (an
+                    // `ensure:` cleanup) sees every write made before it.
+                    let throw_doc = if self.synced_calls_active() {
+                        docvec![
+                            "let _ = ",
+                            threaded_ir::cell_put_call(state_doc),
+                            " in ",
+                            throw_doc
+                        ]
+                    } else {
+                        throw_doc
+                    };
                     Ok(docvec![val_preamble, throw_doc])
                 } else {
                     // Return in Core Erlang is just the value

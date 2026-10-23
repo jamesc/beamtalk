@@ -113,6 +113,15 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         binding_count = bindings.len(),
         "Loaded primitive bindings from stdlib"
     );
+    // ADR 0137 §4: a `no_user_code` mark is a promise the compiler relies on to
+    // skip the actor-state cell bracket, so a mark that cannot hold fails the build.
+    let mark_problems = bindings.check_no_user_code_marks();
+    if !mark_problems.is_empty() {
+        miette::bail!(
+            "invalid `no_user_code` primitive marks:\n  {}",
+            mark_problems.join("\n  ")
+        );
+    }
 
     // Extract native type specs from runtime .beam files so FFI calls in stdlib
     // get proper type inference instead of Dynamic (ADR 0075).

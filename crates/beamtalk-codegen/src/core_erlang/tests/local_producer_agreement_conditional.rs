@@ -261,11 +261,17 @@ pub(super) fn check_conditional_agreement(src: &str) -> Option<usize> {
     let conditionals = conditional_spans(&method.body);
     // A field-only value-type `on:do:`/`ensure:` is a producer with an empty
     // set (the core rule's `Some(vec![])`), so an exception's empty record
-    // counts; for anything else an empty record is no producer.
+    // counts; for anything else an empty record is no producer. An actor
+    // `on:do:`/`ensure:` whose blocks thread `State` is also lowered as a producer
+    // with an empty set (ADR 0137: its `{Value, State}` answer is read back at any
+    // position), a codegen-side decision on what the blocks touch, so it is not
+    // counted against the core rule here.
     let exceptions = exception_spans(&method.body);
     let lowered: HashMap<Span, Vec<String>> = records
         .into_iter()
-        .filter(|(span, names)| !names.is_empty() || exceptions.contains(span))
+        .filter(|(span, names)| {
+            !names.is_empty() || (exceptions.contains(span) && kind == RootMethodKind::ValueType)
+        })
         .collect();
     let mut checked = 0;
     for (span, names) in &expected {

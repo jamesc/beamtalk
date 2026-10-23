@@ -9,6 +9,7 @@
 //! `handle_cast/2`, `handle_call/3`, `handle_info/2`, `code_change/3`,
 //! and `terminate/2`.
 
+use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
@@ -1008,7 +1009,6 @@ impl CoreErlangGenerator {
                 let err_class_name_var2 = format!("_InitErrClass{idx}b");
 
                 let old_state_var = format!("_OldPdict{idx}");
-                let put_ok_var = format!("_PutPdict{idx}");
                 let restore_ok_var = format!("_RestorePdict{idx}");
                 let clear_stack_var = format!("_ClearStack{idx}");
 
@@ -1017,15 +1017,12 @@ impl CoreErlangGenerator {
                     docvec![
                         "let ",
                         leaf::var(old_state_var.clone()),
-                        " = call 'erlang':'get'('$bt_actor_state') in",
-                    ],
-                    line(),
-                    docvec![
-                        "let ",
-                        leaf::var(put_ok_var),
-                        " = call 'erlang':'put'('$bt_actor_state', ",
-                        leaf::var(in_state_var.clone()),
-                        ") in",
+                        " = ",
+                        actor_state_call(
+                            actor_state_helper::INSTALL,
+                            vec![leaf::var(in_state_var.clone())],
+                        ),
+                        " in",
                     ],
                     line(),
                     docvec![
@@ -1041,29 +1038,13 @@ impl CoreErlangGenerator {
                     docvec![
                         "let ",
                         leaf::var(restore_ok_var.clone()),
-                        " = case ",
-                        leaf::var(old_state_var.clone()),
-                        " of",
+                        " = ",
+                        actor_state_call(
+                            actor_state_helper::UNINSTALL,
+                            vec![leaf::var(old_state_var.clone())],
+                        ),
+                        " in",
                     ],
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "<'undefined'> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![line(), "call 'erlang':'erase'('$bt_actor_state')"]
-                            ),
-                            line(),
-                            "<_Prev> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![line(), "call 'erlang':'put'('$bt_actor_state', _Prev)"]
-                            ),
-                        ]
-                    ),
-                    line(),
-                    "end in",
                     line(),
                     docvec![
                         "let ",
@@ -1383,9 +1364,12 @@ impl CoreErlangGenerator {
     fn pdict_stash_preamble() -> Document<'static> {
         docvec![
             line(),
-            "let _OldState = call 'erlang':'get'('$bt_actor_state') in",
-            line(),
-            "let _PutOk = call 'erlang':'put'('$bt_actor_state', State) in",
+            "let _OldState = ",
+            actor_state_call(
+                actor_state_helper::INSTALL,
+                vec![leaf::var("State".to_string())],
+            ),
+            " in",
         ]
     }
 
@@ -1394,26 +1378,12 @@ impl CoreErlangGenerator {
     fn pdict_restore_epilogue() -> Document<'static> {
         docvec![
             line(),
-            "let _RestoreOk = case _OldState of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'undefined'> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![line(), "call 'erlang':'erase'('$bt_actor_state')"]
-                    ),
-                    line(),
-                    "<_Prev> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![line(), "call 'erlang':'put'('$bt_actor_state', _Prev)"]
-                    ),
-                ]
+            "let _RestoreOk = ",
+            actor_state_call(
+                actor_state_helper::UNINSTALL,
+                vec![leaf::var("_OldState".to_string())],
             ),
-            line(),
-            "end in",
+            " in",
             line(),
             "let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in",
         ]

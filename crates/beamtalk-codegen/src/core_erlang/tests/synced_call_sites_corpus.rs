@@ -4,10 +4,10 @@
 //! ADR 0137 Phase 2a (BT-4020): the invariant behind `UnbracketedUserCodeSend`,
 //! enumerated by code generator site.
 //!
-//! With the synced-calls flag on, in an actor instance method, no call that may
+//! In an actor instance method, no call that may
 //! run user code (`send_user_code`) may be rendered into a `Document` outside a
 //! `ThreadedIr` frame: it must be a `SyncedCall`. This probe compiles the
-//! generated and statement-position corpora in count mode (the generator
+//! generated and statement-position corpora in count-only mode (the generator
 //! records every call compiled outside a bracket window, with the `file:function`
 //! of the lowering that compiled it) and compares the set of sites with
 //! [`ALLOWED_SITES`]:
@@ -24,11 +24,10 @@
 //! `BT4020_SITES_DUMP=1` prints every site with its count and an example).
 
 use crate::core_erlang::dropped_assignment_probe::{PRELUDE, corpus};
-use crate::core_erlang::synced_call::{SITE_LOG, SiteRecord};
+use crate::core_erlang::synced_call::{SITE_LOG, SiteRecord, count_only};
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::MessageSelector;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
-use beamtalk_core::synced_calls::{SyncedCallsMode, override_mode};
 use beamtalk_core::test_helpers::test_support::draw_programs;
 use beamtalk_core::unparse::unparse_module;
 use std::collections::BTreeMap;
@@ -193,7 +192,7 @@ thread_local! {
 
 /// Every gap the count-mode compile of `src` recorded.
 fn gaps_of(src: &str) -> Vec<SiteRecord> {
-    let _count = override_mode(SyncedCallsMode::Count);
+    let _count = count_only();
     SITE_LOG.with(|log| log.borrow_mut().clear());
     let (module, diagnostics) = parse(lex_with_eof(src));
     if let Some(error) = diagnostics
@@ -291,21 +290,17 @@ fn every_user_code_call_outside_the_ir_is_at_a_listed_site() {
     );
 }
 
-/// The construct matrix with the flag on, compiled through `erlc`: a bracket
-/// must never produce an unbound `State` version or any other `erlc` failure.
-/// A construct that fails with the flag on must fail with it off too (those
-/// are not this flag's); failures are listed with their source.
+/// The construct matrix compiled through `erlc`: a bracket must never produce
+/// an unbound `State` version or any other `erlc` failure; failures are listed
+/// with their source.
 #[test]
-fn the_construct_matrix_compiles_through_erlc_with_the_flag_on() {
+fn the_construct_matrix_compiles_through_erlc() {
     if !super::erlc_available() {
         return;
     }
-    let compile = |module: &beamtalk_core::ast::Module, flag: bool| {
+    let compile = |module: &beamtalk_core::ast::Module| {
         catch_unwind(AssertUnwindSafe(|| {
-            crate::core_erlang::generate_module(
-                module,
-                CodegenOptions::new("probe").with_synced_calls(flag),
-            )
+            crate::core_erlang::generate_module(module, CodegenOptions::new("probe"))
         }))
         .ok()
         .and_then(Result::ok)
@@ -324,19 +319,16 @@ fn the_construct_matrix_compiles_through_erlc_with_the_flag_on() {
     let mut failures: Vec<String> = Vec::new();
     for src in construct_sources().into_iter().step_by(stride) {
         let (module, _) = parse(lex_with_eof(&src));
-        let Some(on) = compile(&module, true) else {
+        let Some(code) = compile(&module) else {
             continue;
         };
-        if through_erlc(&on) {
-            continue;
-        }
-        if compile(&module, false).is_some_and(|off| through_erlc(&off)) {
+        if !through_erlc(&code) {
             failures.push(src);
         }
     }
     assert!(
         failures.is_empty(),
-        "BT-4020: {} construct(s) compile through erlc with the flag off but not on:\n{}",
+        "BT-4020: {} construct(s) do not compile through erlc:\n{}",
         failures.len(),
         failures.join("\n---\n")
     );
@@ -359,10 +351,10 @@ fn the_probe_sees_a_missing_bracket() {
 }
 
 /// Dev aid, a no-op unless `BT4020_DUMP_SRC=<file>` and `BT4020_DUMP_OUT=<file>` are set:
-/// compiles the actor class in the first file with the flag on and writes its
+/// compiles the actor class in the first file and writes its
 /// Core Erlang to the second, to read the code a corpus gap or miscompile produced.
 #[test]
-fn dump_a_source_with_the_flag_on() {
+fn dump_a_source() {
     let (Some(src), Some(out)) = (
         std::env::var_os("BT4020_DUMP_SRC"),
         std::env::var_os("BT4020_DUMP_OUT"),
@@ -371,10 +363,31 @@ fn dump_a_source_with_the_flag_on() {
     };
     let src = std::fs::read_to_string(src).expect("BT4020_DUMP_SRC is readable");
     let (module, _) = parse(lex_with_eof(&src));
-    let code = crate::core_erlang::generate_module(
-        &module,
-        CodegenOptions::new("probe").with_synced_calls(true),
-    )
-    .expect("codegen");
+    let code = crate::core_erlang::generate_module(&module, CodegenOptions::new("probe"))
+        .expect("codegen");
     std::fs::write(out, code).expect("BT4020_DUMP_OUT is writable");
+}
+
+#[test]
+fn an_evaluated_read_only_literal_block_is_bracketed() {
+    let src =
+        "Actor subclass: Probe\n  state: n = 2\n\n  run =>\n    [self.n] value\n    self.n * 100\n";
+    let gaps = gaps_of(src);
+    assert!(gaps.is_empty(), "{gaps:#?}");
+}
+
+#[test]
+fn the_runtime_dispatch_fallback_in_a_threaded_list_op_is_bracketed() {
+    // A fold that threads `State` (it writes a field) and sends to an unknown receiver:
+    // the list op's runtime-dispatch fallback and the send are both calls.
+    let src = "Actor subclass: Probe\n  state: n = 0\n\n  run: xs with: o =>\n    xs do: [:x | self.n := self.n + 1. o process: x].\n    xs collect: [:x | self.n := self.n + 1. o process: x]\n";
+    let gaps = gaps_of(src);
+    assert!(gaps.is_empty(), "{gaps:#?}");
+}
+
+#[test]
+fn error_sent_to_a_class_receiver_is_not_a_gap() {
+    let src = "Actor subclass: Probe\n  state: n = 0\n\n  run =>\n    self.n := 1.\n    Object error: \"boom\"\n";
+    let gaps = gaps_of(src);
+    assert!(gaps.is_empty(), "{gaps:#?}");
 }

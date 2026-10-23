@@ -13,9 +13,7 @@ use super::super::method_frame::{
 };
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::sequencing::PrecompiledScope;
-use super::super::{
-    CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis, threaded_ir,
-};
+use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, threaded_ir};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::fname;
@@ -228,6 +226,10 @@ impl CoreErlangGenerator {
         &mut self,
         method: &MethodDefinition,
     ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
+        // Scope the cell-store mark to this one method body: a mark left over
+        // from an earlier (possibly failed) lowering must not leak into this
+        // body, and `with_exit_store` takes it when this body is done.
+        threaded_ir::take_cell_store_emitted();
         let body = super::super::util::collect_body_exprs(&method.body);
         self.lower_body_exprs_with_reply(&body, true)
     }
@@ -255,6 +257,8 @@ impl CoreErlangGenerator {
             .body
             .first()
             .map_or_else(|| method.span, |s| s.expression.span());
+        // The mark is scoped to one method body by the lowering wrappers
+        // (`with_exit_store` takes it when the body is done).
         let lowered = self.lower_method_definition_body_with_reply(method);
         self.set_current_nlr_token(None);
         let stmts = lowered?;
@@ -306,7 +310,7 @@ impl CoreErlangGenerator {
         // already produced the try/catch itself; the letrec is a Document-level
         // wrapper around that, unchanged from `wrap_actor_body_with_nlr_catch`'s
         // own `needs_letrec` shape.
-        if needs_letrec && nlr_token_var.is_some() {
+        let body = if needs_letrec && nlr_token_var.is_some() {
             docvec![
                 "letrec '__nlr_body'/0 = fun () ->\n",
                 rendered_body,
@@ -314,7 +318,8 @@ impl CoreErlangGenerator {
             ]
         } else {
             rendered_body
-        }
+        };
+        self.with_exit_store(body)
     }
 
     /// (ADR 0111 Addendum 4/6): lowering-only counterpart of the old
@@ -329,6 +334,9 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
     ) -> Result<Vec<threaded_ir::ThreadedStmt>> {
+        // Same per-body scoping as `lower_method_definition_body_with_reply`:
+        // legacy clauses lower through here, not through that wrapper.
+        threaded_ir::take_cell_store_emitted();
         let body = super::super::util::collect_body_exprs(&block.body);
         self.lower_body_exprs_with_reply(&body, false)
     }
@@ -383,9 +391,11 @@ impl CoreErlangGenerator {
                 continue;
             };
             let captured_mutations = Self::captured_mutations_for_block(block);
-            let needs_tier2 = !captured_mutations.is_empty()
-                || (self.context == CodeGenContext::Actor
-                    && !block_analysis::analyze_block(block).field_writes.is_empty());
+            // ADR 0137: only a block that mutates a captured local is Tier 2. A
+            // block that writes a field is an ordinary closure over the actor's
+            // state (`actor_state_access.rs`); one that does both stays Tier 2,
+            // whose `StateAcc` is the caller's `State`.
+            let needs_tier2 = !captured_mutations.is_empty();
             if !needs_tier2 {
                 continue;
             }
@@ -3103,7 +3113,10 @@ impl CoreErlangGenerator {
                     // Block literal with field mutations (actor state threading)
                     if self.context != super::super::CodeGenContext::ValueType {
                         let analysis = super::super::block_analysis::analyze_block(block);
-                        if self.needs_mutation_threading(&analysis) {
+                        // The same gate the evaluated-block lowering and the
+                        // bracket classification use (ADR 0137): a block that only
+                        // reads state or calls out is a closure on the cell.
+                        if self.value_block_needs_threading(&analysis) {
                             return true;
                         }
                     }

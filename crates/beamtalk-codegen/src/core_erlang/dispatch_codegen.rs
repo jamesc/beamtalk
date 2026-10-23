@@ -1049,7 +1049,10 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        if self.context == CodeGenContext::Actor {
+        // ADR 0137 §3: a self-send in an actor closure is an ordinary message
+        // to `Self` (the cell is current at home; a message to the actor away),
+        // handled by the generic dispatch below.
+        if self.context == CodeGenContext::Actor && !self.in_cell_closure() {
             if let Expression::Identifier(id) = receiver {
                 if id.name == "self" {
                     let doc = self.generate_discarding_self_dispatch(selector, arguments)?;
@@ -1871,7 +1874,7 @@ impl CoreErlangGenerator {
 
     /// [`Self::closure_self_dispatch_state_guard`] with the position decided by
     /// the caller (`generate_super_send` also guards a position that became
-    /// State-threaded only because of the synced-calls flag).
+    /// State-threaded only because it holds a bracketed call).
     fn state_guard_when(
         &mut self,
         applies: bool,
@@ -2451,14 +2454,22 @@ impl CoreErlangGenerator {
             ]);
         }
 
+        // ADR 0137 §3: inside an actor closure a `super` send runs the
+        // superclass method against the cell (the actor's current state at
+        // home), stores its answer back, and answers its value.
+        if self.in_cell_closure() {
+            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
+        }
+
+        // ADR 0137 §3: a block or loop body threads no `State` for a `super` send
+        // (BT-3995): it runs against the cell, which the enclosing call brackets
+        // (`classify_super_send`), and answers its value.
+        if self.super_send_uses_cell() {
+            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
+        }
+
         let current_state = self.current_state_var();
-        // ADR 0137: with the flag on, an inlined list-op body that holds a bracketed
-        // call is State-threaded where it was a Tier 1 closure before. A `super` send
-        // there is still not a State-threading position (BT-3995), so it keeps the
-        // closure treatment (unpack the reply, raise if the callee changed state)
-        // instead of leaking the raw `{reply, R, State}` pair.
-        let in_closure = self.in_state_dropping_closure()
-            || (self.synced_calls_active() && (self.block_depth > 0 || self.in_loop_body));
+        let in_closure = self.in_state_dropping_closure();
         let dispatched_state = current_state.clone();
         let selector_for_guard = selector_atom.clone();
         let doc = docvec![

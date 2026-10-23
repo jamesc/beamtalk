@@ -450,8 +450,8 @@ fn test_self_available_in_method_bodies() {
 }
 
 #[test]
-fn test_field_assignment_in_stored_block_emits_error() {
-    // Test: myBlock := [self.sum := 0] should emit error
+fn test_field_assignment_in_stored_block_is_not_a_stored_closure_error() {
+    // Test: myBlock := [self.sum := 0] no longer emits the stored-closure error (ADR 0137)
 
     let field_assignment = Expression::Assignment {
         target: Box::new(Expression::FieldAccess {
@@ -484,15 +484,14 @@ fn test_field_assignment_in_stored_block_emits_error() {
     let module = Module::new(vec![bare(assignment)], test_span());
     let result = analyse(&module);
 
-    // Should have at least 1 error diagnostic for field assignment in stored block
-    // (may have additional errors for undefined 'self', which is expected)
-    assert!(!result.diagnostics.is_empty());
+    // ADR 0137: a field write in a stored block is legal (no "stored closure"
+    // error); a top-level `self` is still an error of its own.
     let has_field_error = result.diagnostics.iter().any(|d| {
         d.message.contains("cannot assign to field 'sum'") && d.message.contains("stored closure")
     });
     assert!(
-        has_field_error,
-        "Expected field assignment error, got: {:?}",
+        !has_field_error,
+        "No stored-closure field error expected, got: {:?}",
         result.diagnostics
     );
 }

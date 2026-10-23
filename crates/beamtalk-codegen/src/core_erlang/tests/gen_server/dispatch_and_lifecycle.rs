@@ -406,6 +406,7 @@ fn catch_all_dnu_method() -> MethodDefinition {
             is_quoted: false,
             is_intrinsic: true,
             is_inferred: false,
+            no_user_code: false,
             span: Span::new(0, 0),
         })],
         return_type: None,

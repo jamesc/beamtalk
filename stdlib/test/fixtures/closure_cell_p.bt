@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): BT-3988 (`on:do:` in a closure whose body
+// self-sends answered a `{Result, State}` pair) and `ensure:` likewise.
+
+Actor subclass: ClosureCellP
+  state: items = #(1, 2, 3)
+  state: total = 0
+
+  each: blk => self.items collect: blk
+
+  peek => self.total
+
+  bump => self.total := self.total + 1
+
+  run => self each: [:x | [self peek] on: Error do: [:e | 0]]
+
+  runEnsure => self each: [:x | [self peek] ensure: [self.total]]
+
+  runWriting =>
+    self
+      each: [:x |
+        [
+          self bump
+          self.total
+        ] on: Error do: [:e | 0]
+      ]
+
+  total => self.total

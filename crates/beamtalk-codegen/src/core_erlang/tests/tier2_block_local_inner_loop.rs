@@ -62,12 +62,19 @@ fn the_repro_threads_the_post_loop_local_and_state_out_of_the_block() {
         sums.contains("let _ThreadedResult"),
         "the loop should be lowered as a producer:\n{sums}"
     );
+    let post_loop_local =
+        regex::Regex::new(r"= call 'maps':'get'\('__local__n', (StateAcc\d+)\) in")
+            .unwrap()
+            .captures(sums)
+            .unwrap_or_else(|| {
+                panic!("the post-loop local should be read from the post-loop state:\n{sums}")
+            })[1]
+            .to_string();
     assert!(
-        sums.contains("= call 'maps':'get'('__local__n', StateAcc3) in"),
-        "the post-loop local should be read from the post-loop state:\n{sums}"
-    );
-    assert!(
-        sums.contains("{_T2Res") && sums.contains(", StateAcc3}"),
+        regex::Regex::new(r"\{_T2Res\w*, StateAcc\d+\}")
+            .unwrap()
+            .is_match(sums)
+            && post_loop_local.starts_with("StateAcc"),
         "the block should return the post-loop state:\n{sums}"
     );
     assert!(

@@ -682,6 +682,7 @@ fn primitive_expr() -> Expression {
         is_quoted: true,
         is_intrinsic: false,
         is_inferred: false,
+        no_user_code: false,
         span: span(),
     }
 }

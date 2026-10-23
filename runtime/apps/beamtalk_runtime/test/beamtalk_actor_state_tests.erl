@@ -45,7 +45,7 @@ install_take_uninstall_test() ->
 nested_install_restores_enclosing_cell_test() ->
     with_cell(#{a => outer}, fun() ->
         Inner = beamtalk_actor_state:install(#{a => inner}),
-        ?assertEqual(#{a => outer}, Inner),
+        ?assertEqual({self(), #{a => outer}}, Inner),
         ?assertEqual(#{a => inner}, beamtalk_actor_state:take()),
         beamtalk_actor_state:uninstall(Inner),
         ?assertEqual(#{a => outer}, beamtalk_actor_state:take())
@@ -113,6 +113,47 @@ foreign_pid_is_away_even_with_cell_test() ->
         ?assertEqual(#{x => outer}, beamtalk_actor_state:capture(Other, #{x => outer})),
         ?assertEqual(#{x => 1}, beamtalk_actor_state:take())
     end).
+
+%% A cell holding another actor's state (stored by a nested away
+%% `super_send/5`) never counts as home, even for the process that runs in:
+%% the host actor reads its capture, and its writes raise.
+foreign_owned_cell_is_away_for_the_host_test() ->
+    with_cell(#{x => host}, fun() ->
+        Host = self_obj(),
+        %% Simulate the away `super_send/5` entry: another actor's state,
+        %% owned by that actor, installed in this process.
+        ForeignPid = spawn(fun() -> ok end),
+        erlang:put('$bt_actor_state', {ForeignPid, #{x => foreign}}),
+        try
+            ?assertEqual(ForeignPid, beamtalk_actor_state:cell_owner()),
+            ?assertEqual(
+                captured, beamtalk_actor_state:get(Host, x, #{x => captured})
+            ),
+            ?assertEqual(
+                actor_state_unreachable,
+                kind_of(fun() -> beamtalk_actor_state:put(Host, x, 1) end)
+            ),
+            %% A store keeps the foreign owner: the host must not claim it.
+            beamtalk_actor_state:store(#{x => written}),
+            ?assertEqual(ForeignPid, beamtalk_actor_state:cell_owner()),
+            ?assertEqual(
+                captured, beamtalk_actor_state:get(Host, x, #{x => captured})
+            )
+        after
+            %% Restore the host's own cell for `with_cell`'s teardown.
+            erlang:put('$bt_actor_state', {self(), #{x => host}})
+        end
+    end).
+
+store_without_a_cell_claims_the_caller_test() ->
+    ?assertEqual(undefined, beamtalk_actor_state:cell_owner()),
+    beamtalk_actor_state:store(#{x => 1}),
+    try
+        ?assertEqual(self(), beamtalk_actor_state:cell_owner()),
+        ?assertEqual(#{x => 1}, beamtalk_actor_state:take())
+    after
+        erlang:erase('$bt_actor_state')
+    end.
 
 away_read_without_capture_raises_test() ->
     Other = foreign_obj(),
@@ -200,3 +241,164 @@ wrapper_installs_cell_and_erases_it_test() ->
     ),
     ?assertEqual(State, Kept),
     ?assertEqual(false, beamtalk_actor_state:installed()).
+
+%%% view / refresh / call_foreign / super_send (ADR 0137 Phase 2b)
+
+view_is_the_cell_at_home_test() ->
+    with_cell(#{a => 1}, fun() ->
+        ?assertEqual(#{a => 1}, beamtalk_actor_state:view(self_obj(), none)),
+        %% at home the capture is ignored
+        ?assertEqual(#{a => 1}, beamtalk_actor_state:view(self_obj(), #{a => 99}))
+    end).
+
+view_away_is_the_creation_time_capture_test() ->
+    ?assertEqual(#{a => 7}, beamtalk_actor_state:view(foreign_obj(), #{a => 7})).
+
+view_away_without_a_capture_raises_test() ->
+    ?assertEqual(
+        actor_state_unreachable,
+        kind_of(fun() -> beamtalk_actor_state:view(foreign_obj(), none) end)
+    ).
+
+refresh_takes_the_cells_fields_and_keeps_local_scratch_test() ->
+    Acc = #{a => 1, b => 2, '__local__x' => 5},
+    with_cell(#{a => 10, b => 20}, fun() ->
+        ?assertEqual(
+            #{a => 10, b => 20, '__local__x' => 5},
+            beamtalk_actor_state:refresh(self_obj(), Acc)
+        )
+    end).
+
+refresh_away_answers_the_accumulator_unchanged_test() ->
+    Acc = #{a => 1, '__local__x' => 5},
+    ?assertEqual(Acc, beamtalk_actor_state:refresh(foreign_obj(), Acc)).
+
+call_foreign_stores_the_state_and_answers_the_funs_answer_test() ->
+    State = #{n => 1},
+    Fun = fun(Arg) -> {reply, {saw, beamtalk_actor_state:take(), Arg}, State} end,
+    try
+        ?assertEqual(
+            {reply, {saw, State, x}, State},
+            beamtalk_actor_state:call_foreign(State, Fun, [x])
+        )
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_passes_an_error_answer_through_test() ->
+    try
+        ?assertEqual(
+            {error, boom},
+            beamtalk_actor_state:call_foreign(#{n => 1}, fun() -> {error, boom} end, [])
+        )
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_accepts_a_native_that_reads_a_blocks_writes_back_test() ->
+    State = #{n => 1},
+    %% a native that ran a block (the block wrote the cell) answers the cell's state
+    Fun = fun() ->
+        beamtalk_actor_state:store(#{n => 2}),
+        {reply, ok, beamtalk_actor_state:take()}
+    end,
+    try
+        ?assertEqual({reply, ok, #{n => 2}}, beamtalk_actor_state:call_foreign(State, Fun, []))
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_adopts_the_cell_when_the_answer_is_the_entry_state_test() ->
+    State = #{n => 1},
+    %% a block the callee ran wrote the cell, but the callee answers the state it was
+    %% given: the cell holds the only writes
+    Fun = fun() ->
+        beamtalk_actor_state:store(#{n => 2}),
+        {reply, ok, State}
+    end,
+    try
+        ?assertEqual({reply, ok, #{n => 2}}, beamtalk_actor_state:call_foreign(State, Fun, []))
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_adopts_the_cell_for_other_answer_shapes_test() ->
+    State = #{n => 1},
+    Write = fun() -> beamtalk_actor_state:store(#{n => 2}) end,
+    try
+        ?assertEqual(
+            {noreply, #{n => 2}},
+            beamtalk_actor_state:call_foreign(
+                State,
+                fun() ->
+                    Write(),
+                    {noreply, State}
+                end,
+                []
+            )
+        ),
+        ?assertEqual(
+            {error, boom, #{n => 2}},
+            beamtalk_actor_state:call_foreign(
+                State,
+                fun() ->
+                    Write(),
+                    {error, boom, State}
+                end,
+                []
+            )
+        )
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_passes_the_answer_through_when_the_cell_is_unchanged_test() ->
+    State = #{n => 1},
+    try
+        ?assertEqual(
+            {reply, ok, #{n => 3}},
+            beamtalk_actor_state:call_foreign(State, fun() -> {reply, ok, #{n => 3}} end, [])
+        ),
+        ?assertEqual(
+            {reply, ok, State},
+            beamtalk_actor_state:call_foreign(State, fun() -> {reply, ok, State} end, [])
+        )
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_accepts_an_answer_equal_to_the_cell_test() ->
+    State = #{n => 1},
+    %% a compiled callee that stored a version and threaded the same version
+    Fun = fun() ->
+        beamtalk_actor_state:store(#{n => 2}),
+        {reply, ok, #{n => 2}}
+    end,
+    try
+        ?assertEqual({reply, ok, #{n => 2}}, beamtalk_actor_state:call_foreign(State, Fun, []))
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+call_foreign_raises_a_conflict_when_both_the_answer_and_the_cell_changed_test() ->
+    State = #{n => 1},
+    Fun = fun() ->
+        beamtalk_actor_state:store(#{n => 2}),
+        {reply, ok, #{n => 3}}
+    end,
+    try
+        ?assertEqual(
+            actor_state_conflict,
+            kind_of(fun() -> beamtalk_actor_state:call_foreign(State, Fun, []) end)
+        )
+    after
+        erlang:erase('$bt_actor_state')
+    end.
+
+super_send_away_without_a_capture_raises_test() ->
+    ?assertEqual(
+        actor_state_unreachable,
+        kind_of(fun() ->
+            beamtalk_actor_state:super_send(foreign_obj(), none, 'NoSuchClass', bump, [])
+        end)
+    ).

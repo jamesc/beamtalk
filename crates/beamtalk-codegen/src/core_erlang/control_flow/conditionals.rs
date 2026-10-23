@@ -2360,7 +2360,7 @@ impl CoreErlangGenerator {
             // fix.
             if let BodyExprKind::EarlyReturn = kind {
                 if let Expression::Return { value, .. } = expr {
-                    if !self.in_class_method()
+                    if !self.threads_no_actor_state()
                         && matches!(
                             self.classify_body_expr(value),
                             BodyExprKind::DispatchingSelfSend

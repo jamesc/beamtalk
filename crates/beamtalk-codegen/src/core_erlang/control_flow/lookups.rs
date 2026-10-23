@@ -176,7 +176,7 @@ impl CoreErlangGenerator {
         let eager_key = eager.then(|| self.threaded_prelude_doc(&key_tv.prelude));
         let key_value = self.threaded_value_doc(&key_tv.value);
         let key_var = self.fresh_temp_var("LookupKey");
-        // With the synced-calls flag on, a non-empty prelude is spliced into the
+        // In an actor instance method a non-empty prelude is spliced into the
         // producer's frame (see the caller) instead of rendered into the tuple.
         let splice = self.synced_calls_active()
             && !(recv_tv.prelude.is_empty() && key_tv.prelude.is_empty());

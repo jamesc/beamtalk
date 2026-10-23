@@ -22,7 +22,7 @@
 //! - **Structural intrinsic** (`@primitive timesRepeat`): The unquoted name
 //!   identifies a code generation pattern handled by the compiler.
 
-use beamtalk_core::ast::{Expression, Module};
+use beamtalk_core::ast::{Expression, Module, TypeAnnotation};
 use std::collections::{HashMap, HashSet};
 
 /// A single primitive binding extracted from a stdlib method.
@@ -35,6 +35,11 @@ pub enum PrimitiveBinding {
     SelectorBased {
         /// The selector atom to pass to the runtime dispatch module.
         selector: String,
+        /// The stdlib marked the pragma `no_user_code` (ADR 0137 §4): the primitive
+        /// can never dispatch to user code for any argument, so a call to it
+        /// needs no actor-state cell bracket. [`PrimitiveBindingTable::check_no_user_code_marks`]
+        /// rejects the mark unless every parameter is a primitive type.
+        no_user_code: bool,
     },
 
     /// Structural intrinsic: the compiler generates custom code.
@@ -60,7 +65,43 @@ type BindingKey = (String, String);
 pub struct PrimitiveBindingTable {
     /// Map from (`class_name`, selector) to primitive binding.
     bindings: HashMap<BindingKey, PrimitiveBinding>,
+    /// Every `no_user_code` mark seen, with the method's parameter type names, for
+    /// [`Self::check_no_user_code_marks`].
+    marks: Vec<NoUserCodeMark>,
 }
+
+/// A `no_user_code` mark on a primitive pragma, with what the check needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NoUserCodeMark {
+    class_name: String,
+    selector: String,
+    /// The pragma is a selector-based primitive (a structural intrinsic is
+    /// compiler-generated code, not a runtime call, and takes no mark).
+    selector_based: bool,
+    /// The class declaring the primitive is `sealed`: nothing can subclass it and
+    /// override the method, so a statically known receiver class is exact.
+    class_sealed: bool,
+    /// Each parameter's simple annotated type name; `None` when it is untyped or
+    /// not a plain class name.
+    parameter_types: Vec<Option<String>>,
+}
+
+/// The parameter types a `no_user_code` primitive may take: types whose own
+/// methods never dispatch to user code whatever value of that type is passed.
+/// A block, an open class (`Object`, `Number`), a collection or a protocol
+/// could all reach user code (an element's `=`, a subclass override), so none
+/// of those is here.
+pub const NO_USER_CODE_PARAMETER_TYPES: &[&str] = &[
+    "Integer",
+    "Float",
+    "String",
+    "Symbol",
+    "Boolean",
+    "Character",
+    "Binary",
+    "Nil",
+    "UndefinedObject",
+];
 
 impl PrimitiveBindingTable {
     /// Creates an empty binding table.
@@ -68,6 +109,7 @@ impl PrimitiveBindingTable {
     pub fn new() -> Self {
         Self {
             bindings: HashMap::new(),
+            marks: Vec::new(),
         }
     }
 
@@ -85,13 +127,35 @@ impl PrimitiveBindingTable {
                 // an Expression::Primitive node.
                 if method.body.len() == 1 {
                     if let Expression::Primitive {
-                        name, is_quoted, ..
+                        name,
+                        is_quoted,
+                        no_user_code,
+                        ..
                     } = &method.body[0].expression
                     {
                         let selector = method.selector.name().to_string();
+                        if *no_user_code {
+                            self.marks.push(NoUserCodeMark {
+                                class_name: class_name.clone(),
+                                selector: selector.clone(),
+                                selector_based: *is_quoted,
+                                class_sealed: class.is_sealed,
+                                parameter_types: method
+                                    .parameters
+                                    .iter()
+                                    .map(|p| match &p.type_annotation {
+                                        Some(TypeAnnotation::Simple(id)) => {
+                                            Some(id.name.to_string())
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect(),
+                            });
+                        }
                         let binding = if *is_quoted {
                             PrimitiveBinding::SelectorBased {
                                 selector: name.to_string(),
+                                no_user_code: *no_user_code,
                             }
                         } else {
                             PrimitiveBinding::StructuralIntrinsic {
@@ -105,6 +169,56 @@ impl PrimitiveBindingTable {
                 }
             }
         }
+    }
+
+    /// Whether `class_name >> selector` is a selector-based primitive the stdlib
+    /// marked `no_user_code` (ADR 0137 §4): it can never dispatch to user code.
+    #[must_use]
+    pub fn is_no_user_code(&self, class_name: &str, selector: &str) -> bool {
+        matches!(
+            self.lookup(class_name, selector),
+            Some(PrimitiveBinding::SelectorBased {
+                no_user_code: true,
+                ..
+            })
+        )
+    }
+
+    /// The `no_user_code` marks that break the rule (ADR 0137 §4), one message
+    /// each: a mark on a structural intrinsic, or on a method with a parameter
+    /// that is untyped or not one of [`NO_USER_CODE_PARAMETER_TYPES`] (a block
+    /// or an open class could dispatch to user code). `build-stdlib` fails on a
+    /// non-empty answer.
+    #[must_use]
+    pub fn check_no_user_code_marks(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        for mark in &self.marks {
+            let at = format!("{} >> {}", mark.class_name, mark.selector);
+            if !mark.selector_based {
+                problems.push(format!(
+                    "{at}: `no_user_code` is only valid on a selector-based `@primitive`"
+                ));
+            }
+            if !mark.class_sealed {
+                problems.push(format!(
+                    "{at}: `no_user_code` is only valid on a `sealed` class (a subclass could override the primitive with user code)"
+                ));
+            }
+            for (index, parameter) in mark.parameter_types.iter().enumerate() {
+                let allowed = parameter
+                    .as_deref()
+                    .is_some_and(|ty| NO_USER_CODE_PARAMETER_TYPES.contains(&ty));
+                if !allowed {
+                    problems.push(format!(
+                        "{at}: `no_user_code` requires every parameter to be one of {} (parameter {} is {})",
+                        NO_USER_CODE_PARAMETER_TYPES.join(", "),
+                        index + 1,
+                        parameter.as_deref().unwrap_or("untyped"),
+                    ));
+                }
+            }
+        }
+        problems
     }
 
     /// Looks up a primitive binding for a given class and selector.
@@ -279,6 +393,7 @@ mod tests {
                 is_quoted,
                 is_intrinsic: false,
                 is_inferred: false,
+                no_user_code: false,
                 span: span(),
             })],
             span(),
@@ -295,6 +410,37 @@ mod tests {
             ))],
             span(),
         )
+    }
+
+    #[test]
+    fn test_no_user_code_mark_rejects_untyped_and_open_parameters() {
+        let mut table = PrimitiveBindingTable::new();
+        table.marks.push(NoUserCodeMark {
+            class_name: "List".into(),
+            selector: "includes:".into(),
+            selector_based: true,
+            class_sealed: true,
+            parameter_types: vec![None],
+        });
+        table.marks.push(NoUserCodeMark {
+            class_name: "List".into(),
+            selector: "at:".into(),
+            selector_based: true,
+            class_sealed: false,
+            parameter_types: vec![Some("Integer".into())],
+        });
+        table.marks.push(NoUserCodeMark {
+            class_name: "Block".into(),
+            selector: "value".into(),
+            selector_based: false,
+            class_sealed: true,
+            parameter_types: vec![],
+        });
+        let problems = table.check_no_user_code_marks();
+        assert_eq!(problems.len(), 3, "{problems:?}");
+        assert!(problems[0].contains("List >> includes:"));
+        assert!(problems[1].contains("List >> at:") && problems[1].contains("sealed"));
+        assert!(problems[2].contains("Block >> value"));
     }
 
     #[test]
@@ -329,6 +475,7 @@ mod tests {
             table.lookup("Integer", "+"),
             Some(&PrimitiveBinding::SelectorBased {
                 selector: "+".to_string(),
+                no_user_code: false,
             })
         );
     }
@@ -534,6 +681,7 @@ mod tests {
             binding,
             PrimitiveBinding::SelectorBased {
                 selector: "asFloat".to_string(),
+                no_user_code: false,
             }
         );
 
@@ -610,6 +758,7 @@ mod tests {
             table.lookup("File", "exists:"),
             Some(&PrimitiveBinding::SelectorBased {
                 selector: "exists:".to_string(),
+                no_user_code: false,
             })
         );
     }
@@ -640,6 +789,7 @@ mod tests {
             table.lookup("Integer", "+"),
             Some(&PrimitiveBinding::SelectorBased {
                 selector: "+".to_string(),
+                no_user_code: false,
             }),
             "One level deep must be found"
         );
@@ -647,6 +797,7 @@ mod tests {
             table.lookup("List", "size"),
             Some(&PrimitiveBinding::SelectorBased {
                 selector: "size".to_string(),
+                no_user_code: false,
             }),
             "Two levels deep must be found"
         );
@@ -675,6 +826,7 @@ mod tests {
             table.lookup("Integer", "+"),
             Some(&PrimitiveBinding::SelectorBased {
                 selector: "+".to_string(),
+                no_user_code: false,
             })
         );
     }
@@ -710,6 +862,7 @@ mod tests {
             table.lookup("Integer", "+"),
             Some(&PrimitiveBinding::SelectorBased {
                 selector: "+".to_string(),
+                no_user_code: false,
             })
         );
 
@@ -721,6 +874,11 @@ mod tests {
             })
         );
 
+        // The stdlib's real `no_user_code` marks satisfy the build rule.
+        assert!(table.is_no_user_code("List", "size"));
+        assert!(!table.is_no_user_code("List", "do:"));
+        assert_eq!(table.check_no_user_code_marks(), Vec::<String>::new());
+
         // Integer timesRepeat: is pure BT — not in the binding table
         assert!(table.lookup("Integer", "timesRepeat:").is_none());
 
@@ -729,6 +887,7 @@ mod tests {
             table.lookup("String", "length"),
             Some(&PrimitiveBinding::SelectorBased {
                 selector: "length".to_string(),
+                no_user_code: false,
             })
         );
 

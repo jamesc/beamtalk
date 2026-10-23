@@ -100,14 +100,30 @@ t := Adr0132ReplCallee calleeDirect: [t + 1]
 
 // @load-error tests/repl-protocol/fixtures/adr0133_testcase_field_write_error.bt => `self.n` is assigned in a block returned from `makeBumper`
 
-// BT-3952: the read-side rule. A block that READS `self.total` and is passed
-// to the actor's own method (or stored, returned, placed in a literal) would
-// see the value from when it was made, not the one the method has set since.
+// BT-3952 (retired by ADR 0137): a block that READS `self.total` and is passed
+// to the actor's own method reads the field as it is when the block runs, after
+// the method has changed it.
 
-// @load-error tests/repl-protocol/fixtures/bt3952_stale_field_read_error.bt => `self.total` is read in a block that runs later; it would see the value from when the block was made
+// @load tests/repl-protocol/fixtures/bt3952_stale_field_read_error.bt
 
-// BT-3998: a send to a local bound only to `self` is a compile error.
+Bt3952StaleFieldReadError spawn stale
+// => 1
 
-// @load-error tests/repl-protocol/fixtures/bt3998_self_alias_error.bt => `other` is `self`
+// BT-3998 (retired by ADR 0137): a send to a local bound to `self` is a send to
+// the actor and sees, and keeps, the method's field writes.
 
-// @load-error tests/repl-protocol/fixtures/bt3998_self_alias_write_error.bt => `other` is `self`
+// @load tests/repl-protocol/fixtures/bt3998_self_alias_error.bt
+
+Bt3998SelfAliasError spawn readThroughAlias
+// => 5
+
+// @load tests/repl-protocol/fixtures/bt3998_self_alias_write_error.bt
+
+aliasWriter := Bt3998SelfAliasWriteError spawn
+// => _
+
+aliasWriter writeThroughAlias
+// => 7
+
+aliasWriter getX
+// => 7

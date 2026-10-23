@@ -78,7 +78,7 @@ impl CoreErlangGenerator {
         // ADR 0133 `groupBy:` residual check (BT-3909).
         let root = if self.is_repl_mode() {
             None
-        } else if self.in_class_method() {
+        } else if self.threads_no_actor_state() {
             Some(RootMethodKind::Class)
         } else if self.context == CodeGenContext::Actor {
             Some(RootMethodKind::Actor)
@@ -92,8 +92,63 @@ impl CoreErlangGenerator {
         let actor_state_eligible = !ThreadedFamilies::from_matches(&self.eligible_families())
             .as_slice()
             .is_empty();
-        let synced = self.synced_calls_active() && analysis.has_user_code_sends;
+        // ADR 0137: a construct whose blocks run in place here and touch the
+        // actor's state threads `State` rather than run its blocks as closures
+        // against the cell (a bracketed call, or a plain field read, which must
+        // see the version the method holds).
+        let synced = self.synced_calls_active() && self.analysis_touches_actor_state(analysis);
         analysis.needs_mutation_threading_with(root, actor_state_eligible, synced)
+    }
+
+    /// Whether an evaluated literal block (`[...] value`) is lowered in place with
+    /// `State` threaded. Holding only calls that may run user code does not
+    /// make it so (ADR 0137): such a block is a closure the call as a whole
+    /// brackets, as for a loop.
+    pub(in crate::core_erlang) fn value_block_needs_threading(
+        &self,
+        analysis: &block_analysis::BlockMutationAnalysis,
+    ) -> bool {
+        self.needs_mutation_threading_with_synced(analysis, false)
+    }
+
+    /// [`Self::block_touches_actor_state`] over an already-computed analysis.
+    pub(in crate::core_erlang) fn analysis_touches_actor_state(
+        &self,
+        analysis: &block_analysis::BlockMutationAnalysis,
+    ) -> bool {
+        !analysis.field_reads.is_empty()
+            || !analysis.field_writes.is_empty()
+            || analysis.has_self_sends
+            || analysis.has_user_code_sends
+            || analysis.captured_reads.iter().any(|name| {
+                !matches!(name.as_str(), "self" | "super" | "true" | "false" | "nil")
+                    && self.lookup_var(name).is_none()
+            })
+    }
+
+    /// [`Self::needs_mutation_threading`] with the bracket's contribution
+    /// decided by the caller ([`Self::block_arg_needs_threading_with`]).
+    fn needs_mutation_threading_with_synced(
+        &self,
+        analysis: &block_analysis::BlockMutationAnalysis,
+        synced: bool,
+    ) -> bool {
+        if synced {
+            return self.needs_mutation_threading(analysis);
+        }
+        let root = if self.is_repl_mode() {
+            None
+        } else if self.threads_no_actor_state() {
+            Some(RootMethodKind::Class)
+        } else if self.context == CodeGenContext::Actor {
+            Some(RootMethodKind::Actor)
+        } else {
+            Some(RootMethodKind::ValueType)
+        };
+        let actor_state_eligible = !ThreadedFamilies::from_matches(&self.eligible_families())
+            .as_slice()
+            .is_empty();
+        analysis.needs_mutation_threading_with(root, actor_state_eligible, false)
     }
 
     /// Returns `true` if the block body contains list op message sends
@@ -239,8 +294,18 @@ impl CoreErlangGenerator {
     /// fold treats as carried the same way: such a body threads the bindings map
     /// (the REPL always has that ambient carrier).
     pub(in crate::core_erlang) fn block_arg_needs_threading(&self, block: &Block) -> bool {
+        self.block_arg_needs_threading_with(block, true)
+    }
+
+    /// [`Self::block_arg_needs_threading`] with the ADR 0137 bracket decided by
+    /// the caller: a conditional arm or protected body that holds a bracketed
+    /// call threads `State` through it (`synced`), a loop or fold body does
+    /// not. A body with no state effect of its own is a plain closure that
+    /// runs in cell mode ([`Self::in_cell_closure`]); the loop call as a whole
+    /// is the bracket.
+    fn block_arg_needs_threading_with(&self, block: &Block, synced: bool) -> bool {
         let analysis = self.block_profile_or_analyze(block);
-        self.needs_mutation_threading(&analysis)
+        self.needs_mutation_threading_with_synced(&analysis, synced)
             || self.body_has_list_op_cross_scope_mutations(block)
             // BT-3823: in the REPL, a block that writes a binding anywhere (a
             // conditional arm whose write sits in a fold inside a nested
@@ -279,7 +344,8 @@ impl CoreErlangGenerator {
     /// so the lowering and the caller that unpacks it cannot disagree.
     pub(in crate::core_erlang) fn loop_body_has_carried_mutations(&self, body: &Block) -> bool {
         !self.loop_threaded_locals(body, None).is_empty()
-            || (self.block_arg_needs_threading(body) && self.loop_has_ambient_carrier(body))
+            || (self.block_arg_needs_threading_with(body, false)
+                && self.loop_has_ambient_carrier(body))
     }
 
     /// BT-3999: whether a `whileTrue:`/`whileFalse:` `condition` has a state
@@ -325,8 +391,11 @@ impl CoreErlangGenerator {
             return false;
         };
         // ADR 0137: in an actor instance method a condition holding a bracketed
-        // call threads `State` like a state effect does.
+        // call threads `State` like a state effect does, once the loop threads
+        // at all. A loop whose body carries nothing is a plain loop whose
+        // condition is a cell closure, bracketed with the loop as one call.
         let synced = self.synced_calls_active()
+            && body.is_some_and(|body| self.loop_body_has_carried_mutations(body))
             && beamtalk_core::semantic_analysis::block_facts::while_condition_has_synced_user_code_sends(
                 condition,
             );

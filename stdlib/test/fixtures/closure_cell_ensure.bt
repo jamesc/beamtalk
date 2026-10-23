@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): `ensure:` write-through, entry store and the
+// cleanup that reads the cell. An `ensure:` cleanup sees every write the
+// protected body made before it ran when the body exits normally or with `^`,
+// and after an error the state at entry plus the body's own writes made before
+// the error.
+
+Actor subclass: ClosureCellEnsure
+  state: n = 0
+  state: seen = 0
+
+  seen => self.seen
+
+  normalExit =>
+    [self.n := 5] ensure: [self.seen := self.n]
+    self.seen
+
+  // A `^` stores before it throws, so the cleanup sees every write before it.
+  earlyReturn: rec =>
+    [
+      self.n := 7
+      ^1
+    ] ensure: [rec record: self.n]
+    0
+
+  // The cleanup runs because of an error: it records what it sees in `rec`,
+  // an actor the on:do: rollback does not touch.
+  errorExit: rec =>
+    [
+      [
+        self.n := 9
+        1 / 0
+      ] ensure: [rec record: self.n]
+    ] on: Error do: [:e | nil]
+    self.n
+
+  // A call before the failure that wrote through a closure is not guaranteed
+  // to reach the cleanup, but a lexical write is.
+  entryState: rec =>
+    self.n := 3
+    [[1 / 0] ensure: [rec record: self.n]] on: Error do: [:e | nil]
+    self.n
+
+  bump => self.n := self.n + 1
+
+  // Writes kept in loop parameters or made by a compiled self-send reach the
+  // cleanup of a failed body as well.
+  loopError: rec =>
+    [
+      [
+        #(1, 2, 3)
+          do: [:i |
+            self.n := self.n + i
+            i == 2 ifTrue: [1 / 0]
+          ]
+      ] ensure: [rec record: self.n]
+    ] on: Error do: [:e | nil]
+    self.n
+
+  selfSendError: rec =>
+    [
+      [
+        self bump
+        1 / 0
+      ] ensure: [rec record: self.n]
+    ] on: Error do: [:e | nil]
+    self.n

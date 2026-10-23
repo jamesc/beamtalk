@@ -29,7 +29,7 @@ sealed typed Collection(V) subclass: Dictionary(K, V)
   /// ```beamtalk
   /// #{#a => 1, #b => 2} size                   // => 2
   /// ```
-  size -> Integer => @primitive
+  size -> Integer => @primitive no_user_code
 
   /// Return a list of all keys.
   ///

@@ -1545,15 +1545,18 @@ sync_send(ActorPid, 'onExit:', [Block]) ->
     end;
 sync_send(ActorPid, Selector, Args) ->
     %% Layer 1: Fast-path for self-sends.
-    %% If ActorPid is our own process AND we have stashed state (meaning we're
-    %% inside a handle_call/handle_cast dispatch), dispatch directly to avoid
-    %% gen_server:call deadlock. This catches aliased self-sends like:
+    %% If ActorPid is our own process AND the installed cell holds our own
+    %% state (meaning we're inside a handle_call/handle_cast dispatch),
+    %% dispatch directly to avoid gen_server:call deadlock. This catches
+    %% aliased self-sends like:
     %%   other := self. other fieldNames
-    case ActorPid =:= self() andalso beamtalk_actor_state:installed() of
-        true ->
+    case self_send_kind(ActorPid) of
+        self ->
             self_dispatch(Selector, Args);
-        false ->
-            sync_send_remote(ActorPid, Selector, Args)
+        remote ->
+            sync_send_remote(ActorPid, Selector, Args);
+        foreign ->
+            raise_self_send_during_away_super(ActorPid, Selector)
     end.
 
 -doc """
@@ -1799,10 +1802,10 @@ sync_send(ActorPid, Selector, Args, Timeout) when
     Timeout =:= infinity
 ->
     %% Layer 1: Fast-path for self-sends (same as sync_send/3).
-    case ActorPid =:= self() andalso beamtalk_actor_state:installed() of
-        true ->
+    case self_send_kind(ActorPid) of
+        self ->
             self_dispatch(Selector, Args);
-        false ->
+        remote ->
             Class = lookup_class(ActorPid),
             Metadata = #{pid => ActorPid, class => Class, selector => Selector, mode => sync},
             try
@@ -1857,7 +1860,9 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                     raise_node_down(node(ActorPid), Selector);
                 exit:{_Reason, _} ->
                     raise_actor_dead(Selector)
-            end
+            end;
+        foreign ->
+            raise_self_send_during_away_super(ActorPid, Selector)
     end;
 sync_send(_ActorPid, Selector, _Args, _InvalidTimeout) ->
     Error = beamtalk_error:new(
@@ -1867,6 +1872,54 @@ sync_send(_ActorPid, Selector, _Args, _InvalidTimeout) ->
         <<"Timeout must be a non-negative integer (milliseconds) or #infinity">>
     ),
     beamtalk_exception_handler:reraise(Error).
+
+-doc """
+How a sync send to `ActorPid` from this process should go (Layer 1).
+
+`self` (our own pid with our own state installed) dispatches directly.
+`remote` is the normal `gen_server:call` path — including our own pid with
+no cell installed, exactly as before. `foreign` is our own pid while the
+cell holds another actor's state (stored by a nested away `super_send/5`):
+the remote path could never serve our own pid (`gen_server:call` to self
+exits `calling_self`, which the catch-all would misreport as `actor_dead`),
+so the send sites raise `deadlock_detected` instead.
+""".
+-spec self_send_kind(pid() | tuple()) -> self | remote | foreign.
+self_send_kind(ActorPid) ->
+    case ActorPid =:= self() of
+        true ->
+            case beamtalk_actor_state:cell_owner() of
+                ActorPid -> self;
+                undefined -> remote;
+                _Foreign -> foreign
+            end;
+        false ->
+            remote
+    end.
+
+-doc """
+Raise a structured `deadlock_detected` error for a self-send issued while
+another actor's state is installed in this process's cell (a nested away
+`super_send/5`): our own callback is blocked in that call, so the send could
+never be served.
+""".
+-spec raise_self_send_during_away_super(pid(), atom()) -> no_return().
+raise_self_send_during_away_super(ActorPid, Selector) ->
+    Class = lookup_class(ActorPid),
+    Error = beamtalk_error:new(
+        deadlock_detected,
+        Class,
+        Selector,
+        <<
+            "Sync send to own actor while another actor's state is installed: ",
+            "the actor is blocked in the call that carried the block away"
+        >>
+    ),
+    Error1 = beamtalk_error:with_details(Error, #{
+        target_pid => ActorPid,
+        cell_owner => beamtalk_actor_state:cell_owner()
+    }),
+    beamtalk_exception_handler:reraise(Error1).
 
 -doc """
 Direct self-dispatch for re-entrant self-sends (Layer 1).
@@ -2190,8 +2243,8 @@ exited (timeout, or the actor died with some other reason first).
 -spec stop_actor(pid(), term(), timeout()) -> ok | {exit, term()}.
 stop_actor(ActorPid, Reason, Timeout) when ActorPid =:= self() ->
     %% Defer only inside a dispatching callback — the same guard as the
-    %% Layer 1 self-send fast path in sync_send/3. '$bt_actor_state' is
-    %% stashed by every callback wrapped with apply_pending_actions/1, so a
+    %% Layer 1 self-send fast path in sync_send/3. The actor-state cell is
+    %% installed by every callback wrapped with apply_pending_actions/1, so a
     %% request recorded here is guaranteed to be consumed. Anywhere else
     %% (e.g. a hand-written native gen_server) there is nothing to consume
     %% it, so fall through and let gen_server:stop/3 fail visibly
@@ -2389,8 +2442,8 @@ returns and before the next mailbox message (see apply_pending_actions/1).
 
 Raises in the caller — never silently drops the request:
 - `invalid_continuation` when `Pid` is not the calling process, or it is
-  but no wrapped dispatching callback is running (`'$bt_actor_state'` is
-  undefined), since nothing would consume the request — the same guard as
+  but no wrapped dispatching callback is running (`beamtalk_actor_state:installed/0`
+  is `false`), since nothing would consume the request — the same guard as
   stop_actor/3's deferred self-stop;
 - `type_error` when the selector is not a Symbol or the arguments are not a
   List;

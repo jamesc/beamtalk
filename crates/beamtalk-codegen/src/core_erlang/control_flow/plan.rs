@@ -223,7 +223,7 @@ struct BodyEffects {
     /// Condition block has state effects (field writes or self-sends).
     cond_has_state_effects: bool,
     /// ADR 0137: the body holds a call bracketed with a `State` store/reload
-    /// (actor instance method, synced-calls flag on).
+    /// (actor instance method).
     body_has_synced_sends: bool,
     /// Body has a tier-2 value call assigned to a threaded local.
     has_tier2_threaded_assign: bool,
@@ -918,7 +918,7 @@ impl ThreadingPlan {
             || threaded_locals.is_empty()
             || use_direct_params
             || !matches!(context, CodeGenContext::Actor)
-            || generator.in_class_method()
+            || generator.threads_no_actor_state()
         {
             return false;
         }
@@ -1066,18 +1066,19 @@ impl ThreadingPlan {
         let mut pack_docs: Vec<Document<'static>> = Vec::new();
         // Value-type methods and class methods have no actor State
         // to pack from — start from a fresh empty map instead.
-        let mut current =
-            if matches!(self.context, CodeGenContext::ValueType) || generator.in_class_method() {
-                let init_map_var = generator.fresh_temp_var("InitMap");
-                pack_docs.push(docvec![
-                    "let ",
-                    leaf::var(init_map_var.clone()),
-                    " = call 'maps':'new'() in ",
-                ]);
-                init_map_var
-            } else {
-                self.initial_state_var.clone()
-            };
+        let mut current = if matches!(self.context, CodeGenContext::ValueType)
+            || generator.threads_no_actor_state()
+        {
+            let init_map_var = generator.fresh_temp_var("InitMap");
+            pack_docs.push(docvec![
+                "let ",
+                leaf::var(init_map_var.clone()),
+                " = call 'maps':'new'() in ",
+            ]);
+            init_map_var
+        } else {
+            self.initial_state_var.clone()
+        };
         for var_name in &self.threaded_locals {
             let packed_var = generator.fresh_temp_var("Packed");
             let core_var = generator
@@ -1215,7 +1216,7 @@ impl ThreadingPlan {
         generator: &mut CoreErlangGenerator,
     ) -> Document<'static> {
         let starts_from_fresh_map =
-            matches!(self.context, CodeGenContext::ValueType) || generator.in_class_method();
+            matches!(self.context, CodeGenContext::ValueType) || generator.threads_no_actor_state();
         if self.threaded_locals.is_empty() && !starts_from_fresh_map {
             return docvec!["{'nil', ", leaf::var(self.initial_state_var.clone()), "}",];
         }

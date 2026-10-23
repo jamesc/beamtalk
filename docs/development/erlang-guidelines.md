@@ -164,7 +164,7 @@ class_bump(ClassSelf) ->
 
 ### Actor state (ADR 0137)
 
-While an actor callback runs, the actor state map lives in one cell owned by `beamtalk_actor_state`: `install/1` and `uninstall/1` bracket a callback, `take/0` yields the new state on a normal exit, and `adapt/1` converts a `{reply, R, NewState}` result (native methods, ADR 0066 extension funs, `dispatch/4`) into the cell. Never touch `'$bt_actor_state'` with `erlang:get/put/erase` yourself; a block writing a field away from its actor's process raises `actor_state_unreachable`.
+While an actor callback runs, the actor state map lives in one cell owned by `beamtalk_actor_state`: `install/1` and `uninstall/1` bracket a callback, `take/0` yields the new state on a normal exit, and `adapt/1` converts a `{reply, R, NewState}` result (native methods, ADR 0066 extension funs, `dispatch/4`) into the cell. Never touch `'$bt_actor_state'` with `erlang:get/put/erase` yourself: runtime and test code goes through the helpers, and so do the generated callbacks. The one exception is the compiler's cell bracket (`ThreadedStmt::SyncedCall`, `ACTOR_STATE_CELL` in `threaded_ir/emit.rs`), which inlines the `put`/`get` BIFs because a helper call would cost more than the bracket (ADR 0137 gate 2); `the_cell_key_matches_the_runtime_define` pins its key to the `-define(CELL, ...)` in `beamtalk_actor_state.erl`. A block writing a field away from its actor's process raises `actor_state_unreachable`.
 
 **Module map.** `beamtalk_class_vars` is the leaf that owns the key and every access; it calls neither `beamtalk_object_class` nor `beamtalk_behaviour_intrinsics`. Around it:
 

@@ -1,12 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Fixture that triggers a compile error: an Actor method passes a block that
-// reads `self.total` to one of its own methods, which runs it after changing
-// the field (ADR 0133 amendment, BT-3952). The block would see the value from
-// when it was made. Used by
-// tests/repl-protocol/cases/adr0133_escaping_block.btscript via
-// `// @load-error`.
+// Fixture: an Actor method passes a block that reads `self.total` to one of its
+// own methods, which runs it after changing the field. Under ADR 0137 the block
+// reads the live value (ADR 0133 amendment BT-3952 retired). Used by
+// tests/repl-protocol/cases/adr0133_escaping_block.btscript via `// @load`.
 
 Actor subclass: Bt3952StaleFieldReadError
   state: total = 0

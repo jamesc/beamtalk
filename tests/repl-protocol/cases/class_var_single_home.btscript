@@ -82,12 +82,18 @@ CvshTally total
 // => 5
 
 // ---------------------------------------------------------------------------
-// BT-3922 (ADR 0133): a block that assigns a class variable and escapes is a
-// compile error, so the BT-3760 direct-write rows (carried to another class,
-// to an actor, returned, stored in a binding) can no longer be loaded.
+// BT-3922 (ADR 0133, retired by ADR 0137 for the compile error): a block that
+// assigns a class variable and escapes loads; it writes the live variable only
+// at home, and anywhere else a write raises `class_state_unreachable` (ADR 0130).
 // ---------------------------------------------------------------------------
 
-// @load-error tests/repl-protocol/fixtures/class_var_single_home_escaping_write.bt => `self.total` is assigned in a block returned from `makeWriter`
+// @load tests/repl-protocol/fixtures/class_var_single_home_escaping_write.bt
+
+escapedWriter := CvshEscapingWrite makeWriter
+// => _
+
+escapedWriter value
+// => ERROR: class variable total cannot be written from this process
 
 
 // ---------------------------------------------------------------------------

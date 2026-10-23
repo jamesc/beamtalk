@@ -6,11 +6,12 @@
 //! three narrow accessors, never through a raw field or an AST-directed
 //! emission path. Depends only on [`super::ir`]; nothing here verifies IR.
 
+use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FrameId, LoopCounter,
-    NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode, TryRegion, ValueRef,
-    VersionPrefix, VersionedVar,
+    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, FrameId,
+    LoopCounter, NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode,
+    TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -256,10 +257,17 @@ pub(in crate::core_erlang) fn render(
             ThreadedStmt::OnDoCatch {
                 vars,
                 entry,
+                cell,
                 try_region,
                 clauses,
                 ..
-            } => docs.push(render_on_do_catch(vars, *entry, try_region, clauses)),
+            } => docs.push(render_on_do_catch(
+                vars,
+                *entry,
+                cell.as_ref(),
+                try_region,
+                clauses,
+            )),
             ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
                 "let ",
                 leaf::var(carrier.clone()),
@@ -311,9 +319,33 @@ pub(in crate::core_erlang) fn render(
     Document::Vec(docs)
 }
 
-/// The actor-state cell's process-dictionary key (`beamtalk_actor_state`'s
-/// `CELL`). The one Rust definition the bracket renders with.
-pub(in crate::core_erlang) const ACTOR_STATE_CELL: &str = "$bt_actor_state";
+thread_local! {
+    /// A cell store was emitted since the last [`take_cell_store_emitted`].
+    static CELL_STORE_EMITTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether any cell store was emitted since the last call, and clears the mark.
+/// A method that stored an intermediate `State` leaves the cell older than its
+/// answer, so its reply stores the final `State` back (`with_exit_store`). The
+/// mark is set by [`cell_put_call`], the one emitter of every store, so a new
+/// store site cannot be missed. Both method-body lowering wrappers reset the
+/// mark on entry, so it never leaks from one body (or a failed lowering) into
+/// the next; bodies are never nested, so no inner lowering can consume an
+/// outer body's mark early. A stale mark only adds a harmless exit store.
+pub(in crate::core_erlang) fn take_cell_store_emitted() -> bool {
+    CELL_STORE_EMITTED.with(std::cell::Cell::take)
+}
+
+/// `call 'beamtalk_actor_state':'store'(<state>)`: the one emitter of every
+/// cell store: the [`ThreadedStmt::SyncedCall`] bracket, the `on:do:` and
+/// `ensure:` boundaries, the `^` pre-throw store and the exit store. `store/1`
+/// keeps the cell's current owner so a store made while another actor's state
+/// is installed (a nested away `super_send/5`) does not claim that state for
+/// the host process.
+pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
+    CELL_STORE_EMITTED.with(|c| c.set(true));
+    actor_state_call(actor_state_helper::STORE, vec![state])
+}
 
 /// Renders one [`ThreadedStmt::SyncedCall`] (ADR 0137 §1): the store of
 /// `store` to the cell, the call, and (unless the call is store-only) the
@@ -327,11 +359,9 @@ fn render_synced_call(
 ) -> Document<'static> {
     let store_name = ctx.resolve_prefix(store);
     let mut parts: Vec<Document<'static>> = vec![docvec![
-        "let _ = call 'erlang':'put'(",
-        leaf::atom(ACTOR_STATE_CELL),
-        ", ",
-        leaf::var(store_name),
-        ") in ",
+        "let _ = ",
+        cell_put_call(leaf::var(store_name)),
+        " in ",
     ]];
     match result {
         Some(result) => parts.push(docvec![
@@ -347,9 +377,9 @@ fn render_synced_call(
         parts.push(docvec![
             "let ",
             leaf::var(ctx.resolve_prefix(load)),
-            " = call 'erlang':'get'(",
-            leaf::atom(ACTOR_STATE_CELL),
-            ") in "
+            " = ",
+            actor_state_call(actor_state_helper::TAKE, vec![]),
+            " in "
         ]);
     }
     Document::Vec(parts)
@@ -510,6 +540,7 @@ fn render_local_rebind(
 fn render_on_do_catch(
     vars: &OnDoCatchVars,
     entry: Option<CatchEntry>,
+    cell: Option<&CellBoundary>,
     try_region: &TryRegion,
     clauses: &[CatchClause],
 ) -> Document<'static> {
@@ -526,8 +557,13 @@ fn render_on_do_catch(
         }
         None => Document::Nil,
     };
+    let cell_entry_doc = match cell {
+        Some(boundary) => CoreErlangGenerator::cell_boundary_entry_doc(boundary),
+        None => Document::Nil,
+    };
     let mut docs: Vec<Document<'static>> = vec![docvec![
         entry_doc,
+        cell_entry_doc,
         "try ",
         try_region.body.clone(),
         "of ",
@@ -588,6 +624,9 @@ fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static
     match step {
         CatchStep::ClassVarRestore { snapshot } => {
             CoreErlangGenerator::class_var_restore_doc(snapshot)
+        }
+        CatchStep::CellRestore(boundary) => {
+            CoreErlangGenerator::cell_boundary_restore_doc(boundary)
         }
         CatchStep::WrapException => docvec![
             "let ",
@@ -1111,17 +1150,35 @@ fn render_bind(
     let target_name = ctx.resolve_prefix(target);
     let source_name = ctx.resolve_prefix(source);
     match op {
-        BindOp::Put { field, value } => docvec![
-            "let ",
-            leaf::var(target_name),
-            " = call 'maps':'put'(",
-            leaf::atom(field.clone()),
-            ", ",
-            render_value(value, ctx),
-            ", ",
-            leaf::var(source_name),
-            ") in ",
-        ],
+        BindOp::Put { field, value } => {
+            let put = docvec![
+                "let ",
+                leaf::var(target_name.clone()),
+                " = call 'maps':'put'(",
+                leaf::atom(field.clone()),
+                ", ",
+                render_value(value, ctx),
+                ", ",
+                leaf::var(source_name),
+                ") in ",
+            ];
+            // ADR 0137 §5: inside an `ensure:` protected body a field write also
+            // stores the new version to the cell (a local's scratch key is not a
+            // field).
+            if ctx.generator.ensure_write_through > 0
+                && target.prefix == VersionPrefix::State
+                && !field.starts_with(super::ir::LOCAL_STATE_KEY_PREFIX)
+            {
+                docvec![
+                    put,
+                    "let _ = ",
+                    cell_put_call(leaf::var(target_name)),
+                    " in "
+                ]
+            } else {
+                put
+            }
+        }
         BindOp::Unpack { field } => docvec![
             "let ",
             leaf::var(target_name),
@@ -1131,13 +1188,28 @@ fn render_bind(
             leaf::var(source_name),
             ") in ",
         ],
-        BindOp::Direct(value) => docvec![
-            "let ",
-            leaf::var(target_name),
-            " = ",
-            render_value(value, ctx),
-            " in ",
-        ],
+        BindOp::Direct(value) => {
+            let bind = docvec![
+                "let ",
+                leaf::var(target_name.clone()),
+                " = ",
+                render_value(value, ctx),
+                " in ",
+            ];
+            // ADR 0137 §5: a `State` version a compiled self-send hands back inside an
+            // `ensure:` protected body is stored too, so the cleanup of a failed
+            // body sees what the send changed.
+            if ctx.generator.ensure_write_through > 0 && target.prefix == VersionPrefix::State {
+                docvec![
+                    bind,
+                    "let _ = ",
+                    cell_put_call(leaf::var(target_name)),
+                    " in "
+                ]
+            } else {
+                bind
+            }
+        }
     }
 }
 
@@ -1173,4 +1245,96 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
         leaf::var(ctx.resolve_prefix(state)),
         "}"
     ]
+}
+
+#[cfg(test)]
+mod cell_helper_conformance {
+    use crate::core_erlang::actor_state_access::actor_state_helper;
+
+    /// Every `beamtalk_actor_state` helper codegen emits must be exported by
+    /// the runtime: generated code calls them, so removing or renaming one
+    /// fails here instead of with `undef` at runtime. The expected set lives
+    /// in one place (`actor_state_helper::ALL`), which the one emitter
+    /// references, so the list cannot drift from what is actually emitted.
+    /// All `-export` blocks in the module are collected, so a helper moved
+    /// to a second block is still found (CLAUDE.md). Edit the Erlang module
+    /// (the owner) when this fails.
+    #[test]
+    fn the_runtime_exports_every_emitted_cell_helper() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../runtime/apps/beamtalk_runtime/src/beamtalk_actor_state.erl"
+        );
+        let src = std::fs::read_to_string(path).expect("read beamtalk_actor_state.erl");
+        let exported = exported_entries(&src);
+        assert!(
+            !exported.is_empty(),
+            "no -export block found in beamtalk_actor_state.erl"
+        );
+        for (name, arity) in actor_state_helper::ALL {
+            let entry = format!("{name}/{arity}");
+            assert!(
+                exported.contains(&entry),
+                "beamtalk_actor_state.erl must export {entry}; generated code calls it"
+            );
+        }
+    }
+
+    /// The `name/arity` entries of every `-export([...])` block in an Erlang
+    /// source file: one-line and multi-line blocks, several entries per line,
+    /// entries on the block's opening line, and `%` comments all count.
+    fn exported_entries(src: &str) -> std::collections::BTreeSet<String> {
+        let mut exported = std::collections::BTreeSet::new();
+        let mut in_export = false;
+        for line in src.lines() {
+            let code = line.split('%').next().unwrap_or("").trim();
+            let mut rest = code;
+            if let Some(open) = rest.find("-export([") {
+                in_export = true;
+                rest = &rest[open + "-export([".len()..];
+            }
+            if !in_export {
+                continue;
+            }
+            if let Some(close) = rest.find("])") {
+                rest = &rest[..close];
+                in_export = false;
+            }
+            for entry in rest.split(',') {
+                let entry = entry.trim();
+                if !entry.is_empty() {
+                    exported.insert(entry.to_string());
+                }
+            }
+        }
+        exported
+    }
+
+    #[test]
+    fn parses_one_line_blocks_and_several_entries_per_line() {
+        let src = [
+            "% a comment mentioning -export([ignored/9]).",
+            "-export([foo/1]).",
+            "-export([",
+            "    bar/2, baz/0, % a trailing comment",
+            "    qux/3",
+            "]).",
+        ]
+        .join("\n");
+        let entries = exported_entries(&src);
+        assert_eq!(entries.len(), 4);
+        for entry in ["foo/1", "bar/2", "baz/0", "qux/3"] {
+            assert!(entries.contains(entry), "missing {entry}: {entries:?}");
+        }
+    }
+
+    #[test]
+    fn finds_entries_on_the_opening_line_and_in_later_blocks() {
+        let src = "-export([first/1,\n second/2]).\n-export([third/3]).\n";
+        let entries = exported_entries(src);
+        assert_eq!(entries.len(), 3);
+        for entry in ["first/1", "second/2", "third/3"] {
+            assert!(entries.contains(entry), "missing {entry}: {entries:?}");
+        }
+    }
 }

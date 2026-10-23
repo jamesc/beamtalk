@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): a state-changing `super` send in a loop body.
+
+Actor subclass: ClosureCellSuperBase
+  state: n = 0
+
+  bump => self.n := self.n + 1
+
+  n => self.n
+
+  peekViaPerform => self perform: #n
+
+  // Runs a block handed in: an away `super` send through this method runs the
+  // block while another actor's state is installed in the host's cell.
+  apply: blk => blk value

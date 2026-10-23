@@ -17,8 +17,11 @@
 
 // --- Compilation errors in loaded files ---
 
-// Field assignment inside a stored closure is an error
-// @load-error tests/repl-protocol/fixtures/semantic_field_error.bt => cannot assign to field
+// Field assignment inside a stored closure writes the live field (ADR 0137)
+// @load tests/repl-protocol/fixtures/semantic_field_error.bt
+
+BadStoredClosure spawn badMethod
+// => 1
 
 // Subclassing a sealed builtin class is an error
 // @load-error tests/repl-protocol/fixtures/semantic_sealed_error.bt => Cannot subclass sealed class

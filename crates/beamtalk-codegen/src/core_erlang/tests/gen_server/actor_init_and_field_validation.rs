@@ -83,8 +83,9 @@ fn test_handle_continue_dispatches_initialize_chain() {
     // pdict stash/restore brackets every safe_dispatch call to
     // preserve re-entrant self-send semantics inside initialize.
     assert!(
-        code.contains("'$bt_actor_state'"),
-        "handle_continue/2 must stash/restore $bt_actor_state for re-entrant sends. Got:\n{code}"
+        code.contains("call 'beamtalk_actor_state':'install'(")
+            && code.contains("call 'beamtalk_actor_state':'uninstall'("),
+        "handle_continue/2 must install/uninstall the actor-state cell for re-entrant sends. Got:\n{code}"
     );
 
     // The chain dispatches initialize via safe_dispatch on the class module.

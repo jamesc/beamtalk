@@ -2139,7 +2139,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn is_do_with_vt_local_threading(&self, expr: &Expression) -> bool {
         // Allow class methods regardless of module context (Actor classes
         // have context=Actor but class methods still need local-map threading).
-        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+        if !self.threads_no_actor_state() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         if let Expression::MessageSend {
@@ -2172,7 +2172,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+        if !self.threads_no_actor_state() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         if let Expression::MessageSend {
@@ -2459,7 +2459,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+        if !self.threads_no_actor_state() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         let Some(body) = Self::counted_loop_body_block(expr) else {
@@ -2581,7 +2581,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+        if !self.threads_no_actor_state() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         if Self::foldl_list_op_body_block(expr).is_none() {
@@ -2858,7 +2858,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+        if !self.threads_no_actor_state() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         if let Expression::MessageSend {
@@ -3702,7 +3702,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+        if !self.threads_no_actor_state() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
         let Expression::MessageSend {

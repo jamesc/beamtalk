@@ -311,6 +311,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 354,
                                     end: 378,
@@ -375,6 +376,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 427,
                                     end: 451,

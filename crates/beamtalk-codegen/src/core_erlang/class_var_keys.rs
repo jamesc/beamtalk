@@ -35,14 +35,18 @@ pub(super) const HOME_KEY: &str = "$bt_class_vars_home";
 pub(super) const RO_TAG: &str = "$bt_class_vars_ro";
 
 /// The class-variable calling-convention version a compiled module declares in
-/// `__beamtalk_meta/0` as `class_var_abi` (ADR 0130 §3): `1` is "class methods
+/// `__beamtalk_meta/0` as `class_var_abi` (ADR 0130 §3): `1` was "class methods
 /// are `class_<sel>(ClassSelf, Args...)` and class variables live in the
-/// class process's dictionary". The runtime's load gate
+/// class process's dictionary"; `2` adds the actor-state cell protocol (ADR 0137):
+/// actor closures read and write `'$bt_actor_state'`, and `dispatch/4` exits that
+/// are not compiled methods run through `beamtalk_actor_state:call_foreign/3`.
+/// A module compiled for `1` must be recompiled (and the node restarted across the
+/// change, ADR 0125). The runtime's load gate
 /// (`beamtalk_class_var_abi:check_class_info_abi/2`, enforced at class registration,
 /// hot reload and the release preflight) compares a module's `class_var_abi`
 /// with `?BT_CLASS_VAR_ABI` in the generated header: this constant is the one
 /// place the value is written.
-pub(super) const ABI_VERSION: i64 = 1;
+pub(super) const ABI_VERSION: i64 = 2;
 
 /// The class key for the class object `class_self_var` names:
 /// `{'$bt_class_vars', call 'erlang':'element'(2, ClassSelf)}`.
@@ -157,6 +161,6 @@ mod tests {
         assert!(
             hrl.contains("-define(BT_CLASS_VARS_RO(ClassTag), {'$bt_class_vars_ro', ClassTag}).")
         );
-        assert!(hrl.contains("-define(BT_CLASS_VAR_ABI, 1)."));
+        assert!(hrl.contains("-define(BT_CLASS_VAR_ABI, 2)."));
     }
 }

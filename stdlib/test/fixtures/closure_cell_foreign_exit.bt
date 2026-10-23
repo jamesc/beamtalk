@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): a stored block handed to a foreign exit of
+// `dispatch/4` (an inherited runtime method reached through `perform:`) writes
+// the actor's field; `call_foreign/3` answers the state the block wrote.
+
+Actor subclass: ClosureCellForeignExit
+  state: n = 2
+
+  n => self.n
+
+  viaPerform =>
+    b := [:x | self.n := 9]
+    self perform: #ifNotNil: withArguments: #(b)
+    self.n
+
+  viaPerformTwoBlocks =>
+    b := [:x | self.n := 11]
+    self perform: #ifNil:ifNotNil: withArguments: #([0], b)
+    self.n
+
+  direct =>
+    b := [:x | self.n := 7]
+    self ifNotNil: b
+    self.n
+
+  // Compiled methods that store to the cell without a bracketed send (`on:do:`,
+  // `ensure:`, `^`) still leave the cell at their final state when reached
+  // through a foreign exit.
+  stores =>
+    self.n := 1
+    [self.n := 2] on: Error do: [:e | 0]
+    self.n := 3
+
+  storesEnsure =>
+    self.n := 4
+    [nil] ensure: [nil]
+    self.n := 5
+
+  // Returns to its entry value after storing: without the exit store the stale
+  // cell would replace the answer.
+  storesBackToEntry =>
+    self.n := 1
+    [0] on: Error do: [:e | 0]
+    self.n := 2
+
+  runStoresBackToEntry =>
+    self perform: #storesBackToEntry
+    self.n
+
+  storesEarlyReturn =>
+    self.n := 6
+    [^self.n] ensure: [nil]
+
+  runStores =>
+    self perform: #stores
+    self.n
+
+  runStoresEnsure =>
+    self perform: #storesEnsure
+    self.n
+
+  runStoresEarlyReturn => self perform: #storesEarlyReturn

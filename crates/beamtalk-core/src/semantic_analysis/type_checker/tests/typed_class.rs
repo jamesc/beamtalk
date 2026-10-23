@@ -272,6 +272,7 @@ fn test_typed_class_skips_primitive_methods() {
                 is_quoted: true,
                 is_intrinsic: false,
                 is_inferred: false,
+                no_user_code: false,
                 span: span(),
             })],
             span(),

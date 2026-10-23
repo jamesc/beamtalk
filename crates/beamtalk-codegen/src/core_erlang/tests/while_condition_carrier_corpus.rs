@@ -317,7 +317,7 @@ fn bt4002_verifier_reports_a_condition_family_the_loop_drops() {
 }
 
 /// How many programs [`generated_while_programs_compile`] draws (256, or
-/// `BT4020_PROGRAMS` for a larger seed count: the synced-calls flag-on runs use it).
+/// `BT4020_PROGRAMS` for a larger seed count).
 fn generated_programs() -> usize {
     std::env::var("BT4020_PROGRAMS")
         .ok()

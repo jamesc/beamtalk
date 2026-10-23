@@ -49,6 +49,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 305,
                                     end: 322,
@@ -103,6 +104,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 334,
                                     end: 351,
@@ -147,6 +149,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 365,
                                     end: 384,
@@ -210,6 +213,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 399,
                                     end: 415,
@@ -290,6 +294,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 446,
                                     end: 471,
@@ -370,6 +375,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 497,
                                     end: 517,
@@ -433,6 +439,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 541,
                                     end: 566,
@@ -496,6 +503,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 627,
                                     end: 650,
@@ -569,6 +577,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 670,
                                     end: 689,
@@ -632,6 +641,7 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: false,
                                 is_inferred: false,
+                                no_user_code: false,
                                 span: Span {
                                     start: 734,
                                     end: 763,

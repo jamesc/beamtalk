@@ -871,7 +871,7 @@ impl CoreErlangGenerator {
     /// which a self-send threads `State` (a class method threads nothing,
     /// ADR 0130; same exclusion as the planner's).
     pub(super) fn in_actor_instance_context(&self) -> bool {
-        self.context == CodeGenContext::Actor && !self.in_class_method()
+        self.context == CodeGenContext::Actor && !self.in_class_method() && !self.in_cell_closure()
     }
 
     /// `true` if `expr` (already paren-unwrapped) is a dispatching Actor

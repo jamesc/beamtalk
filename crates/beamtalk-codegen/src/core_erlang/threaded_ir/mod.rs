@@ -27,7 +27,7 @@
 //! epilogue (`control_flow::body::generate_foldl_loop_body`, the same
 //! addendum's next issue).
 //!
-//! ADR 0137 Phase 2a (BT-4020, behind the synced-calls flag, off by default):
+//! ADR 0137 Phase 2a (BT-4020):
 //! [`ThreadedStmt::SyncedCall`] is the cell bracket around a call that may run
 //! user code — store the threaded `State`, call, reload — and
 //! [`VerifyError::UnbracketedUserCodeSend`] reports a call that was not built
@@ -89,13 +89,14 @@ pub(super) use build::{
     build_family_construct_tuple, build_family_local_threading_prelude,
     build_local_threading_prelude, build_method_body, opaque_escapes, stepping_local_rebinds,
 };
-pub(super) use emit::{RenderCtx, render, render_value};
+pub(super) use emit::{RenderCtx, cell_put_call, render, render_value, take_cell_store_emitted};
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId, LoopCounter, NlrThrowShape,
-    OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId,
-    TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, FoldCarry, FrameId, LoopCounter,
+    NlrThrowShape, OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
+    ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix,
+    VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // The one family slot order and the `'__local__'` key prefix.

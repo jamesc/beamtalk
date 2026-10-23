@@ -77,16 +77,21 @@ Method bodies keep threading `State` in locals as today. A field read is
 with no process-dictionary access.
 
 The cell `'$bt_actor_state'`, which every callback already installs, carries
-the state across any call that might run one of this actor's blocks. Before
-such a call the compiler emits one store of the current version to the cell;
-after it returns, one load into the next version:
+the state across any call that might run one of this actor's blocks, tagged
+with the owning actor as `{Owner, Map}`. Before such a call the compiler
+emits one store of the current version to the cell; after it returns, one
+load into the next version:
 
 ```erlang
-let _ = call 'erlang':'put'('$bt_actor_state', State3) in
+let _ = call 'beamtalk_actor_state':'store'(State3) in
 let R = call 'beamtalk_message_dispatch':'send'(Recv, 'do:', [Block]) in
-let State4 = call 'erlang':'get'('$bt_actor_state') in
+let State4 = call 'beamtalk_actor_state':'take'() in
 ...
 ```
+
+`store/1` keeps the cell's current owner, so a store made while another
+actor's state is installed (a nested away `super_send/5`) does not claim that
+state for the host process.
 
 A call needs the bracket when it may run user code in this process: a
 `value`-family call on a block that is not inlined, a send with a block
@@ -169,13 +174,23 @@ Phase 2a adds a test that drives every arm of a generated `dispatch/4` and
 checks that each one either is a compiled clause or calls `call_foreign/3`.
 
 `call_foreign/3` stores `State` to the cell, invokes the fun with it, and
-returns the fun's own `{reply, R, NewState}`. A native method or extension
-fun that runs a block must read the block's writes back from the cell
-(`beamtalk_actor_state:get/2`) before it answers; one that runs no block, or
-never writes state, needs no change. Phase 2b audits the few that run blocks.
-In debug builds `call_foreign/3` asserts that if the cell changed during the
-call, the returned `NewState` reflects the change, so a native that forgets
-fails its tests instead of dropping a write.
+returns the fun's own `{reply, R, NewState}` unless the cell changed during the
+call (always on, every build): if the answer is the exact entry state, the cell
+holds the only writes (a stored block run by an inherited `Object` method such as
+`ifNotNil:` reached through `perform:withArguments:`) and the answer carries the
+cell's state; if the answer is a different state and the cell changed to
+something else, `call_foreign/3` raises `actor_state_conflict`; an answer equal
+to the cell (a compiled callee that stored and threaded the same version) or an
+unchanged cell passes through. A native method or extension fun that runs a block
+should still read the block's writes back from the cell
+(`beamtalk_actor_state:get/2`) before it answers.
+
+Phase 2b audit of what runs blocks behind a foreign exit: the only inherited
+methods that evaluate a caller-supplied block are `Object>>ifNotNil:`,
+`ifNil:ifNotNil:` and `ifNotNil:ifNil:` (compiled Beamtalk in `object.bt`; `ifNil:`
+never runs its block), plus `perform:withArguments:` reaching them. Both shapes
+are covered by `closure_cell_foreign_exit.bt`. No other native or extension fun
+in the runtime evaluates a block against the actor's state.
 
 The helper does not reconcile the cell with the answer; ADR 0137's
 Alternatives Considered says why.
@@ -199,8 +214,14 @@ and the method that emitted the bracket loads its writes when it returns.
 
 A block is at home when a callback of its own actor is running in the current
 process, tested as `Self#beamtalk_object.pid =:= self()` with the cell
-present. Away, a field read answers the block's capture, a write raises
-`actor_state_unreachable`, and a self-send is a message to the actor's pid.
+present *and owned by that same actor*. While a nested away `super_send/5`
+runs, the cell holds the other actor's state, so a host block running inside
+the call is away: its reads answer its capture, its writes raise
+`actor_state_unreachable`, and its self-sends raise `deadlock_detected`
+(the host's callback is blocked in that call, so the send could never be
+served). Otherwise away, a field read answers the block's
+capture, a write raises `actor_state_unreachable`, and a self-send is a
+message to the actor's pid.
 If the actor is blocked in the call that carried the block away,
 `check_call_stack/2` raises `deadlock_detected` or the call times out, as for
 any A→B→A cycle. A block passed to a class method is at home only when the
@@ -401,9 +422,16 @@ The oracle (BT-3950) settles the rows that mix actor state with locals. Phase 0
 ran it with the flag on and off and every cell agreed, because the matrix
 probes local threading and the prototype did not change it, so they are
 decided after Phase 2b: `RESIDUAL_DENY_SET` `EvaluatedBlockValue` (BT-3981,
-with its PIN-BUGs in `bt3971test.bt` and `bt3939tier2inlined_test.bt`) and
-`GroupByValue`, and the roughly 15 `DENY_SET` rows marked `stateful`, 11 of
-them for actors.
+with its PIN-BUGs in `bt3971test.bt` and `bt3939tier2inlined_test.bt`) and the
+roughly 15 `DENY_SET` rows marked `stateful`, 11 of them for actors.
+(`GroupByValue` is gone: ADR 0133 Phase 3, BT-3912, deleted that residual.)
+
+Phase 2b (BT-4009) result: the generated corpus
+(`scripts/gen-actor-closure-matrix.py`, 260 at-home and 6 away cells) agrees with
+the rule for every shape it generates, on a BEAM. The corpus leaves out the
+shapes the surviving validator rows still reject (an inlined `[...] value` that
+writes a field or sends to `self` as a message argument; the local-threading
+rows), so those rows stay until Phase 3 (BT-4010) deletes them.
 
 These stay because method bodies and plain self-sends still thread: the
 `State` family, the actor frame mode, the `{reply, R, State}` method
@@ -439,7 +467,7 @@ the cell as its new state (`take/0`) and `adapt/1` stores a native's
 
 **Phase 2a (L).** Align `beamtalk_actor_state`'s moduledoc and `adapt/1`
 with the amended convention: the method's `{reply, R, NewState}` is the new
-state. Add `call_foreign/3` with its debug-build assertion, and route every
+state. Add `call_foreign/3` (always on: it adopts the cell or raises `actor_state_conflict`), and route every
 non-compiled arm of `dispatch/4` (§2) through it, with the test that drives
 every arm. Reword the `actor_state_unreachable` hint, which today says a
 block "run after the method returned" is away; a block run in a later
@@ -467,7 +495,7 @@ writes from the cell before answering. Optionally skip the store when no
 field write happened since the last sync (§7). The exit gate is a generated
 actor-field-closure corpus (block shape × send kind × at home or away ×
 position), compiled and run on a BEAM, with every case answering what the
-rule in ADR 0137 says. Remove the flag and bump the module ABI marker.
+rule in ADR 0137 says. Remove the flag and bump the module ABI marker (done in BT-4009: `class_var_abi` is the one marker, now 2).
 
 **Phase 3 (M).** Delete the §8 table and whatever the oracle confirms
 after Phase 2b. In `docs/beamtalk-language-features.md`, replace the BT-3922

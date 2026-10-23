@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0137 Phase 2b (BT-4009): records what a cleanup saw (a state the
+// on:do: rollback of another actor does not undo).
+
+Actor subclass: ClosureCellRecorder
+  state: last = nil
+
+  record: aValue => self.last := aValue
+
+  last => self.last

@@ -49,7 +49,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// (Set new add: 1) size           // => 1
   /// Set new size                    // => 0
   /// ```
-  size -> Integer => @primitive
+  size -> Integer => @primitive no_user_code
 
   /// Test if the set has no elements.
   ///
@@ -57,7 +57,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// Set new isEmpty                 // => true
   /// ```
-  isEmpty -> Boolean => @primitive
+  isEmpty -> Boolean => @primitive no_user_code
 
   /// Test if the set contains the given element.
   ///

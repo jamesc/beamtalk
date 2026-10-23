@@ -137,7 +137,11 @@ Method bodies keep threading `State` in locals as today, so a field access in
 a method costs what it costs now. The process-dictionary cell
 `'$bt_actor_state'`, installed by every callback, carries the state only
 across a call that may run user code: the compiler stores the current
-version before such a call and loads it after. A block that runs inside the
+version before such a call and loads it after. The cell is tagged with its
+owner as `{Owner, Map}`: a block is at home only with the cell present *and*
+owned by its own actor, so a block of the host actor running inside a nested
+away `super_send/5` reads its creation-time capture instead of the other
+actor's fields. A block that runs inside the
 actor reads and writes the cell; one that runs elsewhere uses its
 creation-time capture. A self-send to a compiled method of this actor stays
 threaded with no store or load, and methods keep answering
@@ -234,8 +238,12 @@ a block that leaves it sees a copy and cannot write.
 exact. The process dictionary holds the state only while a callback runs and
 only across calls into code that may run a block. A native actor method or
 extension fun that runs user blocks must read the block's writes from the cell
-before answering, and a debug-build assertion catches one that does not; one
-that runs no blocks needs no change. A block reading fields in a later
+before answering. `call_foreign/3` checks it in every build: if the fun
+answers the exact state it was given while the cell changed (a stored block it
+ran wrote a field, as for `perform: #ifNotNil: withArguments: #(b)`), the answer
+carries the cell's state; if it answered a different state and the cell changed
+to something else, it raises `actor_state_conflict` instead of losing either
+set of writes. A native that runs no blocks needs no change. A block reading fields in a later
 message is a departure from `fun` capture semantics.
 
 **Production operator.** `sys:get_state/1`, `sys:replace_state/2`, hot code
@@ -330,11 +338,17 @@ in another process.
 - A missed sync point fails the build.
 
 ### Negative
+- Known gap (BT-4121): a loop that keeps its variables in parameters and holds
+  no whole `State` leaves the slow path of a guarded operator (`acc + m`, where
+  `m` is a user object with its own `+`) unbracketed, so a user `+` that touches
+  this actor's fields runs against a stale cell. Bracketing it would force every
+  arithmetic loop over untyped locals to thread `State`.
 - Every send that may run user code pays a store and a load, about 10 ns
   (10.4 ns with 18 schedulers, just over the gate).
 - The protocol has two homes: compiled code and `call_foreign/3`. A native
   method or extension fun that runs a block must read the block's writes from
-  the cell; only a debug-build assertion checks it.
+  the cell; `call_foreign/3` adopts the cell's state when the answer is the
+  entry state and raises `actor_state_conflict` when both changed.
 - Some errors move from compile time to run time. The lint sees only blocks
   passed directly to `Timer`, another actor or a non-direct class method.
 - A synchronous self-send from a block running in another process that is
@@ -369,9 +383,26 @@ Detail per phase is in the design note.
   callback wrappers.
 - **Phase 2a (L, BT-4009).** `call_foreign/3`, `SyncedCall` and the verifier,
   driven to zero misses over every corpus before 2b starts.
-- **Phase 2b (L).** Closures on the cell, `ensure:`/`on:do:`/`^` stores,
-  `no_user_code` marks, the native audit, and a generated BEAM-run corpus as
-  the exit gate.
+- **Phase 2b (L, done: BT-4009).** Closures on the cell, `ensure:`/`on:do:`/`^`
+  stores, `no_user_code` marks, the native audit, and a generated BEAM-run corpus
+  as the exit gate. The synced-calls flag is gone. The module ABI marker is
+  `class_var_abi` (the one marker the runtime gates on), bumped from 1 to 2.
+  The exit gate is `scripts/gen-actor-closure-matrix.py`: 260 at-home cells
+  (block shape x send kind x position, including `^`, stored and passed
+  blocks) and 6 away cells, each with an expected value from the generator's own
+  model, all passing on a BEAM. Findings the corpus forced, each fixed in the
+  node that owns it: a read-only `[...] value` that was left unbracketed;
+  an `on:do:`/`ensure:` in operand position that leaked its `{Value, State}`
+  pair (it is now a producer with an empty local set); and a `super` send in a
+  block or loop body, which now runs against the cell, bracketed by the call that
+  runs it. Review then found one more bleed: while an away `super` runs, the
+  superclass stores another actor's state in the host's cell, and a host
+  block running inside the call read it as its own. The cell now carries its
+  owner (`{Owner, Map}` in `beamtalk_actor_state`), `at_home/1` checks
+  ownership, every store preserves it, and the corpus covers the shape (an
+  away super running one of the host's blocks). The shapes the surviving
+  validator rows still reject are not in the
+  corpus; those rows go in Phase 3.
 - **Phase 3 (M).** Delete the rejections and guards; update the language
   guide.
 - **Phase 4 (S).** The `actor-state-abroad` lint and the amendment notes in

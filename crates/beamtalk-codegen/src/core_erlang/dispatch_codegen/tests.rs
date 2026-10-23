@@ -839,6 +839,7 @@ fn binary_send_dispatches_to_self_admits_an_own_class_reference() {
     let ctx = |context, in_class_method| ShapeCtx {
         context,
         in_class_method,
+        in_cell_closure: false,
         class_var_names: &empty,
         class_method_selectors: &empty,
         class_name: "C".to_string(),

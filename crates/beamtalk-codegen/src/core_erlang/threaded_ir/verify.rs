@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, FoldCarry, FrameId,
+    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, FoldCarry, FrameId,
     LOCAL_STATE_KEY_PREFIX, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
     RebindLowering, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
     UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
@@ -150,6 +150,22 @@ pub(in crate::core_erlang) enum VerifyError {
     /// `catch_boundary.rs` tests build such nodes directly.
     CatchWithoutClassVarRestore {
         defect: CatchRestoreDefect,
+        at: Span,
+    },
+
+    /// ADR 0137 §5: a compiled `on:do:` in an actor instance method or an actor
+    /// closure is an actor-state catch boundary, and its
+    /// [`ThreadedStmt::OnDoCatch`] node does not honour the obligation: its
+    /// non-NLR clause must restore the cell to the region's pre-region state
+    /// ([`CellBoundary`]) right after the class-variable restore, before the
+    /// exception is wrapped and the handler runs. Without it a closure or
+    /// callee in the handler reads the writes the failed region made.
+    ///
+    /// **What it guards:** like [`Self::CatchWithoutClassVarRestore`], the one
+    /// builder (`on_do_catch_boundary`) cannot trip it; the check is for a
+    /// second constructor or an edit that drops the step.
+    CatchWithoutStateRestore {
+        defect: StateRestoreDefect,
         at: Span,
     },
 
@@ -410,8 +426,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// guard, ...) in an actor instance method was not built into a
     /// [`ThreadedStmt::SyncedCall`], so the cell the closures and aliased
     /// self-sends read holds an earlier `State` than the method's own and the
-    /// call's writes are lost to the method. Only reported with the
-    /// synced-calls flag on. `selector` names the send, `region` the kind of
+    /// call's writes are lost to the method. `selector` names the send, `region` the kind of
     /// region the lowering was in when it emitted it without a bracket (the
     /// node that owns the fix). Reported by the generator at the send
     /// emitter, because the sends in an unbracketed region are exactly the
@@ -496,6 +511,17 @@ pub(in crate::core_erlang) enum CatchRestoreDefect {
     /// An NLR pass-through shape is missing before the non-NLR clause (it is
     /// absent, or ordered after it): a `^` of that shape would be restored.
     NlrArmNotBeforeRestore(NlrThrowShape),
+}
+
+/// What is wrong with the cell half of an [`ThreadedStmt::OnDoCatch`] node
+/// ([`VerifyError::CatchWithoutStateRestore`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum StateRestoreDefect {
+    /// The non-NLR clause does not have the cell restore right after the
+    /// class-variable restore.
+    NotAfterClassVarRestore,
+    /// The cell restore reads a different variable than the node's entry binds.
+    RestoresWrongVariable,
 }
 
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
@@ -1394,6 +1420,7 @@ impl VerifyWalk<'_> {
             ThreadedStmt::OnDoCatch {
                 vars,
                 entry,
+                cell,
                 clauses,
                 span,
                 ..
@@ -1401,6 +1428,10 @@ impl VerifyWalk<'_> {
                 if let Some(defect) = check_catch_restore(vars, *entry, clauses) {
                     self.errors
                         .push(VerifyError::CatchWithoutClassVarRestore { defect, at: *span });
+                }
+                if let Some(defect) = check_cell_restore(cell.as_ref(), clauses) {
+                    self.errors
+                        .push(VerifyError::CatchWithoutStateRestore { defect, at: *span });
                 }
                 if !catch_filter_closed(clauses) {
                     self.errors
@@ -1488,6 +1519,25 @@ fn check_catch_restore(
     }
 }
 
+/// ADR 0137 §5 obligation of one [`ThreadedStmt::OnDoCatch`] that carries a
+/// [`CellBoundary`]: its non-NLR clause has the matching cell restore as its
+/// second step, right after the class-variable restore.
+fn check_cell_restore(
+    cell: Option<&CellBoundary>,
+    clauses: &[CatchClause],
+) -> Option<StateRestoreDefect> {
+    let boundary = cell?;
+    let steps = clauses.iter().find_map(|c| match c {
+        CatchClause::NonNlr { steps } => Some(steps),
+        CatchClause::NlrPassThrough(_) => None,
+    })?;
+    match steps.get(1) {
+        Some(CatchStep::CellRestore(found)) if found == boundary => None,
+        Some(CatchStep::CellRestore(_)) => Some(StateRestoreDefect::RestoresWrongVariable),
+        _ => Some(StateRestoreDefect::NotAfterClassVarRestore),
+    }
+}
+
 /// Whether the non-NLR clause of a [`ThreadedStmt::OnDoCatch`] closes the class
 /// filter it opens: `ClassFilter`, then `FilterHandler`, then `FilterMiss`, the
 /// last three steps in that order. A node with no non-NLR clause has no filter
@@ -1562,7 +1612,7 @@ impl CoreErlangGenerator {
     /// The [`ScopeKind`] the generator is currently lowering — the one place
     /// that maps generator state to the verifier's scope (BT-3725).
     pub(in crate::core_erlang) fn threaded_scope(&self) -> ScopeKind {
-        if self.in_class_method() {
+        if self.threads_no_actor_state() {
             ScopeKind::ClassMethod
         } else if self.context == CodeGenContext::ValueType {
             ScopeKind::ValueType
@@ -1610,8 +1660,8 @@ impl CoreErlangGenerator {
         if errors.is_empty() {
             return;
         }
-        // BT-4020's count mode tallies findings instead of aborting on them.
-        if self.note_counted_verify_errors(errors, invariant_label, span) {
+        // The invariant probe (test-only count mode) tallies findings instead of aborting.
+        if self.note_counted_verify_errors() {
             return;
         }
         debug_assert!(

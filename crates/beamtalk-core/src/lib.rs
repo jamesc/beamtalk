@@ -58,7 +58,6 @@ pub mod span;
 // `is_exception_selector`/`is_conditional_selector` to decide state-threading
 // codegen for exception handlers and conditionals.
 pub mod state_threading_selectors;
-pub mod synced_calls;
 pub mod synthetic_selectors;
 pub mod test_helpers;
 pub mod tool_expr;

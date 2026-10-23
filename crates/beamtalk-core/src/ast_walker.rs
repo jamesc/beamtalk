@@ -330,8 +330,10 @@ pub struct SendRef<'a> {
 /// whole `MessageSend`, so the shared receiver is that send's inner receiver
 /// (or `receiver` itself when it is not a send). The later messages are stored
 /// as bare selector/arguments, so callers judging them must pair each with
-/// this receiver (BT-3716). Private: [`cascade_sends`] does the pairing.
-fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
+/// this receiver (BT-3716). [`cascade_sends`] does the pairing; codegen reads
+/// this for the shared receiver of a cascade it is classifying.
+#[must_use]
+pub fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
     match receiver {
         Expression::MessageSend {
             receiver: inner, ..

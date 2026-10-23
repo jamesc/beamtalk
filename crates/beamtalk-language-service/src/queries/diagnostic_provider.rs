@@ -614,32 +614,10 @@ mod tests {
     }
 
     #[test]
-    fn compute_diagnostics_emits_error_for_field_assignment_in_stored_block() {
-        // Test: myBlock := [self.sum := 0]
-        let source = "myBlock := [self.sum := 0]";
-        let tokens = lex_with_eof(source);
-        let (module, parse_diags) = parse(tokens);
-
-        let diagnostics = compute_diagnostics(&module, parse_diags);
-
-        // Should have error for field assignment in stored block
-        let has_field_error = diagnostics.iter().any(|d| {
-            d.message.contains("cannot assign to field") && d.message.contains("stored closure")
-        });
-        assert!(
-            has_field_error,
-            "Expected field assignment error, got: {diagnostics:?}"
-        );
-    }
-
-    #[test]
     fn compute_diagnostics_no_error_for_field_assignment_in_field_stored_block() {
         // self.onTick := [:x | self.sum := 0] must NOT emit the
-        // stored-closure field error — unlike the local-var case above
-        // (compute_diagnostics_emits_error_for_field_assignment_in_stored_block,
-        // still unaffected), a block stored into a *field* is unconditionally
-        // safe: every self.field value(:...) call site now runtime-discriminates
-        // Tier 1 vs Tier 2, regardless of which method later invokes it.
+        // stored-closure field error (ADR 0137: a block that writes a field is
+        // legal wherever it is stored).
         let source = "self.onTick := [:x | self.sum := 0]";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);

@@ -4,9 +4,9 @@
 // BT-3936 case A: like `SelfSendHomPool`, but no method passes `do:` a
 // field-writing block, so `do:`'s parameter is not a promoted Tier 2
 // position and the block in `recordAll` is a plain closure. Its self-send
-// (`record:`) changes `total`; the closure cannot return that, so the
-// self-send raises `stateful_block_dispatch` (actor_self_send_hom_test.bt).
-// `lookupAll` is the read-only twin, which answers normally.
+// (`record:`) changes `total`; the closure runs inside the actor, so the
+// change is kept (ADR 0137, actor_self_send_hom_test.bt). `lookupAll` is the
+// read-only twin.
 
 Actor subclass: SelfSendHomPlainPool
   state: items = #(1, 2, 3)

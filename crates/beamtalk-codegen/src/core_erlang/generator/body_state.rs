@@ -55,6 +55,7 @@ pub(in crate::core_erlang) struct BodyState {
     block_depth: usize,
     closure_drops_state: bool,
     class_var_capture: Option<String>,
+    actor_closure: Option<crate::core_erlang::actor_state_access::ActorClosure>,
     /// The enclosing body's non-local-return token variable
     /// (`value_type_context.current_nlr_token`): a nested body mints and
     /// clears its own, and the enclosing body's `^` in a later block must
@@ -85,6 +86,7 @@ impl CoreErlangGenerator {
             block_depth: std::mem::take(&mut self.block_depth),
             closure_drops_state: std::mem::take(&mut self.closure_drops_state),
             class_var_capture: self.class_var_capture.take(),
+            actor_closure: self.actor_closure.take(),
             nlr_token: {
                 let token = self.current_nlr_token().cloned();
                 self.set_current_nlr_token(None);
@@ -111,6 +113,7 @@ impl CoreErlangGenerator {
             block_depth,
             closure_drops_state,
             class_var_capture,
+            actor_closure,
             nlr_token,
         } = state;
         self.set_state_version(state_version);
@@ -127,6 +130,7 @@ impl CoreErlangGenerator {
         self.block_depth = block_depth;
         self.closure_drops_state = closure_drops_state;
         self.class_var_capture = class_var_capture;
+        self.actor_closure = actor_closure;
         self.set_current_nlr_token(nlr_token);
     }
 

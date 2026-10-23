@@ -362,6 +362,12 @@ pub enum Expression {
         /// Only affects unparsing (round-tripping back to bare
         /// form); codegen and analysis use `name`/`is_quoted` unchanged.
         is_inferred: bool,
+        /// Whether the pragma is marked `no_user_code` (`@primitive "size"
+        /// no_user_code`, ADR 0137 §4): the primitive can never dispatch to user
+        /// code for any argument, so a call to it needs no cell bracket. The
+        /// stdlib build rejects the mark on a method with a parameter that is not
+        /// a primitive or sealed value type.
+        no_user_code: bool,
         /// Source location of the entire `@primitive name` expression.
         span: Span,
     },
