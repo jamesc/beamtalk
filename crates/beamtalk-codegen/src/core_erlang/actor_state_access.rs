@@ -66,10 +66,11 @@ impl ActorClosure {
 
 /// Every `beamtalk_actor_state` helper codegen emits, as `(name, arity)`.
 ///
-/// Each emitter below references its entry here (never a fresh string
-/// literal), and `cell_helper_conformance` checks every entry against the
-/// runtime's `-export` blocks — renaming or unexporting a helper fails the
-/// build instead of failing with `undef` at runtime.
+/// [`actor_state_call`] takes one of these entries and checks the emitted
+/// argument count against its arity, and `cell_helper_conformance` checks
+/// every entry against the runtime's `-export` blocks — renaming,
+/// unexporting, or mis-aritying a helper fails the build instead of failing
+/// with `undef` at runtime.
 pub(in crate::core_erlang) mod actor_state_helper {
     pub const INSTALL: (&str, u32) = ("install", 1);
     pub const UNINSTALL: (&str, u32) = ("uninstall", 1);
@@ -104,16 +105,38 @@ pub(in crate::core_erlang) mod actor_state_helper {
     ];
 }
 
-/// The one emitter of a `call 'beamtalk_actor_state':'<function>'(Self, <args>..)`.
-fn actor_state_call(function: &str, args: Vec<Document<'static>>) -> Document<'static> {
+/// The one emitter of a `call 'beamtalk_actor_state':'<helper>'(<args>...)`.
+///
+/// Every codegen site that reaches the actor-state cell goes through here —
+/// bracket stores and loads, closure reads/writes/captures/`super` sends,
+/// `on:do:` and `ensure:` boundaries, callback install/uninstall, and the
+/// `dispatch/4` foreign exits — so the module and function atoms are built
+/// with [`leaf::atom`] in one place (ADR 0089). `helper` is one of
+/// [`actor_state_helper`]'s `(name, arity)` entries and `args` the call's
+/// full argument list; the count is checked against the arity here, so
+/// emitting the wrong number of arguments fails the build instead of failing
+/// with `undef` at runtime.
+pub(in crate::core_erlang) fn actor_state_call(
+    helper: (&str, u32),
+    args: Vec<Document<'static>>,
+) -> Document<'static> {
+    let (name, arity) = helper;
+    assert_eq!(
+        args.len(),
+        arity as usize,
+        "beamtalk_actor_state:{name} takes {arity} arguments"
+    );
     let mut parts: Vec<Document<'static>> = vec![
-        Document::Str("call 'beamtalk_actor_state':"),
-        leaf::atom(function),
+        Document::Str("call "),
+        leaf::atom("beamtalk_actor_state"),
+        Document::Str(":"),
+        leaf::atom(name),
         Document::Str("("),
-        leaf::var("Self"),
     ];
-    for arg in args {
-        parts.push(Document::Str(", "));
+    for (i, arg) in args.into_iter().enumerate() {
+        if i > 0 {
+            parts.push(Document::Str(", "));
+        }
         parts.push(arg);
     }
     parts.push(Document::Str(")"));
@@ -198,8 +221,8 @@ impl CoreErlangGenerator {
                 leaf::var(capture),
                 " = ",
                 actor_state_call(
-                    actor_state_helper::CAPTURE.0,
-                    vec![leaf::var(outer.capture().to_string())],
+                    actor_state_helper::CAPTURE,
+                    vec![leaf::var("Self"), leaf::var(outer.capture().to_string()),],
                 ),
                 " in ",
                 fun
@@ -219,7 +242,7 @@ impl CoreErlangGenerator {
         let capture = self
             .actor_closure_capture()
             .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()));
-        actor_state_call(actor_state_helper::VIEW.0, vec![capture])
+        actor_state_call(actor_state_helper::VIEW, vec![leaf::var("Self"), capture])
     }
 
     /// A read of field `name` inside an actor closure.
@@ -228,8 +251,8 @@ impl CoreErlangGenerator {
             .actor_closure_capture()
             .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()));
         actor_state_call(
-            actor_state_helper::GET.0,
-            vec![leaf::atom(name.to_string()), capture],
+            actor_state_helper::GET,
+            vec![leaf::var("Self"), leaf::atom(name.to_string()), capture],
         )
     }
 
@@ -245,8 +268,9 @@ impl CoreErlangGenerator {
             .actor_closure_capture()
             .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()));
         actor_state_call(
-            actor_state_helper::SUPER_SEND.0,
+            actor_state_helper::SUPER_SEND,
             vec![
+                leaf::var("Self"),
                 capture,
                 leaf::atom(class_name.to_string()),
                 leaf::atom(selector.to_string()),
@@ -270,9 +294,9 @@ impl CoreErlangGenerator {
             CellBoundary::Snapshot(snapshot) => docvec![
                 "let ",
                 leaf::var(snapshot.name().to_string()),
-                " = call 'beamtalk_actor_state':'",
-                actor_state_helper::SNAPSHOT.0,
-                "'() in "
+                " = ",
+                actor_state_call(actor_state_helper::SNAPSHOT, vec![]),
+                " in "
             ],
         }
     }
@@ -291,11 +315,12 @@ impl CoreErlangGenerator {
                 ]
             }
             CellBoundary::Snapshot(snapshot) => docvec![
-                "do call 'beamtalk_actor_state':'",
-                actor_state_helper::RESTORE.0,
-                "'(",
-                leaf::var(snapshot.name().to_string()),
-                ") "
+                "do ",
+                actor_state_call(
+                    actor_state_helper::RESTORE,
+                    vec![leaf::var(snapshot.name().to_string())]
+                ),
+                " "
             ],
         }
     }
@@ -335,11 +360,32 @@ impl CoreErlangGenerator {
             leaf::var(ok_var),
             " = ",
             actor_state_call(
-                actor_state_helper::PUT.0,
-                vec![leaf::atom(name.to_string()), leaf::var(val_var.clone())]
+                actor_state_helper::PUT,
+                vec![
+                    leaf::var("Self"),
+                    leaf::atom(name.to_string()),
+                    leaf::var(val_var.clone())
+                ]
             ),
             " in ",
             leaf::var(val_var)
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{actor_state_call, actor_state_helper};
+
+    /// The arity half of a helper entry is checked where the call is built:
+    /// emitting the wrong argument count fails codegen instead of failing
+    /// with `undef` when the generated module runs.
+    #[test]
+    #[should_panic(expected = "beamtalk_actor_state:get takes 3 arguments")]
+    fn wrong_argument_count_fails_codegen() {
+        let _ = actor_state_call(
+            actor_state_helper::GET,
+            vec![beamtalk_cerl_doc::leaf::var("Self")],
+        );
     }
 }

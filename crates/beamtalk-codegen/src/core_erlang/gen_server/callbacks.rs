@@ -9,7 +9,7 @@
 //! `handle_cast/2`, `handle_call/3`, `handle_info/2`, `code_change/3`,
 //! and `terminate/2`.
 
-use super::super::actor_state_access::actor_state_helper;
+use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
@@ -43,20 +43,6 @@ pub(in crate::core_erlang) struct InheritedTypedField {
     pub field_name: String,
     /// Human-readable type annotation (used verbatim in diagnostics).
     pub type_name: String,
-}
-
-/// `call 'beamtalk_actor_state':'<function>'(<arg>)`: the generated callbacks reach the
-/// actor-state cell only through the runtime helpers (ADR 0137), never the pdict key.
-fn actor_state_call(function: &str, arg: Document<'static>) -> Document<'static> {
-    docvec![
-        "call ",
-        leaf::atom("beamtalk_actor_state"),
-        ":",
-        leaf::atom(function.to_string()),
-        "(",
-        arg,
-        ")"
-    ]
 }
 
 impl CoreErlangGenerator {
@@ -1033,8 +1019,8 @@ impl CoreErlangGenerator {
                         leaf::var(old_state_var.clone()),
                         " = ",
                         actor_state_call(
-                            actor_state_helper::INSTALL.0,
-                            leaf::var(in_state_var.clone()),
+                            actor_state_helper::INSTALL,
+                            vec![leaf::var(in_state_var.clone())],
                         ),
                         " in",
                     ],
@@ -1054,8 +1040,8 @@ impl CoreErlangGenerator {
                         leaf::var(restore_ok_var.clone()),
                         " = ",
                         actor_state_call(
-                            actor_state_helper::UNINSTALL.0,
-                            leaf::var(old_state_var.clone()),
+                            actor_state_helper::UNINSTALL,
+                            vec![leaf::var(old_state_var.clone())],
                         ),
                         " in",
                     ],
@@ -1380,8 +1366,8 @@ impl CoreErlangGenerator {
             line(),
             "let _OldState = ",
             actor_state_call(
-                actor_state_helper::INSTALL.0,
-                leaf::var("State".to_string()),
+                actor_state_helper::INSTALL,
+                vec![leaf::var("State".to_string())],
             ),
             " in",
         ]
@@ -1394,8 +1380,8 @@ impl CoreErlangGenerator {
             line(),
             "let _RestoreOk = ",
             actor_state_call(
-                actor_state_helper::UNINSTALL.0,
-                leaf::var("_OldState".to_string()),
+                actor_state_helper::UNINSTALL,
+                vec![leaf::var("_OldState".to_string())],
             ),
             " in",
             line(),

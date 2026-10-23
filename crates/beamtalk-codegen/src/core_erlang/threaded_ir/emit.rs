@@ -6,7 +6,7 @@
 //! three narrow accessors, never through a raw field or an AST-directed
 //! emission path. Depends only on [`super::ir`]; nothing here verifies IR.
 
-use super::super::actor_state_access::actor_state_helper;
+use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, FrameId,
@@ -344,13 +344,7 @@ pub(in crate::core_erlang) fn take_cell_store_emitted() -> bool {
 /// the host process.
 pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
     CELL_STORE_EMITTED.with(|c| c.set(true));
-    docvec![
-        "call 'beamtalk_actor_state':'",
-        actor_state_helper::STORE.0,
-        "'(",
-        state,
-        ")"
-    ]
+    actor_state_call(actor_state_helper::STORE, vec![state])
 }
 
 /// Renders one [`ThreadedStmt::SyncedCall`] (ADR 0137 §1): the store of
@@ -383,9 +377,9 @@ fn render_synced_call(
         parts.push(docvec![
             "let ",
             leaf::var(ctx.resolve_prefix(load)),
-            " = call 'beamtalk_actor_state':'",
-            actor_state_helper::TAKE.0,
-            "'() in "
+            " = ",
+            actor_state_call(actor_state_helper::TAKE, vec![]),
+            " in "
         ]);
     }
     Document::Vec(parts)
@@ -1260,11 +1254,11 @@ mod cell_helper_conformance {
     /// Every `beamtalk_actor_state` helper codegen emits must be exported by
     /// the runtime: generated code calls them, so removing or renaming one
     /// fails here instead of with `undef` at runtime. The expected set lives
-    /// in one place (`actor_state_helper::ALL`), which the emitters
-    /// themselves reference, so the list cannot drift from what is actually
-    /// emitted. All `-export` blocks in the module are collected, so a helper
-    /// moved to a second block is still found (CLAUDE.md). Edit the Erlang
-    /// module (the owner) when this fails.
+    /// in one place (`actor_state_helper::ALL`), which the one emitter
+    /// references, so the list cannot drift from what is actually emitted.
+    /// All `-export` blocks in the module are collected, so a helper moved
+    /// to a second block is still found (CLAUDE.md). Edit the Erlang module
+    /// (the owner) when this fails.
     #[test]
     fn the_runtime_exports_every_emitted_cell_helper() {
         let path = concat!(
@@ -1272,22 +1266,7 @@ mod cell_helper_conformance {
             "/../../runtime/apps/beamtalk_runtime/src/beamtalk_actor_state.erl"
         );
         let src = std::fs::read_to_string(path).expect("read beamtalk_actor_state.erl");
-        let mut exported = std::collections::BTreeSet::new();
-        let mut in_export = false;
-        for line in src.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("-export([") {
-                in_export = true;
-                continue;
-            }
-            if in_export {
-                if trimmed.starts_with("]).") || trimmed.starts_with("]);") {
-                    in_export = false;
-                    continue;
-                }
-                exported.insert(trimmed.trim_end_matches(',').to_string());
-            }
-        }
+        let exported = exported_entries(&src);
         assert!(
             !exported.is_empty(),
             "no -export block found in beamtalk_actor_state.erl"
@@ -1298,6 +1277,64 @@ mod cell_helper_conformance {
                 exported.contains(&entry),
                 "beamtalk_actor_state.erl must export {entry}; generated code calls it"
             );
+        }
+    }
+
+    /// The `name/arity` entries of every `-export([...])` block in an Erlang
+    /// source file: one-line and multi-line blocks, several entries per line,
+    /// entries on the block's opening line, and `%` comments all count.
+    fn exported_entries(src: &str) -> std::collections::BTreeSet<String> {
+        let mut exported = std::collections::BTreeSet::new();
+        let mut in_export = false;
+        for line in src.lines() {
+            let code = line.split('%').next().unwrap_or("").trim();
+            let mut rest = code;
+            if let Some(open) = rest.find("-export([") {
+                in_export = true;
+                rest = &rest[open + "-export([".len()..];
+            }
+            if !in_export {
+                continue;
+            }
+            if let Some(close) = rest.find("])") {
+                rest = &rest[..close];
+                in_export = false;
+            }
+            for entry in rest.split(',') {
+                let entry = entry.trim();
+                if !entry.is_empty() {
+                    exported.insert(entry.to_string());
+                }
+            }
+        }
+        exported
+    }
+
+    #[test]
+    fn parses_one_line_blocks_and_several_entries_per_line() {
+        let src = [
+            "% a comment mentioning -export([ignored/9]).",
+            "-export([foo/1]).",
+            "-export([",
+            "    bar/2, baz/0, % a trailing comment",
+            "    qux/3",
+            "]).",
+        ]
+        .join("\n");
+        let entries = exported_entries(&src);
+        assert_eq!(entries.len(), 4);
+        for entry in ["foo/1", "bar/2", "baz/0", "qux/3"] {
+            assert!(entries.contains(entry), "missing {entry}: {entries:?}");
+        }
+    }
+
+    #[test]
+    fn finds_entries_on_the_opening_line_and_in_later_blocks() {
+        let src = "-export([first/1,\n second/2]).\n-export([third/3]).\n";
+        let entries = exported_entries(src);
+        assert_eq!(entries.len(), 3);
+        for entry in ["first/1", "second/2", "third/3"] {
+            assert!(entries.contains(entry), "missing {entry}: {entries:?}");
         }
     }
 }

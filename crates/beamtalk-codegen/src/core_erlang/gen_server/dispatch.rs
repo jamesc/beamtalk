@@ -8,7 +8,7 @@
 //! Generates the method table, `has_method/1`, `safe_dispatch/3`, and
 //! `dispatch/4` functions for runtime message routing.
 
-use super::super::actor_state_access::actor_state_helper;
+use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::super::value_accessors;
 use super::super::{CoreErlangGenerator, Result};
@@ -707,17 +707,20 @@ impl CoreErlangGenerator {
     /// `call 'beamtalk_actor_state':'call_foreign'(State, <fun beamtalk_dispatch:name/arity>, [args])`:
     /// a `dispatch/4` exit that is not a compiled method (ADR 0137 §2).
     fn call_foreign_doc(function: &str, arity: i64, args: Document<'static>) -> Document<'static> {
-        docvec![
-            "call 'beamtalk_actor_state':'",
-            actor_state_helper::CALL_FOREIGN.0,
-            "'(State, call 'erlang':'make_fun'('beamtalk_dispatch', ",
-            leaf::atom(function.to_string()),
-            ", ",
-            leaf::int_lit(arity),
-            "), [",
-            args,
-            "])"
-        ]
+        actor_state_call(
+            actor_state_helper::CALL_FOREIGN,
+            vec![
+                leaf::var("State"),
+                docvec![
+                    "call 'erlang':'make_fun'('beamtalk_dispatch', ",
+                    leaf::atom(function.to_string()),
+                    ", ",
+                    leaf::int_lit(arity),
+                    ")"
+                ],
+                docvec!["[", args, "]"],
+            ],
+        )
     }
 
     /// Generates the hierarchy walk via `beamtalk_dispatch:super`, falling back to DNU.

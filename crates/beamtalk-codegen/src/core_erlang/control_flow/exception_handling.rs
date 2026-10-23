@@ -48,7 +48,7 @@
 //!     primop 'raw_raise'(_Type, _Error, _Stacktrace)
 //! ```
 
-use super::super::actor_state_access::actor_state_helper;
+use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::erlang_types::ErlangVar;
 use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
@@ -1356,9 +1356,12 @@ impl CoreErlangGenerator {
         // arm's scratch map seeded.
         if cell_boundary {
             docs.push(docvec![
-                "let StateAcc = call 'beamtalk_actor_state':'",
-                actor_state_helper::REFRESH.0,
-                "'(Self, StateAcc) in "
+                "let StateAcc = ",
+                actor_state_call(
+                    actor_state_helper::REFRESH,
+                    vec![leaf::var("Self"), leaf::var("StateAcc")]
+                ),
+                " in "
             ]);
         }
         // Cleanup body generates state mutations that are discarded (re-raise
