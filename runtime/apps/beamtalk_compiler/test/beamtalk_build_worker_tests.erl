@@ -179,6 +179,38 @@ compile_core_file_invalid(TmpDir) ->
     Result = beamtalk_build_worker:compile_core_file(CoreFile, OutDir),
     ?assertEqual(error, Result).
 
+%% Core Erlang that passes scan/parse but fails core_lint (unbound variable)
+%% exercises the {error, {core_compile_error, ...}} arm of compile_core_file/2
+%% and the `describe_compile_error({core_compile_error, ...})` clause (line 334).
+compile_core_file_compile_error_test_() ->
+    {setup, fun setup_temp_dir/0, fun cleanup_temp_dir/1, fun(TmpDir) ->
+        fun() ->
+            CoreFile = filename:join(TmpDir, "unbound_var.core"),
+            OutDir = filename:join(TmpDir, "ebin"),
+            ok = filelib:ensure_dir(filename:join(OutDir, "dummy")),
+            ok = file:write_file(CoreFile, unbound_var_core_erlang_source()),
+            Result = beamtalk_build_worker:compile_core_file(CoreFile, OutDir),
+            ?assertEqual(error, Result),
+            BeamFile = filename:join(OutDir, "bt_bw_unbound_var.beam"),
+            ?assertNot(filelib:is_regular(BeamFile))
+        end
+    end}.
+
+%% A regular file at the output-dir path makes file:write_file/2 fail with
+%% enotdir, exercising the {error, WriteReason} arm of compile_core_file/2
+%% (lines 210, 217).
+compile_core_file_write_error_test_() ->
+    {setup, fun setup_temp_dir/0, fun cleanup_temp_dir/1, fun(TmpDir) ->
+        fun() ->
+            CoreFile = filename:join(TmpDir, "test_build_worker_mod.core"),
+            ok = file:write_file(CoreFile, valid_core_erlang_source()),
+            BlockingFile = filename:join(TmpDir, "blocking_dir"),
+            ok = file:write_file(BlockingFile, <<>>),
+            Result = beamtalk_build_worker:compile_core_file(CoreFile, BlockingFile),
+            ?assertEqual(error, Result)
+        end
+    end}.
+
 %%% ---------------------------------------------------------------
 %%% compile_modules/2 — parallel worker pool
 %%% ---------------------------------------------------------------
