@@ -30,6 +30,7 @@
 
 use super::while_condition_carrier_corpus::{FieldCodegen, codegen_outcome};
 use super::{assert_compiles_through_erlc, codegen};
+#[cfg(debug_assertions)]
 use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
