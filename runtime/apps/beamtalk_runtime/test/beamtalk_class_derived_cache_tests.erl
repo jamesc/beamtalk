@@ -58,7 +58,7 @@ write_during_compute_is_not_served() ->
 invalid_hit_is_recomputed() ->
     %% fetch/3's Valid gate (used by tagged_class_dispatch/1's
     %% module-loaded check and class_of_object_by_name/1's pid-liveness
-    %% check, BT-4117): a cached value that fails it is recomputed, and the
+    %% check): a cached value that fails it is recomputed, and the
     %% recomputation overwrites the stale entry.
     Key = key(),
     ?assertEqual(stale, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, stale} end)),

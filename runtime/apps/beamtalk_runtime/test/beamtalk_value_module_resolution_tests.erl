@@ -29,7 +29,7 @@ reading `beamtalk_xref`. `self hasField: #x` used to cost ~15-20 µs, almost
 all of it two full copies of `xref_class_gen` to fill a provenance field
 nobody read.
 
-BT-4117: `class_of_object_by_name/1` memoises the class object in
+`class_of_object_by_name/1` memoises the class object in
 `beamtalk_class_derived_cache`, so a warm `p class` makes no registry,
 metadata or atom-construction call.
 """.
@@ -181,7 +181,7 @@ warm_value_send_does_no_string_work() ->
     end.
 
 warm_class_of_object_builds_no_atoms() ->
-    %% BT-4117: with the class object cached, a warm class_of_object_by_name/1
+    %% With the class object cached, a warm class_of_object_by_name/1
     %% is a counter read + ETS read + pid liveness check — no registry_name,
     %% class_object_tag, whereis or metadata read. The cold call is traced
     %% first as a positive control that the patterns actually catch those.

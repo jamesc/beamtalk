@@ -156,7 +156,7 @@ class_of_object_inner(ClassName) ->
 Return a class object given a class name atom.
 
 The class object (tag + module + pid) is memoised in
-`beamtalk_class_derived_cache` (BT-4117): `obj class` on a Value used to
+`beamtalk_class_derived_cache`: `obj class` on a Value used to
 rebuild it on every call — a `whereis` plus two atom constructions
 (`registry_name/1`, `class_object_tag/1`) — at ~25 red / 44 words per call
 (vs-elixir bench row 12a). A warm call is now one counter read, one ETS
