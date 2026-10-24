@@ -990,8 +990,97 @@ class_of_object_by_name_test_() ->
                         'Integer', SavedModule, SavedSelectors, SavedSuperclass, SavedIsAbstract
                     )
                 end
+            end},
+            {"class object is cached: repeated calls are structurally equal (BT-4117)", fun() ->
+                {_, Pid} = beamtalk_test_dynamic_class:register('Bt4117Cached'),
+                try
+                    First = beamtalk_primitive:class_of_object_by_name('Bt4117Cached'),
+                    ?assertMatch({beamtalk_object, 'Bt4117Cached class', _, Pid}, First),
+                    lists:foreach(
+                        fun(_) ->
+                            ?assertEqual(
+                                First, beamtalk_primitive:class_of_object_by_name('Bt4117Cached')
+                            )
+                        end,
+                        lists:seq(1, 5)
+                    )
+                after
+                    stop_named_class('Bt4117Cached')
+                end
+            end},
+            {"redefinition is seen by the next call (BT-4117)", fun() ->
+                {_, Pid} = beamtalk_test_dynamic_class:register('Bt4117Redefined'),
+                try
+                    {beamtalk_object, Tag, _, Pid} =
+                        beamtalk_primitive:class_of_object_by_name('Bt4117Redefined'),
+                    ok = beamtalk_class_metadata:merge_identity(
+                        'Bt4117Redefined', 'bt@redefined@mod', [], 'Object', false
+                    ),
+                    ?assertEqual(
+                        {beamtalk_object, Tag, 'bt@redefined@mod', Pid},
+                        beamtalk_primitive:class_of_object_by_name('Bt4117Redefined')
+                    )
+                after
+                    stop_named_class('Bt4117Redefined')
+                end
+            end},
+            {"restart with a new pid is seen by the next call (BT-4117)", fun() ->
+                {_, Pid1} = beamtalk_test_dynamic_class:register('Bt4117Restarted'),
+                {beamtalk_object, _, _, Pid1} =
+                    beamtalk_primitive:class_of_object_by_name('Bt4117Restarted'),
+                ok = stop_named_class('Bt4117Restarted'),
+                {_, Pid2} = beamtalk_test_dynamic_class:register('Bt4117Restarted'),
+                try
+                    ?assertNotEqual(Pid1, Pid2),
+                    {beamtalk_object, _, _, Pid2} =
+                        beamtalk_primitive:class_of_object_by_name('Bt4117Restarted')
+                after
+                    stop_named_class('Bt4117Restarted')
+                end
+            end},
+            {"untrappable kill is repaired by the next call (BT-4117)", fun() ->
+                {_, Pid} = beamtalk_test_dynamic_class:register('Bt4117Killed'),
+                Stale = beamtalk_primitive:class_of_object_by_name('Bt4117Killed'),
+                ?assertMatch({beamtalk_object, _, _, Pid}, Stale),
+                %% Unwatch first: otherwise the class monitor would eagerly
+                %% restart the class and the next call could answer the fresh
+                %% object instead of the bare atom (both are correct; the atom
+                %% pins the repair deterministically).
+                ok = beamtalk_class_monitor:unwatch('Bt4117Killed'),
+                MRef = monitor(process, Pid),
+                exit(Pid, kill),
+                receive
+                    {'DOWN', MRef, process, Pid, _} -> ok
+                after 5000 ->
+                    error(bt4117_kill_timeout)
+                end,
+                try
+                    %% The cached object names a dead pid; it must not be
+                    %% served. Nothing revives the class (unwatched, and
+                    %% supervisor children are temporary), so the answer is
+                    %% the bare atom — exactly what the uncached code answers
+                    %% for an unregistered class.
+                    ?assertEqual(
+                        'Bt4117Killed',
+                        beamtalk_primitive:class_of_object_by_name('Bt4117Killed')
+                    )
+                after
+                    %% No terminate/2 ran, so drop the rows it would have.
+                    ok = beamtalk_class_metadata:delete('Bt4117Killed'),
+                    _ = (catch ets:delete(beamtalk_class_pids, Pid)),
+                    ok
+                end
             end}
         ]}.
+
+stop_named_class(Name) ->
+    case beamtalk_class_registry:whereis_class(Name) of
+        undefined ->
+            ok;
+        Pid ->
+            catch gen_server:stop(Pid, normal, 5000),
+            ok
+    end.
 
 %%% ============================================================================
 %%% camel_to_snake/1 Tests (via class_name_to_module)

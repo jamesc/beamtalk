@@ -28,6 +28,10 @@ the published method records (cached), never building a `CompiledMethod` or
 reading `beamtalk_xref`. `self hasField: #x` used to cost ~15-20 µs, almost
 all of it two full copies of `xref_class_gen` to fill a provenance field
 nobody read.
+
+`class_of_object_by_name/1` memoises the class object in
+`beamtalk_class_derived_cache`, so a warm `p class` makes no registry,
+metadata or atom-construction call.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -66,6 +70,8 @@ value_module_resolution_test_() ->
             fun module_less_class_makes_no_code_server_call/0},
         {"warm Value sends do no module-name string work (BT-4064)",
             fun warm_value_send_does_no_string_work/0},
+        {"warm `class` builds no atoms and reads no registry (BT-4117)",
+            fun warm_class_of_object_builds_no_atoms/0},
         {"exception bit follows a superclass change (BT-4064)",
             fun exception_bit_follows_superclass_change/0},
         {"a cached module that is purged and reloaded is re-derived (BT-4064)",
@@ -170,6 +176,36 @@ warm_value_send_does_no_string_work() ->
         ),
         ?assertEqual([7, true, 5, true], Results),
         ?assertEqual([], Calls)
+    after
+        stop_class(Pid)
+    end.
+
+warm_class_of_object_builds_no_atoms() ->
+    %% With the class object cached, a warm class_of_object_by_name/1
+    %% is a counter read + ETS read + pid liveness check — no registry_name,
+    %% class_object_tag, whereis or metadata read. The cold call is traced
+    %% first as a positive control that the patterns actually catch those.
+    Patterns = [
+        {beamtalk_class_registry, '_', '_'},
+        {beamtalk_class_metadata, '_', '_'},
+        {beamtalk_object_class, module_name, 1},
+        {erlang, list_to_atom, 1},
+        {erlang, atom_to_list, 1},
+        {erlang, binary_to_atom, 2},
+        {erlang, atom_to_binary, 2}
+    ],
+    Pid = start_class(?CLASS, ?MOD),
+    try
+        {Cold, ColdCalls} = calls_during(Patterns, fun() ->
+            beamtalk_primitive:class_of_object_by_name(?CLASS)
+        end),
+        ?assertMatch({beamtalk_object, _, _, Pid}, Cold),
+        ?assertNotEqual([], [C || C = {beamtalk_class_registry, _, _} <- ColdCalls]),
+        {Warm, WarmCalls} = calls_during(Patterns, fun() ->
+            [beamtalk_primitive:class_of_object_by_name(?CLASS) || _ <- lists:seq(1, 10)]
+        end),
+        ?assertEqual([Cold || _ <- lists:seq(1, 10)], Warm),
+        ?assertEqual([], WarmCalls)
     after
         stop_class(Pid)
     end.

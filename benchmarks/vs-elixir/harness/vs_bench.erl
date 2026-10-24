@@ -471,7 +471,7 @@ compiles_to("11a") -> "letrec loop; + with is_number guard and coercion try";
 compiles_to("11b") -> "erlang:'+'(A, 1)";
 compiles_to("11c") -> "is_number guard, erlang:'+'";
 compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatch/3";
-compiles_to("12a") -> "beamtalk_primitive:class_of_object: ETS lookups + list_to_atom per call";
+compiles_to("12a") -> "beamtalk_primitive:class_of_object: derived-cache hit (counter + ETS read + pid liveness)";
 compiles_to("12b") -> "class ref built per call (gen_server:call) + send(P, 'isKindOf:') -> includesBehaviour: via class processes";
 compiles_to(_) -> "".
 

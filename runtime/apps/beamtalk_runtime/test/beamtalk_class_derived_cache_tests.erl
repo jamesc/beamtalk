@@ -26,6 +26,8 @@ derived_cache_test_() ->
         {"a nocache answer is not stored", fun nocache_is_not_stored/0},
         {"a write that lands during a compute makes its result stale",
             fun write_during_compute_is_not_served/0},
+        {"a hit failing the validity check is recomputed and repaired",
+            fun invalid_hit_is_recomputed/0},
         {"insert, merge_identity and delete each invalidate", fun metadata_writes_invalidate/0},
         {"a superclass cycle terminates (BT-4065)", fun superclass_cycle_terminates/0}
     ]}.
@@ -52,6 +54,23 @@ write_during_compute_is_not_served() ->
     ?assertEqual(stale, beamtalk_class_derived_cache:fetch(Key, Stale)),
     ?assertEqual(fresh, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, fresh} end)),
     ?assertEqual(fresh, beamtalk_class_derived_cache:fetch(Key, fun() -> error(recomputed) end)).
+
+invalid_hit_is_recomputed() ->
+    %% fetch/3's Valid gate (used by tagged_class_dispatch/1's
+    %% module-loaded check and class_of_object_by_name/1's pid-liveness
+    %% check): a cached value that fails it is recomputed, and the
+    %% recomputation overwrites the stale entry.
+    Key = key(),
+    ?assertEqual(stale, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, stale} end)),
+    ?assertEqual(
+        fresh,
+        beamtalk_class_derived_cache:fetch(
+            Key, fun() -> {cache, fresh} end, fun(V) -> V =:= fresh end
+        )
+    ),
+    ?assertEqual(
+        fresh, beamtalk_class_derived_cache:fetch(Key, fun() -> error(recomputed) end)
+    ).
 
 metadata_writes_invalidate() ->
     Class = 'DerivedCacheTestClass',
