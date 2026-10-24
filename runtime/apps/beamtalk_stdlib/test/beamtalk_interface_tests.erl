@@ -387,6 +387,13 @@ live_registry_test_() ->
                     beamtalk_interface:classNamed(42)
                 )
             end},
+            %% Review: a non-list argument is a type error, like classNamed/1.
+            {"classesNamed non-list arg raises type_error", fun() ->
+                ?assertError(
+                    #{error := #beamtalk_error{kind = type_error}},
+                    beamtalk_interface:classesNamed(42)
+                )
+            end},
             {"help: on a known class returns its formatted help", fun() ->
                 H = beamtalk_interface:help('Integer'),
                 ?assert(is_binary(H)),
