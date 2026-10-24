@@ -425,6 +425,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
         package: None,
         is_value: true,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![eco_string("okValue"), eco_string("errReason")],
         state_types: {

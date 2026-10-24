@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// A plain `Value` sub-subclass of `DirectCtorPoint`. Indirect
+// subclasses take the slow path; these tests pin its behavior.
+
+DirectCtorPoint subclass: DirectCtorChild
+  field: z = 0

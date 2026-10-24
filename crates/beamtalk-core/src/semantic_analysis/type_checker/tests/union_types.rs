@@ -567,6 +567,7 @@ fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),

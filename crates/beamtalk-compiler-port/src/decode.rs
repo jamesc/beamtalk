@@ -423,6 +423,10 @@ pub(crate) fn parse_class_info_from_meta_term(
         package,
         is_value,
         is_native: false, // BEAM cache doesn't carry native flag; re-derived at parse time
+        // the wire doesn't carry the constructor anchor either;
+        // binary-only cross-package classes conservatively miss out on
+        // direct constructor calls (safe `class_send` fallback).
+        auto_ctors: None,
         // ADR 0103: handle scope is a declaration, not structurally re-derivable,
         // so read it back from the meta map — a binary-only dependency that
         // declares `handleScope:` must keep its tier across package boundaries.

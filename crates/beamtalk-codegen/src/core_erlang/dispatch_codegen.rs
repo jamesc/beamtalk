@@ -2791,6 +2791,17 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let raw_selector = selector.name().to_string();
 
+        // nullary `new` on an eligible Value builds via a direct
+        // `Module:'new'()` call. The synthesized builder takes no arguments
+        // (not even `ClassSelf`), so it cannot use the generic direct-call
+        // shape below. (`new:` stays on `class_send`: its chain verdict
+        // lives in the baked metadata, which only dynamic sends consult.)
+        if raw_selector == "new" && arguments.is_empty() {
+            if let Some(module_name) = self.direct_new0_module(class_name) {
+                return Ok(Self::generate_direct_new_call(&module_name));
+            }
+        }
+
         // Check if this class method is eligible for direct call optimization.
         if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw_selector) {
             return self.generate_direct_class_method_call(&module_name, &raw_selector, arguments);
@@ -2925,6 +2936,32 @@ impl CoreErlangGenerator {
                 .contains(raw_selector)
                 .then(|| info.module_name.to_string())
         })
+    }
+
+    /// Module for a direct nullary-`new` call, if eligible.
+    ///
+    /// Companion to [`direct_call_eligible_module`](Self::direct_call_eligible_module)
+    /// for the `new` constructor, which cannot live in `selectors` (its
+    /// direct form takes no `ClassSelf` argument).
+    fn direct_new0_module(&self, class_name: &str) -> Option<String> {
+        self.direct_call_eligible
+            .get(class_name)
+            .and_then(|info| info.direct_new0.then(|| info.module_name.to_string()))
+    }
+
+    /// Generates a direct nullary-`new` call.
+    ///
+    /// ```erlang
+    /// call 'module':'new'()
+    /// ```
+    fn generate_direct_new_call(module_name: &str) -> Document<'static> {
+        docvec![
+            "call ",
+            leaf::atom(module_name.to_string()),
+            ":",
+            leaf::atom("new".to_string()),
+            "()"
+        ]
     }
 
     /// Pre-scans a class for self-sends that pass Tier 2 (stateful) block arguments.

@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 138
 expression: core_erlang
 ---
 module 'typed_value_type' ['new'/0, 'new'/1, 'getX'/1, 'getY'/1, 'distanceTo:'/2, 'printString'/1, 'x'/1, 'y'/1, 'withX:'/2, 'withY:'/2, 'class_x:y:'/3, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
@@ -179,7 +180,8 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
       'method_info' => ~{'getX' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'getY' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'distanceTo:' => ~{'arity' => 1, 'param_types' => ['TypedPoint'], 'return_type' => 'Float', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'printString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'x' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'y' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withX:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withY:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'x:y:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~
+      'direct_class_methods' => ~{'x:y:' => 'class_x:y:'}~,
+      'direct_constructors' => ['new', 'new:']
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -216,7 +218,8 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
       'method_info' => ~{'getX' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'getY' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'distanceTo:' => ~{'arity' => 1, 'param_types' => ['TypedPoint'], 'return_type' => 'Float', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'printString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'x' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'y' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withX:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withY:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'x:y:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~
+      'direct_class_methods' => ~{'x:y:' => 'class_x:y:'}~,
+      'direct_constructors' => ['new', 'new:']
     }~
 
 'module_info'/0 = fun () ->

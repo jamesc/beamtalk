@@ -31,6 +31,7 @@ fn price_band_class_info_with_lo_type(
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![ecow::EcoString::from("lo")],
         state_types,

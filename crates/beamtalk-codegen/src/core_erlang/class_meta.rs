@@ -55,6 +55,11 @@ pub(crate) struct MetaProvenance<'a> {
     /// (`beamtalk_behaviour_intrinsics:selectorProviderFromName/2`) reads it to
     /// classify a flattened provision by its origin rather than its module.
     pub stdlib_trait_methods: &'a [String],
+    /// this class's directly-callable constructors (`new` and/or
+    /// `new:`), emitted as `'direct_constructors'` (omitted when empty).
+    /// Dynamic `class_send` for these selectors builds in the caller via a
+    /// direct module call instead of routing through the class process.
+    pub direct_constructors: &'a [String],
     /// BT-3916: the class defines, outside the stdlib, a collection message the
     /// stdlib's collection methods run through; emitted as
     /// `'overrides_collection_selector' => 'true'` (omitted when `false`).
@@ -409,6 +414,7 @@ impl CoreErlangGenerator {
             Self::meta_provenance_entries(provenance),
             Self::meta_direct_class_methods_entry(provenance.direct_class_methods),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
+            Self::meta_direct_constructors_entry(provenance.direct_constructors),
             if provenance.overrides_collection_selector {
                 Document::Str(",\n      'overrides_collection_selector' => 'true'")
             } else {
@@ -481,6 +487,19 @@ impl CoreErlangGenerator {
         docvec![
             ",\n      'stdlib_trait_methods' => ",
             Self::meta_atom_list(selectors)
+        ]
+    }
+
+    /// emit `'direct_constructors' => ['new', ...]`, the
+    /// constructors dynamic sends may build in the caller. Omitted when
+    /// the class has none, so only eligible classes change.
+    fn meta_direct_constructors_entry(ctors: &[String]) -> Document<'static> {
+        if ctors.is_empty() {
+            return Document::Nil;
+        }
+        docvec![
+            ",\n      'direct_constructors' => ",
+            Self::meta_atom_list(ctors)
         ]
     }
 

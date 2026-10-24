@@ -26,6 +26,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),

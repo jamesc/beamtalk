@@ -108,6 +108,8 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Future".into(),
         ClassInfo {
             name: "Future".into(),
+            // Runtime-only builtin (no .bt source): never synthesized.
+            auto_ctors: None,
             superclass: Some("Object".into()),
             is_sealed: true,
             is_abstract: false,

@@ -3812,3 +3812,255 @@ fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
         "no threaded map surgery on a ClassVars map. Got:\n{code}"
     );
 }
+
+// --- direct Value construction (cross-class `new` / keyword ctors) ---
+//
+// An unqualified class reference in a fresh generator is never an
+// own-class reference (no class is being compiled), so it reaches
+// `generate_class_method_call` — the cross-class path. Own-class
+// construction (`Pt new` inside `Pt`) routes to the self-send path
+// instead, which was already direct (keyword shape,
+// `try_instantiation_intrinsic` for `new`).
+
+/// Builds a generator with a hand-planted verdict for one class:
+/// `keyword` joins the direct-call selector set (the generic
+/// `class_<sel>` shape), `direct_new0`/`direct_new1` ride the dedicated
+/// flags — what `compute_direct_call_eligible` produces for a stateless
+/// Value subclass. Planting the map directly tests emission without
+/// depending on hierarchy construction.
+fn generator_with_direct_constructors(
+    class: &str,
+    keyword: Option<&str>,
+    direct_new0: bool,
+    direct_new1: bool,
+) -> CoreErlangGenerator {
+    let mut generator = CoreErlangGenerator::new("bt@test@main");
+    let mut selectors = std::collections::HashSet::new();
+    if let Some(kw) = keyword {
+        selectors.insert(kw.to_string());
+    }
+    generator.direct_call_eligible.insert(
+        class.to_string(),
+        DirectCallClassInfo {
+            module_name: "bt@test@pt".into(),
+            selectors,
+            direct_new0,
+            direct_new1,
+        },
+    );
+    generator
+}
+
+fn unqualified_class_reference(name: &str) -> Expression {
+    let end = u32::try_from(name.len()).expect("fixture name fits in a span");
+    Expression::ClassReference {
+        name: Identifier::new(name, Span::new(0, end)),
+        package: None,
+        span: Span::new(0, end),
+    }
+}
+
+#[test]
+fn test_direct_new0_emits_module_new_call() {
+    // `Pt new` on an eligible Value builds via a direct
+    // `Module:'new'()` call — no registry lookup, no `class_send`.
+    let mut generator = generator_with_direct_constructors("Pt", None, true, false);
+    let receiver = unqualified_class_reference("Pt");
+    let selector = MessageSelector::Unary("new".into());
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("call 'bt@test@pt':'new'()"),
+        "eligible `Pt new` must call the synthesized builder directly. Got:\n{output}"
+    );
+    assert!(
+        !output.contains("whereis_class") && !output.contains("class_send"),
+        "direct `new` must not touch the registry or gen_server dispatch. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_direct_new0_flag_off_falls_back_to_class_send() {
+    // the map entry may exist (e.g. for the keyword ctor) while
+    // `new` itself is ineligible (custom `new`); the send must fall back.
+    let mut generator = generator_with_direct_constructors("Pt", Some("x:y:"), false, false);
+    let receiver = unqualified_class_reference("Pt");
+    let selector = MessageSelector::Unary("new".into());
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("'beamtalk_class_registry':'whereis_class'('Pt')"),
+        "ineligible `new` must look the class up in the registry. Got:\n{output}"
+    );
+    assert!(
+        output.contains("'beamtalk_object_class':'class_send'"),
+        "ineligible `new` must dispatch via class_send. Got:\n{output}"
+    );
+    assert!(
+        !output.contains(":'new'()"),
+        "ineligible `new` must not emit a direct builder call. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_new_without_eligible_entry_falls_back_to_class_send() {
+    // a class with no verdict at all (unknown, stateful,
+    // actor) keeps today's behavior — fail closed to `class_send`.
+    let mut generator = CoreErlangGenerator::new("bt@test@main");
+    let receiver = unqualified_class_reference("Pt");
+    let selector = MessageSelector::Unary("new".into());
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("'beamtalk_object_class':'class_send'"),
+        "`new` with no eligibility entry must dispatch via class_send. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_direct_keyword_constructor_emits_class_fn_call() {
+    // `Pt x: 1 y: 2` on an eligible Value uses the generic
+    // direct-call shape (`class_x:y:/3` ignores its `ClassSelf` arg).
+    let mut generator = generator_with_direct_constructors("Pt", Some("x:y:"), true, true);
+    let receiver = unqualified_class_reference("Pt");
+    let selector = MessageSelector::Keyword(vec![
+        KeywordPart::new("x:", Span::new(3, 5)),
+        KeywordPart::new("y:", Span::new(9, 11)),
+    ]);
+    let arguments = vec![
+        Expression::Literal(Literal::Integer(1), Span::new(6, 7)),
+        Expression::Literal(Literal::Integer(2), Span::new(12, 13)),
+    ];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("call 'bt@test@pt':'class_x:y:'('nil', 1, 2)"),
+        "eligible keyword ctor must call class_x:y:/3 directly with nil ClassSelf. Got:\n{output}"
+    );
+    assert!(
+        !output.contains("whereis_class") && !output.contains("class_send"),
+        "direct keyword ctor must not touch the registry or gen_server dispatch. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_direct_new1_stays_on_class_send() {
+    // static `new:` keeps the `class_send` fallback even when
+    // eligible — the chain verdict stays single-sourced in the baked
+    // metadata, which only dynamic sends consult.
+    let mut generator = generator_with_direct_constructors("Pt", None, true, true);
+    let receiver = unqualified_class_reference("Pt");
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("new:", Span::new(3, 7))]);
+    let arguments = vec![Expression::Literal(Literal::Integer(1), Span::new(8, 9))];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("'beamtalk_object_class':'class_send'"),
+        "static `new:` must stay on class_send (dynamic-only fast path). Got:\n{output}"
+    );
+    assert!(
+        !output.contains(":'new'("),
+        "static `new:` must not emit a direct builder call. Got:\n{output}"
+    );
+}
+
+#[test]
+fn test_value_meta_bakes_direct_constructors() {
+    // end to end: a stateless Value subclass bakes its
+    // constructor verdicts into `__beamtalk_meta` — `new` (and `new:`,
+    // whose chain here is just the builtin-Value router) under
+    // `direct_constructors`, the keyword ctor under
+    // `direct_class_methods`.
+    let src = "Value subclass: Pt\n  field: x = 0\n  field: y = 0\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'direct_constructors' => ['new', 'new:']"),
+        "stateless Value must bake new/new: verdicts. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'x:y:' => 'class_x:y:'"),
+        "keyword ctor must join the baked direct class methods. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn test_value_with_custom_new_omits_it_from_baked_constructors() {
+    // fail-closed: a user-defined class-side `new` removes only
+    // `new` from the baked verdicts; the keyword ctor stays direct.
+    let src = "Value subclass: Custom\n  field: x = 0\n\n  class new => self x: 41\n";
+    let code = codegen_source(src);
+    assert!(
+        !code.contains("'direct_constructors' => ['new'"),
+        "custom `new` must not bake a direct `new` verdict. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'x:' => 'class_x:'"),
+        "custom `new` must not disturb the keyword ctor verdict. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_actor_meta_omits_direct_constructors() {
+    // actor classes have no constructor anchor, so no key is
+    // baked at all (only eligible classes change).
+    let src = "Actor subclass: Srv\n  state: value = 0\n";
+    let code = codegen_source(src);
+    assert!(
+        !code.contains("direct_constructors"),
+        "actor modules must not bake a direct_constructors key. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_long_keyword_ctor_bakes_hashed_meta_key() {
+    // a keyword ctor over many fields exceeds Erlang's 255-char
+    // atom limit; the baked `direct_class_methods` key must be the hashed
+    // `kw_<hash>` form (like send sites and `class_method_info` keys), or
+    // the module's own `.core` fails to scan (`core_scan_error` — this
+    // broke BUnit fixtures such as `value_many_fields.bt`).
+    use std::fmt::Write as _;
+    let mut src = String::from("Value subclass: WideVal\n");
+    for i in 0..32 {
+        writeln!(src, "  field: field{i:02} = 0").expect("write to String cannot fail");
+    }
+    let code = codegen_source(&src);
+    let raw_kw: String = (0..32).fold(String::new(), |mut acc, i| {
+        write!(acc, "field{i:02}:").expect("write to String cannot fail");
+        acc
+    });
+    assert!(
+        raw_kw.len() > 255,
+        "test setup must build an over-long keyword (got {} chars)",
+        raw_kw.len()
+    );
+    assert!(
+        !code.contains(&raw_kw),
+        "over-long keyword ctor selector must not appear raw anywhere. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'kw_"),
+        "baked direct entry must use the hashed 'kw_<hash>' key. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
