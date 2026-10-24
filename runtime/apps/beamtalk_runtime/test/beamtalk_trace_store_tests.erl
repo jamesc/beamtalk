@@ -2382,7 +2382,7 @@ upgrade_resets_aggregates_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Free-list contention under concurrent churn (BT-4120)
+%% Test: Free-list contention under concurrent churn
 %%====================================================================
 
 -doc """
@@ -2521,6 +2521,13 @@ free_list_churn_stays_flat_test_() ->
                 [exit(P, kill) || P <- Win1],
                 wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
                 ?assertEqual(Allocs, ets:info(beamtalk_agg_free_slots, size)),
+                %% Releases stripe across all shards: a fixed-shard
+                %% regression would pile every release onto one.
+                Shards = lists:usort([
+                    S
+                 || {{S, _, _}} <- ets:tab2list(beamtalk_agg_free_slots)
+                ]),
+                ?assertEqual(64, length(Shards)),
 
                 %% Window 2: the same shape, now through take_slot/0 — nearly
                 %% every allocation reuses a released slot. (Exact drain is
@@ -2627,7 +2634,7 @@ free_slots_upgrade_recreates_unsharded_table_test_() ->
                 StorePid = whereis(beamtalk_trace_store),
                 ok = sys:suspend(StorePid),
                 try
-                    %% Simulate the pre-BT-4120 layout: any process may
+                    %% Simulate the pre-sharding layout: any process may
                     %% delete a named table.
                     true = ets:delete(beamtalk_agg_free_slots),
                     _ = ets:new(beamtalk_agg_free_slots, [named_table, public, set]),

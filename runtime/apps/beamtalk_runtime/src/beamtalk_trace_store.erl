@@ -28,7 +28,7 @@ Storage layout (BT-4103):
 - beamtalk_agg_free_slots (ETS ordered_set): {{Shard, CounterRef, SlotBase}}
   for atomics slots released by swept pid rows, reused before the slot
   allocator bumps. The shard spreads concurrent takers across the table so
-  they stop racing for a single head (BT-4120). Only pid rows use it, so it
+  they stop racing for a single head. Only pid rows use it, so it
   is idle unless tracing is enabled.
 - beamtalk_trace_events (ETS ordered_set): composite key → trace event
 - current array triple in persistent_term: lock-free aggregate increments + CAS min/max (~50ns)
@@ -161,7 +161,7 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 %% past the cap are not tracked until the sweep reclaims dead pids' rows. A
 %% soft cap: two callers racing past it can overshoot by a row each.
 -define(MAX_PID_KEYS, 100000).
-%% Shard count for the free-slots table (BT-4120). Fixed rather than derived
+%% Shard count for the free-slots table. Fixed rather than derived
 %% from schedulers_online, so releases and takes always agree however many
 %% schedulers are online.
 -define(FREE_LIST_SHARDS, 64).
@@ -699,7 +699,7 @@ reset_aggregates_after_upgrade() ->
     end.
 
 -doc """
-Drop a pre-BT-4120 free-slots table: it is a `set` of unsharded
+Drop a pre-sharding free-slots table: it is a `set` of unsharded
 `{{Ref, Base}}` rows, which the sharded take path cannot use. The free list
 is a pure reuse cache — no live row references a freed slot — so dropping
 it only costs some slot reuse, and `ensure_table/2` recreates it sharded
@@ -974,8 +974,8 @@ Take a released slot if one is free. Rows are `{{Shard, Ref, Base}}` in an
 `ordered_set`, so `ets:next/2` from a shard's lower bound jumps straight to
 that shard's first entry. The taker probes from its hashed shard and walks
 on — to the next shard on an empty shard or a lost `ets:take/2` race — so
-concurrent takers claim different slots instead of racing for one head
-(BT-4120). Answers `none` when the table is empty or every probe missed;
+concurrent takers claim different slots instead of racing for one head.
+Answers `none` when the table is empty or every probe missed;
 the caller then bumps a fresh slot, so a miss only costs reuse, never a
 sample. `ets:take/2` hands a slot to exactly one caller, so a taken slot is
 never double-allocated.
@@ -1011,7 +1011,8 @@ take_slot_shard(Shard, TriesLeft) ->
 -doc """
 Put a slot on the free list for reuse. The shard stripes entries across the
 table: consecutive `unique_integer` values land on consecutive shards, so a
-sweep's sequential releases spread over all of them (BT-4120).
+sweep's sequential releases spread over all of them. Each release must
+pair with an exclusive claim: a twice-released slot would be taken twice.
 """.
 -spec release_slot(atomics:atomics_ref(), non_neg_integer()) -> true.
 release_slot(AtomicsRef, SlotBase) ->
