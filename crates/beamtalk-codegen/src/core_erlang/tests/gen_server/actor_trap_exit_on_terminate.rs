@@ -85,6 +85,7 @@ fn test_actor_inheriting_terminate_override_from_cross_file_ancestor_traps_exit(
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),

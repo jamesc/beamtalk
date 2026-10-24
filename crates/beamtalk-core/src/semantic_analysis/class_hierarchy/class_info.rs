@@ -145,6 +145,49 @@ pub enum SuperclassTypeArg {
 /// Information about a class in the hierarchy.
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
+/// Constructor synthesis record (BT-4099): what the class's own compilation
+/// emitted for value construction.
+///
+/// `Some` iff the class's AST kind was `Value` when its `ClassInfo` was
+/// extracted — the same gate codegen's `compute_auto_slot_methods` uses, so
+/// `Some` means the compiled module exports the synthesized `new/0`/`new/1`
+/// (modulo user-supplied `new`/`new:`, which suppress them). The keyword
+/// decision is the one `add_value_auto_methods` made: `Some(selector)` iff a
+/// keyword constructor was synthesized (non-empty state, no user-defined
+/// class method with that selector).
+///
+/// `None` for non-Value classes, for Value classes whose AST kind fell back
+/// (cross-file parent gaps — `propagate_class_kind` corrects `is_value` for
+/// the type checker but deliberately leaves this unset, since codegen emits
+/// no value treatment there), and for hand-written/cross-wire infos that
+/// predate the field (`#[serde(default)]`). Readers treat `None` as "no
+/// direct constructor calls" (safe fallback to `class_send`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AutoConstructors {
+    /// Synthesized keyword constructor selector (e.g. `x:y:`), if any.
+    pub keyword_constructor: Option<EcoString>,
+}
+
+/// Constructor direct-call eligibility (BT-4099): which value-construction
+/// sends for a class build in the caller instead of routing through the
+/// class process's `gen_server`.
+///
+/// Computed once per class by
+/// [`ClassHierarchy::direct_constructors`](super::ClassHierarchy::direct_constructors):
+/// codegen consults it for static sends and bakes the `new`/`new:` answers
+/// into `__beamtalk_meta` (as `direct_constructors`) for dynamic sends, so
+/// the runtime never re-derives eligibility.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DirectConstructors {
+    /// `Class new` (no args) builds via a direct `Module:'new'()` call.
+    pub new0: bool,
+    /// `Class new: map` builds via a direct `Module:'new'(Map)` call.
+    pub new1: bool,
+    /// Keyword constructor selector callable directly (e.g. `x:y:`), if any.
+    pub keyword: Option<EcoString>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(clippy::struct_excessive_bools)]
@@ -181,6 +224,10 @@ pub struct ClassInfo {
     /// Native actors delegate to a backing Erlang module and cannot declare
     /// `state:` fields (state is owned by the Erlang `gen_server`).
     pub is_native: bool,
+    /// Constructor synthesis record, if the class's AST kind was `Value` at
+    /// extraction (BT-4099). See [`AutoConstructors`] for the invariant.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub auto_ctors: Option<AutoConstructors>,
     /// Declared sendability handle scope (ADR 0103, `handleScope: #symbol`).
     ///
     /// The bare symbol text (e.g. `"process"`, `"node"`) declared via a
@@ -399,13 +446,21 @@ impl ClassInfo {
 
         // For `Value subclass:` classes, synthesize auto-generated slot
         // methods so the type checker and cross-file consumers can resolve them.
-        if class.class_kind == ClassKind::Value {
-            ClassHierarchy::add_value_auto_methods(
-                class,
-                &mut instance_methods,
-                &mut class_methods,
-            );
-        }
+        // The recorded keyword decision is also the constructor-emission
+        // anchor (BT-4099): `Some` here means this same AST will get value
+        // treatment in codegen (`compute_auto_slot_methods` gates on the
+        // identical `class_kind == Value` check).
+        let auto_ctors = if class.class_kind == ClassKind::Value {
+            Some(AutoConstructors {
+                keyword_constructor: ClassHierarchy::add_value_auto_methods(
+                    class,
+                    &mut instance_methods,
+                    &mut class_methods,
+                ),
+            })
+        } else {
+            None
+        };
 
         Self {
             name: class.name.name.clone(),
@@ -417,6 +472,7 @@ impl ClassInfo {
             package: None, // Populated later by the build pipeline or BEAM metadata
             is_value: class.class_kind == ClassKind::Value,
             is_native: class.backing_module.is_some(),
+            auto_ctors,
             handle_scope: class.handle_scope.as_ref().map(|s| s.name.clone()),
             surface_incomplete: false,
             state: class.state.iter().map(|s| s.name.name.clone()).collect(),

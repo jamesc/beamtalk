@@ -169,6 +169,7 @@ fn cross_file_inherited_late_field_read_is_guarded() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![ecow::EcoString::from("proc")],
         state_types: {

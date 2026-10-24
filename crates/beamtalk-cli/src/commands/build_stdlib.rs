@@ -718,6 +718,10 @@ struct ClassMeta {
     /// Declared sendability handle scope (ADR 0103, `handleScope: #symbol`).
     /// The bare symbol text (e.g. `"process"`), or `None` when undeclared.
     handle_scope: Option<String>,
+    /// Synthesized keyword constructor selector (BT-4099), if any — the
+    /// `auto_ctors` anchor decision, captured by
+    /// `synthesize_value_auto_methods` against user methods only.
+    auto_kw: Option<String>,
 }
 
 /// Sort class metadata by class name — every generated-artifact writer
@@ -814,12 +818,18 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
 /// (`class_hierarchy/mod.rs`) and ensures the type checker can resolve
 /// state-based accessors without having to process the source `.bt` file first.
 #[allow(clippy::too_many_lines)] // synthesizes getter + updater + constructor metadata inline
+/// Synthesizes auto getters, `with*` setters and the keyword constructor for
+/// a Value subclass, appending to `methods`/`class_methods`. Returns the
+/// synthesized keyword selector, if any — the BT-4099 `auto_ctors` anchor
+/// decision, made here against user methods only (after this runs, the
+/// keyword lives in `class_methods`, so a later re-check could not tell
+/// synthesis from a user collision).
 fn synthesize_value_auto_methods(
     class: &beamtalk_core::ast::ClassDefinition,
     class_name: &str,
     methods: &mut Vec<MethodMeta>,
     class_methods: &mut Vec<MethodMeta>,
-) {
+) -> Option<String> {
     let user_selectors: std::collections::HashSet<String> =
         methods.iter().map(|m| m.selector.clone()).collect();
     let user_class_selectors: std::collections::HashSet<String> =
@@ -875,39 +885,41 @@ fn synthesize_value_auto_methods(
     let kw_sel: String = beamtalk_core::synthetic_selectors::keyword_constructor_selector(
         class.state.iter().map(|s| s.name.name.as_str()),
     );
-    if !user_class_selectors.contains(&kw_sel) {
-        let arity = class.state.len();
-        let param_types = class
-            .state
-            .iter()
-            .map(|s| s.type_annotation.as_ref().map(DeclaredType::from))
-            .collect();
-        let args_desc: String = class
-            .state
-            .iter()
-            .map(|s| {
-                let dv = s.default_value.as_ref().map_or_else(
-                    || "nil".to_string(),
-                    beamtalk_core::semantic_analysis::class_hierarchy::format_default_value,
-                );
-                format!("{} (default: {})", s.name.name, dv)
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        let ctor_doc =
-            format!("Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*");
-        class_methods.push(MethodMeta {
-            selector: kw_sel,
-            arity,
-            kind: MethodKindMeta::Primary,
-            is_sealed: false,
-            is_internal: false,
-            spawns_block: false,
-            return_type: Some(DeclaredType::simple(class_name)),
-            param_types,
-            doc: Some(ctor_doc),
-        });
+    if user_class_selectors.contains(&kw_sel) {
+        return None;
     }
+    let arity = class.state.len();
+    let param_types = class
+        .state
+        .iter()
+        .map(|s| s.type_annotation.as_ref().map(DeclaredType::from))
+        .collect();
+    let args_desc: String = class
+        .state
+        .iter()
+        .map(|s| {
+            let dv = s.default_value.as_ref().map_or_else(
+                || "nil".to_string(),
+                beamtalk_core::semantic_analysis::class_hierarchy::format_default_value,
+            );
+            format!("{} (default: {})", s.name.name, dv)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ctor_doc =
+        format!("Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*");
+    class_methods.push(MethodMeta {
+        selector: kw_sel.clone(),
+        arity,
+        kind: MethodKindMeta::Primary,
+        is_sealed: false,
+        is_internal: false,
+        spawns_block: false,
+        return_type: Some(DeclaredType::simple(class_name)),
+        param_types,
+        doc: Some(ctor_doc),
+    });
+    Some(kw_sel)
 }
 
 /// Iterate `methods`, set `spawns_block = true` for every selector listed in
@@ -1365,10 +1377,15 @@ fn extract_class_metadata(
 
     let class_name = class.name.name.to_string();
 
-    // Synthesize auto-generated methods for Value subclasses with state
-    if class.class_kind == beamtalk_core::ast::ClassKind::Value && !class.state.is_empty() {
-        synthesize_value_auto_methods(class, &class_name, &mut methods, &mut class_methods);
-    }
+    // Synthesize auto-generated methods for Value subclasses with state,
+    // capturing the keyword-constructor decision for the `auto_ctors`
+    // anchor (BT-4099).
+    let auto_kw =
+        if class.class_kind == beamtalk_core::ast::ClassKind::Value && !class.state.is_empty() {
+            synthesize_value_auto_methods(class, &class_name, &mut methods, &mut class_methods)
+        } else {
+            None
+        };
 
     // Mark Timer methods that spawn their block argument
     if class_name == "Timer" {
@@ -1418,6 +1435,7 @@ fn extract_class_metadata(
         type_params,
         superclass_type_args,
         handle_scope: class.handle_scope.as_ref().map(|s| s.name.to_string()),
+        auto_kw,
     })
 }
 
@@ -1683,7 +1701,9 @@ fn generate_builtins_rs(
          \n\
          // `ClassVarInfo` is unused whenever no stdlib class declares `classState:`.\n\
          #[allow(unused_imports)]\n\
-         use super::super::{ClassInfo, ClassVarInfo, DeclaredType, MethodInfo, SuperclassTypeArg};\n\
+         use super::super::{\n\
+         \x20   AutoConstructors, ClassInfo, ClassVarInfo, DeclaredType, MethodInfo, SuperclassTypeArg,\n\
+         };\n\
          use crate::ast::{MethodKind, SlotKind};\n\
          use ecow::EcoString;\n\
          use std::collections::{BTreeSet, HashMap};\n\
@@ -1874,6 +1894,24 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
             .as_deref()
             .map_or_else(|| "None".to_string(), |s| format!("Some(\"{s}\".into())")),
     );
+
+    // auto_ctors — constructor synthesis record (BT-4099). Mirrors
+    // `ClassInfo::from_class_definition`: `Some` iff the AST kind is `Value`
+    // (the same gate codegen's `compute_auto_slot_methods` uses), with the
+    // keyword decision captured at synthesis time (`meta.auto_kw`) — it must
+    // come from there, not from re-checking `meta.class_methods`, which by
+    // now also holds the synthesized keyword itself.
+    let auto_ctors = if meta.class_kind == beamtalk_core::ast::ClassKind::Value {
+        match &meta.auto_kw {
+            Some(sel) => {
+                format!("Some(AutoConstructors {{ keyword_constructor: Some(\"{sel}\".into()) }})")
+            }
+            None => "Some(AutoConstructors { keyword_constructor: None })".to_string(),
+        }
+    } else {
+        "None".to_string()
+    };
+    let _ = writeln!(code, "            auto_ctors: {auto_ctors},");
 
     // State
     if meta.state.is_empty() {
@@ -3123,6 +3161,7 @@ mod tests {
             type_params: vec![],
             superclass_type_args: vec![],
             handle_scope: None,
+            auto_kw: None,
         }
     }
 
@@ -3159,6 +3198,43 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_class_entry_auto_ctors_anchor() {
+        // BT-4099: a Value meta emits a populated anchor from the captured
+        // keyword decision (`auto_kw`), `keyword_constructor: None` when
+        // synthesis produced nothing, and a bare `None` anchor for
+        // non-Value kinds. The decision must be captured at synthesis
+        // time: by emission, `class_methods` also holds the synthesized
+        // keyword itself, so re-checking it here would always (wrongly)
+        // report a user collision.
+        let mut meta = sample_class_meta();
+        meta.class_kind = beamtalk_core::ast::ClassKind::Value;
+        meta.auto_kw = Some("x:y:".to_string());
+        let mut code = String::new();
+        generate_class_entry(&mut code, &meta);
+        assert!(
+            code.contains("keyword_constructor: Some(\"x:y:\".into())"),
+            "captured keyword must reach the anchor. Got:\n{code}"
+        );
+
+        meta.auto_kw = None;
+        let mut code = String::new();
+        generate_class_entry(&mut code, &meta);
+        assert!(
+            code.contains("Some(AutoConstructors { keyword_constructor: None })"),
+            "a Value with no keyword keeps an empty anchor. Got:\n{code}"
+        );
+
+        meta.class_kind = beamtalk_core::ast::ClassKind::Object;
+        meta.auto_kw = Some("x:y:".to_string());
+        let mut code = String::new();
+        generate_class_entry(&mut code, &meta);
+        assert!(
+            code.contains("auto_ctors: None"),
+            "non-Value kinds emit a bare None anchor. Got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_generate_class_entry_root_class() {
         let meta = ClassMeta {
             module_name: "bt@stdlib@proto_object".to_string(),
@@ -3181,6 +3257,7 @@ mod tests {
             type_params: vec![],
             superclass_type_args: vec![],
             handle_scope: None,
+            auto_kw: None,
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);
@@ -3287,6 +3364,7 @@ mod tests {
                 type_params: vec![],
                 superclass_type_args: vec![],
                 handle_scope: None,
+                auto_kw: None,
             },
             ClassMeta {
                 module_name: "bt@stdlib@alpha".to_string(),
@@ -3309,6 +3387,7 @@ mod tests {
                 type_params: vec![],
                 superclass_type_args: vec![],
                 handle_scope: None,
+                auto_kw: None,
             },
         ];
 
@@ -4362,6 +4441,7 @@ mod tests {
             type_params: vec!["T".to_string(), "U".to_string()],
             superclass_type_args: vec![DeclaredType::simple("T"), DeclaredType::simple("Concrete")],
             handle_scope: None,
+            auto_kw: None,
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);

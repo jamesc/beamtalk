@@ -38,6 +38,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),

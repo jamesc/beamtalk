@@ -35,6 +35,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![eco_string("count")],
         state_types: {

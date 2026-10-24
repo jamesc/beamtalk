@@ -13,7 +13,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::ops::ControlFlow;
 
 use super::ClassHierarchy;
-use super::class_info::{ClassInfo, InitializeAssignsSummary, MethodInfo};
+use super::class_info::{ClassInfo, DirectConstructors, InitializeAssignsSummary, MethodInfo};
 use super::declared_type::DeclaredType;
 
 impl ClassHierarchy {
@@ -447,10 +447,18 @@ impl ClassHierarchy {
 
         // Synthesize auto-slot methods for newly-discovered Value subclasses.
         // We need the AST `ClassDefinition` for slot info, so look it up.
+        // The keyword decision is discarded here (BT-4099): these classes'
+        // AST kind is not `Value`, so codegen emits no value treatment for
+        // them — their `auto_ctors` anchor stays `None` and only the type
+        // checker sees the synthesized methods.
         for class in &module.classes {
             if classes_to_fix.contains(&class.name.name) {
                 if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
-                    Self::add_value_auto_methods(class, &mut info.methods, &mut info.class_methods);
+                    let _ = Self::add_value_auto_methods(
+                        class,
+                        &mut info.methods,
+                        &mut info.class_methods,
+                    );
                 }
             }
         }
@@ -545,6 +553,97 @@ impl ClassHierarchy {
                 .classes
                 .get(name.as_str())
                 .and_then(|info| info.superclass.as_ref().map(ToString::to_string));
+        }
+        false
+    }
+
+    /// Constructor direct-call eligibility for the named class (BT-4099).
+    ///
+    /// A `Value` constructor builds a plain map without touching the class
+    /// process, so when the class is a stateless non-native `Value` whose
+    /// constructors are all synthesized, sends to them compile (static) or
+    /// dispatch (dynamic) to a direct module call in the caller:
+    /// - `new` needs no ancestor walk: the `{new, []}` handler calls the
+    ///   class's own `Module:new/0` unconditionally, so an ancestor's user
+    ///   `new` is shadowed identically in both paths.
+    /// - `new:` dispatches through the chain at runtime
+    ///   (`has_class_new_in_chain`), so any user `new:` in the class or its
+    ///   ancestors disables the fast path — except `Value`'s own, which is
+    ///   the `@intrinsic basicNewWith` router that just forwards to the
+    ///   receiver's `new/1` (a source linter pins that premise).
+    /// - keyword constructors ignore `ClassSelf` and resolve own-first, so
+    ///   only the class's own synthesis record matters.
+    ///
+    /// Unknown classes, unknown ancestors, cycles, chains deeper than the
+    /// runtime's cap, and parse-incomplete surfaces (where a missing user
+    /// `new` would be misread as "synthesized") all fail closed.
+    #[must_use]
+    pub fn direct_constructors(&self, class_name: &str) -> DirectConstructors {
+        let mut result = DirectConstructors::default();
+        let Some(info) = self.classes.get(class_name) else {
+            return result;
+        };
+        if info.surface_incomplete {
+            return result;
+        }
+        let Some(auto_ctors) = info.auto_ctors.as_ref() else {
+            return result;
+        };
+        if !info.class_variables.is_empty() {
+            return result;
+        }
+        result.keyword.clone_from(&auto_ctors.keyword_constructor);
+        if info.is_abstract || info.is_native {
+            return result;
+        }
+        let has_own = |selector: &str| {
+            info.methods.iter().any(|m| m.selector.as_str() == selector)
+                || info
+                    .class_methods
+                    .iter()
+                    .any(|m| m.selector.as_str() == selector)
+        };
+        if !has_own("new") {
+            result.new0 = true;
+        }
+        if !has_own("new:") && !self.chain_has_user_new_init(class_name) {
+            result.new1 = true;
+        }
+        result
+    }
+
+    /// Whether any ancestor of the named class defines a class-side `new:`
+    /// that is real user code (BT-4099).
+    ///
+    /// `Value` itself is skipped: its `new:` is the `@intrinsic basicNewWith`
+    /// router, not an override (skipping by name is sound: `Value` is a
+    /// runtime-protected class name, so no user class can shadow it).
+    /// Mirrors the runtime's `has_class_new_in_chain` depth cap (50);
+    /// anything unknown fails closed so the `new:` fast path stays off.
+    fn chain_has_user_new_init(&self, class_name: &str) -> bool {
+        let mut current = self
+            .classes
+            .get(class_name)
+            .and_then(|info| info.superclass.clone());
+        let mut visited = HashSet::new();
+        let mut depth = 0;
+        while let Some(name) = current.as_ref() {
+            if depth >= 50 || !visited.insert((*name).clone()) {
+                return true;
+            }
+            depth += 1;
+            let Some(info) = self.classes.get(name.as_str()) else {
+                return true;
+            };
+            if name.as_str() != "Value"
+                && info
+                    .class_methods
+                    .iter()
+                    .any(|m| m.selector.as_str() == "new:")
+            {
+                return true;
+            }
+            current.clone_from(&info.superclass);
         }
         false
     }
@@ -947,11 +1046,15 @@ impl ClassHierarchy {
     /// class hierarchy (and therefore the type checker) agrees byte-for-byte with
     /// the methods codegen emits — without duplicating the naming logic.
     #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to slot count
+    /// Returns the synthesized keyword constructor selector, if one was added.
+    ///
+    /// The return value is the constructor-emission record (BT-4099): callers
+    /// building a fresh `ClassInfo` store it as the `auto_ctors` anchor.
     pub(super) fn add_value_auto_methods(
         class: &ClassDefinition,
         instance_methods: &mut Vec<MethodInfo>,
         class_methods: &mut Vec<MethodInfo>,
-    ) {
+    ) -> Option<EcoString> {
         use super::class_info::format_default_value;
 
         let user_instance_selectors: HashSet<EcoString> = instance_methods
@@ -1014,42 +1117,44 @@ impl ClassHierarchy {
         }
 
         // Auto keyword constructor on the class side (e.g., `x:y:`)
-        if !class.state.is_empty() {
-            let kw_sel: EcoString =
-                EcoString::from(crate::synthetic_selectors::keyword_constructor_selector(
-                    class.state.iter().map(|s| s.name.name.as_str()),
-                ));
-            let arity = class.state.len();
-            if !user_class_selectors.contains(&kw_sel) {
-                let args_desc: String = class
-                    .state
-                    .iter()
-                    .map(|s| {
-                        let dv = s
-                            .default_value
-                            .as_ref()
-                            .map_or_else(|| "nil".to_string(), format_default_value);
-                        format!("{} (default: {})", s.name.name, dv)
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let ctor_doc = format!(
-                    "Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*"
-                );
-                class_methods.push(MethodInfo {
-                    selector: kw_sel,
-                    arity,
-                    kind: MethodKind::Primary,
-                    defined_in: class_name.clone(),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: Some(DeclaredType::simple(class_name.clone())),
-                    param_types: vec![None; arity],
-                    doc: Some(ctor_doc.into()),
-                    origin: None,
-                });
-            }
+        if class.state.is_empty() {
+            return None;
         }
+        let kw_sel: EcoString =
+            EcoString::from(crate::synthetic_selectors::keyword_constructor_selector(
+                class.state.iter().map(|s| s.name.name.as_str()),
+            ));
+        let arity = class.state.len();
+        if user_class_selectors.contains(&kw_sel) {
+            return None;
+        }
+        let args_desc: String = class
+            .state
+            .iter()
+            .map(|s| {
+                let dv = s
+                    .default_value
+                    .as_ref()
+                    .map_or_else(|| "nil".to_string(), format_default_value);
+                format!("{} (default: {})", s.name.name, dv)
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ctor_doc =
+            format!("Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*");
+        class_methods.push(MethodInfo {
+            selector: kw_sel.clone(),
+            arity,
+            kind: MethodKind::Primary,
+            defined_in: class_name.clone(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some(DeclaredType::simple(class_name.clone())),
+            param_types: vec![None; arity],
+            doc: Some(ctor_doc.into()),
+            origin: None,
+        });
+        Some(kw_sel)
     }
 }

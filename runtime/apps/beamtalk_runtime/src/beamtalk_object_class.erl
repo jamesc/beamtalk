@@ -1091,6 +1091,7 @@ init({ClassName, ClassInfo}) ->
     %% gen_server hop.
     sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
     sync_direct_class_methods(ClassName, Meta),
+    sync_direct_constructors(ClassName, Meta),
 
     %% Clear any runtime class-method funs left behind by a *hard*
     %% crash of the previous incarnation of this class process — a hard crash
@@ -1482,6 +1483,9 @@ handle_call(
             ok = publish_reflection(State#class_state{name = NewName}),
             beamtalk_class_metadata:put_direct_class_methods(
                 NewName, beamtalk_class_metadata:lookup_direct_class_methods(OldName)
+            ),
+            beamtalk_class_metadata:put_direct_constructors(
+                NewName, beamtalk_class_metadata:lookup_direct_constructors(OldName)
             ),
             beamtalk_class_registry:record_class_pid(self(), NewName),
             beamtalk_class_registry:record_loaded_class(NewName, self()),
@@ -2526,6 +2530,24 @@ sync_direct_class_methods(ClassName, Meta) ->
     beamtalk_class_metadata:put_direct_class_methods(ClassName, Direct).
 
 -doc """
+Publish the compiled `direct_constructors` eligibility set (BT-4099).
+
+Copies `direct_constructors` from `Meta` into the unified metadata row, where
+`beamtalk_class_dispatch:class_send/3` reads it without a gen_server hop. Meta
+without the key (dynamic classes, older modules) clears the set, so a reload
+that makes a class ineligible takes effect immediately. Only `new`/`new:`
+atoms are kept; anything else in the list is dropped defensively.
+""".
+-spec sync_direct_constructors(class_name(), map()) -> ok.
+sync_direct_constructors(ClassName, Meta) ->
+    Ctors =
+        case maps:get(direct_constructors, Meta, []) of
+            L when is_list(L) -> [S || S <- L, S =:= new orelse S =:= 'new:'];
+            _ -> []
+        end,
+    beamtalk_class_metadata:put_direct_constructors(ClassName, Ctors).
+
+-doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.
 
 ADR 0084: picks out the entries that carry a `block` (runtime/builder
@@ -2734,6 +2756,9 @@ apply_class_info(State, ClassInfo) ->
     %% fresh meta — a reload can add or drop eligible selectors (or make the
     %% class ineligible entirely, e.g. by adding `classState:`).
     sync_direct_class_methods(State#class_state.name, Meta),
+    %% BT-4099: same for the direct-construction verdicts (e.g. a reload
+    %% adding a custom `new` drops it from the baked set immediately).
+    sync_direct_constructors(State#class_state.name, Meta),
 
     State#class_state{
         module = NewModule,

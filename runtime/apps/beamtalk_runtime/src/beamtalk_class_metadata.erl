@@ -124,6 +124,10 @@ a table deleted between an existence check and the op (teardown/shutdown).
     put_direct_class_methods/2,
     lookup_direct_class_methods/1,
     lookup_direct_class_method/2,
+    %% BT-4099: direct-construction eligibility set for dynamic `new`/`new:`.
+    put_direct_constructors/2,
+    lookup_direct_constructors/1,
+    lookup_direct_constructor/2,
     %% ADR 0125 §2.2/§3.4, BT-3574: the `field_types`/`field_kinds` ->
     %% `beamtalk_shape_diff:shape()`-shaped normalisation shared by the live
     %% (`beamtalk_workspace_shape_store`) and build-time
@@ -207,7 +211,14 @@ a table deleted between an existence check and the op (teardown/shutdown).
     is_sealed :: boolean() | undefined,
     is_typed :: boolean() | undefined,
     is_internal :: boolean() | undefined,
-    shape_version :: pos_integer() | undefined
+    shape_version :: pos_integer() | undefined,
+    %% BT-4099: `direct_constructors` from the compiled module's
+    %% `__beamtalk_meta/0` — the `[new]` / `[new, 'new:']` subset
+    %% `direct_constructors` (Rust) deemed buildable in the caller without
+    %% the class gen_server. A plain list (at most two elements); `[]` for
+    %% dynamic classes, stateful classes, and modules compiled before the
+    %% key existed.
+    direct_constructors = [] :: [selector()]
 }).
 
 -type side() :: instance | class.
@@ -1127,6 +1138,58 @@ lookup_direct_class_method(Name, Selector) ->
             direct_class_methods = #{Selector := SafeFn}
         }} when Module =/= undefined ->
             {ok, Module, SafeFn};
+        _ ->
+            error
+    end.
+
+-doc """
+Store a class's direct-construction eligibility set (BT-4099).
+
+`Ctors` is the `direct_constructors` value from the class's `__beamtalk_meta/0`
+(`[new]` and/or `['new:']`); pass `[]` to clear it. Updates the existing row in
+place; a no-op when no row exists (the class registers its row first, so this
+only happens on a class that is being torn down).
+""".
+-spec put_direct_constructors(class_name(), [selector()]) -> ok.
+put_direct_constructors(Name, Ctors) when is_list(Ctors) ->
+    new(),
+    try
+        ets:update_element(?TABLE, Name, {#class_metadata.direct_constructors, Ctors}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc "Read a class's whole direct-construction eligibility set (`[]` when none or unknown).".
+-spec lookup_direct_constructors(class_name()) -> [selector()].
+lookup_direct_constructors(Name) ->
+    case field(Name, #class_metadata.direct_constructors) of
+        Ctors when is_list(Ctors) -> Ctors;
+        _ -> []
+    end.
+
+-doc """
+Resolve a constructor to a direct-callable module for a class (BT-4099),
+or `error` when the send must go through the class gen_server.
+
+Same gates as `lookup_direct_class_method/2`: the row must name a module,
+the class must have no runtime-installed class-method funs (ADR 0084),
+and the baked verdict must list the selector. The target is always `new`
+itself (`new/0` for `new`, `new/1` for `new:`) — the caller checks the
+export at the right arity, mirroring `lookup_direct_call/3`.
+""".
+-spec lookup_direct_constructor(class_name(), selector()) -> {ok, module()} | error.
+lookup_direct_constructor(Name, Selector) ->
+    case row(Name) of
+        {ok, #class_metadata{
+            module = Module,
+            has_runtime_class_methods = false,
+            direct_constructors = Ctors
+        }} when Module =/= undefined, is_list(Ctors) ->
+            case lists:member(Selector, Ctors) of
+                true -> {ok, Module};
+                false -> error
+            end;
         _ ->
             error
     end.

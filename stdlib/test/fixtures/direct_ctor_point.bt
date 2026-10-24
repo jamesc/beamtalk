@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4099: a stateless Value subclass with no custom constructors —
+// `new`, `new:` and the keyword ctor are all direct-call eligible, so
+// dynamic sends must build in the caller, exactly like the static form.
+
+Value subclass: DirectCtorPoint
+  field: x = 0
+  field: y = 0
