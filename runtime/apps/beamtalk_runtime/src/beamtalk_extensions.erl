@@ -242,6 +242,11 @@ register(Class, Selector, Fun, Owner, Source) when
         end
     end),
 
+    %% An installed extension changes hierarchy resolution (compiled
+    %% `has_method_local/1` consults this table), invalidating cached
+    %% defining-method entries.
+    beamtalk_class_derived_cache:invalidate(),
+
     %% ADR 0087 Phase 4: maintain the xref index for extension methods
     %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
     %% `Source`) is re-parsed and indexed; a sourceless one (`register/4`, or
@@ -349,6 +354,8 @@ unregister(Class, Selector, ClassSide) when
         ets:delete(?SOURCES_TABLE, Key),
         sync_shadow_flag(EtsClass)
     end),
+    %% Removal changes resolution the same way installation does.
+    beamtalk_class_derived_cache:invalidate(),
     %% Clear this selector's conflict history too — previously only
     %% purge_class/1's whole-class sweep did this.
     _ = ets:match_delete(?CONFLICTS_TABLE, {Key, '_', '_'}),

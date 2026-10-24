@@ -134,7 +134,16 @@ dispatch_test_() ->
                 fun test_invoke_method_module_undefined_continues/0},
             %% class_chain_step's per-node probe must stay O(depth)
             {"class_chain_step probes has_method_local/2 exactly once per level",
-                fun test_class_chain_step_probe_cost_is_linear_in_depth/0}
+                fun test_class_chain_step_probe_cost_is_linear_in_depth/0},
+            %% Defining-method cache: warm hits skip the walk, writes flush it
+            {"warm inherited lookup performs zero hierarchy probes",
+                fun test_cached_lookup_skips_walk/0},
+            {"hot patch on ancestor invalidates cached owner",
+                fun test_hot_patch_invalidates_cached_owner/0},
+            {"ancestor extension install and removal re-resolve",
+                fun test_extension_install_invalidates_cached_owner/0},
+            {"super-send warms the shared start-class entry",
+                fun test_super_send_warms_shared_entry/0}
         ]
     end}.
 
@@ -1592,4 +1601,191 @@ bt3482_drain_trace_calls(Acc) ->
             bt3482_drain_trace_calls([{F, length(Args)} | Acc])
     after 0 ->
         lists:reverse(Acc)
+    end.
+
+%%% ============================================================================
+%%% Defining-method cache
+%%% ============================================================================
+
+%% A warm inherited lookup serves the cached owner without touching the
+%% hierarchy: zero `has_method_local/2` probes. The cold/warm timings are
+%% informational (no timing assertion — CI load would flake it); the probe
+%% count is the regression pin.
+test_cached_lookup_skips_walk() ->
+    Depth = 3,
+    Chain = bt3482_build_chain(Depth),
+    #{names := Names, mods := Mods} = Chain,
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        Leaf = hd(Names),
+        Base = lists:last(Names),
+        BaseMod = lists:last(Mods),
+        State = #{'$beamtalk_class' => Leaf},
+        Self = make_ref(),
+
+        ColdStart = erlang:monotonic_time(microsecond),
+        Cold = beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf),
+        ColdEnd = erlang:monotonic_time(microsecond),
+        ?assertMatch({reply, bt3482_deep_result, _}, Cold),
+        [{_, _, {owner, Base, BaseMod}}] = ets:lookup(
+            beamtalk_class_derived_cache, {defining_method, Leaf, bt3482DeepMethod}
+        ),
+
+        %% Warm average over many iterations, untraced.
+        WarmStart = erlang:monotonic_time(microsecond),
+        WarmAvg = defmethod_warm_avg(1000, Leaf, Self, State),
+        WarmEnd = erlang:monotonic_time(microsecond),
+        ?debugFmt(
+            "defining-method cache: cold=~pus warm_avg=~.2fμs/lookup (~pus wall)",
+            [ColdEnd - ColdStart, WarmAvg, WarmEnd - WarmStart]
+        ),
+
+        %% One traced warm lookup in a worker (a process cannot trace
+        %% itself): the same answer with no hierarchy probes at all.
+        TestPid = self(),
+        Worker = spawn(fun() ->
+            receive
+                go ->
+                    R = beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf),
+                    TestPid ! {defmethod_warm_result, R}
+            end
+        end),
+        1 = erlang:trace(Worker, true, [call, {tracer, TestPid}]),
+        1 = erlang:trace_pattern({beamtalk_object_class, has_method_local, 2}, true, [global]),
+        1 = erlang:trace_pattern({beamtalk_object_class, has_method, 2}, true, [global]),
+        Worker ! go,
+        Warm =
+            receive
+                {defmethod_warm_result, R} -> R
+            after 5000 ->
+                erlang:error(defmethod_worker_timeout)
+            end,
+        _ = erlang:trace_pattern({beamtalk_object_class, has_method_local, 2}, false, [global]),
+        _ = erlang:trace_pattern({beamtalk_object_class, has_method, 2}, false, [global]),
+        (try
+            erlang:trace(Worker, false, [call])
+        catch
+            error:badarg -> ok
+        end),
+        Calls = bt3482_drain_trace_calls(),
+        ?assertMatch({reply, bt3482_deep_result, _}, Warm),
+        ?assertEqual(0, length([1 || {has_method_local, 2} <- Calls])),
+        ?assertEqual(0, length([1 || {has_method, 2} <- Calls]))
+    after
+        bt3482_teardown_chain(Chain)
+    end.
+
+defmethod_warm_avg(0, _Leaf, _Self, _State) ->
+    0.0;
+defmethod_warm_avg(N, Leaf, Self, State) ->
+    Start = erlang:monotonic_time(microsecond),
+    lists:foreach(
+        fun(_) -> beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf) end,
+        lists:seq(1, N)
+    ),
+    End = erlang:monotonic_time(microsecond),
+    (End - Start) / N.
+
+%% A hot patch on an ancestor changes resolution: the cached entry is
+%% flushed and the next lookup re-resolves to the patching class. The stub
+%% modules cannot invoke the fun (their default clause delegates via
+%% `super/5`), so the proof is the recomputed owner row, not the answer.
+test_hot_patch_invalidates_cached_owner() ->
+    Chain = bt3482_build_chain(3),
+    #{names := [Leaf, Mid, _Base], mods := [_, MidMod, _]} = Chain,
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        State = #{'$beamtalk_class' => Leaf},
+        Self = make_ref(),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            beamtalk_dispatch:lookup(midPatchedSel, [], Self, State, Leaf)
+        ),
+        ?assertEqual(
+            [],
+            ets:lookup(beamtalk_class_derived_cache, {defining_method, Leaf, midPatchedSel})
+        ),
+        MidPid = beamtalk_class_registry:whereis_class(Mid),
+        ?assertNotEqual(undefined, MidPid),
+        ok = beamtalk_object_class:put_method(
+            MidPid, midPatchedSel, fun(_S, [], St) -> {reply, patched, St} end
+        ),
+        %% Re-resolves (a stale entry would still miss): the owner row now
+        %% names the patching class. The answer itself stays a DNU — the
+        %% stub default clause delegates past a fun it cannot invoke.
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            beamtalk_dispatch:lookup(midPatchedSel, [], Self, State, Leaf)
+        ),
+        [{_, _, {owner, Mid, MidMod}}] = ets:lookup(
+            beamtalk_class_derived_cache, {defining_method, Leaf, midPatchedSel}
+        )
+    after
+        bt3482_teardown_chain(Chain)
+    end.
+
+%% An extension installed on an ancestor changes resolution end to end:
+%% the compiled probe reports it, the owner row names the ancestor, and
+%% the extension fun is invoked. Removal restores the DNU. Uses the real
+%% Counter/Actor classes — the stub modules do not consult extensions.
+test_extension_install_invalidates_cached_owner() ->
+    ok = ensure_counter_loaded(),
+    ok = beamtalk_extensions:init(),
+    beamtalk_class_derived_cache:invalidate(),
+    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+    Self = make_ref(),
+    ExtFun = fun(_Args, _S, St) -> {ext4109_result, St} end,
+    try
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            beamtalk_dispatch:lookup(extSel4109, [], Self, State, 'Counter')
+        ),
+        ?assertEqual(
+            [],
+            ets:lookup(beamtalk_class_derived_cache, {defining_method, 'Counter', extSel4109})
+        ),
+        ok = beamtalk_extensions:register('Actor', extSel4109, ExtFun, defmethod_test),
+        ?assertMatch(
+            {reply, ext4109_result, _},
+            beamtalk_dispatch:lookup(extSel4109, [], Self, State, 'Counter')
+        ),
+        [{_, _, {owner, 'Actor', _}}] = ets:lookup(
+            beamtalk_class_derived_cache, {defining_method, 'Counter', extSel4109}
+        ),
+        ok = beamtalk_extensions:unregister('Actor', extSel4109),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            beamtalk_dispatch:lookup(extSel4109, [], Self, State, 'Counter')
+        )
+    after
+        (try
+            beamtalk_extensions:unregister('Actor', extSel4109)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% A `super` send warms the entry keyed by the class the walk starts at —
+%% the same entry a direct send to that class would use — and warms
+%% nothing for the class it skips.
+test_super_send_warms_shared_entry() ->
+    Chain = bt3482_build_chain(3),
+    #{names := [Leaf, Mid | _]} = Chain,
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        State = #{'$beamtalk_class' => Leaf},
+        Self = make_ref(),
+        ?assertMatch(
+            {reply, bt3482_deep_result, _},
+            beamtalk_dispatch:super(bt3482DeepMethod, [], Self, State, Leaf)
+        ),
+        [{_, _, {owner, _, _}}] = ets:lookup(
+            beamtalk_class_derived_cache, {defining_method, Mid, bt3482DeepMethod}
+        ),
+        ?assertEqual(
+            [],
+            ets:lookup(beamtalk_class_derived_cache, {defining_method, Leaf, bt3482DeepMethod})
+        )
+    after
+        bt3482_teardown_chain(Chain)
     end.
