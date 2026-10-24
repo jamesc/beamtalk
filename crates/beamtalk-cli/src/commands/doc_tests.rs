@@ -18,6 +18,7 @@ use beamtalk_core::ast::Module;
 // ──────────────────────────────────────────────────────────────────────────
 
 pub(crate) use crate::commands::util::Expected;
+use crate::commands::util::find_assertion_marker_pos;
 
 /// A single expression + assertion pair from a doc comment.
 #[derive(Debug)]
@@ -244,9 +245,11 @@ fn parse_code_block(lines: &[(usize, &str)], absolute_line_offset: usize) -> Vec
 /// Try to split `expression // => expected` from a single line.
 ///
 /// Doc examples often use inline assertions like `3 + 4  // => 7`.
+/// Uses [`find_assertion_marker_pos`] to skip `// =>` occurrences inside
+/// double-quoted string literals.
 fn split_inline_assertion(line: &str) -> Option<(String, &str)> {
     let marker = "// =>";
-    let pos = line.find(marker)?;
+    let pos = find_assertion_marker_pos(line)?;
 
     // Make sure this isn't at the start (would be an orphaned marker)
     if pos == 0 {
@@ -304,6 +307,20 @@ mod tests {
     #[test]
     fn test_split_inline_assertion_at_start() {
         assert!(split_inline_assertion("// => 7").is_none());
+    }
+
+    #[test]
+    fn test_split_inline_assertion_ignores_marker_inside_string() {
+        // "// =>" inside a double-quoted string must not be treated as the assertion marker.
+        assert!(split_inline_assertion("Transcript show: \"val // => 1\"").is_none());
+    }
+
+    #[test]
+    fn test_split_inline_assertion_real_marker_after_string() {
+        // A real assertion after a string expression is still found.
+        let (expr, expected) = split_inline_assertion("\"hello\" size  // => 5").unwrap();
+        assert_eq!(expr, "\"hello\" size");
+        assert_eq!(expected, "5");
     }
 
     #[test]
