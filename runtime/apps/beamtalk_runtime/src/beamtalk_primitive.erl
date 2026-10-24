@@ -155,6 +155,30 @@ class_of_object_inner(ClassName) ->
 -doc """
 Return a class object given a class name atom.
 
+The class object (tag + module + pid) is memoised in
+`beamtalk_class_derived_cache` (BT-4117): `obj class` on a Value used to
+rebuild it on every call — a `whereis` plus two atom constructions
+(`registry_name/1`, `class_object_tag/1`) — at ~25 red / 44 words per call
+(vs-elixir bench row 12a). A warm call is now one counter read, one ETS
+read and a liveness check on the cached pid.
+
+Every metadata write (load, hot reload / redefinition, removal) flushes
+the cache, and a hit whose pid has died without one (an untrappable kill
+runs no `terminate/2`, so no row is deleted) is re-derived instead of
+served — pids are never reused within a node, so a live cached pid is
+still the class.
+""".
+-spec class_of_object_by_name(atom()) -> tuple() | atom().
+class_of_object_by_name(ClassName) ->
+    beamtalk_class_derived_cache:fetch(
+        {class_object, ClassName},
+        fun() -> resolve_class_object(ClassName) end,
+        fun valid_class_object/1
+    ).
+
+-doc """
+Uncached derivation behind `class_of_object_by_name/1`.
+
 Resolves the module via the `beamtalk_class_metadata` ETS table
 (populated unconditionally alongside the class's own identity at
 init/reload) rather than `beamtalk_object_class:module_name/1`'s
@@ -174,21 +198,41 @@ to the gen_server call only for the practically-unreachable case where a
 class object exists in the registry but hasn't (yet) written its metadata
 row — accepting the old deadlock exposure there rather than raising, since
 that miss should not happen for a class that can already be instantiated.
+
+Only answers for a registered class (one with a metadata row) are cached,
+so probing arbitrary names cannot grow the table.
 """.
--spec class_of_object_by_name(atom()) -> tuple() | atom().
-class_of_object_by_name(ClassName) ->
+-spec resolve_class_object(atom()) -> {cache | nocache, tuple() | atom()}.
+resolve_class_object(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
-            ClassName;
+            {nocache, ClassName};
         Pid when is_pid(Pid) ->
-            ModuleName =
-                case beamtalk_class_metadata:lookup_module(ClassName) of
-                    {ok, Module} -> Module;
-                    not_found -> beamtalk_object_class:module_name(Pid)
-                end,
-            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-            {beamtalk_object, ClassTag, ModuleName, Pid}
+            case beamtalk_class_metadata:lookup_module(ClassName) of
+                {ok, Module} ->
+                    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+                    {cache, {beamtalk_object, ClassTag, Module, Pid}};
+                not_found ->
+                    ModuleName = beamtalk_object_class:module_name(Pid),
+                    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+                    {nocache, {beamtalk_object, ClassTag, ModuleName, Pid}}
+            end
     end.
+
+-doc """
+Whether a cached `class_of_object_by_name/1` answer is still current.
+
+Only class objects are ever cached (unregistered names answer `nocache`),
+and a cached pid that is still alive is still the class — anything that
+moves the class to a new pid or module (restart, reload, redefinition,
+removal) either rewrites the metadata row (flushing the cache) or kills
+the old pid. Anything else forces a re-derive.
+""".
+-spec valid_class_object(term()) -> boolean().
+valid_class_object({beamtalk_object, _, _, Pid}) when is_pid(Pid) ->
+    is_process_alive(Pid);
+valid_class_object(_) ->
+    false.
 
 -doc """
 Return the printString representation of any value.

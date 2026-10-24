@@ -35,8 +35,11 @@ Keys are caller-chosen terms; namespace them with a leading tag
 (`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`,
 `{instance_method_info, Class, Selector}` — the last is
 `beamtalk_method_resolver:instance_method_info/2`, the dispatch-time method
-lookup behind `beamtalk_primitive:runtime_instance_method/2`, BT-4071). That
-key caches misses too (a selector no class in the chain defines, e.g. a DNU
+lookup behind `beamtalk_primitive:runtime_instance_method/2`, BT-4071 — and
+`{class_object, Class}`, the first-class class object
+`beamtalk_primitive:class_of_object_by_name/1` answers (BT-4117), whose
+cached pid is re-validated on every hit). The `instance_method_info` key
+caches misses too (a selector no class in the chain defines, e.g. a DNU
 or `respondsTo:` probe), so the table holds up to one row per class and
 selector atom sent through that path; selectors are existing atoms, and the
 next class write flushes them all.
