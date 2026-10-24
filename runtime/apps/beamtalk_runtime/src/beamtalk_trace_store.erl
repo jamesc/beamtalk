@@ -25,9 +25,11 @@ Storage layout (BT-4103):
   are not tracked until the sweep reclaims dead pids' rows.
 - beamtalk_agg_pid_keys (ETS bag): Pid → Selector, one row per agg_pid key,
   so an actor's rows (and dead pids) are found without scanning agg_pid
-- beamtalk_agg_free_slots (ETS set): {SlotBase} for atomics slots released by
-  swept pid rows, reused before the slot allocator bumps. Only pid rows use
-  it, so it is idle unless tracing is enabled.
+- beamtalk_agg_free_slots (ETS ordered_set): {{Shard, CounterRef, SlotBase}}
+  for atomics slots released by swept pid rows, reused before the slot
+  allocator bumps. The shard spreads concurrent takers across the table so
+  they stop racing for a single head. Only pid rows use it, so it
+  is idle unless tracing is enabled.
 - beamtalk_trace_events (ETS ordered_set): composite key → trace event
 - current array triple in persistent_term: lock-free aggregate increments + CAS min/max (~50ns)
 - persistent_term toggle: beamtalk_tracing_enabled (true | false)
@@ -159,6 +161,10 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 %% past the cap are not tracked until the sweep reclaims dead pids' rows. A
 %% soft cap: two callers racing past it can overshoot by a row each.
 -define(MAX_PID_KEYS, 100000).
+%% Shard count for the free-slots table. Fixed rather than derived
+%% from schedulers_online, so releases and takes always agree however many
+%% schedulers are online.
+-define(FREE_LIST_SHARDS, 64).
 
 -record(state, {
     sweep_timer :: reference() | undefined,
@@ -665,7 +671,8 @@ ensure_ets_tables() ->
     ok = beamtalk_ets_heir:ensure_table(?AGG_CLASS_STATS, [set | Opts]),
     ok = beamtalk_ets_heir:ensure_table(?AGG_PID, [set | Opts]),
     ok = beamtalk_ets_heir:ensure_table(?AGG_PID_KEYS, [bag | Opts]),
-    ok = beamtalk_ets_heir:ensure_table(?AGG_FREE_SLOTS, [set | Opts]),
+    reset_free_slots_after_upgrade(),
+    ok = beamtalk_ets_heir:ensure_table(?AGG_FREE_SLOTS, [ordered_set | Opts]),
     ok = beamtalk_ets_heir:ensure_table(?TRACE_EVENTS, [ordered_set | Opts]),
     ok.
 
@@ -689,6 +696,28 @@ reset_aggregates_after_upgrade() ->
                     [?AGG_CLASS_STATS, ?AGG_PID, ?AGG_PID_KEYS, ?AGG_FREE_SLOTS]
             ),
             fresh_counters()
+    end.
+
+-doc """
+Drop a pre-sharding free-slots table: it is a `set` of unsharded
+`{{Ref, Base}}` rows, which the sharded take path cannot use. The free list
+is a pure reuse cache — no live row references a freed slot — so dropping
+it only costs some slot reuse, and `ensure_table/2` recreates it sharded
+below. A concurrent writer racing the drop raises `badarg`, which
+`record_dispatch/6` already turns into a dropped sample.
+""".
+reset_free_slots_after_upgrade() ->
+    case ets:info(?AGG_FREE_SLOTS) of
+        undefined ->
+            ok;
+        Info ->
+            case proplists:get_value(type, Info) of
+                ordered_set ->
+                    ok;
+                _ ->
+                    _ = catch ets:delete(?AGG_FREE_SLOTS),
+                    ok
+            end
     end.
 
 -doc "Ensure the counters triple exists in persistent_term.".
@@ -941,27 +970,54 @@ reset_slot(AtomicsRef, SlotBase) ->
     atomics:put(AtomicsRef, SlotBase + ?SLOT_MIN_DURATION, ?MIN_SENTINEL).
 
 -doc """
-Take a released slot if one is free. Rows are `{{Ref, Base}}` (the key is the
-slot itself, since slots live in different arrays now); `ets:take/2` hands a
-free slot to exactly one caller, and a caller that loses the race for the
-first free slot tries again.
+Take a released slot if one is free. Rows are `{{Shard, Ref, Base}}` in an
+`ordered_set`, so `ets:next/2` from a shard's lower bound jumps straight to
+that shard's first entry. The taker probes from its hashed shard and walks
+on — to the next shard on an empty shard or a lost `ets:take/2` race — so
+concurrent takers claim different slots instead of racing for one head.
+Answers `none` when the table is empty or every probe missed;
+the caller then bumps a fresh slot, so a miss only costs reuse, never a
+sample. `ets:take/2` hands a slot to exactly one caller, so a taken slot is
+never double-allocated.
 """.
 -spec take_slot() -> {atomics:atomics_ref(), non_neg_integer()} | none.
 take_slot() ->
-    case ets:first(?AGG_FREE_SLOTS) of
-        '$end_of_table' ->
+    %% Fast path: probing every shard of an empty table on each call would
+    %% tax the drained-tail window where the free list sits empty.
+    case ets:info(?AGG_FREE_SLOTS, size) of
+        0 ->
             none;
-        Key ->
-            case ets:take(?AGG_FREE_SLOTS, Key) of
-                [{Key}] -> Key;
-                [] -> take_slot()
-            end
+        _ ->
+            take_slot_shard(erlang:phash2(self(), ?FREE_LIST_SHARDS), ?FREE_LIST_SHARDS)
     end.
 
--doc "Put a slot on the free list for reuse.".
+take_slot_shard(_Shard, 0) ->
+    none;
+take_slot_shard(Shard, TriesLeft) ->
+    %% `{Shard, 0, 0}` is below every `{Shard, Ref, Base}` key: 0 is below
+    %% every atomics ref in the term order.
+    case ets:next(?AGG_FREE_SLOTS, {Shard, 0, 0}) of
+        {Shard, Ref, Base} = Key ->
+            case ets:take(?AGG_FREE_SLOTS, Key) of
+                [{Key}] ->
+                    {Ref, Base};
+                [] ->
+                    take_slot_shard((Shard + 1) rem ?FREE_LIST_SHARDS, TriesLeft - 1)
+            end;
+        _Other ->
+            take_slot_shard((Shard + 1) rem ?FREE_LIST_SHARDS, TriesLeft - 1)
+    end.
+
+-doc """
+Put a slot on the free list for reuse. The shard stripes entries across the
+table: consecutive `unique_integer` values land on consecutive shards, so a
+sweep's sequential releases spread over all of them. Each release must
+pair with an exclusive claim: a twice-released slot would be taken twice.
+""".
 -spec release_slot(atomics:atomics_ref(), non_neg_integer()) -> true.
 release_slot(AtomicsRef, SlotBase) ->
-    ets:insert(?AGG_FREE_SLOTS, {{AtomicsRef, SlotBase}}).
+    Shard = erlang:unique_integer([monotonic, positive]) rem ?FREE_LIST_SHARDS,
+    ets:insert(?AGG_FREE_SLOTS, {{Shard, AtomicsRef, SlotBase}}).
 
 -doc """
 Grow the counters unless another caller already has (the current ref is no
