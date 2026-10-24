@@ -38,6 +38,8 @@ dictionary or ETS state is required.
 %% Direct exports for Erlang FFI calls from sealed Object Beamtalk
 -export([
     allClasses/0,
+    classesNamed/1,
+    liveClassName/1,
     classNamed/1,
     findClass/1,
     help/1, help/2,
@@ -120,6 +122,84 @@ allClasses() ->
         end
      || {Name, Mod, Pid} <- beamtalk_class_registry:live_class_entries()
     ].
+
+-doc """
+Resolve class names to class objects from the registry snapshot, dropping
+any name that is no longer registered (BT-4095).
+
+Called via `(Erlang beamtalk_interface) classesNamed: names` by
+`SystemNavigation`'s tolerant class walk to turn an xref miss partition's
+`fallback_classes` into a scope. Each name is resolved with
+`whereis_class/1` plus `class_object_for_pid/2` (the ETS-backed
+`module_name_safe/1`, which only calls the class process on a metadata miss),
+so a fully registered class is resolved without a message and a class removed
+since the partition was taken is skipped instead of raising. Order follows
+`Names`.
+""".
+%% The argument is specced `term()`, not `[atom()]`: the FFI type checker's
+%% unary `[T] -> [T]` heuristic would otherwise copy the caller's
+%% `List(Symbol)` onto this function's result type.
+-spec classesNamed(term()) -> [beamtalk_object()].
+classesNamed(Names) when is_list(Names) ->
+    lists:filtermap(
+        fun
+            (Name) when is_atom(Name) ->
+                case beamtalk_class_registry:whereis_class(Name) of
+                    Pid when is_pid(Pid) ->
+                        %% Skip a class still inside `init/1` (no reverse-index
+                        %% row yet), as `allClasses/0` does, so resolving it
+                        %% never blocks on its `module_name` call.
+                        case beamtalk_class_registry:class_name_for_pid(Pid) of
+                            {ok, _} ->
+                                case class_object_for_pid(Name, Pid) of
+                                    nil -> false;
+                                    ClassObj -> {true, ClassObj}
+                                end;
+                            not_found ->
+                                false
+                        end;
+                    undefined ->
+                        false
+                end;
+            (_) ->
+                false
+        end,
+        Names
+    ).
+
+-doc """
+The registered name of the class behind a class or metaclass object, or `nil`
+if that class has been removed (BT-4095).
+
+Called via `(Erlang beamtalk_interface) liveClassName: aClass` by
+`SystemNavigation`'s tolerant class walk, before and after each per-class
+step, to tell "this class was removed mid-walk" apart from a genuine error.
+
+For a local class this is message-free: the pid's reverse-index row
+(`class_name_for_pid/1`), which `terminate/2` deletes when the class is
+removed (and a restart deletes when it replaces the pid). A class killed
+untrappably skips `terminate/2`, so its row survives: it is crashed and
+awaiting auto-restart, not removed, and still answers its name. The walk then
+sends to it, `class_send_with_recovery` restarts it, and a genuine error from
+it is re-raised rather than swallowed.
+
+A remote class (pg spans a cluster) cannot be checked locally, so it falls
+back to `class_name_safe/1`'s call and answers `nil` only if that call exits.
+""".
+-spec liveClassName(term()) -> atom() | nil.
+liveClassName(#beamtalk_object{pid = Pid}) when is_pid(Pid), node(Pid) =:= node() ->
+    case beamtalk_class_registry:class_name_for_pid(Pid) of
+        {ok, Name} -> Name;
+        not_found -> nil
+    end;
+liveClassName(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
+    try
+        beamtalk_object_class:class_name_safe(Pid)
+    catch
+        exit:_ -> nil
+    end;
+liveClassName(_) ->
+    nil.
 
 -doc """
 Look up a class by name (atom or binary).
@@ -713,7 +793,9 @@ object process that is transiently unavailable.
 `beamtalk_object_class:module_name/1` is a `gen_server:call` to the class
 object process. A race between `whereis_class/1` handing back a live pid and
 this call — the process restarting, or a busy scheduler under a heavy parallel
-test load — can make the call exit with `noproc` / `timeout`. We treat that as
+test load — can make the call exit with `noproc` / `timeout`, and a class
+removed while the call is in flight makes it exit `normal` / `shutdown`
+(BT-4095). We treat each as
 "not currently resolvable" and return `nil` instead of letting the raw `exit`
 surface to the caller as an `erlang_exit` error. This mirrors the
 noproc/timeout guard already in `handle_help/1`, and in particular keeps batch
@@ -738,7 +820,12 @@ class_object_for_pid(ClassName, Pid) ->
             {beamtalk_object, ClassTag, ModuleName, Pid}
     catch
         exit:{noproc, _} -> nil;
-        exit:{timeout, _} -> nil
+        exit:{timeout, _} -> nil;
+        %% BT-4095: the class process exited (removed, `normal` / `shutdown`)
+        %% while serving the `module_name` call.
+        exit:{normal, {gen_server, call, _}} -> nil;
+        exit:{shutdown, {gen_server, call, _}} -> nil;
+        exit:{{shutdown, _}, {gen_server, call, _}} -> nil
     end.
 
 -doc """

@@ -29,6 +29,97 @@ sealed typed Object subclass: SystemNavigation
   class sealed allClasses -> List(Behaviour) =>
     (Erlang beamtalk_interface) allClasses
 
+  // ===== Tolerant Class Walk (BT-4095) =====
+  //
+  // Classes come and go while a system-wide query runs: tests, the REPL and
+  // hot reload define and remove classes concurrently. Every per-class step a
+  // query takes is a send to that class, so a class removed between building
+  // the scope and visiting it would raise `class_not_found` and abort the whole
+  // query. Every system-wide walk below goes through `liveClassesIn:inject:into:`,
+  // the one place that decides "this class was removed mid-walk, skip it".
+
+  /// Resolve class names to the classes still registered, dropping any name
+  /// that is no longer registered.
+  ///
+  /// Turns an xref miss partition's `#fallback_classes` into a walk scope from
+  /// the registry snapshot (no message to any class process), in place of
+  /// filtering `allClasses` by `cls name`, which sent `name` to every class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation classesNamed: #(#Integer, #NoSuchClass)  // => [Integer]
+  /// ```
+  class sealed classesNamed: names :: List(Symbol) -> List(Behaviour) =>
+    self registeredClassesNamed: names
+
+  /// Fold `aBlock` over the classes of `aScope`, skipping any class that has
+  /// been removed from the system.
+  ///
+  /// A class already removed when the walk reaches it is skipped without being
+  /// sent anything. If `aBlock` raises for a class, the class is checked again:
+  /// if it was removed while `aBlock` ran, the error is dropped and the walk
+  /// continues with the accumulator as it was before that class; otherwise
+  /// the error is re-raised, so genuine failures are not hidden. The removal
+  /// check reads the registry's metadata, never the class process.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation liveClassesIn: #(Integer) inject: 0 into: [:n :c | n + 1]  // => 1
+  /// ```
+  class sealed liveClassesIn: aScope :: List(Behaviour) inject: initial :: A into: aBlock :: Block(A, Behaviour, A) -> A =>
+    aScope
+      inject: initial
+      into: [:acc :cls |
+        (self isRemoved: cls)
+          ifTrue: [acc]
+          ifFalse: [
+            [
+              aBlock value: acc value: cls
+            ] on: Error do: [:e |
+              (self isRemoved: cls) ifTrue: [acc] ifFalse: [e signal]
+            ]
+          ]
+      ]
+
+  /// The classes of `aScope` for which `aBlock` answers true, skipping any
+  /// class removed mid-walk. A `select:` over `liveClassesIn:inject:into:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation liveClassesIn: #(Integer) select: [:c | true]  // => [Integer]
+  /// ```
+  class sealed liveClassesIn: aScope :: List(Behaviour) select: aBlock :: Block(Behaviour, Boolean) -> List(Behaviour) =>
+    self
+      liveClassesIn: aScope
+      inject: List new
+      into: [:acc :cls |
+        (aBlock value: cls) ifTrue: [acc add: cls] ifFalse: [acc]
+      ]
+
+  /// Whether `aClass` (a class or metaclass) has been removed from the system.
+  /// Reads the registry's metadata; sends nothing to the class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation isRemoved: Integer  // => false
+  /// ```
+  class sealed isRemoved: aClass :: Behaviour -> Boolean =>
+    (self liveClassNameOf: aClass) isNil
+
+  /// Sort `classes` by class name, dropping any class removed since it was
+  /// collected. Names come from the registry's metadata, so a class removed
+  /// between the walk and the sort cannot make the comparator raise (one
+  /// removed during the sort itself keeps its place under the key `""`).
+  class sealed sortedByName: classes :: List(Behaviour) -> List(Behaviour) =>
+    live := classes reject: [:c | self isRemoved: c]
+    live sort: [:a :b | (self sortKeyOf: a) < (self sortKeyOf: b)]
+
+  /// The sort key `sortedByName:` uses: the registered class name as a String,
+  /// or `""` for a class removed since the caller's check.
+  class sealed sortKeyOf: aClass :: Behaviour -> String =>
+    name := self liveClassNameOf: aClass
+    name isNil ifTrue: [""] ifFalse: [name asString]
+
   /// Return every class that participates in the actor model — i.e. each class
   /// whose `superclassChain` includes `Actor`.
   ///
@@ -48,7 +139,8 @@ sealed typed Object subclass: SystemNavigation
   class sealed actorClasses -> List(Behaviour) =>
     actorClass := self findClass: #Actor
     actorClass isNil ifTrue: [^List new]
-    actors := self allClasses
+    actors := self
+      liveClassesIn: self allClasses
       select: [:c |
         // Suppresses the type check on `actorClass` (declared `Object`)
         // flowing into `superclassChain includes:`. findClass:'s return type
@@ -58,7 +150,7 @@ sealed typed Object subclass: SystemNavigation
         @expect type
         c superclassChain includes: actorClass
       ]
-    actors sort: [:a :b | a name asString < b name asString]
+    self sortedByName: actors
 
   /// Return every class that overrides the does-not-understand handler — i.e.
   /// each class that locally defines `doesNotUnderstand:args:` (Beamtalk's DNU
@@ -84,10 +176,10 @@ sealed typed Object subclass: SystemNavigation
   /// SystemNavigation dnuHandlers  // => [ErlangModule, ProtoObject, ...]
   /// ```
   class sealed dnuHandlers -> List(Behaviour) =>
-    handlers := self allClasses select: [:c |
+    handlers := self liveClassesIn: self allClasses select: [:c |
       c includesSelector: #doesNotUnderstand:args:
     ]
-    handlers sort: [:a :b | a name asString < b name asString]
+    self sortedByName: handlers
 
   // ===== Trait Users (ADR 0127 §12) =====
 
@@ -316,15 +408,22 @@ sealed typed Object subclass: SystemNavigation
     ]
     // Miss-policy fallback: probe only the loaded-but-unindexed classes, on
     // both sides, exactly as the legacy scan did.
-    fallbackScope := self allClasses select: [:cls |
-      fallbackClasses includes: cls name
-    ]
-    fallbackInstance := fallbackScope select: [:c |
+    // BT-4095: resolve the fallback names from the registry snapshot and probe
+    // through the tolerant walk, so a class removed after the partition was
+    // taken is skipped instead of raising `class_not_found`.
+    fallbackScope := self classesNamed: fallbackClasses
+    fallbackInstance := self liveClassesIn: fallbackScope select: [:c |
       c includesSelector: aSelector
     ]
-    fallbackClassSide := (fallbackScope select: [:c |
-      c class includesSelector: aSelector
-    ]) collect: [:c | c class]
+    fallbackClassSide := self
+      liveClassesIn: fallbackScope
+      inject: List new
+      into: [:acc :c |
+        meta := c class
+        (meta includesSelector: aSelector) ifTrue: [
+          acc add: meta
+        ] ifFalse: [acc]
+      ]
     indexImpls ++ fallbackInstance ++ fallbackClassSide
 
   // ===== Outgoing Calls (messagesSentBy:) =====
@@ -446,11 +545,10 @@ sealed typed Object subclass: SystemNavigation
     indexScan := self indexedSiteRecordsFrom: indexedRows into: List new
     // Miss-policy fallback: source-scan only the loaded-but-unindexed classes,
     // walking both instance and class side as the legacy scan did (BT-2195).
-    // Filter `allClasses` (typed List(Behaviour)) by the fallback name set
-    // rather than resolving each tag, which keeps the scope strongly typed.
-    fallbackScan := (self allClasses select: [:cls |
-      fallbackClasses includes: cls name
-    ])
+    // `classesNamed:` resolves the fallback names from the registry snapshot;
+    // the tolerant walk skips a class removed mid-scan (BT-4095).
+    fallbackScan := self
+      liveClassesIn: (self classesNamed: fallbackClasses)
       inject: indexScan
       into: [:acc :cls |
         withInstance := self
@@ -473,15 +571,19 @@ sealed typed Object subclass: SystemNavigation
   /// metaclass object (`<class> class`), matching the legacy scan's `cls` /
   /// `cls class` convention (BT-2195). Falls back to the raw tag if the name
   /// resolves to nil (a registry entry with no live class behind it — should
-  /// not happen, but the scan must not crash). On that defensive path
-  /// `resolveExtensionClass:` returns the raw `ownerTag` Symbol; it is
-  /// preserved as-is even for class-side hits rather than coerced into
-  /// `Symbol class`.
+  /// not happen, but the scan must not crash; it also covers a class removed
+  /// after the xref rows were read). On that path the raw `ownerTag` Symbol is
+  /// returned as-is, even for class-side hits.
+  ///
+  /// BT-4095: the class-side hit resolves the metaclass tag (`#'Foo class'`)
+  /// through the registry, rather than sending `isKindOf:` and `class` to the
+  /// class, so a class removed mid-query cannot make the mapping raise.
   class sealed senderClassFor: ownerTag :: Symbol classSide: isClassSide :: Boolean -> Object =>
-    cls := self resolveExtensionClass: ownerTag
-    (isClassSide and: [
-      (cls isKindOf: Symbol) not
-    ]) ifTrue: [cls class] ifFalse: [cls]
+    tag := isClassSide ifTrue: [
+      self classObjectTag: ownerTag
+    ] ifFalse: [ownerTag]
+    resolved := self findClass: tag
+    resolved isNil ifTrue: [ownerTag] ifFalse: [resolved]
 
   /// Map the xref index `bt_row()`s returned by `beamtalk_xref:senders_of_bt/1`
   /// or `references_to_bt/1` onto `#{#class, #selector, #line}` result records,
@@ -879,9 +981,8 @@ sealed typed Object subclass: SystemNavigation
     indexScan := self indexedSiteRecordsFrom: indexedRows into: List new
     // Miss-policy fallback: source-scan only the loaded-but-unindexed classes,
     // walking both instance and class side as the legacy scan did (BT-2195).
-    classScan := (self allClasses select: [:cls |
-      fallbackClasses includes: cls name
-    ])
+    classScan := self
+      liveClassesIn: (self classesNamed: fallbackClasses)
       inject: indexScan
       into: [:acc :cls |
         // `collectReferencesFor:in:into:` skips scopes for which `>>` is not
@@ -1176,7 +1277,8 @@ sealed typed Object subclass: SystemNavigation
     targetModule := parsed at: #module
     targetFunction := parsed at: #function
     targetArity := parsed at: #arity
-    classScan := self allClasses
+    classScan := self
+      liveClassesIn: self allClasses
       inject: List new
       into: [:acc :cls |
         // BT-2195: Walk both instance side (`cls`) and class side
@@ -1371,7 +1473,8 @@ sealed typed Object subclass: SystemNavigation
     (aRegex isKindOf: Regex) ifFalse: [
       self error: "SystemNavigation methodsMatching: requires a Regex argument"
     ]
-    classScan := self allClasses
+    classScan := self
+      liveClassesIn: self allClasses
       inject: List new
       into: [:acc :cls |
         // BT-2195: Walk both instance side (`cls`) and class side
@@ -1489,17 +1592,18 @@ sealed typed Object subclass: SystemNavigation
     // accumulator on the RIGHT of `++` so each step copies only the small
     // per-class list and shares `acc` — `++` copies only its LEFT operand, so
     // `(perClass) ++ acc` keeps the walk O(total_selectors) rather than O(n²).
-    fallbackScope := self allClasses select: [:cls |
-      fallbackClasses includes: cls name
-    ]
-    fallbackSels := fallbackScope inject: indexedSels into: [:acc :cls |
-      (self selectorsForClass: cls) ++ acc
-    ]
+    // Typed locals: a class-side method-local type parameter (`A`) types the
+    // block's params but not the send's result, so bind it explicitly.
+    fallbackSels :: List(Symbol) := self
+      liveClassesIn: (self classesNamed: fallbackClasses)
+      inject: indexedSels
+      into: [:acc :cls | (self selectorsForClass: cls) ++ acc]
     // Extension selectors are not in the index yet, so gather them across the
     // full scope; `unique sort` below absorbs any overlap with the above.
-    allSels := self allClasses inject: fallbackSels into: [:acc :cls |
-      (self extensionSelectorsForBothSides: cls) ++ acc
-    ]
+    allSels :: List(Symbol) := self
+      liveClassesIn: self allClasses
+      inject: fallbackSels
+      into: [:acc :cls | (self extensionSelectorsForBothSides: cls) ++ acc]
     matches := allSels select: [:sel |
       sel asString lowercase includesSubstring: needle
     ]
@@ -1746,20 +1850,22 @@ sealed typed Object subclass: SystemNavigation
     // gathered AND its sends source-scanned, and the two `_bt` reads compute the
     // miss set independently (one warning per query each).
     fallbackClasses := self unionFallbackClasses: (definedPartition at: #fallback_classes) with: (sendsPartition at: #fallback_classes)
-    fallbackScope := self allClasses select: [:cls |
-      fallbackClasses includes: cls name
-    ]
+    fallbackScope := self classesNamed: fallbackClasses
     // Defined set = indexed defines + fallback-class defines + extension
     // selectors (not yet indexed) + the documented runtime-provided selectors.
     indexedDefined := self definedSetFromIndex: definedRows into: Set new
-    withFallbackDefined := fallbackScope
+    // Typed locals: a class-side method-local type parameter (`A`) types the
+    // block's params but not the send's result, so bind it explicitly.
+    withFallbackDefined :: Set(Symbol) := self
+      liveClassesIn: fallbackScope
       inject: indexedDefined
       into: [:acc :cls |
         (self selectorsForClass: cls) inject: acc into: [:innerAcc :sel |
           innerAcc add: sel
         ]
       ]
-    withExtDefined := self allClasses
+    withExtDefined :: Set(Symbol) := self
+      liveClassesIn: self allClasses
       inject: withFallbackDefined
       into: [:acc :cls |
         (self extensionSelectorsForBothSides: cls) inject: acc into: [:innerAcc :sel |
@@ -1786,7 +1892,8 @@ sealed typed Object subclass: SystemNavigation
       into: Dictionary new
     // Miss-policy fallback: source-scan only the loaded-but-unindexed classes,
     // both sides, as the legacy walk did.
-    groupedWithFallback := fallbackScope
+    groupedWithFallback :: Dictionary := self
+      liveClassesIn: fallbackScope
       inject: grouped
       into: [:acc :cls |
         withInstance := self
@@ -1844,7 +1951,8 @@ sealed typed Object subclass: SystemNavigation
           ]
           ifFalse: [acc]
       ]
-    fallbackScope
+    self
+      liveClassesIn: fallbackScope
       inject: fromIndex
       into: [:acc :cls |
         withInstance := (cls methods includes: #doesNotUnderstand:args:) ifTrue: [
@@ -2185,9 +2293,8 @@ sealed typed Object subclass: SystemNavigation
     sentSet := self sentSetFromIndex: indexedSent into: Set new
     // Miss-policy fallback: source-scan sends only from the loaded-but-unindexed
     // classes, both sides, exactly as the legacy walk did.
-    withFallbackSent := (classList select: [:cls |
-      fallbackClasses includes: cls name
-    ])
+    withFallbackSent := self
+      liveClassesIn: (self classesNamed: fallbackClasses)
       inject: sentSet
       into: [:acc :cls |
         withInstance := self collectSentSelectorsIn: cls into: acc
@@ -2198,7 +2305,8 @@ sealed typed Object subclass: SystemNavigation
     excluded := self runtimeCalledSelectors inject: Set new into: [:acc :sel |
       acc add: sel
     ]
-    classList
+    self
+      liveClassesIn: classList
       inject: List new
       into: [:acc :cls |
         withInstance := self
@@ -2440,6 +2548,16 @@ sealed typed Object subclass: SystemNavigation
   /// Resolve a class-name tag to the class/metaclass object, or `nil`.
   class internal sealed findClass: aName :: Object -> Object =>
     (Erlang beamtalk_interface) findClass: aName
+
+  /// The still-registered classes among `names` (BT-4095), resolved from the
+  /// registry snapshot.
+  class internal sealed registeredClassesNamed: names :: List(Symbol) -> List(Behaviour) =>
+    (Erlang beamtalk_interface) classesNamed: names
+
+  /// The registered name of `aClass`'s class, or `nil` once it is removed
+  /// (BT-4095). Metadata only; never a send to the class process.
+  class internal sealed liveClassNameOf: aClass :: Behaviour -> Symbol | Nil =>
+    (Erlang beamtalk_interface) liveClassName: aClass
 
   /// Every message send (with line + receiver tag) in `aSource`.
   class internal sealed allSendsIn: aSource :: String -> List(Tuple) =>

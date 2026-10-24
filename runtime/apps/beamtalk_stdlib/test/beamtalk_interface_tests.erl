@@ -333,6 +333,54 @@ live_registry_test_() ->
             {"findClass unknown metaclass tag returns nil", fun() ->
                 ?assertEqual(nil, beamtalk_interface:findClass('ZzzNope class'))
             end},
+            %% BT-4095: the tolerant SystemNavigation walk's registry reads.
+            {"classesNamed drops unregistered names and keeps order", fun() ->
+                ?assertMatch(
+                    [
+                        {beamtalk_object, 'Object class', _, _},
+                        {beamtalk_object, 'Integer class', _, _}
+                    ],
+                    beamtalk_interface:classesNamed(['Object', 'ZzzNoSuchClass', 'Integer', 42])
+                )
+            end},
+            {"liveClassName names a live class and its metaclass", fun() ->
+                Integer = beamtalk_interface:findClass('Integer'),
+                Meta = beamtalk_interface:findClass('Integer class'),
+                ?assertEqual('Integer', beamtalk_interface:liveClassName(Integer)),
+                ?assertEqual('Integer', beamtalk_interface:liveClassName(Meta)),
+                ?assertEqual(nil, beamtalk_interface:liveClassName(42))
+            end},
+            {"liveClassName is nil for a class whose process has exited", fun() ->
+                Dead = spawn(fun() -> ok end),
+                MRef = monitor(process, Dead),
+                receive
+                    {'DOWN', MRef, process, Dead, _} -> ok
+                end,
+                ?assertEqual(
+                    nil,
+                    beamtalk_interface:liveClassName({beamtalk_object, 'Gone class', gone, Dead})
+                )
+            end},
+            %% A class killed untrappably keeps its reverse-index row (terminate/2
+            %% did not run) and is awaiting auto-restart: crashed, not removed.
+            {"liveClassName still names a crashed class whose row survives", fun() ->
+                Dead = spawn(fun() -> ok end),
+                MRef = monitor(process, Dead),
+                receive
+                    {'DOWN', MRef, process, Dead, _} -> ok
+                end,
+                ok = beamtalk_class_registry:record_class_pid(Dead, 'BT4095Crashed'),
+                try
+                    ?assertEqual(
+                        'BT4095Crashed',
+                        beamtalk_interface:liveClassName(
+                            {beamtalk_object, 'BT4095Crashed class', gone, Dead}
+                        )
+                    )
+                after
+                    ets:delete(beamtalk_class_pids, Dead)
+                end
+            end},
             {"classNamed integer arg raises type_error", fun() ->
                 ?assertError(
                     #{error := #beamtalk_error{kind = type_error}},
