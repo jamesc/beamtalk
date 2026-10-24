@@ -58,8 +58,9 @@ sealed typed Object subclass: SystemNavigation
   /// A class already removed when the walk reaches it is skipped without being
   /// sent anything. If `aBlock` raises for a class, the class is checked again:
   /// if it was removed while `aBlock` ran, the error is dropped and the walk
-  /// continues with the accumulator as it was before that class; otherwise
-  /// the error is re-raised, so genuine failures are not hidden. The removal
+  /// continues with the next class; otherwise the error is re-raised, so
+  /// genuine failures are not hidden. Extend the accumulator only after your
+  /// sends, so a skipped class leaves nothing partial behind. The removal
   /// check reads the registry's metadata, never the class process.
   ///
   /// ## Examples

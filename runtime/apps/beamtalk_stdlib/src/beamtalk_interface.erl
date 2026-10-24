@@ -165,7 +165,14 @@ classesNamed(Names) when is_list(Names) ->
                 false
         end,
         Names
-    ).
+    );
+classesNamed(_) ->
+    Error0 = beamtalk_error:new(type_error, 'Beamtalk'),
+    Error1 = beamtalk_error:with_selector(Error0, 'classesNamed:'),
+    Error2 = beamtalk_error:with_hint(
+        Error1, <<"classesNamed: expects a list of class-name atoms">>
+    ),
+    beamtalk_error:raise(Error2).
 
 -doc """
 The registered name of the class behind a class or metaclass object, or `nil`
