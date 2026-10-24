@@ -1625,7 +1625,8 @@ extension_method_on_compiled_actor_test() ->
         ?assertEqual(42, Result)
     after
         gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', testExtension})
+        ets:delete(beamtalk_extensions, {'Counter', testExtension}),
+        beamtalk_class_derived_cache:invalidate()
     end.
 
 %% Test: Extension method receives Args correctly
@@ -1640,7 +1641,8 @@ extension_method_with_args_test() ->
         ?assertEqual(50, Result)
     after
         gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', 'scaleBy:'})
+        ets:delete(beamtalk_extensions, {'Counter', 'scaleBy:'}),
+        beamtalk_class_derived_cache:invalidate()
     end.
 
 %% Test: Extension doesn't interfere with regular methods
@@ -1656,7 +1658,8 @@ extension_coexists_with_regular_methods_test() ->
         {ok, extended} = gen_server:call(Pid, {myExtension, []})
     after
         gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', myExtension})
+        ets:delete(beamtalk_extensions, {'Counter', myExtension}),
+        beamtalk_class_derived_cache:invalidate()
     end.
 
 %% Test: Unregistered extension falls through to DNU error
@@ -1698,7 +1701,8 @@ extension_method_state_threading_test() ->
         {ok, 200} = gen_server:call(Pid, {getValue, []})
     after
         gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', 'addHundred'})
+        ets:delete(beamtalk_extensions, {'Counter', 'addHundred'}),
+        beamtalk_class_derived_cache:invalidate()
     end.
 
 %% Test: Extension that raises answers a structured error and leaves the actor alive
@@ -1730,5 +1734,6 @@ extension_error_propagation_test() ->
         {ok, 0} = gen_server:call(Pid, {getValue, []})
     after
         gen_server:stop(Pid),
-        ets:delete(beamtalk_extensions, {'Counter', crashMethod})
+        ets:delete(beamtalk_extensions, {'Counter', crashMethod}),
+        beamtalk_class_derived_cache:invalidate()
     end.

@@ -238,7 +238,82 @@ responds_to(Selector, ClassName) ->
 %%% ============================================================================
 
 -doc """
-Look up method in class chain via direct hierarchy walk.
+Look up a method starting at `ClassName`: resolve the defining owner
+(usually cached) and invoke it, falling back to the hierarchy walk on a
+miss so errors keep their exact shape.
+""".
+-spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) ->
+    dispatch_result().
+lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
+    case resolve_owner(ClassName, Selector) of
+        {owner, Owner, Module} ->
+            invoke_resolved(Owner, Module, Selector, Args, Self, State);
+        miss ->
+            walk_in_class_chain(Selector, Args, Self, State, ClassName)
+    end.
+
+-doc """
+Resolve the class that defines `Selector` for a send starting at `ClassName`.
+
+Memoised in the derived cache: class writes and extension installs
+invalidate it; death without restart is flushed by the class monitor and
+an out-of-band purge is caught by the export guard below. Anything but a
+dispatchable owner is a miss — the walk below then reproduces today's
+errors exactly.
+""".
+-spec resolve_owner(class_name(), selector()) -> {owner, class_name(), module()} | miss.
+resolve_owner(ClassName, Selector) ->
+    beamtalk_class_derived_cache:fetch(
+        {defining_method, ClassName, Selector},
+        fun() -> compute_owner(ClassName, Selector) end,
+        %% The module half can only go stale out-of-band (a purge without a
+        %% reload, which writes no metadata): re-check the export on a hit
+        %% and recompute past it when gone. Deliberately no `ensure_loaded`
+        %% here — that could run `on_load` on the hot path.
+        fun
+            ({owner, _, Module}) -> erlang:function_exported(Module, dispatch, 4);
+            (_) -> false
+        end
+    ).
+
+-spec compute_owner(class_name(), selector()) ->
+    {cache, {owner, class_name(), module()}} | {nocache, miss}.
+compute_owner(ClassName, Selector) ->
+    StepFun = fun(CurrentClass, _Depth) -> compute_step(CurrentClass, Selector) end,
+    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, {owner, _, _} = Owner} -> {cache, Owner};
+        _ -> {nocache, miss}
+    end.
+
+-doc """
+Non-invoking twin of `class_chain_step/6`: run the same probes (registry,
+`has_method_local/2`, dispatchable module, superclass) and report the owner
+instead of invoking. `dispatchable_module/1` is shared so both agree on
+which classes are dispatchable.
+""".
+-spec compute_step(class_name(), selector()) ->
+    beamtalk_hierarchy:step_result({owner, class_name(), module()} | miss).
+compute_step(ClassName, Selector) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            {found, miss};
+        ClassPid ->
+            case beamtalk_object_class:has_method_local(ClassPid, Selector) of
+                true ->
+                    case dispatchable_module(ClassPid) of
+                        {ok, Module} -> {found, {owner, ClassName, Module}};
+                        continue -> {next, beamtalk_object_class:superclass_safe(ClassPid)}
+                    end;
+                false ->
+                    case beamtalk_object_class:superclass_safe(ClassPid) of
+                        none -> {found, miss};
+                        SuperclassName -> {next, SuperclassName}
+                    end
+            end
+    end.
+
+-doc """
+Look up a method in the class chain via direct hierarchy walk.
 
 ADR 0032 Phase 1: Replaces the flattened table fast path with a direct
 chain walk via has_method/2 + superclass/1. At max hierarchy depth of 6
@@ -250,9 +325,9 @@ The walk itself (depth guard, cycle warning, advance-to-superclass)
 is `beamtalk_hierarchy:walk_ancestors/3`; `class_chain_step/6` supplies only
 the per-class `has_method/2` + `superclass/1` probe and method invocation.
 """.
--spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) ->
+-spec walk_in_class_chain(selector(), args(), bt_self(), state(), class_name()) ->
     dispatch_result().
-lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
+walk_in_class_chain(Selector, Args, Self, State, ClassName) ->
     %% No separate whereis_class/1 pre-check here: class_chain_step/6 performs
     %% that lookup for every node it visits (including ClassName itself, at
     %% depth 0) and already produces the identical class_not_found error, so
@@ -383,11 +458,26 @@ walk or raises `does_not_understand` accordingly.
 -spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state()) ->
     dispatch_result() | {continue, class_name() | none}.
 invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
+    case dispatchable_module(ClassPid) of
+        {ok, ModuleName} ->
+            invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State);
+        continue ->
+            {continue, beamtalk_object_class:superclass_safe(ClassPid)}
+    end.
+
+-doc """
+The dispatchable module for a class that `has_method_local/2` already
+accepted, or `continue` when the walk must advance past it (module-less or
+dispatch-less classes). Shared by the invoking walk and the resolving
+compute so both agree on which classes are dispatchable.
+""".
+-spec dispatchable_module(pid()) -> {ok, module()} | continue.
+dispatchable_module(ClassPid) ->
     %% Get the module name for this class
     case beamtalk_object_class:module_name_safe(ClassPid) of
         undefined ->
             %% Dynamic class or no module — continue to superclass
-            {continue, beamtalk_object_class:superclass_safe(ClassPid)};
+            continue;
         ModuleName ->
             %% Ensure the module is loaded before checking exports.
             %% BEAM lazy-loads modules, and function_exported/3 only checks
@@ -399,143 +489,153 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
             case erlang:function_exported(ModuleName, dispatch, 4) of
                 false ->
                     %% Module exists but lacks dispatch/4 — continue to superclass
-                    {continue, beamtalk_object_class:superclass_safe(ClassPid)};
+                    continue;
                 true ->
-                    %% Intercept printString/displayString/inspect for actor and
-                    %% supervisor instances and route them to beamtalk_object_ops —
-                    %% but only when the method resolved to a class the instance
-                    %% did NOT override it on. A user subclass override is found
-                    %% earlier in the walk (MethodOwner is that subclass) and must
-                    %% be honoured.
-                    %%
-                    %% ADR 0094: a default actor's or supervisor's
-                    %% printString/displayString must render the kind-headed
-                    %% `Actor(ClassName, pid)` / `Supervisor(ClassName, pid)` /
-                    %% `DynamicSupervisor(ClassName, pid)` label, which only
-                    %% beamtalk_object_ops produces — the compiled Object methods
-                    %% return a bare class name. Routing here unifies all three
-                    %% display selectors onto the runtime renderer.
-                    %%
-                    %% For actors, an unoverridden printString/displayString/inspect
-                    %% resolves with MethodOwner = 'Object': class_chain_step/6 probes
-                    %% each level with beamtalk_object_class:has_method_local/2,
-                    %% which for a compiled actor class answers via
-                    %% `has_method_local/1` — a strictly local own-methods-or-extension
-                    %% check that never delegates to a superclass, unlike `has_method/1`
-                    %% itself. So the hierarchy walk keeps advancing one class at a time
-                    %% until it reaches Object itself (see class_chain_step/6's own doc
-                    %% for the O(depth²) this costs).
-                    %%
-                    %% For supervisors it's different: `Supervisor`/
-                    %% `DynamicSupervisor` are plain "Value" classes (`Object
-                    %% subclass: Supervisor`), whose codegen never sets
-                    %% `DispatchSpec.emit_local_probe` — they export no
-                    %% `has_method_local/1`, so `has_method_local/2` falls back to their
-                    %% `has_method/1`, which *delegates* to its superclass for any
-                    %% selector it doesn't locally list (see `value_type_codegen.rs`
-                    %% `generate_primitive_has_method`/`generate_minimal_has_method`).
-                    %% That delegation makes the per-node probe report `true` as soon as
-                    %% it reaches `Supervisor`/`DynamicSupervisor` — the walk never
-                    %% actually visits a node named `'Object'` for an unoverridden
-                    %% supervisor, it stops one level short. (A user supervisor
-                    %% subclass's module does export `has_method_local/1` since
-                    %% ADR 0135, but it answers only the class's own selectors and
-                    %% extensions, so the walk passes it for `printString` and
-                    %% still stops at the stdlib base.) So an unoverridden
-                    %% supervisor's MethodOwner is `'Supervisor'` or
-                    %% `'DynamicSupervisor'`, never `'Object'` — without this branch,
-                    %% `aSupervisor printString` would fall through to the compiled
-                    %% Object method's bare class name instead of matching the REPL's
-                    %% kind-headed label.
-                    %%
-                    %% This also avoids the displayString deadlock: the compiled
-                    %% Object displayString sends a message back to Self
-                    %% (displayString calls self printString), producing a second
-                    %% gen_server:call on the same actor process. beamtalk_object_ops
-                    %% derives the label directly from the tuple with no self-sends.
-                    %% (Supervisors dispatch in-process — not via gen_server:call —
-                    %% so they're not deadlock-prone the same way, but routing them
-                    %% through the same renderer keeps one label authority.)
-                    %%
-                    %% ADR 0095 Phase 3: `inspect` on a default actor is
-                    %% also routed here. Although it returns an `Inspector` cursor
-                    %% (not a self-rendered string), the compiled `Object>>inspect`
-                    %% is `Inspector on: self`, i.e. `on/1` — which, when it runs
-                    %% *inside* the actor's own `handle_call`, issues
-                    %% `sys:get_state(self())` and dead-locks (time-out →
-                    %% `#unavailable`). beamtalk_object_ops:dispatch(inspect, ...)
-                    %% instead seeds the cursor from the in-hand `State` via
-                    %% `on/2` — the self-inspection-safe path. A user `inspect`
-                    %% override is honoured as usual.
-                    %% `inspect` is deliberately *not* extended to supervisors here
-                    %% (unlike printString/displayString above): supervisors dispatch
-                    %% in-process, so `Object>>inspect`'s self-send isn't deadlock-prone
-                    %% for them, and only the printString/displayString divergence was
-                    %% reported — widening `inspect`'s behaviour is out of scope.
-                    IsDisplaySelector =
-                        Selector =:= 'printString' orelse Selector =:= 'displayString',
-                    IsUnoverriddenSupervisorMethod =
-                        is_supervisor_instance(Self) andalso IsDisplaySelector andalso
-                            (MethodOwner =:= 'Object' orelse MethodOwner =:= 'Supervisor' orelse
-                                MethodOwner =:= 'DynamicSupervisor'),
-                    IsUnoverriddenActorMethod =
-                        MethodOwner =:= 'Object' andalso is_actor_instance(Self) andalso
-                            (IsDisplaySelector orelse Selector =:= inspect),
-                    case IsUnoverriddenActorMethod orelse IsUnoverriddenSupervisorMethod of
-                        true ->
-                            %% beamtalk_object_ops:dispatch is known-safe, but wrap it
-                            %% with the same normalization as the slow path so callers
-                            %% always receive a canonical {reply,_,_} | {error,_} tuple.
-                            try beamtalk_object_ops:dispatch(Selector, Args, Self, State) of
-                                {reply, _, _} = Reply -> Reply;
-                                {error, Error, _State} -> {error, Error}
-                            catch
-                                Type:Reason:Stack ->
-                                    ?LOG_DEBUG("Erlang error in beamtalk_object_ops:dispatch", #{
-                                        selector => Selector,
-                                        reason => beamtalk_error:format_reason(Type, Reason),
-                                        domain => [beamtalk, runtime]
-                                    }),
-                                    Wrapped = beamtalk_exception_handler:ensure_wrapped(
-                                        Type,
-                                        Reason,
-                                        Stack,
-                                        dispatch_context(Selector, Self, State, MethodOwner)
-                                    ),
-                                    #{error := BtError} = Wrapped,
-                                    {error, BtError}
-                            end;
-                        false ->
-                            %% Normalize the return value: dispatch/4 returns either
-                            %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
-                            %% We call it inside a try/catch to translate raw Erlang exceptions
-                            %% into structured beamtalk errors instead of letting them escape.
-                            %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised
-                            %% by every in-tree caller (or replied by an actor)
-                            try
-                                case ModuleName:dispatch(Selector, Args, Self, State) of
-                                    {reply, _, _} = Reply -> Reply;
-                                    {error, Error, _State} -> {error, Error};
-                                    Other -> Other
-                                end
-                            catch
-                                Type:Reason:Stack ->
-                                    ?LOG_DEBUG("Erlang error in compiled dispatch", #{
-                                        module => ModuleName,
-                                        selector => Selector,
-                                        reason => beamtalk_error:format_reason(Type, Reason),
-                                        domain => [beamtalk, runtime]
-                                    }),
-                                    Wrapped = beamtalk_exception_handler:ensure_wrapped(
-                                        Type,
-                                        Reason,
-                                        Stack,
-                                        dispatch_context(Selector, Self, State, MethodOwner)
-                                    ),
-                                    #{error := BtError} = Wrapped,
-                                    {error, BtError}
-                            end
-                    end
+                    {ok, ModuleName}
+            end
+    end.
+
+-doc """
+Invoke a resolved owner: the `printString`/`displayString`/`inspect`
+interception plus the compiled `dispatch/4` call, shared by the cached and
+walked paths.
+""".
+-spec invoke_resolved(class_name(), module(), selector(), args(), bt_self(), state()) ->
+    dispatch_result().
+invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
+    %% Intercept printString/displayString/inspect for actor and
+    %% supervisor instances and route them to beamtalk_object_ops —
+    %% but only when the method resolved to a class the instance
+    %% did NOT override it on. A user subclass override is found
+    %% earlier in the walk (MethodOwner is that subclass) and must
+    %% be honoured.
+    %%
+    %% ADR 0094: a default actor's or supervisor's
+    %% printString/displayString must render the kind-headed
+    %% `Actor(ClassName, pid)` / `Supervisor(ClassName, pid)` /
+    %% `DynamicSupervisor(ClassName, pid)` label, which only
+    %% beamtalk_object_ops produces — the compiled Object methods
+    %% return a bare class name. Routing here unifies all three
+    %% display selectors onto the runtime renderer.
+    %%
+    %% For actors, an unoverridden printString/displayString/inspect
+    %% resolves with MethodOwner = 'Object': class_chain_step/6 probes
+    %% each level with beamtalk_object_class:has_method_local/2,
+    %% which for a compiled actor class answers via
+    %% `has_method_local/1` — a strictly local own-methods-or-extension
+    %% check that never delegates to a superclass, unlike `has_method/1`
+    %% itself. So the hierarchy walk keeps advancing one class at a time
+    %% until it reaches Object itself (see class_chain_step/6's own doc
+    %% for the O(depth²) this costs).
+    %%
+    %% For supervisors it's different: `Supervisor`/
+    %% `DynamicSupervisor` are plain "Value" classes (`Object
+    %% subclass: Supervisor`), whose codegen never sets
+    %% `DispatchSpec.emit_local_probe` — they export no
+    %% `has_method_local/1`, so `has_method_local/2` falls back to their
+    %% `has_method/1`, which *delegates* to its superclass for any
+    %% selector it doesn't locally list (see `value_type_codegen.rs`
+    %% `generate_primitive_has_method`/`generate_minimal_has_method`).
+    %% That delegation makes the per-node probe report `true` as soon as
+    %% it reaches `Supervisor`/`DynamicSupervisor` — the walk never
+    %% actually visits a node named `'Object'` for an unoverridden
+    %% supervisor, it stops one level short. (A user supervisor
+    %% subclass's module does export `has_method_local/1` since
+    %% ADR 0135, but it answers only the class's own selectors and
+    %% extensions, so the walk passes it for `printString` and
+    %% still stops at the stdlib base.) So an unoverridden
+    %% supervisor's MethodOwner is `'Supervisor'` or
+    %% `'DynamicSupervisor'`, never `'Object'` — without this branch,
+    %% `aSupervisor printString` would fall through to the compiled
+    %% Object method's bare class name instead of matching the REPL's
+    %% kind-headed label.
+    %%
+    %% This also avoids the displayString deadlock: the compiled
+    %% Object displayString sends a message back to Self
+    %% (displayString calls self printString), producing a second
+    %% gen_server:call on the same actor process. beamtalk_object_ops
+    %% derives the label directly from the tuple with no self-sends.
+    %% (Supervisors dispatch in-process — not via gen_server:call —
+    %% so they're not deadlock-prone the same way, but routing them
+    %% through the same renderer keeps one label authority.)
+    %%
+    %% ADR 0095 Phase 3: `inspect` on a default actor is
+    %% also routed here. Although it returns an `Inspector` cursor
+    %% (not a self-rendered string), the compiled `Object>>inspect`
+    %% is `Inspector on: self`, i.e. `on/1` — which, when it runs
+    %% *inside* the actor's own `handle_call`, issues
+    %% `sys:get_state(self())` and dead-locks (time-out →
+    %% `#unavailable`). beamtalk_object_ops:dispatch(inspect, ...)
+    %% instead seeds the cursor from the in-hand `State` via
+    %% `on/2` — the self-inspection-safe path. A user `inspect`
+    %% override is honoured as usual.
+    %% `inspect` is deliberately *not* extended to supervisors here
+    %% (unlike printString/displayString above): supervisors dispatch
+    %% in-process, so `Object>>inspect`'s self-send isn't deadlock-prone
+    %% for them, and only the printString/displayString divergence was
+    %% reported — widening `inspect`'s behaviour is out of scope.
+    IsDisplaySelector =
+        Selector =:= 'printString' orelse Selector =:= 'displayString',
+    IsUnoverriddenSupervisorMethod =
+        is_supervisor_instance(Self) andalso IsDisplaySelector andalso
+            (MethodOwner =:= 'Object' orelse MethodOwner =:= 'Supervisor' orelse
+                MethodOwner =:= 'DynamicSupervisor'),
+    IsUnoverriddenActorMethod =
+        MethodOwner =:= 'Object' andalso is_actor_instance(Self) andalso
+            (IsDisplaySelector orelse Selector =:= inspect),
+    case IsUnoverriddenActorMethod orelse IsUnoverriddenSupervisorMethod of
+        true ->
+            %% beamtalk_object_ops:dispatch is known-safe, but wrap it
+            %% with the same normalization as the slow path so callers
+            %% always receive a canonical {reply,_,_} | {error,_} tuple.
+            try beamtalk_object_ops:dispatch(Selector, Args, Self, State) of
+                {reply, _, _} = Reply -> Reply;
+                {error, Error, _State} -> {error, Error}
+            catch
+                Type:Reason:Stack ->
+                    ?LOG_DEBUG("Erlang error in beamtalk_object_ops:dispatch", #{
+                        selector => Selector,
+                        reason => beamtalk_error:format_reason(Type, Reason),
+                        domain => [beamtalk, runtime]
+                    }),
+                    Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                        Type,
+                        Reason,
+                        Stack,
+                        dispatch_context(Selector, Self, State, MethodOwner)
+                    ),
+                    #{error := BtError} = Wrapped,
+                    {error, BtError}
+            end;
+        false ->
+            %% Normalize the return value: dispatch/4 returns either
+            %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
+            %% We call it inside a try/catch to translate raw Erlang exceptions
+            %% into structured beamtalk errors instead of letting them escape.
+            %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised
+            %% by every in-tree caller (or replied by an actor)
+            try
+                case ModuleName:dispatch(Selector, Args, Self, State) of
+                    {reply, _, _} = Reply -> Reply;
+                    {error, Error, _State} -> {error, Error};
+                    Other -> Other
+                end
+            catch
+                Type:Reason:Stack ->
+                    ?LOG_DEBUG("Erlang error in compiled dispatch", #{
+                        module => ModuleName,
+                        selector => Selector,
+                        reason => beamtalk_error:format_reason(Type, Reason),
+                        domain => [beamtalk, runtime]
+                    }),
+                    Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                        Type,
+                        Reason,
+                        Stack,
+                        dispatch_context(Selector, Self, State, MethodOwner)
+                    ),
+                    #{error := BtError} = Wrapped,
+                    {error, BtError}
             end
     end.
 

@@ -65,7 +65,8 @@ cleanup(_) ->
 init_creates_tables_test() ->
     %% Clean up any existing tables
     (try
-        ets:delete(beamtalk_extensions)
+        ets:delete(beamtalk_extensions),
+        beamtalk_class_derived_cache:invalidate()
     catch
         _:_ -> ok
     end),

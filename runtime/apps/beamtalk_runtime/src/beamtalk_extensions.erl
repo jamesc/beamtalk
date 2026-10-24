@@ -67,6 +67,13 @@ beamtalk_extensions:conflicts().
 ```
 
 See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
+
+**Only this module's API may write the extensions table.** Compiled
+`has_method_local/1` reads it on every hierarchy probe, so a raw
+`ets:insert`/`ets:delete` bypasses the derived-cache invalidation that
+`register`/`unregister` perform; code that must do one (test fixtures
+cleaning up) has to call `beamtalk_class_derived_cache:invalidate/0`
+itself.
 """.
 -export([
     init/0,
@@ -151,6 +158,9 @@ init() ->
 
     %% BT-3676: the shadow flags are authoritative from here on.
     beamtalk_class_shadow_flags:mark_ready(),
+    %% A re-init after a table loss recreates empty tables: any owner
+    %% derived from the lost rows is stale, so flush unconditionally.
+    beamtalk_class_derived_cache:invalidate(),
     ok.
 
 -doc """
@@ -241,6 +251,11 @@ register(Class, Selector, Fun, Owner, Source) when
                 maybe_store_source(Key, Source)
         end
     end),
+
+    %% An installed extension changes hierarchy resolution (compiled
+    %% `has_method_local/1` consults this table), invalidating cached
+    %% defining-method entries.
+    beamtalk_class_derived_cache:invalidate(),
 
     %% ADR 0087 Phase 4: maintain the xref index for extension methods
     %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
@@ -349,6 +364,8 @@ unregister(Class, Selector, ClassSide) when
         ets:delete(?SOURCES_TABLE, Key),
         sync_shadow_flag(EtsClass)
     end),
+    %% Removal changes resolution the same way installation does.
+    beamtalk_class_derived_cache:invalidate(),
     %% Clear this selector's conflict history too — previously only
     %% purge_class/1's whole-class sweep did this.
     _ = ets:match_delete(?CONFLICTS_TABLE, {Key, '_', '_'}),

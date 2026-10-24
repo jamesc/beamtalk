@@ -222,6 +222,10 @@ restart_within_budget(
     Recent = [T || T <- maps:get(ClassName, History, []), Now - T < Window],
     case length(Recent) >= Max of
         true ->
+            %% No restart: the registry dropped the pid without a metadata
+            %% write, invalidating pid-dependent cached facts (notably the
+            %% defining-method owner, whose compute reads `whereis_class`).
+            beamtalk_class_derived_cache:invalidate(),
             ?LOG_ERROR(
                 "Class process for '~p' crashed ~p times within ~pms — giving up "
                 "on eager restart (lazy recovery on next send may still apply)",
@@ -245,6 +249,9 @@ restart_within_budget(
                 {ok, _NewPid} ->
                     ok;
                 {error, RestartReason} ->
+                    %% Failed restart leaves the class dead like the
+                    %% budget-exhausted branch above: flush for the same reason.
+                    beamtalk_class_derived_cache:invalidate(),
                     ?LOG_ERROR(
                         "Eager restart of crashed class '~p' failed: ~p",
                         [ClassName, RestartReason],
@@ -252,6 +259,7 @@ restart_within_budget(
                     )
             catch
                 ErrClass:CatchReason ->
+                    beamtalk_class_derived_cache:invalidate(),
                     ?LOG_ERROR(
                         "Eager restart of crashed class '~p' raised ~p:~p",
                         [ClassName, ErrClass, CatchReason],
