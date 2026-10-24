@@ -128,7 +128,7 @@ impl BeamtalkMcp {
 
     /// Enable actor trace event capture (ADR 0069).
     #[tool(
-        description = "Enable actor trace event capture. Aggregate stats (call counts, durations) are always on; this enables detailed per-event traces. Call get-traces and actor-stats after running actor code to inspect results. Disable with evaluate(\"Tracing disable\")."
+        description = "Enable actor trace event capture. Class-level aggregate stats (call counts, durations) are always on; this enables detailed per-event traces and per-actor stats. Call get-traces and actor-stats after running actor code to inspect results. Disable with evaluate(\"Tracing disable\")."
     )]
     pub(crate) async fn enable_tracing(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("enable_tracing");
@@ -149,7 +149,7 @@ impl BeamtalkMcp {
 
     /// Disable actor trace event capture (ADR 0069).
     #[tool(
-        description = "Disable actor trace event capture. Aggregate stats remain available. Use enable-tracing to resume capture."
+        description = "Disable actor trace event capture. Class-level aggregate stats remain available; per-actor detail is dropped. Use enable-tracing to resume capture."
     )]
     pub(crate) async fn disable_tracing(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("disable_tracing");
@@ -263,7 +263,7 @@ impl BeamtalkMcp {
 
     /// Get aggregate actor statistics (ADR 0069).
     #[tool(
-        description = "Get aggregate per-actor, per-method statistics: call count, total/average/min/max duration, error and timeout counts. Stats are always available even without tracing enabled. Optionally filter by actor PID."
+        description = "Get aggregate call statistics: call count, total/average/min/max duration, error and timeout counts. Per-class, per-method stats are always available even without tracing enabled; per-actor detail requires tracing (enable-tracing first) and is dropped when tracing is disabled. Optionally filter by actor PID."
     )]
     pub(crate) async fn actor_stats(
         &self,

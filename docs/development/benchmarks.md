@@ -1683,6 +1683,52 @@ Apple Silicon, OTP 28, medians.
   `'$handle_undefined_function'/2` now handles unknown FFI calls the way it would for a plain Erlang
   caller (the pre-check used to reject them).
 
+## BT-4103: trace dispatch aggregate cost (class-keyed always-on)
+
+BT-4103 re-keyed the always-on aggregates by `{Class, Selector}` (one sticky row per pair, updated in
+the caller) and moved per-actor detail behind `Tracing enable` (a capped table, swept for dead pids,
+no monitors). This re-measures the "~150 ns/call" claim from ADR 0069 and the churn cost that made
+the trace store the BT-4051 accept-rate blocker.
+
+Harness: `runtime/perf/bench_trace_dispatch.escript`, run after `just build`:
+
+```
+ERL_FLAGS="+S 1" escript runtime/perf/bench_trace_dispatch.escript
+```
+
+Rows: `hit_dis`/`hit_en` time `record_dispatch/6` on an existing key with tracing disabled/enabled
+(median of 31 batches × 200,000 calls); `churn_dis`/`churn_en` time it with a never-before-seen pid
+per call — a wave of new short-lived actors (median of 9 batches × 20,000 calls, pids pre-made
+outside the timed region); `handler` times `handle_dispatch_stop/4` end to end. Apple arm64, OTP 28,
+`+S 1`, 2026-10-22:
+
+| Row | Before (BT-4066 design) | After (BT-4103) |
+|---|---|---|
+| `hit_dis` (steady-state always-on) | 98.9 | 88.6 |
+| `handler` (full telemetry handler) | 114.3 | 114.4 |
+| `churn_dis` (new actor, disabled) | 2311.2 | 95.3 |
+| `hit_en` (steady-state, enabled) | 95.2 | 153.3 |
+| `churn_en` (new actor, enabled) | 3809.4 | 715.5 |
+
+All figures ns/call, medians. Stable across three after-runs on separate invocations
+(`handler` varied 114–119, `churn_en` 695–768 — run noise; the rest within ±2 ns).
+
+### Findings
+
+- The always-on churn pathology is gone: a dispatch from a never-before-seen actor costs the same as
+  steady-state (~96 ns vs ~2.3 µs before, ~24×), because it hits the existing `{Class, Selector}` row
+  instead of allocating a per-pid row, inserting a pid→class row and casting `track_pid`. Steady-state
+  dispatch is slightly cheaper too (no per-dispatch pid→class ETS write).
+- The "~150 ns/call" claim now reads ~114 ns for the full handler, ~89 ns for the aggregate write
+  itself. `Tracing`'s doc comment and the language-features guide say ~120 ns.
+- Enabled mode costs more per dispatch than before (~153 ns steady-state: two aggregate writes, class
+  plus pid) — opt-in debugging overhead. Enabled churn is still ~5× cheaper than before (~715 ns vs
+  3.8 µs): the class write hits and only the pid row allocates, with no cast and no monitor/DOWN
+  traffic in the background.
+- Memory, not just time, is flat: 1M short-lived actors through the always-on path leave every
+  aggregate table and the atomics array exactly at baseline (pinned by
+  `million_actor_churn_stays_flat_test_`).
+
 ## Beamtalk vs Elixir: per-operation overhead on the same BEAM
 
 `benchmarks/vs-elixir/` runs about 40 paired operations (Value getters and

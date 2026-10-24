@@ -14,15 +14,15 @@
 /// threading.
 ///
 /// Aggregate stats (call counts, durations) are always-on
-/// with negligible overhead (~150ns/call). Detailed trace events
+/// with negligible overhead (~120ns/call). Detailed trace events
 /// require explicit enable/disable.
 ///
-/// To retire a dead actor's aggregates, the trace store monitors every
-/// actor once it has handled a message (armed asynchronously after that
-/// first message). So an actor's `monitored_by` includes the trace store's
-/// pid, and it can appear between two snapshots. Code and tests that
-/// inspect monitors should match the monitors they care about, not compare
-/// the whole `monitored_by` list.
+/// Always-on aggregates are keyed by class and selector only: one entry
+/// per `{Class, Selector}` pair, however many actors churn through the
+/// system. Per-actor detail is collected only while tracing is enabled
+/// (`Tracing enable`), is bounded, and is dropped again on `disable`.
+/// The trace store never monitors actors, so their `monitored_by` is
+/// unaffected by tracing.
 ///
 /// Tracing observes actor dispatch. To emit or attach to your own
 /// application events on the `telemetry` bus, use `Telemetry`.
@@ -98,7 +98,8 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
 
   // === Tracing lifecycle ===
 
-  /// Start capturing trace events (aggregates are always on).
+  /// Start capturing trace events and per-actor aggregate stats
+  /// (class/selector aggregates are always on).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -107,7 +108,8 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
   /// ```
   class sealed enable -> Nil => self delegate
 
-  /// Stop capturing trace events.
+  /// Stop capturing trace events. Drops the per-actor aggregate stats;
+  /// class/selector aggregates keep accumulating.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -167,11 +169,10 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
 
   // === Aggregate stats ===
 
-  /// Per-actor, per-method aggregate stats (always available, even without tracing).
-  ///
-  /// Live actors are keyed by pid. When an actor dies its stats are folded
-  /// into a per-class entry keyed `"retired:<Class>"` (with `retired => true`),
-  /// so the totals stay correct without keeping a row per dead actor.
+  /// Aggregate stats, keyed by class: one `"class:<Class>"` entry per
+  /// class with per-method call counts and durations (always available,
+  /// even without tracing). While tracing is enabled the map also holds
+  /// one entry per pid with live actors' per-actor detail.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -180,9 +181,10 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
   /// ```
   class sealed stats -> Dictionary => self delegate
 
-  /// Aggregate stats for a specific actor.
-  /// Returns #{} for unknown and dead actors (a dead actor's stats are in
-  /// the `"retired:<Class>"` entry of `stats`).
+  /// Aggregate stats for a specific actor. Only collected while tracing
+  /// is enabled; answers #{} when tracing is off and for unknown actors.
+  /// The class-level totals for a dead actor stay in the `"class:<Class>"`
+  /// entry of `stats`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -194,6 +196,7 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
   // === Analysis (computed from aggregates) ===
 
   /// Top N methods by average duration (descending).
+  /// One entry per `{Class, Selector}`, covering every actor of the class.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -204,6 +207,7 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
     self delegate
 
   /// Top N methods by call count (descending).
+  /// One entry per `{Class, Selector}`, covering every actor of the class.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -213,6 +217,7 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
   class sealed hotMethods: limit :: Integer -> List(Dictionary) => self delegate
 
   /// Top N methods by error + timeout rate (descending).
+  /// One entry per `{Class, Selector}`, covering every actor of the class.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -222,7 +227,8 @@ sealed typed Object subclass: Tracing native: beamtalk_tracing
   class sealed errorMethods: limit :: Integer -> List(Dictionary) =>
     self delegate
 
-  /// Top N actors by message queue length — live snapshot.
+  /// Top N actors by message queue length — live snapshot over every
+  /// registered actor, whether or not tracing is enabled.
   ///
   /// ## Examples
   /// ```beamtalk

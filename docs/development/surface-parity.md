@@ -234,7 +234,7 @@ The git ops are **`surface-specific` to the LiveView cockpit** — the human-fac
 | `enable-tracing` | -- | `surface-specific: agent-only workflow (BT-1606)` | `enable_tracing` | -- | Enable actor trace capture |
 | `disable-tracing` | -- | `surface-specific: agent-only workflow (BT-1606)` | `disable_tracing` | -- | Disable actor trace capture |
 | `get-traces` | -- | `surface-specific: agent-only workflow (BT-1606)` | `get_traces` | -- | Retrieve captured traces |
-| `actor-stats` | -- | `surface-specific: agent-only workflow (BT-1606)` | `actor_stats` | -- | Per-actor/method aggregate stats |
+| `actor-stats` | -- | `surface-specific: agent-only workflow (BT-1606)` | `actor_stats` | -- | Aggregate stats: per-class/method always, plus per-actor detail while tracing is enabled (BT-4103) |
 | `export-traces` | -- | `surface-specific: agent-only workflow (BT-1606)` | `export_traces` | -- | Export traces to JSON file |
 | `pid-stats` | -- | `surface-specific: LiveView IDE Inspector` | *(via LiveView IDE)* | -- | Live process metrics (queue depth, memory, reductions, status, current function) for one actor pid — the read companion to the live-Inspector per-object change stream (ADR 0095 §5, BT-2489). Read-only `process_info` reflection (the `:observer`/LiveDashboard primitive set), guarded so a dead pid degrades to `status: dead`. The Cockpit Inspector pane re-issues it on each `{object_changed, …}` push (or a refresh timer). |
 

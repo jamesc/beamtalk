@@ -204,7 +204,13 @@ ensure_table_creates_then_reclaims() ->
 trace_store_reclaims_after_crash() ->
     owner_restart_reclaims(
         beamtalk_trace_store,
-        [beamtalk_agg_index, beamtalk_agg_class, beamtalk_trace_events]
+        [
+            beamtalk_agg_class_stats,
+            beamtalk_agg_pid,
+            beamtalk_agg_pid_keys,
+            beamtalk_agg_free_slots,
+            beamtalk_trace_events
+        ]
     ).
 
 announcements_reclaims_after_crash() ->

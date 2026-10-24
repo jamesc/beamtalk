@@ -276,12 +276,13 @@ aggregate_counters_updated_test_() ->
                     %% Allow telemetry handlers to process
                     timer:sleep(50),
 
-                    %% Check aggregate stats
+                    %% Check aggregate stats (always-on class entry; no
+                    %% per-actor entry while tracing is disabled)
                     Stats = beamtalk_trace_store:get_stats(),
                     PidKey = list_to_binary(pid_to_list(Pid)),
-                    ?assertMatch(#{PidKey := _}, Stats),
-                    PidStats = maps:get(PidKey, Stats),
-                    Methods = maps:get(<<"methods">>, PidStats),
+                    ?assertNot(maps:is_key(PidKey, Stats)),
+                    #{<<"class:Counter">> := CounterStats} = Stats,
+                    Methods = maps:get(<<"methods">>, CounterStats),
 
                     %% increment should have 2 calls
                     IncStats = maps:get(<<"increment">>, Methods),
@@ -554,12 +555,11 @@ multiple_modes_aggregate_test_() ->
                     %% Allow telemetry handlers to process
                     timer:sleep(100),
 
-                    %% Verify stats show calls for both methods
+                    %% Verify stats show calls for both methods (in the
+                    %% always-on class entry)
                     Stats = beamtalk_trace_store:get_stats(),
-                    PidKey = list_to_binary(pid_to_list(Pid)),
-                    ?assertMatch(#{PidKey := _}, Stats),
-                    PidStats = maps:get(PidKey, Stats),
-                    Methods = maps:get(<<"methods">>, PidStats),
+                    #{<<"class:Counter">> := CounterStats} = Stats,
+                    Methods = maps:get(<<"methods">>, CounterStats),
 
                     %% increment: 1 sync + 1 cast = 2 calls
                     IncStats = maps:get(<<"increment">>, Methods),
@@ -768,13 +768,13 @@ lifecycle_aggregate_stats_test_() ->
                 timer:sleep(100),
 
                 %% Get aggregate stats — should include lifecycle operations.
-                %% The actor has stopped, so its per-pid entry is retired
-                %% into the class rollup (BT-4066).
+                %% Death changes nothing: the always-on class entry holds
+                %% every dispatch (BT-4103).
                 Stats = beamtalk_trace_store:get_stats(),
                 PidKey = list_to_binary(pid_to_list(Pid)),
                 ?assertNot(maps:is_key(PidKey, Stats)),
-                ?assertMatch(#{<<"retired:Counter">> := _}, Stats),
-                Methods = maps:get(<<"methods">>, maps:get(<<"retired:Counter">>, Stats)),
+                ?assertMatch(#{<<"class:Counter">> := _}, Stats),
+                Methods = maps:get(<<"methods">>, maps:get(<<"class:Counter">>, Stats)),
 
                 %% Start and stop should each have at least 1 call
                 StartStats = maps:get(<<"start">>, Methods),
