@@ -67,6 +67,13 @@ beamtalk_extensions:conflicts().
 ```
 
 See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
+
+**Only this module's API may write the extensions table.** Compiled
+`has_method_local/1` reads it on every hierarchy probe, so a raw
+`ets:insert`/`ets:delete` bypasses the derived-cache invalidation that
+`register`/`unregister` perform; code that must do one (test fixtures
+cleaning up) has to call `beamtalk_class_derived_cache:invalidate/0`
+itself.
 """.
 -export([
     init/0,
@@ -151,6 +158,9 @@ init() ->
 
     %% BT-3676: the shadow flags are authoritative from here on.
     beamtalk_class_shadow_flags:mark_ready(),
+    %% A re-init after a table loss recreates empty tables: any owner
+    %% derived from the lost rows is stale, so flush unconditionally.
+    beamtalk_class_derived_cache:invalidate(),
     ok.
 
 -doc """

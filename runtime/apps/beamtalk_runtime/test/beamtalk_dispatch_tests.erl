@@ -143,7 +143,17 @@ dispatch_test_() ->
             {"ancestor extension install and removal re-resolve",
                 fun test_extension_install_invalidates_cached_owner/0},
             {"super-send warms the shared start-class entry",
-                fun test_super_send_warms_shared_entry/0}
+                fun test_super_send_warms_shared_entry/0},
+            {"extension shadowing a deeper owner flips the cached row",
+                fun test_extension_shadow_invalidates_cached_owner/0},
+            {"kill past the restart budget flushes the cached owner",
+                fun test_kill_budget_exhausted_flushes_cache/0},
+            {"purged owner module recomputes past the owner",
+                fun test_purged_module_recomputes_past_owner/0},
+            {"cached and walked resolution agree through skips",
+                fun test_cached_and_walked_agree_through_skips/0},
+            {"misses never cache rows", fun test_misses_never_cache_rows/0},
+            {"reparenting flushes the cached owner", fun test_reparent_invalidates_cached_owner/0}
         ]
     end}.
 
@@ -287,7 +297,8 @@ test_extension_priority() ->
 
     %% Clean up the extension to avoid leaking between tests
     (try
-        ets:delete(beamtalk_extensions, {'Counter', testExtension})
+        ets:delete(beamtalk_extensions, {'Counter', testExtension}),
+        beamtalk_class_derived_cache:invalidate()
     catch
         _:_ -> ok
     end),
@@ -421,7 +432,8 @@ test_extension_error_propagation() ->
         ?assertMatch({error, #beamtalk_error{}}, Result)
     after
         (try
-            ets:delete(beamtalk_extensions, {'Counter', crashExt})
+            ets:delete(beamtalk_extensions, {'Counter', crashExt}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -453,7 +465,8 @@ test_extension_nlr_passthrough() ->
         )
     after
         (try
-            ets:delete(beamtalk_extensions, {'Integer', bt3199NlrExt})
+            ets:delete(beamtalk_extensions, {'Integer', bt3199NlrExt}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -483,7 +496,8 @@ test_extension_script_exit_passthrough() ->
         )
     after
         (try
-            ets:delete(beamtalk_extensions, {'Integer', bt3199ScriptExitExt})
+            ets:delete(beamtalk_extensions, {'Integer', bt3199ScriptExitExt}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -501,7 +515,8 @@ test_responds_to_extension_method() ->
         ?assert(beamtalk_dispatch:responds_to(extTestMethod, 'Counter'))
     after
         (try
-            ets:delete(beamtalk_extensions, {'Counter', extTestMethod})
+            ets:delete(beamtalk_extensions, {'Counter', extTestMethod}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -638,7 +653,8 @@ test_super_finds_extension_on_superclass() ->
     after
         %% Clean up extension (ignore any error if it's already gone)
         (try
-            ets:delete(beamtalk_extensions, {'Actor', superExtTest})
+            ets:delete(beamtalk_extensions, {'Actor', superExtTest}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -673,7 +689,8 @@ test_extension_state_threading() ->
         ?assertMatch({reply, 142, #{'value' := 142}}, Result)
     after
         (try
-            ets:delete(beamtalk_extensions, {'Counter', addHundred})
+            ets:delete(beamtalk_extensions, {'Counter', addHundred}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -702,7 +719,8 @@ test_value_type_extension_via_runtime_dispatch() ->
         ?assertMatch({reply, {value_ext_called, 42}, _}, Result)
     after
         (try
-            ets:delete(beamtalk_extensions, {'Integer', testValExt})
+            ets:delete(beamtalk_extensions, {'Integer', testValExt}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -1089,7 +1107,8 @@ test_extension_bad_arity() ->
         ?assertMatch({error, #beamtalk_error{selector = badArityExt}}, Result)
     after
         (try
-            ets:delete(beamtalk_extensions, {'Counter', badArityExt})
+            ets:delete(beamtalk_extensions, {'Counter', badArityExt}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -1207,7 +1226,8 @@ test_extension_raises_reraised() ->
         ?assertMatch({error, #beamtalk_error{}}, Result)
     after
         (try
-            ets:delete(beamtalk_extensions, {'Counter', throwingExt})
+            ets:delete(beamtalk_extensions, {'Counter', throwingExt}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -1346,7 +1366,8 @@ test_super_extension_invoke() ->
         ?assertMatch({reply, from_super_ext, _}, Result)
     after
         (try
-            ets:delete(beamtalk_extensions, {'Actor', superExtMethod})
+            ets:delete(beamtalk_extensions, {'Actor', superExtMethod}),
+            beamtalk_class_derived_cache:invalidate()
         catch
             _:_ -> ok
         end)
@@ -1686,39 +1707,40 @@ defmethod_warm_avg(N, Leaf, Self, State) ->
     End = erlang:monotonic_time(microsecond),
     (End - Start) / N.
 
-%% A hot patch on an ancestor changes resolution: the cached entry is
-%% flushed and the next lookup re-resolves to the patching class. The stub
-%% modules cannot invoke the fun (their default clause delegates via
-%% `super/5`), so the proof is the recomputed owner row, not the answer.
+%% A hot patch shadowing a cached hit changes resolution: the patch
+%% flushes the base row and the next lookup re-resolves to the patching
+%% class. The answer stays the deep result either way (the stub default
+%% clause delegates via `super/5`), so the row flip is the proof — a
+%% stale cache would keep serving the base row.
 test_hot_patch_invalidates_cached_owner() ->
     Chain = bt3482_build_chain(3),
-    #{names := [Leaf, Mid, _Base], mods := [_, MidMod, _]} = Chain,
+    #{names := [Leaf, Mid, Base], mods := [_, MidMod, _]} = Chain,
     beamtalk_class_derived_cache:invalidate(),
     try
         State = #{'$beamtalk_class' => Leaf},
         Self = make_ref(),
         ?assertMatch(
-            {error, #beamtalk_error{kind = does_not_understand}},
-            beamtalk_dispatch:lookup(midPatchedSel, [], Self, State, Leaf)
+            {reply, bt3482_deep_result, _},
+            beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf)
         ),
-        ?assertEqual(
-            [],
-            ets:lookup(beamtalk_class_derived_cache, {defining_method, Leaf, midPatchedSel})
+        [{_, _, {owner, Base, _}}] = ets:lookup(
+            beamtalk_class_derived_cache, {defining_method, Leaf, bt3482DeepMethod}
         ),
         MidPid = beamtalk_class_registry:whereis_class(Mid),
         ?assertNotEqual(undefined, MidPid),
         ok = beamtalk_object_class:put_method(
-            MidPid, midPatchedSel, fun(_S, [], St) -> {reply, patched, St} end
+            MidPid, bt3482DeepMethod, fun(_S, [], St) -> {reply, patched, St} end
         ),
-        %% Re-resolves (a stale entry would still miss): the owner row now
-        %% names the patching class. The answer itself stays a DNU — the
-        %% stub default clause delegates past a fun it cannot invoke.
+        ?assertEqual(
+            [],
+            ets:lookup(beamtalk_class_derived_cache, {defining_method, Leaf, bt3482DeepMethod})
+        ),
         ?assertMatch(
-            {error, #beamtalk_error{kind = does_not_understand}},
-            beamtalk_dispatch:lookup(midPatchedSel, [], Self, State, Leaf)
+            {reply, bt3482_deep_result, _},
+            beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf)
         ),
         [{_, _, {owner, Mid, MidMod}}] = ets:lookup(
-            beamtalk_class_derived_cache, {defining_method, Leaf, midPatchedSel}
+            beamtalk_class_derived_cache, {defining_method, Leaf, bt3482DeepMethod}
         )
     after
         bt3482_teardown_chain(Chain)
@@ -1753,6 +1775,13 @@ test_extension_install_invalidates_cached_owner() ->
             beamtalk_class_derived_cache, {defining_method, 'Counter', extSel4109}
         ),
         ok = beamtalk_extensions:unregister('Actor', extSel4109),
+        %% The removal flushes the Actor row (without the flush this stale
+        %% row would linger; the re-lookup below would still answer DNU via
+        %% the dispatch default clause, so only the row state discriminates).
+        ?assertEqual(
+            [],
+            ets:lookup(beamtalk_class_derived_cache, {defining_method, 'Counter', extSel4109})
+        ),
         ?assertMatch(
             {error, #beamtalk_error{kind = does_not_understand}},
             beamtalk_dispatch:lookup(extSel4109, [], Self, State, 'Counter')
@@ -1763,6 +1792,279 @@ test_extension_install_invalidates_cached_owner() ->
         catch
             _:_ -> ok
         end)
+    end.
+
+%% An extension installed on an ancestor shadows a cached deeper owner:
+%% `yourself` is defined only on Object, so installing the extension on
+%% Actor must flip the cached row (and the answer) to Actor, and removal
+%% must flip it back. Warms a hit first — a miss-warmed entry would
+%% recompute correctly with or without the flush.
+test_extension_shadow_invalidates_cached_owner() ->
+    ok = ensure_counter_loaded(),
+    ok = beamtalk_extensions:init(),
+    beamtalk_class_derived_cache:invalidate(),
+    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+    Self = make_ref(),
+    ExtFun = fun(_Args, _S, St) -> {shadow4109_result, St} end,
+    try
+        ?assertMatch(
+            {reply, Self, _},
+            beamtalk_dispatch:lookup(yourself, [], Self, State, 'Counter')
+        ),
+        [{_, _, {owner, 'Object', _}}] = ets:lookup(
+            beamtalk_class_derived_cache, {defining_method, 'Counter', yourself}
+        ),
+        ok = beamtalk_extensions:register('Actor', yourself, ExtFun, defmethod_test),
+        ?assertEqual(
+            [],
+            ets:lookup(beamtalk_class_derived_cache, {defining_method, 'Counter', yourself})
+        ),
+        ?assertMatch(
+            {reply, shadow4109_result, _},
+            beamtalk_dispatch:lookup(yourself, [], Self, State, 'Counter')
+        ),
+        [{_, _, {owner, 'Actor', _}}] = ets:lookup(
+            beamtalk_class_derived_cache, {defining_method, 'Counter', yourself}
+        ),
+        ok = beamtalk_extensions:unregister('Actor', yourself),
+        ?assertMatch(
+            {reply, Self, _},
+            beamtalk_dispatch:lookup(yourself, [], Self, State, 'Counter')
+        ),
+        [{_, _, {owner, 'Object', _}}] = ets:lookup(
+            beamtalk_class_derived_cache, {defining_method, 'Counter', yourself}
+        )
+    after
+        (try
+            beamtalk_extensions:unregister('Actor', yourself)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% Killing past the restart budget gives up without a metadata write;
+%% the monitor flushes on the give-up branch. Uses the real Counter
+%% (stubs cannot restart): each kill awaits the new pid so all four
+%% crashes land inside the window, then the fourth leaves it dead.
+test_kill_budget_exhausted_flushes_cache() ->
+    ok = ensure_counter_loaded(),
+    beamtalk_class_derived_cache:invalidate(),
+    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+    Self = make_ref(),
+    ?assertMatch(
+        {reply, _, _}, beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter')
+    ),
+    [{_, _, {owner, 'Counter', _}}] = ets:lookup(
+        beamtalk_class_derived_cache, {defining_method, 'Counter', increment}
+    ),
+    try
+        P0 = beamtalk_class_registry:whereis_class('Counter'),
+        P1 = defmethod_kill_wait_new('Counter', P0),
+        P2 = defmethod_kill_wait_new('Counter', P1),
+        P3 = defmethod_kill_wait_new('Counter', P2),
+        exit(P3, kill),
+        %% Budget is 3 restarts per window: the fourth DOWN gives up.
+        %% Restarts land in milliseconds, so 300ms of continued absence
+        %% proves give-up rather than a slow restart.
+        defmethod_await_gone('Counter'),
+        timer:sleep(300),
+        ?assertEqual(undefined, beamtalk_class_registry:whereis_class('Counter')),
+        ?assertEqual(
+            [],
+            ets:lookup(beamtalk_class_derived_cache, {defining_method, 'Counter', increment})
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = class_not_found}},
+            beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter')
+        )
+    after
+        ok = ensure_counter_loaded()
+    end.
+
+%% Purging the cached owner's module out from under it: the export guard
+%% fails, the lookup recomputes past the owner, and the answer matches a
+%% fresh walk (DNU). The module is reloaded before teardown so the stops
+%% and purges there see a live module.
+test_purged_module_recomputes_past_owner() ->
+    Chain = bt3482_build_chain(3),
+    #{names := [Leaf | _] = Names, mods := Mods} = Chain,
+    BaseMod = lists:last(Mods),
+    Base = lists:last(Names),
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        State = #{'$beamtalk_class' => Leaf},
+        Self = make_ref(),
+        ?assertMatch(
+            {reply, bt3482_deep_result, _},
+            beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf)
+        ),
+        code:purge(BaseMod),
+        code:delete(BaseMod),
+        ?assertNot(erlang:function_exported(BaseMod, dispatch, 4)),
+        %% Twice: the guarded-stale row recomputes (correctly) every time.
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf)
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf)
+        )
+    after
+        %% Reload from recompiled forms (stubs have no beam file, so
+        %% `get_object_code` cannot fetch the binary) before teardown.
+        (try
+            Forms = bt3482_stub_forms(BaseMod, Base, none, true),
+            {ok, BaseMod, Bin} = compile:forms(Forms),
+            {module, BaseMod} = code:load_binary(BaseMod, "defmethod_test", Bin)
+        catch
+            _:_ -> error
+        end),
+        bt3482_teardown_chain(Chain)
+    end.
+
+%% Cached and walked resolution agree through skips: a module-less mid
+%% chain class claims the method via published instance methods but has
+%% no dispatchable module, so both paths must skip it to the base and
+%% agree on the owner and the answer.
+test_cached_and_walked_agree_through_skips() ->
+    BaseChain = bt3482_build_chain(1),
+    #{names := [Base]} = BaseChain,
+    beamtalk_class_derived_cache:invalidate(),
+    MidFun = fun(_S, [], St) -> {reply, mid_claim, St} end,
+    {ok, _} = beamtalk_object_class:start_link('DifSkipMid', #{
+        superclass => Base,
+        instance_methods => #{bt3482DeepMethod => #{block => MidFun, arity => 0}},
+        instance_variables => []
+    }),
+    {ok, _} = beamtalk_object_class:start_link('DifSkipLeaf', #{
+        superclass => 'DifSkipMid',
+        instance_methods => #{},
+        instance_variables => []
+    }),
+    try
+        State = #{'$beamtalk_class' => 'DifSkipLeaf'},
+        Self = make_ref(),
+        Cold = beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, 'DifSkipLeaf'),
+        ?assertMatch({reply, bt3482_deep_result, _}, Cold),
+        [{_, _, {owner, Base, _}}] = ets:lookup(
+            beamtalk_class_derived_cache, {defining_method, 'DifSkipLeaf', bt3482DeepMethod}
+        ),
+        ?assertEqual(
+            Cold, beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, 'DifSkipLeaf')
+        )
+    after
+        defmethod_stop_quietly('DifSkipLeaf'),
+        defmethod_stop_quietly('DifSkipMid'),
+        bt3482_teardown_chain(BaseChain)
+    end.
+
+%% Misses are never cached: a hundred DNU sends leave no row for the key
+%% (this is the table's memory bound — hits only).
+test_misses_never_cache_rows() ->
+    ok = ensure_counter_loaded(),
+    beamtalk_class_derived_cache:invalidate(),
+    State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
+    Self = make_ref(),
+    Results = [
+        beamtalk_dispatch:lookup(freshMiss4109, [], Self, State, 'Counter')
+     || _ <- lists:seq(1, 100)
+    ],
+    ?assert(
+        lists:all(
+            fun
+                ({error, _}) -> true;
+                (_) -> false
+            end,
+            Results
+        )
+    ),
+    ?assertEqual(
+        [],
+        ets:lookup(beamtalk_class_derived_cache, {defining_method, 'Counter', freshMiss4109})
+    ).
+
+%% Reparenting under a chain that lacks the selector flushes the warm
+%% owner: the next lookup re-resolves (here, to a DNU that caches
+%% nothing) instead of serving the stale row.
+test_reparent_invalidates_cached_owner() ->
+    Chain = bt3482_build_chain(3),
+    #{names := [Leaf | _], mods := [LeafMod | _]} = Chain,
+    {ok, _} = beamtalk_object_class:start_link('DifOrphanParent', #{
+        superclass => none,
+        instance_methods => #{},
+        instance_variables => []
+    }),
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        State = #{'$beamtalk_class' => Leaf},
+        Self = make_ref(),
+        ?assertMatch(
+            {reply, bt3482_deep_result, _},
+            beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf)
+        ),
+        ?assertMatch(
+            [{_, _, {owner, _, _}}],
+            ets:lookup(beamtalk_class_derived_cache, {defining_method, Leaf, bt3482DeepMethod})
+        ),
+        %% update_class sources superclass from module meta rather than the
+        %% info map, so metadata-less stubs cannot reparent through it; merge
+        %% the identity row directly, as the reload path does.
+        {ok, LeafMod, LeafSels} = beamtalk_class_metadata:lookup_methods(Leaf),
+        beamtalk_class_metadata:merge_identity(
+            Leaf, LeafMod, LeafSels, 'DifOrphanParent', false
+        ),
+        ?assertEqual(
+            [],
+            ets:lookup(beamtalk_class_derived_cache, {defining_method, Leaf, bt3482DeepMethod})
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf)
+        )
+    after
+        defmethod_stop_quietly('DifOrphanParent'),
+        bt3482_teardown_chain(Chain)
+    end.
+
+defmethod_stop_quietly(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            ok;
+        Pid ->
+            (try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end)
+    end.
+
+defmethod_kill_wait_new(ClassName, OldPid) ->
+    exit(OldPid, kill),
+    defmethod_kill_wait_new_loop(ClassName, OldPid, 500).
+
+defmethod_kill_wait_new_loop(_ClassName, _OldPid, 0) ->
+    erlang:error(defmethod_restart_timeout);
+defmethod_kill_wait_new_loop(ClassName, OldPid, N) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        NewPid when is_pid(NewPid), NewPid =/= OldPid -> NewPid;
+        _ ->
+            timer:sleep(10),
+            defmethod_kill_wait_new_loop(ClassName, OldPid, N - 1)
+    end.
+
+defmethod_await_gone(ClassName) ->
+    defmethod_await_gone(ClassName, 500).
+
+defmethod_await_gone(_ClassName, 0) ->
+    erlang:error(defmethod_still_registered);
+defmethod_await_gone(ClassName, N) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            ok;
+        _ ->
+            timer:sleep(10),
+            defmethod_await_gone(ClassName, N - 1)
     end.
 
 %% A `super` send warms the entry keyed by the class the walk starts at —

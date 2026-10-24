@@ -238,17 +238,9 @@ responds_to(Selector, ClassName) ->
 %%% ============================================================================
 
 -doc """
-Look up method in class chain via direct hierarchy walk.
-
-ADR 0032 Phase 1: Replaces the flattened table fast path with a direct
-chain walk via has_method/2 + superclass/1. At max hierarchy depth of 6
-(typical 4), this means at most ~12 gen_server calls — microseconds on a
-local node. The flattened table cache was removed to eliminate its race
-window and O(N) rebuild broadcast cascade.
-
-The walk itself (depth guard, cycle warning, advance-to-superclass)
-is `beamtalk_hierarchy:walk_ancestors/3`; `class_chain_step/6` supplies only
-the per-class `has_method/2` + `superclass/1` probe and method invocation.
+Look up a method starting at `ClassName`: resolve the defining owner
+(usually cached) and invoke it, falling back to the hierarchy walk on a
+miss so errors keep their exact shape.
 """.
 -spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) ->
     dispatch_result().
@@ -263,16 +255,25 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
 -doc """
 Resolve the class that defines `Selector` for a send starting at `ClassName`.
 
-Memoised in the derived cache: the defining owner and module only change on
-a class write (load, reload, hot patch, removal) or an extension install,
-and every one of those invalidates the cache. Anything but a dispatchable
-owner is a miss — the walk below then reproduces today's errors exactly.
+Memoised in the derived cache: class writes and extension installs
+invalidate it; death without restart is flushed by the class monitor and
+an out-of-band purge is caught by the export guard below. Anything but a
+dispatchable owner is a miss — the walk below then reproduces today's
+errors exactly.
 """.
 -spec resolve_owner(class_name(), selector()) -> {owner, class_name(), module()} | miss.
 resolve_owner(ClassName, Selector) ->
     beamtalk_class_derived_cache:fetch(
         {defining_method, ClassName, Selector},
-        fun() -> compute_owner(ClassName, Selector) end
+        fun() -> compute_owner(ClassName, Selector) end,
+        %% The module half can only go stale out-of-band (a purge without a
+        %% reload, which writes no metadata): re-check the export on a hit
+        %% and recompute past it when gone. Deliberately no `ensure_loaded`
+        %% here — that could run `on_load` on the hot path.
+        fun
+            ({owner, _, Module}) -> erlang:function_exported(Module, dispatch, 4);
+            (_) -> false
+        end
     ).
 
 -spec compute_owner(class_name(), selector()) ->
@@ -311,6 +312,19 @@ compute_step(ClassName, Selector) ->
             end
     end.
 
+-doc """
+Look up a method in the class chain via direct hierarchy walk.
+
+ADR 0032 Phase 1: Replaces the flattened table fast path with a direct
+chain walk via has_method/2 + superclass/1. At max hierarchy depth of 6
+(typical 4), this means at most ~12 gen_server calls — microseconds on a
+local node. The flattened table cache was removed to eliminate its race
+window and O(N) rebuild broadcast cascade.
+
+The walk itself (depth guard, cycle warning, advance-to-superclass)
+is `beamtalk_hierarchy:walk_ancestors/3`; `class_chain_step/6` supplies only
+the per-class `has_method/2` + `superclass/1` probe and method invocation.
+""".
 -spec walk_in_class_chain(selector(), args(), bt_self(), state(), class_name()) ->
     dispatch_result().
 walk_in_class_chain(Selector, Args, Self, State, ClassName) ->
