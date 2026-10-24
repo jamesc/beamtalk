@@ -23,6 +23,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 -export([
     class_send/3,
     lookup_direct_call/3,
+    lookup_direct_constructor/3,
     class_self_dispatch/3,
     class_self_dispatch/4,
     class_self_send/3,
@@ -103,9 +104,31 @@ class_send_plain(ClassPid, spawn, Args) when ClassPid =:= self() ->
 class_send_plain(ClassPid, 'spawnWith:', Args) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, 'spawnWith:', Args);
 class_send_plain(ClassPid, 'new', []) ->
-    class_send_with_recovery(ClassPid, 'new', fun(P) ->
-        unwrap_class_call(gen_server:call(P, {new, []}))
-    end);
+    %% an eligible Value builds in the caller via a direct
+    %% `Module:new()` call — the same call `handle_new_compiled` would make,
+    %% minus the gen_server hop (and its `IsConstructible` cache write, which
+    %% a later slow-path call recomputes). Anything ineligible falls through
+    %% to the gen_server path unchanged.
+    case lookup_direct_constructor(ClassPid, 'new', []) of
+        {ok, Module} ->
+            erlang:apply(Module, new, []);
+        error ->
+            class_send_with_recovery(ClassPid, 'new', fun(P) ->
+                unwrap_class_call(gen_server:call(P, {new, []}))
+            end)
+    end;
+class_send_plain(ClassPid, 'new:', [Map]) when is_map(Map) ->
+    %% same for `new:` with a map argument, via `Module:new/1`.
+    %% A non-map argument keeps the unguarded clause below, whose gen_server
+    %% path reproduces the legacy fallbacks (see `lookup_direct_constructor/3`).
+    case lookup_direct_constructor(ClassPid, 'new:', [Map]) of
+        {ok, Module} ->
+            erlang:apply(Module, new, [Map]);
+        error ->
+            class_send_with_recovery(ClassPid, 'new:', fun(P) ->
+                unwrap_class_call(gen_server:call(P, {new, [Map]}))
+            end)
+    end;
 class_send_plain(ClassPid, 'new:', [Map]) ->
     class_send_with_recovery(ClassPid, 'new:', fun(P) ->
         unwrap_class_call(gen_server:call(P, {new, [Map]}))
@@ -185,6 +208,52 @@ lookup_direct_call(ClassPid, Selector, Args) when is_pid(ClassPid), is_list(Args
     end;
 lookup_direct_call(_ClassPid, _Selector, _Args) ->
     error.
+
+-doc """
+Resolve a dynamic `new`/`new:` send to a direct module call, if eligible.
+
+Eligible when the class's baked `direct_constructors` lists the selector, the
+class names a module and has no runtime-installed class-method funs (the
+`lookup_direct_constructor/2` gates), and the module exports `new` at the
+right arity (`new/0` for `new`, `new/1` for `new:` with a map argument). A
+non-map `new:` argument is never eligible: the gen_server path reproduces
+the legacy `IsConstructible = false` fallback and the `new: expects a
+Dictionary argument` error there.
+
+The verdict is generated metadata (Rust's `direct_constructors`), never
+re-derived here. `new` needs no chain check because `new/0` is itself the
+override slot (a custom `new` compiles to, or delegates from, it), so the
+direct call and the gen_server path reach the same function either way.
+`new:` shares the direct-call trust model: reloading a class re-syncs its own
+verdicts, while an ancestor reload does not re-bake descendants. Like
+`lookup_direct_call/3`, the export check only sees loaded code, so a class
+whose module nobody has touched yet takes one gen_server fallback (which
+loads it) before going direct.
+""".
+-spec lookup_direct_constructor(pid(), selector(), list()) -> {ok, module()} | error.
+lookup_direct_constructor(ClassPid, new, []) when is_pid(ClassPid) ->
+    lookup_direct_constructor_module(ClassPid, new, 0);
+lookup_direct_constructor(ClassPid, 'new:', [Map]) when is_pid(ClassPid), is_map(Map) ->
+    lookup_direct_constructor_module(ClassPid, 'new:', 1);
+lookup_direct_constructor(_ClassPid, _Selector, _Args) ->
+    error.
+
+-spec lookup_direct_constructor_module(pid(), selector(), arity()) -> {ok, module()} | error.
+lookup_direct_constructor_module(ClassPid, Selector, Arity) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_direct_constructor(ClassName, Selector) of
+                {ok, Module} = Found ->
+                    case erlang:function_exported(Module, new, Arity) of
+                        true -> Found;
+                        false -> error
+                    end;
+                error ->
+                    error
+            end;
+        not_found ->
+            error
+    end.
 
 -doc """
 Report a class-method self-send that would deadlock.

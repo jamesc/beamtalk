@@ -2303,7 +2303,7 @@ concurrent_alloc_during_grow_and_clear_test_() ->
                 %% Every slot is accounted for exactly once: on the free list
                 %% or held by a class row, never both. Slots are {Ref, Base}
                 %% pairs: rows keep their birth array across grows.
-                Free = [S || {S} <- ets:tab2list(beamtalk_agg_free_slots)],
+                Free = [{R, B} || {{_, R, B}} <- ets:tab2list(beamtalk_agg_free_slots)],
                 Held = [{R, B} || {_, R, B} <- ets:tab2list(beamtalk_agg_class_stats)],
                 ?assertEqual([], [S || S <- Held, lists:member(S, Free)]),
                 ?assertEqual(length(Held), length(lists:usort(Held))),
@@ -2378,5 +2378,279 @@ upgrade_resets_aggregates_test_() ->
                 beamtalk_trace_store:record_dispatch(self(), pong, 1, ok, sync, 'Counter'),
                 #{<<"methods">> := #{<<"pong">> := Pong}} = class_entry(<<"Counter">>),
                 ?assertEqual(1, maps:get(<<"calls">>, Pong))
+            end)}
+    end}.
+
+%%====================================================================
+%% Test: Free-list contention under concurrent churn
+%%====================================================================
+
+-doc """
+One churn window: `Workers` processes race a start barrier, then each
+records `DispatchesPerPid` dispatches for each of `PerWorker` fresh pids.
+Every first dispatch allocates a pid row — through `take_slot/0` when the
+free list holds released slots, else the bump allocator — while the shared
+{Class, Selector} keeps every dispatch on the class fast path. When
+`Trace` is true the workers' `ets:take/2` calls are call-traced and
+counted. Answers `{ElapsedUs, Pids, Takes}`.
+""".
+churn_window(Workers, PerWorker, Class, Selector, DispatchesPerPid, Trace) ->
+    Parent = self(),
+    Collector =
+        case Trace of
+            true -> spawn_link(fun() -> take_counter_loop(0) end);
+            false -> undefined
+        end,
+    case Trace of
+        true -> 1 = erlang:trace_pattern({ets, take, 2}, [{'_', [], []}], [global]);
+        false -> ok
+    end,
+    try
+        do_churn_window(
+            Parent, Collector, Workers, PerWorker, Class, Selector, DispatchesPerPid, Trace
+        )
+    after
+        case Trace of
+            true -> _ = erlang:trace_pattern({ets, take, 2}, false, [global]);
+            false -> ok
+        end,
+        case Collector of
+            undefined -> ok;
+            _ -> Collector ! stop
+        end
+    end.
+
+do_churn_window(Parent, Collector, Workers, PerWorker, Class, Selector, DispatchesPerPid, Trace) ->
+    Work = fun() ->
+        case Trace of
+            true -> 1 = erlang:trace(self(), true, [call, {tracer, Collector}]);
+            false -> ok
+        end,
+        receive
+            go -> ok
+        after 60000 -> exit(churn_barrier_timeout)
+        end,
+        Ps = [
+            begin
+                P = idle_process(),
+                [
+                    beamtalk_trace_store:record_dispatch(P, Selector, 10, ok, sync, Class)
+                 || _ <- lists:seq(1, DispatchesPerPid)
+                ],
+                P
+            end
+         || _ <- lists:seq(1, PerWorker)
+        ],
+        Parent ! {churn_done, self(), Ps},
+        case Trace of
+            %% Stay alive until the parent lifts the trace flags: tracing
+            %% a dead pid raises.
+            true ->
+                receive
+                    release -> ok
+                after 60000 -> exit(churn_release_timeout)
+                end;
+            false ->
+                ok
+        end
+    end,
+    Wins = [spawn_link(Work) || _ <- lists:seq(1, Workers)],
+    T0 = erlang:monotonic_time(microsecond),
+    [W ! go || W <- Wins],
+    AllPids = collect_churn_pids(Workers),
+    T1 = erlang:monotonic_time(microsecond),
+    Takes =
+        case Trace of
+            true ->
+                [1 = erlang:trace(W, false, [call]) || W <- Wins],
+                Collector ! {get, self()},
+                Taken =
+                    receive
+                        {takes, N} -> N
+                    after 5000 -> exit(churn_count_timeout)
+                    end,
+                [W ! release || W <- Wins],
+                Taken;
+            false ->
+                0
+        end,
+    {T1 - T0, AllPids, Takes}.
+
+-doc "Collect one `{churn_done, Pid, Pids}` per worker.".
+collect_churn_pids(0) ->
+    [];
+collect_churn_pids(N) ->
+    receive
+        {churn_done, _W, Ps} -> Ps ++ collect_churn_pids(N - 1)
+    after 120000 -> exit(churn_collect_timeout)
+    end.
+
+-doc "Count call-traced `ets:take/2` calls on the free-slots table.".
+take_counter_loop(N) ->
+    receive
+        {trace, _Pid, call, {ets, take, [beamtalk_agg_free_slots, _Key]}} ->
+            take_counter_loop(N + 1);
+        {trace, _Pid, call, _MFA} ->
+            take_counter_loop(N);
+        {get, From} ->
+            From ! {takes, N},
+            take_counter_loop(N);
+        stop ->
+            ok
+    end.
+
+free_list_churn_stays_flat_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {timeout, 300,
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                %% The free list is a pure reuse cache: drain it so the
+                %% sizes below start from zero rather than earlier tests'
+                %% leftovers.
+                ets:delete_all_objects(beamtalk_agg_free_slots),
+                Workers = 32,
+                PerWorker = 500,
+                Allocs = Workers * PerWorker,
+                Class = 'ChurnFree',
+                Selector = churned,
+                %% Window 1: the bump path (the free list starts empty).
+                %% Two dispatches per pid, so a reused slot still holding
+                %% its previous owner's counts is detectable below.
+                {T1, Win1, _} = churn_window(Workers, PerWorker, Class, Selector, 2, false),
+                ?assertEqual(Allocs, ets:info(beamtalk_agg_pid, size)),
+                [exit(P, kill) || P <- Win1],
+                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                ?assertEqual(Allocs, ets:info(beamtalk_agg_free_slots, size)),
+                %% Releases stripe across all shards: a fixed-shard
+                %% regression would pile every release onto one.
+                Shards = lists:usort([
+                    S
+                 || {{S, _, _}} <- ets:tab2list(beamtalk_agg_free_slots)
+                ]),
+                ?assertEqual(64, length(Shards)),
+
+                %% Window 2: the same shape, now through take_slot/0 — nearly
+                %% every allocation reuses a released slot. (Exact drain is
+                %% racy by design: a take that loses every probe to faster
+                %% racers bumps a fresh slot instead of spinning, leaving a
+                %% straggler or two for the next window.)
+                {T2, Win2, _} = churn_window(Workers, PerWorker, Class, Selector, 1, false),
+                ?assertEqual(Allocs, ets:info(beamtalk_agg_pid, size)),
+                FreeW2 = ets:info(beamtalk_agg_free_slots, size),
+                ?assert(FreeW2 =< Allocs div 100),
+                %% Flat: the aged node churns at the fresh node's rate.
+                ?debugFmt("BT-4120 windows: fresh=~pus aged=~pus", [T1, T2]),
+                ?assert(T2 =< T1 * 6),
+
+                %% Every new row holds a distinct slot ...
+                Slots = [{R, B} || {_, R, B, _} <- ets:tab2list(beamtalk_agg_pid)],
+                ?assertEqual(Allocs, length(lists:usort(Slots))),
+                %% ... zeroed before reuse: one dispatch reads as one call,
+                %% not one plus the previous owner's two.
+                [Sample | _] = Win2,
+                SampleKey = list_to_binary(pid_to_list(Sample)),
+                #{SampleKey := #{<<"methods">> := #{<<"churned">> := SampleStats}}} =
+                    beamtalk_trace_store:get_stats(Sample),
+                ?assertEqual(1, maps:get(<<"calls">>, SampleStats)),
+                %% ... and the class entry holds every dispatch exactly once.
+                #{<<"methods">> := #{<<"churned">> := Churned}} =
+                    class_entry(<<"ChurnFree">>),
+                ?assertEqual(3 * Allocs, maps:get(<<"calls">>, Churned)),
+
+                %% Window 3 (traced): ~1 free-list take per new actor.
+                [exit(P, kill) || P <- Win2],
+                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                %% The sweep releases exactly the window-2 rows on top of
+                %% window 2's stragglers.
+                Pool3 = ets:info(beamtalk_agg_free_slots, size),
+                ?assertEqual(FreeW2 + Allocs, Pool3),
+                {_T3, Win3, Takes} = churn_window(Workers, PerWorker, Class, Selector, 1, true),
+                ?assertEqual(Allocs, ets:info(beamtalk_agg_pid, size)),
+                FreeW3 = ets:info(beamtalk_agg_free_slots, size),
+                ?assert(Pool3 - FreeW3 >= Allocs * 99 div 100),
+                ?debugFmt("BT-4120 takes: ~p takes for ~p allocs", [Takes, Allocs]),
+                ?assert(Takes > 0),
+                ?assert(Takes =< Allocs * 3 div 2),
+                [exit(P, kill) || P <- Win3],
+                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end)
+            end)}
+    end}.
+
+free_list_release_reuse_roundtrip_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {"released slots are reused with identical slot identity, zeroed",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                ets:delete_all_objects(beamtalk_agg_free_slots),
+                Class = 'ReuseProbe',
+                Selector = probed,
+                Pids = [idle_process() || _ <- lists:seq(1, 3)],
+                [
+                    beamtalk_trace_store:record_dispatch(P, Selector, 10, ok, sync, Class)
+                 || P <- Pids
+                ],
+                FirstSlots = lists:sort([
+                    {R, B}
+                 || {{P, _}, R, B, _} <- ets:tab2list(beamtalk_agg_pid), lists:member(P, Pids)
+                ]),
+                ?assertEqual(3, length(FirstSlots)),
+                [exit(P, kill) || P <- Pids],
+                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                Freed = lists:sort([
+                    {R, B}
+                 || {{_, R, B}} <- ets:tab2list(beamtalk_agg_free_slots)
+                ]),
+                ?assertEqual(FirstSlots, Freed),
+                %% Fresh pids reuse exactly those slots.
+                Pids2 = [idle_process() || _ <- lists:seq(1, 3)],
+                [
+                    beamtalk_trace_store:record_dispatch(P, Selector, 10, ok, sync, Class)
+                 || P <- Pids2
+                ],
+                SecondSlots = lists:sort([
+                    {R, B}
+                 || {{P, _}, R, B, _} <- ets:tab2list(beamtalk_agg_pid), lists:member(P, Pids2)
+                ]),
+                ?assertEqual(FirstSlots, SecondSlots),
+                ?assertEqual(0, ets:info(beamtalk_agg_free_slots, size)),
+                %% Zeroed: one dispatch reads as exactly one call.
+                [
+                    begin
+                        K = list_to_binary(pid_to_list(P)),
+                        #{K := #{<<"methods">> := #{<<"probed">> := S}}} =
+                            beamtalk_trace_store:get_stats(P),
+                        ?assertEqual(1, maps:get(<<"calls">>, S))
+                    end
+                 || P <- Pids2
+                ],
+                [P ! stop || P <- Pids2]
+            end)}
+    end}.
+
+free_slots_upgrade_recreates_unsharded_table_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {"a pre-BT-4120 `set` free list is dropped and recreated sharded",
+            ?_test(begin
+                StorePid = whereis(beamtalk_trace_store),
+                ok = sys:suspend(StorePid),
+                try
+                    %% Simulate the pre-sharding layout: any process may
+                    %% delete a named table.
+                    true = ets:delete(beamtalk_agg_free_slots),
+                    _ = ets:new(beamtalk_agg_free_slots, [named_table, public, set]),
+                    Ref = atomics:new(8, [{signed, true}]),
+                    true = ets:insert(beamtalk_agg_free_slots, {{Ref, 1}}),
+                    ?assertEqual(ok, sys:change_code(StorePid, beamtalk_trace_store, "2", []))
+                after
+                    ok = sys:resume(StorePid)
+                end,
+                ?assertEqual(ordered_set, ets:info(beamtalk_agg_free_slots, type)),
+                ?assertEqual(0, ets:info(beamtalk_agg_free_slots, size)),
+                %% The store is functional and tracks new pid rows.
+                beamtalk_trace_store:enable(),
+                P = idle_process(),
+                beamtalk_trace_store:record_dispatch(P, ping, 1, ok, sync, 'Counter'),
+                ?assertMatch([_], ets:lookup(beamtalk_agg_pid, {P, ping})),
+                P ! stop
             end)}
     end}.

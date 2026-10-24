@@ -393,6 +393,7 @@ impl CoreErlangGenerator {
         self.direct_call_eligible = Self::compute_direct_call_eligible(hierarchy, self);
         if let Some(class) = module.classes.first() {
             self.own_direct_class_methods = self.own_direct_class_methods_for(&class.name.name);
+            self.own_direct_constructors = self.own_direct_constructors_for(&class.name.name);
             self.own_stdlib_trait_methods = self.own_stdlib_trait_methods_for(hierarchy, class);
             self.own_overrides_collection_selector =
                 self.overrides_collection_selector_for(hierarchy, class);
@@ -493,20 +494,45 @@ impl CoreErlangGenerator {
             })
     }
 
+    /// The class's own directly-callable constructors for `__beamtalk_meta`:
+    /// `new` and/or `new:`, in that order. Empty for classes with
+    /// none (and for native facades).
+    fn own_direct_constructors_for(&self, class_name: &str) -> Vec<String> {
+        let Some(info) = self.direct_call_eligible.get(class_name) else {
+            return Vec::new();
+        };
+        let mut own = Vec::new();
+        if info.direct_new0 {
+            own.push("new".to_string());
+        }
+        if info.direct_new1 {
+            own.push("new:".to_string());
+        }
+        own
+    }
+
     /// A class's direct-call-eligible class methods as sorted
-    /// `(raw selector, safe function name)` pairs, read from the already
+    /// `(safe selector, safe function name)` pairs, read from the already
     /// computed `direct_call_eligible` (ADR 0129 Phase 0b) — the value baked
     /// into `__beamtalk_meta/0` as `direct_class_methods`.
     fn own_direct_class_methods_for(&self, class_name: &str) -> Vec<(String, String)> {
         let Some(info) = self.direct_call_eligible.get(class_name) else {
             return Vec::new();
         };
+        // The key is the *safe* selector, not the raw one: a keyword
+        // constructor over many fields exceeds Erlang's 255-char atom limit,
+        // and a raw key would make the module's own `.core` unscannable
+        // (`core_scan_error`). `safe_class_method_selector` is the
+        // identity for short selectors, so existing entries are unchanged;
+        // for long ones it is the same `kw_<hash>` form send sites emit
+        // (`generate_class_method_call`) and `class_method_info` keys use,
+        // so runtime lookup still hits.
         let mut own: Vec<(String, String)> = info
             .selectors
             .iter()
             .map(|sel| {
                 (
-                    sel.clone(),
+                    super::selector_mangler::safe_class_method_selector(sel),
                     super::selector_mangler::safe_class_method_fn_name(sel),
                 )
             })
@@ -537,40 +563,50 @@ impl CoreErlangGenerator {
             //
             // ADR 0119 Context: this is the only place that
             // iterates *every* hierarchy class unconditionally, including
-            // `Future` (a runtime-only builtin with no `stdlib/src/Future.bt`
-            // source — see `class_hierarchy/builtins.rs`). `Future`'s
-            // hardcoded `ClassInfo` always has empty `class_methods` today,
-            // so this gate is what keeps it from reaching
-            // `compiled_module_name` here and emitting a reference to a
-            // nonexistent `bt@...` module. If `Future` (or another
-            // no-`.bt`-source builtin) ever gains real class methods, this gate
-            // stops protecting it and its module resolution needs a real
-            // registry answer (`ClassModuleRegistry`'s `ModuleName::Native`
-            // variant exists for exactly this) — not implemented
-            // speculatively now, since no current call site resolves
-            // `Future`'s module at all.
-            if class_info.class_methods.is_empty() {
-                continue;
-            }
-
+            // Runtime-only builtins without `.bt` source (e.g. `Future` —
+            // see `class_hierarchy/builtins.rs`) have empty `class_methods`
+            // and no constructor anchor, so the insert condition below keeps
+            // them from reaching `compiled_module_name` (which would emit a
+            // reference to a nonexistent `bt@...` module). If `Future` (or
+            // another no-`.bt`-source builtin) ever gains real class methods
+            // or constructors, its module resolution needs a real registry
+            // answer (`ClassModuleRegistry`'s `ModuleName::Native` variant
+            // exists for exactly this) — not implemented speculatively now,
+            // since no current call site resolves such a module at all.
             let mut selectors = std::collections::HashSet::new();
-            for method in &class_info.class_methods {
-                // Sealed class, no class variables, not a process-state
-                // constructor, `class sealed` method: the single rule shared
-                // with the `class-state-abroad` lint.
-                if !class_info.is_direct_call_eligible(method) {
-                    continue;
+            // Skip the method scan (but not the constructor rule below) for
+            // method-less classes: it only avoids resolving runtime-only
+            // builtins' modules (e.g. `Future`), while a method-less Value
+            // still gets a direct `new/0`.
+            if !class_info.class_methods.is_empty() {
+                for method in &class_info.class_methods {
+                    // Sealed class, no class variables, not a process-state
+                    // constructor, `class sealed` method: the single rule shared
+                    // with the `class-state-abroad` lint.
+                    if !class_info.is_direct_call_eligible(method) {
+                        continue;
+                    }
+                    selectors.insert(method.selector.to_string());
                 }
-                selectors.insert(method.selector.to_string());
+            }
+            // constructors. Keyword constructors share the direct
+            // `(nil, args...)` shape, so they join the selector set;
+            // `new`/`new:` need arity-specific emission/lookup and travel in
+            // dedicated flags instead (never in `selectors`).
+            let ctors = hierarchy.direct_constructors(class_name);
+            if let Some(keyword) = &ctors.keyword {
+                selectors.insert(keyword.to_string());
             }
 
-            if !selectors.is_empty() {
+            if !selectors.is_empty() || ctors.new0 || ctors.new1 {
                 let module_name = EcoString::from(generator.compiled_module_name(class_name));
                 result.insert(
                     class_name.to_string(),
                     DirectCallClassInfo {
                         module_name,
                         selectors,
+                        direct_new0: ctors.new0,
+                        direct_new1: ctors.new1,
                     },
                 );
             }

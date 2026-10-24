@@ -941,6 +941,7 @@ fn cycle_detection_in_superclass_chain() {
             package: None,
             is_value: false,
             is_native: false,
+            auto_ctors: None,
             handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
@@ -969,6 +970,7 @@ fn cycle_detection_in_superclass_chain() {
             package: None,
             is_value: false,
             is_native: false,
+            auto_ctors: None,
             handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
@@ -2314,6 +2316,7 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![EcoString::from("count")],
         state_types: HashMap::new(),
@@ -2363,6 +2366,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![EcoString::from("count")],
         state_types: HashMap::new(),
@@ -2403,6 +2407,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
@@ -2451,6 +2456,7 @@ fn add_from_beam_meta_skips_builtins() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
@@ -2537,6 +2543,7 @@ fn stamp_package_does_not_overwrite_existing_package() {
         package: Some(EcoString::from("other_pkg")),
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
@@ -2596,6 +2603,7 @@ fn stamp_package_on_infos_does_not_overwrite_existing_package() {
         package: Some(EcoString::from("other_pkg")),
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
@@ -2633,6 +2641,7 @@ fn add_from_beam_meta_preserves_is_internal_and_package() {
         package: Some(EcoString::from("mylib")),
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
@@ -3206,6 +3215,7 @@ fn cross_file_value_sub_subclass_finds_new() {
         package: None,
         is_value: true,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![EcoString::from("x")],
         state_types: HashMap::new(),
@@ -3288,6 +3298,7 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![EcoString::from("proc"), EcoString::from("id")],
         state_types: HashMap::new(),
@@ -3399,6 +3410,7 @@ fn cross_file_all_initialize_assigns_includes_parent_summary() {
         package: None,
         is_value: false,
         is_native: false,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![EcoString::from("socket")],
         state_types: HashMap::new(),
@@ -3504,6 +3516,7 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
         package: None,
         is_value: false,
         is_native: true,
+        auto_ctors: None,
         handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
@@ -3557,4 +3570,292 @@ fn all_initialize_assigns_missing_chain_link_marks_incomplete() {
         "an unresolved ancestor (missing from the hierarchy) must mark the summary incomplete"
     );
     assert!(summary.assigned.is_empty());
+}
+
+// --- direct constructor tests ---
+fn bt4099_hierarchy_for_source(source: &str) -> ClassHierarchy {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    ClassHierarchy::build(&module)
+        .0
+        .expect("fixture hierarchy should build")
+}
+
+#[test]
+fn direct_constructors_value_new_init_is_intrinsic_router() {
+    // The walk skips `Value`'s `new:` assuming the `@intrinsic
+    // basicNewWith` router; `MethodInfo` has no body, so pin the body
+    // by parsing `stdlib/src/value.bt` itself.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src/value.bt");
+    let source =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let tokens = crate::source_analysis::lex_with_eof(&source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let value = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Value")
+        .expect("value.bt should define class Value");
+    let new_init = value
+        .class_methods
+        .iter()
+        .find(|m| m.selector.name().as_str() == "new:")
+        .expect("Value should define class-side `new:`");
+    assert_eq!(
+        new_init.body.len(),
+        1,
+        "Value's `new:` should be a single-expression router"
+    );
+    match &new_init.body[0].expression {
+        crate::ast::Expression::Primitive {
+            name, is_intrinsic, ..
+        } => {
+            assert!(
+                *is_intrinsic,
+                "Value's `new:` must be `@intrinsic`, not `@primitive`"
+            );
+            assert_eq!(
+                name.as_str(),
+                "basicNewWith",
+                "Value's `new:` must route via `basicNewWith`"
+            );
+        }
+        other => panic!("Value's `new:` must be the intrinsic router, found: {other:?}"),
+    }
+}
+
+#[test]
+fn direct_constructors_plain_value() {
+    // Builtin Value itself defines class `new:` (the @intrinsic router), so
+    // `new1` being true here proves the ancestor walk skips it. Pin that
+    // premise explicitly: if Value ever loses `new:`, revisit the skip.
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Pt\n  state: x :: Integer = 0\n  state: y :: Integer = 0\n",
+    );
+    let value_info = h.get_class("Value").expect("builtins provide Value");
+    assert!(
+        value_info
+            .class_methods
+            .iter()
+            .any(|m| m.selector.as_str() == "new:"),
+        "premise: Value defines class new: (the @intrinsic router the walk skips)"
+    );
+    let ctors = h.direct_constructors("Pt");
+    assert!(ctors.new0, "plain Value: `Pt new` builds in the caller");
+    assert!(ctors.new1, "plain Value: `Pt new:` builds in the caller");
+    assert_eq!(
+        ctors.keyword.as_deref(),
+        Some("x:y:"),
+        "plain Value: keyword constructor builds in the caller"
+    );
+}
+
+#[test]
+fn direct_constructors_stateless_value() {
+    let h = bt4099_hierarchy_for_source("Value subclass: Empty\n");
+    let ctors = h.direct_constructors("Empty");
+    assert!(ctors.new0);
+    assert!(ctors.new1);
+    assert_eq!(ctors.keyword, None);
+}
+
+#[test]
+fn direct_constructors_user_new_blocks_new0_only() {
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Pt\n  state: x :: Integer = 0\n  class new => Pt x: 1\n",
+    );
+    let ctors = h.direct_constructors("Pt");
+    assert!(!ctors.new0, "user `new` runs in the class process");
+    assert!(ctors.new1, "user nullary `new` does not affect `new:`");
+}
+
+#[test]
+fn direct_constructors_instance_new_blocks_new0() {
+    let h =
+        bt4099_hierarchy_for_source("Value subclass: Pt\n  state: x :: Integer = 0\n  new => 42\n");
+    let ctors = h.direct_constructors("Pt");
+    assert!(
+        !ctors.new0,
+        "instance `new` suppresses the synthesized new/0"
+    );
+}
+
+#[test]
+fn direct_constructors_user_new_init_blocks_new1_only() {
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Pt\n  state: x :: Integer = 0\n  class new: m => Pt x: 1\n",
+    );
+    let ctors = h.direct_constructors("Pt");
+    assert!(!ctors.new1, "user `new:` runs in the class process");
+    assert!(ctors.new0, "user `new:` does not affect nullary `new`");
+}
+
+#[test]
+fn direct_constructors_instance_new_init_blocks_new1() {
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Pt\n  state: x :: Integer = 0\n  new: m => 42\n",
+    );
+    let ctors = h.direct_constructors("Pt");
+    assert!(
+        !ctors.new1,
+        "instance `new:` suppresses the synthesized new/1"
+    );
+}
+
+#[test]
+fn direct_constructors_class_state_blocks_all() {
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Pt\n  state: x :: Integer = 0\n  classState: total = 0\n",
+    );
+    let ctors = h.direct_constructors("Pt");
+    assert!(!ctors.new0);
+    assert!(!ctors.new1);
+    assert_eq!(ctors.keyword, None);
+}
+
+#[test]
+fn direct_constructors_abstract_blocks_new_but_not_keyword() {
+    // `new`/`new:` route through the `{new, _}` handler, which rejects
+    // abstract classes; keyword constructors go through `class_method_call`,
+    // which has no abstract check — the direct call preserves both paths.
+    let h = bt4099_hierarchy_for_source("abstract Value subclass: Pt\n  state: x :: Integer = 0\n");
+    let ctors = h.direct_constructors("Pt");
+    assert!(!ctors.new0);
+    assert!(!ctors.new1);
+    assert_eq!(ctors.keyword.as_deref(), Some("x:"));
+}
+
+#[test]
+fn direct_constructors_non_value_excluded() {
+    let h = bt4099_hierarchy_for_source("Object subclass: Box\n  state: x :: Integer = 0\n");
+    let ctors = h.direct_constructors("Box");
+    assert!(!ctors.new0);
+    assert!(!ctors.new1);
+    assert_eq!(ctors.keyword, None);
+}
+
+#[test]
+fn direct_constructors_actor_excluded() {
+    let h = bt4099_hierarchy_for_source("Actor subclass: Counter\n  state: count :: Integer = 0\n");
+    let ctors = h.direct_constructors("Counter");
+    assert!(!ctors.new0);
+    assert!(!ctors.new1);
+    assert_eq!(ctors.keyword, None);
+}
+
+#[test]
+fn direct_constructors_native_excluded() {
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Natty native: beamtalk_natty\n  state: x :: Integer = 0\n",
+    );
+    let ctors = h.direct_constructors("Natty");
+    assert!(!ctors.new0);
+    assert!(!ctors.new1);
+}
+
+#[test]
+fn direct_constructors_user_keyword_suppresses_keyword() {
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Pt\n  state: x :: Integer = 0\n  class x: v => Pt new\n",
+    );
+    let ctors = h.direct_constructors("Pt");
+    assert_eq!(
+        ctors.keyword, None,
+        "user class-side x: suppresses the synthesized keyword constructor"
+    );
+    assert!(ctors.new0);
+    assert!(ctors.new1);
+}
+
+#[test]
+fn direct_constructors_unknown_class_fails_closed() {
+    let h = bt4099_hierarchy_for_source("Value subclass: Pt\n");
+    assert_eq!(h.direct_constructors("Nope"), DirectConstructors::default());
+}
+
+#[test]
+fn direct_constructors_missing_ancestor_fails_closed_for_new1() {
+    let mut h = bt4099_hierarchy_for_source("Value subclass: Pt\n");
+    h.classes.get_mut("Pt").expect("Pt should exist").superclass =
+        Some(ecow::EcoString::from("Missing"));
+    let ctors = h.direct_constructors("Pt");
+    assert!(!ctors.new1, "unknown ancestors fail closed");
+    assert!(
+        ctors.new0,
+        "nullary `new` needs no ancestor walk: it always calls the class's own new/0"
+    );
+}
+
+#[test]
+fn direct_constructors_ancestor_user_new_init_blocks_new1() {
+    // Simulates the post-writeback indirect case (not yet produced by
+    // extraction): Sub's anchor is set but its superclass is user code.
+    let mut h = bt4099_hierarchy_for_source(
+        "Value subclass: Mid\n  class new: m => Mid new\nValue subclass: Sub\n",
+    );
+    {
+        let sub = h.classes.get_mut("Sub").expect("Sub should exist");
+        sub.superclass = Some(ecow::EcoString::from("Mid"));
+    }
+    let ctors = h.direct_constructors("Sub");
+    assert!(
+        !ctors.new1,
+        "ancestor user `new:` wins at runtime via chain dispatch"
+    );
+    assert!(ctors.new0, "ancestor `new:` does not affect nullary `new`");
+}
+
+#[test]
+fn direct_constructors_ancestor_user_new_is_shadowed() {
+    // Same simulation: an ancestor's nullary user `new` never runs for
+    // `Sub new` (the `{new, []}` handler calls Sub's own new/0), so it
+    // blocks nothing.
+    let mut h = bt4099_hierarchy_for_source(
+        "Value subclass: Mid\n  class new => Mid new\nValue subclass: Sub\n",
+    );
+    {
+        let sub = h.classes.get_mut("Sub").expect("Sub should exist");
+        sub.superclass = Some(ecow::EcoString::from("Mid"));
+    }
+    let ctors = h.direct_constructors("Sub");
+    assert!(ctors.new0);
+    assert!(ctors.new1);
+}
+
+#[test]
+fn direct_constructors_cycle_terminates_and_fails_closed() {
+    let mut h = bt4099_hierarchy_for_source("Value subclass: Aaa\nValue subclass: Bbb\n");
+    h.classes
+        .get_mut("Aaa")
+        .expect("Aaa should exist")
+        .superclass = Some(ecow::EcoString::from("Bbb"));
+    h.classes
+        .get_mut("Bbb")
+        .expect("Bbb should exist")
+        .superclass = Some(ecow::EcoString::from("Aaa"));
+    let ctors = h.direct_constructors("Aaa");
+    assert!(!ctors.new1);
+    assert!(ctors.new0);
+}
+
+#[test]
+fn direct_constructors_incomplete_ancestor_fails_closed_for_new1() {
+    // An existing ancestor with an incomplete surface may hide a user
+    // `new:` dropped by error recovery: fail closed.
+    let mut h = bt4099_hierarchy_for_source("Value subclass: Mid\nValue subclass: Sub\n");
+    {
+        let sub = h.classes.get_mut("Sub").expect("Sub should exist");
+        sub.superclass = Some(ecow::EcoString::from("Mid"));
+        let mid = h.classes.get_mut("Mid").expect("Mid should exist");
+        mid.surface_incomplete = true;
+    }
+    let ctors = h.direct_constructors("Sub");
+    assert!(
+        !ctors.new1,
+        "an ancestor with an incomplete surface may hide a user `new:`"
+    );
+    assert!(
+        ctors.new0,
+        "nullary `new` needs no ancestor walk: it always calls the class's own new/0"
+    );
 }

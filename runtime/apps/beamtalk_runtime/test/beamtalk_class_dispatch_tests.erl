@@ -157,7 +157,7 @@ class_method_fun_name_boundary_exactly_fits_unhashed_test() ->
 
 %% Conformance: `class_method_fun_name/1` must hash a long selector
 %% identically to the Rust codegen's `safe_class_method_fn_name`
-%% (`crates/beamtalk-core/src/codegen/core_erlang/selector_mangler.rs`) — same
+%% (`crates/beamtalk-codegen/src/core_erlang/selector_mangler.rs`) — same
 %% FNV-1a 64-bit hash, same threshold, same naming scheme. The corpus is the
 %% single source of truth both implementations are pinned to; the Rust side
 %% asserts the identical cases in

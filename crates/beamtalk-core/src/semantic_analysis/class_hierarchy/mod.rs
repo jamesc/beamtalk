@@ -33,8 +33,8 @@ pub(crate) fn generated_stdlib_protocol_files() -> Vec<(&'static str, &'static s
 #[cfg(test)]
 mod tests;
 pub use class_info::{
-    ClassInfo, ClassVarInfo, InitializeAssignsSummary, MethodInfo, SuperclassTypeArg,
-    format_default_value,
+    AutoConstructors, ClassInfo, ClassVarInfo, DirectConstructors, InitializeAssignsSummary,
+    MethodInfo, SuperclassTypeArg, format_default_value,
 };
 pub use declared_type::DeclaredType;
 /// Per-class selector index: maps class name → (selector → method vec position).
@@ -243,6 +243,8 @@ impl ClassHierarchy {
                 name.clone(),
                 ClassInfo {
                     name: name.clone(),
+                    // Synthetic protocol root: no .bt source, no synthesized constructors.
+                    auto_ctors: None,
                     superclass: Some("Protocol".into()),
                     is_sealed: true,
                     is_abstract: true,
@@ -460,6 +462,8 @@ impl ClassHierarchy {
                     eco_name,
                     ClassInfo {
                         name: EcoString::from(class_name.as_str()),
+                        // Index fallback for unknown classes: fail closed.
+                        auto_ctors: None,
                         superclass: Some(EcoString::from(superclass_name.as_str())),
                         is_sealed: false,
                         is_abstract: false,

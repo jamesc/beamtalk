@@ -1,0 +1,114 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// direct Value construction. `new`, `new:` and the keyword ctor
+// of a stateless Value subclass build in the caller — statically as a
+// direct module call, dynamically via the baked `direct_constructors`
+// verdict — while a custom `new` / `new:` (only `Object` subclasses can
+// define them; `Value` seals both) keeps routing through the class
+// gen_server and wins.
+//
+// Fixtures: fixtures/direct_ctor_point.bt, fixtures/direct_ctor_custom.bt,
+// fixtures/direct_ctor_child.bt.
+
+TestCase subclass: DirectConstructionTest
+
+  // --- eligible construction builds correct values -------------------------
+  testNewBuildsDefaults =>
+    pt := DirectCtorPoint new
+    self assert: pt x equals: 0
+    self assert: pt y equals: 0
+
+  testNewWithMapBuildsOverridden =>
+    pt := DirectCtorPoint new: #{#x => 3}
+    self assert: pt x equals: 3
+    self assert: pt y equals: 0
+
+  testKeywordBuildsSlots =>
+    pt := DirectCtorPoint x: 1 y: 2
+    self assert: pt x equals: 1
+    self assert: pt y equals: 2
+
+  // --- dynamic forms agree with the static form ----------------------------
+  testVariableReceiverNew =>
+    cls := DirectCtorPoint
+    pt := cls new
+    self assert: pt x equals: 0
+    self assert: pt y equals: 0
+
+  testVariableReceiverNewWithMap =>
+    cls := DirectCtorPoint
+    pt := cls new: #{#y => 4}
+    self assert: pt x equals: 0
+    self assert: pt y equals: 4
+
+  testVariableReceiverKeyword =>
+    cls := DirectCtorPoint
+    pt := cls x: 5 y: 6
+    self assert: pt x equals: 5
+    self assert: pt y equals: 6
+
+  testPerformNew =>
+    pt := DirectCtorPoint perform: #new
+    self assert: pt x equals: 0
+
+  testPerformNewWithMap =>
+    pt := DirectCtorPoint perform: #new: withArguments: #(#{#x => 7})
+    self assert: pt x equals: 7
+    self assert: pt y equals: 0
+
+  // --- subclass with a clean chain (slow path) -----------------------------
+  testChildNewBuildsInheritedDefaults =>
+    c := DirectCtorChild new
+    self assert: c x equals: 0
+    self assert: c y equals: 0
+    self assert: c z equals: 0
+
+  testChildNewWithMapSetsOwnAndInherited =>
+    c := DirectCtorChild new: #{#x => 1, #z => 3}
+    self assert: c x equals: 1
+    self assert: c y equals: 0
+    self assert: c z equals: 3
+
+  testChildVariableReceiverNew =>
+    cls := DirectCtorChild
+    c := cls new
+    self assert: c class equals: DirectCtorChild
+    self assert: c z equals: 0
+
+  testChildKeywordOwnField =>
+    c := DirectCtorChild z: 9
+    self assert: c z equals: 9
+    self assert: c x equals: 0
+
+  // --- native facades share the synthesized keyword shape -------------------
+  testNativeKeywordStaysDirect =>
+    n := Node name: #'w1@localhost'
+    self assert: n name equals: #'w1@localhost'
+    p := Package
+      name: "pkg"
+      version: "1.0"
+      classes: #()
+      dependencies: #()
+      source: ""
+    self assert: p name equals: "pkg"
+    self assert: p version equals: "1.0"
+
+  // --- custom constructors win through the gen_server ----------------------
+  testCustomNewWinsInClassProcess =>
+    pid := DirectCtorCustom new
+    self deny: (pid =:= Erlang erlang self)
+
+  testCustomNewWinsDynamically =>
+    cls := DirectCtorCustom
+    pid := cls new
+    self deny: (pid =:= Erlang erlang self)
+
+  testCustomNewWithMapWinsInClassProcess =>
+    pid := DirectCtorCustom new: #{#x => 1}
+    self deny: (pid =:= Erlang erlang self)
+
+  testCustomNewWithMapWinsDynamically =>
+    cls := DirectCtorCustom
+    pid := cls new: #{#x => 1}
+    self deny: (pid =:= Erlang erlang self)

@@ -31,6 +31,7 @@ impl CoreErlangGenerator {
             otp_release: self.otp_release.as_deref(),
             direct_class_methods: &self.own_direct_class_methods,
             stdlib_trait_methods: &self.own_stdlib_trait_methods,
+            direct_constructors: &self.own_direct_constructors,
             overrides_collection_selector: self.own_overrides_collection_selector,
             overrides_species_construction: self.own_overrides_species_construction,
         }
