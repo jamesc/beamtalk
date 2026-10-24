@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-4099: direct Value construction. `new`, `new:` and the keyword ctor
+// direct Value construction. `new`, `new:` and the keyword ctor
 // of a stateless Value subclass build in the caller — statically as a
 // direct module call, dynamically via the baked `direct_constructors`
 // verdict — while a custom `new` / `new:` (only `Object` subclasses can
@@ -57,7 +57,7 @@ TestCase subclass: DirectConstructionTest
     self assert: pt x equals: 7
     self assert: pt y equals: 0
 
-  // --- subclass with a clean chain stays direct ----------------------------
+  // --- subclass with a clean chain (slow path) -----------------------------
   testChildNewBuildsInheritedDefaults =>
     c := DirectCtorChild new
     self assert: c x equals: 0

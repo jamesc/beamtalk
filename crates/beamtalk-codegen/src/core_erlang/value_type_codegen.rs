@@ -427,9 +427,10 @@ impl CoreErlangGenerator {
         if !has_explicit_new {
             parts.push(Document::Str("'new'/0"));
         }
-        // new/1 (the keyword new: constructor, or the auto-generated initializer) is
-        // suppressed if the class explicitly defines either new: (keyword, which emits
-        // 'new'/1 itself) OR unary new (which also emits 'new'/1 via Self parameter).
+        // new/1 (the auto-generated initializer) is suppressed if the class
+        // explicitly defines new: on either side (the class-side method
+        // compiles to 'class_new'/2 instead) OR unary instance-side new
+        // (which emits 'new'/1 itself via its Self parameter).
         if !has_explicit_new_with && !has_explicit_new {
             parts.push(Document::Str("'new'/1"));
         }

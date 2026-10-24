@@ -3572,13 +3572,56 @@ fn all_initialize_assigns_missing_chain_link_marks_incomplete() {
     assert!(summary.assigned.is_empty());
 }
 
-// --- BT-4099 direct constructor tests ---
+// --- direct constructor tests ---
 fn bt4099_hierarchy_for_source(source: &str) -> ClassHierarchy {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _) = crate::source_analysis::parse(tokens);
     ClassHierarchy::build(&module)
         .0
         .expect("fixture hierarchy should build")
+}
+
+#[test]
+fn direct_constructors_value_new_init_is_intrinsic_router() {
+    // The walk skips `Value`'s `new:` assuming the `@intrinsic
+    // basicNewWith` router; `MethodInfo` has no body, so pin the body
+    // by parsing `stdlib/src/value.bt` itself.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src/value.bt");
+    let source =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let tokens = crate::source_analysis::lex_with_eof(&source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let value = module
+        .classes
+        .iter()
+        .find(|c| c.name.name.as_str() == "Value")
+        .expect("value.bt should define class Value");
+    let new_init = value
+        .class_methods
+        .iter()
+        .find(|m| m.selector.name().as_str() == "new:")
+        .expect("Value should define class-side `new:`");
+    assert_eq!(
+        new_init.body.len(),
+        1,
+        "Value's `new:` should be a single-expression router"
+    );
+    match &new_init.body[0].expression {
+        crate::ast::Expression::Primitive {
+            name, is_intrinsic, ..
+        } => {
+            assert!(
+                *is_intrinsic,
+                "Value's `new:` must be `@intrinsic`, not `@primitive`"
+            );
+            assert_eq!(
+                name.as_str(),
+                "basicNewWith",
+                "Value's `new:` must route via `basicNewWith`"
+            );
+        }
+        other => panic!("Value's `new:` must be the intrinsic router, found: {other:?}"),
+    }
 }
 
 #[test]
@@ -3793,4 +3836,26 @@ fn direct_constructors_cycle_terminates_and_fails_closed() {
     let ctors = h.direct_constructors("Aaa");
     assert!(!ctors.new1);
     assert!(ctors.new0);
+}
+
+#[test]
+fn direct_constructors_incomplete_ancestor_fails_closed_for_new1() {
+    // An existing ancestor with an incomplete surface may hide a user
+    // `new:` dropped by error recovery: fail closed.
+    let mut h = bt4099_hierarchy_for_source("Value subclass: Mid\nValue subclass: Sub\n");
+    {
+        let sub = h.classes.get_mut("Sub").expect("Sub should exist");
+        sub.superclass = Some(ecow::EcoString::from("Mid"));
+        let mid = h.classes.get_mut("Mid").expect("Mid should exist");
+        mid.surface_incomplete = true;
+    }
+    let ctors = h.direct_constructors("Sub");
+    assert!(
+        !ctors.new1,
+        "an ancestor with an incomplete surface may hide a user `new:`"
+    );
+    assert!(
+        ctors.new0,
+        "nullary `new` needs no ancestor walk: it always calls the class's own new/0"
+    );
 }

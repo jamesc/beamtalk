@@ -1,9 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-4099: a plain `Value` sub-subclass of `DirectCtorPoint` — no custom
-// constructors anywhere in its chain, so its `new` / `new:` stay direct
-// (static and dynamic forms), with inherited fields defaulted.
+// A plain `Value` sub-subclass of `DirectCtorPoint`. Indirect
+// subclasses take the slow path; these tests pin its behavior.
 
 DirectCtorPoint subclass: DirectCtorChild
   field: z = 0

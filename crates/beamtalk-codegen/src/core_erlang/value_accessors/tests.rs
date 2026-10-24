@@ -293,3 +293,50 @@ fn test_synthetic_skips_user_overridden_keyword_constructor() {
         "user-defined keyword constructor must suppress the synthetic class-side entry"
     );
 }
+
+// ─── Anchor/emission agreement ─────────────────────────────
+
+#[test]
+fn test_keyword_constructor_anchor_agrees_with_emission() {
+    // The anchor and emission copies of the keyword-constructor rule
+    // must agree; a drift mints calls to nonexistent functions.
+    let cases: &[(&str, &str, Option<&str>)] = &[
+        (
+            "plain",
+            "Value subclass: Pt\n  field: x = 0\n  field: y = 0\n",
+            Some("x:y:"),
+        ),
+        ("stateless", "Value subclass: Empty\n", None),
+        (
+            "user collision",
+            "Value subclass: Pt\n  field: x = 0\n  class x: v => Pt new\n",
+            None,
+        ),
+        (
+            "user new keeps kw",
+            "Value subclass: Pt\n  field: x = 0\n  class new => Pt x: 1\n",
+            Some("x:"),
+        ),
+        ("object", "Object subclass: Box\n  field: x = 0\n", None),
+    ];
+    for (name, src, expected) in cases {
+        let module = beamtalk_core::test_helpers::test_support::parse_bt(src);
+        let class = module
+            .classes
+            .first()
+            .expect("fixture should declare a class");
+        let hierarchy =
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+                .0
+                .expect("fixture hierarchy should build");
+        let anchor = hierarchy
+            .get_class(class.name.name.as_str())
+            .expect("class should be present")
+            .auto_ctors
+            .as_ref()
+            .and_then(|auto| auto.keyword_constructor.as_deref());
+        let emitted = compute_auto_slot_methods(class).and_then(|auto| auto.keyword_constructor);
+        assert_eq!(anchor, *expected, "{name}: anchor decision");
+        assert_eq!(emitted.as_deref(), *expected, "{name}: emission decision");
+    }
+}

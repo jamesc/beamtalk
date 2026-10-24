@@ -145,16 +145,12 @@ pub enum SuperclassTypeArg {
 /// Information about a class in the hierarchy.
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
-/// Constructor synthesis record (BT-4099): what the class's own compilation
+/// Constructor synthesis record: what the class's own compilation
 /// emitted for value construction.
 ///
-/// `Some` iff the class's AST kind was `Value` when its `ClassInfo` was
-/// extracted — the same gate codegen's `compute_auto_slot_methods` uses, so
-/// `Some` means the compiled module exports the synthesized `new/0`/`new/1`
-/// (modulo user-supplied `new`/`new:`, which suppress them). The keyword
-/// decision is the one `add_value_auto_methods` made: `Some(selector)` iff a
-/// keyword constructor was synthesized (non-empty state, no user-defined
-/// class method with that selector).
+/// `Some` for direct `Value` subclasses only: extraction sees the AST
+/// kind before writeback, so indirect subclasses keep `None` and take
+/// the slow path.
 ///
 /// `None` for non-Value classes, for Value classes whose AST kind fell back
 /// (cross-file parent gaps — `propagate_class_kind` corrects `is_value` for
@@ -169,7 +165,7 @@ pub struct AutoConstructors {
     pub keyword_constructor: Option<EcoString>,
 }
 
-/// Constructor direct-call eligibility (BT-4099): which value-construction
+/// Constructor direct-call eligibility: which value-construction
 /// sends for a class build in the caller instead of routing through the
 /// class process's `gen_server`.
 ///
@@ -182,7 +178,9 @@ pub struct AutoConstructors {
 pub struct DirectConstructors {
     /// `Class new` (no args) builds via a direct `Module:'new'()` call.
     pub new0: bool,
-    /// `Class new: map` builds via a direct `Module:'new'(Map)` call.
+    /// `Class new: map` is eligible for a direct `Module:'new'(Map)` call.
+    /// Consulted by dynamic sends only: static `new:` keeps `class_send`
+    /// so the chain verdict stays single-sourced in the baked metadata.
     pub new1: bool,
     /// Keyword constructor selector callable directly (e.g. `x:y:`), if any.
     pub keyword: Option<EcoString>,
@@ -225,7 +223,7 @@ pub struct ClassInfo {
     /// `state:` fields (state is owned by the Erlang `gen_server`).
     pub is_native: bool,
     /// Constructor synthesis record, if the class's AST kind was `Value` at
-    /// extraction (BT-4099). See [`AutoConstructors`] for the invariant.
+    /// extraction. See [`AutoConstructors`] for the invariant.
     #[cfg_attr(feature = "serde", serde(default))]
     pub auto_ctors: Option<AutoConstructors>,
     /// Declared sendability handle scope (ADR 0103, `handleScope: #symbol`).
@@ -447,9 +445,7 @@ impl ClassInfo {
         // For `Value subclass:` classes, synthesize auto-generated slot
         // methods so the type checker and cross-file consumers can resolve them.
         // The recorded keyword decision is also the constructor-emission
-        // anchor (BT-4099): `Some` here means this same AST will get value
-        // treatment in codegen (`compute_auto_slot_methods` gates on the
-        // identical `class_kind == Value` check).
+        // anchor: `Some` here means direct construction verdicts apply.
         let auto_ctors = if class.class_kind == ClassKind::Value {
             Some(AutoConstructors {
                 keyword_constructor: ClassHierarchy::add_value_auto_methods(

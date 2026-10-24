@@ -2791,7 +2791,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let raw_selector = selector.name().to_string();
 
-        // BT-4099: nullary `new` on an eligible Value builds via a direct
+        // nullary `new` on an eligible Value builds via a direct
         // `Module:'new'()` call. The synthesized builder takes no arguments
         // (not even `ClassSelf`), so it cannot use the generic direct-call
         // shape below. (`new:` stays on `class_send`: its chain verdict
@@ -2938,7 +2938,7 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// Module for a direct nullary-`new` call (BT-4099), if eligible.
+    /// Module for a direct nullary-`new` call, if eligible.
     ///
     /// Companion to [`direct_call_eligible_module`](Self::direct_call_eligible_module)
     /// for the `new` constructor, which cannot live in `selectors` (its
@@ -2949,7 +2949,7 @@ impl CoreErlangGenerator {
             .and_then(|info| info.direct_new0.then(|| info.module_name.to_string()))
     }
 
-    /// Generates a direct nullary-`new` call (BT-4099).
+    /// Generates a direct nullary-`new` call.
     ///
     /// ```erlang
     /// call 'module':'new'()

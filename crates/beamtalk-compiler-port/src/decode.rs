@@ -423,7 +423,7 @@ pub(crate) fn parse_class_info_from_meta_term(
         package,
         is_value,
         is_native: false, // BEAM cache doesn't carry native flag; re-derived at parse time
-        // BT-4099: the wire doesn't carry the constructor anchor either;
+        // the wire doesn't carry the constructor anchor either;
         // binary-only cross-package classes conservatively miss out on
         // direct constructor calls (safe `class_send` fallback).
         auto_ctors: None,

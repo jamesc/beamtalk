@@ -65,15 +65,14 @@ pub(in crate::core_erlang) struct DirectCallClassInfo {
     /// The compiled Erlang module name (e.g., `bt@stdlib@tracing`).
     pub module_name: EcoString,
     /// Set of selector names eligible for direct call (e.g., `{"setContext:", "context", ...}`).
-    /// Excludes `startLink`-family selectors and non-sealed class methods.
-    /// Includes synthesized keyword constructors (BT-4099), which share the
-    /// `(nil, args...)` direct-call shape — but never `new`/`new:`, whose
-    /// direct forms have different arities (see below).
+    /// Excludes `startLink`-family selectors; user methods must be `class
+    /// sealed`. Synthesized keyword constructors join unconditionally:
+    /// their body ignores `ClassSelf`. Never contains `new`/`new:`.
     pub selectors: std::collections::HashSet<String>,
-    /// `Class new` builds via a direct `Module:'new'()` call (BT-4099).
+    /// `Class new` builds via a direct `Module:'new'()` call.
     pub direct_new0: bool,
-    /// `Class new: map` builds via a direct `Module:'new'(Map)` call
-    /// (BT-4099). Consulted for `__beamtalk_meta` baking (dynamic sends);
+    /// `Class new: map` builds via a direct `Module:'new'(Map)` call.
+    /// Consulted for `__beamtalk_meta` baking (dynamic sends);
     /// static sends keep the `class_send` fallback so the chain verdict
     /// stays single-sourced in the baked metadata.
     pub direct_new1: bool,

@@ -124,7 +124,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     put_direct_class_methods/2,
     lookup_direct_class_methods/1,
     lookup_direct_class_method/2,
-    %% BT-4099: direct-construction eligibility set for dynamic `new`/`new:`.
+    %% direct-construction eligibility set for dynamic `new`/`new:`.
     put_direct_constructors/2,
     lookup_direct_constructors/1,
     lookup_direct_constructor/2,
@@ -212,7 +212,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     is_typed :: boolean() | undefined,
     is_internal :: boolean() | undefined,
     shape_version :: pos_integer() | undefined,
-    %% BT-4099: `direct_constructors` from the compiled module's
+    %% `direct_constructors` from the compiled module's
     %% `__beamtalk_meta/0` — the `[new]` / `[new, 'new:']` subset
     %% `direct_constructors` (Rust) deemed buildable in the caller without
     %% the class gen_server. A plain list (at most two elements); `[]` for
@@ -1143,7 +1143,7 @@ lookup_direct_class_method(Name, Selector) ->
     end.
 
 -doc """
-Store a class's direct-construction eligibility set (BT-4099).
+Store a class's direct-construction eligibility set.
 
 `Ctors` is the `direct_constructors` value from the class's `__beamtalk_meta/0`
 (`[new]` and/or `['new:']`); pass `[]` to clear it. Updates the existing row in
@@ -1169,7 +1169,7 @@ lookup_direct_constructors(Name) ->
     end.
 
 -doc """
-Resolve a constructor to a direct-callable module for a class (BT-4099),
+Resolve a constructor to a direct-callable module for a class,
 or `error` when the send must go through the class gen_server.
 
 Same gates as `lookup_direct_class_method/2`: the row must name a module,

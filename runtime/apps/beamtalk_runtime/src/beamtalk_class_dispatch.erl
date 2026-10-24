@@ -104,7 +104,7 @@ class_send_plain(ClassPid, spawn, Args) when ClassPid =:= self() ->
 class_send_plain(ClassPid, 'spawnWith:', Args) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, 'spawnWith:', Args);
 class_send_plain(ClassPid, 'new', []) ->
-    %% BT-4099: an eligible Value builds in the caller via a direct
+    %% an eligible Value builds in the caller via a direct
     %% `Module:new()` call — the same call `handle_new_compiled` would make,
     %% minus the gen_server hop (and its `IsConstructible` cache write, which
     %% a later slow-path call recomputes). Anything ineligible falls through
@@ -118,7 +118,7 @@ class_send_plain(ClassPid, 'new', []) ->
             end)
     end;
 class_send_plain(ClassPid, 'new:', [Map]) when is_map(Map) ->
-    %% BT-4099: same for `new:` with a map argument, via `Module:new/1`.
+    %% same for `new:` with a map argument, via `Module:new/1`.
     %% A non-map argument keeps the unguarded clause below, whose gen_server
     %% path reproduces the legacy fallbacks (see `lookup_direct_constructor/3`).
     case lookup_direct_constructor(ClassPid, 'new:', [Map]) of
@@ -210,7 +210,7 @@ lookup_direct_call(_ClassPid, _Selector, _Args) ->
     error.
 
 -doc """
-Resolve a dynamic `new`/`new:` send to a direct module call, if eligible (BT-4099).
+Resolve a dynamic `new`/`new:` send to a direct module call, if eligible.
 
 Eligible when the class's baked `direct_constructors` lists the selector, the
 class names a module and has no runtime-installed class-method funs (the
@@ -224,7 +224,7 @@ The verdict is generated metadata (Rust's `direct_constructors`), never
 re-derived here. `new` needs no chain check because `new/0` is itself the
 override slot (a custom `new` compiles to, or delegates from, it), so the
 direct call and the gen_server path reach the same function either way.
-`new:` inherits BT-3639's trust model: reloading a class re-syncs its own
+`new:` shares the direct-call trust model: reloading a class re-syncs its own
 verdicts, while an ancestor reload does not re-bake descendants. Like
 `lookup_direct_call/3`, the export check only sees loaded code, so a class
 whose module nobody has touched yet takes one gen_server fallback (which

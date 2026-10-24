@@ -718,7 +718,7 @@ struct ClassMeta {
     /// Declared sendability handle scope (ADR 0103, `handleScope: #symbol`).
     /// The bare symbol text (e.g. `"process"`), or `None` when undeclared.
     handle_scope: Option<String>,
-    /// Synthesized keyword constructor selector (BT-4099), if any — the
+    /// Synthesized keyword constructor selector, if any — the
     /// `auto_ctors` anchor decision, captured by
     /// `synthesize_value_auto_methods` against user methods only.
     auto_kw: Option<String>,
@@ -820,7 +820,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
 #[allow(clippy::too_many_lines)] // synthesizes getter + updater + constructor metadata inline
 /// Synthesizes auto getters, `with*` setters and the keyword constructor for
 /// a Value subclass, appending to `methods`/`class_methods`. Returns the
-/// synthesized keyword selector, if any — the BT-4099 `auto_ctors` anchor
+/// synthesized keyword selector, if any — the `auto_ctors` anchor
 /// decision, made here against user methods only (after this runs, the
 /// keyword lives in `class_methods`, so a later re-check could not tell
 /// synthesis from a user collision).
@@ -1378,8 +1378,7 @@ fn extract_class_metadata(
     let class_name = class.name.name.to_string();
 
     // Synthesize auto-generated methods for Value subclasses with state,
-    // capturing the keyword-constructor decision for the `auto_ctors`
-    // anchor (BT-4099).
+    // capturing the keyword-constructor decision for the anchor.
     let auto_kw =
         if class.class_kind == beamtalk_core::ast::ClassKind::Value && !class.state.is_empty() {
             synthesize_value_auto_methods(class, &class_name, &mut methods, &mut class_methods)
@@ -1895,12 +1894,10 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
             .map_or_else(|| "None".to_string(), |s| format!("Some(\"{s}\".into())")),
     );
 
-    // auto_ctors — constructor synthesis record (BT-4099). Mirrors
-    // `ClassInfo::from_class_definition`: `Some` iff the AST kind is `Value`
-    // (the same gate codegen's `compute_auto_slot_methods` uses), with the
-    // keyword decision captured at synthesis time (`meta.auto_kw`) — it must
-    // come from there, not from re-checking `meta.class_methods`, which by
-    // now also holds the synthesized keyword itself.
+    // Constructor synthesis record, mirroring `from_class_definition`:
+    // `Some` iff the AST kind is `Value`. The keyword decision comes from
+    // `meta.auto_kw` (captured at synthesis time): `meta.class_methods`
+    // already holds the synthesized keyword itself.
     let auto_ctors = if meta.class_kind == beamtalk_core::ast::ClassKind::Value {
         match &meta.auto_kw {
             Some(sel) => {
@@ -3199,7 +3196,7 @@ mod tests {
 
     #[test]
     fn test_generate_class_entry_auto_ctors_anchor() {
-        // BT-4099: a Value meta emits a populated anchor from the captured
+        // a Value meta emits a populated anchor from the captured
         // keyword decision (`auto_kw`), `keyword_constructor: None` when
         // synthesis produced nothing, and a bare `None` anchor for
         // non-Value kinds. The decision must be captured at synthesis
@@ -3232,6 +3229,60 @@ mod tests {
             code.contains("auto_ctors: None"),
             "non-Value kinds emit a bare None anchor. Got:\n{code}"
         );
+    }
+
+    #[test]
+    fn test_synthesized_keyword_agrees_with_anchor() {
+        // The generator's keyword-constructor copy must agree with the
+        // hierarchy anchor, or `generated_builtins.rs` and fresh
+        // extraction disagree about synthesized constructors.
+        let cases: &[&str] = &[
+            "Value subclass: Pt\n  field: x = 0\n  field: y = 0\n",
+            "Value subclass: Empty\n",
+            "Value subclass: Pt\n  field: x = 0\n  class x: v => Pt new\n",
+            "Value subclass: Pt\n  field: x = 0\n  class new => Pt x: 1\n",
+            "Object subclass: Box\n  field: x = 0\n",
+        ];
+        for src in cases {
+            let module = beamtalk_core::test_helpers::test_support::parse_bt(src);
+            let class = module
+                .classes
+                .first()
+                .expect("fixture should declare a class");
+            let mut methods: Vec<MethodMeta> =
+                class.methods.iter().map(method_def_to_meta).collect();
+            let mut class_methods: Vec<MethodMeta> =
+                class.class_methods.iter().map(method_def_to_meta).collect();
+            // Mirror `extract_class_metadata`'s gate: synthesis only runs
+            // for `Value` kinds with state.
+            let auto_kw = if class.class_kind == beamtalk_core::ast::ClassKind::Value
+                && !class.state.is_empty()
+            {
+                synthesize_value_auto_methods(
+                    class,
+                    class.name.name.as_str(),
+                    &mut methods,
+                    &mut class_methods,
+                )
+            } else {
+                None
+            };
+            let hierarchy =
+                beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+                    .0
+                    .expect("fixture hierarchy should build");
+            let anchor = hierarchy
+                .get_class(class.name.name.as_str())
+                .expect("class should be present")
+                .auto_ctors
+                .as_ref()
+                .and_then(|auto| auto.keyword_constructor.clone());
+            assert_eq!(
+                auto_kw.as_deref(),
+                anchor.as_deref(),
+                "generator and anchor must agree. Source:\n{src}"
+            );
+        }
     }
 
     #[test]

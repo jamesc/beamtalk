@@ -396,7 +396,7 @@ pub struct CoreErlangGenerator {
     /// `safe_class_method_selector` (identity when short, `kw_<hash>` when the
     /// raw selector would exceed the atom limit), matching send sites.
     pub(in crate::core_erlang) own_direct_class_methods: Vec<(String, String)>,
-    /// BT-4099: the class being compiled's own directly-callable
+    /// the class being compiled's own directly-callable
     /// constructors (`new` and/or `new:`, in that order) — a view of
     /// `direct_call_eligible`, baked into `__beamtalk_meta/0` as
     /// `direct_constructors` for dynamic sends. Keyword constructors ride

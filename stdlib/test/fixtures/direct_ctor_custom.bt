@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-4099: an `Object` subclass with custom `new` / `new:` (`Value` seals
+// an `Object` subclass with custom `new` / `new:` (`Value` seals
 // both, so only `Object` subclasses can define them). Never direct-call
 // eligible (no constructor anchor), so construction routes through the
 // class gen_server however the send is reached. Each custom body answers

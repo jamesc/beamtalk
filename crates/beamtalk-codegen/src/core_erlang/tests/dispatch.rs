@@ -3813,16 +3813,16 @@ fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
     );
 }
 
-// --- BT-4099: direct Value construction (cross-class `new` / keyword ctors) ---
+// --- direct Value construction (cross-class `new` / keyword ctors) ---
 //
 // An unqualified class reference in a fresh generator is never an
 // own-class reference (no class is being compiled), so it reaches
 // `generate_class_method_call` — the cross-class path. Own-class
 // construction (`Pt new` inside `Pt`) routes to the self-send path
-// instead, which was already direct (BT-4029 keyword shape,
+// instead, which was already direct (keyword shape,
 // `try_instantiation_intrinsic` for `new`).
 
-/// Builds a generator with a hand-planted BT-4099 verdict for one class:
+/// Builds a generator with a hand-planted verdict for one class:
 /// `keyword` joins the direct-call selector set (the generic
 /// `class_<sel>` shape), `direct_new0`/`direct_new1` ride the dedicated
 /// flags — what `compute_direct_call_eligible` produces for a stateless
@@ -3862,7 +3862,7 @@ fn unqualified_class_reference(name: &str) -> Expression {
 
 #[test]
 fn test_direct_new0_emits_module_new_call() {
-    // BT-4099: `Pt new` on an eligible Value builds via a direct
+    // `Pt new` on an eligible Value builds via a direct
     // `Module:'new'()` call — no registry lookup, no `class_send`.
     let mut generator = generator_with_direct_constructors("Pt", None, true, false);
     let receiver = unqualified_class_reference("Pt");
@@ -3885,7 +3885,7 @@ fn test_direct_new0_emits_module_new_call() {
 
 #[test]
 fn test_direct_new0_flag_off_falls_back_to_class_send() {
-    // BT-4099: the map entry may exist (e.g. for the keyword ctor) while
+    // the map entry may exist (e.g. for the keyword ctor) while
     // `new` itself is ineligible (custom `new`); the send must fall back.
     let mut generator = generator_with_direct_constructors("Pt", Some("x:y:"), false, false);
     let receiver = unqualified_class_reference("Pt");
@@ -3912,7 +3912,7 @@ fn test_direct_new0_flag_off_falls_back_to_class_send() {
 
 #[test]
 fn test_new_without_eligible_entry_falls_back_to_class_send() {
-    // BT-4099: a class with no verdict at all (unknown, stateful,
+    // a class with no verdict at all (unknown, stateful,
     // actor) keeps today's behavior — fail closed to `class_send`.
     let mut generator = CoreErlangGenerator::new("bt@test@main");
     let receiver = unqualified_class_reference("Pt");
@@ -3931,7 +3931,7 @@ fn test_new_without_eligible_entry_falls_back_to_class_send() {
 
 #[test]
 fn test_direct_keyword_constructor_emits_class_fn_call() {
-    // BT-4099: `Pt x: 1 y: 2` on an eligible Value uses the generic
+    // `Pt x: 1 y: 2` on an eligible Value uses the generic
     // direct-call shape (`class_x:y:/3` ignores its `ClassSelf` arg).
     let mut generator = generator_with_direct_constructors("Pt", Some("x:y:"), true, true);
     let receiver = unqualified_class_reference("Pt");
@@ -3961,7 +3961,7 @@ fn test_direct_keyword_constructor_emits_class_fn_call() {
 
 #[test]
 fn test_direct_new1_stays_on_class_send() {
-    // BT-4099: static `new:` keeps the `class_send` fallback even when
+    // static `new:` keeps the `class_send` fallback even when
     // eligible — the chain verdict stays single-sourced in the baked
     // metadata, which only dynamic sends consult.
     let mut generator = generator_with_direct_constructors("Pt", None, true, true);
@@ -3986,7 +3986,7 @@ fn test_direct_new1_stays_on_class_send() {
 
 #[test]
 fn test_value_meta_bakes_direct_constructors() {
-    // BT-4099 end to end: a stateless Value subclass bakes its
+    // end to end: a stateless Value subclass bakes its
     // constructor verdicts into `__beamtalk_meta` — `new` (and `new:`,
     // whose chain here is just the builtin-Value router) under
     // `direct_constructors`, the keyword ctor under
@@ -4006,7 +4006,7 @@ fn test_value_meta_bakes_direct_constructors() {
 
 #[test]
 fn test_value_with_custom_new_omits_it_from_baked_constructors() {
-    // BT-4099 fail-closed: a user-defined class-side `new` removes only
+    // fail-closed: a user-defined class-side `new` removes only
     // `new` from the baked verdicts; the keyword ctor stays direct.
     let src = "Value subclass: Custom\n  field: x = 0\n\n  class new => self x: 41\n";
     let code = codegen_source(src);
@@ -4022,7 +4022,7 @@ fn test_value_with_custom_new_omits_it_from_baked_constructors() {
 
 #[test]
 fn test_actor_meta_omits_direct_constructors() {
-    // BT-4099: actor classes have no constructor anchor, so no key is
+    // actor classes have no constructor anchor, so no key is
     // baked at all (only eligible classes change).
     let src = "Actor subclass: Srv\n  state: value = 0\n";
     let code = codegen_source(src);
@@ -4034,7 +4034,7 @@ fn test_actor_meta_omits_direct_constructors() {
 
 #[test]
 fn test_long_keyword_ctor_bakes_hashed_meta_key() {
-    // BT-4099: a keyword ctor over many fields exceeds Erlang's 255-char
+    // a keyword ctor over many fields exceeds Erlang's 255-char
     // atom limit; the baked `direct_class_methods` key must be the hashed
     // `kw_<hash>` form (like send sites and `class_method_info` keys), or
     // the module's own `.core` fails to scan (`core_scan_error` — this

@@ -2530,7 +2530,7 @@ sync_direct_class_methods(ClassName, Meta) ->
     beamtalk_class_metadata:put_direct_class_methods(ClassName, Direct).
 
 -doc """
-Publish the compiled `direct_constructors` eligibility set (BT-4099).
+Publish the compiled `direct_constructors` eligibility set.
 
 Copies `direct_constructors` from `Meta` into the unified metadata row, where
 `beamtalk_class_dispatch:class_send/3` reads it without a gen_server hop. Meta
@@ -2756,7 +2756,7 @@ apply_class_info(State, ClassInfo) ->
     %% fresh meta — a reload can add or drop eligible selectors (or make the
     %% class ineligible entirely, e.g. by adding `classState:`).
     sync_direct_class_methods(State#class_state.name, Meta),
-    %% BT-4099: same for the direct-construction verdicts (e.g. a reload
+    %% same for the direct-construction verdicts (e.g. a reload
     %% adding a custom `new` drops it from the baked set immediately).
     sync_direct_constructors(State#class_state.name, Meta),
 

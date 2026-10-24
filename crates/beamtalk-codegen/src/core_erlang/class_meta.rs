@@ -55,7 +55,7 @@ pub(crate) struct MetaProvenance<'a> {
     /// (`beamtalk_behaviour_intrinsics:selectorProviderFromName/2`) reads it to
     /// classify a flattened provision by its origin rather than its module.
     pub stdlib_trait_methods: &'a [String],
-    /// BT-4099: this class's directly-callable constructors (`new` and/or
+    /// this class's directly-callable constructors (`new` and/or
     /// `new:`), emitted as `'direct_constructors'` (omitted when empty).
     /// Dynamic `class_send` for these selectors builds in the caller via a
     /// direct module call instead of routing through the class process.
@@ -490,7 +490,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-4099: emit `'direct_constructors' => ['new', ...]`, the
+    /// emit `'direct_constructors' => ['new', ...]`, the
     /// constructors dynamic sends may build in the caller. Omitted when
     /// the class has none, so only eligible classes change.
     fn meta_direct_constructors_entry(ctors: &[String]) -> Document<'static> {

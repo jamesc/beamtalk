@@ -494,8 +494,8 @@ impl CoreErlangGenerator {
             })
     }
 
-    /// The class's own directly-callable constructors for `__beamtalk_meta`
-    /// (BT-4099): `new` and/or `new:`, in that order. Empty for classes with
+    /// The class's own directly-callable constructors for `__beamtalk_meta`:
+    /// `new` and/or `new:`, in that order. Empty for classes with
     /// none (and for native facades).
     fn own_direct_constructors_for(&self, class_name: &str) -> Vec<String> {
         let Some(info) = self.direct_call_eligible.get(class_name) else {
@@ -522,8 +522,8 @@ impl CoreErlangGenerator {
         // The key is the *safe* selector, not the raw one: a keyword
         // constructor over many fields exceeds Erlang's 255-char atom limit,
         // and a raw key would make the module's own `.core` unscannable
-        // (`core_scan_error`, BT-4099). `safe_class_method_selector` is the
-        // identity for short selectors, so BT-3639 entries are unchanged;
+        // (`core_scan_error`). `safe_class_method_selector` is the
+        // identity for short selectors, so existing entries are unchanged;
         // for long ones it is the same `kw_<hash>` form send sites emit
         // (`generate_class_method_call`) and `class_method_info` keys use,
         // so runtime lookup still hits.
@@ -589,7 +589,7 @@ impl CoreErlangGenerator {
                     selectors.insert(method.selector.to_string());
                 }
             }
-            // BT-4099 constructors. Keyword constructors share the direct
+            // constructors. Keyword constructors share the direct
             // `(nil, args...)` shape, so they join the selector set;
             // `new`/`new:` need arity-specific emission/lookup and travel in
             // dedicated flags instead (never in `selectors`).

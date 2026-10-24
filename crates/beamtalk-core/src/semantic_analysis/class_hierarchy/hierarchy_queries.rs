@@ -447,10 +447,8 @@ impl ClassHierarchy {
 
         // Synthesize auto-slot methods for newly-discovered Value subclasses.
         // We need the AST `ClassDefinition` for slot info, so look it up.
-        // The keyword decision is discarded here (BT-4099): these classes'
-        // AST kind is not `Value`, so codegen emits no value treatment for
-        // them — their `auto_ctors` anchor stays `None` and only the type
-        // checker sees the synthesized methods.
+        // Discard the keyword decision: without a `Value` AST kind these
+        // classes keep a `None` anchor and take the slow path.
         for class in &module.classes {
             if classes_to_fix.contains(&class.name.name) {
                 if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
@@ -557,7 +555,7 @@ impl ClassHierarchy {
         false
     }
 
-    /// Constructor direct-call eligibility for the named class (BT-4099).
+    /// Constructor direct-call eligibility for the named class.
     ///
     /// A `Value` constructor builds a plain map without touching the class
     /// process, so when the class is a stateless non-native `Value` whose
@@ -570,7 +568,7 @@ impl ClassHierarchy {
     ///   (`has_class_new_in_chain`), so any user `new:` in the class or its
     ///   ancestors disables the fast path — except `Value`'s own, which is
     ///   the `@intrinsic basicNewWith` router that just forwards to the
-    ///   receiver's `new/1` (a source linter pins that premise).
+    ///   receiver's `new/1` (pinned by a test parsing `value.bt`).
     /// - keyword constructors ignore `ClassSelf` and resolve own-first, so
     ///   only the class's own synthesis record matters.
     ///
@@ -613,7 +611,7 @@ impl ClassHierarchy {
     }
 
     /// Whether any ancestor of the named class defines a class-side `new:`
-    /// that is real user code (BT-4099).
+    /// that is real user code.
     ///
     /// `Value` itself is skipped: its `new:` is the `@intrinsic basicNewWith`
     /// router, not an override (skipping by name is sound: `Value` is a
@@ -635,6 +633,12 @@ impl ClassHierarchy {
             let Some(info) = self.classes.get(name.as_str()) else {
                 return true;
             };
+            // Error recovery can drop method definitions, so an ancestor
+            // whose surface is incomplete may hide a user `new:` — fail
+            // closed, like the leaf check in `direct_constructors`.
+            if info.surface_incomplete {
+                return true;
+            }
             if name.as_str() != "Value"
                 && info
                     .class_methods
@@ -1048,7 +1052,7 @@ impl ClassHierarchy {
     #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to slot count
     /// Returns the synthesized keyword constructor selector, if one was added.
     ///
-    /// The return value is the constructor-emission record (BT-4099): callers
+    /// The return value is the constructor-emission record: callers
     /// building a fresh `ClassInfo` store it as the `auto_ctors` anchor.
     pub(super) fn add_value_auto_methods(
         class: &ClassDefinition,
