@@ -161,13 +161,21 @@ TestCase subclass: CharacterTest
   // deliberate — it pins the constant-condition shape.)
   testCharacterConditionalTakenBranch =>
     @expect lint
-    self assert: (true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) printString equals: "$6"
+    self assert: (true ifTrue: [
+      Character value: (48 + 6)
+    ] ifFalse: [0]) printString equals: "$6"
     @expect lint
-    self assert: (true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) class equals: Character
+    self assert: (true ifTrue: [
+      Character value: (48 + 6)
+    ] ifFalse: [0]) class equals: Character
     @expect lint
-    self assert: (true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) asString size equals: 1
+    self assert: (true ifTrue: [
+      Character value: (48 + 6)
+    ] ifFalse: [0]) asString size equals: 1
     @expect lint
-    self assert: (false ifTrue: [0] ifFalse: [Character value: (48 + 6)]) printString equals: "$6"
+    self assert: (false ifTrue: [
+      0
+    ] ifFalse: [Character value: (48 + 6)]) printString equals: "$6"
     @expect lint
     self assert: (false ifTrue: [$A] ifFalse: [0]) class equals: Integer
 
