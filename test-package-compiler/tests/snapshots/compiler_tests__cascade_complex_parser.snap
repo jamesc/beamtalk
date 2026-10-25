@@ -502,6 +502,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "x",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 523,
                                             end: 524,
@@ -581,6 +582,7 @@ Module {
                                     parameters: [
                                         BlockParameter {
                                             name: "x",
+                                            type_annotation: None,
                                             span: Span {
                                                 start: 543,
                                                 end: 544,

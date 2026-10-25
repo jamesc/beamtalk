@@ -160,6 +160,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "each",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 1214,
                                                         end: 1218,
@@ -378,6 +379,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "each",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 1382,
                                                         end: 1386,
@@ -617,6 +619,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "each",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 1543,
                                                         end: 1547,
@@ -856,6 +859,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "each",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 1640,
                                                         end: 1644,
@@ -1067,6 +1071,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "acc",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 1796,
                                                         end: 1799,
@@ -1074,6 +1079,7 @@ Module {
                                                 },
                                                 BlockParameter {
                                                     name: "each",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 1801,
                                                         end: 1805,
@@ -1282,6 +1288,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "each",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 2035,
                                                         end: 2039,
@@ -1576,6 +1583,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "each",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 2165,
                                                         end: 2169,
@@ -1822,6 +1830,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "each",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 2283,
                                                         end: 2287,

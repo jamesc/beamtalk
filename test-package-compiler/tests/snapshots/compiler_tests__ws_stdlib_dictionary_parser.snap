@@ -1015,6 +1015,7 @@ Module {
                             parameters: [
                                 BlockParameter {
                                     name: "k",
+                                    type_annotation: None,
                                     span: Span {
                                         start: 775,
                                         end: 776,
@@ -1022,6 +1023,7 @@ Module {
                                 },
                                 BlockParameter {
                                     name: "v",
+                                    type_annotation: None,
                                     span: Span {
                                         start: 778,
                                         end: 779,
@@ -1250,6 +1252,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "v",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 905,
                                             end: 906,
