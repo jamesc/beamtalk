@@ -240,3 +240,79 @@ fn test_sealed_fixture_value_self_sends_dispatch_bt_4152() {
         .stdout(contains("3 passed"))
         .stdout(contains("0 failed"));
 }
+
+/// BT-4094: a test class calling a `sealed` dependency-package class method
+/// must compile the call against `bt@<package>@<module>`, as `src/` and
+/// fixtures do — not the `bt@<snake>` heuristic, which fails at runtime
+/// with `Undefined function`.
+///
+/// Each test file compiles against its own package's class index, which
+/// used to omit dependency classes (only the merged, fixture-facing index
+/// had them), so the direct-call table resolved e.g. `Catalina start:` to
+/// `bt@catalina:'class_start:'` instead of `bt@catalina@catalina`.
+///
+/// Uses a `path` dependency so the test is hermetic (no network access).
+#[test]
+fn test_file_calls_sealed_dependency_class_method_bt_4094() {
+    let project = cli_common::fixture_project();
+    let root = project.path();
+
+    // Dependency package exposing a sealed class with nullary and keyword
+    // class methods (mirroring `ServerConfig optionNames` / `Catalina start:`).
+    std::fs::create_dir_all(root.join("depkit/src")).unwrap();
+    std::fs::write(
+        root.join("depkit/beamtalk.toml"),
+        "# Copyright 2026 James Casey\n\
+         # SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         [package]\n\
+         name = \"depkit\"\n\
+         version = \"0.1.0\"\n\
+         \n\
+         [dependencies]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("depkit/src/DepWidget.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         sealed Object subclass: DepWidget\n\
+         \x20\x20class sealed answer => 42\n\
+         \x20\x20class sealed double: n => n + n\n",
+    )
+    .unwrap();
+
+    // Depend on it from the fixture project via a relative path.
+    let manifest = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
+    assert!(
+        manifest.ends_with("[dependencies]\n"),
+        "fixture manifest shape changed; update this test's append"
+    );
+    std::fs::write(
+        root.join("beamtalk.toml"),
+        format!("{manifest}depkit = {{ path = \"depkit\" }}\n"),
+    )
+    .unwrap();
+
+    std::fs::write(
+        root.join("test/DepProbeTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: DepProbeTest\n\
+         \n\
+         \x20\x20testAnswer => self assert: DepWidget answer equals: 42\n\
+         \x20\x20testDouble => self assert: (DepWidget double: 21) equals: 42\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(root)
+        .args(["test", "--quiet"])
+        .assert()
+        .success()
+        // GreeterTest (1) + DepProbeTest (2).
+        .stdout(contains("3 passed"))
+        .stdout(contains("0 failed"));
+}
