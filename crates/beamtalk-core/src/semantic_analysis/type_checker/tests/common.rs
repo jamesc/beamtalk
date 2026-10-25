@@ -416,6 +416,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
 
     let result_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("GenResult"),
         superclass: Some(eco_string("Value")),
         is_sealed: true,

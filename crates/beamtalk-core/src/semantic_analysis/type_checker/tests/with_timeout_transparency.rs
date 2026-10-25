@@ -35,6 +35,7 @@ fn add_slow_db_actor(hierarchy: &mut ClassHierarchy) {
 
     let info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("SlowDb"),
         superclass: Some(eco_string("Actor")),
         is_sealed: false,
@@ -84,6 +85,7 @@ fn add_fake_proxy_object(hierarchy: &mut ClassHierarchy) {
 
     let info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("FakeProxy"),
         superclass: Some(eco_string("Object")),
         is_sealed: false,
@@ -270,6 +272,7 @@ fn logger_class(
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string(name),
         superclass: Some(eco_string(superclass)),
         is_sealed: false,

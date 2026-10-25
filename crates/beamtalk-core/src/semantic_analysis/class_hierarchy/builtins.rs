@@ -120,6 +120,10 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             handle_scope: None,
             surface_incomplete: false,
+            // Runtime-only with no `.bt` module (native-backed): truthfully
+            // module-less. Static dispatch excludes `Future` via the builtin
+            // gate before reading this flag.
+            is_module_less: true,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),

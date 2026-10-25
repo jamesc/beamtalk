@@ -774,12 +774,14 @@ fn test_actor_with_parent_init_and_initialize_defers_to_handle_continue() {
 /// The absence of the nilable fields in the output confirms the nilability
 /// guards work correctly.
 #[test]
+#[allow(clippy::too_many_lines)] // data-literal-heavy fixture setup, not logic
 fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
     use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
     use std::collections::HashMap;
 
     let ancestor = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: ecow::EcoString::from("BaseActor"),
         superclass: Some(ecow::EcoString::from("Actor")),
         is_sealed: false,
@@ -912,6 +914,7 @@ fn test_cross_file_ancestor_late_field_excluded_from_validation() {
 
     let ancestor = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: ecow::EcoString::from("BaseActor"),
         superclass: Some(ecow::EcoString::from("Actor")),
         is_sealed: false,

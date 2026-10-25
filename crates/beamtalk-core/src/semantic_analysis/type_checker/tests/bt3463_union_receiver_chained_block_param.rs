@@ -294,6 +294,7 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     let with_instance_override = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("WithInstanceOverride"),
         superclass: Some(eco_string("Object")),
         is_sealed: false,
@@ -346,6 +347,7 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
     };
     let plain = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("Plain"),
         superclass: Some(eco_string("Object")),
         is_sealed: false,

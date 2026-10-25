@@ -350,6 +350,7 @@ fn type_args_for_generic_class_no_false_positive() {
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "GenericDict".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -376,6 +377,7 @@ fn type_args_for_generic_class_no_false_positive() {
         },
         ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "Counter".into(),
             superclass: Some("Object".into()),
             is_sealed: false,

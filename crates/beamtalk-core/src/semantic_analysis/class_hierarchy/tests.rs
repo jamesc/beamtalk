@@ -932,6 +932,7 @@ fn cycle_detection_in_superclass_chain() {
         "A".into(),
         ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "A".into(),
             superclass: Some("B".into()),
             is_sealed: false,
@@ -961,6 +962,7 @@ fn cycle_detection_in_superclass_chain() {
         "B".into(),
         ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "B".into(),
             superclass: Some("A".into()),
             is_sealed: false,
@@ -2307,6 +2309,7 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
     let mut h = ClassHierarchy::with_builtins();
     let info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("Counter"),
         superclass: Some(EcoString::from("Actor")),
         is_sealed: false,
@@ -2357,6 +2360,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
     // Simulate AST-derived entry (from ClassHierarchy::build)
     let ast_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("Counter"),
         superclass: Some(EcoString::from("Actor")),
         is_sealed: false,
@@ -2398,6 +2402,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
     // Stale cache entry with different method
     let cache_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("Counter"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -2447,6 +2452,7 @@ fn add_from_beam_meta_skips_builtins() {
     let original_method_count = h.get_class("Integer").unwrap().methods.len();
     let stub = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("Integer"),
         superclass: None,
         is_sealed: false,
@@ -2534,6 +2540,7 @@ fn stamp_package_does_not_overwrite_existing_package() {
     let mut h = ClassHierarchy::with_builtins();
     let info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("RemoteClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -2594,6 +2601,7 @@ fn stamp_package_on_infos_sets_package_on_non_builtin_classes() {
 fn stamp_package_on_infos_does_not_overwrite_existing_package() {
     let mut infos = vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("RemoteClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -2632,6 +2640,7 @@ fn add_from_beam_meta_preserves_is_internal_and_package() {
     let mut h = ClassHierarchy::with_builtins();
     let info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("InternalHelper"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -3206,6 +3215,7 @@ fn cross_file_value_sub_subclass_finds_new() {
     // Inject cross-file Base class (from another file: Value subclass: Base)
     let base_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("Base"),
         superclass: Some(EcoString::from("Value")),
         is_sealed: false,
@@ -3289,6 +3299,7 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
     // `late classState: current`, `classState: total`.
     let a_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("A"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -3401,6 +3412,7 @@ fn cross_file_all_initialize_assigns_includes_parent_summary() {
 
     let a_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("A"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -3507,6 +3519,7 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
 
     let native_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("NativeParent"),
         superclass: Some(EcoString::from("Actor")),
         is_sealed: false,

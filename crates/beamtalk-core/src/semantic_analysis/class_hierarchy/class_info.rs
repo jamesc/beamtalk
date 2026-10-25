@@ -247,6 +247,20 @@ pub struct ClassInfo {
     /// the current module (their parse errors surface directly).
     #[cfg_attr(feature = "serde", serde(default))]
     pub surface_incomplete: bool,
+    /// Whether this class has no compiled BEAM module (BT-4069).
+    ///
+    /// True for live `ClassBuilder` classes (whose methods are funs in the
+    /// class process — set by the live-image decode in
+    /// `beamtalk-compiler-port`, comparing the meta map's `module` to the
+    /// class name), for synthetic hierarchy entries, and for runtime-only
+    /// `Future` (native-backed, no `.bt` module). A module-less class
+    /// registers its own class name as its module, so its instances dispatch
+    /// through `runtime_instance_method`, never through a
+    /// `Module:dispatch/3` — any consumer resolving a static dispatch target
+    /// must fail closed on this flag. Always `false` for source-built and
+    /// generated-builtin classes.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub is_module_less: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
     /// Declared type annotations for state fields (field name → type).
@@ -471,6 +485,8 @@ impl ClassInfo {
             auto_ctors,
             handle_scope: class.handle_scope.as_ref().map(|s| s.name.clone()),
             surface_incomplete: false,
+            // AST-built classes always compile to a module.
+            is_module_less: false,
             state: class.state.iter().map(|s| s.name.name.clone()).collect(),
             state_types: class
                 .state

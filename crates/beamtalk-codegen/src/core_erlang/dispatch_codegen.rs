@@ -79,7 +79,8 @@ type SendHandler = fn(
 /// converts sends that would otherwise be fully dynamic, so every earlier,
 /// more specific handler keeps its sends. A send that no entry claims falls
 /// through to `generate_message_send`'s `generate_runtime_dispatch` default.
-const HANDLERS: &[(&str, SendHandler)] = &[
+/// Pinned by `typed_sealed::send_handlers_keep_priority_positions`.
+pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
     (
         "character_typed",
         CoreErlangGenerator::try_handle_character_typed_message,
@@ -634,6 +635,9 @@ impl CoreErlangGenerator {
     ///    entry point).
     /// 4. Its ancestry is fully known (`has_cross_file_parent` fails closed —
     ///    a missing link could hide an `Exception` ancestor).
+    /// 5. It has a compiled module (`is_module_less` fails closed — a live
+    ///    `ClassBuilder` class dispatches through funs in its class process,
+    ///    so a direct `Module:dispatch/3` would `undef`).
     ///
     /// Why this is sound (the guard, not the annotation, is trusted):
     ///
@@ -650,10 +654,18 @@ impl CoreErlangGenerator {
     ///   selector whose dynamic path diverges — a different hint via
     ///   `is_ivar_method` — so the handler below excludes it.)
     /// - Every hierarchy entry that can reach here has a compiled module
-    ///   exporting `dispatch/3` (batch hierarchies contain only compiled
-    ///   classes; REPL/builder classes never reach here because REPL codegen
-    ///   leaves `type_map` empty), and the remote `Mod:dispatch/3` call is
-    ///   late-bound, so hot reload needs no invalidation.
+    ///   exporting `dispatch/3`: batch hierarchies contain only compiled
+    ///   classes, and live module-less (`ClassBuilder`) classes arriving via
+    ///   a REPL or `compile:source:` ambient hierarchy are excluded by
+    ///   condition 5 (only bare REPL *expressions* leave `type_map` empty;
+    ///   inline class definitions and compiled methods populate it). The
+    ///   remote `Mod:dispatch/3` call is late-bound, so hot reload needs no
+    ///   invalidation.
+    ///
+    /// Known limitation (review A3, BT-4149; shared with `class sealed` direct calls):
+    /// the target module is pinned at compile time, so if it is removed
+    /// afterwards (`removeFromSystem`) a tag-matching send raises raw `undef`
+    /// where the dynamic path would degrade to `does_not_understand`.
     fn typed_sealed_value_target(&self, receiver: &Expression) -> Option<TypedSealedTarget> {
         let beamtalk_core::semantic_analysis::InferredType::Known {
             class_name,
@@ -682,6 +694,9 @@ impl CoreErlangGenerator {
         }
         let info = hierarchy.get_class(class_name)?;
         if !info.is_sealed {
+            return None;
+        }
+        if info.is_module_less {
             return None;
         }
         if !matches!(

@@ -17,6 +17,7 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
 
     let info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("Processor"),
         superclass: Some(eco_string("Value")),
         is_sealed: true,

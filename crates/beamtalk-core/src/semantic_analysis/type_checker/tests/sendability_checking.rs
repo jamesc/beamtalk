@@ -20,6 +20,7 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: class.into(),
         superclass: Some(superclass.into()),
         is_sealed: false,

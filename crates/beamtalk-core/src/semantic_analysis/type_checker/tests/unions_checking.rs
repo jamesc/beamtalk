@@ -15,6 +15,7 @@ fn union_arg_all_compatible_no_warning() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "Calculator".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -79,6 +80,7 @@ fn union_arg_none_compatible_warns() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "Calculator".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -149,6 +151,7 @@ fn union_arg_mixed_compatible_hints() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "Calculator".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -219,6 +222,7 @@ fn union_arg_dynamic_still_skips() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "Calculator".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -294,6 +298,7 @@ fn test_hierarchy_with_class_literal_arg(
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "TestCase".into(),
             superclass: Some("Value".into()),
             is_sealed: false,
@@ -320,6 +325,7 @@ fn test_hierarchy_with_class_literal_arg(
         },
         ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "ClassChecker".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -778,6 +784,7 @@ fn union_protocol_mixed_conformance_hints() {
     // Add sortKey to Integer so it conforms
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "SortableInt".into(),
         superclass: Some("Integer".into()),
         is_sealed: false,
@@ -872,6 +879,7 @@ fn union_type_param_bounds_all_conform_no_warning() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "BoundedLogger".into(),
         superclass: Some("Actor".into()),
         is_sealed: false,
@@ -944,6 +952,7 @@ fn union_type_param_bounds_none_conform_warns() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "BoundedLogger".into(),
         superclass: Some("Actor".into()),
         is_sealed: false,
@@ -1028,6 +1037,7 @@ fn union_type_param_bounds_mixed_conformance_hints() {
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "BoundedLogger".into(),
             superclass: Some("Actor".into()),
             is_sealed: false,
@@ -1054,6 +1064,7 @@ fn union_type_param_bounds_mixed_conformance_hints() {
         },
         ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "SortableInt".into(),
             superclass: Some("Integer".into()),
             is_sealed: false,
@@ -1849,6 +1860,7 @@ fn union_arg_parameterized_member_mismatch_warns() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "Sink".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -1931,6 +1943,7 @@ fn union_arg_parameterized_members_all_match_no_warning() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "Sink".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
