@@ -336,23 +336,11 @@ fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_c
 
 #[test]
 fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_compiles() {
-    // verification, acceptance criterion 5: a field-mutating block
-    // held in a local var and passed as a *non-literal* argument to a
-    // self-send — `self applyBlock: blk to: x`, where `blk` was assigned
-    // separately — is a case `scan_class_for_tier2_blocks`
-    // (dispatch_codegen.rs) can't see: it only recognizes a *literal* block
-    // at the call site to promote the callee's parameter into
-    // `tier2_method_info`/`tier2_block_params`. If this compiled anyway with
-    // `aBlock value: x` inside `applyBlock:to:` naively applying with no
-    // state, it would badarity-crash at runtime whenever `blk` is actually a
-    // Tier 2 fun.
-    //
-    // Confirms this is instead a compile-time error: `prescan_tier2_local_vars`
-    // only promotes `blk` when every later use is a *safe* value/value: call —
-    // here `blk` is passed as an *argument* to `applyBlock:to:`, not a value:
-    // receiver, so prescan correctly leaves it unpromoted and it falls through
-    // to `generate_block`'s existing `FieldAssignmentInUnsupportedBlock` gate
-    // — a safe compile-time failure, not a silent runtime crash.
+    // A field-mutating block held in a local var and passed as a
+    // *non-literal* argument to a self-send — `self applyBlock: blk to: x`,
+    // where `blk` was assigned separately. Under ADR 0137 the block is an
+    // ordinary closure over the actor-state cell: it compiles, and writes
+    // the live field when it runs inside the actor.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  applyBlock: aBlock to: x =>\n    aBlock value: x\n\n  run: x =>\n    blk := [:y | self.total := self.total + y]\n    self applyBlock: blk to: x\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
@@ -581,18 +569,16 @@ fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
 }
 
 #[test]
-fn test_bt3755_self_send_promotes_block_only_for_a_callee_that_threads_it() {
-    // The class pre-scan reads the actor-channel predicate
-    // (`block_facts::callee_threads_block_param`): a captured-local write
-    // is packed into the actor state around the self-send only when the
-    // callee is a sealed method of the class that invokes the block directly.
-    let threading = "Actor subclass: Ctr\n  sealed ap: b => b value\n\n  run =>\n    t := 0\n    self ap: [t := t + 1]\n    t\n";
-    let code = codegen(threading);
-    assert!(
-        code.contains("'maps':'put'('__local__t', T, State"),
-        "a threading callee gets the Tier 2 pack/extract. Got:\n{code}"
-    );
+fn test_bt3755_self_send_does_not_promote_a_writing_block() {
+    // ADR 0137 Phase 3 (BT-4010): the Tier 2 self-send promotion
+    // (`scan_class_for_tier2_blocks` / `detect_tier2_self_send`) is deleted.
+    // A block that writes a captured local and is passed to a self-send is
+    // an escaping-block compile error (ADR 0133), so no callee shape gets
+    // the Tier 2 pack/extract around the send, whatever the callee does
+    // with the block. (Codegen tests skip validation, so this shape still
+    // compiles here; the validator rejects it.)
     for callee in [
+        "sealed ap: b => b value",
         "sealed ap: b => #(1) do: [:x | b value]",
         "ap: b => b value",
     ] {
@@ -602,7 +588,8 @@ fn test_bt3755_self_send_promotes_block_only_for_a_callee_that_threads_it() {
         let code = codegen(&src);
         assert!(
             !code.contains("'maps':'put'('__local__t', T, State"),
-            "`{callee}` does not thread the block, so it is not promoted. Got:\n{code}"
+            "`{callee}`: no Tier 2 pack/extract around the self-send. Got:\n{code}"
         );
     }
 }
+

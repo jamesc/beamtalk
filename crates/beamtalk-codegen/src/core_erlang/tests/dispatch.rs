@@ -2952,11 +2952,12 @@ fn test_sealed_method_logger_call_tags_own_selector() {
 
 #[test]
 fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
-    // generate_tier2_self_send_open (a self-send passing a
-    // stateful block argument — one that captures and mutates an outer
-    // local, e.g. a user-defined HOM invocation like
-    // `self eachItem: [:x | count := count + x]`) had no breadcrumb
-    // coverage at all. Mirrors the real-world pattern verified in
+    // A self-send passing a stateful block argument — one that captures
+    // and mutates an outer local, e.g. a user-defined HOM invocation like
+    // `self eachItem: [:x | count := count + x]` — had no breadcrumb
+    // coverage at all. (ADR 0133 rejects this shape; codegen tests skip
+    // validation, so it still compiles here, as a plain self-send of a
+    // Tier 2 fun.) Mirrors the real-world pattern verified in
     // stdlib/test/fixtures/hom_composability_actor.bt's
     // testMutatingBlockInCustomLoop.
     let src = concat!(
@@ -2973,17 +2974,15 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
     );
     let code = codegen_source(src);
 
-    // Sanity: the Tier 2 stateful-block plumbing (StateAcc threading) is
-    // present, proving this test exercises generate_tier2_self_send_open
-    // and not a plain self-dispatch path.
+    // Sanity: the Tier 2 stateful-block argument (StateAcc threading) is
+    // present.
     assert!(
         code.contains("StateAcc"),
-        "Test setup must exercise the Tier 2 stateful self-send path \
-         (generate_tier2_self_send_open). Got:\n{code}"
+        "Test setup must pass a Tier 2 stateful block argument. Got:\n{code}"
     );
     assert!(
         code.contains("call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'())"),
-        "generate_tier2_self_send_open's error branch must resolve the \
+        "The self-send's error branch must resolve the \
          breadcrumb 'class' via a runtime lookup_class(self()) call. Got:\n{code}"
     );
     let reraise_with_breadcrumb = regex::Regex::new(
@@ -2992,7 +2991,7 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
     .unwrap();
     assert!(
         reraise_with_breadcrumb.is_match(&code),
-        "generate_tier2_self_send_open must thread the selector/class \
+        "The self-send must thread the selector/class \
          breadcrumb into reraise/4. Got:\n{code}"
     );
 }

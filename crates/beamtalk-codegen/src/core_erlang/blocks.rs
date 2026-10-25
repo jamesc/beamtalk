@@ -136,9 +136,8 @@ impl CoreErlangGenerator {
     ///
     /// Captured mutations = variables written inside the block that were also
     /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
-    /// Field writes (`self.x := ...`) and self-sends are handled separately:
-    /// - Field writes are threaded via `gen_server` State at the method level (for Tier 2).
-    /// - Self-sends are pre-scanned via `generate_tier2_self_send_open`.
+    /// Field writes (`self.x := ...`) in an actor closure go through the
+    /// actor-state cell (ADR 0137); self-sends in one are ordinary messages.
     ///
     /// ADR 0130 §5: a block literal that reads a class variable binds its
     /// creation-time capture around the `fun` ([`Self::with_class_var_capture`]).

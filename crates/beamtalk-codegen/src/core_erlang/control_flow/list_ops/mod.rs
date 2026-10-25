@@ -259,44 +259,6 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// The selector and hint of the `stateful_block_dispatch` error
-    /// [`Self::non_literal_callable_doc`] raises in an actor: the self-send
-    /// selector the block was passed to (the method being compiled), and the
-    /// list op it forwarded the block to.
-    fn forwarded_state_change_error(&self, list_selector: &str) -> (String, String) {
-        match self.current_method_selector.clone() {
-            Some(method) => {
-                let hint = format!(
-                    "The block passed to `{method}` changed actor state (a field write, or \
-                     a self-send that changed state) when `{method}` forwarded it to \
-                     `{list_selector}`; the change cannot be kept. Change the state in \
-                     the method that owns the loop, and pass a block that returns the \
-                     value instead."
-                );
-                (method, hint)
-            }
-            None => (
-                list_selector.to_string(),
-                format!(
-                    "A block whose run changed actor state (a field write, or a self-send \
-                     that changed state) was passed on to `{list_selector}`; the change \
-                     cannot be kept. Change the state in the method that owns the loop, \
-                     and pass a block that returns the value instead."
-                ),
-            ),
-        }
-    }
-
-    /// Whether `callable` is a parameter the method being compiled receives
-    /// as a promoted Tier 2 block (`tier2_block_params`, from the self-send
-    /// pre-scan).
-    fn is_promoted_tier2_param(&self, callable: &Expression) -> bool {
-        matches!(
-            callable.unwrap_parens(),
-            Expression::Identifier(id) if self.tier2_block_params.contains(id.name.as_str())
-        )
-    }
-
     /// The callable argument of a list op that calls it with `arity`
     /// arguments: a literal block compiles as itself (the caller has already
     /// sent a mutating one down its `_with_mutations` path); anything else
@@ -328,20 +290,12 @@ impl CoreErlangGenerator {
     /// A runtime arity check: a callable of `arity` arguments (a Tier 1
     /// block) and anything that is not a fun pass through unchanged. A
     /// Tier 2 block (`arity + 1` arguments, the trailing `StateAcc`) is
-    /// wrapped to `arity` arguments. Outside an actor instance method there
-    /// is no `State`: its seed is a fresh empty map and the returned map is
-    /// dropped. In an actor instance method a Tier 2 block here is one
-    /// `detect_tier2_self_send` promoted for a self-send to the current
-    /// method: as a passthrough at a position another call site promoted
-    /// (BT-3936). (A block that writes a field is no longer promoted:
-    /// BT-3922 makes passing one to a self-send a compile error.) Its seed
-    /// is the live `State`, so it reads fields
-    /// and may `^`; a block whose run changed actor state (a field write, or
-    /// a self-send that changed state) returns a different map, and with the
-    /// fold gone that change has no way back, so it raises
-    /// `stateful_block_dispatch` rather than drop it. A block that writes a
-    /// captured local never gets here (the ADR 0133 escaping-block
-    /// diagnostic).
+    /// wrapped to `arity` arguments. Its seed is a fresh empty map and the
+    /// returned map is dropped: a block that writes a captured local never
+    /// gets here (the ADR 0133 escaping-block diagnostic), and an actor
+    /// block that writes a field is an ordinary closure over the cell
+    /// (ADR 0137), so nothing here needs the live `State`. A wrong-arity
+    /// block from outside never sees the actor's state.
     ///
     /// Arity alone cannot tell a Tier 2 block from a Tier 1 block of one
     /// argument too many (an `ifNone:` handler `[:x | ...]`, a 3-argument
@@ -353,16 +307,8 @@ impl CoreErlangGenerator {
     /// two-tuple whose second element is a map is still read as a Tier 2
     /// reply.
     ///
-    /// In an actor, only a callable that is a promoted Tier 2 parameter of
-    /// the method being compiled (`tier2_block_params`) is seeded with the
-    /// live `State`; every other one gets a fresh empty map, so a
-    /// wrong-arity block from outside never sees the actor's state. The
-    /// remaining exposure: a wrong-arity block passed at a *promoted*
-    /// parameter position is applied to the live `State` before the guard
-    /// raises. That lasts until BT-3922 removes the promotion.
-    ///
     /// Generated pattern (`is_function/2` avoids badarg on non-funs), for
-    /// `arity` 1 outside an actor:
+    /// `arity` 1:
     /// ```text
     ///   let _Callable = <expr> in
     ///   case call 'erlang':'is_function'(_Callable, 1) of
@@ -393,66 +339,20 @@ impl CoreErlangGenerator {
         list_selector: &str,
         arity: usize,
     ) -> Result<Document<'static>> {
-        self.non_literal_callable_doc_seeded(callable, list_selector, arity, None)
-    }
-
-    /// [`Self::non_literal_callable_doc`] with the actor state the Tier 2
-    /// arm is seeded from (and compared against) named by the caller: the
-    /// `ifNone:` handler after a `detect:ifNone:` fold runs on the fold's
-    /// final state, not the state before the fold. `None` is the current
-    /// field-read state.
-    pub(in crate::core_erlang) fn non_literal_callable_doc_seeded(
-        &mut self,
-        callable: &Expression,
-        list_selector: &str,
-        arity: usize,
-        seed_state: Option<&str>,
-    ) -> Result<Document<'static>> {
         let callable_var = self.fresh_temp_var("Callable");
         let raw_code = self.expression_doc(callable)?;
         let wrap_args: Vec<String> = (0..arity).map(|_| self.fresh_temp_var("WArg")).collect();
         let wrap_tuple = self.fresh_temp_var("T");
         let wrap_res = self.fresh_temp_var("WRes");
         let wrap_state = self.fresh_temp_var("WSt");
-        let actor = self.in_actor_instance_context();
-        // Only a promoted Tier 2 parameter is seeded with the live actor
-        // `State`; any other fun of `arity + 1` arguments (a wrong-arity block
-        // from another process, say) gets a fresh empty map, so it never sees
-        // the actor's private state, and the guard below still raises.
-        let (seed, seed_preamble) = if actor && self.is_promoted_tier2_param(callable) {
-            let seed =
-                seed_state.map_or_else(|| self.current_field_read_state_var(), str::to_string);
-            (seed, Document::Str(""))
-        } else {
-            let seed = self.fresh_temp_var("EmptyState");
-            let preamble = docvec!["let ", leaf::var(seed.clone()), " = ~{}~ in "];
-            (seed, preamble)
-        };
-        // What a Tier 2 reply `{WRes, WSt}` answers. In an actor, a state
-        // change raises; elsewhere the map is dropped. The comparison keeps
-        // the codegen-internal `__local__` keys on purpose: a promoted block
-        // that rebinds a block-local in an inner loop returns a stale value
-        // with that key leaked into its map (BT-3939, the same on main), and
-        // comparing with `beamtalk_actor:strip_local_temps` would turn that
-        // loud error into the stale value.
-        let on_reply = if actor {
-            let (error_selector, hint) = self.forwarded_state_change_error(list_selector);
-            let raise =
-                self.generate_stateful_block_dispatch_error(&error_selector, "Block", &hint);
-            docvec![
-                "case call 'erlang':'=:='(",
-                leaf::var(wrap_state.clone()),
-                ", ",
-                leaf::var(seed.clone()),
-                ") of <'true'> when 'true' -> ",
-                leaf::var(wrap_res.clone()),
-                " <'false'> when 'true' -> ",
-                raise,
-                " end",
-            ]
-        } else {
-            leaf::var(wrap_res.clone())
-        };
+        // The Tier 2 arm's seed is always a fresh empty map: nothing here
+        // needs the live `State` (see the function docs), so a wrong-arity
+        // block from another process never sees the actor's private state.
+        let seed = self.fresh_temp_var("EmptyState");
+        let seed_preamble = docvec!["let ", leaf::var(seed.clone()), " = ~{}~ in "];
+        // What a Tier 2 reply `{WRes, WSt}` answers: the value, with the
+        // returned map dropped (a genuine Tier 2 block never gets here).
+        let on_reply = leaf::var(wrap_res.clone());
         // A fun of `arity + 1` arguments that does not reply `{Result, Map}`
         // is a Tier 1 block of the wrong arity, not a Tier 2 one: raise the
         // same structured error as a wrong-arity block reached by `perform:`
