@@ -379,6 +379,7 @@ Base subclass: Child
     // Simulate Base from another file: Value subclass: Base (field: x = 0)
     let base_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("Base"),
         superclass: Some(eco_string("Value")),
         is_sealed: false,

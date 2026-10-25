@@ -22,6 +22,7 @@ fn price_band_class_info_with_lo_type(
     }
     ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: ecow::EcoString::from("PriceBand"),
         superclass: Some(ecow::EcoString::from("Object")),
         is_sealed: false,

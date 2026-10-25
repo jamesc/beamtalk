@@ -475,3 +475,68 @@ fn self_type_return_survives_etf_meta() {
         "'Actor class' atom must round-trip as ClassOf(\"Actor\")"
     );
 }
+
+/// BT-4069: `is_module_less` decodes from the meta map's `module` key. A
+/// live module-less (`ClassBuilder`) class registers its own class name as
+/// its module; a compiled class's module is always `bt@…`-prefixed, and a
+/// compiled `__beamtalk_meta/0` omits `module` entirely (self-describing).
+#[test]
+fn module_less_decodes_from_meta_module_key() {
+    use eetf::FixInteger;
+
+    let decode = |meta_map: Map| {
+        let term = Term::from(Map::from([(atom("BuilderWidget"), Term::from(meta_map))]));
+        let classes = parse_class_hierarchy_from_term(&term);
+        assert_eq!(classes.len(), 1, "should parse one class");
+        classes.into_iter().next().expect("one class")
+    };
+    // (class, superclass, meta_version, is_sealed, is_abstract) shared by
+    // all three maps below.
+    let shared = || {
+        [
+            (atom("class"), atom("BuilderWidget")),
+            (atom("superclass"), atom("Object")),
+            (atom("meta_version"), Term::from(FixInteger::from(2))),
+            (atom("is_sealed"), atom("true")),
+            (atom("is_abstract"), atom("false")),
+        ]
+    };
+
+    // Hot-patch meta for a module-less class: module == class name.
+    let [class, superclass, version, sealed, abstract_] = shared();
+    let info = decode(Map::from([
+        class,
+        superclass,
+        version,
+        sealed,
+        abstract_,
+        (atom("module"), atom("BuilderWidget")),
+    ]));
+    assert!(info.is_sealed);
+    assert!(
+        info.is_module_less,
+        "module == class name must decode as module-less"
+    );
+
+    // Hot-patch meta for a compiled class: bt@-prefixed module.
+    let [class, superclass, version, sealed, abstract_] = shared();
+    let info = decode(Map::from([
+        class,
+        superclass,
+        version,
+        sealed,
+        abstract_,
+        (atom("module"), atom("bt@live@builder_widget")),
+    ]));
+    assert!(
+        !info.is_module_less,
+        "bt@-prefixed module must decode as module-ful"
+    );
+
+    // Compiled `__beamtalk_meta/0`: no `module` key at all.
+    let info = decode(Map::from(shared()));
+    assert!(
+        !info.is_module_less,
+        "absent module key must decode as module-ful"
+    );
+}

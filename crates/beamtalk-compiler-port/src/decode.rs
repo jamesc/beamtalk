@@ -305,6 +305,30 @@ pub(crate) fn parse_method_infos_from_map(
         .collect()
 }
 
+/// Whether a meta map describes a module-less (`ClassBuilder`) class (BT-4069).
+///
+/// Only hot-patch meta maps carry `module` (a compiled `__beamtalk_meta/0`
+/// is self-describing and omits it). A live module-less class registers its
+/// own class name as its module (`beamtalk_object_class:init/1`'s default);
+/// a compiled class's module is always `bt@…`-prefixed — so `module == class`
+/// is exactly the module-less test. Absent means compiled (`false`).
+fn meta_is_module_less(m: &Map, class_name: &str) -> bool {
+    map_get(m, "module")
+        .and_then(term_to_atom)
+        .is_some_and(|s| s.as_str() == class_name)
+}
+
+/// Extracts the declaring package from BEAM metadata (ADR 0071).
+fn meta_package(m: &Map) -> Option<ecow::EcoString> {
+    map_get(m, "package").and_then(term_to_atom).and_then(|s| {
+        if s == "none" {
+            None
+        } else {
+            Some(ecow::EcoString::from(s.as_str()))
+        }
+    })
+}
+
 /// Deserialize a single `__beamtalk_meta/0` ETF map into a `ClassInfo`.
 ///
 /// Returns `None` if `term` is not a map. Degrades gracefully on missing keys
@@ -406,13 +430,9 @@ pub(crate) fn parse_class_info_from_meta_term(
     let class_methods = parse_method_infos_from_map(m, "class_method_info", class_name);
 
     // ADR 0071: Extract package from BEAM metadata (populated by codegen)
-    let package = map_get(m, "package").and_then(term_to_atom).and_then(|s| {
-        if s == "none" {
-            None
-        } else {
-            Some(ecow::EcoString::from(s.as_str()))
-        }
-    });
+    let package = meta_package(m);
+
+    let is_module_less = meta_is_module_less(m, class_name);
 
     Some(ClassInfo {
         name: ecow::EcoString::from(class_name),
@@ -436,6 +456,7 @@ pub(crate) fn parse_class_info_from_meta_term(
         // BEAM metadata comes from successfully-compiled modules, whose
         // surfaces are complete by construction.
         surface_incomplete: false,
+        is_module_less,
         is_typed,
         state,
         state_types,

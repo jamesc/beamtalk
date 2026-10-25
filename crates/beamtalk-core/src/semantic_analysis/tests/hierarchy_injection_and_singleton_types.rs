@@ -15,6 +15,7 @@ fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
 
     let pre_class = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("UserClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,

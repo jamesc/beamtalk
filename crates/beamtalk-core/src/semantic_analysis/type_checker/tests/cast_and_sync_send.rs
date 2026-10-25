@@ -26,6 +26,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
 
     let info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("Counter"),
         superclass: Some(eco_string("Actor")),
         is_sealed: false,

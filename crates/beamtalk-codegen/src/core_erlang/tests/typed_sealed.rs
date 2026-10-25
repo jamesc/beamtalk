@@ -300,6 +300,61 @@ fn binary_send_on_sealed_receiver_never_direct() {
 }
 
 #[test]
+fn erlang_module_typed_param_stays_dynamic() {
+    // `ErlangModule` instances are tagged maps, but dynamic dispatch routes
+    // them to the hand-written native proxy, not a compiled module — a
+    // direct call would run the wrong code. Exclusion is correctness here.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: m :: ErlangModule -> Object =>\n",
+        "    m frobnicate\n",
+    ));
+    assert!(
+        !code.contains("'dispatch'('frobnicate'"),
+        "native-proxied receiver must stay dynamic. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'("),
+        "native-proxied receiver send should still exist as a dynamic send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn class_object_typed_param_stays_dynamic() {
+    // `Class`/`Metaclass` instances are `#beamtalk_object{}` records, not
+    // maps: the tag guard could never match.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: c :: Class -> Object =>\n",
+        "    c frobnicate\n",
+    ));
+    assert!(
+        !code.contains("'dispatch'('frobnicate'"),
+        "record receiver must stay dynamic. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'("),
+        "record receiver send should still exist as a dynamic send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn sealed_stdlib_result_sends_direct() {
+    // A sealed stdlib Value converts too (vs-elixir row 9b's shape): the
+    // guard matches the tag and the direct call hits `bt@stdlib@result`.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: r :: Result(Integer, Symbol) -> Object =>\n",
+        "    r isOk\n",
+    ));
+    assert!(
+        code.contains("call 'bt@stdlib@result':'dispatch'('isOk'"),
+        "sealed stdlib receiver should direct-call. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
 fn future_typed_param_stays_dynamic() {
     // `Future` is the runtime-only builtin: no compiled module, so no
     // `dispatch/3` to direct-call (its dynamic sends route via
@@ -310,12 +365,257 @@ fn future_typed_param_stays_dynamic() {
         "    f frobnicate\n",
     ));
     assert!(
-        !code.contains(":dispatch'('frobnicate'"),
+        !code.contains("'dispatch'('frobnicate'"),
         "runtime-only receiver must stay dynamic. Got:\n{code}"
     );
     assert!(
         code.contains("beamtalk_message_dispatch':'send'("),
         "runtime-only receiver send should still exist as a dynamic send. Got:\n{code}"
+    );
+}
+
+/// A sealed `Object`-kind class arriving via the ambient (live-image)
+/// hierarchy — the shape a REPL inline class definition sees for a
+/// `ClassBuilder` class after a live edit. `module_less` selects the
+/// module-less (fun-backed, dispatches via `runtime_instance_method`)
+/// flavor versus the compiled flavor.
+fn ambient_sealed_object(
+    module_less: bool,
+    package: Option<&str>,
+) -> beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
+    ClassInfo {
+        name: "AmbientWidget".into(),
+        superclass: Some("Object".into()),
+        is_sealed: true,
+        is_abstract: false,
+        is_typed: true,
+        is_internal: false,
+        package: package.map(Into::into),
+        is_value: false,
+        is_native: false,
+        auto_ctors: None,
+        handle_scope: None,
+        surface_incomplete: false,
+        is_module_less: module_less,
+        state: vec![],
+        state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
+        state_kinds: std::collections::HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }
+}
+
+fn codegen_with_ambient(
+    src: &str,
+    ambient: beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo,
+) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("test").with_class_hierarchy(vec![ambient]),
+    )
+    .expect("codegen should succeed")
+}
+
+#[test]
+fn module_less_ambient_sealed_class_stays_dynamic() {
+    // A1: a sealed module-less (`ClassBuilder`) class seen through a REPL
+    // inline definition's ambient hierarchy must NOT direct-call — there
+    // is no `Module:dispatch/3` (dynamic dispatch runs the fun via
+    // `runtime_instance_method`), so a direct call would `undef`.
+    let code = codegen_with_ambient(
+        concat!(
+            "Object subclass: Caller\n",
+            "  useIt: w :: AmbientWidget -> Object =>\n",
+            "    w frobnicate\n",
+        ),
+        ambient_sealed_object(true, None),
+    );
+    assert!(
+        !code.contains("'dispatch'('frobnicate'"),
+        "module-less receiver must stay dynamic. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'("),
+        "module-less receiver send should still exist as a dynamic send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn module_ful_ambient_sealed_class_sends_direct() {
+    // Positive control for the module-less test above: the same ambient
+    // sealed class WITH a compiled module still takes the direct path, so
+    // the negative cannot pass vacuously (e.g. by the checker failing to
+    // resolve the pre-loaded annotation).
+    let code = codegen_with_ambient(
+        concat!(
+            "Object subclass: Caller\n",
+            "  useIt: w :: AmbientWidget -> Object =>\n",
+            "    w frobnicate\n",
+        ),
+        ambient_sealed_object(false, None),
+    );
+    assert!(
+        code.contains("call 'bt@ambient_widget':'dispatch'('frobnicate'"),
+        "module-ful ambient receiver should direct-call. Got:\n{code}"
+    );
+}
+
+#[test]
+fn packaged_ambient_sealed_class_resolves_qualified_module() {
+    // The `package = Some` resolution branch: registry miss falls back to
+    // the deterministic `bt@{package}@{snake}` composition.
+    let code = codegen_with_ambient(
+        concat!(
+            "Object subclass: Caller\n",
+            "  useIt: w :: AmbientWidget -> Object =>\n",
+            "    w frobnicate\n",
+        ),
+        ambient_sealed_object(false, Some("live")),
+    );
+    assert!(
+        code.contains("call 'bt@live@ambient_widget':'dispatch'('frobnicate'"),
+        "packaged ambient receiver should direct-call the qualified module. Got:\n{code}"
+    );
+}
+
+/// BT-4069 (review F1): sealed Value/Object builtins whose instances are
+/// `'$beamtalk_class'`-tagged maps with a compiled module — the complement of
+/// [`NON_TAGGED_MAP_CLASSES`](crate::core_erlang::dispatch_codegen::NON_TAGGED_MAP_CLASSES)
+/// over the sealed builtins. Every entry is `.bt`-defined (generated builtin:
+/// a compiled `bt@stdlib@…` module exporting `dispatch/3` exists), so a
+/// tag match routes to that same module dynamically and statically alike.
+/// A newly added sealed builtin fails
+/// `all_sealed_builtins_are_classified_for_static_dispatch` until its author
+/// puts it here or in `NON_TAGGED_MAP_CLASSES` — with the routing reason —
+/// so an `ErlangModule`-like (native proxy) or `Exception`-like (alternate
+/// entry) addition cannot slip through unclassified.
+const KNOWN_TAGGED_SEALED_BUILTINS: &[&str] = &[
+    "ActorSpawned",
+    "ActorStopped",
+    "AnnouncementNavigation",
+    "Array",
+    "Beamtalk",
+    "BindingChanged",
+    "BindingsView",
+    "ChangeEntry",
+    "ChangeLog",
+    "ClassLoaded",
+    "ClassRemoved",
+    "CompiledMethod",
+    "Console",
+    "DateTime",
+    "Digest",
+    "Duration",
+    "Erlang",
+    "File",
+    "FileHandle",
+    "FlushCompleted",
+    "Inspector",
+    "InspectorField",
+    "Json",
+    "Logger",
+    "Node",
+    "NodeDown",
+    "NodeShapeSkew",
+    "NodeUp",
+    "OS",
+    "ObjectStateChanged",
+    "Package",
+    "Parallel",
+    "Program",
+    "Protocol",
+    "Random",
+    "Regex",
+    "Result",
+    "Session",
+    "Set",
+    "Stream",
+    "Subscription",
+    "SubscriptionNode",
+    "SupervisionChildAdded",
+    "SupervisionChildCrashed",
+    "SupervisorChild",
+    "System",
+    "SystemAnnouncer",
+    "SystemNavigation",
+    "Telemetry",
+    "Time",
+    "Timer",
+    "Tracing",
+    "Transcript",
+    "Uuid",
+    "Workspace",
+];
+
+#[test]
+fn all_sealed_builtins_are_classified_for_static_dispatch() {
+    use beamtalk_core::ast::ClassKind;
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    let module = beamtalk_core::ast::Module::new(
+        Vec::new(),
+        beamtalk_core::source_analysis::Span::new(0, 0),
+    );
+    let (hierarchy_result, _) = ClassHierarchy::build(&module);
+    let hierarchy = hierarchy_result.expect("builtin hierarchy should build");
+    for name in hierarchy.class_names() {
+        let info = hierarchy
+            .get_class(name)
+            .unwrap_or_else(|| panic!("{name} should still resolve"));
+        if !info.is_sealed {
+            continue;
+        }
+        if !matches!(
+            hierarchy.resolve_class_kind(name),
+            ClassKind::Value | ClassKind::Object
+        ) {
+            continue;
+        }
+        if info.is_module_less {
+            // Separately gated (dispatch condition 5, with its own negative
+            // tests): only runtime-only `Future` and synthetic protocol roots
+            // may be module-less here.
+            assert!(
+                name == "Future" || hierarchy.is_protocol_class(name),
+                "{name} is newly module-less — confirm the dispatch gates exclude it"
+            );
+            continue;
+        }
+        assert!(
+            crate::core_erlang::dispatch_codegen::NON_TAGGED_MAP_CLASSES.contains(&name.as_str())
+                || KNOWN_TAGGED_SEALED_BUILTINS.contains(&name.as_str()),
+            "{name} is a new sealed builtin — classify it: NON_TAGGED_MAP_CLASSES \
+             (never a tagged map of its own name) or KNOWN_TAGGED_SEALED_BUILTINS \
+             (.bt-defined: compiled module + tagged-map instances)"
+        );
+    }
+}
+
+#[test]
+fn send_handlers_keep_priority_positions() {
+    // BT-4069 (review F2): `HANDLERS` order is load-bearing — `typed_sealed`
+    // must stay last (it converts only would-be-dynamic sends) and
+    // `character_typed` first. A handler appended after `typed_sealed`
+    // would silently never fire for sealed-typed receivers.
+    let handlers = crate::core_erlang::dispatch_codegen::HANDLERS;
+    assert_eq!(
+        handlers.first().map(|(name, _)| *name),
+        Some("character_typed"),
+        "character_typed must stay first"
+    );
+    assert_eq!(
+        handlers.last().map(|(name, _)| *name),
+        Some("typed_sealed"),
+        "typed_sealed must stay last"
     );
 }
 

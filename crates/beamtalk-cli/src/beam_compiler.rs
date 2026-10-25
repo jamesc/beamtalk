@@ -1744,6 +1744,7 @@ end
 
         let sibling = ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "SiblingBt2793".into(),
             superclass: Some("Object".into()),
             is_sealed: false,

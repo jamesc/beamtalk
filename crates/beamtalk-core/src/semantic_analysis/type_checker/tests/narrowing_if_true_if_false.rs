@@ -128,12 +128,14 @@ fn bt_2020_if_true_if_false_mixed_arms_yield_concrete_type() {
 /// assigned to `picked` should let `picked` bind as `MyVal`, so `picked xyzzyNonsense`
 /// warns with a DNU naming `xyzzyNonsense`.
 #[test]
+#[allow(clippy::too_many_lines)] // data-literal-heavy fixture setup, not logic
 fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     // Register a `MyVal` class so `MyVal new` yields `Known(MyVal)`.
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "MyVal".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -726,6 +728,7 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("Weird"),
         superclass: Some(eco_string("Object")),
         is_sealed: false,

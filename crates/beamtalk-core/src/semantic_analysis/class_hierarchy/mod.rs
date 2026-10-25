@@ -255,6 +255,8 @@ impl ClassHierarchy {
                     is_native: false,
                     handle_scope: None,
                     surface_incomplete: false,
+                    // Synthetic entry: no compiled module exists.
+                    is_module_less: true,
                     state: vec![],
                     state_types: HashMap::new(),
                     state_has_default: HashMap::new(),
@@ -479,6 +481,8 @@ impl ClassHierarchy {
                         // whose chain includes it must never be classified
                         // ClosedComplete.
                         surface_incomplete: true,
+                        // Stub: no compiled module is known.
+                        is_module_less: true,
                         state: Vec::new(),
                         state_types: HashMap::new(),
                         state_has_default: HashMap::new(),

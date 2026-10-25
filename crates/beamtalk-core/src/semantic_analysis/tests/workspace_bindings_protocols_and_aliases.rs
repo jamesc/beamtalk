@@ -29,6 +29,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
     // sentinel, the check is suppressed and the test would pass vacuously.
     let dummy_class = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: EcoString::from("DummyClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,

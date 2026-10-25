@@ -556,6 +556,7 @@ fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "PartialA".into(),
         // `MissingAncestor` is never registered — the checker cannot
         // enumerate PartialA's full method surface.

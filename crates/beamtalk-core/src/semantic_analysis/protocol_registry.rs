@@ -1404,6 +1404,7 @@ Value subclass: Version
         let mut hierarchy = ClassHierarchy::with_builtins();
         let gadget = ClassInfo {
             surface_incomplete: false,
+            is_module_less: false,
             name: "Gadget".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -1486,6 +1487,7 @@ Value subclass: Version
             let mut h = ClassHierarchy::with_builtins();
             h.add_from_beam_meta(vec![ClassInfo {
                 surface_incomplete: false,
+                is_module_less: false,
                 name: "Gadget".into(),
                 superclass: Some("Object".into()),
                 is_sealed: false,
@@ -1778,6 +1780,7 @@ Value subclass: Version
             "Printable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                is_module_less: false,
                 name: "Printable".into(),
                 superclass: Some("Protocol".into()),
                 is_sealed: true,
@@ -1850,6 +1853,7 @@ Value subclass: Version
             "Tickable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                is_module_less: false,
                 name: "Tickable".into(),
                 superclass: Some("Protocol".into()),
                 is_sealed: true,

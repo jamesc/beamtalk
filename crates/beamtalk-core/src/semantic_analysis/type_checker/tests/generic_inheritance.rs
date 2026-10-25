@@ -16,6 +16,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
 
     let collection_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("GenCollection"),
         superclass: Some(eco_string("Object")),
         is_sealed: false,
@@ -86,6 +87,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
 
     let array_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("GenArray"),
         superclass: Some(eco_string("GenCollection")),
         is_sealed: false,
@@ -200,6 +202,7 @@ fn generic_inheritance_concrete_superclass_type_arg() {
     // IntArray has no type params, but maps Integer to GenCollection's E
     let int_array_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("IntArray"),
         superclass: Some(eco_string("GenCollection")),
         is_sealed: false,
@@ -309,6 +312,7 @@ fn generic_inheritance_multi_level_composition() {
     // SortedArray(E) extends GenArray(E)
     let sorted_info = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("SortedArray"),
         superclass: Some(eco_string("GenArray")),
         is_sealed: false,
@@ -405,6 +409,7 @@ fn type_param_bounds_conforming_type_no_warning() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "BoundedLogger".into(),
         superclass: Some("Actor".into()),
         is_sealed: false,
@@ -480,6 +485,7 @@ fn type_param_bounds_non_conforming_type_warns() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "BoundedLogger".into(),
         superclass: Some("Actor".into()),
         is_sealed: false,
@@ -586,6 +592,7 @@ fn type_param_bounds_dynamic_skipped() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "BoundedLogger".into(),
         superclass: Some("Actor".into()),
         is_sealed: false,
@@ -642,6 +649,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
     // Add a sealed Value class: SealedBox(T) — covariant (immutable)
     let sealed_box = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("SealedBox"),
         superclass: Some(eco_string("Value")),
         is_sealed: true,
@@ -700,6 +708,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
     // Add an Actor class: ActorBox(T) — invariant (mutable state)
     let actor_box = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("ActorBox"),
         superclass: Some(eco_string("Actor")),
         is_sealed: false,
@@ -761,6 +770,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
     // Add an unsealed Value class: OpenBox(T) — invariant (can be subclassed)
     let open_box = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("OpenBox"),
         superclass: Some(eco_string("Value")),
         is_sealed: false,
@@ -789,6 +799,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
     // Add a class that accepts SealedBox(Printable) parameter
     let consumer = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("BoxConsumer"),
         superclass: Some(eco_string("Object")),
         is_sealed: false,
@@ -956,6 +967,7 @@ fn variance_covariant_non_conforming_rejected() {
     // Add OpaqueType without asString — does not conform to Printable
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: eco_string("OpaqueType"),
         superclass: Some(eco_string("Object")),
         is_sealed: false,
@@ -1234,6 +1246,7 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
     let mut h = ClassHierarchy::with_builtins();
     h.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: "HttpClient".into(),
         superclass: Some("Object".into()),
         is_sealed: false,

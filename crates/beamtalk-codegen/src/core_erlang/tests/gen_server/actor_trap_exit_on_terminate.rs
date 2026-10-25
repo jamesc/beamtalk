@@ -76,6 +76,7 @@ fn test_actor_inheriting_terminate_override_from_cross_file_ancestor_traps_exit(
 
     let ancestor = ClassInfo {
         surface_incomplete: false,
+        is_module_less: false,
         name: ecow::EcoString::from("BaseCleanupActor"),
         superclass: Some(ecow::EcoString::from("Actor")),
         is_sealed: false,
