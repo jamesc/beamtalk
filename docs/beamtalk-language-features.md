@@ -1472,8 +1472,11 @@ where `late` may appear:**
 2. `late state:`/`classState:` with no type annotation — the point of
    `late` is a non-nilable *declared* type, and an untyped slot already
    defaults to `nil` with no check.
-3. `late state:`/`classState:` on a nilable type (`T | Nil`) — a slot whose
-   type already admits `nil` is never in the state `late` describes.
+3. `late state:`/`classState:` on a type that admits `nil` — a syntactic
+   `T | Nil`, but also `Object` and `ProtoObject` (`nil` is an instance of
+   both), `Dynamic` (which accepts every value unchecked), and any alias
+   or protocol that admits `nil`. A slot whose type already admits `nil`
+   is never in the state `late` describes.
 4. `late state:`/`classState:` with a default value — a slot with a
    default is never unset.
 5. `late state:` on a `native:` Actor, or `late state:`/`field:` on
@@ -1483,7 +1486,8 @@ where `late` may appear:**
 
 ```beamtalk
 late state: x            // error (2): requires a type annotation
-late state: x :: T | Nil // error (3): drop `late` or make the type non-nilable
+late state: x :: T | Nil // error (3): drop `late` or narrow the type to exclude nil
+late state: x :: Object  // error (3): `nil` is an `Object`, so the type admits nil
 late state: x :: T = v   // error (4): a slot with a default is never unset
 ```
 
@@ -1516,14 +1520,15 @@ two angles, not a contradiction: one reports declared shape, the other
 reports assignment.
 
 A `late` slot is excluded from the post-`initialize` definite-assignment
-check. Reading it before assignment raises `UninitializedStateError`
-**whichever way it is still unassigned** — its key is simply absent, or an
-open-world writer (`spawnWith:` with a non-literal map, `fieldAt:put:`,
-`perform:`) has planted an observed `nil` there without going through
-ordinary `self.slot :=` assignment; `late` does not make a non-nilable
-declared type sound against those writers, it only makes the violation
-raise at the read, naming the slot, instead of surfacing as a
-does-not-understand on `nil` somewhere downstream. `self.slot` (or
+check. Reading it before assignment raises `UninitializedStateError` —
+and "before assignment" means exactly that its key is absent from the
+state map. Presence — not value — is assignment: if an open-world writer
+(`spawnWith:` with a non-literal map, `fieldAt:put:`, `perform:`) has
+planted a `nil` there without going through ordinary `self.slot :=`
+assignment, the key is present and the read answers `nil`, exactly as
+`hasField:` reports it assigned (BT-4061). `late` does not make a
+non-nilable declared type sound against those writers; it makes the direct
+read and `hasField:` agree on what "assigned" means. `self.slot` (or
 `fieldAt: #slot`) is the raising direct read; `hasField: #slot` is the
 non-raising presence test to ask first — `Object`'s `hasField:`/
 `clearField:` (ADR 0035's `field`-prefixed reflection family) make a

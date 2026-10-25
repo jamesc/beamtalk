@@ -37,6 +37,29 @@
 //!   an unresolvable/dynamic type has never been treated as an implicit
 //!   escape hatch from the definite-assignment check.
 //!
+//! [`admits_nil_type_annotation`] (ADR 0124 B1, BT-4061) answers the same
+//! question a second way — subtype-style rather than explicit-member-style:
+//! `nil` (a value of `UndefinedObject`) is assignable to the type, so a
+//! `late` slot declaring it already has a value for the unassigned state.
+//! It resolves through the same [`resolve_declared_type`] + ADR 0102
+//! set-operator machinery ([`inferred_admits_nil`], shared with
+//! [`is_nilable_inferred`]), but answers the leaves differently: a `Known`
+//! class admits when it is the nil class, a superclass of it (`Object`,
+//! `ProtoObject` — the nominal chain `is_assignable_to` walks to accept
+//! `nil` into an `:: Object` slot), or a protocol `nil` provably satisfies;
+//! `Dynamic` admits (it accepts every value unchecked); `Meta`/`Never`
+//! admit nothing. The two readings differ deliberately: Part A's narrow
+//! reading keeps the Warning (and the runtime post-`initialize` backstop)
+//! firing on `:: Object`/`:: Dynamic` slots, while B1's wide reading rejects
+//! `late` on exactly the types `nil` can flow into. Unknown class names
+//! admit nothing — an Error must not fire on what the checker cannot see.
+//!
+//! `&`/`\` operands resolve without a hierarchy (this module passes none,
+//! as Part A always has), so a nominal `Base \ Nil` still reads as its base
+//! and a nominal `A & B` collapses to `Never`: the same erasure Part A
+//! applies. `&`/`\` in a slot annotation is exotic, and matching the
+//! checker's own resolution everywhere beats a second, B1-only reading.
+//!
 //! This module has no dependency on `beamtalk-codegen` — it lives below both
 //! `beamtalk-codegen` and `beamtalk-lsp`/`beamtalk-lint` (the shared-leaf-
 //! module pattern, `docs/development/architecture-principles.md` §6), so
@@ -45,7 +68,8 @@
 
 use crate::ast::{SlotKind, StateDeclaration, TypeAnnotation};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
-use crate::semantic_analysis::class_hierarchy::DeclaredType;
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     InferredType, TypeStringContext, resolve_declared_type,
@@ -124,33 +148,122 @@ pub fn is_nilable_type_name(name: &str, aliases: &AliasRegistry) -> bool {
     is_nilable_declared_type(&DeclaredType::parse(name), aliases)
 }
 
+/// Shared resolution step for [`is_nilable_type_annotation`],
+/// [`is_nilable_type_name`] and [`admits_nil_type_annotation`]: resolve `dt`
+/// to an [`InferredType`], expanding aliases through `aliases` (and, when
+/// given, keeping class ∩ protocol intersections irreducible instead of
+/// collapsing them to `Never`).
+fn resolve_for_nil_admission(
+    dt: &DeclaredType,
+    aliases: &AliasRegistry,
+    protocols: Option<&ProtocolRegistry>,
+) -> InferredType {
+    resolve_declared_type(
+        dt,
+        &HashMap::new(),
+        protocols,
+        Some(aliases),
+        TypeStringContext::Declared,
+    )
+}
+
 /// Shared resolution step for both [`is_nilable_type_annotation`] and
 /// [`is_nilable_type_name`]: resolve `dt` to an [`InferredType`] (expanding
 /// aliases through `aliases`) and check the result for nil-admission.
 fn is_nilable_declared_type(dt: &DeclaredType, aliases: &AliasRegistry) -> bool {
-    let resolved = resolve_declared_type(
-        dt,
-        &HashMap::new(),
-        None,
-        Some(aliases),
-        TypeStringContext::Declared,
-    );
+    let resolved = resolve_for_nil_admission(dt, aliases, None);
     is_nilable_inferred(&resolved)
+}
+
+/// `true` if `annotation` admits `nil` subtype-style (ADR 0124 §1, B1,
+/// BT-4061): `nil` is assignable to it, so a `late` slot declaring it
+/// already has a value for the unassigned state. See the module doc for how
+/// this wide reading differs from [`is_nilable_type_annotation`]'s narrow
+/// one, and why.
+#[must_use]
+pub fn admits_nil_type_annotation(
+    annotation: &TypeAnnotation,
+    aliases: &AliasRegistry,
+    hierarchy: &ClassHierarchy,
+    protocols: &ProtocolRegistry,
+) -> bool {
+    let resolved =
+        resolve_for_nil_admission(&DeclaredType::from(annotation), aliases, Some(protocols));
+    inferred_admits_nil(
+        &resolved,
+        &|class_name| admits_nil_known_class(class_name, hierarchy, protocols),
+        true,
+    )
+}
+
+/// The nominal leaf of [`admits_nil_type_annotation`]: `true` when `nil` is
+/// a value of the named class-or-protocol — the nil class itself, a nominal
+/// superclass of it, or a protocol it provably satisfies. Anything else
+/// (ordinary classes, unknown names) admits nothing.
+fn admits_nil_known_class(
+    class_name: &str,
+    hierarchy: &ClassHierarchy,
+    protocols: &ProtocolRegistry,
+) -> bool {
+    if WellKnownClass::from_str(class_name).is_some_and(WellKnownClass::is_nil_class) {
+        return true;
+    }
+    // `nil`'s nominal supertypes (`Object`, `ProtoObject`): the same chain
+    // `is_assignable_to`/`is_type_compatible` walk to accept `nil` into an
+    // `:: Object` slot.
+    if hierarchy
+        .superclass_chain(WellKnownClass::UndefinedObject.as_str())
+        .iter()
+        .any(|ancestor| ancestor == class_name)
+    {
+        return true;
+    }
+    // A protocol `nil` provably satisfies admits `nil` as a value. A plain
+    // unknown name is neither a protocol nor satisfied, so this answers
+    // `false` for it too — see `admits_nil_type_annotation`'s doc.
+    protocols.conforms_by_known_surface(
+        WellKnownClass::UndefinedObject.as_str(),
+        class_name,
+        hierarchy,
+    )
 }
 
 /// `true` if a resolved [`InferredType`] admits `nil` — see the module doc
 /// for the per-shape rules (Union/Intersection/Negation).
 fn is_nilable_inferred(ty: &InferredType) -> bool {
-    match ty {
-        InferredType::Known { class_name, .. } => {
+    inferred_admits_nil(
+        ty,
+        &|class_name| {
             WellKnownClass::from_str(class_name).is_some_and(WellKnownClass::is_nil_class)
-        }
-        InferredType::Union { members, .. } => members.iter().any(is_nilable_inferred),
-        InferredType::Intersection { members, .. } => members.iter().all(is_nilable_inferred),
+        },
+        false,
+    )
+}
+
+/// Shared ADR 0102 set-operator recursion for "does this resolved type admit
+/// `nil`" — Union(any)/Intersection(all)/Negation(base ∧ ¬excluded) —
+/// parameterized by the two leaf answers that differ per query: how a nominal
+/// class name answers, and how `Dynamic` answers. `Meta`/`Never` never admit
+/// under either query.
+fn inferred_admits_nil(
+    ty: &InferredType,
+    known_admits_nil: &impl Fn(&str) -> bool,
+    dynamic_admits_nil: bool,
+) -> bool {
+    match ty {
+        InferredType::Known { class_name, .. } => known_admits_nil(class_name),
+        InferredType::Union { members, .. } => members
+            .iter()
+            .any(|m| inferred_admits_nil(m, known_admits_nil, dynamic_admits_nil)),
+        InferredType::Intersection { members, .. } => members
+            .iter()
+            .all(|m| inferred_admits_nil(m, known_admits_nil, dynamic_admits_nil)),
         InferredType::Negation { base, excluded, .. } => {
-            is_nilable_inferred(base) && !is_nilable_inferred(excluded)
+            inferred_admits_nil(base, known_admits_nil, dynamic_admits_nil)
+                && !inferred_admits_nil(excluded, known_admits_nil, dynamic_admits_nil)
         }
-        InferredType::Meta { .. } | InferredType::Dynamic(_) | InferredType::Never => false,
+        InferredType::Dynamic(_) => dynamic_admits_nil,
+        InferredType::Meta { .. } | InferredType::Never => false,
     }
 }
 
@@ -410,6 +523,69 @@ mod tests {
             false,
             SlotKind::Eager,
             &registry
+        ));
+    }
+
+    // ── admits_nil_type_annotation (BT-4061: wide, subtype-style) ────────────
+
+    #[test]
+    fn admits_nil_object_dynamic_proto_object_but_part_a_does_not() {
+        // The deliberate asymmetry between the two readings: B1 rejects
+        // `late` on exactly the types `nil` can flow into, while Part A
+        // keeps its narrow reading so the Warning (and the runtime
+        // backstop) still fire on `:: Object`/`:: Dynamic` slots.
+        let aliases = AliasRegistry::new();
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocols = ProtocolRegistry::new();
+        for name in ["Object", "ProtoObject", "Dynamic"] {
+            let annotation = simple(name);
+            assert!(
+                admits_nil_type_annotation(&annotation, &aliases, &hierarchy, &protocols),
+                "{name} admits nil subtype-style (BT-4061)"
+            );
+            assert!(
+                !is_nilable_type_annotation(&annotation, &aliases),
+                "Part A keeps its narrow explicit-Nil reading for {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn admits_nil_plain_and_unknown_classes_admit_nothing() {
+        let aliases = AliasRegistry::new();
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocols = ProtocolRegistry::new();
+        for name in ["Integer", "Subprocess", "SomeUnknownClass"] {
+            assert!(
+                !admits_nil_type_annotation(&simple(name), &aliases, &hierarchy, &protocols),
+                "{name} admits nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn admits_nil_unions_and_aliases_follow_members() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocols = ProtocolRegistry::new();
+        let plain = AliasRegistry::new();
+        assert!(admits_nil_type_annotation(
+            &union(&["Integer", "Nil"]),
+            &plain,
+            &hierarchy,
+            &protocols
+        ));
+        assert!(!admits_nil_type_annotation(
+            &union(&["Integer", "String"]),
+            &plain,
+            &hierarchy,
+            &protocols
+        ));
+        let aliased = registry_with_alias("JsonValue", union(&["Nil", "Boolean", "Integer"]));
+        assert!(admits_nil_type_annotation(
+            &simple("JsonValue"),
+            &aliased,
+            &hierarchy,
+            &protocols
         ));
     }
 }

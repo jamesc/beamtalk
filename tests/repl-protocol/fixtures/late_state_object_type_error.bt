@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4061: Fixture that triggers the B1 `late`-on-nil-admitting-type
+// compile error — `nil` is an `Object`, so `late state: a :: Object`
+// already has a value for the unassigned state and `late` declares
+// nothing. Loaded via `@load-error`, never compiled into the suite.
+
+typed Actor subclass: LateObjectReplActor
+  late state: a :: Object
+
+  read -> Object => self.a

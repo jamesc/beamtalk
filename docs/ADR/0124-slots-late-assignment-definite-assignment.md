@@ -1538,3 +1538,38 @@ by decision, remain future work
   [Pharo ComputedSlots](https://astares.blogspot.com/2019/03/computedslots-in-pharo.html);
   [Swift `lazy var` on structs](https://www.avanderlee.com/swift/lazy-var-property/)
   and [the Swift Forums thread on lazy vars in immutable structs](https://forums.swift.org/t/allow-lazy-vars-on-immutable-structs/16417)
+
+## Amendment (2026-10-25, BT-4061): presence-only reads; `late` rejected on every nil-admitting type
+
+Two corrections to §1–§3, found via Catalina's `Handler handlerOptions`:
+
+**1. The read guard is presence-only; the `{ok, 'nil'}` arm is deleted.**
+§3 specified a three-arm guard whose `{ok, 'nil'}` arm raised alongside the
+absent-key arm ("required, not optional"). That arm contradicted §2 ("the
+presence test is `maps:is_key/2`") and disagreed with `hasField:`, which
+answers presence: a `late` slot holding `nil` read as assigned by one
+surface and unassigned by the other. The guard is now
+`{ok, V} -> V; 'error' -> raise` — a present key holding `nil` answers
+`nil` — and each raising read shares its presence test with `hasField:`
+(`beamtalk_reflection:read_field/2` via `has_field/2`,
+`beamtalk_class_vars:late_value/3` via `has_value/2`, the class
+gen_server's `get_class_var` via `class_var_assigned/2`), so the two
+cannot drift apart again. `nil` in a `late` slot is reachable only through
+an open-world writer (`spawnWith:` with a non-literal map, `fieldAt:put:`,
+`perform:`): B1 (below) keeps honest code from declaring a type `nil` can
+flow into, but the open-world writers are still untyped, so the read
+defines their outcome as "present" rather than raising.
+
+**2. B1 rejects `late` on every nil-admitting type, not just syntactic
+`T | Nil`.** §1 forbade "a nilable type" but B1 matched only a syntactic
+`Nil`/`UndefinedObject` member, so `late state: a :: Object` compiled —
+and `nil` is an `Object` (`UndefinedObject` subclasses it; the checker
+accepts `nil` into `:: Object` slots), making the first defect reachable
+from ordinary code. B1 now uses the checker's own subtype-style
+"admits `Nil`" predicate (`definite_assignment::admits_nil_type_annotation`,
+sharing the ADR 0102 set-operator recursion with Part A's predicate):
+`Object`, `ProtoObject`, `Dynamic`, aliases and protocols admitting `nil`
+are all Errors, with the fix-it "Drop 'late' or narrow the type to exclude
+nil". Part A's narrow explicit-`Nil` reading is unchanged — `:: Object`
+slots still get the definite-assignment Warning and the runtime backstop —
+and the two readings' deliberate asymmetry is pinned by test.

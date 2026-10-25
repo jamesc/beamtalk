@@ -330,24 +330,15 @@ impl CoreErlangGenerator {
     /// end
     /// ```
     ///
-    /// A `late` variable (ADR 0124) additionally treats a stored `nil` as a
-    /// miss, so `get_late/2` raises the same `uninitialized_state_error` for an
-    /// unassigned (`nil` or absent) variable.
+    /// A `late` variable (ADR 0124, as amended by BT-4061) differs only in
+    /// the miss path: `get_late/2` raises `uninitialized_state_error` for an
+    /// absent variable, where `get/2` answers `nil`. The hit path is
+    /// presence-only for both — a stored `nil` answers `nil`, exactly as
+    /// `hasField:` reports it assigned.
     pub(super) fn class_var_read_doc(&mut self, name: &str, late: bool) -> Document<'static> {
         let map_var = self.fresh_temp_var("CVMap");
         let val_var = self.fresh_temp_var("CVVal");
-        let (function, hit_guard) = if late {
-            (
-                "get_late",
-                docvec![
-                    "call 'erlang':'=/='(",
-                    leaf::var(val_var.clone()),
-                    ", 'nil')"
-                ],
-            )
-        } else {
-            ("get", Document::Str("'true'"))
-        };
+        let function = if late { "get_late" } else { "get" };
         let key = self.class_var_key_ref_doc();
         let fallback = || self.class_var_read_helper_call_doc(function, vec![leaf::atom(name)]);
         docvec![
@@ -363,9 +354,7 @@ impl CoreErlangGenerator {
             leaf::var(map_var),
             ") of <{'ok', ",
             leaf::var(val_var.clone()),
-            "}> when ",
-            hit_guard,
-            " -> ",
+            "}> when 'true' -> ",
             leaf::var(val_var),
             " <_> when 'true' -> ",
             fallback(),
@@ -458,12 +447,15 @@ mod tests {
     }
 
     #[test]
-    fn late_read_treats_nil_as_a_miss() {
+    fn late_read_answers_a_stored_nil_on_the_hit_path() {
+        // BT-4061: presence — not value — is assignment. The `late` hit
+        // path has no nil-is-a-miss guard; only the miss path differs from
+        // eager (`get_late/2`, which raises on an absent key).
         let doc = generator()
             .class_var_read_doc("cache", true)
             .to_pretty_string();
-        assert!(doc.contains("when call 'erlang':'=/='("), "{doc}");
-        assert!(doc.contains(", 'nil')"), "{doc}");
+        assert!(!doc.contains("when call 'erlang':'=/='("), "{doc}");
+        assert!(!doc.contains(", 'nil')"), "{doc}");
         assert_eq!(
             doc.matches("call 'beamtalk_class_vars':'get_late'(ClassSelf, 'cache')")
                 .count(),

@@ -549,15 +549,12 @@ impl CoreErlangGenerator {
             .is_some_and(|h| h.class_variable_kind(class_name, var_name) == SlotKind::Late)
     }
 
-    /// ADR 0124 §3: builds one `call 'beamtalk_error':'raise'(...)` arm for
-    /// an unassigned `late` slot read — shared by both `{ok, 'nil'}` and
-    /// `'error'` case arms of [`Self::generate_late_field_read`], which need
-    /// the identical raise with independent fresh variable names (Core
-    /// Erlang `let`-bound names are unique per function, so the two arms
-    /// can't share one set of names even though only one of them ever
-    /// executes). Reuses the shared `beamtalk_error:'new'` →
-    /// `'with_selector'` → `'with_hint'` chain (`errors.rs`) rather than
-    /// hand-rolling it, per CLAUDE.md's no-duplicate-implementations rule.
+    /// ADR 0124 §3 (as amended by BT-4061): builds the
+    /// `call 'beamtalk_error':'raise'(...)` for the `'error'` (absent-key)
+    /// arm of [`Self::generate_late_field_read`]. Reuses the shared
+    /// `beamtalk_error:'new'` → `'with_selector'` → `'with_hint'` chain
+    /// (`errors.rs`) rather than hand-rolling it, per CLAUDE.md's
+    /// no-duplicate-implementations rule.
     fn generate_uninitialized_state_raise(
         &mut self,
         class_name: &str,
@@ -586,23 +583,23 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// ADR 0124 §3/B3: the guarded `late`-slot read —
+    /// ADR 0124 §3/B3 (as amended by BT-4061): the guarded `late`-slot
+    /// read — presence-only:
     /// ```erlang
     /// case maps:find(Slot, State) of
-    ///   {ok, 'nil'} -> <raise uninitialized_state_error>
-    ///   {ok, V}     -> V
-    ///   'error'     -> <raise uninitialized_state_error>
+    ///   {ok, V} -> V
+    ///   'error' -> <raise uninitialized_state_error>
     /// end
     /// ```
     /// Shared by `generate_field_access`'s instance branch (State/Self map)
-    /// and class-method branch (the class process's dictionary) — both read the same slot the
-    /// same way, differing only in which map variable and declared-type
-    /// lookup feed it. The `'nil'` arm is required, not optional: `nil` can
-    /// reach an unassigned `late` slot's key unobserved (`spawnWith:` with a
-    /// non-literal map, `fieldAt:put:`, `perform:`), and a presence-only
-    /// guard would hand that `nil` to a reader the type checker told to skip
-    /// narrowing (ADR §3). Stays pure — returns a value, threads no state —
-    /// because reading never writes.
+    /// and the actor-closure cell view — both read the same slot the same
+    /// way, differing only in which map variable and declared-type lookup
+    /// feed it. Presence — not value — is assignment (ADR §2): a present
+    /// key holding `nil` (reachable only through an open-world writer —
+    /// `spawnWith:` with a non-literal map, `fieldAt:put:`, `perform:` —
+    /// since B1 rejects `late` on every nil-admitting type) answers `nil`,
+    /// exactly as `hasField:` reports it assigned. Stays pure — returns a
+    /// value, threads no state — because reading never writes.
     fn generate_late_field_read(
         &mut self,
         field_name: &str,
@@ -631,7 +628,6 @@ impl CoreErlangGenerator {
              and has not been assigned yet"
         );
         let ok_var = self.fresh_temp_var("LateVal");
-        let nil_raise = self.generate_uninitialized_state_raise(&class_name, &selector, &hint_text);
         let absent_raise =
             self.generate_uninitialized_state_raise(&class_name, &selector, &hint_text);
         docvec![
@@ -639,9 +635,7 @@ impl CoreErlangGenerator {
             leaf::atom(field_name.to_string()),
             ", ",
             state_var,
-            ") of <{'ok', 'nil'}> when 'true' -> ",
-            nil_raise,
-            " <{'ok', ",
+            ") of <{'ok', ",
             leaf::var(ok_var.clone()),
             "}> when 'true' -> ",
             leaf::var(ok_var),

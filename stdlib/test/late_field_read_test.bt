@@ -27,17 +27,35 @@ TestCase subclass: LateFieldReadTest
     self assert: (result includesSubstring: "Integer")
     self assert: (result includesSubstring: "late")
 
-  testNilInjectedViaSpawnWithAlsoRaises =>
-    // spawnWith: with a non-literal map must be caught by the guard's
-    // {ok, nil} arm exactly like an absent key — the whole point of that
-    // arm (ADR §3): a `late` slot's key can carry an observed `nil`
-    // without going through ordinary assignment. Built via a variable
-    // (not an inline `#{...}` literal at the call site) so the compile-time
+  testNilInjectedViaSpawnWithReadsBackAsAssigned =>
+    // BT-4061: presence — not value — is assignment (ADR 0124 §2). An
+    // injected `nil` makes the key present, so `hasField:` is true and the
+    // read answers `nil` instead of raising. Built via a variable (not an
+    // inline `#{...}` literal at the call site) so the compile-time
     // literal-map type check doesn't reject it up front — exactly the
     // "spawnWith: with a non-literal map" case the ADR names.
     initArgs := Dictionary new at: #proc put: nil
     a := LateFieldReadActor spawnWith: initArgs
-    self should: [a getProc] raise: #uninitialized_state_error
+    self assert: (a hasField: #proc)
+    self assert: a getProc equals: nil
+
+  testNilForgedViaFieldAtPutReadsBackAsAssigned =>
+    // BT-4061's repro shape: `hasField:` says assigned while the direct
+    // read raised. (`late state: a :: Object` itself no longer compiles —
+    // B1 rejects nil-admitting types — so the `nil` is forged through the
+    // untyped `fieldAt:put:` writer instead, the only way to reach this
+    // state now.) Both surfaces must agree the slot is assigned.
+    a := LateFieldReadActor spawn
+    a fieldAt: #proc put: nil
+    self assert: (a hasField: #proc)
+    self assert: a getProc equals: nil
+
+  testFieldAtOnForgedNilAnswersNil =>
+    // The reflective read agrees with the direct read: a present key
+    // holding `nil` answers `nil`, never raises.
+    a := LateFieldReadActor spawn
+    a fieldAt: #proc put: nil
+    self assert: (a fieldAt: #proc) equals: nil
 
   testReadAfterAssignAnswersTheValue =>
     a := LateFieldReadActor spawn
@@ -77,3 +95,14 @@ TestCase subclass: LateFieldReadTest
   testClassReadAfterAssignAnswersTheValue =>
     LateClassVarAssignedActor setCurrent: 7
     self assert: LateClassVarAssignedActor getCurrent equals: 7
+
+  testClassNilForgedViaPerformReadsBackAsAssigned =>
+    // BT-4061, class-side counterpart: forge `nil` past the typed
+    // `setCurrent:` parameter via dynamic `perform:` (which skips static
+    // argument checking), then the class-method read answers it and
+    // `hasField:` agrees the variable is assigned. Sets what it needs, so
+    // it cannot interfere with the assign-then-read test above whatever
+    // order the two run in.
+    LateClassVarAssignedActor perform: #setCurrent: withArguments: #(nil)
+    self assert: (LateClassVarAssignedActor hasField: #current)
+    self assert: LateClassVarAssignedActor getCurrent equals: nil

@@ -3,12 +3,14 @@
 
 // LateFieldReadActor — test fixture for BT-3549 (ADR 0124 §3/B3)
 //
-// Exercises the guarded `late` slot read (`maps:find` + the `'nil'` and
-// absence arms, `generate_field_access`): a read before assignment and a
-// `nil` injected via `spawnWith:` both raise `UninitializedStateError`;
-// a read after assignment answers the value; a `late` read inside a
-// `whileTrue:` body whose condition is false from the start never runs
-// the body and so never raises.
+// Exercises the guarded `late` slot read (presence-only `maps:find`,
+// `generate_field_access`): a read before assignment raises
+// `UninitializedStateError`; a read after assignment answers the value;
+// a present key holding `nil` (injected via `spawnWith:` with a
+// non-literal map, or forged via `fieldAt:put:`) answers `nil`, agreeing
+// with `hasField:` (BT-4061); a `late` read inside a `whileTrue:` body
+// whose condition is false from the start never runs the body and so
+// never raises.
 
 typed Actor subclass: LateFieldReadActor
   late state: proc :: Integer
