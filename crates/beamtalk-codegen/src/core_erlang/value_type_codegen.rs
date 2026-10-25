@@ -1832,14 +1832,16 @@ impl CoreErlangGenerator {
     /// Lowers to:
     /// ```erlang
     /// call 'beamtalk_erlang_proxy':'native_call'(
-    ///     'BackingModule', 'fnName', [Arg1, ...], {'ClassName', 'selector:'})
+    ///     'BackingModule', 'fnName', [Arg1, ...], {'ClassName', 'selector:'}, 'beamtalk')
     /// ```
     ///
     /// `arg_vars` are the Core Erlang variables to forward verbatim — the caller
     /// prepends `Self` for instance methods and omits it for class methods. The
     /// `{Class, Sel}` context lets the proxy report `ClassName>>selector:` on a
-    /// wrapped error instead of the bare Erlang MFA. Routing through
-    /// `native_call/4` (rather than a bare `Mod:Fn` call) is what gives the
+    /// wrapped error instead of the bare Erlang MFA. The trailing mode atom is
+    /// the `stock`/`beamtalk` coercion mode, precomputed from the
+    /// statically-known backing module (BT-4153). Routing through
+    /// `native_call/5` (rather than a bare `Mod:Fn` call) is what gives the
     /// generated dispatch wrap-by-default error handling and ADR 0076
     /// ok/error → `Result` coercion, identical to inline `(Erlang …)` FFI.
     pub(in crate::core_erlang) fn native_delegate_body_doc(
@@ -1853,6 +1855,7 @@ impl CoreErlangGenerator {
             arg_vars.iter().map(|v| leaf::var(v.clone())),
             &Document::Str(", "),
         );
+        let mode = super::util::ffi_coercion_mode(backing_module);
         docvec![
             "call 'beamtalk_erlang_proxy':'native_call'(",
             leaf::atom(backing_module.to_string()),
@@ -1864,7 +1867,9 @@ impl CoreErlangGenerator {
             leaf::atom(class_name.to_string()),
             ", ",
             leaf::atom(selector.name().to_string()),
-            "})"
+            "}, ",
+            leaf::atom(mode),
+            ")"
         ]
     }
 

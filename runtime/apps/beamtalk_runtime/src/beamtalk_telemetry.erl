@@ -14,7 +14,7 @@ Two audiences share it:
 - **The stdlib `Telemetry` facade** (`stdlib/src/telemetry.bt`). The class
   is `native: beamtalk_telemetry` and its class-side methods are
   `self delegate` bodies (ADR 0101, BT-4055), lowered to
-  `beamtalk_erlang_proxy:native_call/4` into `execute/3`, `span/3`,
+  `beamtalk_erlang_proxy:native_call/5` into `execute/3`, `span/3`,
   `attach/3`, `attachMany/3` and `detach/1`. The function names follow the
   `native:` naming rule (the selector's first keyword). These validate their
   arguments and raise structured `#beamtalk_error{}`s. The module opts out of
@@ -153,7 +153,7 @@ detach(HandlerId) ->
 
 -doc """
 Opt out of `beamtalk_erlang_proxy`'s ok/error → `Result` coercion (ADR 0076)
-for the `native_call/4` path. `span/3` answers whatever the user's block
+for the `native_call/5` path. `span/3` answers whatever the user's block
 answers, so a block value of `#ok` or `{error, _}` must come back as is. The
 module's own answers are `nil` and already-built `Result`s, so nothing here
 relies on the coercion.

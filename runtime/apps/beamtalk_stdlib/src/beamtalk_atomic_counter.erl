@@ -250,7 +250,7 @@ delete(_Self) ->
 %%% ============================================================================
 %%% FFI Shims
 %%%
-%%% The (Erlang beamtalk_atomic_counter) FFI uses beamtalk_erlang_proxy:direct_call/3,
+%%% The (Erlang beamtalk_atomic_counter) FFI uses beamtalk_erlang_proxy:direct_call/4,
 %%% which derives the Erlang function name from the first keyword of the selector.
 %%%   `(Erlang beamtalk_atomic_counter) new: name` → `new(name)` → `'new:'`
 %%%   `(Erlang beamtalk_atomic_counter) named: name` → `named(name)` → `'named:'`

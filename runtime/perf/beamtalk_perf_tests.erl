@@ -497,22 +497,23 @@ report_ns(Name, #{median := Median, mean := Mean, min := Min,
         "PERF: ~s ~bns (mean: ~.1fns, min: ~bns, max: ~bns, p95: ~bns, p99: ~bns, n: ~b)~n",
         [Name, Median, float(Mean), Min, Max, P95, P99, N]).
 
-%% --- BT-4021: inline FFI `direct_call/3` overhead ---
+%% --- BT-4021: inline FFI `direct_call/4` overhead ---
 %%
 %% Every inline FFI send (`Erlang erlang monotonic_time`,
 %% `(Erlang gen_tcp) send: s with: d`, ...) lowers to
-%% `beamtalk_erlang_proxy:direct_call(M, F, Args)`. Before BT-4021 it read
-%% `M:module_info(exports)` on every call (~5-14 us); now the export list is
-%% read only after an `undef`. Reported in ns/call (batched like the hires
-%% benchmark) next to the plain call, plus the ratio the issue's acceptance
-%% criterion targets (~2x). `gen_tcp:module_info(exports)` is the per-call cost
-%% that was removed, kept here as the reference point.
+%% `beamtalk_erlang_proxy:direct_call(M, F, Args, Mode)` (BT-4153: the mode
+%% is precomputed by codegen; `/3` derives it per call). Before BT-4021 it
+%% read `M:module_info(exports)` on every call (~5-14 us); now the export
+%% list is read only after an `undef`. Reported in ns/call (batched like the
+%% hires benchmark) next to the plain call, plus the ratio the issue's
+%% acceptance criterion targets (~2x). `gen_tcp:module_info(exports)` is the
+%% per-call cost that was removed, kept here as the reference point.
 
 bench_ffi_direct_call() ->
     _ = code:ensure_loaded(gen_tcp),
     Plain = ffi_batch_ns(fun() -> erlang:monotonic_time() end),
     Direct = ffi_batch_ns(fun() ->
-        beamtalk_erlang_proxy:direct_call(erlang, monotonic_time, [])
+        beamtalk_erlang_proxy:direct_call(erlang, monotonic_time, [], stock)
     end),
     Exports = ffi_batch_ns(fun() -> gen_tcp:module_info(exports) end),
     report_ns("ffi/plain_monotonic_time", Plain, ?HIRES_ITERATIONS),

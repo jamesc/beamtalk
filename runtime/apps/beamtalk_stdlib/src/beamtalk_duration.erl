@@ -31,7 +31,7 @@ Float alternative was rejected so deadline arithmetic stays exact.
 
 ## FFI Shims
 
-`beamtalk_erlang_proxy:direct_call/3` derives the Erlang function name from
+`beamtalk_erlang_proxy:direct_call/4` derives the Erlang function name from
 the first keyword of the Beamtalk selector. Operator selectors (`+`, `<`, …)
 are not valid Erlang function names, so the Beamtalk operators dispatch
 through named shims (`add`, `subtract`, `multiply`, `lt`, `gt`, `lte`,

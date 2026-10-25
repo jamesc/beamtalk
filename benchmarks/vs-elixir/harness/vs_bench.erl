@@ -30,7 +30,12 @@
 
 -module(vs_bench).
 
--export([main/1, profile/1, rows/0]).
+-export([main/1, profile/1, rows/0, ffi_ok/0]).
+
+%% Fixture callee for row 13d: an FFI target returning the bare atom `ok`,
+%% which the proxy coerces to `Result ok: nil`. No pure OTP function returns
+%% bare `ok` without side effects, so the suite provides its own.
+ffi_ok() -> ok.
 
 -define(BT, 'bt@vs_elixir_bench@vb_bench').
 -define(EX, 'Elixir.VeBench').
@@ -139,7 +144,19 @@ rows() ->
             {struct_of, point}
         ]},
         {"12b", machinery, "p isKindOf: VbPoint / is_struct(p, Point)", 20000, 'isKindOf:p:', point,
-            [{is_struct_check, point}]}
+            [{is_struct_check, point}]},
+        {"13a", ffi, "FFI call, integer result / apply", 100000, 'ffiInt:a:', int, [
+            {apply_phash2, int}, {direct_phash2, int}
+        ]},
+        {"13b", ffi, "FFI call, binary result, caller-typed / apply", 100000, 'ffiBinary:a:', int, [
+            {apply_integer_to_binary, int}, {direct_integer_to_binary, int}
+        ]},
+        {"13c", ffi, "FFI call, {ok, V} result / apply", 100000, 'ffiOkTuple:d:', dict, [
+            {apply_maps_find, dict}, {direct_maps_find, dict}
+        ]},
+        {"13d", ffi, "FFI call, ok-atom result / apply", 100000, 'ffiOk:', none, [
+            {apply_ffi_ok, none}
+        ]}
     ].
 
 %%====================================================================
@@ -473,6 +490,10 @@ compiles_to("11c") -> "is_number guard, erlang:'+'";
 compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatch/3";
 compiles_to("12a") -> "beamtalk_primitive:class_of_object: derived-cache hit (counter + ETS read + pid liveness)";
 compiles_to("12b") -> "class ref built per call (gen_server:call) + send(P, 'isKindOf:') -> includesBehaviour: via class processes";
+compiles_to("13a") -> "direct_call/4 ('erlang', 'phash2', [A], 'stock'): mode precomputed (BT-4153), integer fast path";
+compiles_to("13b") -> "direct_call/4 ('erlang', 'integer_to_binary', [A], 'stock'): binary fast path";
+compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";
+compiles_to("13d") -> "direct_call/4 ('vs_bench', 'ffi_ok', [], 'stock'): mode precomputed, ok still wraps to Result";
 compiles_to(_) -> "".
 
 %%====================================================================

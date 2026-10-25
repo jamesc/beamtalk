@@ -55,7 +55,7 @@ timeout guards against unexpected stalls.
 
 ## FFI Shims
 
-The `beamtalk_erlang_proxy:direct_call/3` dispatch derives the Erlang function
+The `beamtalk_erlang_proxy:direct_call/4` dispatch derives the Erlang function
 name from the first keyword of the Beamtalk selector (stripping the trailing
 colon). The colon-free shims (`after/2`, `every/2`, `sleep/1`, `sendAfter/3`,
 `sendEvery/3`) bridge the
@@ -258,7 +258,7 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
 %%% ============================================================================
 %%% FFI Shims
 %%%
-%%% The (Erlang beamtalk_timer) FFI uses beamtalk_erlang_proxy:direct_call/3,
+%%% The (Erlang beamtalk_timer) FFI uses beamtalk_erlang_proxy:direct_call/4,
 %%% which derives the Erlang function name from the first keyword of the
 %%% Beamtalk selector (stripping the trailing colon). These shims provide
 %%% the colon-free entry points that the proxy calls:

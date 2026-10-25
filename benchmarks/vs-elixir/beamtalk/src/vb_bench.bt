@@ -275,3 +275,32 @@ sealed Object subclass: VbBench
     last := false
     n timesRepeat: [last := p isKindOf: VbPoint]
     last
+
+  // === 13. FFI calls (BT-4153) ===
+  class ffiInt: n :: Integer a: a :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := Erlang erlang phash2: a]
+    last
+
+  class ffiBinary: n :: Integer a: a :: Integer -> String =>
+    last := ""
+    n
+      timesRepeat: [
+        s :: String := Erlang erlang integer_to_binary: a
+        last := s
+      ]
+    last
+
+  class ffiOkTuple: n :: Integer d: d :: Dictionary(Symbol, Integer) -> Object =>
+    last := nil
+    n timesRepeat: [last := Erlang maps find: #k map: d]
+    last
+
+  class ffiOk: n :: Integer -> Object =>
+    last := nil
+    n
+      timesRepeat: [
+        @expect unresolved_ffi
+        last := Erlang vs_bench ffi_ok
+      ]
+    last

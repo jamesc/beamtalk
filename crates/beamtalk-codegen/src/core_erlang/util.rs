@@ -1774,6 +1774,35 @@ pub fn to_module_name(class_name: &str) -> String {
     beamtalk_core::ast::to_module_name(class_name)
 }
 
+/// Whether an Erlang module atom names a Beamtalk-owned module (BT-4153).
+///
+/// Mirrors `beamtalk_erlang_proxy:is_beamtalk_module/1`: `beamtalk_*`
+/// hand-written runtime helpers and `bt@*` compiler-generated class modules.
+/// Codegen precomputes this for statically-known FFI targets and emits the
+/// `stock`/`beamtalk` coercion mode, so the runtime skips its per-call
+/// module-name scan.
+///
+/// Keep in sync with the Erlang side: `test_is_beamtalk_module` below and
+/// `is_beamtalk_module_conformance_test` in
+/// `runtime/apps/beamtalk_runtime/test/beamtalk_erlang_proxy_tests.erl`
+/// assert the same table. A rule change applied to only one side (impl plus
+/// its own test) stays green on both sides while codegen and runtime
+/// diverge — so update both tables together, never one alone.
+pub(super) fn is_beamtalk_module(module_name: &str) -> bool {
+    module_name.starts_with("beamtalk_") || module_name.starts_with("bt@")
+}
+
+/// The `stock`/`beamtalk` coercion-mode atom to emit for an FFI call to
+/// `module_name` (BT-4153). Precomputes [`is_beamtalk_module`] at compile
+/// time for `direct_call/4` and `native_call/5`.
+pub(super) fn ffi_coercion_mode(module_name: &str) -> &'static str {
+    if is_beamtalk_module(module_name) {
+        "beamtalk"
+    } else {
+        "stock"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1847,5 +1876,40 @@ mod tests {
             .current_class(&module)
             .expect("current_class must find ExduraEvent despite the file/class name mismatch");
         assert_eq!(found.name.name, "ExduraEvent");
+    }
+
+    #[test]
+    fn test_is_beamtalk_module() {
+        // BT-4153: same table as `is_beamtalk_module_conformance_test` in
+        // runtime/apps/beamtalk_runtime/test/beamtalk_erlang_proxy_tests.erl —
+        // update both together so the pair cannot drift silently.
+        for name in [
+            "beamtalk_actor",
+            "beamtalk_stream",
+            "beamtalk_",
+            "bt@stdlib@list",
+            "bt@test@foo",
+            "bt@",
+        ] {
+            assert!(
+                is_beamtalk_module(name),
+                "{name} should be a Beamtalk module"
+            );
+        }
+        for name in [
+            "lists",
+            "erlang",
+            "maps",
+            "vs_bench",
+            "beamtalk",
+            "beamtalkx",
+            "bt",
+            "btx@foo",
+            "my_beamtalk_mod",
+            "BEAMTALK_FOO",
+            "",
+        ] {
+            assert!(!is_beamtalk_module(name), "{name} should be a stock module");
+        }
     }
 }

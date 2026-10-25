@@ -337,3 +337,15 @@ side, main → PR. Rows not listed did not move.
   (`at:`/`at:put:` are dict intrinsics claimed before dispatch selection, and
   Dictionary instances are untagged maps the guard could never match); 9a's
   `value` (the block-or-send handler owns the `value` selector).
+- **BT-4153** adds rows 13a–13d (FFI call overhead vs raw `apply/3`) and a
+  fast path: result-shape-first coercion plus a compiler-precomputed
+  `stock`/`beamtalk` mode, so the per-call `atom_to_list` and prefix scans
+  are gone (7 rounds, `results/bench-bt4153-before.md`,
+  `results/bench-bt4153-after.md`). Beamtalk side, before → after: 13a
+  integer result 16.1 red / 14 w → **7.01 / 2** (111 ns → 29.5 ns); 13b
+  caller-typed binary 16.1 / 17 → **7.03 / 5**; 13c `{ok, V}` 19.2 / 25 →
+  **13.1 / 17**; 13d bare `ok` 19.2 / 23 → **10.0 / 7**. The `Result` wrap on
+  13c/13d stays — it is mandatory semantics, still applied on the slow path.
+  Non-FFI rows match the same base run-for-run; multi-process rows (3b, 3c,
+  7a, 7b, 8b) wobble a few words between run configurations with or without
+  this change.

@@ -40,11 +40,14 @@ See: ADR 0028 §1 (Module Proxy Pattern)
 
 -export([
     coerce_ffi_result/2,
+    coerce_ffi_result/3,
     coerce_result/1,
     direct_call/3,
+    direct_call/4,
     dispatch/3,
     has_method/1,
     native_call/4,
+    native_call/5,
     new/1
 ]).
 
@@ -58,6 +61,24 @@ See: ADR 0028 §1 (Module Proxy Pattern)
 %%%   errors report the Beamtalk class/selector so they read `Stream>>take:`
 %%%   rather than the bare Erlang MFA.
 -type error_context() :: none | {atom(), atom()}.
+
+%%% Which result-coercion rule applies (BT-4153).
+%%%
+%%% - `stock` — a stock OTP / third-party module: scan list results for
+%%%   charlists and coerce the bare `error` atom, like `coerce_result/1`.
+%%% - `beamtalk` — a Beamtalk-owned module (`beamtalk_*` or `bt@*`, see
+%%%   `is_beamtalk_module/1`): lists pass through untouched and the bare
+%%%   `error` atom is a legitimate value (BT-3660); modules exporting
+%%%   `beamtalk_ffi_raw_results/0` skip Result coercion as well.
+%%%
+%%% A pure function of the module atom, so codegen precomputes it for
+%%% statically-known call sites (`direct_call/4`, `native_call/5`) and the
+%%% per-call module-name scan is skipped. The dynamic paths (`direct_call/3`,
+%%% `native_call/4`, `validate_and_apply/4`) derive it here per call.
+%%% Renaming a module across the stock/beamtalk boundary requires
+%%% recompiling its callers, as with any rename — a stale caller beam keeps
+%%% passing the mode the old name implied.
+-type coercion_mode() :: stock | beamtalk.
 
 -doc "Create a new ErlangModule proxy for the given module atom.".
 -spec new(atom()) -> map().
@@ -178,22 +199,43 @@ Because the apply is no longer gated on `module_info(exports)`, a module that
 exports `'$handle_undefined_function'/2` now handles unknown calls exactly as
 it would for a plain Erlang caller; the old pre-check rejected them.
 
-Wrapping policy is unified across all apply paths via `apply_with_coercion/5`
+Wrapping policy is unified across all apply paths via `apply_with_coercion/6`
 (ADR 0101 Part 2): `error:*` is converted to a structured `#beamtalk_error{}`,
 while `exit:*` and `throw:*` propagate naturally so `Erlang erlang exit: 1`
 behaves as expected and foreign throws stay throws.
+
+Derives the coercion mode from `Module` on every call. Codegen emits
+`direct_call/4` with the mode precomputed instead (BT-4153).
 """.
 -spec direct_call(atom(), atom(), list()) -> term().
 direct_call(Module, FunName, Args) ->
-    apply_with_coercion(Module, FunName, Args, FunName, none).
+    direct_call(Module, FunName, Args, coercion_mode(Module)).
+
+-doc """
+Entry point for direct Erlang calls with a precomputed coercion mode.
+
+Identical to `direct_call/3` except `Mode` — `stock` or `beamtalk`, a pure
+function of the statically-known `Module` — is supplied by the caller, so the
+per-call module-name scan (`is_beamtalk_module/1`) is skipped. Codegen emits
+this for every inline `(Erlang module)` send (BT-4153); `direct_call/3`
+derives the mode at runtime for dynamic callers.
+
+Callers must pass the mode for `Module` — a mismatch silently applies the
+wrong coercion rule. Anything but `stock`/`beamtalk` fails fast with
+`function_clause` here, before the `try`, so a typo is never misattributed
+to the callee.
+""".
+-spec direct_call(atom(), atom(), list(), coercion_mode()) -> term().
+direct_call(Module, FunName, Args, Mode) when Mode =:= stock; Mode =:= beamtalk ->
+    apply_with_coercion(Module, FunName, Args, FunName, none, Mode).
 
 -doc """
 Entry point for `native:` Object delegation (ADR 0101 Part 1).
 
 `native:` Object methods lower to
-`beamtalk_erlang_proxy:native_call(Mod, Fn, [Self | Args], {Class, Sel})`.
+`beamtalk_erlang_proxy:native_call(Mod, Fn, [Self | Args], {Class, Sel}, Mode)`.
 Like `direct_call/3`/`validate_and_apply/4` it does no export pre-check and
-routes through the shared `apply_with_coercion/5`, so it gets the **same**
+routes through the shared `apply_with_coercion/6`, so it gets the **same**
 `error:*` → `#beamtalk_error{}` wrapping and ADR 0076 ok/error → `Result`
 coercion as inline FFI. The difference is the error context: a missing target
 is reported against the Beamtalk `{Class, Sel}` instead of `'ErlangModule'`.
@@ -209,10 +251,32 @@ swapped between compile and call) and surfaced as a structured
 wrong-arity distinction, so call it only with the exact `{Mod, Fn, Args}` shape
 codegen emits. Hand-written code wanting those messages should use
 `direct_call/3` (or the `(Erlang module)` FFI surface) instead.
+
+Derives the coercion mode from `Module` on every call. Codegen emits
+`native_call/5` with the mode precomputed instead (BT-4153).
 """.
 -spec native_call(atom(), atom(), list(), {atom(), atom()}) -> term().
 native_call(Module, FunName, Args, {Class, Selector}) ->
-    apply_with_coercion(Module, FunName, Args, FunName, {Class, Selector}).
+    native_call(Module, FunName, Args, {Class, Selector}, coercion_mode(Module)).
+
+-doc """
+Entry point for `native:` Object delegation with a precomputed coercion mode.
+
+Identical to `native_call/4` except `Mode` — `stock` or `beamtalk`, a pure
+function of the statically-known `Module` — is supplied by the caller, so the
+per-call module-name scan (`is_beamtalk_module/1`) is skipped. Codegen emits
+this for every `native:` delegation (BT-4153).
+
+Callers must pass the mode for `Module` — a mismatch silently applies the
+wrong coercion rule. Anything but `stock`/`beamtalk` fails fast with
+`function_clause` here, before the `try`, so a typo is never misattributed
+to the callee.
+""".
+-spec native_call(atom(), atom(), list(), {atom(), atom()}, coercion_mode()) -> term().
+native_call(Module, FunName, Args, {Class, Selector}, Mode) when
+    Mode =:= stock; Mode =:= beamtalk
+->
+    apply_with_coercion(Module, FunName, Args, FunName, {Class, Selector}, Mode).
 
 -doc """
 The single, unified apply path for all FFI (ADR 0101 Part 2).
@@ -235,11 +299,14 @@ and `native_call/4`:
 - `throw:*` → **passes through** (not caught)
 
 `Context` selects the class/selector reported on wrapped errors — see
-`error_context()`. The wrapping helpers (`ensure_wrapped`-style) run only on the
-error path; the happy path pays nothing beyond the `try` frame, coercion and one class-variable snapshot read.
+`error_context()`. `Mode` selects the result-coercion rule without a per-call
+module-name scan — see `coercion_mode()`. The wrapping helpers
+(`ensure_wrapped`-style) run only on the error path; the happy path pays
+nothing beyond the `try` frame, coercion and one class-variable snapshot read.
 """.
--spec apply_with_coercion(atom(), atom(), list(), atom(), error_context()) -> term().
-apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
+-spec apply_with_coercion(atom(), atom(), list(), atom(), error_context(), coercion_mode()) ->
+    term().
+apply_with_coercion(Module, FunName, Args, OrigSelector, Context, Mode) ->
     %% The first attempt can run a Beamtalk block passed as an argument. If it
     %% raises `badarg` and the charlist retry runs, the retry is a fresh attempt:
     %% class-variable writes the failed first attempt made must not survive into
@@ -248,7 +315,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
     %% bt-catcher-audit: converted - snapshot taken here is restored before the badarg retry
     %% (BT-3728)
     try
-        coerce_ffi_result(Module, erlang:apply(Module, FunName, Args))
+        coerce_ffi_result(Module, erlang:apply(Module, FunName, Args), Mode)
     catch
         Class:Reason:Stack ->
             %% Single catch → shared classifier: the apply and the
@@ -265,7 +332,9 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
                 Args,
                 OrigSelector,
                 Context,
-                fun(M, F, A, Sel, Ctx, St) -> maybe_retry_badarg(M, F, A, Sel, Ctx, St, Snap) end
+                fun(M, F, A, Sel, Ctx, St) ->
+                    maybe_retry_badarg(M, F, A, Sel, Ctx, St, Snap, Mode)
+                end
             )
     end.
 
@@ -280,16 +349,23 @@ list, map or tuple argument are not detected.
 Many Erlang functions (os:cmd/1, file:read_file/1, …) expect charlists but
 Beamtalk strings are binaries. Applies the same unified catch policy on the
 retry; if the retry still fails (or no binary args were coercible) the error is
-wrapped per `apply_with_coercion/5`.
+wrapped per `apply_with_coercion/6`.
 
 `Snap` is the class-variable snapshot taken before the first attempt. A retry
 restores it first, so writes made by a block run inside the failed attempt are
 discarded, the same rule `beamtalk_class_vars:protect/1` applies (BT-3728).
 """.
 -spec maybe_retry_badarg(
-    atom(), atom(), list(), atom(), error_context(), list(), beamtalk_class_vars:snapshot()
+    atom(),
+    atom(),
+    list(),
+    atom(),
+    error_context(),
+    list(),
+    beamtalk_class_vars:snapshot(),
+    coercion_mode()
 ) -> term().
-maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack, Snap) ->
+maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack, Snap, Mode) ->
     CoercedArgs = coerce_binaries_to_charlists(Args),
     %% Never retry a call that was passed a fun (a Beamtalk block): the retry
     %% would run caller code a second time, side effects included (BT-4055).
@@ -299,9 +375,9 @@ maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack, Snap) ->
             %% bt-catcher-audit: converted - restores the pre-call snapshot before retrying; the
             %% retry re-raises
             try
-                coerce_ffi_result(Module, erlang:apply(Module, FunName, CoercedArgs))
+                coerce_ffi_result(Module, erlang:apply(Module, FunName, CoercedArgs), Mode)
             catch
-                %% Same classifier as apply_with_coercion/5, but `badarg` is now
+                %% Same classifier as apply_with_coercion/6, but `badarg` is now
                 %% terminal (no second retry) — the OnBadarg continuation raises
                 %% directly instead of looping back here.
                 Class:Reason:Stack2 ->
@@ -333,13 +409,13 @@ raise_badarg_terminal(Module, FunName, _Args, OrigSelector, Context, Stack) ->
 -doc """
 The single FFI exception classifier shared by the apply and badarg-retry paths.
 
-Both `apply_with_coercion/5` and `maybe_retry_badarg/7` used to inline a copy of
+Both `apply_with_coercion/6` and `maybe_retry_badarg/8` used to inline a copy of
 this clause set; they only differed in what `badarg` does (retry vs. raise). That
 divergence is now the `OnBadarg` continuation — a `fun/6` invoked as
 `OnBadarg(Module, FunName, Args, OrigSelector, Context, Stack)` — so adding a new
 exception clause here cannot silently skip one path.
 
-Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/5`:
+Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/6`:
 - `error:#{error := #beamtalk_error{}}` / `error:#beamtalk_error{}` → re-raised
   (idempotent; never reclassified)
 - any other `error:*` raised in compiled Beamtalk code that the callee ran
@@ -361,8 +437,8 @@ Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/5`:
 """.
 %% Returns `term()`, not `no_return()`: every classified-exception clause raises,
 %% but the `badarg` clause defers to `OnBadarg`, and the first-pass continuation
-%% (`maybe_retry_badarg/7`) can *return* the charlist-coerced retry result on
-%% success. That value flows back through here to `apply_with_coercion/5`.
+%% (`maybe_retry_badarg/8`) can *return* the charlist-coerced retry result on
+%% success. That value flows back through here to `apply_with_coercion/6`.
 -spec classify_ffi_exception(
     error | exit | throw,
     term(),
@@ -516,16 +592,17 @@ get_exports(Module) ->
 -doc """
 Apply with lazy validation of function existence and arity.
 
-Delegates to the unified `apply_with_coercion/5` so the `call:args:` / dispatch
+Delegates to the unified `apply_with_coercion/6` so the `call:args:` / dispatch
 path shares the **same** exception policy as inline FFI (ADR 0101 Part 2):
 `error:*` wrapped, `exit:*`/`throw:*` propagated. Like `direct_call/3`,
 `module_info(exports)` is read only after an `error:undef` on the target
 (BT-4021), to build the missing-function / wrong-arity error. No caching — hot
-code reload must work.
+code reload must work. The module is known only at runtime here, so the
+coercion mode is derived per call (BT-4153).
 """.
 -spec validate_and_apply(atom(), atom(), list(), atom()) -> term().
 validate_and_apply(Module, FunName, Args, OrigSelector) ->
-    apply_with_coercion(Module, FunName, Args, OrigSelector, none).
+    apply_with_coercion(Module, FunName, Args, OrigSelector, none, coercion_mode(Module)).
 
 -doc """
 Raise an error for missing function or wrong arity.
@@ -631,7 +708,7 @@ applies. A stacktrace with neither is classified as before.
 
 Best effort: a tail call out of Beamtalk code into a raising Erlang function, or
 a raise more than `backtrace_depth` frames below the block, hides the Beamtalk
-frame, and the error is then classified as the call's. `maybe_retry_badarg/7`
+frame, and the error is then classified as the call's. `maybe_retry_badarg/8`
 does not rely on this: it never retries a call with a fun as a direct
 argument. A fun nested inside a list, map or tuple argument is not detected.
 """.
@@ -891,17 +968,90 @@ by converting them to binaries.
 
 Charlist coercion is only needed for stock Erlang modules whose APIs return
 charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
+
+Derives the coercion mode from `Module` on every call; prefer
+`coerce_ffi_result/3` with a precomputed mode (BT-4153).
 """.
 -spec coerce_ffi_result(atom(), term()) -> term().
 coerce_ffi_result(Module, Result) ->
+    coerce_ffi_result(Module, Result, coercion_mode(Module)).
+
+-doc """
+Derive the result-coercion rule for a runtime module atom (BT-4153).
+
+Codegen precomputes this for statically-known call sites; the dynamic paths
+call it here. A pure function of the atom — no loaded-code dependency, so no
+invalidation on reload or purge.
+""".
+-spec coercion_mode(atom()) -> coercion_mode().
+coercion_mode(Module) ->
     case is_beamtalk_module(Module) of
-        true ->
-            case returns_raw_results(Module) of
-                true -> Result;
-                false -> coerce_result_no_charlist(Result)
-            end;
-        false ->
-            coerce_result(coerce_charlist_result(Result))
+        true -> beamtalk;
+        false -> stock
+    end.
+
+-doc """
+Apply both charlist and result coercion under a precomputed mode.
+
+Identical to `coerce_ffi_result/2` except `Mode` selects the rule, so the
+module-name scan is skipped.
+
+Fast path (BT-4153): results whose coercion is the identity in *every* mode —
+scalars, binaries and bitstrings, pids, ports, references, funs, maps, `[]`,
+atoms other than `ok`/`error`, and tuples that are not `{ok, _}`/`{error, _}`
+— pass through with no module check and no allocation. Only non-empty lists,
+ok/error-tagged results and the bare `ok`/`error` atoms reach the slow path,
+which keeps the exact `coerce_ffi_result/2` semantics per mode.
+
+Coupled to the coercion helpers below staying shallow: `coerce_charlist_result/1`
+inspects only top-level lists and `coerce_result/1` recurses at most one level
+into `{ok, _}`/`{error, _}` payloads. A coercion change that recurses into
+tuples/maps, or a new mode-divergent bare-atom rule, must update these clauses
+(and the absolute tests) with it — the fast path would otherwise bypass it.
+""".
+-spec coerce_ffi_result(atom(), term(), coercion_mode()) -> term().
+coerce_ffi_result(_Module, Result, _Mode) when
+    is_integer(Result);
+    is_float(Result);
+    %% is_bitstring subsumes is_binary: every binary is a bitstring.
+    is_bitstring(Result);
+    is_pid(Result);
+    is_port(Result);
+    is_reference(Result);
+    is_function(Result);
+    is_map(Result)
+->
+    Result;
+coerce_ffi_result(_Module, [], _Mode) ->
+    [];
+coerce_ffi_result(_Module, Result, _Mode) when is_atom(Result), Result =/= ok, Result =/= error ->
+    Result;
+coerce_ffi_result(_Module, Result, _Mode) when
+    is_tuple(Result),
+    (tuple_size(Result) =/= 2 orelse
+        (element(1, Result) =/= ok andalso element(1, Result) =/= error))
+->
+    Result;
+coerce_ffi_result(_Module, ok, stock) ->
+    beamtalk_result:from_tagged_tuple({ok, nil});
+coerce_ffi_result(Module, ok, beamtalk) ->
+    case returns_raw_results(Module) of
+        true -> ok;
+        false -> beamtalk_result:from_tagged_tuple({ok, nil})
+    end;
+coerce_ffi_result(_Module, error, stock) ->
+    beamtalk_result:from_tagged_tuple({error, nil});
+coerce_ffi_result(_Module, error, beamtalk) ->
+    %% The bare atom `error` is a legitimate value for Beamtalk-owned
+    %% modules (BT-3660) — and raw-result modules pass everything through —
+    %% so both beamtalk cases agree here with no raw check.
+    error;
+coerce_ffi_result(_Module, Result, stock) ->
+    coerce_result(coerce_charlist_result(Result));
+coerce_ffi_result(Module, Result, beamtalk) ->
+    case returns_raw_results(Module) of
+        true -> Result;
+        false -> coerce_result_no_charlist(Result)
     end.
 
 -doc """
