@@ -1676,8 +1676,17 @@ is_beamtalk_module_conformance_test() ->
         beamtalk_actor, beamtalk_stream, beamtalk_, 'bt@stdlib@list', 'bt@test@foo', 'bt@'
     ],
     Stock = [
-        lists, erlang, maps, vs_bench, beamtalk, beamtalkx, bt, 'btx@foo', my_beamtalk_mod,
-        'BEAMTALK_FOO', ''
+        lists,
+        erlang,
+        maps,
+        vs_bench,
+        beamtalk,
+        beamtalkx,
+        bt,
+        'btx@foo',
+        my_beamtalk_mod,
+        'BEAMTALK_FOO',
+        ''
     ],
     [
         ?assertEqual("hi", beamtalk_erlang_proxy:coerce_ffi_result(M, "hi"))
@@ -1693,9 +1702,32 @@ coerce_ffi_result_3_equivalence_test() ->
     %% every result shape in each module class (stock, beamtalk, raw).
     {module, beamtalk_ets} = code:ensure_loaded(beamtalk_ets),
     Shapes = [
-        42, -1, 4.5, <<>>, <<"bin">>, self(), make_ref(), fun() -> ok end, #{}, #{a => 1}, [],
-        foo, nil, true, ok, error, {ok, 1}, {error, x}, {ok, 1, 2}, {error}, {a, b}, {}, {1},
-        [1, 2, 3], "hi", [<<>>, ok]
+        42,
+        -1,
+        4.5,
+        <<>>,
+        <<"bin">>,
+        self(),
+        make_ref(),
+        fun() -> ok end,
+        #{},
+        #{a => 1},
+        [],
+        foo,
+        nil,
+        true,
+        ok,
+        error,
+        {ok, 1},
+        {error, x},
+        {ok, 1, 2},
+        {error},
+        {a, b},
+        {},
+        {1},
+        [1, 2, 3],
+        "hi",
+        [<<>>, ok]
     ],
     Modes = [{lists, stock}, {beamtalk_stream, beamtalk}, {beamtalk_ets, beamtalk}],
     [
@@ -1778,6 +1810,10 @@ catch_ffi_error(Fun) ->
         Unexpected -> {unexpected_return, Unexpected}
     catch
         error:#{error := Err} ->
-            {Err#beamtalk_error.kind, Err#beamtalk_error.class, Err#beamtalk_error.selector,
-                Err#beamtalk_error.hint}
+            {
+                Err#beamtalk_error.kind,
+                Err#beamtalk_error.class,
+                Err#beamtalk_error.selector,
+                Err#beamtalk_error.hint
+            }
     end.
