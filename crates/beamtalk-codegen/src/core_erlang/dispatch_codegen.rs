@@ -1134,10 +1134,13 @@ impl CoreErlangGenerator {
     /// Generates a proxy-routed call for Erlang interop.
     ///
     /// Converts Beamtalk selectors to Erlang function names and routes through
-    /// `beamtalk_erlang_proxy:direct_call/3` for automatic binary→charlist coercion:
-    /// - Unary: `node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])` (zero-arg)
-    /// - Keyword single: `reverse:` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'reverse', [Xs])`
-    /// - Keyword multi: `seq:with:` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'seq', [1, 10])`
+    /// `beamtalk_erlang_proxy:direct_call/4` for automatic binary→charlist coercion:
+    /// - Unary: `node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')` (zero-arg)
+    /// - Keyword single: `reverse:` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'reverse', [Xs], 'stock')`
+    /// - Keyword multi: `seq:with:` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'seq', [1, 10], 'stock')`
+    ///
+    /// The trailing mode atom is the `stock`/`beamtalk` coercion mode,
+    /// precomputed from the statically-known module (BT-4153).
     ///
     /// Returns `None` for selectors that are Object/ProtoObject protocol methods
     /// (e.g. `printString`, `asString`) — these must go through runtime dispatch
@@ -1166,13 +1169,16 @@ impl CoreErlangGenerator {
                     return Ok(None);
                 }
                 // Route zero-arg calls through proxy (consistent with keyword sends).
-                // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])`
+                // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')`
+                let mode = super::util::ffi_coercion_mode(module_name);
                 let doc = docvec![
                     "call 'beamtalk_erlang_proxy':'direct_call'(",
                     leaf::atom(module_name.to_string()),
                     ", ",
                     leaf::atom(function_name.to_string()),
-                    ", [])"
+                    ", [], ",
+                    leaf::atom(mode),
+                    ")"
                 ];
                 Ok(Some(doc))
             }
@@ -1207,9 +1213,10 @@ impl CoreErlangGenerator {
                     }
                 }
 
-                // Route through beamtalk_erlang_proxy:direct_call/3 to
+                // Route through beamtalk_erlang_proxy:direct_call/4 to
                 // enable binary→charlist coercion for functions like os:cmd/1.
-                // Args are wrapped in a list: call 'proxy':'direct_call'('M','F',[args])
+                // Args are wrapped in a list: call 'proxy':'direct_call'('M','F',[args],Mode)
+                let mode = super::util::ffi_coercion_mode(module_name);
                 let call_doc = docvec![
                     "call 'beamtalk_erlang_proxy':'direct_call'(",
                     leaf::atom(module_name.to_string()),
@@ -1217,7 +1224,9 @@ impl CoreErlangGenerator {
                     leaf::atom(function_name.to_string()),
                     ", [",
                     Document::Vec(arg_parts),
-                    "])"
+                    "], ",
+                    leaf::atom(mode),
+                    ")"
                 ];
 
                 let doc = if preamble_docs.is_empty() {
@@ -1285,6 +1294,7 @@ impl CoreErlangGenerator {
         // Mirrors `native_delegate_body_doc`: the Erlang shim name is the first
         // keyword without its colon, and the `{Class, Selector}` context makes a
         // wrapped error read `File>>open:mode:do:` rather than a bare MFA.
+        // `beamtalk_file` is Beamtalk-owned, so the mode is 'beamtalk' (BT-4153).
         Ok(Some(docvec![
             "call 'beamtalk_erlang_proxy':'native_call'(",
             leaf::atom("beamtalk_file"),
@@ -1296,7 +1306,7 @@ impl CoreErlangGenerator {
             leaf::atom("File"),
             ", ",
             leaf::atom(selector_atom),
-            "})"
+            "}, 'beamtalk')"
         ]))
     }
 

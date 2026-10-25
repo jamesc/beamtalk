@@ -1240,7 +1240,7 @@ fn test_cascade_multiple_field_assignments_state_threading() {
 
 #[test]
 fn test_erlang_interop_direct_call_keyword_single_arg() {
-    // `Erlang lists reverse: xs` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'reverse', [Xs])`
+    // `Erlang lists reverse: xs` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'reverse', [Xs], 'stock')`
     // Routes through proxy for binary→charlist coercion support
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -1284,7 +1284,7 @@ fn test_erlang_interop_direct_call_keyword_single_arg() {
 
 #[test]
 fn test_erlang_interop_direct_call_keyword_multi_arg() {
-    // `Erlang lists seq: 1 with: 10` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'seq', [1, 10])`
+    // `Erlang lists seq: 1 with: 10` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'seq', [1, 10], 'stock')`
     // Routes through proxy for binary→charlist coercion support
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -1399,7 +1399,7 @@ fn test_erlang_interop_direct_call_zero_arg() {
     let output = doc.to_pretty_string();
 
     assert!(
-        output.contains("call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])"),
+        output.contains("call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')"),
         "Should emit proxy-routed zero-arg call. Got: {output}"
     );
 }
@@ -1542,6 +1542,43 @@ fn test_erlang_interop_direct_call_parenthesized_receiver() {
         !output.contains("beamtalk_message_dispatch"),
         "Should not use runtime dispatch. Got: {output}"
     );
+}
+
+#[test]
+fn test_erlang_interop_direct_call_coercion_mode() {
+    // BT-4153: the emitted direct_call/4 carries the precomputed coercion
+    // mode — 'stock' for stock modules, 'beamtalk' for beamtalk_* modules.
+    for (module, mode) in [("lists", "stock"), ("beamtalk_stream", "beamtalk")] {
+        let mut generator = CoreErlangGenerator::new("test");
+        let inner_receiver = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Erlang", Span::new(0, 6)),
+                span: Span::new(0, 6),
+                package: None,
+            }),
+            selector: MessageSelector::Unary(module.into()),
+            arguments: vec![],
+            is_cast: false,
+            span: Span::new(0, 12),
+        };
+        let selector =
+            MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(13, 21))]);
+        let arguments = vec![Expression::Identifier(Identifier::new(
+            "xs",
+            Span::new(22, 24),
+        ))];
+
+        let doc = generator
+            .generate_message_send(&inner_receiver, &selector, &arguments)
+            .unwrap();
+        let output = doc.to_pretty_string();
+
+        assert!(
+            output.contains(&format!("'direct_call'('{module}', 'reverse', ["))
+                && output.contains(&format!("], '{mode}')")),
+            "Module {module} should emit mode '{mode}'. Got: {output}"
+        );
+    }
 }
 
 #[test]
