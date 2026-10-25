@@ -124,6 +124,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "item",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 799,
                                                         end: 803,
@@ -131,6 +132,7 @@ Module {
                                                 },
                                                 BlockParameter {
                                                     name: "i",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 805,
                                                         end: 806,

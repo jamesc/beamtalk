@@ -790,20 +790,38 @@ impl Block {
 /// A block parameter.
 ///
 /// Example: In `[:x :y | ...]`, `x` and `y` are block parameters.
+/// Parameters may carry an optional type annotation (`:x :: Integer`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BlockParameter {
     /// The parameter name.
     pub name: EcoString,
+    /// Optional type annotation (e.g. `Integer` in `[:x :: Integer | ...]`).
+    pub type_annotation: Option<TypeAnnotation>,
     /// Source location.
     pub span: Span,
 }
 
 impl BlockParameter {
-    /// Creates a new block parameter.
+    /// Creates a new untyped block parameter.
     #[must_use]
     pub fn new(name: impl Into<EcoString>, span: Span) -> Self {
         Self {
             name: name.into(),
+            type_annotation: None,
+            span,
+        }
+    }
+
+    /// Creates a typed block parameter.
+    #[must_use]
+    pub fn with_type(
+        name: impl Into<EcoString>,
+        type_annotation: TypeAnnotation,
+        span: Span,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            type_annotation: Some(type_annotation),
             span,
         }
     }
@@ -1213,5 +1231,30 @@ impl TypeAnnotation {
             Self::Intersection { .. } => is_right,
             _ => false,
         }
+    }
+
+    /// `true` when `self`, used as a block parameter's `:: Type` annotation,
+    /// must be parenthesised for the printed form to re-parse to the same
+    /// AST.
+    ///
+    /// Block parameter annotations are read with
+    /// `parse_single_type_annotation`, which stops at a top-level `|` (the
+    /// block's own parameter separator) and does not consume the `&`/`\`
+    /// tier — so a top-level [`Self::Union`], [`Self::FalseOr`],
+    /// [`Self::Difference`], or [`Self::Intersection`] (only reachable via
+    /// explicit grouping parens in the source) keeps its parens:
+    /// `:x :: (Integer | String)`. Grouping parens re-parse transparently,
+    /// so the round-tripped AST is identical.
+    ///
+    /// Single source of truth for the formatter's block-parameter rendering —
+    /// keep them in sync by calling this, not by duplicating the match.
+    pub(crate) fn needs_parens_in_block_param(&self) -> bool {
+        matches!(
+            self,
+            Self::Union { .. }
+                | Self::FalseOr { .. }
+                | Self::Difference { .. }
+                | Self::Intersection { .. }
+        )
     }
 }

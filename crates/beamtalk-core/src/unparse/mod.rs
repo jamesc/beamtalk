@@ -1731,7 +1731,29 @@ fn unparse_block(block: &Block) -> Document<'static> {
 }
 
 fn unparse_block_parameter(param: &BlockParameter) -> Document<'static> {
-    docvec![":", leaf::ident(&param.name)]
+    docvec![
+        ":",
+        leaf::ident(&param.name),
+        unparse_block_param_annotation_opt(param.type_annotation.as_ref()),
+    ]
+}
+
+/// Renders a block parameter's optional `:: Type` annotation (`:x` alone
+/// when absent, `:x :: Integer` when present).
+///
+/// A top-level `|`/`&`/`\` annotation keeps grouping parens (`:x ::
+/// (Integer | String)`): the parser reads this position with
+/// `parse_single_type_annotation`, so a bare union would swallow the
+/// block's `|` separator (see
+/// [`TypeAnnotation::needs_parens_in_block_param`]).
+fn unparse_block_param_annotation_opt(ty: Option<&TypeAnnotation>) -> Document<'static> {
+    match ty {
+        None => nil(),
+        Some(t) if t.needs_parens_in_block_param() => {
+            docvec![" :: (", unparse_type_annotation(t), ")"]
+        }
+        Some(t) => docvec![" :: ", unparse_type_annotation(t)],
+    }
 }
 
 // --- Cascade unparsing ---
@@ -1953,6 +1975,7 @@ fn unparse_binary_segment(seg: &BinarySegment) -> Document<'static> {
             BinarySegmentType::Integer => "integer",
             BinarySegmentType::Float => "float",
             BinarySegmentType::Binary => "binary",
+            BinarySegmentType::Bitstring => "bitstring",
             BinarySegmentType::Utf8 => "utf8",
         });
     }

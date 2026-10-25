@@ -79,6 +79,14 @@ TestCase subclass: PatternMatchingTest
         _ -> "small"
       ])
       equals: "medium"
+    // Guard with parenthesized arithmetic (BT-4097: parens are transparent)
+    self
+      assert: (42 match: [
+        x when: [(x + 1) > 100] -> "big";
+        x when: [(x + 1) > 10] -> "medium";
+        _ -> "small"
+      ])
+      equals: "medium"
     // Match on expression result
     self
       assert: ((3 + 4) match: [
@@ -431,3 +439,30 @@ TestCase subclass: PatternMatchingTest
         _ -> 0
       ])
       equals: 30
+
+  testMultipleWildcardsInTuplePattern =>
+    // BT-4098: every _ in one pattern is a fresh anonymous variable
+    self
+      assert: ({#a, 1, 2, 3} match: [
+        {#a, _, x, _} -> x;
+        _ -> 0
+      ])
+      equals: 2
+
+  testMultipleWildcardsNested =>
+    // BT-4098: nested patterns with several _ in one arm
+    self
+      assert: ({#ok, {#a, 1, 2, 3}, 99} match: [
+        {#ok, {#a, _, x, _}, r} -> x + r;
+        _ -> 0
+      ])
+      equals: 101
+
+  testMultipleWildcardsInMapPattern =>
+    // BT-4098: several _ across one map pattern's bindings
+    self
+      assert: ((#{#a => 1, #b => 2, #c => 3}) match: [
+        #{#a => _, #b => x, #c => _} -> x;
+        _ -> 0
+      ])
+      equals: 2

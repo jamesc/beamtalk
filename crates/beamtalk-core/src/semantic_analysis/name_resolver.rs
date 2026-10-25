@@ -17,7 +17,7 @@
 
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, Expression, Identifier, Literal, MatchArm,
-    MessageSelector, MethodDefinition, Module,
+    MessageSelector, MethodDefinition, Module, Pattern,
 };
 use crate::semantic_analysis::scope::{BindingKind, Scope};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -380,6 +380,8 @@ impl NameResolver {
                             .define(&binding.name, binding.span, BindingKind::Local);
                     }
                 }
+                // Segment sizes count as uses here too (BT-4097).
+                self.resolve_pattern_sizes(pattern);
             }
         }
     }
@@ -572,6 +574,12 @@ impl NameResolver {
                 .define(&binding.name, binding.span, BindingKind::Parameter);
         }
 
+        // Resolve binary segment sizes (BT-4097): a size names a parameter, a
+        // local, or a variable bound by an earlier segment — all defined by
+        // now — and counts as a use, so a variable used only as a size warns
+        // nothing.
+        self.resolve_pattern_sizes(&arm.pattern);
+
         // Resolve guard expression (if present) - can see pattern variables
         if let Some(guard) = &arm.guard {
             self.resolve_expression(guard);
@@ -585,6 +593,58 @@ impl NameResolver {
 
         // Exit match arm scope
         self.scope.pop();
+    }
+
+    /// Resolves the size expressions of every binary segment in `pattern`.
+    ///
+    /// Sizes are ordinary use positions (BT-4097): resolving them marks the
+    /// named parameters/locals/fields used and surfaces typos as undefined
+    /// variables. Callers define the pattern's own bindings first, so a size
+    /// naming a variable bound elsewhere in the pattern resolves.
+    fn resolve_pattern_sizes(&mut self, pattern: &Pattern) {
+        match pattern {
+            Pattern::Binary { segments, .. } => {
+                for seg in segments {
+                    if let Some(size) = &seg.size {
+                        self.resolve_expression(size);
+                    }
+                    // Segment values are variables, wildcards, or literals
+                    // from the parser, but recurse defensively.
+                    self.resolve_pattern_sizes(&seg.value);
+                }
+            }
+            Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+                for elem in elements {
+                    self.resolve_pattern_sizes(elem);
+                }
+                if let Pattern::List { tail: Some(t), .. } = pattern {
+                    self.resolve_pattern_sizes(t);
+                }
+            }
+            Pattern::Array { elements, rest, .. } => {
+                for elem in elements {
+                    self.resolve_pattern_sizes(elem);
+                }
+                if let Some(rest_pat) = rest {
+                    self.resolve_pattern_sizes(rest_pat);
+                }
+            }
+            Pattern::Map { pairs, .. } => {
+                for pair in pairs {
+                    self.resolve_pattern_sizes(&pair.value);
+                }
+            }
+            Pattern::Constructor { keywords, .. } => {
+                for (_, binding) in keywords {
+                    self.resolve_pattern_sizes(binding);
+                }
+            }
+            Pattern::Wildcard(_)
+            | Pattern::Literal(..)
+            | Pattern::Nil(_)
+            | Pattern::Variable(_)
+            | Pattern::Type { .. } => {}
+        }
     }
 
     /// Checks if defining a variable with the given name would shadow an outer variable.
