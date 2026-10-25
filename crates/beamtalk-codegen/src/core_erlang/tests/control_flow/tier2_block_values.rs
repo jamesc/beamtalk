@@ -592,4 +592,3 @@ fn test_bt3755_self_send_does_not_promote_a_writing_block() {
         );
     }
 }
-
