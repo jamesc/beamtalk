@@ -4365,6 +4365,24 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 ]
 // => 42
 
+// Binary patterns (BT-663; BT-4096, BT-4097)
+(Binary fromBytes: #(3, 104, 105, 33, 99)) match: [
+  <<n:8, payload:n/binary, rest/binary>> -> payload toBytes;
+  _ -> #()
+]
+// => #(104, 105, 33): a size may be a literal, a variable bound by an
+// earlier segment, a parameter/local, or a parenthesized expression.
+(Binary fromBytes: #(10, 9)) match: [
+  <<0:1, v:7, rest/binary>> -> v;
+  _ -> -1
+]
+// => 10: integer literal values match exactly.
+(Binary fromBytes: #(234, 7)) match: [
+  <<_:3, v:5, rest/bits>> -> v;
+  _ -> -1
+]
+// => 10: bits/bitstring match possibly-unaligned bits.
+
 // Nil pattern — matches nil exactly (BT-2854, ADR 0107)
 value := nil
 value match: [
@@ -4403,6 +4421,8 @@ x match: [
 // => 2
 ```
 
+**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). Dependent sizes and size expressions are only supported when the binary pattern is the whole arm pattern — nested ones must match the enclosing value first, then the binary. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is a compile error; one that does neither compiles without a warning and silently never runs. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`).
 
 **Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
@@ -4434,6 +4454,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
+| Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails (BT-663, BT-4096, BT-4097) |
 | Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
 | Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only — see restrictions below (BT-2855, ADR 0107) |
 
