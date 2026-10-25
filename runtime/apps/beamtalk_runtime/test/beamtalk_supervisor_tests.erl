@@ -49,6 +49,9 @@ Tests cover:
 - class_dispatch hook: initialize runs only on fresh start, not already_started or error
 - start_child_via_class_method/4 rejects an abstract class's `self new`,
   resolved by class name rather than a fabricated process-dictionary flag
+- maxChildren atomic enforcement inside the supervisor: concurrent starters
+  never overshoot, one start_child call per startChild, terminateChild frees
+  the slot synchronously, failing children release theirs (BT-4068)
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -66,7 +69,9 @@ Tests cover:
     class_writeVar/1,
     class_readVar/1,
     class_readThenActor/1,
-    start_link_fake_child/0
+    start_link_fake_child/0,
+    start_link_fake_child/1,
+    start_link_fake_child/2
 ]).
 
 %% Fake class methods that route through
@@ -100,6 +105,20 @@ Used as the supervisor callback module.
 init({simple_one_for_one, ChildSpec}) ->
     SupFlags = #{strategy => simple_one_for_one, intensity => 0, period => 1},
     {ok, {SupFlags, [ChildSpec]}};
+%% BT-4068: a dynamic supervisor with full enforcement state, installed the
+%% way `beamtalk_supervisor:dynamic_init/3` does — through the same
+%% production helpers, not a reimplementation. This clause must precede the
+%% plain-limit clause below, which would otherwise match first.
+init({simple_one_for_one, ChildSpec, {capped, MaxChildren}}) ->
+    put('$beamtalk_max_children', MaxChildren),
+    Capacity = beamtalk_supervisor:init_child_capacity(MaxChildren),
+    {CapTid, CapMon} = Capacity,
+    put('$beamtalk_max_children_state', {CapTid, CapMon}),
+    Wrapped = beamtalk_supervisor:wrap_capped_child_spec(ChildSpec, MaxChildren, Capacity),
+    %% Restarts allowed (unlike the intensity-0 default below): the restart
+    %% replay test needs them, and temporary children never restart anyway.
+    SupFlags = #{strategy => simple_one_for_one, intensity => 5, period => 5},
+    {ok, {SupFlags, [Wrapped]}};
 %% BT-3964: a dynamic supervisor carrying a maxChildren limit, stashed the way
 %% `beamtalk_supervisor:dynamic_init/2` does (dynamic_init_walks_hierarchy_via_ets_test
 %% pins that the key matches).
@@ -1511,6 +1530,31 @@ dynamic_init_invalid_values_fail_start_with_validator_error_test() ->
 -doc "Start a fake child gen_server — OTP-compatible {ok, Pid} return.".
 start_link_fake_child() ->
     gen_server:start_link(?MODULE, fake_child, []).
+
+%% BT-4068: arities the wrapped template lands on for `startChild: args`
+%% (`[Args]`) and `startChild:name:` (`[Args, Name]`). The received args are
+%% recorded for the arg-threading test, then the child starts as usual.
+start_link_fake_child(Args) ->
+    record_fake_child_args([Args]),
+    start_link_fake_child().
+
+start_link_fake_child(Args, Name) ->
+    record_fake_child_args([Args, Name]),
+    start_link_fake_child().
+
+record_fake_child_args(Args) ->
+    case ets:info(bt4068_fake_child_args, id) of
+        undefined ->
+            ets:new(bt4068_fake_child_args, [named_table, public, set]);
+        _ ->
+            ok
+    end,
+    ets:insert(bt4068_fake_child_args, {last, Args}),
+    ok.
+
+last_fake_child_args() ->
+    [{last, Args}] = ets:lookup(bt4068_fake_child_args, last),
+    Args.
 
 %% Fake class method: simulates `MyClass create: Name value: Val` which starts
 %% a gen_server and returns a beamtalk_object tuple.
@@ -3319,6 +3363,391 @@ startChild_max_children_zero_test() ->
     after
         ChildClassPid ! stop,
         gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% BT-4068: atomic maxChildren enforcement inside the supervisor
+%%====================================================================
+
+start_enforced_capped_dynamic_supervisor(Max) ->
+    start_enforced_capped_dynamic_supervisor(Max, temporary).
+
+start_enforced_capped_dynamic_supervisor(Max, Restart) ->
+    ChildSpec = #{
+        id => fake_child_template,
+        start => {?MODULE, start_link_fake_child, []},
+        restart => Restart,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => [?MODULE]
+    },
+    {ok, SupPid} = supervisor:start_link(?MODULE, {simple_one_for_one, ChildSpec, {capped, Max}}),
+    SupPid.
+
+%% Poll a pool's children for one outside `Exclude`, e.g. a restarted child.
+await_pool_child(SupPid, Exclude) ->
+    await_pool_child(SupPid, Exclude, 200).
+
+await_pool_child(_SupPid, _Exclude, 0) ->
+    error(pool_child_timeout);
+await_pool_child(SupPid, Exclude, N) ->
+    Pids = [
+        P
+     || {_, P, _, _} <- supervisor:which_children(SupPid),
+        is_pid(P),
+        not lists:member(P, Exclude)
+    ],
+    case Pids of
+        [New | _] ->
+            New;
+        [] ->
+            timer:sleep(10),
+            await_pool_child(SupPid, Exclude, N - 1)
+    end.
+
+%% Poll a capacity table until its counter reads `Expected` (a death's DOWN
+%% is processed asynchronously, so the count settles a moment after the
+%% restart it overlaps).
+await_capacity_count(Tid, Expected) ->
+    await_capacity_count(Tid, Expected, 200).
+
+await_capacity_count(_Tid, Expected, 0) ->
+    error({capacity_count_timeout, Expected});
+await_capacity_count(Tid, Expected, N) ->
+    case ets:lookup_element(Tid, count, 2) of
+        Expected ->
+            ok;
+        _ ->
+            timer:sleep(10),
+            await_capacity_count(Tid, Expected, N - 1)
+    end.
+
+%% Trace `supervisor:count_children/1` and `supervisor:start_child/2` calls
+%% (global patterns; only explicitly traced processes report). Callers must
+%% pair `trace_sup_start_calls/0` with `untrace_sup_start_calls/0`.
+trace_sup_start_calls() ->
+    1 = erlang:trace_pattern({supervisor, count_children, 1}, true, [global]),
+    1 = erlang:trace_pattern({supervisor, start_child, 2}, true, [global]),
+    %% Drop any stale trace messages an earlier failed test left behind, so
+    %% the drain below only sees this test's calls.
+    _ = drain_sup_start_calls(),
+    ok.
+
+untrace_sup_start_calls() ->
+    _ = erlang:trace_pattern({supervisor, count_children, 1}, false, [global]),
+    _ = erlang:trace_pattern({supervisor, start_child, 2}, false, [global]),
+    ok.
+
+%% Spawn a gated starter: it runs `Fun` once released with `go`, then
+%% reports to `Test`. A crashing starter is reported as a failure, not a
+%% hung collect.
+spawn_gated_starter(Test, Fun) ->
+    spawn_monitor(fun() ->
+        receive
+            go -> ok
+        end,
+        Test ! {starter_done, self(), Fun()}
+    end).
+
+%% A gated starter additionally traced for supervisor calls (the patterns
+%% from `trace_sup_start_calls/0` must be armed first).
+spawn_traced_starter(Test, Fun) ->
+    {Pid, _Ref} = Gated = spawn_gated_starter(Test, Fun),
+    1 = erlang:trace(Pid, true, [call, {tracer, Test}]),
+    Gated.
+
+release_and_collect_starters(Starters) ->
+    [P ! go || {P, _} <- Starters],
+    [
+        receive
+            {starter_done, P, R} ->
+                _ = erlang:demonitor(Ref, [flush]),
+                R;
+            {'DOWN', Ref, process, P, Reason} ->
+                error({starter_crashed, P, Reason})
+        after 30000 ->
+            error({starter_timeout, P})
+        end
+     || {P, Ref} <- Starters
+    ].
+
+%% Drain supervisor-call trace messages until 200 ms of quiet; returns
+%% `{CountChildrenCalls, StartChildCalls}`.
+drain_sup_start_calls() ->
+    drain_sup_start_calls(0, 0).
+
+drain_sup_start_calls(CountChildren, StartChild) ->
+    receive
+        {trace, _, call, {supervisor, count_children, _}} ->
+            drain_sup_start_calls(CountChildren + 1, StartChild);
+        {trace, _, call, {supervisor, start_child, _}} ->
+            drain_sup_start_calls(CountChildren, StartChild + 1)
+    after 200 ->
+        {CountChildren, StartChild}
+    end.
+
+startChild_max_children_concurrent_test() ->
+    %% N parallel startChild/1 calls admit exactly Max; the rest get
+    %% max_children. The atomic in-supervisor check can never overshoot.
+    Max = 8,
+    N = 64,
+    SupPid = start_enforced_capped_dynamic_supervisor(Max),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4068DynWorker'),
+    set_child_class(SupPid, ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT4068CapSup', ?MODULE, SupPid},
+        Starters = [
+            spawn_gated_starter(self(), fun() -> beamtalk_supervisor:startChild(Self) end)
+         || _ <- lists:seq(1, N)
+        ],
+        Results = release_and_collect_starters(Starters),
+        Ok = [R || {ok, _} = R <- Results],
+        Refused = [R || {error, #beamtalk_error{kind = max_children}} = R <- Results],
+        ?assertEqual(Max, length(Ok)),
+        ?assertEqual(N - Max, length(Refused)),
+        ?assertEqual(length(Results), length(Ok) + length(Refused)),
+        [?assertEqual(#{max_children => Max}, E#beamtalk_error.details) || {error, E} <- Refused],
+        ?assertEqual({ok, Max}, beamtalk_supervisor:countChildren(Self)),
+        Counts = supervisor:count_children(SupPid),
+        ?assertEqual(Max, proplists:get_value(workers, Counts, 0))
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_max_children_single_call_test() ->
+    %% Each startChild on a capped pool is exactly one call into the
+    %% supervisor (start_child), with no count_children round trip — for
+    %% admitted and refused starts alike, on every arity.
+    Max = 2,
+    SupPid = start_enforced_capped_dynamic_supervisor(Max),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4068DynCalls'),
+    set_child_class(SupPid, ChildClassObj),
+    trace_sup_start_calls(),
+    try
+        Self = {beamtalk_supervisor, 'BT4068CallSup', ?MODULE, SupPid},
+        Starters = [
+            spawn_traced_starter(self(), fun() -> beamtalk_supervisor:startChild(Self) end),
+            spawn_traced_starter(self(), fun() -> beamtalk_supervisor:startChild(Self) end),
+            spawn_traced_starter(self(), fun() -> beamtalk_supervisor:startChild(Self) end),
+            spawn_traced_starter(
+                self(), fun() -> beamtalk_supervisor:startChild(Self, #{n => 1}) end
+            ),
+            spawn_traced_starter(
+                self(), fun() -> beamtalk_supervisor:startChild(Self, #{n => 2}, bt4068_traced) end
+            )
+        ],
+        %% Phased release: the first two fill the pool, the rest refuse.
+        {Admit, Refuse} = lists:split(2, Starters),
+        [First, Second] = release_and_collect_starters(Admit),
+        ?assertMatch({ok, _}, First),
+        ?assertMatch({ok, _}, Second),
+        [Third, Fourth, Fifth] = release_and_collect_starters(Refuse),
+        ?assertMatch({error, #beamtalk_error{kind = max_children}}, Third),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = max_children, selector = 'startChild:'}}, Fourth
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = max_children, selector = 'startChild:name:'}}, Fifth
+        ),
+        %% Five starts, five start_child calls, zero count_children calls.
+        ?assertEqual({0, 5}, drain_sup_start_calls())
+    after
+        untrace_sup_start_calls(),
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_legacy_cap_still_counts_test() ->
+    %% A capped pool WITHOUT enforcement state (started before BT-4068, or a
+    %% fixture that only stashes the limit) keeps the BT-3964 caller-side
+    %% check: startChild calls supervisor:count_children/1 first.
+    SupPid = start_capped_dynamic_supervisor(2),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4068DynLegacy'),
+    set_child_class(SupPid, ChildClassObj),
+    trace_sup_start_calls(),
+    try
+        Self = {beamtalk_supervisor, 'BT4068LegacySup', ?MODULE, SupPid},
+        Starter = spawn_traced_starter(self(), fun() -> beamtalk_supervisor:startChild(Self) end),
+        [Result] = release_and_collect_starters([Starter]),
+        ?assertMatch({ok, _}, Result),
+        ?assertEqual({1, 1}, drain_sup_start_calls())
+    after
+        untrace_sup_start_calls(),
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_max_children_arg_threading_test() ->
+    %% The wrapper strips the capacity token and threads the caller's args to
+    %% the template untouched: startChild: delivers [Args], startChild:name:
+    %% delivers [Args, Name].
+    SupPid = start_enforced_capped_dynamic_supervisor(2),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4068DynArgs'),
+    set_child_class(SupPid, ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT4068ArgsSup', ?MODULE, SupPid},
+        ?assertMatch({ok, _}, beamtalk_supervisor:startChild(Self, #{n => 1})),
+        ?assertEqual([#{n => 1}], last_fake_child_args()),
+        ?assertMatch({ok, _}, beamtalk_supervisor:startChild(Self, #{n => 2}, bt4068_named)),
+        ?assertEqual([#{n => 2}, bt4068_named], last_fake_child_args())
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_max_children_terminate_releases_slot_test() ->
+    %% terminateChild: frees the slot synchronously: a startChild immediately
+    %% after always succeeds, with no async-DOWN window to flake on.
+    %% Repeated rounds so a missing sync release would almost surely flake.
+    Max = 2,
+    SupPid = start_enforced_capped_dynamic_supervisor(Max),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4068DynTerm'),
+    set_child_class(SupPid, ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT4068TermSup', ?MODULE, SupPid},
+        {ok, C1} = beamtalk_supervisor:startChild(Self),
+        {ok, _C2} = beamtalk_supervisor:startChild(Self),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = max_children}}, beamtalk_supervisor:startChild(Self)
+        ),
+        lists:foreach(
+            fun(_) ->
+                {ok, nil} = beamtalk_supervisor:terminateChild(Self, C1),
+                {ok, Next} = beamtalk_supervisor:startChild(Self),
+                %% The pool is full again immediately: the freed slot went to
+                %% exactly one start.
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = max_children}},
+                    beamtalk_supervisor:startChild(Self)
+                ),
+                {ok, nil} = beamtalk_supervisor:terminateChild(Self, Next)
+            end,
+            lists:seq(1, 20)
+        )
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_max_children_restart_replays_original_args_test() ->
+    %% An OTP restart replays the tokened start args; the wrapper recognises
+    %% the consumed token, strips it, and restarts the child with its
+    %% ORIGINAL args — the token must never leak into the child's start.
+    SupPid = start_enforced_capped_dynamic_supervisor(2, permanent),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4068DynRestart'),
+    set_child_class(SupPid, ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT4068RestartSup', ?MODULE, SupPid},
+        {ok, C1} = beamtalk_supervisor:startChild(Self),
+        {ok, C2} = beamtalk_supervisor:startChild(Self, #{n => 7}),
+        ?assertEqual([#{n => 7}], last_fake_child_args()),
+        C1Pid = element(4, C1),
+        C2Pid = element(4, C2),
+        %% The no-args child restarts through the nullary start (recording
+        %% nothing): the recorded args are untouched.
+        kill_and_await_down(C1Pid),
+        C1New = await_pool_child(SupPid, [C1Pid, C2Pid]),
+        ?assertEqual([#{n => 7}], last_fake_child_args()),
+        %% The with-args child restarts with its original args.
+        kill_and_await_down(C2Pid),
+        _C2New = await_pool_child(SupPid, [C1Pid, C2Pid, C1New]),
+        ?assertEqual([#{n => 7}], last_fake_child_args()),
+        ?assertEqual({ok, 2}, beamtalk_supervisor:countChildren(Self)),
+        {{dictionary, '$beamtalk_max_children_state'}, {Tid, _MonPid}} =
+            erlang:process_info(SupPid, {dictionary, '$beamtalk_max_children_state'}),
+        ok = await_capacity_count(Tid, 2)
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+kill_and_await_down(Pid) ->
+    Mon = monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', Mon, process, Pid, _} ->
+            demonitor(Mon, [flush]),
+            ok
+    after 5000 ->
+        error(child_not_dead)
+    end.
+
+dynamic_init_installs_capacity_state_test() ->
+    %% A pool started through the real dynamic_init/3 carries enforcement
+    %% state and a wrapped template; with maxChildren = 0 every startChild
+    %% arity refuses without starting anything (the child module does not
+    %% even exist — refusal happens before the template MFA runs).
+    {ChildPid, ChildClass} = bt3963_supervisor_child_class('BT4068DynChildSup'),
+    Config = bt3963_dynamic_config(ChildClass, #{maxChildren => 0}),
+    try
+        with_bt3963_class('BT3963Pool', Config, fun() ->
+            {ok, P} = beamtalk_bt3963_sup_fixture:start_link(nil),
+            try
+                {{dictionary, '$beamtalk_max_children_state'}, {Tid, MonPid}} =
+                    erlang:process_info(P, {dictionary, '$beamtalk_max_children_state'}),
+                ?assert(is_pid(MonPid)),
+                ?assert(is_process_alive(MonPid)),
+                ?assertEqual(0, ets:lookup_element(Tid, count, 2)),
+                {ok, Spec} = supervisor:get_childspec(P, 'BT4068DynChildSup'),
+                ?assertMatch(
+                    {beamtalk_supervisor, checked_dynamic_start, [_]},
+                    maps:get(start, Spec)
+                ),
+                Self = bt3963_sup('BT3963Pool', P),
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = max_children, selector = startChild}},
+                    beamtalk_supervisor:startChild(Self)
+                ),
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = max_children, selector = 'startChild:'}},
+                    beamtalk_supervisor:startChild(Self, #{n => 1})
+                ),
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = max_children, selector = 'startChild:name:'}},
+                    beamtalk_supervisor:startChild(Self, #{n => 1}, bt4068_never)
+                ),
+                ?assertEqual(0, ets:lookup_element(Tid, count, 2)),
+                ?assertEqual(undefined, whereis(bt4068_never))
+            after
+                stop_linked(P)
+            end
+        end)
+    after
+        ChildPid ! stop,
+        beamtalk_class_metadata:delete('BT4068DynChildSup')
+    end.
+
+dynamic_init_failing_child_releases_slot_test() ->
+    %% A start whose child fails to start releases its slot: repeated failing
+    %% starts never fill the pool, and never report max_children.
+    {ChildPid, ChildClass} = bt3963_supervisor_child_class('BT4068DynFailSup'),
+    Config = bt3963_dynamic_config(ChildClass, #{maxChildren => 1}),
+    try
+        with_bt3963_class('BT3963Pool', Config, fun() ->
+            {ok, P} = beamtalk_bt3963_sup_fixture:start_link(nil),
+            try
+                {{dictionary, '$beamtalk_max_children_state'}, {Tid, _MonPid}} =
+                    erlang:process_info(P, {dictionary, '$beamtalk_max_children_state'}),
+                Self = bt3963_sup('BT3963Pool', P),
+                %% bt3963_child_mod does not exist, so the child start fails.
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = child_start_failed}},
+                    beamtalk_supervisor:startChild(Self)
+                ),
+                ?assertEqual(0, ets:lookup_element(Tid, count, 2)),
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = child_start_failed}},
+                    beamtalk_supervisor:startChild(Self)
+                ),
+                ?assertEqual(0, ets:lookup_element(Tid, count, 2))
+            after
+                stop_linked(P)
+            end
+        end)
+    after
+        ChildPid ! stop,
+        beamtalk_class_metadata:delete('BT4068DynFailSup')
     end.
 
 %%====================================================================
