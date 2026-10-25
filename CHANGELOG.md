@@ -224,6 +224,7 @@
 - Fix: `self new` / `self new:` / `self spawn` / `self class` / `self error:` inside a direct-called `class sealed` method no longer raises `badarg` — the receiver is now correctly resolved as the calling class (BT-4029, #4489)
 - Fix: a conditional whose receiver is a self-send in a Letrec loop body no longer trips `UnboundVersion State1` — the state variable is now correctly threaded across the call boundary (BT-4000, #4484)
 - Fix: a field write in a `whileTrue:`/`whileFalse:` condition of a value type is now correctly carried across iterations instead of being silently dropped (BT-4002, #4476)
+- Fix: FFI arity check accepts the multi-arity `erlang` BIFs — `integer_to_binary/2`, `atom_to_binary/2`, `binary_to_atom/2`, `binary_to_list/3` and `spawn/2,4` no longer warn "expected arity 1" (BT-4101)
 
 ### Runtime
 

@@ -75,3 +75,11 @@ TestCase subclass: ErlangInteropTest
     // ...and the human-readable message never leaks the raw `badarg` atom
     // (the raw reason lives in `hint` and `details`, not the user-facing message).
     self assert: (caught message includesSubstring: "badarg") equals: false
+
+  // BT-4101: multi-arity erlang BIFs must pass the FFI arity check —
+  // integer_to_binary/2 was rejected ("expected arity 1").
+  testMultiArityErlangBifs =>
+    // integer_to_binary/2: hex chunk-size encoding (Buccaneer Phase 0)
+    self assert: (Erlang erlang integer_to_binary: 255 with: 16) equals: "FF"
+    // binary_to_integer/2 round-trip
+    self assert: (Erlang erlang binary_to_integer: "FF" with: 16) equals: 255
