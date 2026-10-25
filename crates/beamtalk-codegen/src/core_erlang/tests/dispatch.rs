@@ -1399,7 +1399,8 @@ fn test_erlang_interop_direct_call_zero_arg() {
     let output = doc.to_pretty_string();
 
     assert!(
-        output.contains("call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')"),
+        output
+            .contains("call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')"),
         "Should emit proxy-routed zero-arg call. Got: {output}"
     );
 }

@@ -1889,7 +1889,10 @@ mod tests {
             "bt@test@foo",
             "bt@",
         ] {
-            assert!(is_beamtalk_module(name), "{name} should be a Beamtalk module");
+            assert!(
+                is_beamtalk_module(name),
+                "{name} should be a Beamtalk module"
+            );
         }
         for name in [
             "lists",
