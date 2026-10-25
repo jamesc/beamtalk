@@ -1006,6 +1006,42 @@ fn is_assignable_to_integer_or_string() {
     ));
 }
 
+/// `is_assignable_to` with a union on the *value* side (BT-4042).
+///
+/// A union is assignable to a declared type iff *every* member is — the
+/// union-subtype rule (`A | B <: T` iff `A <: T` and `B <: T`). This is the
+/// direction the local-annotation narrowing check needs: `y :: Integer | Nil
+/// := <Object>` compares declared (`Integer | UndefinedObject`) against
+/// inferred (`Object`) with the declared type in the value position.
+#[test]
+fn is_assignable_to_union_value_side() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    // Every member a subtype of Object → the union is.
+    assert!(TypeChecker::is_assignable_to(
+        &"Integer | UndefinedObject".into(),
+        &"Object".into(),
+        &hierarchy
+    ));
+    assert!(TypeChecker::is_assignable_to(
+        &"Integer | String".into(),
+        &"Object".into(),
+        &hierarchy
+    ));
+    // String is not a Number → the union is not assignable to Number.
+    assert!(!TypeChecker::is_assignable_to(
+        &"Integer | String".into(),
+        &"Number".into(),
+        &hierarchy
+    ));
+    // A union nested inside a generic member's type args must not be
+    // mistaken for a top-level member separator.
+    assert!(TypeChecker::is_assignable_to(
+        &"Array(Integer | String) | UndefinedObject".into(),
+        &"Object".into(),
+        &hierarchy
+    ));
+}
+
 // ── singleton members in unions ────────────────────────────────
 
 /// Infer `x <selector>` (optionally with `arg`) where `x :: Integer | #infinity`,

@@ -187,6 +187,146 @@ fn annotated_assignment_narrowing_to_parametric_type_no_warning() {
 }
 
 #[test]
+fn annotated_assignment_narrowing_to_union_from_object_no_warning() {
+    // BT-4042: `y :: Integer | Nil := <Object>` — narrowing to a union
+    // must be accepted silently, exactly like narrowing to a simple type
+    // (`annotated_assignment_narrowing_from_object_no_warning`): the union
+    // is more specific than (assignable to) the inferred `Object`.
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    env.set_local("someVar", InferredType::known("Object"));
+
+    let union_ann = TypeAnnotation::Union {
+        types: vec![
+            TypeAnnotation::simple("Integer", span()),
+            TypeAnnotation::simple("Nil", span()),
+        ],
+        span: span(),
+    };
+    let expr = Expression::Assignment {
+        target: Box::new(var("y")),
+        value: Box::new(Expression::Identifier(Identifier::new("someVar", span()))),
+        type_annotation: Some(union_ann),
+        span: span(),
+    };
+    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Narrowing Object to Integer | Nil should not warn, got: {type_warnings:?}"
+    );
+}
+
+/// BT-4042 issue repro: in a `typed` class, `y :: Integer | Nil := self obj`
+/// (RHS inferred `Object`) must not warn, and the follow-up `isNil` check
+/// must narrow `y` so `y + 1` is warning-free too.
+#[test]
+fn bt4042_union_narrowing_from_object_issue_repro() {
+    let source = r"
+typed Object subclass: Nv
+  class obj -> Object => 3
+
+  class a -> Integer =>
+    x :: Integer := self obj
+    x + 1
+
+  class b -> Integer =>
+    y :: Integer | Nil := self obj
+    y isNil ifTrue: [0] ifFalse: [y + 1]
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse(&module);
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Union narrowing from Object should not warn, got: {type_warnings:?}"
+    );
+}
+
+#[test]
+fn annotated_assignment_unrelated_union_still_warns() {
+    // Negative guard for BT-4042: a union annotation unrelated to the RHS
+    // in *both* directions must still warn — the fix only accepts unions
+    // assignable to (more specific than) the inferred type.
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    // RHS is a String literal, declared as Integer | Nil → should warn
+    let union_ann = TypeAnnotation::Union {
+        types: vec![
+            TypeAnnotation::simple("Integer", span()),
+            TypeAnnotation::simple("Nil", span()),
+        ],
+        span: span(),
+    };
+    let expr = Expression::Assignment {
+        target: Box::new(var("y")),
+        value: Box::new(str_lit("hello")),
+        type_annotation: Some(union_ann),
+        span: span(),
+    };
+    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
+    assert!(
+        !type_warnings.is_empty(),
+        "String assigned to Integer | Nil annotation should produce a type mismatch warning"
+    );
+}
+
+#[test]
+fn annotated_assignment_union_rhs_to_wider_declared_no_warning() {
+    // Companion direction through the same BT-4042 helper fix: a union RHS
+    // whose every member is a subtype of the declared type is assignable to
+    // it (`x :: Object := <Integer | Nil>`), so no warning.
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    env.set_local(
+        "someVar",
+        InferredType::simple_union(&["Integer", "UndefinedObject"]),
+    );
+
+    let expr = Expression::Assignment {
+        target: Box::new(var("x")),
+        value: Box::new(Expression::Identifier(Identifier::new("someVar", span()))),
+        type_annotation: Some(TypeAnnotation::simple("Object", span())),
+        span: span(),
+    };
+    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "Integer | Nil assigned to Object should not warn, got: {type_warnings:?}"
+    );
+}
+
+#[test]
 fn annotated_assignment_mismatch_warns() {
     // Known incompatible type should emit a warning
     let mut checker = TypeChecker::new();
