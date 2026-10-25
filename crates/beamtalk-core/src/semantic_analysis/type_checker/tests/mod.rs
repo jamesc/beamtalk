@@ -34,6 +34,7 @@ mod bt3409_detect_ifnone_nil_narrowing;
 mod bt3463_union_receiver_chained_block_param;
 mod bt3604_known_remote_diagnostics;
 mod bt4023_ffi_result_exception;
+mod bt4032_dynamic_state_default;
 mod bt4040_interval_element_type;
 mod bt4044_perform_explicit_dynamic;
 mod bt4107_compound_nil_guard_narrowing;

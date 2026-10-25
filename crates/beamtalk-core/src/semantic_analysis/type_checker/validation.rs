@@ -3182,6 +3182,18 @@ impl TypeChecker {
                     self.alias_registry.as_ref(),
                 );
             self.referenced_aliases.extend(alias_deps);
+            // BT-4032: an explicit `:: Dynamic` annotation opts the slot
+            // out of checking (ADR 0077) — accept any default.
+            // `is_assignable_to` below has no unknown-class escape hatch
+            // (unlike `is_type_compatible`), so without this skip a
+            // declared `Dynamic` rejects every `Known` literal default.
+            // Mirrors the `InferredType::Dynamic(_) => true`
+            // expected-type arm in `known_type_compatible_with_expected`
+            // (return-type checking), which treats a declared `Dynamic`
+            // the same way.
+            if matches!(resolved_declared, InferredType::Dynamic(_)) {
+                continue;
+            }
             let declared_type = resolved_declared.display_annotation();
             if type_param_names.contains(&declared_type.as_str()) {
                 continue;
