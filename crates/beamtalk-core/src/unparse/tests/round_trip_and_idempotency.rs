@@ -433,3 +433,44 @@ fn tuple_literal_interpolation_keeps_padding() {
     assert_identity("x := \"x { {a, b} size } y\"\n");
     assert_identity("x := \"x {a} y\"\n");
 }
+
+// --- Native declarations (BT-4144) ---
+
+/// Assert `source` (already canonical, trailing newline included) survives
+/// a parse → unparse → parse round-trip with a byte-identical AST.
+#[track_caller]
+fn assert_native_round_trip(source: &str) {
+    let formatted = format_source(source).expect("test source must parse without errors");
+    assert_eq!(
+        formatted, source,
+        "formatter changed canonical source.\n\noriginal:\n{source}\n\nformatted:\n{formatted}"
+    );
+    let module = parse_source(source);
+    let module2 = parse_source(&formatted);
+    assert_eq!(
+        module, module2,
+        "AST changed by parse → unparse → parse round-trip.\n\nsource:\n{source}"
+    );
+}
+
+#[test]
+fn native_declaration_round_trips() {
+    // `beamtalk fmt` used to erase `declare native:` blocks entirely.
+    assert_native_round_trip(
+        "/// Type declarations for Erlang module `lists`.\ndeclare native: lists\n  node -> Symbol\n  reverse: list :: List(T) -> List(T)\n  member: elem :: T in: list :: List(T) -> Boolean\n",
+    );
+}
+
+#[test]
+fn native_declaration_keeps_source_order() {
+    // Interleaved back into source position, not grouped by kind: a
+    // native declaration after a class stays after it.
+    assert_native_round_trip(
+        "Object subclass: Calc\n\n  add: x to: y => x + y\n\ndeclare native: lists\n  reverse: list :: List(T) -> List(T)\n",
+    );
+}
+
+#[test]
+fn native_declaration_header_trailing_comment() {
+    assert_native_round_trip("declare native: lists  // FFI stubs\n  node -> Symbol\n");
+}
