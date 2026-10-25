@@ -108,6 +108,48 @@ fn test_find_source_files_nonexistent_path() {
     assert!(result.is_err());
 }
 
+#[cfg(unix)]
+#[test]
+fn test_find_source_files_follows_symlinked_source() {
+    // BT-4105: a symlinked `.bt` file in `src/` must be discovered for
+    // compilation, not silently skipped. The discovered path is the link
+    // itself (inside `src/`), so module-name derivation keeps working as
+    // if it were a regular file.
+    let temp = TempDir::new().unwrap();
+    let project_path = create_test_project(&temp);
+    let src_path = project_path.join("src");
+    let elsewhere = project_path.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    write_test_file(&elsewhere.join("spike_handler.bt"), "main := [42].");
+    std::os::unix::fs::symlink(
+        elsewhere.join("spike_handler.bt"),
+        src_path.join("spike_handler.bt"),
+    )
+    .unwrap();
+
+    let files = find_source_files(&project_path).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(
+        files[0].file_name(),
+        Some("spike_handler.bt"),
+        "unexpected files: {files:?}"
+    );
+    assert!(files[0].starts_with(&src_path));
+
+    // And the discovered link path compiles to Core Erlang.
+    let core_file = project_path.join("spike_handler.core");
+    let result = compile_file(
+        &files[0],
+        "spike_handler",
+        &core_file,
+        &default_options(),
+        &CompileContext::default(),
+        None,
+    );
+    assert!(result.is_ok());
+    assert!(core_file.exists());
+}
+
 #[test]
 fn test_compile_valid_file() {
     let temp = TempDir::new().unwrap();
