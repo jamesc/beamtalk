@@ -178,9 +178,10 @@ pub(in crate::core_erlang) const NON_TAGGED_MAP_CLASSES: &[&str] = &[
 pub(in crate::core_erlang) struct TypedSealedTarget {
     /// The sealed class name: the `'$beamtalk_class'` tag the guard matches.
     pub(in crate::core_erlang) class_name: String,
-    /// The class's compiled module, resolved like a qualified class
-    /// reference (registry under the referenced package, else the
-    /// deterministic `bt@{package}@{snake}` composition).
+    /// The class's compiled module: this unit's own registry entry when
+    /// present (the module the unit actually emits — BT-4152), else the
+    /// qualified derivation (registry under the referenced package, else
+    /// the deterministic `bt@{package}@{snake}` composition).
     pub(in crate::core_erlang) module_name: String,
 }
 
