@@ -135,7 +135,19 @@ impl CoreErlangGenerator {
         }
 
         let match_var = self.fresh_temp_var("Match");
-        let value_doc = self.expression_doc(value)?;
+        // BT-4146: the scrutinee compiles through `threaded_expression`,
+        // like a conditional's receiver (`compile_conditional_receiver`):
+        // it may be a call that must run inside a `SyncedCall` window in an
+        // actor method (`0 + x` coerces through a user `plusFromNumber:`
+        // when `x` is not statically numeric), or thread state ahead of the
+        // `case`. An enclosing sequencing that already compiled it ahead
+        // (`single_sequenced_child`) reads the precompiled value back here
+        // instead of compiling it twice. The prelude is `Document::Nil`
+        // for a pure scrutinee, so this is a no-op there.
+        let recv_frame = self.current_frame();
+        let recv_tv = self.threaded_expression(value, recv_frame)?;
+        let value_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
+        let value_doc = self.threaded_value_doc(&recv_tv.value);
 
         // Guard against unsupported pattern forms reaching array-match codegen.
         for arm in arms {
@@ -279,6 +291,7 @@ impl CoreErlangGenerator {
         };
 
         Ok(docvec![
+            value_preamble,
             "let ",
             leaf::var(match_var.clone()),
             " = ",
@@ -459,10 +472,24 @@ impl CoreErlangGenerator {
         (field.name.as_str(), *span)
     }
 
+    /// BT-4147: whether the legacy arm body `body` holds a value-position
+    /// assignment to a local nothing binds yet — the one shape the legacy
+    /// path must not compile as an expression (the write would drop). A
+    /// block literal's own statements bind themselves, so only assignments
+    /// outside one count.
+    fn match_arm_first_binds_local(&self, body: &Expression) -> bool {
+        beamtalk_core::semantic_analysis::block_facts::assignments_outside_blocks(body)
+            .iter()
+            .filter(|(_, span)| self.value_assign_sites.contains(span))
+            .any(|(name, _)| !self.binds_threadable_local(name))
+    }
+
     /// Compiles a `match:` arm body.
     ///
     /// When `base_state` is `None` (no arm in this `match:` needs actor state
-    /// threading — the common case), this is exactly `expression_doc`.
+    /// threading — the common case), this is exactly `expression_doc`,
+    /// except an arm body that first-binds a local (BT-4147), which
+    /// compiles through `threaded_expression` so the write binds.
     ///
     /// When `base_state` is `Some` (`match_needs_state_threading` found at
     /// least one arm that does), every arm must yield a `{Value, State}` tuple
@@ -499,6 +526,25 @@ impl CoreErlangGenerator {
         threading: Option<&MatchThreading<'_>>,
     ) -> Result<Document<'static>> {
         let Some(threading) = threading else {
+            // BT-4147: an arm body that first-binds a local (`1 -> (u :=
+            // 11)` with `u` bound nowhere else) compiles through
+            // `threaded_expression`, like the scrutinee (BT-4146): the
+            // assignment is a producer (BT-3910), so its prelude binds the
+            // local and answers the value — bare `expression_doc` would
+            // drop the write and report it. The `match:` itself is not a
+            // producer for such a write (producers thread outer-bound
+            // locals only), and anything else keeps the legacy path
+            // byte-identically. A bound write stays loud: analysis rejects
+            // it as MatchArmWrite. (Not the synthetic-block arm lowering
+            // below: that answers a `{Value, StateAcc}` tuple, which has
+            // no `StateAcc` to close over on this path.)
+            if self.match_arm_first_binds_local(body) {
+                let frame = self.current_frame();
+                let tv = self.threaded_expression(body, frame)?;
+                let preamble = self.threaded_prelude_doc(&tv.prelude);
+                let value_doc = self.threaded_value_doc(&tv.value);
+                return Ok(docvec![preamble, value_doc]);
+            }
             return self.expression_doc(body);
         };
         // BT-3947: an arm of a producer is a `BranchArm` frame, lowered as the

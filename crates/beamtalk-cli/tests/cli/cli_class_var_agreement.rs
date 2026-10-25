@@ -459,11 +459,13 @@ fn headline(text: &str) -> String {
 /// protected block whose cleanup would read a stale local. Matched on the exact
 /// message, whitespace-normalised since the diagnostic is line-wrapped. The
 /// errors of a fixture with such a rejection may also be the "Failed to compile
-/// fixture" trailer and unused-variable lints; errors of other fixtures in the
-/// batch are theirs to be judged when they are compiled alone. `case_files` are
-/// the fixtures of the program being judged (empty: any): a rejection must be in
-/// one of them, and every error in any of them must be that rejection or its
-/// trailer, so a real error in another fixture of the same program is not hidden.
+/// fixture" trailer and lints that are warnings, never the compile failure
+/// (`Unused variable`, `Unused parameter`, a block that reads class state and
+/// escapes); errors of other fixtures in the batch are theirs to be judged when
+/// they are compiled alone. `case_files` are the fixtures of the program being
+/// judged (empty: any): a rejection must be in one of them, and every error in
+/// any of them must be that rejection, its trailer or an allowed lint, so a
+/// real error in another fixture of the same program is not hidden.
 fn is_loud_ensure_nlr_rejection(text: &str, case_files: &[String]) -> bool {
     let flat = text.replace('│', " ");
     let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -474,6 +476,17 @@ fn is_loud_ensure_nlr_rejection(text: &str, case_files: &[String]) -> bool {
             && e.contains("the cleanup would not see the new `")
             && e.contains("(BT-3947)")
     };
+    // BT-4018: warnings (`Diagnostic::warning`), never the compile
+    // failure: an unused local or parameter, or a block that reads class
+    // state (with or without a `hasField:` probe) and escapes
+    // (`class_state_abroad`). The prefixes are exact: the error-severity
+    // `block writes object state, but ...` (ADR 0133) must never be allowed.
+    let is_allowed_lint = |e: &str| {
+        e.starts_with("Unused variable")
+            || e.starts_with("Unused parameter")
+            || e.starts_with("block reads class variable")
+            || e.starts_with("block probes the class state")
+    };
     // The fixtures a pin error is located in (`╭─[<file>:<line>:<col>]`).
     let files: Vec<&str> = errors
         .iter()
@@ -483,6 +496,16 @@ fn is_loud_ensure_nlr_rejection(text: &str, case_files: &[String]) -> bool {
             rest.split(':').next()
         })
         .collect();
+    // The files whose errors must all be pin, trailer or allowed lint: the
+    // judged program's own when given (a co-batched program's errors are
+    // judged when it is the offender, never here), else the pin files.
+    let in_scope = |e: &str| {
+        if case_files.is_empty() {
+            files.iter().any(|f| e.contains(f))
+        } else {
+            case_files.iter().any(|f| e.contains(f.as_str()))
+        }
+    };
     !files.is_empty()
         && (case_files.is_empty()
             || files.iter().any(|p| {
@@ -492,13 +515,8 @@ fn is_loud_ensure_nlr_rejection(text: &str, case_files: &[String]) -> bool {
             }))
         && errors
             .iter()
-            .filter(|e| {
-                files.iter().any(|f| e.contains(f))
-                    || case_files.iter().any(|f| e.contains(f.as_str()))
-            })
-            .all(|e| {
-                is_pin(e) || e.starts_with("Failed to compile") || e.starts_with("Unused variable")
-            })
+            .filter(|e| in_scope(e))
+            .all(|e| is_pin(e) || e.starts_with("Failed to compile") || is_allowed_lint(e))
 }
 
 fn tail(text: &str) -> String {
@@ -610,8 +628,11 @@ fn run_alone(case: &Case) -> (Package, Run) {
 }
 
 /// Runs `cases` and returns every failure, bisecting broken batches.
+/// Programs skipped as loud BT-3947 rejections are collected into `skipped`
+/// as `(index, seed, size)` so the report shows what the draw did not cover
+/// (BT-4018).
 #[allow(clippy::too_many_lines)] // one bisecting driver; splitting it would scatter the batch protocol
-fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
+fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u64, u32)>) {
     if cases.is_empty() {
         return;
     }
@@ -707,20 +728,24 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
                 // loud rejection of an `ensure:` protected block that may
                 // return non-locally is not a disagreement: the program is
                 // never compiled, so no wrong answer is produced.
-                if !is_loud_ensure_nlr_rejection(&text, &files_of(owner)) {
+                if is_loud_ensure_nlr_rejection(&text, &files_of(owner)) {
+                    skipped.push((c.index, c.seed, c.size));
+                } else {
                     record(c, Failure::Compile(headline(&text), tail(&text)), failed);
                 }
                 let rest: Vec<&Case> = cases.iter().copied().filter(|c| c.index != owner).collect();
-                check(&rest, failed);
+                check(&rest, failed, skipped);
             } else if let [only] = cases {
-                if !is_loud_ensure_nlr_rejection(&text, &files_of(only.index)) {
+                if is_loud_ensure_nlr_rejection(&text, &files_of(only.index)) {
+                    skipped.push((only.index, only.seed, only.size));
+                } else {
                     record(only, Failure::Compile(headline(&text), tail(&text)), failed);
                 }
             } else {
                 let (a, b) = cases.split_at(cases.len() / 2);
                 let before = failed.len();
-                check(a, failed);
-                check(b, failed);
+                check(a, failed, skipped);
+                check(b, failed, skipped);
                 // The batch was broken but every half passed (an interaction
                 // between programs, or a flaky run): never let that pass
                 // silently; blame the batch's first case.
@@ -745,7 +770,12 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>) {
     }
 }
 
-fn report(shapes: Shapes, all: &[Case], failed: &[Failed]) -> String {
+fn report(
+    shapes: Shapes,
+    all: &[Case],
+    failed: &[Failed],
+    skipped: &[(usize, u64, u32)],
+) -> String {
     let mut s = String::new();
     let mut by_program: Vec<usize> = failed.iter().map(|f| f.index).collect();
     by_program.sort_unstable();
@@ -758,6 +788,23 @@ fn report(shapes: Shapes, all: &[Case], failed: &[Failed]) -> String {
         100 * by_program.len() / all.len().max(1),
         shapes
     );
+    // BT-4018: the loud BT-3947 rejections the draw did not cover, so the
+    // `ensure:` shape cannot silently lose programs to the skip.
+    if !skipped.is_empty() {
+        let mut ids: Vec<(usize, u64, u32)> = skipped.to_vec();
+        ids.sort_unstable();
+        ids.dedup();
+        let pairs: Vec<String> = ids
+            .iter()
+            .map(|(index, seed, size)| format!("({index}, {seed}, {size})"))
+            .collect();
+        let _ = writeln!(
+            s,
+            "skipped {} programs as loud BT-3947 rejections (index, seed, size): {}",
+            ids.len(),
+            pairs.join(" ")
+        );
+    }
     // Group the failures by cause: the compiler's one-line reason, or the
     // wrong-answer spelling.
     let mut causes: Vec<(String, usize)> = Vec::new();
@@ -803,8 +850,9 @@ fn property(shapes: Shapes) {
     let all = draw(shapes, corpus_cases_from_env(DEFAULT_CASES));
     let refs: Vec<&Case> = all.iter().collect();
     let mut failed = Vec::new();
-    check(&refs, &mut failed);
-    let text = report(shapes, &all, &failed);
+    let mut skipped = Vec::new();
+    check(&refs, &mut failed, &mut skipped);
+    let text = report(shapes, &all, &failed, &skipped);
     eprintln!("{text}");
     assert!(failed.is_empty(), "{text}");
 }
@@ -1096,4 +1144,87 @@ fn class_var_agreement_classifies_runner_output_confirm() {
     let other_clean = vec![(first_probe, crash_run()), (probe, clean())];
     assert!(!environment_confirmed_by(&crashed, &other_clean));
     assert!(!environment_confirmed_by(&crashed, &[]));
+}
+
+/// The BT-3947 pin is loud (skipped, not a disagreement) with warning-only
+/// company: the `beamtalk test` output renders warnings with the same `×`
+/// marker as errors, so an unused local or parameter and a block that reads
+/// class state and escapes ride along. A real error in the judged program's
+/// own fixtures still fails; a co-batched program's errors are judged when
+/// it is the offender, never here. No BEAM.
+#[test]
+fn class_var_agreement_skips_loud_ensure_rejection_with_warnings() {
+    let pin = |file: &str| {
+        format!(
+            "beamtalk::compile\n\n  × an `ensure:` protected block that writes `t` may return non-locally (`m`\n  │ may be a block it runs), which is not supported yet in a class method: the\n  │ cleanup would not see the new `t` (BT-3947)\n    ╭─[{file}:25:371]\n"
+        )
+    };
+    let trailer = |file: &str| format!("  × Failed to compile fixture '{file}'\n");
+    let unused_var = |file: &str| format!("  × Unused variable `v9`\n    ╭─[{file}:30:475]\n");
+    let unused_param = |file: &str| format!("  × Unused parameter `x`\n    ╭─[{file}:14:13]\n");
+    let abroad = |file: &str| {
+        format!(
+            "  × block reads class variable m of CvAbtOpen and is stored in a local: if run\n    ╭─[{file}:26:12]\n"
+        )
+    };
+    let probe = |file: &str| {
+        format!(
+            "  × block probes the class state of CvAbtOpen with `hasField: #n` and is stored in a local: if run\n    ╭─[{file}:26:12]\n"
+        )
+    };
+    // Error-severity, never allowed: the ADR 0133 escaping-block rejection.
+    let escaping = |file: &str| {
+        format!(
+            "  × block writes object state, but `value` cannot return the write\n    ╭─[{file}:26:12]\n"
+        )
+    };
+    let mine = "test/fixtures/cv_abt_open.bt".to_string();
+    let other = "test/fixtures/cv_aec_open.bt".to_string();
+    let files = vec![mine.clone()];
+
+    // The pin alone, and with each allowed warning.
+    assert!(is_loud_ensure_nlr_rejection(
+        &format!("{}{}", pin(&mine), trailer(&mine)),
+        &files
+    ));
+    assert!(is_loud_ensure_nlr_rejection(
+        &format!("{}{}{}", unused_var(&mine), pin(&mine), trailer(&mine)),
+        &files
+    ));
+    assert!(is_loud_ensure_nlr_rejection(
+        &format!("{}{}{}", unused_param(&mine), pin(&mine), trailer(&mine)),
+        &files
+    ));
+    assert!(is_loud_ensure_nlr_rejection(
+        &format!("{}{}{}", abroad(&mine), pin(&mine), trailer(&mine)),
+        &files
+    ));
+    assert!(is_loud_ensure_nlr_rejection(
+        &format!("{}{}{}", probe(&mine), pin(&mine), trailer(&mine)),
+        &files
+    ));
+
+    // A real error in the judged program's own fixture still fails, and a
+    // batch with no pin at all is not a rejection.
+    assert!(!is_loud_ensure_nlr_rejection(
+        &format!("{}{}{}", escaping(&mine), pin(&mine), trailer(&mine)),
+        &files
+    ));
+    assert!(!is_loud_ensure_nlr_rejection(
+        &format!("{}{}", unused_param(&mine), trailer(&mine)),
+        &files
+    ));
+
+    // A co-batched program's real error is judged when it is the offender:
+    // it must not fail this program's verdict.
+    assert!(is_loud_ensure_nlr_rejection(
+        &format!(
+            "{}{}{}{}",
+            pin(&mine),
+            trailer(&mine),
+            escaping(&other),
+            trailer(&other)
+        ),
+        &files
+    ));
 }
