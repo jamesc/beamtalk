@@ -2733,6 +2733,10 @@ render: coll :: Printable | Nil -> String =>
 | `x ifNotNil: [:v \| ...]` | `v` is non-nil in block | Block only |
 | `x ifNil: [...] ifNotNil: [:v \| ...]` | `v` is non-nil in notNil block | NotNil block |
 | `x notNil and: [...]` | `x` is non-nil in block, including nested block-argument positions | Block only |
+| `(a isNil or: [b isNil]) ifTrue: [^...]` | every tested var is non-nil after the statement | Rest of method |
+| `(a isNil or: [b isNil]) ifFalse: [...]` | every tested var is non-nil in false block | False block |
+| `(a notNil and: [b notNil]) ifFalse: [^...]` | every tested var is non-nil after the statement | Rest of method |
+| `(a notNil and: [b notNil]) ifTrue: [...]` | every tested var is non-nil in true block | True block |
 | `x =:= #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
 | `x == #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
 | `x respondsTo: #sel ifFalse: [^...]` | `x` narrows post-guard | Rest of method |
@@ -2740,6 +2744,8 @@ render: coll :: Printable | Nil -> String =>
 The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any block whose body infers as `Never` — including calls to `error:`, `notImplemented`, or any `-> Never` method — not just non-local returns (`^`). Narrowing also works on `self.field` reads: inside `self.field isNil ifFalse: [...]`, the field narrows to non-nil within the block.
 
 **`notNil and:` (BT-2872):** `x notNil and: [...]` narrows `x` to non-nil for the whole block argument — not just where `x` is a further send's receiver, but in any nested position, including as an argument to a binary send inside a further-nested block (`local notNil and: [local > 0 and: [5 >= local]]` narrows `local` inside `5 >= local` too). The narrowing does not survive past the block — a later unguarded use of `x` after the `and:` send is unaffected.
+
+**Combined nil-guards (BT-4107):** an `or:`-chain of `isNil` tests narrows *every* tested variable — `(a isNil or: [b isNil]) ifTrue: [^nil]` proves both `a` and `b` non-nil afterwards (`or:` is false only when both disjuncts are false), and both are non-nil inside the `ifFalse:` arm. Dually, `(a notNil and: [b notNil]) ifFalse: [^nil]` proves both non-nil afterwards, and both are non-nil inside the `ifTrue:` arm. The complementary directions are disjunctive and never narrow: an `or:` guard that holds (or an `and:` guard that fails) only proves *some* variable is nil, not which. As a consequence, a lone `a notNil` test narrows too (`ifFalse: [^...]` post-guard, `ifTrue:` in-branch).
 
 **`isKindOf:` guard-and-return (BT-2825):** the same diverging-guard treatment `isNil` gets also applies to `isKindOf:` — `(x isKindOf: Foo) ifFalse: [^default]` proves `x` is `Foo` for the rest of the method, and `(x isKindOf: Foo) ifTrue: [^default]` proves `x` is `T \ Foo`. This also closes a related gap: when `x`'s declared type is a Protocol (e.g. `Printable`) and `Foo` is a concrete class, the narrowed type collapses to the bare `Foo` — a runtime `isKindOf: Foo` check is a stronger proof than the protocol annotation, so the narrowed value is assignable to a `Foo`-typed local without an `@expect type` escape hatch.
 

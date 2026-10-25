@@ -85,6 +85,33 @@ pub(crate) struct NarrowingInfo {
     pub(crate) class_test: Option<ClassTestInfo>,
 }
 
+/// Which compound nil-guard shape (BT-4107) was detected.
+///
+/// A compound nil-guard is an `or:`-chain of `isNil` tests or an `and:`-chain
+/// of `notNil` tests used as the receiver of `ifTrue:` / `ifFalse:` /
+/// `ifTrue:ifFalse:`. Unlike [`NarrowingInfo`] (one variable, statically
+/// known branch types), a compound guard narrows *N* variables to their
+/// live non-nil types, so it is detected and applied separately (see
+/// `TypeChecker::detect_compound_nil_guard`).
+///
+/// By De Morgan duality for the lazy `Boolean>>or:` / `Boolean>>and:`
+/// (`stdlib/src/boolean.bt`), only one direction narrows:
+/// - [`OrIsNil`](Self::OrIsNil): `or:` is false only when *every* disjunct
+///   is false — every tested var is non-nil in the false branch (and after
+///   a diverging `ifTrue:` guard). The true branch is disjunctive (some var
+///   is nil, but not which) and never narrows.
+/// - [`AndNotNil`](Self::AndNotNil): `and:` is true only when *every*
+///   conjunct is true — every tested var is non-nil in the true branch (and
+///   after a diverging `ifFalse:` guard). The false branch is disjunctive
+///   and never narrows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompoundNilGuardKind {
+    /// `(a isNil or: [b isNil])` — narrows in the false branch.
+    OrIsNil,
+    /// `(a notNil and: [b notNil])` — narrows in the true branch.
+    AndNotNil,
+}
+
 /// Details of a `x class = ClassName` / `x isKindOf: ClassName` narrowing
 /// (ADR 0102 §2 group 2, §5).
 #[derive(Debug, Clone)]
