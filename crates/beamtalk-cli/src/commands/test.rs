@@ -1165,6 +1165,19 @@ fn build_merged_class_indexes(
                     dep_protocol_defs.extend(dep.protocol_defs.iter().cloned());
                     for (class_name, module_name) in &dep.class_module_index {
                         class_module_index.insert(class_name.clone(), module_name.clone());
+                        // BT-4094: each test file compiles against its own
+                        // package's index (`class_index_for_file`), not the
+                        // merged one — so the dependency entries must land
+                        // here too. Without them a direct-called `sealed`
+                        // dependency class method misses the codegen
+                        // registry and falls back to the `bt@<snake>`
+                        // heuristic (`bt@catalina`) instead of
+                        // `bt@<package>@<module>`, failing at runtime with
+                        // `undef`. Fixtures were unaffected because they
+                        // compile against the merged index above.
+                        if let Some((pkg_map, _)) = pkg_class_indexes.get_mut(pkg_root) {
+                            pkg_map.insert(class_name.clone(), module_name.clone());
+                        }
                     }
                     dep_class_infos.extend(dep.class_infos.clone());
                     dep_alias_infos.extend(dep.alias_infos.clone());
