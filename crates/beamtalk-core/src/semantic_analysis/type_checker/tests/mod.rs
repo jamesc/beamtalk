@@ -35,6 +35,7 @@ mod bt3463_union_receiver_chained_block_param;
 mod bt3604_known_remote_diagnostics;
 mod bt4023_ffi_result_exception;
 mod bt4040_interval_element_type;
+mod bt4044_perform_explicit_dynamic;
 mod bt4107_compound_nil_guard_narrowing;
 mod cast_and_sync_send;
 mod destructure_and_extension;

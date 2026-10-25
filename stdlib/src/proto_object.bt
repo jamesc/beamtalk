@@ -90,7 +90,7 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// 42 perform: #abs withArguments: #()   // => 42
   /// ```
-  perform: selector :: Symbol withArguments: arguments :: List =>
+  perform: selector :: Symbol withArguments: arguments :: List -> Dynamic =>
     @intrinsic "perform:withArguments:"
 
   /// Execute a class method in the caller's process, bypassing gen_server dispatch.
@@ -107,7 +107,7 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// MyClass performLocally: #run:ctx: withArguments: #(input, ctx)
   /// ```
-  performLocally: selector :: Symbol withArguments: arguments :: List =>
+  performLocally: selector :: Symbol withArguments: arguments :: List -> Dynamic =>
     @intrinsic "performLocally:withArguments:"
 
   /// Send a message dynamically with an arguments list and explicit timeout.
@@ -119,5 +119,5 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// actor perform: #query withArguments: #(sql) timeout: 30000
   /// ```
-  perform: selector :: Symbol withArguments: arguments :: List timeout: timeoutMs :: Timeout =>
+  perform: selector :: Symbol withArguments: arguments :: List timeout: timeoutMs :: Timeout -> Dynamic =>
     @intrinsic "perform:withArguments:timeout:"

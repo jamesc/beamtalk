@@ -312,26 +312,28 @@ ProtoObject subclass: Object
 
   /// Send a unary message dynamically.
   ///
-  /// Left without a declared return type deliberately (BT-2834 pattern,
-  /// see `fieldAt:` above): the invoked method's return type is unknown
-  /// statically, and a fixed `-> Object` would block legitimate chained
-  /// sends on the real (narrower) result.
+  /// Declared `-> Dynamic` explicitly (BT-4044): the invoked method's
+  /// return type is unknown statically, so the reflective result really
+  /// is unknown — and unlike the BT-2834 unannotated pattern (see
+  /// `fieldAt:` above), an explicit `Dynamic` does not warn at call
+  /// sites in `typed` classes. Chained sends on the result still check
+  /// dynamically, as before.
   ///
   /// ## Examples
   /// ```beamtalk
   /// 42 perform: #abs       // => 42
   /// ```
-  sealed perform: selector :: Symbol => @intrinsic dynamicSend
+  sealed perform: selector :: Symbol -> Dynamic => @intrinsic dynamicSend
 
   /// Send a message dynamically with arguments.
   ///
-  /// See `perform:` above for why no return type is declared.
+  /// See `perform:` above for why the return type is declared `Dynamic`.
   ///
   /// ## Examples
   /// ```beamtalk
   /// 3 perform: #max: withArguments: #(5)   // => 5
   /// ```
-  sealed perform: selector :: Symbol withArguments: args :: List =>
+  sealed perform: selector :: Symbol withArguments: args :: List -> Dynamic =>
     @intrinsic dynamicSendWithArgs
 
   // === Abstract method markers ===
