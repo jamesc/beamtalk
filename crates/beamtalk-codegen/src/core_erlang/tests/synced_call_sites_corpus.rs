@@ -391,3 +391,16 @@ fn error_sent_to_a_class_receiver_is_not_a_gap() {
     let gaps = gaps_of(src);
     assert!(gaps.is_empty(), "{gaps:#?}");
 }
+
+#[test]
+fn a_send_scrutinee_of_a_threaded_match_is_bracketed() {
+    // BT-4146 (nightly fuzzing, 2026-10-25): `t := 0` continued by `+x
+    // match: [...]` parses as `t := ((0 + x) match: [...])` — a `match:`
+    // whose scrutinee is a send that may run user code (the `+` coerces
+    // through a user `plusFromNumber:` when `x` is not statically
+    // numeric). The scrutinee must compile inside a bracket window like
+    // any other send.
+    let src = "Actor subclass: Probe\n  state: n = 0\n\n  run: x =>\n    t := 0\n    t := 0 + x match: [\n      1 -> (t := 11);\n      _ -> (t := 20)\n    ]\n    t\n";
+    let gaps = gaps_of(src);
+    assert!(gaps.is_empty(), "{gaps:#?}");
+}

@@ -180,6 +180,43 @@ fn a_legacy_block_body_ending_in_a_parenthesised_local_assignment_drops_nothing(
     }
 }
 
+/// BT-4147: a `match:` arm that first-binds a local drops nothing. The
+/// `match:` is not a producer for a local nothing binds yet (producers
+/// thread outer-bound locals only), so the arm lowers on the legacy path —
+/// as a statement that binds, like a conditional's arm, not as an
+/// expression that drops the write. Same-variable first-binding, another
+/// variable, and a nested first-binding inside the arm.
+#[test]
+fn a_match_arm_that_first_binds_a_local_drops_nothing() {
+    let check = |src: &str| {
+        let (module, parse_diags) = parse(lex_with_eof(src));
+        assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
+        let analysis = analyse_full(&module, AnalysisContext::default());
+        assert!(
+            !analysis
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == Severity::Error),
+            "{src}: {:?}",
+            analysis.diagnostics
+        );
+        let dropped = dropped(&module).unwrap_or_else(|why| panic!("{src}: {why}"));
+        assert!(dropped.is_empty(), "{src}: drops {dropped:?}");
+    };
+    for body in [
+        "r := x match: [1 -> (q := 11); _ -> (q := 20)]\n    r",
+        "r := x match: [1 -> (v := (q := 5)); _ -> 0]\n    r",
+    ] {
+        for src in sources(body) {
+            check(&src);
+        }
+    }
+    // Same-variable first-binding needs its target unbound: no prelude.
+    check(
+        "Object subclass: FirstBind\n  nested: x y: y =>\n    t := x match: [\n      1 -> (t := 11);\n      _ -> (t := 20)\n    ]\n    t\n",
+    );
+}
+
 beamtalk_core::per_family_tests! {
     list = CONTEXTS,
     families = CONTEXT_FAMILIES,
