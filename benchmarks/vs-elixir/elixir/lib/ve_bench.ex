@@ -155,4 +155,17 @@ defmodule VeBench do
 
   defbench(:struct_of, p, do: p.__struct__)
   defbench(:is_struct_check, p, do: is_struct(p, Point))
+
+  # === 13. FFI calls (BT-4153) ===
+
+  defbench(:apply_phash2, a, do: apply(:erlang, :phash2, [a]))
+  defbench(:direct_phash2, a, do: :erlang.phash2(a))
+  defbench(:apply_integer_to_binary, a, do: apply(:erlang, :integer_to_binary, [a]))
+  defbench(:direct_integer_to_binary, a, do: :erlang.integer_to_binary(a))
+  defbench(:apply_maps_find, d, do: apply(:maps, :find, [:k, d]))
+  defbench(:direct_maps_find, d, do: :maps.find(:k, d))
+  # No direct-call alternate for ffi_ok: vs_bench is compiled after the mix
+  # project, so a static :vs_bench.ffi_ok() warns as undefined. (Verified
+  # equivalent anyway: both cost 2 reds / 0 words.)
+  defbench(:apply_ffi_ok, _, do: apply(:vs_bench, :ffi_ok, []))
 end
