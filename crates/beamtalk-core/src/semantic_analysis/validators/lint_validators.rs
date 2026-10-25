@@ -1397,6 +1397,29 @@ mod tests {
         );
     }
 
+    /// `(true) ifTrue: [42]` — a parenthesized literal condition warns too
+    /// (`as_literal_bool` sees through parens; BT-4161).
+    #[test]
+    fn parenthesized_literal_true_if_true_warns() {
+        let src = "(true) ifTrue: [42]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for (true) ifTrue:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("always `true`"),
+            "Expected 'always `true`' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
     /// A non-literal receiver does NOT trigger the warning.
     #[test]
     fn non_literal_receiver_no_warn() {

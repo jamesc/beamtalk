@@ -640,6 +640,15 @@ fn is_character_typed_receiver_rejects_non_character_shapes() {
         span: s(),
     };
     assert!(!is_character_typed_receiver(&package_qualified));
+
+    // BT-4161: a cast (`!`) always evaluates to `'ok'`, so even a
+    // Character-typed shape under a cast is not Character-typed.
+    let mut factory_cast = character_value_call(Expression::Literal(Literal::Integer(65), s()));
+    let Expression::MessageSend { is_cast, .. } = &mut factory_cast else {
+        panic!("character_value_call must build a MessageSend");
+    };
+    *is_cast = true;
+    assert!(!is_character_typed_receiver(&factory_cast));
 }
 
 /// Builds `Character value: <arg>`.
@@ -805,8 +814,8 @@ fn if_true_if_false_recurses_through_nested_branches() {
 /// BT-4161: shapes that must NOT be transparent. An empty block answers
 /// `nil`; a non-block branch argument cannot be inspected (whatever its
 /// `value` answers is dynamically typed); a cast (`!`) always evaluates to
-/// `'ok'`; and single-branch `ifTrue:`/`ifFalse:` can answer `nil` on the
-/// untaken path, so they stay conservatively unrecognized.
+/// `'ok'`; and single-branch `ifTrue:`/`ifFalse:` answer the receiver
+/// boolean on the untaken path, so they stay conservatively unrecognized.
 #[test]
 fn if_true_if_false_rejects_untyped_shapes() {
     // Empty taken branch answers nil.
@@ -840,7 +849,8 @@ fn if_true_if_false_rejects_untyped_shapes() {
     *is_cast = true;
     assert!(!is_character_typed_receiver(&cast));
 
-    // Single-branch conditionals are out of scope (nil on the untaken path).
+    // Single-branch conditionals are out of scope (boolean self, not a
+    // Character, on the untaken path).
     let if_true_only = Expression::MessageSend {
         receiver: Box::new(bool_ident("true")),
         selector: MessageSelector::Keyword(vec![KeywordPart::new("ifTrue:", s())]),
@@ -935,7 +945,7 @@ fn true_false_if_true_if_false_bodies_match_codegen_recognizer() {
             );
         };
         assert!(
-            matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == *taken_param),
+            matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == taken_param),
             "{class_name}>>ifTrue:ifFalse: must answer `{taken_param} value` \
              (the recognizer routes on the taken branch) — update \
              is_character_typed_receiver to match"

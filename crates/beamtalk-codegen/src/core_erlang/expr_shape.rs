@@ -93,6 +93,8 @@ impl CoreErlangGenerator {
 /// producing `"10"` instead of a genuine 1-byte LF string. Recognizing
 /// these additional shapes closes that gap without requiring general
 /// static type inference in codegen.
+///
+/// Casts (`!`) never match any arm: a cast always evaluates to `'ok'`.
 pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
     match expr.unwrap_parens() {
         Expression::Literal(Literal::Character(_), _) => true,
@@ -100,7 +102,7 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
             receiver,
             selector,
             arguments,
-            is_cast,
+            is_cast: false,
             ..
         } => {
             let is_value_factory_call = arguments.len() == 1
@@ -120,8 +122,7 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
                     MessageSelector::Unary(name) if name == "uppercase" || name == "lowercase"
                 )
                 && is_character_typed_receiver(receiver);
-            let is_character_typed_conditional = !is_cast
-                && arguments.len() == 2
+            let is_character_typed_conditional = arguments.len() == 2
                 && matches!(
                     selector.well_known(),
                     Some(WellKnownSelector::IfTrueIfFalse)
@@ -154,8 +155,10 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
 /// conditionals and factory calls compose). Anything else (an empty block,
 /// which answers `nil`; a non-block argument, whose `value` is dynamically
 /// typed) fails closed to `false`, preserving today's Integer dispatch.
-/// Single-branch `ifTrue:`/`ifFalse:` are deliberately not recognized: they
-/// answer `nil` on the untaken path.
+/// Single-branch `ifTrue:`/`ifFalse:` are deliberately not recognized: on
+/// the untaken path they answer the receiver boolean (`True>>ifFalse:` and
+/// `False>>ifTrue:` answer `self`), so only a constant-taken single-branch
+/// send would ever qualify — that sliver is out of scope for BT-4161.
 fn conditional_result_is_character_typed(
     condition: &Expression,
     true_branch: &Expression,
