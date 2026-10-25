@@ -435,17 +435,17 @@ alloc(U0, Events, Final) ->
 %% runtime takes it (from `run.sh profile`).
 compiles_to("0") -> "letrec loop, last threaded as a loop argument";
 compiles_to("0b") -> "send(N, 'timesRepeat:', [fun]); Integer>>timesRepeat: dispatches ifTrue:ifFalse: per step";
-compiles_to("1a") -> "send(P, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3";
-compiles_to("1b") -> "send(P, x, []), same path as 1a";
+compiles_to("1a") -> "tag-guarded direct VbPoint:dispatch/3 (BT-4069); mismatch falls back to send/3";
+compiles_to("1b") -> "send(P, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (open receiver stays dynamic)";
 compiles_to("1c") -> "send(P, sum, []), same path as 1a";
 compiles_to("2a") -> "send(P, 'withX:', [3]), same path as 1a + maps:put";
 compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoint class process";
 compiles_to("3a") -> "direct call Mod:'class_double:'(nil, 21)";
 compiles_to("3b") -> "whereis_class + class_send: not `class sealed`, so gen_server:call into the class process";
 compiles_to("3c") -> "whereis_class + class_send: gen_server:call into the class process";
-compiles_to("4a") -> "send(O, x, []), same path as 1a";
-compiles_to("4b") -> "send(O, area, []), same path as 1a";
-compiles_to("4c") -> "send(S, area, []), same path as 1a";
+compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (untyped receiver stays dynamic)";
+compiles_to("4b") -> "send(O, area, []), same path as 4a";
+compiles_to("4c") -> "send(S, area, []), same path as 4a (open class stays dynamic)";
 compiles_to("5a") -> "send(S, base, []): VbSub:dispatch/3 misses, extensions lookup, VbBase:dispatch/3";
 compiles_to("5b") -> "send(S, viaSelf, []), then `self base` is a second full send";
 compiles_to("5c") -> "send(S, 'hasField:', [v]) -> beamtalk_reflection:has_field/2";
@@ -461,7 +461,7 @@ compiles_to("7d") -> "as 7a; in the actor `self hasField:` misses the module and
 compiles_to("8a") -> "`Error` class ref built per entry (whereis_class + module_name gen_server:call), class_vars snapshot, try";
 compiles_to("8b") -> "as 8a + `Error signal:` via the Error class process, which logs an error, rewraps, rebuilds a stack";
 compiles_to("9a") -> "class_send(Result, 'ok:') gen_server:call; `value` as a block-or-send case";
-compiles_to("9b") -> "send(R, isOk, []), same path as 1a";
+compiles_to("9b") -> "tag-guarded direct Result:dispatch/3 (BT-4069); mismatch falls back to send/3";
 compiles_to("10a") -> "send(D, 'at:put:', ...) -> Dictionary:dispatch/3 -> maps:put";
 compiles_to("10b") -> "send(D, 'at:', ...) -> Dictionary:dispatch/3 -> maps:get";
 compiles_to("10c") -> "send(L, 'add:', [7]) -> List primitive (++)";
