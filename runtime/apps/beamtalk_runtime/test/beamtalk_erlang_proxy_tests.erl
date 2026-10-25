@@ -1668,10 +1668,12 @@ native_call_badarg_with_fun_arg_is_not_retried_test() ->
 
 is_beamtalk_module_conformance_test() ->
     %% Same table as `test_is_beamtalk_module` in
-    %% crates/beamtalk-codegen/src/core_erlang/util.rs — update both together
-    %% so the Rust/Erlang pair cannot drift silently. Probed through
-    %% coerce_ffi_result/2: a charlist result comes back a binary in stock
-    %% mode and an unchanged list in beamtalk mode.
+    %% crates/beamtalk-codegen/src/core_erlang/util.rs. A rule change applied
+    %% to only one side (impl plus its own test) stays green on both sides
+    %% while codegen and runtime diverge — so update both tables together,
+    %% never one alone. Probed through coerce_ffi_result/2: a charlist result
+    %% comes back a binary in stock mode and an unchanged list in beamtalk
+    %% mode.
     Beamtalk = [
         beamtalk_actor, beamtalk_stream, beamtalk_, 'bt@stdlib@list', 'bt@test@foo', 'bt@'
     ],
@@ -1720,14 +1722,21 @@ coerce_ffi_result_3_equivalence_test() ->
         error,
         {ok, 1},
         {error, x},
+        {ok, "hi"},
+        {error, "hi"},
+        {ok, {ok, 1}},
         {ok, 1, 2},
+        {ok},
         {error},
         {a, b},
         {},
         {1},
         [1, 2, 3],
         "hi",
-        [<<>>, ok]
+        [<<>>, ok],
+        [1 | 2],
+        <<1:1>>,
+        #{a => "hi"}
     ],
     Modes = [{lists, stock}, {beamtalk_stream, beamtalk}, {beamtalk_ets, beamtalk}],
     [
@@ -1738,16 +1747,82 @@ coerce_ffi_result_3_equivalence_test() ->
      || {M, Mode} <- Modes, S <- Shapes
     ].
 
-coerce_ffi_result_3_raw_ok_passthrough_test() ->
-    %% Raw-result beamtalk modules pass even `ok` through under /3 ...
+coerce_ffi_result_3_absolute_test() ->
+    %% Absolute pins for the fast-path identity invariant and the
+    %% mode-divergent shapes (BT-4153 review T1/T2). The equivalence test
+    %% compares /3 against /2, which delegates to /3 — it cannot catch a
+    %% per-mode semantic bug that agrees with itself (e.g. swapped slow-path
+    %% bodies). These assertions pin values, not agreement.
     {module, beamtalk_ets} = code:ensure_loaded(beamtalk_ets),
+    %% Fast shapes are the identity in every module class: stock,
+    %% beamtalk-nonraw and beamtalk-raw must all answer the input unchanged.
+    Fast = [
+        42,
+        -1,
+        4.5,
+        <<>>,
+        <<"bin">>,
+        <<1:1>>,
+        self(),
+        make_ref(),
+        fun() -> ok end,
+        #{},
+        #{a => "hi"},
+        [],
+        foo,
+        nil,
+        true,
+        {ok},
+        {ok, 1, 2},
+        {error},
+        {a, b},
+        {},
+        {1}
+    ],
+    [
+        begin
+            ?assertEqual(S, beamtalk_erlang_proxy:coerce_ffi_result(lists, S, stock)),
+            ?assertEqual(S, beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_stream, S, beamtalk)),
+            ?assertEqual(S, beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_ets, S, beamtalk))
+        end
+     || S <- Fast
+    ],
+    %% Mode-divergent shapes, pinned per mode: a charlist payload converts
+    %% under stock but is preserved under beamtalk-nonraw.
+    StockOkCharlist = beamtalk_erlang_proxy:coerce_ffi_result(lists, {ok, "hi"}, stock),
+    ?assertEqual(<<"hi">>, maps:get('okValue', StockOkCharlist)),
+    BtOkCharlist = beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_stream, {ok, "hi"}, beamtalk),
+    ?assertEqual("hi", maps:get('okValue', BtOkCharlist)),
+    %% Raw-result modules pass even ok/error-tagged results through ...
     ?assertEqual(ok, beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_ets, ok, beamtalk)),
     ?assertEqual(
         {ok, 1}, beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_ets, {ok, 1}, beamtalk)
     ),
-    %% ... while non-raw beamtalk modules still wrap.
+    ?assertEqual(
+        {error, "hi"},
+        beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_ets, {error, "hi"}, beamtalk)
+    ),
+    %% ... while non-raw beamtalk modules still wrap `ok`, and stock still
+    %% wraps the bare `error` atom that beamtalk passes through (BT-3660).
     Wrapped = beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_stream, ok, beamtalk),
-    ?assertEqual('Result', maps:get('$beamtalk_class', Wrapped)).
+    ?assertEqual('Result', maps:get('$beamtalk_class', Wrapped)),
+    StockErr = beamtalk_erlang_proxy:coerce_ffi_result(maps, error, stock),
+    ?assertEqual('Result', maps:get('$beamtalk_class', StockErr)),
+    ?assertEqual(error, beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_stream, error, beamtalk)),
+    %% One level of recursion only: the inner tuple is never re-wrapped.
+    StockNested = beamtalk_erlang_proxy:coerce_ffi_result(lists, {ok, {ok, 1}}, stock),
+    ?assertEqual({ok, 1}, maps:get('okValue', StockNested)).
+
+direct_call_4_rejects_bad_mode_test() ->
+    %% A mode typo fails fast with function_clause on the entry point — never
+    %% wrapped and misattributed to the callee (BT-4153 review M1).
+    ?assertError(
+        function_clause, beamtalk_erlang_proxy:direct_call(erlang, phash2, [5], 'Stock')
+    ),
+    ?assertError(
+        function_clause,
+        beamtalk_erlang_proxy:native_call(lists, reverse, [[1]], {'X', 'y'}, 'Stock')
+    ).
 
 direct_call_4_equivalence_test() ->
     %% /4 with the runtime-derived mode behaves exactly like /3.

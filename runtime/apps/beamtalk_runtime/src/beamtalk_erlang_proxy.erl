@@ -75,6 +75,9 @@ See: ADR 0028 §1 (Module Proxy Pattern)
 %%% statically-known call sites (`direct_call/4`, `native_call/5`) and the
 %%% per-call module-name scan is skipped. The dynamic paths (`direct_call/3`,
 %%% `native_call/4`, `validate_and_apply/4`) derive it here per call.
+%%% Renaming a module across the stock/beamtalk boundary requires
+%%% recompiling its callers, as with any rename — a stale caller beam keeps
+%%% passing the mode the old name implied.
 -type coercion_mode() :: stock | beamtalk.
 
 -doc "Create a new ErlangModule proxy for the given module atom.".
@@ -216,16 +219,21 @@ function of the statically-known `Module` — is supplied by the caller, so the
 per-call module-name scan (`is_beamtalk_module/1`) is skipped. Codegen emits
 this for every inline `(Erlang module)` send (BT-4153); `direct_call/3`
 derives the mode at runtime for dynamic callers.
+
+Callers must pass the mode for `Module` — a mismatch silently applies the
+wrong coercion rule. Anything but `stock`/`beamtalk` fails fast with
+`function_clause` here, before the `try`, so a typo is never misattributed
+to the callee.
 """.
 -spec direct_call(atom(), atom(), list(), coercion_mode()) -> term().
-direct_call(Module, FunName, Args, Mode) ->
+direct_call(Module, FunName, Args, Mode) when Mode =:= stock; Mode =:= beamtalk ->
     apply_with_coercion(Module, FunName, Args, FunName, none, Mode).
 
 -doc """
 Entry point for `native:` Object delegation (ADR 0101 Part 1).
 
 `native:` Object methods lower to
-`beamtalk_erlang_proxy:native_call(Mod, Fn, [Self | Args], {Class, Sel})`.
+`beamtalk_erlang_proxy:native_call(Mod, Fn, [Self | Args], {Class, Sel}, Mode)`.
 Like `direct_call/3`/`validate_and_apply/4` it does no export pre-check and
 routes through the shared `apply_with_coercion/6`, so it gets the **same**
 `error:*` → `#beamtalk_error{}` wrapping and ADR 0076 ok/error → `Result`
@@ -258,9 +266,16 @@ Identical to `native_call/4` except `Mode` — `stock` or `beamtalk`, a pure
 function of the statically-known `Module` — is supplied by the caller, so the
 per-call module-name scan (`is_beamtalk_module/1`) is skipped. Codegen emits
 this for every `native:` delegation (BT-4153).
+
+Callers must pass the mode for `Module` — a mismatch silently applies the
+wrong coercion rule. Anything but `stock`/`beamtalk` fails fast with
+`function_clause` here, before the `try`, so a typo is never misattributed
+to the callee.
 """.
 -spec native_call(atom(), atom(), list(), {atom(), atom()}, coercion_mode()) -> term().
-native_call(Module, FunName, Args, {Class, Selector}, Mode) ->
+native_call(Module, FunName, Args, {Class, Selector}, Mode) when
+    Mode =:= stock; Mode =:= beamtalk
+->
     apply_with_coercion(Module, FunName, Args, FunName, {Class, Selector}, Mode).
 
 -doc """
@@ -982,17 +997,24 @@ Identical to `coerce_ffi_result/2` except `Mode` selects the rule, so the
 module-name scan is skipped.
 
 Fast path (BT-4153): results whose coercion is the identity in *every* mode —
-scalars, binaries, pids, ports, references, funs, maps, `[]`, atoms other
-than `ok`/`error`, and tuples that are not `{ok, _}`/`{error, _}` — pass
-through with no module check and no allocation. Only non-empty lists,
+scalars, binaries and bitstrings, pids, ports, references, funs, maps, `[]`,
+atoms other than `ok`/`error`, and tuples that are not `{ok, _}`/`{error, _}`
+— pass through with no module check and no allocation. Only non-empty lists,
 ok/error-tagged results and the bare `ok`/`error` atoms reach the slow path,
 which keeps the exact `coerce_ffi_result/2` semantics per mode.
+
+Coupled to the coercion helpers below staying shallow: `coerce_charlist_result/1`
+inspects only top-level lists and `coerce_result/1` recurses at most one level
+into `{ok, _}`/`{error, _}` payloads. A coercion change that recurses into
+tuples/maps, or a new mode-divergent bare-atom rule, must update these clauses
+(and the absolute tests) with it — the fast path would otherwise bypass it.
 """.
 -spec coerce_ffi_result(atom(), term(), coercion_mode()) -> term().
 coerce_ffi_result(_Module, Result, _Mode) when
     is_integer(Result);
     is_float(Result);
-    is_binary(Result);
+    %% is_bitstring subsumes is_binary: every binary is a bitstring.
+    is_bitstring(Result);
     is_pid(Result);
     is_port(Result);
     is_reference(Result);

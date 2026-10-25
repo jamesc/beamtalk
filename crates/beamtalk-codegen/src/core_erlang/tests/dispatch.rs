@@ -1374,7 +1374,7 @@ fn test_bt2685_parenthesized_erlang_ffi_error_routes_to_proxy() {
 
 #[test]
 fn test_erlang_interop_direct_call_zero_arg() {
-    // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])`
+    // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')`
     // Routes through proxy for consistent validation/coercion
     let mut generator = CoreErlangGenerator::new("test");
 
@@ -1548,8 +1548,13 @@ fn test_erlang_interop_direct_call_parenthesized_receiver() {
 #[test]
 fn test_erlang_interop_direct_call_coercion_mode() {
     // BT-4153: the emitted direct_call/4 carries the precomputed coercion
-    // mode — 'stock' for stock modules, 'beamtalk' for beamtalk_* modules.
-    for (module, mode) in [("lists", "stock"), ("beamtalk_stream", "beamtalk")] {
+    // mode — 'stock' for stock modules, 'beamtalk' for beamtalk_* and bt@*
+    // modules.
+    for (module, mode) in [
+        ("lists", "stock"),
+        ("beamtalk_stream", "beamtalk"),
+        ("bt@stdlib@list", "beamtalk"),
+    ] {
         let mut generator = CoreErlangGenerator::new("test");
         let inner_receiver = Expression::MessageSend {
             receiver: Box::new(Expression::ClassReference {

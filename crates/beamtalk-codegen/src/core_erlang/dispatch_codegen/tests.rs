@@ -192,6 +192,11 @@ fn block_scoped_file_open_is_lowered_only_for_unqualified_file() {
              caller. Got: {unqualified}"
         );
         assert!(
+            unqualified.contains("}, 'beamtalk')"),
+            "File open:do: must carry the precomputed 'beamtalk' mode (BT-4153). \
+             Got: {unqualified}"
+        );
+        assert!(
             !unqualified.contains("class_send"),
             "the block must not reach the class gen_server. Got: {unqualified}"
         );

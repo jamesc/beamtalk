@@ -641,7 +641,7 @@ entries(TableName, Selector) ->
 %%% ============================================================================
 %%% FFI Shims
 %%%
-%%% The (Erlang beamtalk_ets) FFI uses beamtalk_erlang_proxy:direct_call/3,
+%%% The (Erlang beamtalk_ets) FFI uses beamtalk_erlang_proxy:direct_call/4,
 %%% which derives the Erlang function name from the first keyword of the
 %%% Beamtalk selector. These shims provide the colon-free entry points:
 %%%   `(Erlang beamtalk_ets) new: name type: t` → `new(name, t)` → `'new:type:'`

@@ -1294,7 +1294,9 @@ impl CoreErlangGenerator {
         // Mirrors `native_delegate_body_doc`: the Erlang shim name is the first
         // keyword without its colon, and the `{Class, Selector}` context makes a
         // wrapped error read `File>>open:mode:do:` rather than a bare MFA.
-        // `beamtalk_file` is Beamtalk-owned, so the mode is 'beamtalk' (BT-4153).
+        // The mode is computed, not hardcoded, so a rename of the shim or a
+        // prefix-rule change cannot diverge the two (BT-4153 review).
+        let mode = super::util::ffi_coercion_mode("beamtalk_file");
         Ok(Some(docvec![
             "call 'beamtalk_erlang_proxy':'native_call'(",
             leaf::atom("beamtalk_file"),
@@ -1306,7 +1308,9 @@ impl CoreErlangGenerator {
             leaf::atom("File"),
             ", ",
             leaf::atom(selector_atom),
-            "}, 'beamtalk')"
+            "}, ",
+            leaf::atom(mode),
+            ")"
         ]))
     }
 

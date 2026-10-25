@@ -1195,7 +1195,7 @@ is_drive_root(_) ->
 %%% ============================================================================
 %%% FFI Shims
 %%%
-%%% The (Erlang beamtalk_file) FFI uses beamtalk_erlang_proxy:direct_call/3,
+%%% The (Erlang beamtalk_file) FFI uses beamtalk_erlang_proxy:direct_call/4,
 %%% which derives the Erlang function name from the first keyword of the
 %%% Beamtalk selector (stripping the trailing colon). These shims provide
 %%% the colon-free entry points that the proxy calls:

@@ -1785,7 +1785,9 @@ pub fn to_module_name(class_name: &str) -> String {
 /// Keep in sync with the Erlang side: `test_is_beamtalk_module` below and
 /// `is_beamtalk_module_conformance_test` in
 /// `runtime/apps/beamtalk_runtime/test/beamtalk_erlang_proxy_tests.erl`
-/// assert the same table — update both together.
+/// assert the same table. A rule change applied to only one side (impl plus
+/// its own test) stays green on both sides while codegen and runtime
+/// diverge — so update both tables together, never one alone.
 pub(super) fn is_beamtalk_module(module_name: &str) -> bool {
     module_name.starts_with("beamtalk_") || module_name.starts_with("bt@")
 }
