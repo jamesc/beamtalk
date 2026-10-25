@@ -427,15 +427,23 @@ fn parse_block_with_params() {
 #[test]
 fn parse_block_with_typed_param_simple() {
     // `[:b :: Dictionary | b isNil]` — the `:: Type` annotation is
-    // consumed (and currently discarded). Leaving `::` unconsumed would
-    // produce cascading errors that also corrupt the surrounding method
-    // body and cause a spurious "Unused variable" warning for the
-    // assignment receiving the block.
+    // consumed and stored on the parameter (BT-4108) so `beamtalk fmt`
+    // round-trips it. Consuming `::` also avoids cascading errors that
+    // corrupt the surrounding method body and cause a spurious "Unused
+    // variable" warning for the assignment receiving the block.
     let module = parse_ok("[:b :: Dictionary | b isNil]");
     match &module.expressions[0].expression {
         Expression::Block(block) => {
             assert_eq!(block.parameters.len(), 1);
             assert_eq!(block.parameters[0].name.as_str(), "b");
+            assert!(
+                matches!(
+                    &block.parameters[0].type_annotation,
+                    Some(crate::ast::TypeAnnotation::Simple(id)) if id.name == "Dictionary"
+                ),
+                "expected `:: Dictionary` annotation, got: {:?}",
+                block.parameters[0].type_annotation
+            );
             assert_eq!(block.body.len(), 1);
         }
         _ => panic!("Expected block"),
@@ -451,6 +459,16 @@ fn parse_block_with_typed_params_multiple() {
             assert_eq!(block.parameters.len(), 2);
             assert_eq!(block.parameters[0].name.as_str(), "x");
             assert_eq!(block.parameters[1].name.as_str(), "y");
+            for param in &block.parameters {
+                assert!(
+                    matches!(
+                        &param.type_annotation,
+                        Some(crate::ast::TypeAnnotation::Simple(id)) if id.name == "Integer"
+                    ),
+                    "expected `:: Integer` annotation, got: {:?}",
+                    param.type_annotation
+                );
+            }
             assert_eq!(block.body.len(), 1);
         }
         _ => panic!("Expected block"),
@@ -466,6 +484,38 @@ fn parse_block_with_typed_param_generic() {
         Expression::Block(block) => {
             assert_eq!(block.parameters.len(), 1);
             assert_eq!(block.parameters[0].name.as_str(), "xs");
+            assert!(
+                matches!(
+                    &block.parameters[0].type_annotation,
+                    Some(crate::ast::TypeAnnotation::Generic { base, parameters, .. })
+                        if base.name == "List" && parameters.len() == 1
+                ),
+                "expected `:: List(Integer)` annotation, got: {:?}",
+                block.parameters[0].type_annotation
+            );
+            assert_eq!(block.body.len(), 1);
+        }
+        _ => panic!("Expected block"),
+    }
+}
+
+#[test]
+fn parse_block_with_typed_param_union() {
+    // `:x :: (Integer | String)` — grouping parens let a union through
+    // `parse_single_type_annotation` (BT-4108).
+    let module = parse_ok("[:x :: (Integer | String) | x]");
+    match &module.expressions[0].expression {
+        Expression::Block(block) => {
+            assert_eq!(block.parameters.len(), 1);
+            assert_eq!(block.parameters[0].name.as_str(), "x");
+            assert!(
+                matches!(
+                    &block.parameters[0].type_annotation,
+                    Some(crate::ast::TypeAnnotation::Union { types, .. }) if types.len() == 2
+                ),
+                "expected `:: (Integer | String)` annotation, got: {:?}",
+                block.parameters[0].type_annotation
+            );
             assert_eq!(block.body.len(), 1);
         }
         _ => panic!("Expected block"),
