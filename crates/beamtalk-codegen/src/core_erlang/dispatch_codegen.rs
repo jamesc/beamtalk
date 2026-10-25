@@ -178,9 +178,10 @@ pub(in crate::core_erlang) const NON_TAGGED_MAP_CLASSES: &[&str] = &[
 pub(in crate::core_erlang) struct TypedSealedTarget {
     /// The sealed class name: the `'$beamtalk_class'` tag the guard matches.
     pub(in crate::core_erlang) class_name: String,
-    /// The class's compiled module, resolved like a qualified class
-    /// reference (registry under the referenced package, else the
-    /// deterministic `bt@{package}@{snake}` composition).
+    /// The class's compiled module: this unit's own registry entry when
+    /// present (the module the unit actually emits — BT-4152), else the
+    /// qualified derivation (registry under the referenced package, else
+    /// the deterministic `bt@{package}@{snake}` composition).
     pub(in crate::core_erlang) module_name: String,
 }
 
@@ -716,7 +717,21 @@ impl CoreErlangGenerator {
         if hierarchy.has_cross_file_parent(class_name) {
             return None;
         }
-        let module_name = self.compiled_module_name_qualified(class_name, info.package.as_deref());
+        // BT-4152: resolve through this unit's own registry entry first —
+        // it names the module the unit actually emits. `beamtalk test`
+        // emits fixture/test modules unqualified (`bt@<stem>`, keyed under
+        // this unit's own `PackageId`) while stamping the file's own class
+        // with `package = Some(current_package)`; re-deriving from
+        // `info.package` alone would target the never-emitted
+        // `bt@<package>@<class>`. The qualified derivation stays as the
+        // fallback for a packaged class with no index entry.
+        let module_name = self
+            .class_module_registry()
+            .module_for_class(&self.own_package_id(), class_name)
+            .map_or_else(
+                || self.compiled_module_name_qualified(class_name, info.package.as_deref()),
+                |module| module.as_str().to_string(),
+            );
         Some(TypedSealedTarget {
             class_name: class_name.to_string(),
             module_name,
