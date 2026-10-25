@@ -823,9 +823,10 @@ impl CoreErlangGenerator {
     /// arm's chunks (see [`plan_binary_split`]) become nested matches over
     /// `('all',1,'binary')` rest tails — exactly what `erlc` emits for the
     /// same Erlang. Non-trivial size expressions are evaluated into fresh
-    /// variables before their chunk's match. The arm guard applies at the
-    /// innermost level (all variables bound); every level falls through to
-    /// the later arms.
+    /// variables under `try`/`catch` before their chunk's match, so a
+    /// raising size fails the arm instead of crashing (review finding 1).
+    /// The arm guard applies at the innermost level (all variables bound);
+    /// every level falls through to the later arms.
     fn generate_segmented_binary_arm(
         &mut self,
         match_var: &str,
@@ -947,7 +948,8 @@ impl CoreErlangGenerator {
 
     /// Assembles [`SegmentedLevel`]s inside-out: the guard applies
     /// innermost; every level falls through to the later arms; each level's
-    /// hoists evaluate before its own match.
+    /// hoists evaluate under `try`/`catch` before its own match (see
+    /// [`Self::wrap_hoists_in_try`]).
     fn assemble_segmented_levels(
         &mut self,
         levels: Vec<SegmentedLevel>,
@@ -973,9 +975,7 @@ impl CoreErlangGenerator {
             rest_doc.clone(),
             " end"
         ];
-        for (var, value) in last.hoists.into_iter().rev() {
-            next = docvec!["let ", leaf::var(var), " = ", value, " in ", next];
-        }
+        next = self.wrap_hoists_in_try(last.hoists, next, rest_doc);
         for level in rev {
             let fallthrough_var = self.fresh_temp_var("NoMatch");
             next = docvec![
@@ -991,9 +991,50 @@ impl CoreErlangGenerator {
                 rest_doc.clone(),
                 " end"
             ];
-            for (var, value) in level.hoists.into_iter().rev() {
-                next = docvec!["let ", leaf::var(var), " = ", value, " in ", next];
-            }
+            next = self.wrap_hoists_in_try(level.hoists, next, rest_doc);
+        }
+        next
+    }
+
+    /// Wraps `next` in one `try`/`catch` per hoist (review finding 1).
+    ///
+    /// A raising size expression must fail the arm — not crash the match —
+    /// so each hoist evaluates under `try`, whose catch answers the later
+    /// arms. Observably equivalent to Erlang's `try` → `'bad_size'` (the
+    /// whole-scrutinee pre-match `erlc` adds is only an optimization: with
+    /// catch-to-rest, a non-binary scrutinee falls through identically).
+    fn wrap_hoists_in_try(
+        &mut self,
+        hoists: Vec<(String, Document<'static>)>,
+        next: Document<'static>,
+        rest_doc: &Document<'static>,
+    ) -> Document<'static> {
+        let mut next = next;
+        for (var, value) in hoists.into_iter().rev() {
+            let (t, e, s) = (
+                self.fresh_temp_var("Catch"),
+                self.fresh_temp_var("Catch"),
+                self.fresh_temp_var("Catch"),
+            );
+            // Note: concrete Core `try` takes no `end` terminator (unlike
+            // `case`/`let` nesting might suggest — see `erlc +to_core`
+            // output or `number_coercion_try_catch`).
+            next = docvec![
+                "try ",
+                value,
+                " of <",
+                leaf::var(var),
+                "> -> ",
+                next,
+                " catch <",
+                leaf::var(t),
+                ", ",
+                leaf::var(e),
+                ", ",
+                leaf::var(s),
+                "> -> ",
+                rest_doc.clone()
+            ];
         }
         next
     }
@@ -1741,10 +1782,7 @@ pub(in crate::core_erlang) fn plan_binary_split(
                 chunk_start = i;
                 bound_in_chunk.clear();
             }
-            if !matches!(
-                size.as_ref(),
-                Expression::Literal(..) | Expression::Identifier(..)
-            ) {
+            if !is_trivial_size(size) {
                 hoists.push(i);
             }
         }
@@ -1766,6 +1804,17 @@ pub(in crate::core_erlang) fn plan_binary_split(
 fn binary_needs_segmented(segments: &[BinarySegment]) -> bool {
     let plan = plan_binary_split(segments);
     plan.len() > 1 || plan.iter().any(|chunk| !chunk.hoists.is_empty())
+}
+
+/// True for sizes that emit inline: literals and variables, with any
+/// parentheses unwrapped. Only genuine expressions hoist, so `<<a:(8)>>`
+/// stays a one-pattern match (review finding 6).
+fn is_trivial_size(size: &Expression) -> bool {
+    match size {
+        Expression::Literal(..) | Expression::Identifier(..) => true,
+        Expression::Parenthesized { expression, .. } => is_trivial_size(expression),
+        _ => false,
+    }
 }
 
 /// Collects every variable named in a segment size expression.

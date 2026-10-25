@@ -99,7 +99,9 @@ impl VariableContext {
     /// - `fresh_var("temp")` → `"_temp1"`, `"_temp2"`, etc.
     /// - `fresh_var("my_var")` → `"_myvar3"`, `"_myvar4"`, etc.
     ///
-    /// The leading underscore prevents conflicts with user-defined identifiers.
+    /// Note: temps share a namespace with user `_`-prefixed identifiers,
+    /// which map into Core unchanged — a user variable spelling the counter
+    /// value would alias the temp (BT-4140 tracks making this impossible).
     pub(super) fn fresh_var(&mut self, base: &str) -> String {
         self.var_counter += 1;
         let counter = self.var_counter;

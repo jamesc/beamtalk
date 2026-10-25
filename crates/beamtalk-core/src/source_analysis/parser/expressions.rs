@@ -45,6 +45,43 @@ pub(super) fn parse_integer(s: &str) -> Result<i64, String> {
     }
 }
 
+/// Extracts an integer literal and its span, unwrapping parentheses.
+///
+/// Used for binary segment sizes, which may be parenthesized (BT-4097).
+fn literal_int_with_span(expr: &Expression) -> Option<(i64, Span)> {
+    match expr {
+        Expression::Literal(Literal::Integer(n), span) => Some((*n, *span)),
+        Expression::Parenthesized { expression, .. } => literal_int_with_span(expression),
+        _ => None,
+    }
+}
+
+/// Whether integer `value` fits in `size_bits` bits (review finding 3).
+///
+/// `size_bits` is non-negative (negative sizes are rejected separately).
+/// Sizes of 64+ hold any `i64` magnitude; unsigned still rejects negatives.
+fn binary_literal_fits(value: i64, size_bits: i64, signed: bool) -> bool {
+    if size_bits < 0 {
+        return false;
+    }
+    if size_bits == 0 {
+        return value == 0;
+    }
+    if !signed && value < 0 {
+        return false;
+    }
+    if size_bits >= 64 {
+        return true;
+    }
+    // size_bits is now in 1..=63: shifts cannot overflow.
+    if signed {
+        let half = 1i64 << (size_bits - 1);
+        (-half..half).contains(&value)
+    } else {
+        (0..(1i64 << size_bits)).contains(&value)
+    }
+}
+
 impl Parser {
     // ========================================================================
     // Expression Parsing
@@ -2311,6 +2348,11 @@ impl Parser {
         // Optional type/modifiers: `/type[-modifier]*`
         let (segment_type, signedness, endianness) = self.parse_binary_segment_specifiers();
 
+        // Literal shape checks (review finding 3): mirror `erlc` — error
+        // where it errors, warn where it warns — so mistyped literals are
+        // diagnostics, never silently dead arms or invalid Core Erlang.
+        self.check_binary_literal_shapes(&value, size.as_deref(), segment_type, signedness);
+
         let end = self.tokens[self.current.saturating_sub(1)].span();
         BinarySegment {
             value,
@@ -2320,6 +2362,91 @@ impl Parser {
             endianness,
             unit: None,
             span: start.merge(end),
+        }
+    }
+
+    /// Validates literal sizes and values against the segment type.
+    ///
+    /// Mirrors `erlc` (review finding 3): negative literal sizes and sizes
+    /// on `utf8` segments are errors; values that cannot fit, integer
+    /// literals with `binary`/`bitstring` type, and bad float bit sizes are
+    /// warnings. Variable sizes are unchecked (validated at runtime).
+    fn check_binary_literal_shapes(
+        &mut self,
+        value: &Pattern,
+        size: Option<&Expression>,
+        segment_type: Option<BinarySegmentType>,
+        signedness: Option<BinarySignedness>,
+    ) {
+        let size_lit = size.and_then(literal_int_with_span);
+        if let Some((n, span)) = size_lit {
+            if n < 0 {
+                self.diagnostics.push(Diagnostic::error(
+                    format!("binary segment sizes must be non-negative, got {n}"),
+                    span,
+                ));
+                return;
+            }
+        }
+        let seg_type = segment_type.unwrap_or(BinarySegmentType::Integer);
+        if seg_type == BinarySegmentType::Utf8 && size.is_some() {
+            let span = size_lit.map_or_else(|| value.span(), |(_, s)| s);
+            self.diagnostics.push(Diagnostic::error(
+                "size must not be given for segments of type utf8",
+                span,
+            ));
+            return;
+        }
+        if seg_type == BinarySegmentType::Float {
+            if let Some((n, span)) = size_lit {
+                if n != 16 && n != 32 && n != 64 {
+                    self.diagnostics.push(Diagnostic::warning(
+                        format!(
+                            "bad float bit size: float segments must be 16, 32, or 64 bits, got {n}"
+                        ),
+                        span,
+                    ));
+                }
+            }
+            return;
+        }
+        let Pattern::Literal(Literal::Integer(v), value_span) = value else {
+            return;
+        };
+        match seg_type {
+            BinarySegmentType::Binary | BinarySegmentType::Bitstring => {
+                let name = if seg_type == BinarySegmentType::Binary {
+                    "binary"
+                } else {
+                    "bitstring"
+                };
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "this arm can never match because '{v}' is not of the expected type '{name}'"
+                    ),
+                    *value_span,
+                ));
+            }
+            BinarySegmentType::Integer => {
+                // Default integer size is 8 bits (same as codegen).
+                let size_bits = size_lit.map_or(8, |(n, _)| n);
+                let signed = signedness == Some(BinarySignedness::Signed);
+                if !binary_literal_fits(*v, size_bits, signed) {
+                    let message = if !signed && *v < 0 {
+                        format!(
+                            "this arm can never match because the negative value {v} will never match the value of an 'unsigned' binary segment"
+                        )
+                    } else {
+                        let sign = if signed { "signed" } else { "unsigned" };
+                        format!(
+                            "this arm can never match because the value {v} will not fit in an '{sign}' binary segment of size {size_bits}"
+                        )
+                    };
+                    self.diagnostics
+                        .push(Diagnostic::warning(message, *value_span));
+                }
+            }
+            BinarySegmentType::Float | BinarySegmentType::Utf8 => {}
         }
     }
 
@@ -2333,10 +2460,20 @@ impl Parser {
             self.error("Expected integer literal in binary segment");
             return (Pattern::Wildcard(span), None);
         };
-        // `raw` holds non-negative digits only (a leading `-` is a separate
-        // token), so a successfully parsed value always negates safely.
+        // The lexer emits signed `Integer("-…")` tokens when `-` directly
+        // precedes digits, so `raw` may itself be negative (e.g. the second
+        // `-` in `<<- -5:8>>` double-negates). Negation must not overflow:
+        // `- -9223372036854775808` exceeds `i64::MAX` (review finding 2).
         let value = match parse_integer(&raw) {
-            Ok(val) => Pattern::Literal(Literal::Integer(if negated { -val } else { val }), span),
+            Ok(val) if !negated => Pattern::Literal(Literal::Integer(val), span),
+            Ok(val) => {
+                if let Some(neg) = val.checked_neg() {
+                    Pattern::Literal(Literal::Integer(neg), span)
+                } else {
+                    self.error("integer literal out of range in binary segment");
+                    Pattern::Wildcard(span)
+                }
+            }
             Err(e) => {
                 self.diagnostics.push(Diagnostic::error(e, span));
                 Pattern::Wildcard(span)

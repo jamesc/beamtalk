@@ -2079,6 +2079,246 @@ fn test_segmented_binary_arm_splits() {
 }
 
 #[test]
+fn test_segmented_binary_arm_hoists_size_expression_under_try() {
+    // Review finding 1: `<<a:(4 - q), rest/binary>>` evaluates the size
+    // under `try`/`catch` (catch answers the later arms), so a raising
+    // size fails the arm instead of crashing the match.
+    use beamtalk_core::ast::MessageSelector;
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.bind_var("bin", "Bin");
+    generator.bind_var("q", "Q");
+    let pattern = Pattern::Binary {
+        segments: vec![
+            BinarySegment {
+                value: Pattern::Variable(Identifier::new("a", Span::new(0, 1))),
+                size: Some(Box::new(Expression::Parenthesized {
+                    expression: Box::new(Expression::MessageSend {
+                        receiver: Box::new(Expression::Literal(
+                            Literal::Integer(4),
+                            Span::new(0, 1),
+                        )),
+                        selector: MessageSelector::Binary("-".into()),
+                        arguments: vec![Expression::Identifier(Identifier::new(
+                            "q",
+                            Span::new(0, 1),
+                        ))],
+                        span: Span::new(0, 1),
+                        is_cast: false,
+                    }),
+                    span: Span::new(0, 1),
+                })),
+                segment_type: Some(BinarySegmentType::Integer),
+                signedness: None,
+                endianness: None,
+                unit: None,
+                span: Span::new(0, 1),
+            },
+            BinarySegment {
+                value: Pattern::Variable(Identifier::new("rest", Span::new(0, 1))),
+                size: None,
+                segment_type: Some(BinarySegmentType::Binary),
+                signedness: None,
+                endianness: None,
+                unit: None,
+                span: Span::new(0, 1),
+            },
+        ],
+        span: Span::new(0, 1),
+    };
+    let arms = vec![
+        MatchArm::new(
+            pattern,
+            Expression::Identifier(Identifier::new("a", Span::new(0, 1))),
+            Span::new(0, 1),
+        ),
+        MatchArm::new(
+            Pattern::Wildcard(Span::new(0, 1)),
+            Expression::Literal(Literal::Integer(0), Span::new(0, 1)),
+            Span::new(0, 1),
+        ),
+    ];
+    let scrutinee = Expression::Identifier(Identifier::new("bin", Span::new(0, 3)));
+    let doc = generator
+        .generate_match_with(&scrutinee, &arms, None)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("try ") && output.contains("catch <"),
+        "Expected the hoisted size under try/catch, got: {output}"
+    );
+    assert!(
+        !output.contains("let _Size"),
+        "Hoists must not use bare lets (a raise would crash), got: {output}"
+    );
+}
+
+#[test]
+fn test_trivial_parenthesized_size_stays_inline() {
+    // Review finding 6: `<<a:(8), rest/binary>>` emits one native case —
+    // no hoist, no chain routing, no split tail.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.bind_var("bin", "Bin");
+    let pattern = Pattern::Binary {
+        segments: vec![
+            BinarySegment {
+                value: Pattern::Variable(Identifier::new("a", Span::new(0, 1))),
+                size: Some(Box::new(Expression::Parenthesized {
+                    expression: Box::new(Expression::Literal(Literal::Integer(8), Span::new(0, 1))),
+                    span: Span::new(0, 1),
+                })),
+                segment_type: Some(BinarySegmentType::Integer),
+                signedness: None,
+                endianness: None,
+                unit: None,
+                span: Span::new(0, 1),
+            },
+            BinarySegment {
+                value: Pattern::Variable(Identifier::new("rest", Span::new(0, 1))),
+                size: None,
+                segment_type: Some(BinarySegmentType::Binary),
+                signedness: None,
+                endianness: None,
+                unit: None,
+                span: Span::new(0, 1),
+            },
+        ],
+        span: Span::new(0, 1),
+    };
+    let arms = vec![
+        MatchArm::new(
+            pattern,
+            Expression::Identifier(Identifier::new("a", Span::new(0, 1))),
+            Span::new(0, 1),
+        ),
+        MatchArm::new(
+            Pattern::Wildcard(Span::new(0, 1)),
+            Expression::Literal(Literal::Integer(0), Span::new(0, 1)),
+            Span::new(0, 1),
+        ),
+    ];
+    let scrutinee = Expression::Identifier(Identifier::new("bin", Span::new(0, 3)));
+    let doc = generator
+        .generate_match_with(&scrutinee, &arms, None)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        !output.contains("_Size"),
+        "Trivial parenthesized sizes must not hoist, got: {output}"
+    );
+    assert_eq!(
+        output.matches("case ").count(),
+        1,
+        "Expected one native case (no chain routing), got: {output}"
+    );
+}
+
+#[test]
+fn test_binary_pattern_forward_reference_is_clean_error() {
+    // Review finding 8: `<<payload:n/binary, n:8>>` names `n` before it is
+    // bound — a clean error, never invalid Core Erlang.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.bind_var("bin", "Bin");
+    let pattern = Pattern::Binary {
+        segments: vec![
+            BinarySegment {
+                value: Pattern::Variable(Identifier::new("payload", Span::new(0, 7))),
+                size: Some(Box::new(Expression::Identifier(Identifier::new(
+                    "n",
+                    Span::new(8, 9),
+                )))),
+                segment_type: Some(BinarySegmentType::Binary),
+                signedness: None,
+                endianness: None,
+                unit: None,
+                span: Span::new(0, 9),
+            },
+            BinarySegment {
+                value: Pattern::Variable(Identifier::new("n", Span::new(11, 12))),
+                size: Some(Box::new(Expression::Literal(
+                    Literal::Integer(8),
+                    Span::new(13, 14),
+                ))),
+                segment_type: Some(BinarySegmentType::Integer),
+                signedness: None,
+                endianness: None,
+                unit: None,
+                span: Span::new(11, 14),
+            },
+        ],
+        span: Span::new(0, 14),
+    };
+    let arms = vec![MatchArm::new(
+        pattern,
+        Expression::Identifier(Identifier::new("payload", Span::new(0, 7))),
+        Span::new(0, 14),
+    )];
+    let scrutinee = Expression::Identifier(Identifier::new("bin", Span::new(0, 3)));
+    let err = generator
+        .generate_match_with(&scrutinee, &arms, None)
+        .expect_err("forward size reference must fail codegen");
+    assert!(
+        err.to_string().contains('n'),
+        "Error should name the unbound variable, got: {err}"
+    );
+}
+
+#[test]
+fn test_nested_split_requiring_binary_is_clean_error() {
+    // Review finding 8: a split-needing binary nested in a tuple is a clean
+    // error directing the user to match in two steps.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.bind_var("pair", "Pair");
+    let pattern = Pattern::Tuple {
+        elements: vec![
+            Pattern::Literal(Literal::Symbol("ok".into()), Span::new(1, 4)),
+            Pattern::Binary {
+                segments: vec![
+                    BinarySegment {
+                        value: Pattern::Variable(Identifier::new("n", Span::new(0, 1))),
+                        size: Some(Box::new(Expression::Literal(
+                            Literal::Integer(8),
+                            Span::new(2, 3),
+                        ))),
+                        segment_type: Some(BinarySegmentType::Integer),
+                        signedness: None,
+                        endianness: None,
+                        unit: None,
+                        span: Span::new(0, 3),
+                    },
+                    BinarySegment {
+                        value: Pattern::Variable(Identifier::new("p", Span::new(5, 6))),
+                        size: Some(Box::new(Expression::Identifier(Identifier::new(
+                            "n",
+                            Span::new(7, 8),
+                        )))),
+                        segment_type: Some(BinarySegmentType::Binary),
+                        signedness: None,
+                        endianness: None,
+                        unit: None,
+                        span: Span::new(5, 8),
+                    },
+                ],
+                span: Span::new(0, 8),
+            },
+        ],
+        span: Span::new(0, 9),
+    };
+    let arms = vec![MatchArm::new(
+        pattern,
+        Expression::Literal(Literal::Integer(1), Span::new(0, 1)),
+        Span::new(0, 9),
+    )];
+    let scrutinee = Expression::Identifier(Identifier::new("pair", Span::new(0, 4)));
+    let err = generator
+        .generate_match_with(&scrutinee, &arms, None)
+        .expect_err("nested split-needing binary must fail codegen");
+    assert!(
+        err.to_string().contains("whole match-arm pattern"),
+        "Error should direct two-step matching, got: {err}"
+    );
+}
+
+#[test]
 fn test_binary_pattern_unbound_size_is_clean_error() {
     // BT-4096: a size naming nothing bound (forward reference, field, or
     // typo) must be a clean compile error, not invalid Core Erlang.
