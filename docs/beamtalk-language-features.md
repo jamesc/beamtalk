@@ -853,6 +853,14 @@ count := 0
 [:x | temp := x * 2. temp + 1]
 ```
 
+**Scoping:** a variable first assigned inside a block is local to that block —
+`temp` above is invisible outside it — and nested blocks see their enclosing
+blocks' locals. Assigning a variable declared *outside* the block (a captured
+local) is a separate rule: it compiles only where the block is written directly
+as the argument of a control-flow construct or a compiler-known collection
+message (see [Control Flow and Mutations](#control-flow-and-mutations) and
+[ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md)).
+
 **Non-local returns:** `^` inside a block returns from the *enclosing method*, not just from the block. This is the standard Smalltalk non-local return semantics and enables clean early-exit patterns:
 
 ```beamtalk
@@ -1320,6 +1328,9 @@ opts := #({#local, path}, {#nodelay, true},)  // trailing comma is allowed
   through unchanged. Use `Result ok:` / `Result error:` to build a `Result`.
 - To interpolate a tuple literal in a string, add a space: `"pair: { {a, b} }"`.
   `"{{...}}"` is rejected as a mistaken literal-brace escape.
+- The `#()` List literal takes arbitrary expressions as elements, unlike
+  Smalltalk's literal-only arrays: `#(code)` with a bound variable, or
+  `#((Point x: 1 y: 1))`, evaluates its elements.
 - Tuple literals are not supported inside `when:` guards (nor are list literals).
 - Caveat: a tuple whose first element is a runtime tag atom (`#beamtalk_object`,
   `#beamtalk_supervisor`) is misclassified by the runtime's class lookup. This
@@ -4436,6 +4447,11 @@ x match: [
 
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is a compile error; one that does neither compiles without a warning and silently never runs. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`).
 
+**Arms do not thread assignments.** An arm body is not a block, so assigning an
+enclosing local inside one has no effect: the compiler warns (`Assignment to
+`x` inside a match arm has no effect`) and `--warnings-as-errors` rejects it.
+Bind the match's answer instead: `timeout := value match: [...]`.
+
 **Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
 
 **Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor` subclasses (BT-2870).
@@ -7167,6 +7183,11 @@ Binary fromBytes: #(65, 66)  // => Binary
 (Binary fromBytes: #(104, 101, 108, 108, 111)) asString           // => "hello"
 (Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked  // => "hello"
 
+// Invalid UTF-8: asString answers an error tuple with the byte offset;
+// asStringUnchecked keeps the bytes, still dispatched as Binary
+(Binary fromBytes: #(255, 254)) asString                          // => {#error, {#invalid_utf8, 0}}
+(Binary fromBytes: #(255, 254)) asStringUnchecked class           // => Binary
+
 // Serialization (class methods)
 etf := Binary serialize: #(1, 2, 3)
 Binary deserialize: etf               // => #(1, 2, 3)
@@ -7221,6 +7242,9 @@ and gets grapheme semantics. **Do not rely on `class` to tell text from bytes.**
 When the distinction matters, annotate the type (`data :: Binary`) so the
 compiler dispatches statically, or use the unambiguous byte-level selectors
 (`byteSize`, `byteAt:`, `part:size:`) which mean the same thing on both.
+
+Equality is by bytes, not by class: `"a" =:= (Binary fromBytes: #(97))` is
+true, and so is `==`. Byte-safe comparisons never need a conversion first.
 
 Deciding which of the two a bare binary is costs one validating scan of the
 bytes (~32 ns for a short string, ~0.4 ns/byte beyond ~1 KB). It happens only
