@@ -133,6 +133,13 @@ and equality with the `Character`-built string.
 silent fall-through in `lex_character` (unknown `$\x` yields `x`) is noted as
 a known wart for later, out of scope here.
 
+### Symbol literals: explicit carve-out
+
+`#'…'` keeps no backslash handling: `#'a\nb'` still means literal
+backslash-n. Symbols are identifiers, where backslashes are rare and the
+interpolation/HTTP pressure doesn't apply; extending the table there buys
+nothing. Stated here so the carve-out is deliberate, not an oversight.
+
 ```beamtalk
 // Before (BT-4100 workaround):
 nl := (Character value: 13) asString ++ (Character value: 10) asString
