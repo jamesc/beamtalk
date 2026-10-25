@@ -68,15 +68,16 @@ typed Actor subclass: TimeoutProxy
 
   /// Forward all unknown messages to the target with the configured timeout.
   ///
-  /// BT-2829: moved from a statement-level `@expect type` (on the
-  /// `perform:withArguments:timeout:` send below) to declaration-level so it
-  /// also covers the new whole-method "declared -> Object, but body inferred
-  /// as Dynamic (unannotated return)" hint — `doesNotUnderstand:args:`
-  /// forwarding through `perform:withArguments:timeout:` is inherently
-  /// type-erased (the whole point of DNU forwarding), so neither diagnostic
-  /// is actionable here.
-  @expect type
-  doesNotUnderstand: selector :: Symbol args: arguments :: Array -> Object =>
+  /// `doesNotUnderstand:args:` forwarding through
+  /// `perform:withArguments:timeout:` is inherently type-erased (the whole
+  /// point of DNU forwarding). BT-4044: `perform:withArguments:timeout:`
+  /// declares `-> Dynamic` explicitly, so this needs no `@expect type` —
+  /// an explicit `Dynamic` result is silent at call sites in `typed`
+  /// classes (unlike the old unannotated return, BT-2829).
+  ///
+  /// `args` is a `List`, matching the parent declaration and the Erlang
+  /// list the actor dispatch passes to DNU handlers at runtime.
+  doesNotUnderstand: selector :: Symbol args: arguments :: List -> Object =>
     self.target
       perform: selector
       withArguments: arguments
