@@ -84,7 +84,8 @@ tag fully (once per block-literal creation or region, not a hot path).
   the map and skip the declared-set check. Only in-process accesses from
   class-method bodies are checked.
 - `get_late/2` raises the same `uninitialized_state_error` as the class
-  gen_server's `get_class_var` for an unassigned (`nil` or absent) variable.
+  gen_server's `get_class_var` for an absent variable. A stored `nil` is
+  assigned and answers `nil` (BT-4061).
 
 ## Dependencies
 
@@ -456,10 +457,12 @@ read_value(Tag, Name, Map) ->
 
 -spec late_value(atom(), atom(), map()) -> term().
 late_value(Tag, Name, Map) ->
-    case maps:find(Name, Map) of
-        {ok, nil} -> beamtalk_class_var_errors:raise_uninitialized(tag_to_name(Tag), Name);
-        {ok, Value} -> Value;
-        error -> beamtalk_class_var_errors:raise_uninitialized(tag_to_name(Tag), Name)
+    %% BT-4061: presence — not value — is assignment (ADR 0124 §2, as
+    %% amended). The presence question IS `has_value/2` — the raising read
+    %% and `hasField:` share it, so they cannot drift apart again.
+    case has_value(Map, Name) of
+        true -> maps:get(Name, Map);
+        false -> beamtalk_class_var_errors:raise_uninitialized(tag_to_name(Tag), Name)
     end.
 
 %% Never raises on the name: `hasField:` is a non-raising presence test.

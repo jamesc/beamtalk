@@ -305,16 +305,18 @@ get_late_test() ->
     with_clean(fun() ->
         beamtalk_class_vars:install(?KEY, #{late => nil, set => 3}),
         ?assertEqual(3, beamtalk_class_vars:get_late(self_obj(), set)),
-        E1 = raised_error(fun() -> beamtalk_class_vars:get_late(self_obj(), late) end),
+        %% BT-4061: presence — not value — is assignment (ADR 0124 §2, as
+        %% amended). A stored `nil` answers `nil`, agreeing with `has/2`;
+        %% only an absent key raises.
+        ?assertEqual(nil, beamtalk_class_vars:get_late(self_obj(), late)),
+        ?assert(beamtalk_class_vars:has(self_obj(), late)),
+        E1 = raised_error(fun() -> beamtalk_class_vars:get_late(self_obj(), missing) end),
         ?assertMatch(
             #beamtalk_error{kind = uninitialized_state_error, selector = undefined, hint = H} when
                 is_binary(H),
             E1
         ),
-        ?assertEqual(
-            uninitialized_state_error,
-            raised_kind(fun() -> beamtalk_class_vars:get_late(self_obj(), missing) end)
-        )
+        ?assertNot(beamtalk_class_vars:has(self_obj(), missing))
     end).
 
 clear_and_has_test() ->
@@ -409,9 +411,11 @@ captured_fallback_test() ->
         ?assertEqual(1, beamtalk_class_vars:get(self_obj(), a, Captured)),
         ?assert(beamtalk_class_vars:has(self_obj(), a, Captured)),
         ?assertEqual(1, beamtalk_class_vars:get_late(self_obj(), a, Captured)),
+        %% BT-4061: a captured `nil` is present, so it answers `nil`.
+        ?assertEqual(nil, beamtalk_class_vars:get_late(self_obj(), l, Captured)),
         ?assertEqual(
             uninitialized_state_error,
-            raised_kind(fun() -> beamtalk_class_vars:get_late(self_obj(), l, Captured) end)
+            raised_kind(fun() -> beamtalk_class_vars:get_late(self_obj(), missing, Captured) end)
         ),
         %% A live key wins over the captured map.
         beamtalk_class_vars:install(?KEY, #{a => 99}),

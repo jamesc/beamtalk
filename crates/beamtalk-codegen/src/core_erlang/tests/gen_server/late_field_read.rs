@@ -21,8 +21,8 @@ fn hint_binary(text: &str) -> String {
 }
 
 /// Instance branch: `self.proc` on a `late` field must compile to the
-/// three-arm `maps:find` guard, not a bare `maps:get`, and the result must
-/// be real erlc-valid Core Erlang.
+/// presence-only two-arm `maps:find` guard, not a bare `maps:get`, and the
+/// result must be real erlc-valid Core Erlang.
 #[test]
 fn late_instance_field_read_emits_guarded_maps_find_and_compiles() {
     let src = concat!(
@@ -40,9 +40,13 @@ fn late_instance_field_read_emits_guarded_maps_find_and_compiles() {
         code.contains("case call 'maps':'find'('proc', State) of"),
         "a `late` instance field read must guard with maps:find, not maps:get. Got:\n{code}"
     );
+    // BT-4061: presence — not value — is assignment (ADR 0124 §2, as
+    // amended). There is no `{ok, 'nil'}` arm: a present key holding `nil`
+    // answers through the plain `{ok, V}` arm, exactly as `hasField:`
+    // reports it assigned.
     assert!(
-        code.contains("<{'ok', 'nil'}> when 'true' ->"),
-        "the guard must have a {{ok, nil}} arm (ADR 0124 §3 — nil injected via spawnWith:/fieldAt:put:/perform:). Got:\n{code}"
+        !code.contains("<{'ok', 'nil'}> when 'true' ->"),
+        "the guard must NOT have an {{ok, nil}} arm — a nil-valued present key answers nil. Got:\n{code}"
     );
     assert!(
         code.contains("<'error'> when 'true' ->"),
@@ -50,7 +54,7 @@ fn late_instance_field_read_emits_guarded_maps_find_and_compiles() {
     );
     assert!(
         code.contains("'uninitialized_state_error'"),
-        "both raise arms must construct an uninitialized_state_error. Got:\n{code}"
+        "the absent-key arm must construct an uninitialized_state_error. Got:\n{code}"
     );
     let expected_hint = hint_binary(
         "CodexClient field 'proc' (:: Subprocess) is declared `late` and has not been assigned yet",
@@ -90,8 +94,9 @@ fn eager_instance_field_read_stays_bare_maps_get_alongside_late_sibling() {
 }
 
 /// Class-method branch (ADR 0130 §2): `self.current` on a `late classState:`
-/// var reads in place; a stored `nil` or an absent key is a miss that the
-/// runtime's `get_late/2` turns into the structured `uninitialized_state_error`.
+/// var reads in place; only an absent key is a miss, which the runtime's
+/// `get_late/2` turns into the structured `uninitialized_state_error` — a
+/// stored `nil` answers on the hit path (BT-4061).
 #[test]
 fn late_class_var_read_inlines_the_hit_and_falls_back_to_get_late() {
     let src = concat!(
@@ -106,9 +111,12 @@ fn late_class_var_read_inlines_the_hit_and_falls_back_to_get_late() {
         .expect("codegen should succeed");
 
     assert!(
-        code.contains("call 'maps':'find'('current', ")
-            && code.contains("when call 'erlang':'=/='("),
-        "a `late` class variable read must treat a stored nil as a miss. Got:\n{code}"
+        code.contains("call 'maps':'find'('current', "),
+        "a `late` class variable read must guard with maps:find. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("when call 'erlang':'=/='("),
+        "a `late` class variable read must NOT treat a stored nil as a miss — presence is assignment. Got:\n{code}"
     );
     assert!(
         code.contains("call 'beamtalk_class_vars':'get_late'(ClassSelf, 'current')"),

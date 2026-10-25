@@ -1819,13 +1819,14 @@ handle_call(
     Kinds = beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName),
     case class_var_declared_late(Kinds, Name) of
         true ->
-            case maps:find(Name, ClassVars) of
-                {ok, nil} ->
-                    {reply, {error, beamtalk_class_var_errors:uninitialized_error(ClassName, Name)},
-                        State};
-                {ok, Value} ->
-                    {reply, Value, State};
-                error ->
+            %% BT-4061: presence — not value — is assignment (ADR 0124 §2,
+            %% as amended). The presence question is `class_var_assigned/2`,
+            %% shared with the `has_class_var` clause below, so the raising
+            %% read and `hasField:` cannot drift apart again.
+            case class_var_assigned(ClassVars, Name) of
+                true ->
+                    {reply, maps:get(Name, ClassVars), State};
+                false ->
                     {reply, {error, beamtalk_class_var_errors:uninitialized_error(ClassName, Name)},
                         State}
             end;
@@ -1849,8 +1850,9 @@ handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = Clas
     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
     {reply, Value, State#class_state{class_state = NewClassVars}};
 handle_call({has_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
-    %% ADR 0124 §1/§4i/B4: never raises.
-    {reply, maps:is_key(Name, ClassVars), State};
+    %% ADR 0124 §1/§4i/B4: never raises. Shared with `get_class_var`'s
+    %% declared-`late` branch above (BT-4061).
+    {reply, class_var_assigned(ClassVars, Name), State};
 handle_call({clear_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
     %% ADR 0124 §1/§4f/§4i/B4: returns the class object itself, matching
     %% the instance-side intrinsic's `clearField: -> Self` convention.
@@ -1997,6 +1999,17 @@ class_var_declared_late(unknown, _Name) ->
     false;
 class_var_declared_late(Kinds, Name) ->
     maps:get(Name, Kinds, eager) =:= late.
+
+-doc """
+Presence test for a class variable in a class-state map (BT-4061): the one
+"is this variable assigned" helper, shared by `get_class_var`'s
+declared-`late` branch and the `has_class_var` clause, so the raising read
+and `hasField:` cannot drift apart again. Presence — not value — is
+assignment (ADR 0124 §2, as amended): a stored `nil` is assigned.
+""".
+-spec class_var_assigned(map(), atom()) -> boolean().
+class_var_assigned(ClassVars, Name) ->
+    maps:is_key(Name, ClassVars).
 
 -doc """
 Run a class-method (or metaclass-method) call against this class gen_server's

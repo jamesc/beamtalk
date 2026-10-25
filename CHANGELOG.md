@@ -224,6 +224,7 @@
 - Fix: `self new` / `self new:` / `self spawn` / `self class` / `self error:` inside a direct-called `class sealed` method no longer raises `badarg` — the receiver is now correctly resolved as the calling class (BT-4029, #4489)
 - Fix: a conditional whose receiver is a self-send in a Letrec loop body no longer trips `UnboundVersion State1` — the state variable is now correctly threaded across the call boundary (BT-4000, #4484)
 - Fix: a field write in a `whileTrue:`/`whileFalse:` condition of a value type is now correctly carried across iterations instead of being silently dropped (BT-4002, #4476)
+- Fix: reading a `late` slot whose key is present answers its value, including `nil`, and `late` on a nil-admitting type is a compile error (ADR 0124 amendment, BT-4061) — the read guard used to raise `UninitializedStateError` for a stored `nil` while `hasField:` reported the slot assigned; presence — not value — is now assignment on every surface (direct read, `fieldAt:`, class-side reads), with the guard and `hasField:` sharing one presence helper. Separately, `late state: a :: Object` (and `:: Dynamic`, and any alias or protocol admitting `nil`) is now the B1 compile error ADR 0124 §1 specifies, since `nil` is already a value such a slot can hold. Migration: drop `late` or narrow the type to exclude `nil`.
 - Fix: FFI arity check accepts the multi-arity `erlang` BIFs — `integer_to_binary/2`, `atom_to_binary/2`, `binary_to_atom/2`, `binary_to_list/3` and `spawn/2,4` no longer warn "expected arity 1" (BT-4101)
 
 ### Runtime

@@ -91,8 +91,8 @@ pub use collision_checker::{
     check_collision_at_use_sites, check_stdlib_reservation, check_transitive_dep_usage,
 };
 pub use definite_assignment::{
-    is_nilable_type_annotation, is_nilable_type_name, requires_definite_assignment,
-    requires_definite_assignment_for_declared_type,
+    admits_nil_type_annotation, is_nilable_type_annotation, is_nilable_type_name,
+    requires_definite_assignment, requires_definite_assignment_for_declared_type,
 };
 pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
@@ -1167,11 +1167,13 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     );
 
     // Error on malformed `late` slot declarations (ADR 0124 §1, §5, B1):
-    // `late field:` on a Value, no type annotation, a nilable type, or a
-    // default value.
+    // `late field:` on a Value, no type annotation, a nil-admitting type
+    // (BT-4061), or a default value.
     validators::check_late_slot_declarations(
         module,
         &result.class_hierarchy,
+        &result.protocol_registry,
+        &result.alias_registry,
         &mut result.diagnostics,
     );
 
