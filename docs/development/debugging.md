@@ -487,6 +487,40 @@ erl -pa build
 3> fprof:analyse().
 ```
 
+### Profiling Beamtalk code with tprof/eprof (BT-4106)
+
+`tprof` and `eprof` work in a Beamtalk node. Both profilers call
+`M:module_info/1` on every loaded module during analysis, so every
+Beamtalk-compiled module exports `module_info/0,1` (BT-4067) — without
+them `tprof` answers `badarg` and `eprof` crashes with
+`undef bt@...:module_info/1`. Pinned by
+`runtime/apps/beamtalk_stdlib/test/beamtalk_otp_profiler_tests.erl`.
+
+```erlang
+%% Ad-hoc: time one Beamtalk dispatch call (MFA form profiles just it).
+{Class, {call_time, Entries}} = tprof:profile(
+    'bt@stdlib@integer', dispatch, ['class', [], 5],
+    #{type => call_time, report => return}).
+
+%% Whole-expression: trace everything the fun calls; use start_profiling/
+%% stop_profiling/analyze to also print the per-function table.
+{ok, Result} = eprof:profile(
+    [self()], fun() -> 'bt@stdlib@integer':dispatch('class', [], 5) end).
+```
+
+Notes:
+
+- Beamtalk functions show up under their compiled module names
+  (`bt@package@module`), e.g. `bt@stdlib@integer:dispatch/3` — value-type
+  methods additionally appear as `methodName/1` entries on the same module.
+- A class method executes in its class's `gen_server` process, not the
+  caller's, so `eprof:profile([self()], Fun)` attributes the call to the
+  caller and the method body to the class process. To capture the method
+  body, add the class process to the rootset (or use `tprof`'s MFA form on
+  the method's module directly, as above).
+- `observer:start()` works for live memory/process inspection from the same
+  shell.
+
 ## Codegen Diagnostics (BT-1343)
 
 The compiler can emit detailed diagnostics about code generation decisions.
