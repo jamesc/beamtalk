@@ -30,7 +30,9 @@ use std::fs;
 pub struct FileWalker {
     /// File extensions to match (without the leading dot).
     extensions: Vec<String>,
-    /// Whether to skip symlinks (default: true).
+    /// Whether to skip symlinks (default: false — symlinks to files are
+    /// followed, like `erlc` and most build tools; symlinked directories
+    /// are never traversed).
     skip_symlinks: bool,
     /// Directory names to exclude from traversal.
     excluded_dirs: HashSet<String>,
@@ -50,7 +52,7 @@ impl Default for FileWalker {
     fn default() -> Self {
         Self {
             extensions: Vec::new(),
-            skip_symlinks: true,
+            skip_symlinks: false,
             excluded_dirs: HashSet::new(),
             max_files: None,
             strict_errors: true,
@@ -75,7 +77,10 @@ impl FileWalker {
         self
     }
 
-    /// Whether to skip symlinks. Default: `true`.
+    /// Whether to skip symlinks. Default: `false`, meaning symlinks to
+    /// files are followed (collected under the link's own path when the
+    /// link's name matches the extension filter). Symlinked directories
+    /// are never traversed either way. Pass `true` to ignore all symlinks.
     #[must_use]
     pub fn skip_symlinks(mut self, skip: bool) -> Self {
         self.skip_symlinks = skip;
@@ -121,7 +126,8 @@ impl FileWalker {
 
     /// Preset for collecting `.bt` source files.
     ///
-    /// Recursive, symlink-skipping, sorted, strict errors. Excludes
+    /// Recursive, sorted, strict errors. Follows symlinks to files
+    /// (BT-4105) but never traverses into symlinked directories. Excludes
     /// `.git`/`target`/`node_modules`/`_build` — `_build/deps/`
     /// holds full source checkouts for git/registry dependencies (a path
     /// dependency's source stays wherever the path points, outside
@@ -311,12 +317,13 @@ impl FileWalker {
                 }
             };
 
-            if self.skip_symlinks && file_type.is_symlink() {
-                continue;
-            }
-
             let entry_path = Utf8PathBuf::from_path_buf(entry.path())
                 .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", dir))?;
+
+            if file_type.is_symlink() {
+                self.collect_symlink_target(&entry_path, files)?;
+                continue;
+            }
 
             if file_type.is_dir() {
                 if self.is_excluded_dir(&entry_path) {
@@ -331,6 +338,40 @@ impl FileWalker {
         }
 
         Ok(())
+    }
+
+    /// Resolve a symlink entry discovered during a directory walk (BT-4105).
+    ///
+    /// When `skip_symlinks` is set, symlinks are ignored entirely. Otherwise
+    /// symlinks to files are followed — like `erlc` and most build tools —
+    /// and collected under the link's own path when the link's name matches
+    /// the extension filter, so module-name derivation and diagnostics keep
+    /// referring to the path the user sees. Symlinks to directories are
+    /// never traversed (recursing into them risks infinite cycles), and
+    /// other non-file targets are ignored. A dangling symlink whose name
+    /// matches the filter is a read error: fatal under `strict_errors`,
+    /// silently skipped otherwise.
+    fn collect_symlink_target(
+        &self,
+        link_path: &Utf8Path,
+        files: &mut Vec<Utf8PathBuf>,
+    ) -> miette::Result<()> {
+        if self.skip_symlinks || !self.matches_extension_utf8(link_path) {
+            return Ok(());
+        }
+        match fs::metadata(link_path) {
+            Ok(target) if target.is_file() => {
+                files.push(link_path.to_path_buf());
+                Ok(())
+            }
+            Ok(_) => Ok(()),
+            Err(err) => {
+                if self.strict_errors {
+                    miette::bail!("'{link_path}' is a dangling symlink: {err}");
+                }
+                Ok(())
+            }
+        }
     }
 
     fn matches_extension_utf8(&self, path: &Utf8Path) -> bool {
@@ -358,7 +399,7 @@ mod tests {
     fn test_source_files_preset() {
         let walker = FileWalker::source_files();
         assert_eq!(walker.extensions, vec!["bt"]);
-        assert!(walker.skip_symlinks);
+        assert!(!walker.skip_symlinks);
         assert!(walker.strict_errors);
         assert!(walker.sort);
         assert!(walker.recursive);
@@ -537,15 +578,111 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn test_walk_skips_symlinks() {
+    fn test_walk_follows_symlink_to_file() {
+        // BT-4105: a symlinked `.bt` file must be collected, not silently
+        // skipped. The link's own path is reported so module-name
+        // derivation keeps working as if it were a regular file.
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = Utf8Path::from_path(dir.path()).unwrap();
+        let real_file = dir_path.join("real.bt");
+        fs::write(&real_file, "").unwrap();
+        let link = dir_path.join("link.bt");
+        std::os::unix::fs::symlink(&real_file, &link).unwrap();
+
+        let files = FileWalker::source_files().walk(dir_path).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].as_str(), link.as_str());
+        assert!(files[1].as_str().ends_with("real.bt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_walk_symlink_outside_tree_is_followed_under_link_name() {
+        // BT-4105 repro shape: the link lives in the walked tree while its
+        // target lives elsewhere; the extension filter applies to the
+        // link's name, not the target's.
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = Utf8Path::from_path(dir.path()).unwrap();
+        let outside = dir_path.join("elsewhere");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("spike_handler.txt"), "").unwrap();
+        let link = dir_path.join("spike_handler.bt");
+        std::os::unix::fs::symlink(outside.join("spike_handler.txt"), &link).unwrap();
+        // A non-matching link name is not collected even when its target
+        // has a matching extension.
+        fs::write(outside.join("other.bt"), "").unwrap();
+        std::os::unix::fs::symlink(outside.join("other.bt"), dir_path.join("other.txt")).unwrap();
+
+        let files = FileWalker::source_files().walk(dir_path).unwrap();
+        assert_eq!(files, vec![outside.join("other.bt"), link]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_walk_skip_symlinks_opt_out() {
         let dir = tempfile::tempdir().unwrap();
         let dir_path = Utf8Path::from_path(dir.path()).unwrap();
         let real_file = dir_path.join("real.bt");
         fs::write(&real_file, "").unwrap();
         std::os::unix::fs::symlink(&real_file, dir_path.join("link.bt")).unwrap();
 
-        let walker = FileWalker::source_files();
-        let files = walker.walk(dir_path).unwrap();
+        let files = FileWalker::source_files()
+            .skip_symlinks(true)
+            .walk(dir_path)
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].as_str().ends_with("real.bt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_walk_never_traverses_symlinked_dir() {
+        // Symlinked directories are never descended into, so a cycle
+        // (link back to an ancestor) cannot cause infinite recursion.
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = Utf8Path::from_path(dir.path()).unwrap();
+        let sub = dir_path.join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("inner.bt"), "").unwrap();
+        // Extension-matching names so the resolve-then-skip-dir branch is
+        // exercised, not just the name filter: `cycle.bt` links back to an
+        // ancestor, which naive traversal would follow forever.
+        std::os::unix::fs::symlink(dir_path, sub.join("cycle.bt")).unwrap();
+        std::os::unix::fs::symlink(&sub, dir_path.join("linked_sub.bt")).unwrap();
+
+        let files = FileWalker::source_files().walk(dir_path).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].as_str().ends_with("inner.bt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_walk_dangling_symlink_strict_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = Utf8Path::from_path(dir.path()).unwrap();
+        std::os::unix::fs::symlink(dir_path.join("missing.bt"), dir_path.join("dangling.bt"))
+            .unwrap();
+
+        let result = FileWalker::source_files().walk(dir_path);
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("dangling symlink"), "unexpected error: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_walk_dangling_symlink_lenient_skips() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = Utf8Path::from_path(dir.path()).unwrap();
+        fs::write(dir_path.join("real.bt"), "").unwrap();
+        std::os::unix::fs::symlink(dir_path.join("missing.bt"), dir_path.join("dangling.bt"))
+            .unwrap();
+        // A self-referential link (ELOOP) resolves the same way.
+        std::os::unix::fs::symlink(dir_path.join("loop.bt"), dir_path.join("loop.bt")).unwrap();
+
+        let files = FileWalker::source_files()
+            .strict_errors(false)
+            .walk(dir_path)
+            .unwrap();
         assert_eq!(files.len(), 1);
         assert!(files[0].as_str().ends_with("real.bt"));
     }
