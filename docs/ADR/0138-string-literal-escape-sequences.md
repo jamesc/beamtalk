@@ -390,6 +390,12 @@ than bulk-replacing. Downstream packages get loud errors for unknown
 escapes on upgrade; their in-table sites need the same human grep — run it
 before upgrading catalina, buccaneer, http/yaml/collections, exdura.
 
+## Implementation Tracking
+
+**Epic:** BT-4162
+**Issues:** BT-4163, BT-4164, BT-4165
+**Status:** Planned
+
 ## References
 
 - Related issues: BT-4100 (this decision), BT-4079 (Buccaneer spikes),
