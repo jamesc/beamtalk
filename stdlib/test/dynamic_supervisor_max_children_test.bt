@@ -63,6 +63,19 @@ TestCase subclass: DynamicSupervisorMaxChildrenTest
     again := (TestDynamicSupervisorCapped supervise) unwrap
     self assert: again count equals: 1
 
+  testConcurrentStartChildNeverExceedsLimit =>
+    // BT-4068: the cap is checked atomically inside the supervisor, so N
+    // parallel starters admit exactly maxChildren — no check-then-act
+    // overshoot. Each block unwraps, so a refused start (which raises)
+    // becomes an error slot.
+    pool := (TestDynamicSupervisorCapped supervise) unwrap
+    starters := ((1 to: 32) asList) collect: [:i | [pool startChild unwrap]]
+    results := Parallel all: starters
+    self assert: results size equals: 32
+    oks := results select: [:r | r isOk]
+    self assert: oks size equals: 2
+    self assert: pool count equals: 2
+
   testInvalidMaxChildrenFailsSupervise =>
     result := TestDynamicSupervisorBadCap supervise
     self assert: result isError equals: true
