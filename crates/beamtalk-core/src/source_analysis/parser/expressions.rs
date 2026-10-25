@@ -2175,8 +2175,10 @@ impl Parser {
     /// Parses a binary pattern: `<<seg, seg, ...>>`
     ///
     /// Segment syntax: `varname`, `varname:size`, `varname/type`, `varname:size/type-modifiers`
-    /// where type is one of `integer`, `float`, `binary`, `utf8`
+    /// where type is one of `integer`, `float`, `binary`, `bits`/`bitstring`, `utf8`
     /// and modifiers include `signed`/`unsigned`, `big`/`little`/`native`.
+    /// The value may also be an integer literal (`0:1`, BT-4097) and the size
+    /// a parenthesized expression (`v:(8 - p)`, BT-4097).
     fn parse_binary_pattern(&mut self) -> Pattern {
         let start = self.current_token().span();
         self.advance(); // consume `<<`
@@ -2219,15 +2221,15 @@ impl Parser {
     /// `Identifier("name")` + `BinarySelector("/")` + `Identifier("type")`.
     fn parse_binary_segment_size(&mut self) -> Option<Box<Expression>> {
         match self.current_kind() {
-            TokenKind::Integer(_) | TokenKind::Identifier(_) => {
+            TokenKind::Integer(_) | TokenKind::Identifier(_) | TokenKind::LeftParen => {
                 let expr = self.parse_primary();
                 match &expr {
-                    Expression::Literal(Literal::Integer(_), _) | Expression::Identifier(_) => {
-                        Some(Box::new(expr))
-                    }
+                    Expression::Literal(Literal::Integer(_), _)
+                    | Expression::Identifier(_)
+                    | Expression::Parenthesized { .. } => Some(Box::new(expr)),
                     _ => {
                         self.error(
-                            "Binary segment size must be an integer literal or variable name",
+                            "Binary segment size must be an integer literal, a variable name, or a parenthesized expression",
                         );
                         None
                     }
@@ -2290,9 +2292,18 @@ impl Parser {
                 (var, sz)
             }
 
+            // `0:1` — integer literal segment value (BT-4097)
+            TokenKind::Integer(_) => self.parse_binary_literal_value(false),
+
+            // `-1:8` — negative integer literal segment value (BT-4097)
+            TokenKind::BinarySelector(op) if op.as_str() == "-" => {
+                self.advance(); // consume `-`
+                self.parse_binary_literal_value(true)
+            }
+
             _ => {
                 let span = self.current_token().span();
-                self.error("Expected variable name in binary segment");
+                self.error("Expected variable name or integer literal in binary segment");
                 (Pattern::Wildcard(span), None)
             }
         };
@@ -2310,6 +2321,34 @@ impl Parser {
             unit: None,
             span: start.merge(end),
         }
+    }
+
+    /// Parses an integer literal binary segment value with optional `:size`.
+    ///
+    /// `negated` is true when the caller consumed a leading `-` (BT-4097).
+    fn parse_binary_literal_value(&mut self, negated: bool) -> (Pattern, Option<Box<Expression>>) {
+        let token = self.advance();
+        let span = token.span();
+        let TokenKind::Integer(raw) = token.into_kind() else {
+            self.error("Expected integer literal in binary segment");
+            return (Pattern::Wildcard(span), None);
+        };
+        // `raw` holds non-negative digits only (a leading `-` is a separate
+        // token), so a successfully parsed value always negates safely.
+        let value = match parse_integer(&raw) {
+            Ok(val) => Pattern::Literal(Literal::Integer(if negated { -val } else { val }), span),
+            Err(e) => {
+                self.diagnostics.push(Diagnostic::error(e, span));
+                Pattern::Wildcard(span)
+            }
+        };
+        let size = if matches!(self.current_kind(), TokenKind::Colon) {
+            self.advance(); // consume `:`
+            self.parse_binary_segment_size()
+        } else {
+            None
+        };
+        (value, size)
     }
 
     /// Parses optional `/type[-modifier]*` specifiers for a binary segment.
@@ -2338,7 +2377,7 @@ impl Parser {
                 self.advance();
                 let span = self.tokens[self.current - 1].span();
                 match name.as_str() {
-                    "integer" | "float" | "binary" | "bytes" | "utf8" => {
+                    "integer" | "float" | "binary" | "bytes" | "bits" | "bitstring" | "utf8" => {
                         if segment_type.is_some() {
                             self.diagnostics.push(Diagnostic::error(
                                 format!(
@@ -2351,6 +2390,7 @@ impl Parser {
                                 "integer" => BinarySegmentType::Integer,
                                 "float" => BinarySegmentType::Float,
                                 "utf8" => BinarySegmentType::Utf8,
+                                "bits" | "bitstring" => BinarySegmentType::Bitstring,
                                 _ => BinarySegmentType::Binary, // "binary" | "bytes"
                             });
                         }

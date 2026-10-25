@@ -37,3 +37,107 @@ TestCase subclass: BinaryPatternsTest
       _ -> "low"
     ]
     self assert: result equals: "low"
+
+  testMatchLengthPrefixedPayload =>
+    // BT-4096: a segment size may name a variable bound by an earlier segment
+    bin := Binary fromBytes: #(3, 104, 105, 33, 99)
+    result := bin match: [
+      <<n:8, payload:n/binary, rest/binary>> -> {n, payload toBytes, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 3
+    self assert: (result at: 2) equals: #(104, 105, 33)
+    self assert: (result at: 3) equals: #(99)
+
+  testMatchLengthPrefixedIncompleteFallsThrough =>
+    // BT-4096: fewer bytes buffered than the bound size claims — no match
+    bin := Binary fromBytes: #(10, 1, 2)
+    result := bin match: [
+      <<n:8, payload:n/binary, rest/binary>> -> payload;
+      _ -> nil
+    ]
+    self assert: result isNil
+
+  testMatchBitsSegment =>
+    // BT-4097: bits/bitstring segments (234 = 0b11101010)
+    bin := Binary fromBytes: #(234, 7)
+    result := bin match: [
+      <<flags:3, v:5, rest/bitstring>> -> {flags, v, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 7
+    self assert: (result at: 2) equals: 10
+    self assert: (result at: 3) equals: #(7)
+
+  testMatchBitstringTailChained =>
+    // BT-4097: an unaligned rest/bits tail matches again as a bitstring
+    bin := Binary fromBytes: #(234)
+    result := bin match: [
+      <<_:3, rest/bitstring>> -> (rest match: [
+        <<v:5>> -> v;
+        _ -> -1
+      ]);
+      _ -> -1
+    ]
+    self assert: result equals: 10
+
+  testMatchLiteralSegmentValue =>
+    // BT-4097: integer literal segment values (10 = 0b00001010)
+    bin := Binary fromBytes: #(10, 9)
+    result := bin match: [
+      <<0:1, v:7, rest/binary>> -> {v, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 10
+    self assert: (result at: 2) equals: #(9)
+
+  testMatchLiteralSegmentValueFallsThrough =>
+    // BT-4097: first bit is 1 (138 = 0b10001010), so <<0:1, ...>> rejects it
+    bin := Binary fromBytes: #(138, 9)
+    result := bin match: [
+      <<0:1, v:7, rest/binary>> -> v;
+      _ -> nil
+    ]
+    self assert: result isNil
+
+  testMatchSizeExpression =>
+    // BT-4097: parenthesized size expressions (234 = 0b11_101010)
+    q := 2
+    bin := Binary fromBytes: #(234, 7)
+    result := bin match: [
+      <<a:(4 - q), b:(4 + q), rest/binary>> -> {a, b, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 3
+    self assert: (result at: 2) equals: 42
+    self assert: (result at: 3) equals: #(7)
+
+  testMatchSkippedFlagBits =>
+    // BT-4097: sizes from locals (skip is used only as a size — no
+    // unused-variable warning under --warnings-as-errors)
+    p := 5
+    skip := 8 - p
+    bin := Binary fromBytes: #(234)
+    result := bin match: [
+      <<_f:skip, v:p, rest/binary>> -> v;
+      _ -> -1
+    ]
+    self assert: result equals: 10
+
+  testSizeOnlyParameterIsUsed =>
+    // BT-4097: n is used only as a segment size — no unused-parameter warning
+    self assert: (self take: 2 from: (Binary fromBytes: #(7, 8, 9))) toBytes equals: #(7, 8)
+
+  take: n :: Integer from: bin :: Binary -> Binary =>
+    bin match: [
+      <<payload:n/binary, _/binary>> -> payload;
+      _ -> Binary fromBytes: #()
+    ]
+
+  testMatchMultipleWildcardsInBinary =>
+    // BT-4098: every _ in one pattern is a fresh anonymous variable
+    result := (Binary fromBytes: #(1)) match: [
+      <<_:1, _:7>> -> true;
+      _ -> false
+    ]
+    self assert: result

@@ -1039,6 +1039,66 @@ Actor subclass: T
 }
 
 #[test]
+fn parse_binary_pattern_bitstring_segment() {
+    // BT-4097: <<flags:3, v:5, rest/bits>> — bits/bitstring segment type
+    use crate::ast::{BinarySegmentType, Pattern};
+    for spec in ["bits", "bitstring"] {
+        let source = format!("x match: [<<flags:3, v:5, rest/{spec}>> -> v]");
+        let module = parse_ok(&source);
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match for /{spec}");
+        };
+        let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+            panic!("expected Pattern::Binary for /{spec}");
+        };
+        assert_eq!(
+            segments[2].segment_type,
+            Some(BinarySegmentType::Bitstring),
+            "expected Bitstring type for /{spec}"
+        );
+    }
+}
+
+#[test]
+fn parse_binary_pattern_literal_value() {
+    // BT-4097: <<0:1, v:7, rest/binary>> — integer literal segment value
+    use crate::ast::Pattern;
+    let module = parse_ok("x match: [<<0:1, v:7, rest/binary>> -> v]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
+    assert!(
+        matches!(&segments[0].value, Pattern::Literal(Literal::Integer(0), _)),
+        "expected integer literal 0, got: {:?}",
+        segments[0].value
+    );
+}
+
+#[test]
+fn parse_binary_pattern_size_expression() {
+    // BT-4097: <<a:(4 - q), rest/binary>> — parenthesized size expression
+    use crate::ast::Pattern;
+    let module = parse_ok("x match: [<<a:(4 - q), rest/binary>> -> a]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
+    assert!(
+        matches!(
+            segments[0].size.as_deref(),
+            Some(Expression::Parenthesized { .. })
+        ),
+        "expected parenthesized size expression, got: {:?}",
+        segments[0].size
+    );
+}
+
+#[test]
 fn lex_ltlt_gtgt_tokens() {
     use crate::source_analysis::TokenKind;
     let tokens = lex_with_eof("<<");

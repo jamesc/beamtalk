@@ -1953,6 +1953,7 @@ fn unparse_binary_segment(seg: &BinarySegment) -> Document<'static> {
             BinarySegmentType::Integer => "integer",
             BinarySegmentType::Float => "float",
             BinarySegmentType::Binary => "binary",
+            BinarySegmentType::Bitstring => "bitstring",
             BinarySegmentType::Utf8 => "utf8",
         });
     }
