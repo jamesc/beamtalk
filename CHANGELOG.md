@@ -297,6 +297,7 @@
 - **`beamtalk run` / `repl --node` pin `ERL_EPMD_ADDRESS` to loopback (BT-3987)** — all CLI-spawned `erl` processes now default `ERL_EPMD_ADDRESS` to `127.0.0.1`, preventing `epmd` from binding all network interfaces. A new `erl_spawn_lint` module enforces this invariant (#4465)
 - `beamtalk new` CI template now targets the newest supported OTP major from `otp-support.toml` instead of a hardcoded value (BT-3955, #4428)
 - **`just bench-vs-elixir` microbenchmark suite (#4508)** — a new `benchmarks/vs-elixir/` directory contains side-by-side Beamtalk and Elixir microbenchmarks for comparing dispatch, collection, and concurrency performance. Results are documented in `docs/development/benchmarks.md`.
+- **Fix: `unresolved_ffi` no longer warns on the package's own hex-dep and native modules (BT-4022)** — an FFI call to a module from the package's `[native.dependencies]` (e.g. `telemetry`) or its own `native/*.erl` no longer reports `Unknown Erlang module` in `beamtalk build`, `test` and `lint`, the LSP, or the MCP `lint`/`diagnostic_summary` tools. The check now also knows the `.beam` files in the compiled dependency ebin dirs and the `native/*.erl` sources, collected once per run after native compilation; genuinely unknown modules still warn. An `@expect unresolved_ffi` added as a workaround for one of these modules now reports a stale expectation — remove it.
 
 ### Standard Library
 

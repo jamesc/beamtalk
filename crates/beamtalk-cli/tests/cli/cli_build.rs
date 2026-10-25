@@ -426,6 +426,46 @@ fn build_reports_genuine_cross_package_alias_collision_exactly_once() {
         }));
 }
 
+/// BT-4022: an FFI call to the package's own `native/*.erl` module must
+/// not warn `Unknown Erlang module`, while a genuinely unknown module
+/// still does. The fixture has never been built (`_build/` does not exist
+/// when the command starts), so this also pins the collection ordering:
+/// project-known modules are gathered *after* native compilation, once
+/// rebar3/erlc have produced the ebin dirs Pass 2 analysis reads.
+#[test]
+fn build_knows_own_native_module_but_warns_on_unknown() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("native")).expect("mkdir native");
+    std::fs::write(
+        project.path().join("native/my_nif.erl"),
+        "%% Copyright 2026 James Casey\n\
+         %% SPDX-License-Identifier: Apache-2.0\n\
+         -module(my_nif).\n\
+         -moduledoc \"Fixture native module for the BT-4022 build test.\".\n\
+         -export([ping/0]).\n\
+         -doc \"Returns `pong`.\".\n\
+         ping() -> pong.\n",
+    )
+    .expect("write native/my_nif.erl");
+    std::fs::write(
+        project.path().join("src/FfiUser.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         native_result := Erlang my_nif ping.\n\
+         unknown_result := Erlang definitely_unknown_xyz ping.\n",
+    )
+    .expect("write src/FfiUser.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(contains("Unknown Erlang module `definitely_unknown_xyz`"))
+        .stderr(contains("Unknown Erlang module `my_nif`").not());
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

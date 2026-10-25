@@ -432,6 +432,14 @@ pub struct AnalysisContext<'a> {
     /// `false` means any caller that doesn't know about stub files (the
     /// common case today) correctly rejects it.
     pub is_stub_file: bool,
+    /// Erlang module names the `unresolved_ffi` check treats as known
+    /// beyond the static OTP list and `beamtalk_*` (BT-4022) — the
+    /// package's compiled dependency ebin dirs (rebar3 hex/git deps, path
+    /// deps) and its own `native/*.erl` sources, via
+    /// [`crate::ffi_type_specs::collect_project_known_erlang_modules`].
+    /// Empty by default, which preserves the static-list-only behaviour
+    /// for callers with no project on disk.
+    pub known_erlang_modules: std::collections::HashSet<String>,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -446,7 +454,8 @@ impl<'a> AnalysisContext<'a> {
 
     /// Applies the subset of [`crate::CompilerOptions`] that semantic
     /// analysis cares about: `stdlib_mode`, `skip_module_expression_lint`,
-    /// `current_package`, `knowledge_scope`, `has_package_dependencies`.
+    /// `current_package`, `knowledge_scope`, `has_package_dependencies`,
+    /// `known_erlang_modules`.
     #[must_use]
     pub fn with_options(mut self, options: &'a crate::CompilerOptions) -> Self {
         self.stdlib_mode = options.stdlib_mode;
@@ -454,6 +463,8 @@ impl<'a> AnalysisContext<'a> {
         self.current_package = options.current_package.as_deref();
         self.knowledge_scope = options.knowledge_scope;
         self.has_package_dependencies = options.has_package_dependencies;
+        self.known_erlang_modules
+            .clone_from(&options.known_erlang_modules);
         self
     }
 
@@ -555,6 +566,23 @@ impl<'a> AnalysisContext<'a> {
         self.is_stub_file = is_stub_file;
         self
     }
+
+    /// Erlang module names the `unresolved_ffi` check treats as known
+    /// beyond the static OTP list and `beamtalk_*` (BT-4022) — see the
+    /// `known_erlang_modules` field's own doc. Callers that build an
+    /// `AnalysisContext` from [`crate::CompilerOptions`] via
+    /// [`with_options`](Self::with_options) get this from
+    /// [`CompilerOptions::known_erlang_modules`](crate::CompilerOptions::known_erlang_modules)
+    /// automatically and should not call this as well.
+    #[allow(clippy::implicit_hasher)] // concrete HashSet is simpler for callers
+    #[must_use]
+    pub fn with_known_erlang_modules(
+        mut self,
+        known_erlang_modules: std::collections::HashSet<String>,
+    ) -> Self {
+        self.known_erlang_modules = known_erlang_modules;
+        self
+    }
 }
 
 /// Perform semantic analysis on a module.
@@ -652,6 +680,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         cross_file_extensions,
         has_package_dependencies,
         is_stub_file,
+        known_erlang_modules,
     } = ctx;
 
     let mut result = AnalysisResult::new();
@@ -1252,8 +1281,14 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         has_cross_file_classes,
         &mut result.diagnostics,
     );
-    // Warn on Erlang FFI calls to unknown modules.
-    validators::check_unresolved_ffi_modules(module, &mut result.diagnostics);
+    // Warn on Erlang FFI calls to unknown modules. `known_erlang_modules`
+    // carries the package's own dependency/native modules (BT-4022) so a
+    // call to a module the package itself brings in does not warn.
+    validators::check_unresolved_ffi_modules(
+        module,
+        &known_erlang_modules,
+        &mut result.diagnostics,
+    );
     // Warn on Erlang FFI calls with wrong arity for known functions.
     validators::check_ffi_arity(module, &mut result.diagnostics);
     // `declare native:` is only valid in stubs/.

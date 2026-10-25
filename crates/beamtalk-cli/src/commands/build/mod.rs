@@ -190,6 +190,21 @@ fn execute_build_passes(
 
     let native_result = compile_native_sources(env, dep_ctx, &index.class_module_index)?;
 
+    // BT-4022: collect the package's project-known Erlang modules (compiled
+    // hex-dep/native ebin dirs + own `native/*.erl`) *after* native
+    // compilation, so a fresh checkout — where rebar3 has only just produced
+    // the dep ebins this build — already sees them during Pass 2 analysis.
+    // Shadow `options` so every Pass 2 `compile_file` (and only Pass 2;
+    // Pass 1 never runs `analyse_full`) carries the set into the
+    // `unresolved_ffi` check via `AnalysisContext::with_options`.
+    let pass2_options = beamtalk_core::CompilerOptions {
+        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(
+            &env.project_root,
+        ),
+        ..options.clone()
+    };
+    let options = &pass2_options;
+
     // ADR 0075: Extract type specs from OTP and dependency .beam files after
     // native compilation so freshly compiled native modules are included.
     // Results are cached in _build/type_cache/ — incremental builds read zero

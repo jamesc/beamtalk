@@ -138,4 +138,18 @@ pub struct CompilerOptions {
     /// hinting on a dependency-contributed method that genuinely exists
     /// (ADR 0100 Rule 1's third downgrade).
     pub has_package_dependencies: bool,
+
+    /// Erlang module names the `unresolved_ffi` check treats as known
+    /// beyond the static OTP list and `beamtalk_*` (BT-4022).
+    ///
+    /// Threaded into semantic analysis via `AnalysisContext::with_options`.
+    /// Every surface populates this from the single source of truth,
+    /// [`ffi_type_specs::collect_project_known_erlang_modules`], which scans
+    /// the package's compiled dependency ebin dirs (rebar3 hex/git deps,
+    /// path deps) and its own `native/*.erl` sources — so an FFI call to a
+    /// module the package itself brings in (e.g. `telemetry` from
+    /// `[native.dependencies]`) no longer warns. Empty by default, which
+    /// preserves the old static-list-only behaviour for callers with no
+    /// project on disk (REPL sessions, single-expression compiles).
+    pub known_erlang_modules: std::collections::HashSet<String>,
 }

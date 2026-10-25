@@ -176,6 +176,11 @@ pub struct SimpleLanguageService {
     project_index: ProjectIndex,
     /// Native type registry for Erlang FFI typed completions (ADR 0075).
     native_types: Option<std::sync::Arc<NativeTypeRegistry>>,
+    /// Project-known Erlang modules for the `unresolved_ffi` check (BT-4022):
+    /// hex-dep/native ebin modules plus own `native/*.erl`, unioned across
+    /// workspace roots by the LSP server at startup (mirrors `native_types`).
+    /// Empty until set — diagnostics then keep the static-list-only behaviour.
+    known_erlang_modules: std::collections::HashSet<String>,
     /// Whether workspace preload has completed with full coverage.
     ///
     /// When `true`, diagnostics are computed with
@@ -257,6 +262,7 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index: ProjectIndex::new(),
             native_types: None,
+            known_erlang_modules: std::collections::HashSet::new(),
             project_complete: false,
             has_package_dependencies: false,
             diagnostics_overrides:
@@ -275,6 +281,7 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index,
             native_types: None,
+            known_erlang_modules: std::collections::HashSet::new(),
             project_complete: false,
             has_package_dependencies: false,
             diagnostics_overrides:
@@ -355,6 +362,24 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn native_types(&self) -> Option<&NativeTypeRegistry> {
         self.native_types.as_deref()
+    }
+
+    /// Sets the project-known Erlang modules for the `unresolved_ffi` check
+    /// (BT-4022) — hex-dep/native ebin modules plus own `native/*.erl`.
+    ///
+    /// Called by the LSP server at startup with the union across workspace
+    /// roots (mirrors [`set_native_types`](Self::set_native_types)); like
+    /// that setter, this is a whole-session simplification loaded once —
+    /// modules added by a later `beamtalk build` need an LSP restart.
+    pub fn set_known_erlang_modules(&mut self, modules: std::collections::HashSet<String>) {
+        self.known_erlang_modules = modules;
+    }
+
+    /// Returns the project-known Erlang modules for the `unresolved_ffi`
+    /// check (BT-4022), if any were set.
+    #[must_use]
+    pub fn known_erlang_modules(&self) -> &std::collections::HashSet<String> {
+        &self.known_erlang_modules
     }
 
     /// Returns a reference to the project index.
@@ -1833,6 +1858,13 @@ impl LanguageService for SimpleLanguageService {
                         beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
                 options.has_package_dependencies = self.has_package_dependencies;
+                // BT-4022: project-known Erlang modules (hex-dep/native
+                // ebins + own `native/*.erl`, set by the LSP server at
+                // startup) so the `unresolved_ffi` check agrees with
+                // `beamtalk build`.
+                options
+                    .known_erlang_modules
+                    .clone_from(&self.known_erlang_modules);
                 // `current_package` so `AliasRegistry::add_pre_loaded`'s
                 // seeding-boundary exclusion (ADR 0108 Phase 5) actually has
                 // real package data to filter `pre_loaded_aliases` on below —

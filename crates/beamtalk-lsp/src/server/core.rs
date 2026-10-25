@@ -524,12 +524,17 @@ impl Backend {
     /// argument-type diagnostics, and any `@expect type` suppressing one
     /// shown as stale. Runs on a blocking task since it may spawn a
     /// `beamtalk_build_worker` BEAM node on a cold/stale cache.
+    ///
+    /// BT-4022: the same per-root walk also collects the project-known
+    /// Erlang modules for the `unresolved_ffi` check (cheap directory
+    /// scan, no BEAM node) and installs them via `set_known_erlang_modules`.
     pub(in crate::server) async fn load_type_cache(&self, roots: &[PathBuf]) {
         use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
         let roots_owned: Vec<PathBuf> = roots.to_vec();
-        let registry = tokio::task::spawn_blocking(move || {
+        let (registry, known_erlang_modules) = tokio::task::spawn_blocking(move || {
             let mut registry = NativeTypeRegistry::new();
+            let mut known_erlang_modules = std::collections::HashSet::new();
             for root in &roots_owned {
                 let Ok(root) = Utf8PathBuf::from_path_buf(root.clone()) else {
                     continue;
@@ -543,8 +548,16 @@ impl Backend {
                 ) {
                     registry.merge(root_registry);
                 }
+                // BT-4022: project-known Erlang modules for the
+                // `unresolved_ffi` check — same per-root walk, unioned
+                // across roots (a whole-session simplification, like
+                // `set_native_types` above — modules added by a later
+                // `beamtalk build` need an LSP restart).
+                known_erlang_modules.extend(
+                    beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&root),
+                );
             }
-            registry
+            (registry, known_erlang_modules)
         })
         .await
         .unwrap_or_default();
@@ -557,6 +570,14 @@ impl Backend {
             );
             let mut svc = self.service.lock().expect("service lock poisoned");
             svc.set_native_types(registry);
+        }
+        if !known_erlang_modules.is_empty() {
+            debug!(
+                count = known_erlang_modules.len(),
+                "Loaded project-known Erlang modules for unresolved_ffi"
+            );
+            let mut svc = self.service.lock().expect("service lock poisoned");
+            svc.set_known_erlang_modules(known_erlang_modules);
         }
     }
 

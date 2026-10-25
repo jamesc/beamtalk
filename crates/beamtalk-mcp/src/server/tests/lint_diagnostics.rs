@@ -187,6 +187,7 @@ fn run_module_analysis_near_miss_divider_span_points_at_comment_line() {
         None,
         false,
         None,
+        &std::collections::HashSet::new(),
     );
     let near_misses: Vec<_> = diags
         .iter()
@@ -226,6 +227,7 @@ fn run_module_analysis_reports_mismatched_file_name() {
         None,
         false,
         Some("event"),
+        &std::collections::HashSet::new(),
     );
     assert!(
         diags
@@ -253,6 +255,7 @@ fn run_module_analysis_does_not_report_matching_file_name() {
         None,
         false,
         Some("exdura_event"),
+        &std::collections::HashSet::new(),
     );
     assert!(
         !diags
@@ -385,6 +388,7 @@ fn run_module_analysis_reports_native_declaration_location_error() {
         None,
         false,
         None,
+        &std::collections::HashSet::new(),
     );
 
     assert!(
@@ -906,5 +910,65 @@ fn run_lint_structured_qualified_dependency_provision_diagnostic_lands_in_depend
         ) && provision[0].line == Some(4),
         "reported against http's file and line: {:?}",
         provision[0]
+    );
+}
+
+/// BT-4022: MCP `lint` must agree with `beamtalk lint` — an FFI call to a
+/// hex-dependency module (a `.beam` in the compiled rebar3 dep ebin dir)
+/// or to the package's own `native/*.erl` must not warn `Unknown Erlang
+/// module`, while a genuinely unknown module still does.
+#[test]
+fn run_lint_structured_knows_hex_dep_and_native_modules_but_warns_on_unknown() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("beamtalk.toml"),
+        "[package]\nname = \"mcp_ffi_fixture\"\nversion = \"0.1.0\"\n\n[dependencies]\n",
+    )
+    .unwrap();
+    // Stand-in for a previous `beamtalk build`'s rebar3 output — only the
+    // `.beam` stem is ever read, never its content.
+    let hex_ebin = root.join("_build/dev/native/default/lib/fakelib/ebin");
+    std::fs::create_dir_all(&hex_ebin).unwrap();
+    std::fs::write(hex_ebin.join("fakelib.beam"), b"not a real beam").unwrap();
+    std::fs::create_dir_all(root.join("native")).unwrap();
+    std::fs::write(
+        root.join("native/my_nif.erl"),
+        "-module(my_nif).\n-export([ping/0]).\nping() -> pong.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/FfiUser.bt"),
+        "hex_result := Erlang fakelib ping: 1.\n\
+         native_result := Erlang my_nif ping.\n\
+         unknown_result := Erlang definitely_unknown_xyz ping.\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(root.join("src").to_str().unwrap());
+    let messages: Vec<&str> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .map(|d| d.message.as_str())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Unknown Erlang module `definitely_unknown_xyz`")),
+        "genuinely unknown module should still warn: {messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("Unknown Erlang module `fakelib`")),
+        "hex-dep module should not warn: {messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("Unknown Erlang module `my_nif`")),
+        "own native module should not warn: {messages:?}"
     );
 }

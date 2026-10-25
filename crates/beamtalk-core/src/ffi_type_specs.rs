@@ -1335,6 +1335,70 @@ pub fn discover_dependency_beam_files(ebin_dirs: &[Utf8PathBuf]) -> Vec<Utf8Path
     beam_files
 }
 
+/// Collect the Erlang module names a project's `unresolved_ffi` check treats
+/// as known (BT-4022).
+///
+/// The union of two tiers:
+/// - `.beam` file stems in [`collect_project_dependency_ebin_dirs`]:
+///   the package's own compiled `native/` output, rebar3 hex/git dependency
+///   ebins (`_build/dev/native/default/lib/*/ebin/`), and path-dependency
+///   ebins (`_build/deps/*/ebin/`);
+/// - `native/*.erl` file stems under `project_root` (non-recursive, mirroring
+///   `beamtalk-cli`'s `collect_erl_files`): the package's own native sources
+///   are known even before any build, when no ebin dir exists yet.
+///
+/// The `.erl` tier assumes the near-universal `-module(foo)` in `foo.erl`
+/// convention rather than parsing each file; after any build the ebin tier
+/// reports the true compiled module names and any mismatch self-corrects.
+///
+/// Missing directories are silently skipped (a fresh checkout with no
+/// `native/` and no `_build/` yields an empty set, not an error).
+///
+/// This is the single source of truth for project-known FFI modules, shared
+/// by `beamtalk build`/`test`/`lint` (via `beamtalk-cli`), `beamtalk-lsp`,
+/// and the MCP `lint`/`diagnostic_summary` tools: every surface funnels the
+/// result into [`CompilerOptions::known_erlang_modules`](crate::CompilerOptions::known_erlang_modules),
+/// which [`AnalysisContext::with_options`](crate::semantic_analysis::AnalysisContext::with_options)
+/// threads into the `check_unresolved_ffi_modules` check — like
+/// [`extract_type_specs`], it lives in `beamtalk-core` so the
+/// LSP can share it without a `beamtalk-lsp -> beamtalk-cli` dependency
+/// (forbidden — see `docs/development/architecture-principles.md`).
+pub fn collect_project_known_erlang_modules(
+    project_root: &Utf8Path,
+) -> std::collections::HashSet<String> {
+    let mut known = std::collections::HashSet::new();
+
+    // Tier 1: compiled `.beam` files (own native output, hex/git deps, path deps).
+    let ebin_dirs = collect_project_dependency_ebin_dirs(project_root);
+    for beam_file in discover_dependency_beam_files(&ebin_dirs) {
+        if let Some(stem) = beam_file.file_stem() {
+            known.insert(stem.to_string());
+        }
+    }
+
+    // Tier 2: the package's own `native/*.erl` sources (pre-build fallback).
+    if let Ok(entries) = std::fs::read_dir(project_root.join("native")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_erl = path.is_file() && path.extension().is_some_and(|ext| ext == "erl");
+            if !is_erl {
+                continue;
+            }
+            if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
+                if let Some(stem) = utf8.file_stem() {
+                    known.insert(stem.to_string());
+                }
+            }
+        }
+    }
+
+    debug!(
+        count = known.len(),
+        "Collected project-known Erlang modules"
+    );
+    known
+}
+
 /// ADR 0075 Phase 1: Extract type specs from OTP and
 /// dependency `.beam` files and cache them.
 ///
@@ -1670,6 +1734,77 @@ mod tests {
         assert!(
             dirs.contains(&dep_ebin),
             "should find the path dependency's ebin dir: {dirs:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // collect_project_known_erlang_modules tests (BT-4022)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn known_erlang_modules_empty_project_yields_empty_set() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let known = collect_project_known_erlang_modules(&root);
+        assert!(known.is_empty(), "fresh project knows no extra modules");
+    }
+
+    #[test]
+    fn known_erlang_modules_covers_hex_dep_beams_and_native_sources() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // A rebar3 hex-dep ebin dir with a compiled `.beam` (content is
+        // irrelevant — only the stem is collected, never parsed).
+        let hex_ebin = root
+            .join("_build")
+            .join("dev")
+            .join("native")
+            .join("default")
+            .join("lib")
+            .join("telemetry")
+            .join("ebin");
+        std::fs::create_dir_all(&hex_ebin).unwrap();
+        std::fs::write(hex_ebin.join("telemetry.beam"), b"fake beam").unwrap();
+        // Non-`.beam` files in an ebin dir are ignored.
+        std::fs::write(hex_ebin.join("telemetry.app"), b"{}").unwrap();
+
+        // The package's own `native/*.erl` sources (pre-build: no ebin yet).
+        let native_dir = root.join("native");
+        std::fs::create_dir_all(&native_dir).unwrap();
+        std::fs::write(native_dir.join("my_nif.erl"), b"-module(my_nif).").unwrap();
+        // Non-`.erl` files under `native/` are ignored.
+        std::fs::write(native_dir.join("notes.txt"), b"not a module").unwrap();
+
+        let known = collect_project_known_erlang_modules(&root);
+        assert!(
+            known.contains("telemetry"),
+            "hex-dep .beam stem should be known: {known:?}"
+        );
+        assert!(
+            known.contains("my_nif"),
+            "own native/*.erl stem should be known: {known:?}"
+        );
+        assert_eq!(known.len(), 2, "nothing else should be known: {known:?}");
+    }
+
+    #[test]
+    fn known_erlang_modules_covers_own_compiled_native_ebin() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Post-build, the package's own native code lives compiled in
+        // `_build/dev/native/ebin/` — its true module names are known even
+        // when the `native/` source dir is gone.
+        let native_ebin = root.join("_build").join("dev").join("native").join("ebin");
+        std::fs::create_dir_all(&native_ebin).unwrap();
+        std::fs::write(native_ebin.join("my_nif.beam"), b"fake beam").unwrap();
+
+        let known = collect_project_known_erlang_modules(&root);
+        assert!(
+            known.contains("my_nif"),
+            "compiled own-native .beam stem should be known: {known:?}"
         );
     }
 
