@@ -24,8 +24,10 @@
 //!    - **Primitives** (everything else): Sync via `beamtalk_primitive:send/3`
 //!
 //! The primitive binding table from `lib/*.bt` (ADR 0007) drives stdlib method
-//! compilation, while call-site dispatch uses runtime type checking since we
-//! don't have static type information.
+//! compilation, while call-site dispatch uses runtime type checking — except
+//! for receivers with a statically-known sealed Value type, which compile to
+//! a guarded direct `Module:dispatch/3` call (BT-4069, the `typed_sealed`
+//! handler below).
 //!
 //! # Special Cases (Compiler Intrinsics)
 //!
@@ -47,7 +49,9 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Expression, MessageSelector, WellKnownSelector};
+use beamtalk_core::ast::{ClassKind, Expression, MessageSelector, WellKnownSelector};
+use beamtalk_core::semantic_analysis::TypeProvenance;
+use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
 use beamtalk_core::source_analysis::Span;
 
 /// Hint on the `stateful_block_dispatch` error a self-send inside a closure
@@ -71,8 +75,10 @@ type SendHandler = fn(
 /// load-bearing: earlier entries intentionally preempt later, more generic
 /// ones (e.g. `character_typed` before `protoobject`/`object`, `dict` before
 /// `list`, `class_method_self_send` before `self_dispatch`) — see each
-/// handler's own doc for why. A send that no entry claims falls through to
-/// `generate_message_send`'s `generate_runtime_dispatch` default.
+/// handler's own doc for why. `typed_sealed` is last deliberately: it only
+/// converts sends that would otherwise be fully dynamic, so every earlier,
+/// more specific handler keeps its sends. A send that no entry claims falls
+/// through to `generate_message_send`'s `generate_runtime_dispatch` default.
 const HANDLERS: &[(&str, SendHandler)] = &[
     (
         "character_typed",
@@ -111,7 +117,71 @@ const HANDLERS: &[(&str, SendHandler)] = &[
         "self_dispatch",
         CoreErlangGenerator::try_handle_self_dispatch,
     ),
+    (
+        "typed_sealed",
+        CoreErlangGenerator::try_handle_typed_sealed_send,
+    ),
 ];
+
+/// BT-4069: sealed classes whose instances are never
+/// `'$beamtalk_class'`-tagged maps carrying their own name, so a tag guard on
+/// them could never match and would only pessimize the send. Every entry is
+/// sealed (a `typed_sealed` hygiene test fails if one stops being so — a dead
+/// entry must be removed, not carried), and each cites the runtime clause that
+/// owns its representation:
+///
+/// - Raw Erlang terms, dispatched by `beamtalk_primitive:module_for_value/1`
+///   (integers, floats, binaries, atoms, funs, tuples, cons cells, pids,
+///   ports, references — including `nil`/`true`/`false` and `Character`
+///   codepoints, which are atoms and integers at runtime).
+/// - `Dictionary`: an untagged map by convention
+///   (`tagged_map_dispatch/1`'s `undefined` arm).
+/// - `Class`/`Metaclass`: `#beamtalk_object{}` records, not maps
+///   (`beamtalk_object_class`).
+/// - `ErlangModule`: tagged, but dynamically routed to the hand-written
+///   native proxy instead of a compiled module (`tagged_map_dispatch/1`'s
+///   `'ErlangModule'` arm) — excluding it is correctness, not just speed.
+///
+/// Deliberately NOT here: `Future` (runtime-only, no compiled module — ruled
+/// out by the builtin/generated check in [`CoreErlangGenerator::typed_sealed_value_target`])
+/// and the `Exception` family (dynamically routed via
+/// `bt@stdlib@exception:dispatch` — ruled out by a superclass-chain walk
+/// there, so future exception subclasses are covered without listing them).
+pub(in crate::core_erlang) const NON_TAGGED_MAP_CLASSES: &[&str] = &[
+    "Integer",
+    "Float",
+    "Character",
+    "String",
+    "Binary",
+    "Symbol",
+    "True",
+    "False",
+    "Boolean",
+    "UndefinedObject",
+    "Block",
+    "Tuple",
+    "List",
+    "Pid",
+    "Port",
+    "Reference",
+    "Dictionary",
+    "Class",
+    "Metaclass",
+    "ErlangModule",
+];
+
+/// BT-4069: a send receiver's statically-known sealed dispatch target — the
+/// class tag to guard on plus the module to direct-call. Resolved by
+/// [`CoreErlangGenerator::typed_sealed_value_target`]; BT-4127 reuses the
+/// same hook to inline `obj class` for typed receivers.
+pub(in crate::core_erlang) struct TypedSealedTarget {
+    /// The sealed class name: the `'$beamtalk_class'` tag the guard matches.
+    pub(in crate::core_erlang) class_name: String,
+    /// The class's compiled module, resolved like a qualified class
+    /// reference (registry under the referenced package, else the
+    /// deterministic `bt@{package}@{snake}` composition).
+    pub(in crate::core_erlang) module_name: String,
+}
 
 impl CoreErlangGenerator {
     /// Generates the `<{'error',..., _}>` case clauses shared by all
@@ -543,6 +613,247 @@ impl CoreErlangGenerator {
         ];
 
         Ok(seq.close(self, call_doc, "CharDispRes"))
+    }
+
+    /// BT-4069: resolves a send receiver to a static sealed-value dispatch
+    /// target, or `None` (stay dynamic) unless every condition holds:
+    ///
+    /// 1. The type checker's `TypeMap` records a `Known` class for the
+    ///    receiver's span with a trusted provenance (`Declared`, `Inferred`
+    ///    or `Substituted` — the same set `project_recv_type` trusts, but as
+    ///    a dispatch-owned rule: xref wants recall while dispatch wants
+    ///    precision, so the two must not share one predicate).
+    /// 2. The class is in the hierarchy, sealed (no subclasses, so the tag
+    ///    check is exact — and hierarchy stubs fail closed with
+    ///    `is_sealed: false`), and `Value`- or `Object`-kind (both are
+    ///    `'$beamtalk_class'`-tagged maps with the same dynamic path).
+    /// 3. Its instances really are tagged maps of its own name: not in
+    ///    [`NON_TAGGED_MAP_CLASSES`], not a runtime-only builtin without a
+    ///    compiled module (`Future`), and not the `Exception` family (whose
+    ///    dynamic sends route via `bt@stdlib@exception:dispatch`, a different
+    ///    entry point).
+    /// 4. Its ancestry is fully known (`has_cross_file_parent` fails closed —
+    ///    a missing link could hide an `Exception` ancestor).
+    ///
+    /// Why this is sound (the guard, not the annotation, is trusted):
+    ///
+    /// - The guard verifies the runtime value's tag; a mismatch (violated
+    ///   annotation, rebound parameter, `asType:` lie) falls back to a
+    ///   byte-identical dynamic send, so no rebind analysis is needed.
+    /// - A tag match means the dynamic path would route to the same module's
+    ///   `dispatch/3` (`tagged_map_dispatch` → `tagged_class_dispatch`, whose
+    ///   only divergences — proxy, exception entry, stdlib shadowing — are
+    ///   excluded above or prevented by the build's cross-package collision
+    ///   detection), and `dispatch/3` preserves DNU, extensions, superclass
+    ///   delegation and `perform:` identically — which is why no
+    ///   method-resolution check is needed. (`fieldAt:put:` is the one
+    ///   selector whose dynamic path diverges — a different hint via
+    ///   `is_ivar_method` — so the handler below excludes it.)
+    /// - Every hierarchy entry that can reach here has a compiled module
+    ///   exporting `dispatch/3` (batch hierarchies contain only compiled
+    ///   classes; REPL/builder classes never reach here because REPL codegen
+    ///   leaves `type_map` empty), and the remote `Mod:dispatch/3` call is
+    ///   late-bound, so hot reload needs no invalidation.
+    fn typed_sealed_value_target(&self, receiver: &Expression) -> Option<TypedSealedTarget> {
+        let beamtalk_core::semantic_analysis::InferredType::Known {
+            class_name,
+            provenance,
+            ..
+        } = self.type_map.get(receiver.span())?
+        else {
+            return None;
+        };
+        if !matches!(
+            provenance,
+            TypeProvenance::Declared(_)
+                | TypeProvenance::Inferred(_)
+                | TypeProvenance::Substituted(_)
+        ) {
+            return None;
+        }
+        if NON_TAGGED_MAP_CLASSES.contains(&class_name.as_str()) {
+            return None;
+        }
+        let hierarchy = self.class_hierarchy.as_ref()?;
+        if ClassHierarchy::is_builtin_class(class_name)
+            && !ClassHierarchy::is_generated_builtin_class(class_name)
+        {
+            return None;
+        }
+        let info = hierarchy.get_class(class_name)?;
+        if !info.is_sealed {
+            return None;
+        }
+        if !matches!(
+            hierarchy.resolve_class_kind(class_name),
+            ClassKind::Value | ClassKind::Object
+        ) {
+            return None;
+        }
+        if class_name.as_str() == "Exception"
+            || hierarchy
+                .superclass_chain(class_name)
+                .iter()
+                .any(|ancestor| ancestor.as_str() == "Exception")
+        {
+            return None;
+        }
+        if hierarchy.has_cross_file_parent(class_name) {
+            return None;
+        }
+        let module_name = self.compiled_module_name_qualified(class_name, info.package.as_deref());
+        Some(TypedSealedTarget {
+            class_name: class_name.to_string(),
+            module_name,
+        })
+    }
+
+    /// BT-4069: `HANDLERS`' last entry. Converts a send to a
+    /// statically-sealed-Value-typed receiver into a guarded direct
+    /// `Module:dispatch/3` call. Only fires when nothing earlier claimed the
+    /// send, so it purely converts would-be-dynamic sends.
+    ///
+    /// Two selectors never take this path: binary operators (which never
+    /// reach the dynamic fallthrough — preserving `generate_runtime_dispatch`'s
+    /// internal error exactly) and `fieldAt:put:` (whose dynamic path raises a
+    /// different hint via the runtime's `is_ivar_method` check than the
+    /// `dispatch/3` arm — semicolon vs em dash — so a direct call would
+    /// observably diverge; unreachable today since the object-reflection
+    /// intrinsic claims it first, kept as enforcement).
+    fn try_handle_typed_sealed_send(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        if matches!(selector, MessageSelector::Binary(_)) {
+            return Ok(None);
+        }
+        if matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut)) {
+            return Ok(None);
+        }
+        let Some(target) = self.typed_sealed_value_target(receiver) else {
+            return Ok(None);
+        };
+        Ok(Some(self.generate_typed_sealed_send(
+            receiver, selector, arguments, &target,
+        )?))
+    }
+
+    /// BT-4069: emits the guarded direct call for a
+    /// [`TypedSealedTarget`]: an `is_map` + `maps:get/3`-default case nest
+    /// (the `match_lowering` idiom — `maps:get/3` never raises, so no guard
+    /// position is needed) selecting between the direct `Module:dispatch/3`
+    /// call and a dynamic-send fallback in each mismatch arm:
+    ///
+    /// ```erlang
+    /// case call 'erlang':'is_map'(R) of
+    ///     <'true'> when 'true' ->
+    ///         case call 'maps':'get'('$beamtalk_class', R, 'undefined') of
+    ///             <'SealedWidget'> when 'true' ->
+    ///                 call 'bt@test@sealed_widget':'dispatch'('x', [], R)
+    ///             <NoMatch> when 'true' ->
+    ///                 call 'beamtalk_message_dispatch':'send'(R, 'x', [])
+    ///         end
+    ///     <'false'> when 'true' ->
+    ///         call 'beamtalk_message_dispatch':'send'(R, 'x', [])
+    ///     <NoMatch> when 'true' -> call 'erlang':'error'({'case_clause', NoMatch})
+    /// end
+    /// ```
+    ///
+    /// Receiver and arguments are sequenced once in evaluation order, then
+    /// bound to fresh temporaries (mirroring `guarded_op_doc`): each operand
+    /// is referenced up to four times below, so unlike the single-use dynamic
+    /// send they cannot stay inline. The outer boolean case carries an
+    /// explicit `case_clause_fallback` like `guarded_op_doc`'s guards; the
+    /// inner case is statically exhaustive via its wildcard arm.
+    fn generate_typed_sealed_send(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        target: &TypedSealedTarget,
+    ) -> Result<Document<'static>> {
+        let selector_atom = selector.name().to_string();
+
+        let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
+        all_exprs.push(receiver);
+        all_exprs.extend(arguments.iter());
+        let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "TSealed")?;
+        let mut docs_iter = docs.drain(..);
+        let receiver_doc = docs_iter.next().ok_or_else(|| {
+            CodeGenError::Internal("thread_subexprs dropped the receiver".to_string())
+        })?;
+        let arg_docs: Vec<Document<'static>> = docs_iter.collect();
+
+        let receiver_var = self.fresh_temp_var("TSealedRecv");
+        let arg_vars: Vec<String> = arg_docs
+            .iter()
+            .map(|_| self.fresh_temp_var("TSealedArg"))
+            .collect();
+        let args_list_doc = Self::join_docs_with_commas(
+            arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
+        );
+
+        let direct_doc = docvec![
+            "call ",
+            leaf::atom(target.module_name.clone()),
+            ":'dispatch'(",
+            leaf::atom(selector_atom.clone()),
+            ", [",
+            args_list_doc.clone(),
+            "], ",
+            leaf::var(receiver_var.clone()),
+            ")",
+        ];
+        let fallback_doc = docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(receiver_var.clone()),
+            ", ",
+            leaf::atom(selector_atom),
+            ", [",
+            args_list_doc,
+            "])",
+        ];
+
+        let no_match_inner = self.fresh_temp_var("TSealedNoMatch");
+        let no_match_outer = self.case_clause_fallback("TSealedOuterNoMatch");
+        let case_doc = docvec![
+            "case call 'erlang':'is_map'(",
+            leaf::var(receiver_var.clone()),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'maps':'get'('$beamtalk_class', ",
+            leaf::var(receiver_var.clone()),
+            ", 'undefined') of ",
+            "<",
+            leaf::atom(target.class_name.clone()),
+            "> when 'true' -> ",
+            direct_doc,
+            " <",
+            leaf::var(no_match_inner),
+            "> when 'true' -> ",
+            fallback_doc.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            fallback_doc,
+            no_match_outer,
+            " end",
+        ];
+
+        let mut body = case_doc;
+        for (var, doc) in arg_vars.into_iter().zip(arg_docs).rev() {
+            body = docvec!["let ", leaf::var(var), " = ", doc, " in ", body];
+        }
+        body = docvec![
+            "let ",
+            leaf::var(receiver_var),
+            " = ",
+            receiver_doc,
+            " in ",
+            body
+        ];
+        Ok(self.close_prelude(&preamble, body, "TSealedRes"))
     }
 
     /// Generates a cast (fire-and-forget) message send.

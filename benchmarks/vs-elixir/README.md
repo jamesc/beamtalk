@@ -300,9 +300,9 @@ off, or a value rebuilt on every use.
 ## Effect of the in-flight PRs
 
 Measured by building each PR (`BEAMTALK=<worktree>/target/debug/beamtalk`,
-7 rounds; `results/bench-pr4504.md`, `results/bench-pr4503.md`). Reductions
-and words per operation, Beamtalk side, main → PR. Rows not listed did not
-move.
+7 rounds; `results/bench-pr4504.md`, `results/bench-pr4503.md`,
+`results/bench-pr4530.md`). Reductions and words per operation, Beamtalk
+side, main → PR. Rows not listed did not move.
 
 | Row | Main | #4504 (BT-4065) | #4503 (BT-4071) |
 |---|---|---|---|
@@ -325,7 +325,15 @@ move.
 - **BT-4071 (#4503)** cuts `self hasField:` in an actor from +812 to +228
   reductions and from +3,209 to +374 words over a plain actor call. The rest
   is the runtime method walk, which a compiled `hasField:` would avoid.
-- **BT-4069** (backlog: sends to a parameter typed as a sealed Value compile to
-  a direct call) should move 1a, 1c and 9b to about 2 reductions and 0 words,
-  and the sealed stdlib receivers in 10a, 10b and 9a's `value`. It would not
-  move 1b, 4a-4c, 5a or 5b, whose receivers are open or untyped.
+- **BT-4069 (#4530)** compiles sends to a sealed-Value-typed receiver to a
+  tag-guarded direct `Mod:dispatch/3` (byte-identical dynamic send on
+  mismatch). Moved rows, main → PR, Beamtalk side (7 rounds,
+  `results/bench-pr4530.md`): 1a sealed getter 29.1 red / 28 w → **3.00 / 0**
+  (191 ns → 3.6 ns);
+  1c sealed method 29.1 / 28 → **3.00 / 0**; 9b `isOk` 25.1 / 27 →
+  **3.00 / 0**; 2a `withX:` 30.2 / 34 → **4.01 / 6** (the 6 words are
+  Elixir's too — the `maps:put` result, not the send). Unmoved as designed:
+  1b, 4a–4c, 5a, 5b (open or untyped receivers stay dynamic); 10a, 10b
+  (`at:`/`at:put:` are dict intrinsics claimed before dispatch selection, and
+  Dictionary instances are untagged maps the guard could never match); 9a's
+  `value` (the block-or-send handler owns the `value` selector).

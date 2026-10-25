@@ -20,6 +20,8 @@
 //! - [`trait_flattening`] — ADR 0127 §3/§10 (BT-3590): a `uses:` class's
 //!   flattened provisions reaching compiled output through both the
 //!   self-sufficient and driver-handoff codegen entry points
+//! - [`typed_sealed`] — BT-4069: sends to sealed-Value-typed receivers
+//!   compiling to a guarded direct `Module:dispatch/3` call
 
 pub use super::*;
 pub use beamtalk_core::ast::*;
@@ -243,6 +245,7 @@ mod threaded_locals_agreement;
 mod tier2_block_local_corpus;
 mod tier2_block_local_inner_loop;
 mod trait_flattening;
+mod typed_sealed;
 mod value_position_assignment_agreement;
 mod value_type_conditional_family_verifier_corpus;
 mod value_type_fold_family_corpus;
