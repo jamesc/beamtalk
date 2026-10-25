@@ -108,6 +108,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "each",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 552,
                                                         end: 556,

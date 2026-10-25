@@ -89,6 +89,7 @@ Module {
                                         parameters: [
                                             BlockParameter {
                                                 name: "x",
+                                                type_annotation: None,
                                                 span: Span {
                                                     start: 175,
                                                     end: 176,
@@ -403,6 +404,7 @@ Module {
                         parameters: [
                             BlockParameter {
                                 name: "x",
+                                type_annotation: None,
                                 span: Span {
                                     start: 355,
                                     end: 356,
@@ -432,6 +434,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "y",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 372,
                                                         end: 373,
@@ -615,6 +618,7 @@ Module {
                             parameters: [
                                 BlockParameter {
                                     name: "item",
+                                    type_annotation: None,
                                     span: Span {
                                         start: 479,
                                         end: 483,
@@ -644,6 +648,7 @@ Module {
                                                 parameters: [
                                                     BlockParameter {
                                                         name: "val",
+                                                        type_annotation: None,
                                                         span: Span {
                                                             start: 502,
                                                             end: 505,

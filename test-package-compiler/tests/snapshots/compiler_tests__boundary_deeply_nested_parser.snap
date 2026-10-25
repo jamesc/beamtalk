@@ -723,6 +723,7 @@ Module {
                                         parameters: [
                                             BlockParameter {
                                                 name: "x",
+                                                type_annotation: None,
                                                 span: Span {
                                                     start: 657,
                                                     end: 658,
@@ -753,6 +754,7 @@ Module {
                                                                         parameters: [
                                                                             BlockParameter {
                                                                                 name: "y",
+                                                                                type_annotation: None,
                                                                                 span: Span {
                                                                                     start: 664,
                                                                                     end: 665,
@@ -783,6 +785,7 @@ Module {
                                                                                                         parameters: [
                                                                                                             BlockParameter {
                                                                                                                 name: "z",
+                                                                                                                type_annotation: None,
                                                                                                                 span: Span {
                                                                                                                     start: 671,
                                                                                                                     end: 672,

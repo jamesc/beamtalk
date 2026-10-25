@@ -215,6 +215,7 @@ Module {
                                             parameters: [
                                                 BlockParameter {
                                                     name: "x",
+                                                    type_annotation: None,
                                                     span: Span {
                                                         start: 727,
                                                         end: 728,

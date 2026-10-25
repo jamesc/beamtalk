@@ -2532,6 +2532,7 @@ fn test_block_value_keyword_field_assignment_arg_hoisted() {
 
     let block_param = BlockParameter {
         name: "x".into(),
+        type_annotation: None,
         span: Span::new(0, 1),
     };
     let block = Expression::Block(Block::new(
