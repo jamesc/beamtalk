@@ -7,6 +7,8 @@
 // BT-2095: Character-literal receivers dispatch to Character primitives.
 // BT-3214: `Character value: N` factory-call receivers (not just literals)
 // dispatch to Character primitives, for non-printable codepoints too.
+// BT-4161: the factory with a computed argument, and `ifTrue:ifFalse:`
+// conditionals answering a Character, dispatch to Character primitives.
 
 TestCase subclass: CharacterTest
 
@@ -138,3 +140,43 @@ TestCase subclass: CharacterTest
     self assert: $A lowercase asString equals: "a"
     self assert: $a uppercase lowercase asString equals: "a"
     self assert: (Character value: 97) uppercase asString equals: "A"
+
+  // BT-4161: `Character value:` with a COMPUTED argument answers a Character,
+  // matching the literal form — downstream sends dispatch through Character,
+  // not Integer. (Found while porting Bandit's chunked-body reader: a
+  // hex-encode loop built digit characters via `Character value: (48 + d)`.)
+  testCharacterValueFactoryComputedArgument =>
+    self assert: (Character value: (48 + 6)) class equals: Character
+    self assert: (Character value: (48 + 6)) printString equals: "$6"
+    self assert: (Character value: (48 + 6)) asString size equals: 1
+    self assert: (Character value: (48 + 6)) asString equals: "6"
+    self assert: ((Character value: (48 + 6)) respondsTo: #uppercase)
+
+  // BT-4161: an `ifTrue:ifFalse:` conditional answering a Character is
+  // transparent — with a literal condition only the taken branch decides
+  // (the other is never evaluated), so the whole conditional dispatches
+  // through Character. Without this, the send falls through to generic
+  // runtime dispatch and is misrouted to `Integer>>asString`, producing
+  // "54" instead of "6". (`@expect lint`: the literal condition is
+  // deliberate — it pins the constant-condition shape.)
+  testCharacterConditionalTakenBranch =>
+    @expect lint
+    self assert: (true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) printString equals: "$6"
+    @expect lint
+    self assert: (true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) class equals: Character
+    @expect lint
+    self assert: (true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) asString size equals: 1
+    @expect lint
+    self assert: (false ifTrue: [0] ifFalse: [Character value: (48 + 6)]) printString equals: "$6"
+    @expect lint
+    self assert: (false ifTrue: [$A] ifFalse: [0]) class equals: Integer
+
+  // BT-4161: with a NON-constant condition the taken branch is unknown
+  // statically, so the conditional is Character-typed only when BOTH
+  // branches agree — a mixed pair stays Integer-dispatched, since routing
+  // it to Character would miscompile the Integer-typed path.
+  testCharacterConditionalBothBranches =>
+    flag := 1 < 2
+    self assert: (flag ifTrue: [$A] ifFalse: [$B]) class equals: Character
+    self assert: (flag ifTrue: [$A] ifFalse: [$B]) asString size equals: 1
+    self assert: (flag ifTrue: [$A] ifFalse: [0]) class equals: Integer

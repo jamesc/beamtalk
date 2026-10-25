@@ -74,7 +74,9 @@ impl CoreErlangGenerator {
 /// literal (`$A`), the class factory `Character value:`, and the two
 /// instance methods with a `-> Character` return type, `uppercase` and
 /// `lowercase` (applied recursively, since their own receiver must itself
-/// be Character-typed — e.g. `$a uppercase lowercase`).
+/// be Character-typed — e.g. `$a uppercase lowercase`) — plus an
+/// `ifTrue:ifFalse:` conditional whose outcome is statically Character (see
+/// [`conditional_result_is_character_typed`]).
 ///
 /// This distinction matters because Character values are bare integers at
 /// the BEAM level (`Character` is declared `Integer subclass:`), so the
@@ -98,6 +100,7 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
             receiver,
             selector,
             arguments,
+            is_cast,
             ..
         } => {
             let is_value_factory_call = arguments.len() == 1
@@ -117,8 +120,64 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
                     MessageSelector::Unary(name) if name == "uppercase" || name == "lowercase"
                 )
                 && is_character_typed_receiver(receiver);
-            is_value_factory_call || is_character_returning_unary_send
+            let is_character_typed_conditional = !is_cast
+                && arguments.len() == 2
+                && matches!(
+                    selector.well_known(),
+                    Some(WellKnownSelector::IfTrueIfFalse)
+                )
+                && conditional_result_is_character_typed(receiver, &arguments[0], &arguments[1]);
+            is_value_factory_call
+                || is_character_returning_unary_send
+                || is_character_typed_conditional
         }
+        _ => false,
+    }
+}
+
+/// True if an `ifTrue:ifFalse:` send with this condition and these branch
+/// arguments statically answers a Character (BT-4161).
+///
+/// A conditional answers exactly one branch's value (`True>>ifTrue:ifFalse:`
+/// answers `trueBlock value`, `False>>ifTrue:ifFalse:` answers `falseBlock
+/// value` — both pinned by
+/// `true_false_if_true_if_false_bodies_match_codegen_recognizer`, which must
+/// stay in sync with this function), so:
+/// - a literal-`true`/`false` condition takes the statically known branch,
+///   and only that branch's type matters — the untaken branch is never
+///   evaluated, so its type is irrelevant;
+/// - a non-constant condition takes an unknown branch, so both branches
+///   must be Character-typed.
+///
+/// Each branch must be a block literal whose last body statement — the
+/// block's answer — is itself Character-typed (recursively, so nested
+/// conditionals and factory calls compose). Anything else (an empty block,
+/// which answers `nil`; a non-block argument, whose `value` is dynamically
+/// typed) fails closed to `false`, preserving today's Integer dispatch.
+/// Single-branch `ifTrue:`/`ifFalse:` are deliberately not recognized: they
+/// answer `nil` on the untaken path.
+fn conditional_result_is_character_typed(
+    condition: &Expression,
+    true_branch: &Expression,
+    false_branch: &Expression,
+) -> bool {
+    let true_typed = branch_value_is_character_typed(true_branch);
+    let false_typed = branch_value_is_character_typed(false_branch);
+    match condition.unwrap_parens().as_literal_bool() {
+        Some(true) => true_typed,
+        Some(false) => false_typed,
+        None => true_typed && false_typed,
+    }
+}
+
+/// True if a conditional branch argument — a block literal — answers a
+/// Character: its last body statement's expression is Character-typed.
+fn branch_value_is_character_typed(branch: &Expression) -> bool {
+    match branch.unwrap_parens() {
+        Expression::Block(block) => block
+            .body
+            .last()
+            .is_some_and(|stmt| is_character_typed_receiver(&stmt.expression)),
         _ => false,
     }
 }
