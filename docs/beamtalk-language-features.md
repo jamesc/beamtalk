@@ -85,7 +85,7 @@ dialog := "She said ""hello"""  // → She said "hello"
 
 ### Character Methods
 
-Character-typed receivers dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values. This applies to character literals (`$A`), the `Character value:` class factory, and chained `uppercase`/`lowercase` sends — all statically Character-typed forms:
+Character-typed receivers dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values. This applies to character literals (`$A`), the `Character value:` class factory, chained `uppercase`/`lowercase` sends, and `ifTrue:ifFalse:` conditionals whose outcome is statically Character — all statically Character-typed forms. A conditional is transparent when a literal condition takes the known branch, or when both branches agree (a non-constant condition with mixed branches stays Integer-dispatched):
 
 ```beamtalk
 $A asInteger              // => 65
@@ -98,6 +98,7 @@ $A respondsTo: #uppercase // => true
 Character value: 65       // => $A
 (Character value: 10) asString   // => "\n" (LF, not "10")
 $a uppercase asString            // => "A"
+(true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) asString  // => "6"
 ```
 
 ### String Operations (Grapheme-Aware)
