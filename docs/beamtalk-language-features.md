@@ -853,6 +853,14 @@ count := 0
 [:x | temp := x * 2. temp + 1]
 ```
 
+**Scoping:** a variable first assigned inside a block is local to that block —
+`temp` above is invisible outside it — and nested blocks see their enclosing
+blocks' locals. Assigning a variable declared *outside* the block (a captured
+local) is a separate rule: it compiles only where the block is written directly
+as the argument of a control-flow construct or a compiler-known collection
+message (see [Control Flow and Mutations](#control-flow-and-mutations) and
+[ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md)).
+
 **Non-local returns:** `^` inside a block returns from the *enclosing method*, not just from the block. This is the standard Smalltalk non-local return semantics and enables clean early-exit patterns:
 
 ```beamtalk
