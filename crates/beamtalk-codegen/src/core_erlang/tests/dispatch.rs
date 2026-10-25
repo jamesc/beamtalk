@@ -2957,9 +2957,7 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
     // `self eachItem: [:x | count := count + x]` — had no breadcrumb
     // coverage at all. (ADR 0133 rejects this shape; codegen tests skip
     // validation, so it still compiles here, as a plain self-send of a
-    // Tier 2 fun.) Mirrors the real-world pattern verified in
-    // stdlib/test/fixtures/hom_composability_actor.bt's
-    // testMutatingBlockInCustomLoop.
+    // Tier 2 fun.)
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: value = 0\n\n",

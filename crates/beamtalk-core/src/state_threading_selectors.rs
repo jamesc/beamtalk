@@ -29,11 +29,11 @@
 //! `ifTrue:`/`ifFalse:` (see `try_generate_boolean_protocol`'s `and:`/`or:`
 //! arms in `beamtalk-codegen`), so they need the same state-threading
 //! classification here — both as a state-threading keyword selector (so
-//! `check_actor_field_mutation_in_closure`/`DispatchKind::ControlFlow`
-//! treat a mutation inside their block argument as safe) and as a
-//! conditional selector (so `control_flow_has_mutations`/
-//! `classify_body_expr` route the enclosing statement through the same
-//! `{Result, NewState}` unpacking as `ifTrue:`/`ifFalse:`).
+//! a mutation inside their block argument counts as control-flow
+//! threading) and as a conditional selector (so
+//! `control_flow_has_mutations`/`classify_body_expr` route the enclosing
+//! statement through the same `{Result, NewState}` unpacking as
+//! `ifTrue:`/`ifFalse:`).
 
 use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 
