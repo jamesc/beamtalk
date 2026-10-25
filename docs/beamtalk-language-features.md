@@ -1744,6 +1744,12 @@ klass instanceCount         // resolves class-side method
 // FFI returns. `new` / `basicNew` on a *concrete* class metatype infers an
 // instance of that class; on an *abstract* class (e.g. `Collection`,
 // `Behaviour`) it stays Dynamic — instantiating an abstract class is an error.
+
+// Block parameter annotations — accepted by the parser and preserved by
+// `beamtalk fmt`. A union (or `&`/`\` chain) needs grouping parens so its
+// `|` doesn't swallow the block's own `|` parameter separator.
+#(1, 2, 3) collect: [:x :: Integer | x + 1]
+self run: [:x :: (Integer | String) | x]
 ```
 
 ### Current Semantics
@@ -1754,6 +1760,7 @@ klass instanceCount         // resolves class-side method
 - Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments. When a type annotation is present, the default value is optional (`field: x :: Integer` / `state: x :: Integer`) — the type annotation is the contract, and `nil` is used internally.
 - Local variable annotations (`name :: Type := expr`) declare the binding's type at type-erasure boundaries. See [Local Variable Type Annotations](#local-variable-type-annotations) below.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
+- Block parameter annotations (`[:x :: Integer | ...]`) are parsed and preserved by `beamtalk fmt`; parameter types are still inferred from the enclosing message signature.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
 ### Local Variable Type Annotations
