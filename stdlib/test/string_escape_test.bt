@@ -1,0 +1,34 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4163 (ADR 0138): string literal escape sequences — \r \n \t \\ \" \0
+// lex to CR LF TAB backslash " NUL. "" doubling and \{ \} are unchanged.
+//
+// No \" case below: fmt canonicalizes every embedded quote to "" doubling,
+// so \" never survives in fmt-clean sources. \" lexing is pinned by the
+// lexer's Rust unit tests instead (same value, same codegen).
+
+TestCase subclass: StringEscapeTest
+
+  testCRLFIsSingleGrapheme => self assert: ("\r\n" size =:= 1)
+
+  testCRLFByteEqualsCharacterBuilt =>
+    built := (Character value: 13) asString ++ (Character value: 10) asString
+    self assert: ("\r\n" =:= built)
+
+  testEachEscapeValue =>
+    self assert: ("\r" =:= (Character value: 13) asString)
+    self assert: ("\n" =:= (Character value: 10) asString)
+    self assert: ("\t" =:= (Character value: 9) asString)
+    self assert: "\\" size equals: 1
+    self assert: "\0" size equals: 1
+
+  testEscapedBackslashDoesNotEscape =>
+    // \\ is one backslash; the n after it is a plain n.
+    self assert: "\\n" size equals: 2
+    self assert: ("\\n" at: 1) equals: "\\"
+
+  testEscapeInInterpolation =>
+    // Escapes decode inside interpolated segments too.
+    b := "B"
+    self assert: ("a\n{b}c" size =:= 4)
