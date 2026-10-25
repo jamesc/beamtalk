@@ -41,9 +41,10 @@ use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MapPatternKey,
-    MatchArm, MessageSelector, MethodDefinition, Module, ParameterDefinition, Pattern,
-    ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, SlotKind, StandaloneMethodDefinition,
-    StateDeclaration, StringSegment, TypeAliasDefinition, TypeAnnotation,
+    MatchArm, MessageSelector, MethodDefinition, Module, NativeDeclaration, ParameterDefinition,
+    Pattern, ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, SlotKind,
+    StandaloneMethodDefinition, StateDeclaration, StringSegment, TypeAliasDefinition,
+    TypeAnnotation,
 };
 use crate::source_analysis::{Severity, lex_with_eof, parse, parse_method};
 use beamtalk_cerl_doc::docvec;
@@ -357,16 +358,17 @@ fn unparse_selector_and_params(
 
 // --- Document builders (pub(crate) for testing) ---
 
-/// One of the three top-level declaration kinds that can appear in a
+/// One of the four top-level declaration kinds that can appear in a
 /// [`Module`] outside of standalone methods and expressions.
 ///
-/// Used only by [`unparse_module_doc`] to interleave classes, protocols, and
-/// type aliases back into their original source order rather than
-/// grouping them by kind.
+/// Used only by [`unparse_module_doc`] to interleave classes, protocols,
+/// type aliases, and native declarations back into their original source
+/// order rather than grouping them by kind.
 enum TopLevelDecl<'a> {
     Class(&'a ClassDefinition),
     Protocol(&'a ProtocolDefinition),
     TypeAlias(&'a TypeAliasDefinition),
+    Native(&'a NativeDeclaration),
 }
 
 impl TopLevelDecl<'_> {
@@ -376,6 +378,7 @@ impl TopLevelDecl<'_> {
             Self::Class(class) => class.comments.leading_blank_line,
             Self::Protocol(protocol) => protocol.comments.leading_blank_line,
             Self::TypeAlias(type_alias) => type_alias.comments.leading_blank_line,
+            Self::Native(native) => native.comments.leading_blank_line,
         }
     }
 }
@@ -391,21 +394,24 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         docs.push(line());
     }
 
-    // Classes, protocols, and type aliases (ADR 0068 Phase 2a, ADR 0108 Phase 1)
-    // are interleaved back into their original source order rather
-    // than grouped by kind — a `type` alias declared after a class must stay
-    // after that class on a format round-trip. `sort_by_key` is a stable
-    // sort, so declarations that legitimately share a start offset
-    // (shouldn't happen for top-level decls) keep this append order:
-    // classes, then protocols, then type aliases.
+    // Classes, protocols, type aliases, and native declarations
+    // (ADR 0068 Phase 2a, ADR 0108 Phase 1) are interleaved back into their
+    // original source order rather than grouped by kind — a `type` alias
+    // declared after a class must stay after that class on a format
+    // round-trip. `sort_by_key` is a stable sort, so declarations that
+    // legitimately share a start offset (shouldn't happen for top-level
+    // decls) keep this append order: classes, then protocols, then type
+    // aliases, then native declarations.
     let mut top_level_decls: Vec<TopLevelDecl<'_>> = Vec::new();
     top_level_decls.extend(module.classes.iter().map(TopLevelDecl::Class));
     top_level_decls.extend(module.protocols.iter().map(TopLevelDecl::Protocol));
     top_level_decls.extend(module.type_aliases.iter().map(TopLevelDecl::TypeAlias));
+    top_level_decls.extend(module.native_declarations.iter().map(TopLevelDecl::Native));
     top_level_decls.sort_by_key(|decl| match decl {
         TopLevelDecl::Class(class) => class.span.start(),
         TopLevelDecl::Protocol(protocol) => protocol.span.start(),
         TopLevelDecl::TypeAlias(type_alias) => type_alias.span.start(),
+        TopLevelDecl::Native(native) => native.span.start(),
     });
 
     for (i, decl) in top_level_decls.into_iter().enumerate() {
@@ -422,6 +428,9 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
             TopLevelDecl::Protocol(protocol) => docs.push(unparse_protocol_definition(protocol)),
             TopLevelDecl::TypeAlias(type_alias) => {
                 docs.push(unparse_type_alias_definition(type_alias));
+            }
+            TopLevelDecl::Native(native) => {
+                docs.push(unparse_native_declaration(native));
             }
         }
         docs.push(line());
@@ -872,6 +881,67 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
         }
         docs.push(nest(2, docvec![line(), unparse_method_definition(method)]));
         first_signature = false;
+    }
+
+    concat(docs)
+}
+
+/// Builds a [`Document`] for a [`NativeDeclaration`] (ADR 0075 Phase 2).
+///
+/// Emits the header (`declare native: <module>`) followed by the typed
+/// method signatures. Structurally a slimmed-down
+/// [`unparse_protocol_definition`]: no type parameters, no `extending:`
+/// clause, no class-side signatures, no provided methods — signature
+/// entries (including their doc comments and inter-signature blank lines)
+/// reuse [`unparse_protocol_signature_entry`] directly.
+#[must_use]
+fn unparse_native_declaration(native: &NativeDeclaration) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+
+    // Non-doc leading comments
+    docs.extend(unparse_comment_attachment_leading(&native.comments));
+
+    // Blank line between this declaration's leading comments and its own
+    // doc comment/header — mirrors the protocol handling above.
+    if leading_ends_with_orphaned_doc_comment(&native.comments)
+        || native.comments.blank_line_after_comments
+    {
+        docs.push(line());
+    }
+
+    // Doc comment
+    if let Some(doc) = &native.doc_comment {
+        for line_text in doc.lines() {
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", leaf::raw_text(line_text)]);
+            }
+            docs.push(line());
+        }
+    }
+
+    // Header: `declare native: <module>`
+    docs.push(docvec![
+        "declare native: ",
+        leaf::ident(&native.module.name),
+    ]);
+
+    // Trailing end-of-line comment on the header line, e.g.
+    // `declare native: lists // comment`.
+    if let Some(trail) = &native.comments.trailing {
+        docs.push(Document::Str("  "));
+        docs.push(unparse_comment(trail));
+    }
+
+    // Method signatures (indented by 2 spaces), reusing the protocol
+    // signature-entry renderer for inter-signature blank lines.
+    let mut first_signature = true;
+    for sig in &native.method_signatures {
+        docs.push(nest(
+            2,
+            unparse_protocol_signature_entry(sig, None, &mut first_signature),
+        ));
     }
 
     concat(docs)
