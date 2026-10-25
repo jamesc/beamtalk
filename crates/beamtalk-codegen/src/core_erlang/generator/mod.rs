@@ -165,10 +165,6 @@ pub struct CoreErlangGenerator {
     /// `safe_dispatch` directly, because the block may execute in a different
     /// process (e.g. Timer callback, cross-actor callback).
     pub(in crate::core_erlang) block_depth: usize,
-    /// BT-3936: whether the innermost enclosing closure (`block_depth > 0`) is a
-    /// Tier 1 `fun`, which cannot hand the actor `State` back. A Tier 2 `fun`
-    /// returns `{Result, StateAccN}`, so it does carry it (false).
-    pub(in crate::core_erlang) closure_drops_state: bool,
     /// ADR 0137 Phase 2a (BT-4020): the cell bracket's mode and bookkeeping
     /// (`synced_call.rs`). Inert outside an actor instance method.
     pub(in crate::core_erlang) synced: super::synced_call::SyncedCallState,
@@ -500,7 +496,6 @@ impl CoreErlangGenerator {
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
-            closure_drops_state: false,
             synced: super::synced_call::SyncedCallState::new(),
             class_var_capture: None,
             actor_closure: None,

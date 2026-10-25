@@ -54,10 +54,6 @@ use beamtalk_core::semantic_analysis::TypeProvenance;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
 use beamtalk_core::source_analysis::Span;
 
-/// Hint on the `stateful_block_dispatch` error a self-send inside a closure
-/// raises when the callee changed actor state (BT-3936).
-const CLOSURE_SELF_SEND_STATE_CHANGE_HINT: &str = "A self-send inside a block changed actor state, but the block cannot return it; return the value and assign it in the method instead";
-
 /// One `generate_message_send` dispatch strategy: `Some(doc)` claims the
 /// send, `None` defers to the next entry in [`HANDLERS`].
 type SendHandler = fn(
@@ -454,11 +450,11 @@ impl CoreErlangGenerator {
             }
 
             // BT-3985: a user-defined binary selector sent to `self` in an
-            // actor instance method is a self-dispatch like any other (it
-            // threads the callee's State, and inside a Tier 1 closure hits
-            // `closure_self_dispatch_state_guard`); in a class method it is
-            // a direct class-side self-send (a send through the class's own
-            // gen_server would deadlock). Both take the HANDLERS path
+            // actor instance method is a self-dispatch like any other (in a
+            // closure it runs against the actor-state cell, ADR 0137); in a
+            // class method it is a direct class-side self-send (a send
+            // through the class's own gen_server would deadlock). Both take
+            // the HANDLERS path
             // (`try_handle_self_dispatch` / `try_handle_class_method_self_send`)
             // instead of the operator lowering. The threaded positions already route it through
             // `generate_self_dispatch` via `is_dispatching_actor_self_send`.
@@ -2156,12 +2152,7 @@ impl CoreErlangGenerator {
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let error_clause = self.generate_self_dispatch_error_clause("SelfError", &selector_atom);
 
-        let reply_body = self.closure_self_dispatch_state_guard(
-            &state_var,
-            &current_state,
-            &selector_atom,
-            leaf::var(result_var.clone()),
-        );
+        let reply_body = leaf::var(result_var.clone());
         let doc = docvec![
             "case ",
             self.safe_dispatch_call_doc(selector_atom, args_doc, current_state),
@@ -2178,100 +2169,6 @@ impl CoreErlangGenerator {
         ];
 
         Ok(doc)
-    }
-
-    /// Whether the code being compiled is inside an actor closure that cannot
-    /// hand a dispatch's returned `State` back (a Tier 1 `fun`): the one
-    /// condition [`Self::closure_self_dispatch_state_guard`] applies under,
-    /// shared with `generate_super_send` so both decide it identically.
-    fn in_state_dropping_closure(&self) -> bool {
-        // A class method of an actor class has `context == Actor` but no
-        // instance `State` to compare against (the `is_actor_self_send` rule,
-        // BT-3581): its closures never carry the guard.
-        self.block_depth > 0
-            && self.closure_drops_state
-            && self.context == CodeGenContext::Actor
-            && !self.in_class_method()
-    }
-
-    /// BT-3936 (ADR 0133 § Error examples): the reply body of a self-send
-    /// dispatch that is compiled inside a closure (`block_depth > 0`) that is a Tier 1 `fun`. The callee's returned
-    /// `State` has nowhere to go from there: the closure answers one value,
-    /// and the surrounding method's `State` is not the closure's to rebind.
-    /// A Tier 2 `fun` is exempt (`closure_drops_state` is false): it takes
-    /// `StateAcc` and returns `{Result, StateAccN}`, so it carries the change
-    /// back to its caller (and a consumer that cannot take it back already
-    /// raises `stateful_block_dispatch`).
-    /// So the callee's returned state (`reply_state`) is compared (`=:=`, which
-    /// shortcuts on identity) with the state the send was dispatched against
-    /// (`dispatched_state`): equal answers `ok_doc` as before, different
-    /// raises `stateful_block_dispatch` rather than drop the change silently.
-    ///
-    /// Outside a closure the doc is `ok_doc` unchanged. This is the one place
-    /// every actor self-send dispatch form (threaded `Bind`, discarding,
-    /// sealed) shares; not a per-call-site check.
-    fn closure_self_dispatch_state_guard(
-        &mut self,
-        reply_state: &str,
-        dispatched_state: &str,
-        selector_atom: &str,
-        ok_doc: Document<'static>,
-    ) -> Document<'static> {
-        let applies = self.in_state_dropping_closure();
-        self.state_guard_when(
-            applies,
-            reply_state,
-            dispatched_state,
-            selector_atom,
-            ok_doc,
-        )
-    }
-
-    /// [`Self::closure_self_dispatch_state_guard`] with the position decided by
-    /// the caller (`generate_super_send` also guards a position that became
-    /// State-threaded only because it holds a bracketed call).
-    fn state_guard_when(
-        &mut self,
-        applies: bool,
-        reply_state: &str,
-        dispatched_state: &str,
-        selector_atom: &str,
-        ok_doc: Document<'static>,
-    ) -> Document<'static> {
-        if !applies {
-            return ok_doc;
-        }
-        let class_name = self.class_name();
-        let error_doc = self.generate_stateful_block_dispatch_error(
-            selector_atom,
-            &class_name,
-            CLOSURE_SELF_SEND_STATE_CHANGE_HINT,
-        );
-        // The fast path is plain `=:=` (identity first). A different map is
-        // compared again with the codegen-internal `__local__<name>` threading
-        // keys stripped (`beamtalk_actor:strip_local_temps/1`, the same helper
-        // the gen_server boundary uses): a read-only callee that rebinds a local
-        // through a conditional / `on:do:` / `ensure:` changes only those keys,
-        // which are not actor state.
-        let ok_slow = ok_doc.clone();
-        docvec![
-            "case call 'erlang':'=:='(",
-            leaf::var(reply_state.to_string()),
-            ", ",
-            leaf::var(dispatched_state.to_string()),
-            ") of <'true'> when 'true' -> ",
-            ok_doc,
-            " <'false'> when 'true' -> case call 'erlang':'=:='(",
-            "call 'beamtalk_actor':'strip_local_temps'(",
-            leaf::var(reply_state.to_string()),
-            "), call 'beamtalk_actor':'strip_local_temps'(",
-            leaf::var(dispatched_state.to_string()),
-            ")) of <'true'> when 'true' -> ",
-            ok_slow,
-            " <'false'> when 'true' -> ",
-            error_doc,
-            " end end",
-        ]
     }
 
     /// ADR 0111 Addendum 5 (shape E2): the dispatch-call/
@@ -2309,7 +2206,6 @@ impl CoreErlangGenerator {
             let result_var = self.fresh_var("SDResult");
             let state_var = self.fresh_var("SDState");
             let current_state = self.current_state_var();
-            let dispatch_state = current_state.clone();
 
             // Capture arguments via bridge (ADR 0018 Phase 0)
             let args_doc = self.capture_argument_list_doc(arguments)?;
@@ -2391,12 +2287,7 @@ impl CoreErlangGenerator {
                 leaf::var(state_var.clone()),
                 "}"
             ];
-            let reply_body = self.closure_self_dispatch_state_guard(
-                &state_var,
-                &dispatch_state,
-                &selector_atom_for_error,
-                ok_doc,
-            );
+            let reply_body = ok_doc;
             let error_clause =
                 self.generate_self_dispatch_error_clause("SDError", &selector_atom_for_error);
             let doc = docvec![
@@ -2447,12 +2338,7 @@ impl CoreErlangGenerator {
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let error_clause = self.generate_self_dispatch_error_clause("SealedError", &selector_atom);
         let state_var = self.fresh_var("SealedState");
-        let reply_body = self.closure_self_dispatch_state_guard(
-            &state_var,
-            &current_state,
-            &selector_atom,
-            leaf::var(result_var.clone()),
-        );
+        let reply_body = leaf::var(result_var.clone());
 
         let doc = docvec![
             "let ",
@@ -2510,12 +2396,7 @@ impl CoreErlangGenerator {
         let error_clause =
             self.generate_self_dispatch_error_clause("SealedDirectError", selector_atom);
         let state_var = self.fresh_var("SealedState");
-        let reply_body = self.closure_self_dispatch_state_guard(
-            &state_var,
-            &current_state,
-            selector_atom,
-            leaf::var(result_var.clone()),
-        );
+        let reply_body = leaf::var(result_var.clone());
 
         let doc = docvec![
             "let ",
@@ -2824,9 +2705,6 @@ impl CoreErlangGenerator {
         }
 
         let current_state = self.current_state_var();
-        let in_closure = self.in_state_dropping_closure();
-        let dispatched_state = current_state.clone();
-        let selector_for_guard = selector_atom.clone();
         let doc = docvec![
             "call 'beamtalk_dispatch':'super'(",
             leaf::atom(selector_atom),
@@ -2839,44 +2717,9 @@ impl CoreErlangGenerator {
             ")",
         ];
         // ADR 0137: a `super` send that may reach the default arm is bracketed.
-        let doc = self.bracket_super_send(selector, doc, Span::default());
-        if !in_closure {
-            return Ok(doc);
-        }
-        // BT-3985: inside a Tier 1 closure the reply tuple has no consumer to
-        // thread `NewState` to, so unpack it here and run the same guard a
-        // self-send gets: a super method that changed actor state raises
-        // `stateful_block_dispatch` rather than drop the change silently.
-        let reply_var = self.fresh_temp_var("SuperReply");
-        let result_var = self.fresh_var("SuperResult");
-        let state_var = self.fresh_var("SuperState");
-        let error_var = self.fresh_temp_var("SuperError");
-        let reply_body = self.state_guard_when(
-            true,
-            &state_var,
-            &dispatched_state,
-            &selector_for_guard,
-            leaf::var(result_var.clone()),
-        );
-        Ok(docvec![
-            "let ",
-            leaf::var(reply_var.clone()),
-            " = ",
-            doc,
-            " in case ",
-            leaf::var(reply_var),
-            " of <{'reply', ",
-            leaf::var(result_var),
-            ", ",
-            leaf::var(state_var),
-            "}> when 'true' -> ",
-            reply_body,
-            " <{'error', ",
-            leaf::var(error_var.clone()),
-            "}> when 'true' -> call 'beamtalk_error':'raise'(",
-            leaf::var(error_var),
-            ") end",
-        ])
+        // A `super` send in a closure runs against the cell (the early returns
+        // above), so its change is kept and no guard is needed (BT-3985 retired).
+        Ok(self.bracket_super_send(selector, doc, Span::default()))
     }
 
     /// Generates code for actor spawn with conditional REPL registry integration.
