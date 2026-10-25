@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4047 fixture: static supervisor whose slow-stopping child (Bt3965SlowStopper,
+// reused from BT-3965) gets more shutdown time than its terminate: needs, so a
+// `stopWithin:` shorter than ~200 ms times out while the background shutdown
+// still finishes cleanly. See stdlib/test/supervisor_stop_within_test.bt.
+
+Supervisor subclass: Bt4047PatientSup
+
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  childSpecs -> List =>
+    spec := (Bt3965SlowStopper supervisionSpec withArgs: #{
+      #tableName => #bt4047Shutdown
+    }) withShutdown: 10000
+    #(spec)

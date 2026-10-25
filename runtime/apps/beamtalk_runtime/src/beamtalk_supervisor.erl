@@ -75,6 +75,7 @@ functions that call OTP APIs from the caller's process context.
     countChildren/1,
     isAlive/1,
     stop/1,
+    stopWithin/2,
     build_child_specs/1,
     spec_to_otp/1,
     spec_to_otp/2,
@@ -2111,6 +2112,104 @@ stop(Self) ->
     end).
 
 -doc """
+Stop the supervisor and all its children, waiting up to `Ms` milliseconds.
+
+Called from `stopWithin:` on Supervisor and DynamicSupervisor instances
+(sealed, BT-4047) via the `stopWithinResult:` FFI seam. Uses
+`gen_server:stop/3` since supervisors are OTP gen_servers.
+
+Returns `{ok, nil}` once the supervisor has stopped; `{error, BtError}` with:
+* `kind = timeout` when the shutdown overruns the wait — the caller gets
+  the error but the supervisor keeps shutting down in the background
+  (`proc_lib:stop/3` delivers the terminate request before its wait
+  expires, so the shutdown is already underway);
+* `kind = stale_handle` when the supervisor process is already dead,
+  `kind = node_down` when its node cannot be reached (via
+  `with_live_supervisor/3`, as `stop/1`);
+* `kind = type_error` when `Ms` is neither a non-negative integer nor
+  `infinity` (Beamtalk `#infinity`), as `Actor stopWith:timeout:`.
+""".
+-spec stopWithin(term(), term()) -> {ok, nil} | {error, #beamtalk_error{}}.
+stopWithin(Self, Ms) ->
+    Pid = element(4, Self),
+    ClassName = element(2, Self),
+    case check_stop_timeout(ClassName, Ms) of
+        {ok, Timeout} ->
+            with_live_supervisor(Self, 'stopWithin:', fun() ->
+                ?LOG_INFO("Supervisor stopping", #{
+                    supervisor => ClassName, pid => Pid, domain => [beamtalk, runtime]
+                }),
+                %% Only the bare `timeout` exit is converted; `noproc` still
+                %% reaches `with_live_supervisor/3` (`stale_handle`) and
+                %% anything else propagates, as in `stop/1`.
+                try
+                    gen_server:stop(Pid, normal, Timeout),
+                    {ok, nil}
+                catch
+                    exit:timeout ->
+                        ?LOG_WARNING(
+                            "Supervisor stop timed out; shutdown continues in background", #{
+                                supervisor => ClassName,
+                                pid => Pid,
+                                timeout_ms => Timeout,
+                                domain => [beamtalk, runtime]
+                            }
+                        ),
+                        {error, stop_timeout_error(ClassName, Timeout)}
+                end
+            end);
+        {error, _} = Error ->
+            Error
+    end.
+
+-doc """
+Validate a `stopWithin:` wait (BT-4047).
+
+Accepts a non-negative integer (milliseconds) or `infinity` (Beamtalk
+`#infinity`); anything else is a `type_error` carrying the offending value in
+`details`, as `Actor stopWith:timeout:` reports it.
+""".
+-spec check_stop_timeout(atom(), term()) ->
+    {ok, non_neg_integer() | infinity} | {error, #beamtalk_error{}}.
+check_stop_timeout(_ClassName, infinity) ->
+    {ok, infinity};
+check_stop_timeout(_ClassName, Ms) when is_integer(Ms), Ms >= 0 ->
+    {ok, Ms};
+check_stop_timeout(ClassName, Other) ->
+    Error0 = beamtalk_error:new(
+        type_error,
+        ClassName,
+        'stopWithin:',
+        iolist_to_binary(
+            io_lib:format(
+                "stopWithin: ms must be a non-negative Integer or #infinity, got ~p",
+                [Other]
+            )
+        )
+    ),
+    {error, beamtalk_error:with_details(Error0, #{value => Other})}.
+
+-doc """
+The `{error, #beamtalk_error{}}` for a `stopWithin:` wait the shutdown
+overran (BT-4047): `kind = timeout`, naming the wait in the hint and
+`details`, since the supervisor keeps shutting down in the background.
+""".
+-spec stop_timeout_error(atom(), non_neg_integer() | infinity) -> #beamtalk_error{}.
+stop_timeout_error(ClassName, Ms) ->
+    Error0 = beamtalk_error:new(
+        timeout,
+        ClassName,
+        'stopWithin:',
+        iolist_to_binary(
+            io_lib:format(
+                "Supervisor did not stop within ~p ms; it keeps shutting down in the background",
+                [Ms]
+            )
+        )
+    ),
+    beamtalk_error:with_details(Error0, #{timeout_ms => Ms}).
+
+-doc """
 Build OTP child specs from a list of class objects or SupervisionSpec values.
 
 Called from the generated `init/1` of Supervisor subclasses (Phase 3 codegen).
@@ -3361,8 +3460,10 @@ with_live_supervisor(Self, Selector, Fun) ->
 %% as `gen_server:call` and `proc_lib:stop` exit), or `none` for a bare reason.
 %% A target-less shape (bare `noproc`/`timeout`/`noconnection`, an `erpc`
 %% error) is assumed to be the supervisor's own: today only `gen_server:stop/1`
-%% raises one inside `with_live_supervisor/3`. A `Fun` that makes its own
-%% target-less call (an `erpc` to another node, say) must catch it itself.
+%% (`stop/1`) and `gen_server:stop/3` (`stopWithin/2`, whose `timeout` exit is
+%% caught inside its own fun) raise one inside `with_live_supervisor/3`. A
+%% `Fun` that makes its own target-less call (an `erpc` to another node, say)
+%% must catch it itself.
 -spec call_target(term()) -> {ok, term()} | none.
 call_target({_Reason, {M, F, [Target | _]}}) when is_atom(M), is_atom(F) -> {ok, Target};
 call_target(_Reason) -> none.

@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4047 fixture: DynamicSupervisor whose children get 10 s to stop —
+// enough for Bt3965SlowStopper's terminate: (reused from BT-3965). See
+// stdlib/test/supervisor_stop_within_test.bt.
+
+DynamicSupervisor(Bt3965SlowStopper) subclass: Bt4047PatientPool
+
+  childClass => Bt3965SlowStopper
+
+  childShutdown -> Integer => 10000
