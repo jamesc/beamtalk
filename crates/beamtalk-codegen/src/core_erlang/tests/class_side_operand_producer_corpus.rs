@@ -206,43 +206,17 @@ fn is_fold_producer(producer: &str) -> bool {
     producer.starts_with("#(1, 2) ")
 }
 
-/// PIN-BUG BT-4089: in an actor class method, a fold that writes a local in
-/// value position (any of [`POSITIONS`]) repacks its locals into the ambient
-/// actor `State`, which a class method does not have: `erlc` rejects it
-/// (`unbound variable 'State'`), the verifier silent. The rows are skipped;
-/// [`pin_bug_bt4089_actor_class_side_fold_in_value_position`] pins it. A fix
-/// for BT-4089 flips the pin and drops this skip.
-fn pinned_bt4089(ctx: &Context, stmt: &str) -> bool {
-    ctx.name == "actor_class_side"
-        && PRODUCERS
-            .iter()
-            .any(|producer| is_fold_producer(producer) && stmt.contains(producer))
-}
-
-#[test]
-fn pin_bug_bt4089_actor_class_side_fold_in_value_position() {
-    if !super::erlc_available() {
-        return;
-    }
-    let ctx = context("actor_class_side");
-    let src = module(
-        ctx,
-        &method(ctx, 0, "    x := #(1, 2) collect: [:e | n := n + e]\n"),
-    );
-    assert_eq!(super::verifier_report(&src, None), None);
-    assert!(
-        !passes(&src),
-        "BT-4089 pin: expected erlc to reject the actor class-side fold"
-    );
+/// Whether `stmt` holds one of [`PRODUCERS`]' folds.
+fn stmt_has_fold_producer(stmt: &str) -> bool {
+    PRODUCERS
+        .iter()
+        .any(|producer| is_fold_producer(producer) && stmt.contains(producer))
 }
 
 fn check_context(ctx: &Context) -> Vec<String> {
     let mut failures = Vec::new();
     let mut compiled: Vec<(String, String)> = Vec::new();
     for (name, stmt) in rows(ctx) {
-        if pinned_bt4089(ctx, &stmt) {
-            continue;
-        }
         let src = module(ctx, &method(ctx, 0, &stmt));
         match (codegen_outcome(&src), twin_outcome(&stmt)) {
             (Err(e), _) => failures.push(format!("{} / {name}: broken: {e}\n{src}", ctx.name)),
@@ -305,9 +279,6 @@ fn class_side_operand_producers_report_the_pre_fix_lowering() {
         for (position, _) in POSITIONS.iter().filter(|(_, direct)| *direct) {
             for producer in PRODUCERS {
                 let stmt = position.replace("PROD", producer);
-                if pinned_bt4089(ctx, &stmt) {
-                    continue;
-                }
                 let src = module(ctx, &method(ctx, 0, &stmt));
                 if codegen_outcome(&src) != Ok(FieldCodegen::Compiles) {
                     continue;
@@ -348,9 +319,6 @@ fn class_side_operand_producers_pre_fix_lowering_is_never_silent() {
     let mut reported = 0;
     for ctx in CONTEXTS.iter().filter(|c| c.class_side) {
         for (name, stmt) in rows(ctx) {
-            if pinned_bt4089(ctx, &stmt) {
-                continue;
-            }
             let src = module(ctx, &method(ctx, 0, &stmt));
             if codegen_outcome(&src) != Ok(FieldCodegen::Compiles) {
                 continue;
@@ -376,5 +344,43 @@ fn class_side_operand_producers_pre_fix_lowering_is_never_silent() {
         "{} row(s) where the pre-fix lowering fails erlc with a silent verifier:\n\n{}",
         silent.len(),
         silent.join("\n\n")
+    );
+}
+
+/// BT-4089: with the pre-fix lowering
+/// ([`LocalRebindFault::TupleAccRepackFromAmbientState`]: a tuple-acc fold's
+/// post-fold repack seeds from the ambient actor `State` whatever the scope)
+/// every actor class-side row whose producer is a fold reports
+/// `ActorStateInClassMethod`: the verifier, not `erlc`, is what catches it.
+#[cfg(debug_assertions)]
+#[test]
+fn bt4089_pre_fix_repack_reports_actor_state_in_class_method() {
+    let mut missed = Vec::new();
+    let mut checked = 0;
+    let ctx = context("actor_class_side");
+    for (name, stmt) in rows(ctx) {
+        if !stmt_has_fold_producer(&stmt) {
+            continue;
+        }
+        let src = module(ctx, &method(ctx, 0, &stmt));
+        if codegen_outcome(&src) != Ok(FieldCodegen::Compiles) {
+            continue;
+        }
+        checked += 1;
+        let report =
+            super::verifier_report(&src, Some(LocalRebindFault::TupleAccRepackFromAmbientState));
+        if !report
+            .as_deref()
+            .is_some_and(|r| r.contains("ActorStateInClassMethod"))
+        {
+            missed.push(format!("{name} / {stmt}: {report:?}"));
+        }
+    }
+    assert!(checked >= 50, "only {checked} row(s) checked");
+    assert!(
+        missed.is_empty(),
+        "{} row(s) where the verifier missed the pre-fix repack:\n{}",
+        missed.len(),
+        missed.join("\n")
     );
 }

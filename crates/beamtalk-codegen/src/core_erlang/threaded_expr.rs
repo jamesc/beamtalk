@@ -165,6 +165,10 @@ pub(super) mod fault {
         /// closed argument list and its `LocalRebind`s are scoped there
         /// (`ProducerSiteNotThreaded` at the method root).
         ClassSendOperandsInPlace,
+        /// BT-4089: a tuple-acc fold's post-fold repack seeds from the
+        /// ambient actor `State`, as before BT-4089, whatever the scope
+        /// (`ActorStateInClassMethod` in a scope whose frame has none).
+        TupleAccRepackFromAmbientState,
     }
 
     thread_local! {
