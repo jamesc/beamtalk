@@ -91,6 +91,21 @@ fn sealed_value_keyword_send_binds_args_once() {
         code.contains("maps':'get'('$beamtalk_class'"),
         "direct call should be guarded on the runtime class tag. Got:\n{code}"
     );
+    // Exactly one `let` binding per operand: the single argument temp is
+    // bound once and read three times (direct args list + both fallback
+    // args lists), the receiver temp once and read five times (is_map,
+    // maps:get, direct call, both fallback sends). Any inlining or double
+    // binding changes these counts.
+    assert_eq!(
+        code.matches("TSealedArg").count(),
+        4,
+        "argument should be bound once and read three times. Got:\n{code}"
+    );
+    assert_eq!(
+        code.matches("TSealedRecv").count(),
+        6,
+        "receiver should be bound once and read five times. Got:\n{code}"
+    );
     super::assert_compiles_through_erlc("test", &code);
 }
 
@@ -245,6 +260,62 @@ fn sealed_exception_subclass_stays_dynamic() {
     assert!(
         code.contains("beamtalk_message_dispatch':'send'("),
         "exception-kin send should still exist as a dynamic send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn field_at_put_on_sealed_receiver_never_direct() {
+    // `fieldAt:put:` is the one selector whose dynamic path diverges from
+    // `dispatch/3` (semicolon vs em dash hint). The object-reflection
+    // intrinsic claims it before dispatch selection today, so this pins the
+    // end state rather than the handler's own guard: no direct call, ever.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: SealedWidget -> Object =>\n",
+        "    w fieldAt: #x put: 1\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        !code.contains("call 'bt@sealed_widget':'dispatch'('fieldAt:put:'"),
+        "fieldAt:put: must never take the direct path. Got:\n{code}"
+    );
+}
+
+#[test]
+fn binary_send_on_sealed_receiver_never_direct() {
+    // Binary selectors never reach the dynamic fallthrough (it raises an
+    // internal error for them); the direct path must not claim them either.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: SealedWidget -> Object =>\n",
+        "    w + 1\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        !code.contains("call 'bt@sealed_widget':'dispatch'('+"),
+        "binary selector must never take the direct path. Got:\n{code}"
+    );
+}
+
+#[test]
+fn future_typed_param_stays_dynamic() {
+    // `Future` is the runtime-only builtin: no compiled module, so no
+    // `dispatch/3` to direct-call (its dynamic sends route via
+    // `beamtalk_future`, not a class module at all).
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: f :: Future -> Object =>\n",
+        "    f frobnicate\n",
+    ));
+    assert!(
+        !code.contains(":dispatch'('frobnicate'"),
+        "runtime-only receiver must stay dynamic. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'("),
+        "runtime-only receiver send should still exist as a dynamic send. Got:\n{code}"
     );
 }
 
