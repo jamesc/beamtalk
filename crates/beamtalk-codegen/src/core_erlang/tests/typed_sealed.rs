@@ -488,6 +488,71 @@ fn packaged_ambient_sealed_class_resolves_qualified_module() {
     );
 }
 
+#[test]
+fn packaged_sealed_class_with_unqualified_index_entry_resolves_emitted_module() {
+    // BT-4152: `beamtalk test` emits fixture (and test-file) modules
+    // unqualified (`bt@<stem>`) while the file's own class carries
+    // `package = Some(current_package)`. The direct-call target must be
+    // the module this compilation unit actually emits (the unit index
+    // entry), not the re-derived `bt@<package>@<class>` — a module that
+    // is never emitted, so the direct call would `undef` at runtime
+    // where the dynamic path resolves the loaded `bt@<stem>` module.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: AmbientWidget -> Object =>\n",
+        "    w frobnicate\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let mut index = std::collections::HashMap::new();
+    index.insert("AmbientWidget".to_string(), "bt@ambient_widget".to_string());
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@caller_fixture")
+            .with_class_hierarchy(vec![ambient_sealed_object(false, Some("buccaneer"))])
+            .with_class_module_index(index),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("call 'bt@ambient_widget':'dispatch'('frobnicate'"),
+        "packaged receiver with an unqualified index entry should direct-call the emitted module. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("bt@buccaneer@ambient_widget"),
+        "must not target the never-emitted qualified module. Got:\n{code}"
+    );
+}
+
+#[test]
+fn packaged_sealed_class_with_index_entry_keeps_package_mode_target() {
+    // BT-4152 (no-change control): in package mode the unit's own
+    // registry entry and the `info.package` re-derivation name the same
+    // module, so resolving through the registry first must not change
+    // the direct-call target there — including a subdirectory class the
+    // closed-form `bt@{package}@{snake}` convention could never rebuild.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: AmbientWidget -> Object =>\n",
+        "    w frobnicate\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let mut index = std::collections::HashMap::new();
+    index.insert(
+        "AmbientWidget".to_string(),
+        "bt@sicp@scheme@env".to_string(),
+    );
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@sicp@main")
+            .with_class_hierarchy(vec![ambient_sealed_object(false, Some("sicp"))])
+            .with_class_module_index(index),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("call 'bt@sicp@scheme@env':'dispatch'('frobnicate'"),
+        "package-mode receiver should direct-call the indexed module. Got:\n{code}"
+    );
+}
+
 /// BT-4069 (review F1): sealed Value/Object builtins whose instances are
 /// `'$beamtalk_class'`-tagged maps with a compiled module — the complement of
 /// [`NON_TAGGED_MAP_CLASSES`](crate::core_erlang::dispatch_codegen::NON_TAGGED_MAP_CLASSES)

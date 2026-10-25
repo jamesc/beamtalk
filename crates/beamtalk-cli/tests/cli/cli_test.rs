@@ -190,3 +190,53 @@ fn test_resolves_cross_file_trait_provided_method_bt_3673() {
         "provided method `tag` must resolve on a cross-file trait user, got:\n{all}"
     );
 }
+
+/// BT-4152: `beamtalk test` emits fixture modules unqualified
+/// (`bt@<stem>`) while stamping the fixture's own class with
+/// `package = Some(current_package)`. A sealed fixture Value whose
+/// methods send to `self` (or to a same-class-typed parameter) must
+/// direct-call the emitted module — not the never-emitted
+/// `bt@<package>@<class>`, which raised `Undefined function` at runtime.
+#[test]
+fn test_sealed_fixture_value_self_sends_dispatch_bt_4152() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("test/fixtures")).unwrap();
+    std::fs::write(
+        project.path().join("test/fixtures/sealed_counter.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         sealed Value subclass: SealedCounter\n\
+         \x20\x20field: count :: Integer = 21\n\
+         \n\
+         \x20\x20doubled -> Integer => self count + self count\n\
+         \n\
+         \x20\x20plus: other :: SealedCounter -> Integer =>\n\
+         \x20\x20\x20\x20self count + other count\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("test/SealedCounterTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: SealedCounterTest\n\
+         \n\
+         \x20\x20testSelfSend =>\n\
+         \x20\x20\x20\x20c := SealedCounter new\n\
+         \x20\x20\x20\x20self assert: c doubled equals: 42\n\
+         \n\
+         \x20\x20testTypedParamSend =>\n\
+         \x20\x20\x20\x20c := SealedCounter new\n\
+         \x20\x20\x20\x20self assert: (c plus: SealedCounter new) equals: 42\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet"])
+        .assert()
+        .success()
+        .stdout(contains("3 passed"))
+        .stdout(contains("0 failed"));
+}
