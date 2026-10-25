@@ -14,6 +14,7 @@
 use crate::ast::{Expression, MatchArm, MessageSelector, Pattern, WellKnownSelector};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::type_checker::narrowing::CompoundNilGuardKind;
 use crate::semantic_analysis::type_checker::narrowing::NarrowingInfo;
 use crate::semantic_analysis::type_checker::narrowing::extract::extract_variable_name;
 use crate::semantic_analysis::type_checker::narrowing::refinement::RefinementLayer;
@@ -267,6 +268,19 @@ impl TypeChecker {
             return;
         }
         let Some(mut info) = Self::detect_narrowing(receiver) else {
+            // No single-variable narrowing matched — fall back to the
+            // compound nil-guard shapes (BT-4107), which are mutually
+            // exclusive with every `RULES` entry (no rule matches an `or:` /
+            // `and:` send).
+            self.apply_compound_nil_guard_narrowing(
+                receiver,
+                arguments,
+                is_if_true,
+                is_if_false,
+                is_if_true_if_false,
+                env,
+                hierarchy,
+            );
             return;
         };
         if !info.is_nil_check
@@ -377,6 +391,103 @@ impl TypeChecker {
             env.push_refinement(RefinementLayer::method_remainder(
                 info.variable.clone(),
                 info.true_type.clone(),
+            ));
+        }
+    }
+
+    /// Apply post-guard narrowing for a compound nil-guard (BT-4107).
+    ///
+    /// Mirrors [`Self::apply_early_return_narrowing`]'s single-variable logic
+    /// for every variable in an `or:`-chain of `isNil` tests or an
+    /// `and:`-chain of `notNil` tests:
+    /// - [`CompoundNilGuardKind::OrIsNil`]: `or:` is false only when every
+    ///   disjunct is false, so a diverging true block (`ifTrue: [^...]`, or
+    ///   the combined `ifTrue: [^...] ifFalse: [...]` whose false block does
+    ///   not reassign a tested var) proves every tested var non-nil on
+    ///   fall-through. A diverging *false* block proves only the disjunction
+    ///   (some var is nil, but not which), so solo `ifFalse:` never narrows.
+    /// - [`CompoundNilGuardKind::AndNotNil`]: the dual — `and:` is true only
+    ///   when every conjunct is true, so a diverging false block
+    ///   (`ifFalse: [^...]`) proves every tested var non-nil. Solo `ifTrue:`
+    ///   never narrows.
+    ///
+    /// Each variable resolves its *current* type live (locals and previously
+    /// narrowed `self.field` keys via
+    /// [`Self::resolve_narrowing_variable_type`]) and narrows through
+    /// [`Self::non_nil_type`], exactly like the `isNil` post-guard above.
+    #[allow(clippy::too_many_arguments)] // mirrors apply_early_return_narrowing's destructured call-site shape
+    pub(in crate::semantic_analysis::type_checker) fn apply_compound_nil_guard_narrowing(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+        is_if_true: bool,
+        is_if_false: bool,
+        is_if_true_if_false: bool,
+        env: &mut TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let Some((kind, variables)) = Self::detect_compound_nil_guard(receiver) else {
+            return;
+        };
+        match kind {
+            CompoundNilGuardKind::OrIsNil => {
+                if !(is_if_true || is_if_true_if_false) {
+                    return;
+                }
+                let Some(Expression::Block(true_block)) = arguments.first() else {
+                    return;
+                };
+                if !self.block_diverges(true_block) {
+                    return;
+                }
+                if is_if_true_if_false {
+                    if let Some(Expression::Block(false_block)) = arguments.get(1) {
+                        if variables
+                            .iter()
+                            .any(|var| block_may_reassign(false_block, var))
+                        {
+                            return;
+                        }
+                    }
+                }
+                self.push_non_nil_remainders(&variables, env, hierarchy);
+            }
+            CompoundNilGuardKind::AndNotNil => {
+                if !is_if_false {
+                    return;
+                }
+                let Some(Expression::Block(false_block)) = arguments.first() else {
+                    return;
+                };
+                if !self.block_diverges(false_block) {
+                    return;
+                }
+                self.push_non_nil_remainders(&variables, env, hierarchy);
+            }
+        }
+    }
+
+    /// Push a method-remainder non-nil refinement for each of `variables`.
+    ///
+    /// Shared by both [`CompoundNilGuardKind`] arms of
+    /// [`Self::apply_compound_nil_guard_narrowing`] — every compound guard
+    /// that narrows post-guard narrows to non-nil.
+    fn push_non_nil_remainders(
+        &self,
+        variables: &[EnvKey],
+        env: &mut TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) {
+        for var in variables {
+            let current_ty = Self::resolve_narrowing_variable_type(
+                var,
+                env,
+                hierarchy,
+                self.alias_registry.as_ref(),
+            );
+            env.push_refinement(RefinementLayer::method_remainder(
+                var.clone(),
+                Self::non_nil_type(&current_ty),
             ));
         }
     }

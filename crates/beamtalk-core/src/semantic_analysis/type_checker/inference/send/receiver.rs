@@ -73,14 +73,15 @@ impl TypeChecker {
         // When the selector is ifTrue:, ifFalse:, or ifTrue:ifFalse:, detect
         // type-testing patterns in the receiver and narrow variable types inside
         // block arguments.
-        let narrowing = if matches!(
+        let is_branching = matches!(
             selector.well_known(),
             Some(
                 WellKnownSelector::IfTrue
                     | WellKnownSelector::IfFalse
                     | WellKnownSelector::IfTrueIfFalse
             )
-        ) {
+        );
+        let narrowing = if is_branching {
             Self::detect_narrowing(receiver)
                 .map(|info| self.refine_responds_to_narrowing(info))
                 .map(|info| {
@@ -103,6 +104,28 @@ impl TypeChecker {
         } else {
             None
         };
+        // Compound nil-guards (BT-4107): `(a isNil or: [b isNil])`,
+        // `(a notNil and: [b notNil])`. Tried only when no single-variable
+        // narrowing matched (the shapes are mutually exclusive), and only in
+        // the proving direction — the disjunctive direction (solo `ifTrue:`
+        // over an `or:` guard, solo `ifFalse:` over an `and:` guard) keeps
+        // the generic path below, exactly as today.
+        let compound_nil_guard = if is_branching && narrowing.is_none() {
+            Self::detect_compound_nil_guard(receiver).filter(|(kind, _)| {
+                matches!(
+                    (kind, selector.well_known()),
+                    (
+                        narrowing::CompoundNilGuardKind::OrIsNil,
+                        Some(WellKnownSelector::IfFalse | WellKnownSelector::IfTrueIfFalse)
+                    ) | (
+                        narrowing::CompoundNilGuardKind::AndNotNil,
+                        Some(WellKnownSelector::IfTrue | WellKnownSelector::IfTrueIfFalse)
+                    )
+                )
+            })
+        } else {
+            None
+        };
 
         // Infer argument types, applying narrowing to block arguments when detected.
         let arg_types: Vec<InferredType> = if let Some(ref info) = narrowing {
@@ -110,6 +133,16 @@ impl TypeChecker {
                 arguments,
                 &selector_name,
                 info,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
+        } else if let Some((kind, ref variables)) = compound_nil_guard {
+            self.infer_args_with_compound_narrowing(
+                arguments,
+                &selector_name,
+                kind,
+                variables,
                 hierarchy,
                 env,
                 in_abstract_method,

@@ -15,7 +15,7 @@
 //! Split out of `inference.rs` (ADR 0106/0107): these methods are
 //! narrowing-specific refinement, not general expression type inference.
 
-use crate::ast::Expression;
+use crate::ast::{Expression, WellKnownSelector};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::Span;
@@ -24,7 +24,7 @@ use ecow::EcoString;
 use super::super::well_known::WellKnownClass;
 use super::super::{EnvKey, InferredType, TypeChecker, TypeEnv, TypeProvenance};
 use super::extract::extract_variable_name;
-use super::{ClassTestInfo, ClassTestKind, NarrowingInfo};
+use super::{ClassTestInfo, ClassTestKind, CompoundNilGuardKind, NarrowingInfo};
 
 impl TypeChecker {
     /// Detect control-flow narrowing from the receiver of `ifTrue:`/`ifFalse:`.
@@ -64,10 +64,104 @@ impl TypeChecker {
         else {
             return None;
         };
-        if selector.well_known() != Some(crate::ast::WellKnownSelector::NotNil) {
+        if selector.well_known() != Some(WellKnownSelector::NotNil) {
             return None;
         }
         extract_variable_name(inner_recv)
+    }
+
+    /// Detect a compound nil-guard (BT-4107): an `or:`-chain of `isNil`
+    /// tests or an `and:`-chain of `notNil` tests used as the receiver of
+    /// `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:`.
+    ///
+    /// Deliberately separate from the [`super::rules::RULES`] table, for the
+    /// same reason as [`Self::detect_not_nil_and_narrowing`]: the table
+    /// narrows one variable to a statically known branch type baked into
+    /// [`NarrowingInfo`], while a compound guard narrows *N* variables to
+    /// their live non-nil types (resolved per-variable via
+    /// [`Self::non_nil_type`]). The shapes are mutually exclusive with every
+    /// table rule (no rule matches an `or:` / `and:` send), so callers try
+    /// this only after [`super::detect`] returns `None`.
+    ///
+    /// Returns the guard kind plus every tested variable's [`EnvKey`]
+    /// (deduplicated, chain order). Returns `None` for any other shape —
+    /// including mixed chains (`a isNil or: [b notNil]`, whose fall-through
+    /// proves a *mixed* fact this machinery cannot express) and chain blocks
+    /// holding anything but a single test statement (a multi-statement block
+    /// could reassign a tested var, e.g. `[a := nil. b isNil]`).
+    pub(in crate::semantic_analysis::type_checker) fn detect_compound_nil_guard(
+        receiver: &Expression,
+    ) -> Option<(CompoundNilGuardKind, Vec<EnvKey>)> {
+        let receiver = receiver.unwrap_parens();
+        if let Some(vars) = Self::collect_or_nil_vars(receiver) {
+            return Some((CompoundNilGuardKind::OrIsNil, vars));
+        }
+        Self::collect_and_not_nil_vars(receiver).map(|vars| (CompoundNilGuardKind::AndNotNil, vars))
+    }
+
+    /// Collect the tested variables of an `or:`-chain of `isNil` tests
+    /// (`a isNil or: [b isNil]`, arbitrarily nested).
+    fn collect_or_nil_vars(expr: &Expression) -> Option<Vec<EnvKey>> {
+        Self::collect_compound_vars(expr, WellKnownSelector::IsNil, "or:")
+    }
+
+    /// Collect the tested variables of an `and:`-chain of `notNil` tests
+    /// (`a notNil and: [b notNil]`, arbitrarily nested).
+    fn collect_and_not_nil_vars(expr: &Expression) -> Option<Vec<EnvKey>> {
+        Self::collect_compound_vars(expr, WellKnownSelector::NotNil, "and:")
+    }
+
+    /// Shared engine behind [`Self::collect_or_nil_vars`] and
+    /// [`Self::collect_and_not_nil_vars`]: a `chain_selector`-chain of
+    /// `test_selector` tests over narrowable variables.
+    ///
+    /// Base case: `<var> isNil` / `<var> notNil` (identifiers and
+    /// `self.<field>` via [`extract_variable_name`]). Recursive case:
+    /// `<inner> or: [<single-test block>]`, where both sides must themselves
+    /// be pure chains of the *same* operator — mixing `or:` and `and:` (or
+    /// mixing `isNil` and `notNil` tests) fails the whole detection, since
+    /// the resulting proof obligation is not "every var is non-nil".
+    fn collect_compound_vars(
+        expr: &Expression,
+        test_selector: WellKnownSelector,
+        chain_selector: &str,
+    ) -> Option<Vec<EnvKey>> {
+        let expr = expr.unwrap_parens();
+        let Expression::MessageSend {
+            receiver: inner,
+            selector,
+            arguments,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        if selector.well_known() == Some(test_selector) {
+            return extract_variable_name(inner).map(|key| vec![key]);
+        }
+        // `or:` / `and:` stay string comparisons rather than
+        // `WellKnownSelector` variants — they are ordinary self-hosted
+        // `Boolean` methods, not type-checker intrinsics (see the `and:`
+        // special-case in `infer_message_send_with_receiver_ty`).
+        if selector.name() != chain_selector || arguments.len() != 1 {
+            return None;
+        }
+        let Expression::Block(block) = arguments[0].unwrap_parens() else {
+            return None;
+        };
+        // The block must hold exactly one test: its value is what the chain
+        // operator observes, and any other statement (notably an assignment
+        // to a tested var) would invalidate the proof.
+        let [stmt] = block.body.as_slice() else {
+            return None;
+        };
+        let mut vars = Self::collect_compound_vars(inner, test_selector, chain_selector)?;
+        for key in Self::collect_compound_vars(&stmt.expression, test_selector, chain_selector)? {
+            if !vars.contains(&key) {
+                vars.push(key);
+            }
+        }
+        Some(vars)
     }
 
     /// Refines a `respondsTo:` narrowing from `Dynamic` to a protocol type
