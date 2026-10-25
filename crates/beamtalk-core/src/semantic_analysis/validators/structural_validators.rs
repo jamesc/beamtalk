@@ -527,12 +527,16 @@ const KNOWN_ARITIES: &[(&str, &str, usize)] = &[
     ("maps", "values", 1),
     // erlang
     ("erlang", "atom_to_binary", 1),
+    ("erlang", "atom_to_binary", 2),
     ("erlang", "atom_to_list", 1),
     ("erlang", "binary_to_atom", 1),
+    ("erlang", "binary_to_atom", 2),
     ("erlang", "binary_to_list", 1),
+    ("erlang", "binary_to_list", 3),
     ("erlang", "element", 2),
     ("erlang", "hd", 1),
     ("erlang", "integer_to_binary", 1),
+    ("erlang", "integer_to_binary", 2),
     ("erlang", "is_atom", 1),
     ("erlang", "is_binary", 1),
     ("erlang", "is_integer", 1),
@@ -545,7 +549,9 @@ const KNOWN_ARITIES: &[(&str, &str, usize)] = &[
     ("erlang", "self", 0),
     ("erlang", "size", 1),
     ("erlang", "spawn", 1),
+    ("erlang", "spawn", 2),
     ("erlang", "spawn", 3),
+    ("erlang", "spawn", 4),
     ("erlang", "throw", 1),
     ("erlang", "tl", 1),
     ("erlang", "tuple_to_list", 1),
@@ -1106,6 +1112,72 @@ mod tests {
         check_ffi_arity(&module, &mut diags);
 
         assert!(diags.is_empty(), "Correct arity should not warn");
+    }
+
+    /// Builds `Erlang erlang <function>: ... with: ...` with `arity` arguments.
+    fn erlang_call(function: &str, arity: usize) -> Expression {
+        let inner_send = Expression::MessageSend {
+            receiver: Box::new(class_ref("Erlang")),
+            selector: MessageSelector::Unary("erlang".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: test_span(),
+        };
+        let mut parts = vec![kwpart(&format!("{function}:"))];
+        parts.extend(std::iter::repeat_with(|| kwpart("with:")).take(arity.saturating_sub(1)));
+        let args = (0..arity)
+            .map(|_| Expression::Identifier(ident("x")))
+            .collect();
+        Expression::MessageSend {
+            receiver: Box::new(inner_send),
+            selector: MessageSelector::Keyword(parts),
+            arguments: args,
+            is_cast: false,
+            span: test_span(),
+        }
+    }
+
+    #[test]
+    fn test_arity_multi_arity_erlang_bifs_no_warning() {
+        // BT-4101: every real arity of a tabled multi-arity erlang BIF must
+        // be accepted — integer_to_binary/2 was rejected ("expected arity 1").
+        // Arities verified against `erlang:module_info(exports)` on OTP 28
+        // (note: binary_to_list/2 does not exist; only /1 and /3).
+        let cases: &[(&str, usize)] = &[
+            ("integer_to_binary", 1),
+            ("integer_to_binary", 2),
+            ("atom_to_binary", 2),
+            ("binary_to_atom", 2),
+            ("binary_to_list", 3),
+            ("spawn", 2),
+            ("spawn", 4),
+        ];
+        for (function, arity) in cases {
+            let module = empty_module_with_exprs(vec![erlang_call(function, *arity)]);
+            let mut diags = Vec::new();
+
+            check_ffi_arity(&module, &mut diags);
+
+            assert!(
+                diags.is_empty(),
+                "erlang:{function}/{arity} should not warn, got: {diags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_arity_integer_to_binary_invalid_arity_still_warns() {
+        // BT-4101: completing the table must not silence the check entirely —
+        // integer_to_binary/3 does not exist and must still warn.
+        let module = empty_module_with_exprs(vec![erlang_call("integer_to_binary", 3)]);
+        let mut diags = Vec::new();
+
+        check_ffi_arity(&module, &mut diags);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("erlang:integer_to_binary/3"));
+        assert!(diags[0].message.contains("expected arity 1 or 2"));
+        assert_eq!(diags[0].category, Some(DiagnosticCategory::ArityMismatch));
     }
 
     #[test]
