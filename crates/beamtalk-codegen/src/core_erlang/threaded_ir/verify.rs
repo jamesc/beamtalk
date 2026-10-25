@@ -493,6 +493,15 @@ pub(in crate::core_erlang) enum ClassMethodDefect {
     /// `StateAcc` map), or of `SelfVt` anywhere: a class method threads no
     /// family.
     FamilyVersion(VersionPrefix),
+    /// BT-4089: a tuple-acc fold's post-fold repack seeds from the ambient
+    /// actor `State` in a scope whose frame has none (a class method, a
+    /// value-type method, an actor cell closure) — `erlc` rejects the module
+    /// with `unbound variable 'State'`. Reported by the repack lowering
+    /// itself (`ThreadingPlan::append_repack_stateacc_doc`), which is
+    /// AST-directed document emission outside the IR (the
+    /// [`VerifyError::UnbracketedUserCodeSend`] shape), not by the structural
+    /// walk: the repack's seed is not in any node for the walk to check.
+    TupleAccRepackFromAmbientState,
 }
 
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node

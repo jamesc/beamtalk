@@ -68,6 +68,7 @@ fn make_plan(
         initial_state_var: "State".to_string(),
         key_style,
         context: CodeGenContext::Actor,
+        span: Span::default(),
         use_direct_params,
         use_tuple_acc,
         tuple_acc_gate_slots: 0,

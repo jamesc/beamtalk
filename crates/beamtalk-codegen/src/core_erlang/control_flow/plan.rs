@@ -10,8 +10,8 @@
 //! split out of `control_flow/mod.rs`, no logic changes.
 
 use super::super::threaded_ir::{
-    FrameId, RebindFrame, RebindFrameKind, StateAccFallbackReason, ThreadingMode, VersionPrefix,
-    VersionedVar,
+    ClassMethodDefect, FrameId, RebindFrame, RebindFrameKind, StateAccFallbackReason,
+    ThreadingMode, VerifyError, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use super::analysis::ThreadedFamilies;
@@ -19,6 +19,7 @@ use super::family_slots::FoldFamilySlots;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::Expression;
+use beamtalk_core::source_analysis::Span;
 
 // ─── ThreadingPlan ────────────────────────────────────────────────────────────
 
@@ -89,6 +90,9 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     pub key_style: KeyStyle,
     /// The code-generation context (Actor, `ValueType`, or `Repl`).
     pub context: CodeGenContext,
+    /// The loop/fold body's span, for diagnostics
+    /// ([`Self::append_repack_stateacc_doc`]'s BT-4089 pin).
+    pub span: Span,
     /// When `true`, thread locals as direct fun parameters instead of a `StateAcc` map.
     ///
     /// Set when the loop body has no field mutations or self-sends.
@@ -624,6 +628,7 @@ impl ThreadingPlan {
             initial_state_var,
             key_style,
             context,
+            span: body.span,
             use_direct_params,
             use_tuple_acc,
             tuple_acc_gate_slots,
@@ -1026,6 +1031,23 @@ impl ThreadingPlan {
         }
     }
 
+    /// BT-4089: whether this plan's frame packs its threaded locals from a
+    /// fresh map rather than the ambient actor `State` — the one predicate
+    /// for the "a frame with no ambient `State` packs from a fresh map" rule,
+    /// read by [`Self::generate_pack_prefix`], [`Self::generate_exit_stateacc`]
+    /// and [`Self::append_repack_stateacc_doc`] alike.
+    ///
+    /// A value-type method has no `State` parameter, and neither does a class
+    /// method ([`CoreErlangGenerator::threads_no_actor_state`]: an actor
+    /// class's class methods still run with `context == Actor`, since the
+    /// enclosing class is an actor even though the *method* itself has no
+    /// per-instance state) nor an actor cell closure — so all three pack from
+    /// `maps:new()`. Every other frame (an actor instance method, the REPL
+    /// bindings) packs from [`Self::initial_state_var`].
+    pub fn packs_from_fresh_map(&self, generator: &CoreErlangGenerator) -> bool {
+        matches!(self.context, CodeGenContext::ValueType) || generator.threads_no_actor_state()
+    }
+
     /// Generates the pack prefix: a `maps:put` chain that loads the initial `StateAcc`.
     ///
     /// Returns `(pack_doc, init_state_var)` where `init_state_var` names the variable
@@ -1066,9 +1088,7 @@ impl ThreadingPlan {
         let mut pack_docs: Vec<Document<'static>> = Vec::new();
         // Value-type methods and class methods have no actor State
         // to pack from — start from a fresh empty map instead.
-        let mut current = if matches!(self.context, CodeGenContext::ValueType)
-            || generator.threads_no_actor_state()
-        {
+        let mut current = if self.packs_from_fresh_map(generator) {
             let init_map_var = generator.fresh_temp_var("InitMap");
             pack_docs.push(docvec![
                 "let ",
@@ -1207,16 +1227,15 @@ impl ThreadingPlan {
     /// ITERATION (i.e. the fun parameter names at the point of the false arm).
     /// For the false-arm case these are the initial parameter names, not updated ones.
     ///
-    /// mirrors `generate_pack_prefix`'s `ValueType`/`in_class_method` check —
-    /// this is the direct-params fast path's own `StateAcc` rebuild, and class methods
-    /// have no `State` to rebuild from here either.
+    /// Reads [`Self::packs_from_fresh_map`] — this is the direct-params fast
+    /// path's own `StateAcc` rebuild, and class methods have no `State` to
+    /// rebuild from here either.
     pub fn generate_exit_stateacc(
         &self,
         param_names: &[String],
         generator: &mut CoreErlangGenerator,
     ) -> Document<'static> {
-        let starts_from_fresh_map =
-            matches!(self.context, CodeGenContext::ValueType) || generator.threads_no_actor_state();
+        let starts_from_fresh_map = self.packs_from_fresh_map(generator);
         if self.threaded_locals.is_empty() && !starts_from_fresh_map {
             return docvec!["{'nil', ", leaf::var(self.initial_state_var.clone()), "}",];
         }
@@ -1420,12 +1439,55 @@ impl ThreadingPlan {
     ///
     /// Must be called AFTER `generate_tuple_extract_suffix_doc` so that the Core Erlang
     /// variable names (e.g. `Total`) refer to the extracted (updated) values.
+    ///
+    /// BT-4089: seeds from a fresh `maps:new()` in a frame with no ambient
+    /// `State` ([`Self::packs_from_fresh_map`]), exactly like
+    /// [`Self::generate_pack_prefix`] — the repack used to seed from
+    /// [`Self::initial_state_var`] unconditionally, which is the ambient actor
+    /// `State`, unbound in an actor class method (`erlc` rejects the module
+    /// with `unbound variable 'State'`).
     pub fn append_repack_stateacc_doc(
         &self,
         generator: &mut CoreErlangGenerator,
     ) -> (Document<'static>, String) {
-        let mut current = self.initial_state_var.clone();
+        // Test-only fault injection (BT-4089): the pre-fix repack, seeding
+        // from the ambient actor `State` whatever the scope, so the pin below
+        // is shown to fire on a real compile
+        // (`tests/class_side_operand_producer_corpus.rs`).
+        #[cfg(test)]
+        let force_ambient = super::super::threaded_expr::fault::active()
+            == Some(
+                super::super::threaded_expr::fault::LocalRebindFault::TupleAccRepackFromAmbientState,
+            );
+        #[cfg(not(test))]
+        let force_ambient = false;
         let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut current = if !force_ambient && self.packs_from_fresh_map(generator) {
+            let fresh_map_var = generator.fresh_temp_var("InitMap");
+            docs.push(docvec![
+                "let ",
+                leaf::var(fresh_map_var.clone()),
+                " = call 'maps':'new'() in ",
+            ]);
+            fresh_map_var
+        } else {
+            // This branch reads the ambient actor `State` by construction. In
+            // a frame with none that variable is unbound (BT-4089): fail
+            // loudly here, through the shared verifier path, rather than in
+            // `erlc`. Reached with a fresh-map frame only under the fault
+            // above or a future re-routing of such a frame here.
+            if self.packs_from_fresh_map(generator) {
+                generator.report_threaded_ir_verify_errors(
+                    &[VerifyError::ActorStateInClassMethod {
+                        defect: ClassMethodDefect::TupleAccRepackFromAmbientState,
+                        at: self.span,
+                    }],
+                    "tuple-acc repack seeded from the ambient actor State in a frame with none",
+                    self.span,
+                );
+            }
+            self.initial_state_var.clone()
+        };
         for var_name in &self.threaded_locals {
             let core_var = generator
                 .lookup_var(var_name)
