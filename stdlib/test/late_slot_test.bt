@@ -35,9 +35,10 @@
 //     fixtures/late_slot_inherited_base_actor.bt's header)
 //   - `spawnWith:` dependency-injection of a `late` slot with a real,
 //     non-`nil` value: `hasField:` is `true` and the injected value reads
-//     back immediately, with no `launch` ever called (the existing
-//     `spawnWith:` coverage in `late_field_read_test.bt` only proves the
-//     *negative* case — an injected `nil` still raises)
+//     back immediately, with no `launch` ever called (the injected-`nil`
+//     case lives in `late_field_read_test.bt`, which pins that presence —
+//     not value — is assignment: an injected `nil` reads back as `nil`,
+//     BT-4061)
 //
 // Fixtures: stdlib/test/fixtures/late_slot_inherited_base_actor.bt
 //           stdlib/test/fixtures/late_slot_inherited_sub_actor.bt

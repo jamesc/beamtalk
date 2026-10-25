@@ -614,6 +614,7 @@ Module {
                             parameters: [
                                 BlockParameter {
                                     name: "c",
+                                    type_annotation: None,
                                     span: Span {
                                         start: 401,
                                         end: 402,
@@ -743,6 +744,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "c",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 470,
                                             end: 471,
@@ -865,6 +867,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "c",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 518,
                                             end: 519,
@@ -1003,6 +1006,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "acc",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 574,
                                             end: 577,
@@ -1010,6 +1014,7 @@ Module {
                                     },
                                     BlockParameter {
                                         name: "c",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 579,
                                             end: 580,

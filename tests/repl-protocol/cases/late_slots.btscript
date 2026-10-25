@@ -317,3 +317,12 @@ a hasField: #proc
 // kind, on both sides of the flip.
 b getProc
 // => 5
+
+// ===========================================================================
+// `late` on a nil-admitting type is a compile error (BT-4061, ADR 0124 §1
+// B1) — `nil` is an `Object`, so the slot already has a value for the
+// unassigned state. A BUnit fixture cannot pin this (an Error diagnostic
+// fails the suite's own compile), so it is pinned here end to end.
+// ===========================================================================
+
+// @load-error tests/repl-protocol/fixtures/late_state_object_type_error.bt => its type admits `Nil`

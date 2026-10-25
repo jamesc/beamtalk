@@ -1472,8 +1472,11 @@ where `late` may appear:**
 2. `late state:`/`classState:` with no type annotation — the point of
    `late` is a non-nilable *declared* type, and an untyped slot already
    defaults to `nil` with no check.
-3. `late state:`/`classState:` on a nilable type (`T | Nil`) — a slot whose
-   type already admits `nil` is never in the state `late` describes.
+3. `late state:`/`classState:` on a type that admits `nil` — a syntactic
+   `T | Nil`, but also `Object` and `ProtoObject` (`nil` is an instance of
+   both), `Dynamic` (which accepts every value unchecked), and any alias
+   or protocol that admits `nil`. A slot whose type already admits `nil`
+   is never in the state `late` describes.
 4. `late state:`/`classState:` with a default value — a slot with a
    default is never unset.
 5. `late state:` on a `native:` Actor, or `late state:`/`field:` on
@@ -1483,7 +1486,8 @@ where `late` may appear:**
 
 ```beamtalk
 late state: x            // error (2): requires a type annotation
-late state: x :: T | Nil // error (3): drop `late` or make the type non-nilable
+late state: x :: T | Nil // error (3): drop `late` or narrow the type to exclude nil
+late state: x :: Object  // error (3): `nil` is an `Object`, so the type admits nil
 late state: x :: T = v   // error (4): a slot with a default is never unset
 ```
 
@@ -1516,14 +1520,15 @@ two angles, not a contradiction: one reports declared shape, the other
 reports assignment.
 
 A `late` slot is excluded from the post-`initialize` definite-assignment
-check. Reading it before assignment raises `UninitializedStateError`
-**whichever way it is still unassigned** — its key is simply absent, or an
-open-world writer (`spawnWith:` with a non-literal map, `fieldAt:put:`,
-`perform:`) has planted an observed `nil` there without going through
-ordinary `self.slot :=` assignment; `late` does not make a non-nilable
-declared type sound against those writers, it only makes the violation
-raise at the read, naming the slot, instead of surfacing as a
-does-not-understand on `nil` somewhere downstream. `self.slot` (or
+check. Reading it before assignment raises `UninitializedStateError` —
+and "before assignment" means exactly that its key is absent from the
+state map. Presence — not value — is assignment: if an open-world writer
+(`spawnWith:` with a non-literal map, `fieldAt:put:`, `perform:`) has
+planted a `nil` there without going through ordinary `self.slot :=`
+assignment, the key is present and the read answers `nil`, exactly as
+`hasField:` reports it assigned (BT-4061). `late` does not make a
+non-nilable declared type sound against those writers; it makes the direct
+read and `hasField:` agree on what "assigned" means. `self.slot` (or
 `fieldAt: #slot`) is the raising direct read; `hasField: #slot` is the
 non-raising presence test to ask first — `Object`'s `hasField:`/
 `clearField:` (ADR 0035's `field`-prefixed reflection family) make a
@@ -1744,6 +1749,12 @@ klass instanceCount         // resolves class-side method
 // FFI returns. `new` / `basicNew` on a *concrete* class metatype infers an
 // instance of that class; on an *abstract* class (e.g. `Collection`,
 // `Behaviour`) it stays Dynamic — instantiating an abstract class is an error.
+
+// Block parameter annotations — accepted by the parser and preserved by
+// `beamtalk fmt`. A union (or `&`/`\` chain) needs grouping parens so its
+// `|` doesn't swallow the block's own `|` parameter separator.
+#(1, 2, 3) collect: [:x :: Integer | x + 1]
+self run: [:x :: (Integer | String) | x]
 ```
 
 ### Current Semantics
@@ -1754,6 +1765,7 @@ klass instanceCount         // resolves class-side method
 - Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments. When a type annotation is present, the default value is optional (`field: x :: Integer` / `state: x :: Integer`) — the type annotation is the contract, and `nil` is used internally.
 - Local variable annotations (`name :: Type := expr`) declare the binding's type at type-erasure boundaries. See [Local Variable Type Annotations](#local-variable-type-annotations) below.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
+- Block parameter annotations (`[:x :: Integer | ...]`) are parsed and preserved by `beamtalk fmt`; parameter types are still inferred from the enclosing message signature.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
 ### Local Variable Type Annotations
@@ -4358,6 +4370,24 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 ]
 // => 42
 
+// Binary patterns (BT-663; BT-4096, BT-4097)
+(Binary fromBytes: #(3, 104, 105, 33, 99)) match: [
+  <<n:8, payload:n/binary, rest/binary>> -> payload toBytes;
+  _ -> #()
+]
+// => #(104, 105, 33): a size may be a literal, a variable bound by an
+// earlier segment, a parameter/local, or a parenthesized expression.
+(Binary fromBytes: #(10, 9)) match: [
+  <<0:1, v:7, rest/binary>> -> v;
+  _ -> -1
+]
+// => 10: integer literal values match exactly.
+(Binary fromBytes: #(234, 7)) match: [
+  <<_:3, v:5, rest/bits>> -> v;
+  _ -> -1
+]
+// => 10: bits/bitstring match possibly-unaligned bits.
+
 // Nil pattern — matches nil exactly (BT-2854, ADR 0107)
 value := nil
 value match: [
@@ -4396,6 +4426,8 @@ x match: [
 // => 2
 ```
 
+**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). Dependent sizes and size expressions are only supported when the binary pattern is the whole arm pattern — nested ones must match the enclosing value first, then the binary. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is a compile error; one that does neither compiles without a warning and silently never runs. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`).
 
 **Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
@@ -4427,6 +4459,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
+| Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails (BT-663, BT-4096, BT-4097) |
 | Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
 | Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only — see restrictions below (BT-2855, ADR 0107) |
 

@@ -1313,6 +1313,7 @@ Module {
                         parameters: [
                             BlockParameter {
                                 name: "x",
+                                type_annotation: None,
                                 span: Span {
                                     start: 1179,
                                     end: 1180,
@@ -1320,6 +1321,7 @@ Module {
                             },
                             BlockParameter {
                                 name: "y",
+                                type_annotation: None,
                                 span: Span {
                                     start: 1182,
                                     end: 1183,

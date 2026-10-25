@@ -838,6 +838,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "val",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 1803,
                                             end: 1806,
@@ -1006,6 +1007,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "val",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 1944,
                                             end: 1947,
@@ -1135,6 +1137,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "val",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 2085,
                                             end: 2088,
@@ -1323,6 +1326,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "x",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 2674,
                                             end: 2675,
@@ -1445,6 +1449,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "str",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 2728,
                                             end: 2731,
@@ -1567,6 +1572,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "n",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 2823,
                                             end: 2824,
@@ -1755,6 +1761,7 @@ Module {
                                         parameters: [
                                             BlockParameter {
                                                 name: "v",
+                                                type_annotation: None,
                                                 span: Span {
                                                     start: 3407,
                                                     end: 3408,
@@ -1912,6 +1919,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "outer",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 3498,
                                             end: 3503,
@@ -1953,6 +1961,7 @@ Module {
                                                         parameters: [
                                                             BlockParameter {
                                                                 name: "inner",
+                                                                type_annotation: None,
                                                                 span: Span {
                                                                     start: 3526,
                                                                     end: 3531,
@@ -2707,6 +2716,7 @@ Module {
                             parameters: [
                                 BlockParameter {
                                     name: "x",
+                                    type_annotation: None,
                                     span: Span {
                                         start: 4939,
                                         end: 4940,
@@ -3368,6 +3378,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "v",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 6364,
                                             end: 6365,
@@ -3536,6 +3547,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "v",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 6484,
                                             end: 6485,
@@ -3673,6 +3685,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "v",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 6573,
                                             end: 6574,
@@ -3813,6 +3826,7 @@ Module {
                                         parameters: [
                                             BlockParameter {
                                                 name: "x",
+                                                type_annotation: None,
                                                 span: Span {
                                                     start: 7153,
                                                     end: 7154,
@@ -4161,6 +4175,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "name",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 7824,
                                             end: 7828,
@@ -4521,6 +4536,7 @@ Module {
                                 parameters: [
                                     BlockParameter {
                                         name: "n",
+                                        type_annotation: None,
                                         span: Span {
                                             start: 8087,
                                             end: 8088,

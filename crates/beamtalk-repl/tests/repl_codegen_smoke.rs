@@ -216,6 +216,7 @@ fn test_generate_repl_module_with_to_do_mutation() {
     let body = Expression::Block(Block {
         parameters: vec![BlockParameter {
             name: "n".into(),
+            type_annotation: None,
             span: Span::new(0, 1),
         }],
         body: vec![bare(assignment)],

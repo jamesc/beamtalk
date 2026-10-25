@@ -564,6 +564,26 @@ impl ProtocolRegistry {
             return Ok(());
         }
 
+        let missing = self.missing_conformance_selectors(class_name, protocol, hierarchy);
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(missing)
+        }
+    }
+
+    /// The selectors of `protocol` that `class_name`'s *known* method surface
+    /// does not resolve — the strict structural core shared by
+    /// [`check_conformance_to_protocol`](Self::check_conformance_to_protocol)
+    /// (which consults it only behind the closed-complete gate) and
+    /// [`conforms_by_known_surface`](Self::conforms_by_known_surface) (which
+    /// consults it directly).
+    fn missing_conformance_selectors(
+        &self,
+        class_name: &str,
+        protocol: &ProtocolInfo,
+        hierarchy: &ClassHierarchy,
+    ) -> Vec<EcoString> {
         // ADR 0127 §8 (decided): a protocol's type is required ∪ provided,
         // so conformance needs every provided selector too, not just the
         // required ones — a class that `uses:` the protocol already has
@@ -588,11 +608,35 @@ impl ProtocolRegistry {
             }
         }
 
-        if missing.is_empty() {
-            Ok(())
-        } else {
-            Err(missing)
-        }
+        missing
+    }
+
+    /// `true` when `class_name`'s *known* method surface resolves every
+    /// selector protocol `protocol_name` requires — strict structural
+    /// conformance with no closed-complete gate and no assume-conformance
+    /// fallback.
+    ///
+    /// Unlike [`check_conformance`](Self::check_conformance), which answers
+    /// "can the checker prove NON-conformance" (unknown receiver/protocol ⇒
+    /// `Ok`, the conservative answer for a warning-severity assignability
+    /// check), this answers "can the checker prove conformance" — the
+    /// direction an Error-severity diagnostic needs. ADR 0124 B1 (BT-4061)
+    /// uses it to decide whether a protocol-typed `late` slot admits `nil`:
+    /// `late state: x :: P` is an error only when `UndefinedObject`'s known
+    /// surface provably satisfies `P`. An unknown protocol name proves
+    /// nothing and answers `false`.
+    #[must_use]
+    pub fn conforms_by_known_surface(
+        &self,
+        class_name: &str,
+        protocol_name: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        let Some(protocol) = self.get(protocol_name) else {
+            return false;
+        };
+        self.missing_conformance_selectors(class_name, protocol, hierarchy)
+            .is_empty()
     }
 
     /// Check if the *class side* of a class conforms to a protocol.

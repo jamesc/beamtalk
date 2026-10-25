@@ -20,7 +20,7 @@
 //! expression code generation stays in [`super::expressions`].
 
 mod destructure;
-mod match_lowering;
+pub(in crate::core_erlang) mod match_lowering;
 mod type_tests;
 
 pub(super) use match_lowering::MatchThreading;

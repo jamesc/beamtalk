@@ -25,3 +25,13 @@ Object subclass: BlockExamples
     aVeryLongVariableNameThatExceedsTheEightyColumnLineWidthLimit ifTrue: [
       self showCr: "yes"
     ]
+
+  /// Block with a typed parameter: the annotation round-trips (BT-4108).
+  typedParam: coll => coll collect: [:x :: Integer | x + 1]
+
+  /// Block with multiple typed parameters, including a generic type.
+  typedParams: coll =>
+    coll inject: #() into: [:acc :: List(Integer) :each :: Integer | acc]
+
+  /// Block with a union-typed parameter: the grouping parens round-trip.
+  unionParam => self run: [:x :: (Integer | String) | x]

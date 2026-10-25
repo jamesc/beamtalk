@@ -408,6 +408,7 @@ fn test_block_param_shadows_outer_variable() {
     let inner_block = Expression::Block(Block {
         parameters: vec![BlockParameter {
             name: "x".into(),
+            type_annotation: None,
             span: Span::new(10, 11),
         }],
         body: vec![bare(Expression::MessageSend {
@@ -426,6 +427,7 @@ fn test_block_param_shadows_outer_variable() {
     let outer_block = Expression::Block(Block {
         parameters: vec![BlockParameter {
             name: "x".into(),
+            type_annotation: None,
             span: Span::new(1, 2),
         }],
         body: vec![bare(inner_block)],
@@ -500,6 +502,7 @@ fn test_underscore_prefixed_no_shadow_warning() {
     let inner_block = Expression::Block(Block {
         parameters: vec![BlockParameter {
             name: "_x".into(),
+            type_annotation: None,
             span: Span::new(10, 12),
         }],
         body: vec![bare(Expression::Identifier(Identifier::new(
@@ -512,6 +515,7 @@ fn test_underscore_prefixed_no_shadow_warning() {
     let outer_block = Expression::Block(Block {
         parameters: vec![BlockParameter {
             name: "_x".into(),
+            type_annotation: None,
             span: Span::new(1, 3),
         }],
         body: vec![bare(inner_block)],
@@ -583,6 +587,7 @@ fn test_no_shadow_warning_different_names() {
     let inner_block = Expression::Block(Block {
         parameters: vec![BlockParameter {
             name: "y".into(),
+            type_annotation: None,
             span: Span::new(10, 11),
         }],
         body: vec![bare(Expression::Identifier(Identifier::new(
@@ -595,6 +600,7 @@ fn test_no_shadow_warning_different_names() {
     let outer_block = Expression::Block(Block {
         parameters: vec![BlockParameter {
             name: "x".into(),
+            type_annotation: None,
             span: Span::new(1, 2),
         }],
         body: vec![bare(inner_block)],

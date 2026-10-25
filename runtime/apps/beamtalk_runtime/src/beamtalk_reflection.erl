@@ -52,10 +52,12 @@ Reads an instance variable by name.
 
 Returns `nil` for non-existent fields (Smalltalk-80 semantics) — UNLESS
 `Name` is declared `late` (ADR 0124 §1/§9/B4) on the receiver's class or an
-ancestor, in which case an absent key or a `nil` value both raise
-`uninitialized_state_error`, agreeing with the direct `self.slot` read
+ancestor, in which case an absent key raises `uninitialized_state_error`,
+agreeing with the direct `self.slot` read
 (`CoreErlangGenerator::generate_late_field_read`, `expressions.rs`) instead
-of silently answering `nil`. Keyed on *declared* late, via
+of silently answering `nil`. Presence — not value — is assignment (ADR 0124
+§2, as amended by BT-4061): a present key holding `nil` answers `nil`. Keyed
+on *declared* late, via
 `beamtalk_behaviour_intrinsics:classAllFieldKindsByName/1`, not on mere
 absence — a typo'd field name is also missing, and must keep today's `nil`
 behaviour.
@@ -64,10 +66,12 @@ behaviour.
 read_field(Name, State) when is_atom(Name), is_map(State) ->
     case declared_late(Name, State) of
         true ->
-            case maps:find(Name, State) of
-                {ok, nil} -> raise_uninitialized_state(Name, State);
-                {ok, Value} -> Value;
-                error -> raise_uninitialized_state(Name, State)
+            %% BT-4061: the presence question IS `has_field/2` — the raising
+            %% read and the non-raising presence test share it, so they
+            %% cannot drift apart again.
+            case has_field(Name, State) of
+                true -> maps:get(Name, State);
+                false -> raise_uninitialized_state(Name, State)
             end;
         false ->
             maps:get(Name, State, nil)

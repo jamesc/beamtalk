@@ -413,6 +413,43 @@ pub(crate) fn core_output_dir() -> Result<(Utf8PathBuf, CoreOutputDir)> {
     Ok((path, CoreOutputDir::Temp(temp_dir)))
 }
 
+/// Find the byte position of `// =>` in `line`, skipping occurrences inside
+/// double-quoted string literals.
+///
+/// Returns `None` if no unquoted `// =>` is present.
+///
+/// Shared between `doc_tests` (inline-assertion splitting) and `test_docs`
+/// (normalize-inline-assertions pre-processing) — both need string-aware
+/// `// =>` detection on the same family of Beamtalk source lines.
+pub(crate) fn find_assertion_marker_pos(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let marker = b"// =>";
+    let marker_len = marker.len();
+    let mut i = 0;
+    let mut in_string = false;
+
+    while i < len {
+        if in_string {
+            if bytes[i] == b'\\' {
+                i += 2; // skip escaped character (e.g. \" inside a string)
+                continue;
+            } else if bytes[i] == b'"' {
+                in_string = false;
+            }
+            i += 1;
+        } else if bytes[i] == b'"' {
+            in_string = true;
+            i += 1;
+        } else if i + marker_len <= len && &bytes[i..i + marker_len] == marker {
+            return Some(i);
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
 /// Find files matching the given extensions in a path.
 ///
 /// - If `path` is a file, validates it has one of the given extensions and returns it.
@@ -708,5 +745,41 @@ mod tests {
 
         let files = find_files(dir_path, &["bt", "btscript"]).unwrap();
         assert_eq!(files.len(), 2);
+    }
+
+    // ── find_assertion_marker_pos ──────────────────────────────────────────
+
+    #[test]
+    fn test_find_marker_not_in_string() {
+        assert_eq!(find_assertion_marker_pos("x + 1  // => 2"), Some(7));
+    }
+
+    #[test]
+    fn test_find_marker_inside_string_returns_none() {
+        assert_eq!(
+            find_assertion_marker_pos("Transcript show: \"literal // => text\""),
+            None
+        );
+    }
+
+    #[test]
+    fn test_find_marker_after_string() {
+        let line = "\"hello\" size  // => 5";
+        let pos = find_assertion_marker_pos(line).expect("marker should be found");
+        assert!(pos > 0);
+        assert_eq!(&line[pos..], "// => 5");
+    }
+
+    #[test]
+    fn test_find_marker_escaped_quote_does_not_end_string() {
+        let line = "x := \"say \\\"// => nope\\\"\"";
+        assert_eq!(find_assertion_marker_pos(line), None);
+    }
+
+    #[test]
+    fn test_find_marker_string_with_real_assertion_after() {
+        let line = "x greet: \"hi // => bye\"  // => ok";
+        let pos = find_assertion_marker_pos(line).expect("marker should be found");
+        assert_eq!(&line[pos..], "// => ok");
     }
 }

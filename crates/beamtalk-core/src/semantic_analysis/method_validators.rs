@@ -1119,6 +1119,7 @@ mod tests {
         let params: Vec<BlockParameter> = (0..arity)
             .map(|i| BlockParameter {
                 name: format!("p{i}").into(),
+                type_annotation: None,
                 span: test_span(),
             })
             .collect();

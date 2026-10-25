@@ -29,7 +29,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, Expression,
-    ExpressionStatement, MatchArm, MessageSelector, Pattern, WellKnownSelector,
+    ExpressionStatement, Identifier, MatchArm, MessageSelector, Pattern, WellKnownSelector,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -166,9 +166,29 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-4096: only a top-level binary arm pattern splits; a split-needing
+        // binary nested inside a composite pattern is a clean error here,
+        // not invalid Core Erlang from the pattern lowering below.
+        for arm in arms {
+            if !matches!(arm.pattern, Pattern::Binary { .. }) {
+                if let Some(span) = nested_split_span(&arm.pattern) {
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: "a binary segment size naming an earlier segment's variable, or a size expression, is only supported when the binary pattern is the whole match-arm pattern — match the enclosing value first, then match the binary"
+                            .to_string(),
+                        span: Some(span),
+                    });
+                }
+            }
+        }
+
         let has_array_arm = arms
             .iter()
             .any(|arm| matches!(arm.pattern, Pattern::Array { .. }));
+        // BT-4096: a top-level binary pattern with dependent sizes compiles
+        // to nested matches with per-arm fallthrough, like Array/Type arms.
+        let has_segmented_binary_arm = arms.iter().any(|arm| {
+            matches!(&arm.pattern, Pattern::Binary { segments, .. } if binary_needs_segmented(segments))
+        });
         // ADR 0107 Phase A: a `Pattern::Type` arm needs the same
         // chain-of-nested-`case`s path as `Pattern::Array` — its runtime
         // test (a guard-safe BIF, an atom-exclusion guard, or a
@@ -202,7 +222,7 @@ impl CoreErlangGenerator {
             });
         let threading = producer.or(state_threading.as_ref());
 
-        let inner_doc = if has_array_arm || has_type_arm {
+        let inner_doc = if has_array_arm || has_type_arm || has_segmented_binary_arm {
             self.generate_match_chain(&match_var, arms, threading)?
         } else {
             // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
@@ -648,6 +668,16 @@ impl CoreErlangGenerator {
             return self.generate_type_pattern(match_var, arm, binding, class, rest, threading);
         }
 
+        // BT-4096: a top-level binary pattern with dependent sizes compiles
+        // to nested matches (Core sizes must be bound before the pattern),
+        // which needs per-arm fallthrough like the Array/Type arms above.
+        if let Pattern::Binary { segments, .. } = &arm.pattern {
+            if binary_needs_segmented(segments) {
+                return self
+                    .generate_segmented_binary_arm(match_var, arm, segments, rest, threading);
+            }
+        }
+
         // Native arm: case _Match of <pattern> when guard -> body <_FT> when 'true' -> rest end
         // Compute current arm first — body codegen must not see state advanced by later arms.
         let fallthrough_var = self.fresh_temp_var("NoMatch");
@@ -785,6 +815,228 @@ impl CoreErlangGenerator {
             rest_doc,
             " end"
         ])
+    }
+
+    /// Compiles a top-level binary arm with dependent sizes (BT-4096).
+    ///
+    /// Core Erlang requires segment sizes bound *before* the pattern, so the
+    /// arm's chunks (see [`plan_binary_split`]) become nested matches over
+    /// `('all',1,'binary')` rest tails — exactly what `erlc` emits for the
+    /// same Erlang. Non-trivial size expressions are evaluated into fresh
+    /// variables under `try`/`catch` before their chunk's match, so a
+    /// raising size fails the arm instead of crashing (review finding 1).
+    /// The arm guard applies at the innermost level (all variables bound);
+    /// every level falls through to the later arms.
+    fn generate_segmented_binary_arm(
+        &mut self,
+        match_var: &str,
+        arm: &MatchArm,
+        segments: &[BinarySegment],
+        rest_arms: &[MatchArm],
+        threading: Option<&MatchThreading<'_>>,
+    ) -> Result<Document<'static>> {
+        // Bind all pattern variables, generate guard + body first (mirror
+        // the array arm: later arms must not advance generator state first).
+        self.push_scope();
+        Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+            self.bind_var(name, core_var);
+        });
+        let guard_part = if let Some(guard) = &arm.guard {
+            let gd = self.generate_guard_expression(guard)?;
+            docvec![" when ", gd]
+        } else {
+            Document::Str(" when 'true'")
+        };
+        let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
+        self.pop_scope();
+
+        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+
+        let plan = plan_binary_split(segments);
+        debug_assert!(
+            plan.len() > 1 || plan.iter().any(|chunk| !chunk.hoists.is_empty()),
+            "dispatch only routes split or hoisted plans here"
+        );
+
+        let levels = self.build_segmented_levels(match_var, arm.pattern.span(), segments, &plan)?;
+        Ok(self.assemble_segmented_levels(levels, guard_part, body_doc, &rest_doc))
+    }
+
+    /// Emits one [`SegmentedLevel`] per chunk of a split plan (BT-4096).
+    ///
+    /// Runs in a single emission scope mirroring the Core-bound variables
+    /// (earlier chunks, hoists) so size validation resolves exactly what
+    /// the nested matches bind.
+    fn build_segmented_levels(
+        &mut self,
+        match_var: &str,
+        arm_span: Span,
+        segments: &[BinarySegment],
+        plan: &[BinaryChunkPlan],
+    ) -> Result<Vec<SegmentedLevel>> {
+        self.push_scope();
+        let mut levels: Vec<SegmentedLevel> = Vec::with_capacity(plan.len());
+        let mut scrutinee = match_var.to_string();
+        for (chunk_idx, chunk) in plan.iter().enumerate() {
+            let mut hoists = Vec::with_capacity(chunk.hoists.len());
+            let mut synthetic: Vec<BinarySegment> = Vec::with_capacity(chunk.end - chunk.start + 1);
+            for (offset, seg) in segments[chunk.start..chunk.end].iter().enumerate() {
+                let i = chunk.start + offset;
+                let size = match &seg.size {
+                    Some(size) if chunk.hoists.contains(&i) => {
+                        self.check_binary_size(size)?;
+                        let fresh = self.fresh_temp_var("Size");
+                        let hoist_doc = self.generate_guard_expression(size)?;
+                        self.bind_var(&fresh, &fresh);
+                        hoists.push((fresh.clone(), hoist_doc));
+                        Some(Box::new(Expression::Identifier(Identifier::new(
+                            fresh.as_str(),
+                            seg.span,
+                        ))))
+                    }
+                    other => other.clone(),
+                };
+                synthetic.push(BinarySegment {
+                    value: seg.value.clone(),
+                    size,
+                    segment_type: seg.segment_type,
+                    signedness: seg.signedness,
+                    endianness: seg.endianness,
+                    unit: seg.unit,
+                    span: seg.span,
+                });
+            }
+            // Non-final chunks match a rest tail for the next level, exactly
+            // as `erlc` does: `('all',1,'binary')` (unit 1: the split point
+            // may be bit-unaligned).
+            let next_scrutinee = if chunk_idx + 1 < plan.len() {
+                let tmp = self.fresh_temp_var("Split");
+                synthetic.push(BinarySegment {
+                    value: Pattern::Variable(Identifier::new(tmp.as_str(), arm_span)),
+                    size: None,
+                    segment_type: Some(BinarySegmentType::Binary),
+                    signedness: None,
+                    endianness: None,
+                    unit: Some(1),
+                    span: arm_span,
+                });
+                self.bind_var(&tmp, &tmp);
+                tmp
+            } else {
+                String::new()
+            };
+            let chunk_doc = self.generate_pattern(&Pattern::Binary {
+                segments: synthetic,
+                span: arm_span,
+            })?;
+            // Bind this chunk's values for later chunks' sizes.
+            for seg in &segments[chunk.start..chunk.end] {
+                if let Pattern::Variable(id) = &seg.value {
+                    let core_var = Self::to_core_erlang_var(&id.name);
+                    self.bind_var(&id.name, &core_var);
+                }
+            }
+            levels.push(SegmentedLevel {
+                scrutinee: std::mem::replace(&mut scrutinee, next_scrutinee),
+                chunk_doc,
+                hoists,
+            });
+        }
+        self.pop_scope();
+        Ok(levels)
+    }
+
+    /// Assembles [`SegmentedLevel`]s inside-out: the guard applies
+    /// innermost; every level falls through to the later arms; each level's
+    /// hoists evaluate under `try`/`catch` before its own match (see
+    /// [`Self::wrap_hoists_in_try`]).
+    fn assemble_segmented_levels(
+        &mut self,
+        levels: Vec<SegmentedLevel>,
+        guard_part: Document<'static>,
+        body_doc: Document<'static>,
+        rest_doc: &Document<'static>,
+    ) -> Document<'static> {
+        let mut rev = levels.into_iter().rev();
+        let last = rev.next().expect("a split plan always has chunks");
+        let fallthrough_var = self.fresh_temp_var("NoMatch");
+        let mut next = docvec![
+            "case ",
+            leaf::var(last.scrutinee),
+            " of <",
+            last.chunk_doc,
+            ">",
+            guard_part,
+            " -> ",
+            body_doc,
+            " <",
+            leaf::var(fallthrough_var),
+            "> when 'true' -> ",
+            rest_doc.clone(),
+            " end"
+        ];
+        next = self.wrap_hoists_in_try(last.hoists, next, rest_doc);
+        for level in rev {
+            let fallthrough_var = self.fresh_temp_var("NoMatch");
+            next = docvec![
+                "case ",
+                leaf::var(level.scrutinee),
+                " of <",
+                level.chunk_doc,
+                "> when 'true' -> ",
+                next,
+                " <",
+                leaf::var(fallthrough_var),
+                "> when 'true' -> ",
+                rest_doc.clone(),
+                " end"
+            ];
+            next = self.wrap_hoists_in_try(level.hoists, next, rest_doc);
+        }
+        next
+    }
+
+    /// Wraps `next` in one `try`/`catch` per hoist (review finding 1).
+    ///
+    /// A raising size expression must fail the arm — not crash the match —
+    /// so each hoist evaluates under `try`, whose catch answers the later
+    /// arms. Observably equivalent to Erlang's `try` → `'bad_size'` (the
+    /// whole-scrutinee pre-match `erlc` adds is only an optimization: with
+    /// catch-to-rest, a non-binary scrutinee falls through identically).
+    fn wrap_hoists_in_try(
+        &mut self,
+        hoists: Vec<(String, Document<'static>)>,
+        next: Document<'static>,
+        rest_doc: &Document<'static>,
+    ) -> Document<'static> {
+        let mut next = next;
+        for (var, value) in hoists.into_iter().rev() {
+            let (t, e, s) = (
+                self.fresh_temp_var("Catch"),
+                self.fresh_temp_var("Catch"),
+                self.fresh_temp_var("Catch"),
+            );
+            // Note: concrete Core `try` takes no `end` terminator (unlike
+            // `case`/`let` nesting might suggest — see `erlc +to_core`
+            // output or `number_coercion_try_catch`).
+            next = docvec![
+                "try ",
+                value,
+                " of <",
+                leaf::var(var),
+                "> -> ",
+                next,
+                " catch <",
+                leaf::var(t),
+                ", ",
+                leaf::var(e),
+                ", ",
+                leaf::var(s),
+                "> -> ",
+                rest_doc.clone()
+            ];
+        }
+        next
     }
 
     /// Handles a `Pattern::Array` element inside an outer array match arm.
@@ -1005,7 +1257,10 @@ impl CoreErlangGenerator {
         pattern: &Pattern,
     ) -> Result<Document<'static>> {
         match pattern {
-            Pattern::Wildcard(_) => Ok(Document::Str("_")),
+            // BT-4098: in Core Erlang `_` is an ordinary variable name, so
+            // two of them in one pattern are a duplicate binding. Freshen
+            // every occurrence (underscore-prefixed: no unused warnings).
+            Pattern::Wildcard(_) => Ok(leaf::var(self.fresh_temp_var("Wildcard"))),
             // Reuses the existing atom-literal codegen path verbatim
             // (ADR 0107 Phase A) — `nil` has one canonical runtime
             // representation, no new mechanism needed.
@@ -1068,17 +1323,7 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str("]"));
                 Ok(Document::Vec(parts))
             }
-            Pattern::Binary { segments, .. } => {
-                let mut parts = vec![Document::Str("#{")];
-                for (i, seg) in segments.iter().enumerate() {
-                    if i > 0 {
-                        parts.push(Document::Str(","));
-                    }
-                    parts.push(self.generate_binary_segment(seg)?);
-                }
-                parts.push(Document::Str("}#"));
-                Ok(Document::Vec(parts))
-            }
+            Pattern::Binary { segments, .. } => self.generate_binary_pattern(segments),
             Pattern::Map { pairs, .. } => {
                 // Beamtalk Dictionaries are plain Erlang maps — emit a Core Erlang map pattern.
                 // `#{#k => v}` compiles to `~{ 'k' := V }~`   (symbol key → atom)
@@ -1181,6 +1426,111 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
+    /// Generates a Core Erlang binary pattern: `#{seg,seg,...}#` (BT-4096).
+    ///
+    /// Segment sizes resolve left to right. A size naming a variable bound
+    /// by an earlier segment of this same pattern cannot emit inline — Core
+    /// Erlang requires sizes bound before the pattern — so it is a clean
+    /// error here (top-level match arms split instead; see the chain
+    /// dispatch, which never routes them here). Anything else bound
+    /// (parameters, locals, earlier chunks) emits inline. Each segment's
+    /// value binds into a scope that ends with the pattern; the caller binds
+    /// all pattern variables separately for the guard/body.
+    fn generate_binary_pattern(&mut self, segments: &[BinarySegment]) -> Result<Document<'static>> {
+        self.push_scope();
+        let mut bound_here: HashSet<&str> = HashSet::new();
+        let mut parts = vec![Document::Str("#{")];
+        for (i, seg) in segments.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(","));
+            }
+            if let Some(size) = &seg.size {
+                if let Some(name) = size_vars(size).iter().find(|v| bound_here.contains(*v)) {
+                    self.pop_scope();
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: format!(
+                            "variable '{name}' cannot be used as a binary segment size here: it is bound by an earlier segment of the same pattern, and Core Erlang requires sizes bound before the pattern (top-level match arms split automatically; nested patterns must match the enclosing value first)"
+                        ),
+                        span: Some(seg.span),
+                    });
+                }
+            }
+            parts.push(self.generate_binary_segment(seg)?);
+            if let Pattern::Variable(id) = &seg.value {
+                let core_var = Self::to_core_erlang_var(&id.name);
+                self.bind_var(&id.name, &core_var);
+                bound_here.insert(id.name.as_str());
+            }
+        }
+        parts.push(Document::Str("}#"));
+        self.pop_scope();
+        Ok(Document::Vec(parts))
+    }
+
+    /// Generates a Core Erlang binary segment size (BT-4096, BT-4097).
+    ///
+    /// A size is a guard position in Core Erlang: only literals, bound
+    /// variables, and arithmetic/comparison expressions are valid. Anything
+    /// else — a field read, a message send, a variable bound only later in
+    /// the pattern — would compile to Core Erlang that `erlc` rejects, so
+    /// it is a clean compile error here instead.
+    fn generate_binary_size(&mut self, size: &Expression) -> Result<Document<'static>> {
+        self.check_binary_size(size)?;
+        self.generate_guard_expression(size)
+            .map_err(|err| match err {
+                CodeGenError::UnsupportedFeature { feature, span } => {
+                    CodeGenError::UnsupportedFeature {
+                        feature: format!("in binary segment size: {feature}"),
+                        span,
+                    }
+                }
+                other => other,
+            })
+    }
+
+    /// Validates a segment size before [`Self::generate_binary_size`] lowers it.
+    ///
+    /// Every identifier must already be bound (an earlier segment's value, a
+    /// parameter, or a local); anything that is not a literal, a variable, or
+    /// a message send is rejected outright (operator validity is left to the
+    /// guard lowering, which rephrases the error with size context).
+    fn check_binary_size(&self, size: &Expression) -> Result<()> {
+        match size {
+            Expression::Literal(..) => Ok(()),
+            Expression::Identifier(id) => {
+                if self.lookup_var(id.name.as_str()).is_none() {
+                    Err(CodeGenError::UnsupportedFeature {
+                        feature: format!(
+                            "variable '{}' cannot be used as a binary segment size here: it is not bound to a value. \
+                             A size may name a variable bound by an earlier segment of the same binary pattern, \
+                             a method parameter, or a local variable (assign a field to a local first)",
+                            id.name
+                        ),
+                        span: Some(id.span),
+                    })
+                } else {
+                    Ok(())
+                }
+            }
+            Expression::Parenthesized { expression, .. } => self.check_binary_size(expression),
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                self.check_binary_size(receiver)?;
+                for arg in arguments {
+                    self.check_binary_size(arg)?;
+                }
+                Ok(())
+            }
+            other => Err(CodeGenError::UnsupportedFeature {
+                feature: "only literals, variables, and arithmetic/comparison expressions are supported in a binary segment size".to_string(),
+                span: Some(other.span()),
+            }),
+        }
+    }
+
     /// Generates a Core Erlang binary segment: `#<Value>(Size,Unit,Type,Flags)`.
     ///
     /// Core Erlang binary segment format:
@@ -1189,8 +1539,8 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// Defaults: type=integer, signedness=unsigned, endianness=big,
-    /// size=8 for integer/float, 'all' for binary, 'undefined' for utf8.
-    /// Unit=1 for integer/float, 8 for binary, 'undefined' for utf8.
+    /// size=8 for integer/float, 'all' for binary/bitstring, 'undefined' for utf8.
+    /// Unit=1 for integer/float/bitstring, 8 for binary, 'undefined' for utf8.
     pub(in crate::core_erlang) fn generate_binary_segment(
         &mut self,
         seg: &BinarySegment,
@@ -1203,28 +1553,37 @@ impl CoreErlangGenerator {
 
         // Size: explicit, or default based on type
         let size_doc = if let Some(size_expr) = &seg.size {
-            self.expression_doc(size_expr)?
+            self.generate_binary_size(size_expr)?
         } else {
             match seg_type {
-                BinarySegmentType::Binary => Document::Str("'all'"),
+                BinarySegmentType::Binary | BinarySegmentType::Bitstring => Document::Str("'all'"),
                 BinarySegmentType::Utf8 => Document::Str("'undefined'"),
                 BinarySegmentType::Integer => Document::Str("8"),
                 BinarySegmentType::Float => Document::Str("64"),
             }
         };
 
-        // Unit: 8 for binary, 'undefined' for utf8, 1 for integer/float
-        let unit_doc = match seg_type {
-            BinarySegmentType::Binary => Document::Str("8"),
-            BinarySegmentType::Utf8 => Document::Str("'undefined'"),
-            BinarySegmentType::Integer | BinarySegmentType::Float => Document::Str("1"),
+        // Unit: explicit override (synthetic split tails, BT-4096) or the
+        // type default — 8 for binary, 1 for bitstring (bits) and
+        // integer/float, 'undefined' for utf8.
+        let unit_doc = match seg.unit {
+            Some(unit) => Document::Owned(unit.to_string()),
+            None => match seg_type {
+                BinarySegmentType::Binary => Document::Str("8"),
+                BinarySegmentType::Utf8 => Document::Str("'undefined'"),
+                BinarySegmentType::Integer
+                | BinarySegmentType::Float
+                | BinarySegmentType::Bitstring => Document::Str("1"),
+            },
         };
 
-        // Type atom
+        // Type atom. Note: `bits`/`bitstring` segments emit the `binary`
+        // type with unit 1 — Core Erlang patterns have no `bitstring` type;
+        // this is exactly what `erlc` emits for `/bits` and `/bitstring`.
         let type_doc = match seg_type {
             BinarySegmentType::Integer => Document::Str("'integer'"),
             BinarySegmentType::Float => Document::Str("'float'"),
-            BinarySegmentType::Binary => Document::Str("'binary'"),
+            BinarySegmentType::Binary | BinarySegmentType::Bitstring => Document::Str("'binary'"),
             BinarySegmentType::Utf8 => Document::Str("'utf8'"),
         };
 
@@ -1262,6 +1621,11 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
+            // Parentheses are transparent in guards (and in segment sizes,
+            // which lower through this function): `when: [(x + 1) > 2]`.
+            Expression::Parenthesized { expression, .. } => {
+                self.generate_guard_expression(expression)
+            }
             Expression::Identifier(id) => match id.name.as_str() {
                 "true" => Ok(Document::Str("'true'")),
                 "false" => Ok(Document::Str("'false'")),
@@ -1376,6 +1740,156 @@ impl CoreErlangGenerator {
             | Pattern::Type { .. } => {}
         }
     }
+}
+
+/// One Core Erlang binary pattern's worth of segments (BT-4096).
+///
+/// A Core binary pattern's sizes must be bound *before* the pattern, so a
+/// segment whose size names a variable bound by an earlier segment of the
+/// same chunk starts a new chunk; each chunk matches the previous chunk's
+/// rest tail (mirroring what `erlc` emits for the same Erlang).
+pub(in crate::core_erlang) struct BinaryChunkPlan {
+    /// First segment index (inclusive) within the arm's segment list.
+    pub(in crate::core_erlang) start: usize,
+    /// Last segment index (exclusive) within the arm's segment list.
+    pub(in crate::core_erlang) end: usize,
+    /// Absolute indices of segments whose size is a non-trivial expression,
+    /// replaced by a hoisted fresh variable evaluated before this chunk.
+    pub(in crate::core_erlang) hoists: Vec<usize>,
+}
+
+/// Splits binary segments into [`BinaryChunkPlan`]s (BT-4096, BT-4097).
+///
+/// Pure over the pattern AST: a size naming a variable bound by an earlier
+/// segment of the current chunk forces a split there; names bound by
+/// earlier chunks or outside the pattern need none (validated at emission).
+/// More than one chunk means the arm needs segmented lowering.
+pub(in crate::core_erlang) fn plan_binary_split(
+    segments: &[BinarySegment],
+) -> Vec<BinaryChunkPlan> {
+    let mut chunks = Vec::new();
+    let mut chunk_start = 0;
+    let mut hoists = Vec::new();
+    let mut bound_in_chunk: HashSet<&str> = HashSet::new();
+    for (i, seg) in segments.iter().enumerate() {
+        if let Some(size) = &seg.size {
+            if size_vars(size).iter().any(|v| bound_in_chunk.contains(*v)) {
+                chunks.push(BinaryChunkPlan {
+                    start: chunk_start,
+                    end: i,
+                    hoists: std::mem::take(&mut hoists),
+                });
+                chunk_start = i;
+                bound_in_chunk.clear();
+            }
+            if !is_trivial_size(size) {
+                hoists.push(i);
+            }
+        }
+        if let Pattern::Variable(id) = &seg.value {
+            bound_in_chunk.insert(id.name.as_str());
+        }
+    }
+    chunks.push(BinaryChunkPlan {
+        start: chunk_start,
+        end: segments.len(),
+        hoists,
+    });
+    chunks
+}
+
+/// True when a top-level binary pattern needs segmented lowering: more
+/// than one chunk, or hoisted size expressions (BT-4096, BT-4097). Either
+/// way the pattern cannot emit as one native Core binary pattern.
+fn binary_needs_segmented(segments: &[BinarySegment]) -> bool {
+    let plan = plan_binary_split(segments);
+    plan.len() > 1 || plan.iter().any(|chunk| !chunk.hoists.is_empty())
+}
+
+/// True for sizes that emit inline: literals and variables, with any
+/// parentheses unwrapped. Only genuine expressions hoist, so `<<a:(8)>>`
+/// stays a one-pattern match (review finding 6).
+fn is_trivial_size(size: &Expression) -> bool {
+    match size {
+        Expression::Literal(..) | Expression::Identifier(..) => true,
+        Expression::Parenthesized { expression, .. } => is_trivial_size(expression),
+        _ => false,
+    }
+}
+
+/// Collects every variable named in a segment size expression.
+fn size_vars(size: &Expression) -> Vec<&str> {
+    fn inner<'a>(size: &'a Expression, vars: &mut Vec<&'a str>) {
+        match size {
+            Expression::Identifier(id) => vars.push(id.name.as_str()),
+            Expression::Parenthesized { expression, .. } => inner(expression, vars),
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                inner(receiver, vars);
+                for arg in arguments {
+                    inner(arg, vars);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut vars = Vec::new();
+    inner(size, &mut vars);
+    vars
+}
+
+/// Span of a binary pattern needing segmented lowering nested inside a
+/// composite pattern, if any. Only a top-level match-arm binary pattern
+/// splits (BT-4096); anything nested is a clean compile error at the call
+/// site.
+fn nested_split_span(pattern: &Pattern) -> Option<Span> {
+    match pattern {
+        Pattern::Binary { segments, span } => {
+            if binary_needs_segmented(segments) {
+                Some(*span)
+            } else {
+                // Non-split binaries are fine nested — but recurse into
+                // segment values defensively (constructed ASTs only).
+                segments
+                    .iter()
+                    .find_map(|seg| nested_split_span(&seg.value))
+            }
+        }
+        Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+            elements.iter().find_map(nested_split_span).or_else(|| {
+                if let Pattern::List { tail: Some(t), .. } = pattern {
+                    nested_split_span(t)
+                } else {
+                    None
+                }
+            })
+        }
+        Pattern::Array { elements, rest, .. } => elements
+            .iter()
+            .find_map(nested_split_span)
+            .or_else(|| rest.as_ref().and_then(|r| nested_split_span(r))),
+        Pattern::Map { pairs, .. } => pairs.iter().find_map(|pair| nested_split_span(&pair.value)),
+        Pattern::Constructor { keywords, .. } => {
+            keywords.iter().find_map(|(_, b)| nested_split_span(b))
+        }
+        Pattern::Wildcard(_)
+        | Pattern::Literal(..)
+        | Pattern::Nil(_)
+        | Pattern::Variable(_)
+        | Pattern::Type { .. } => None,
+    }
+}
+
+/// One nested level of a segmented binary arm (BT-4096): this chunk's
+/// pattern, the size-expression hoists evaluated before it, and the
+/// scrutinee it matches.
+struct SegmentedLevel {
+    scrutinee: String,
+    chunk_doc: Document<'static>,
+    hoists: Vec<(String, Document<'static>)>,
 }
 
 /// Field layout for a sealed-type constructor pattern (Phase 1: stdlib types only).

@@ -1039,6 +1039,190 @@ Actor subclass: T
 }
 
 #[test]
+fn parse_binary_pattern_bitstring_segment() {
+    // BT-4097: <<flags:3, v:5, rest/bits>> — bits/bitstring segment type
+    use crate::ast::{BinarySegmentType, Pattern};
+    for spec in ["bits", "bitstring"] {
+        let source = format!("x match: [<<flags:3, v:5, rest/{spec}>> -> v]");
+        let module = parse_ok(&source);
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match for /{spec}");
+        };
+        let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+            panic!("expected Pattern::Binary for /{spec}");
+        };
+        assert_eq!(
+            segments[2].segment_type,
+            Some(BinarySegmentType::Bitstring),
+            "expected Bitstring type for /{spec}"
+        );
+    }
+}
+
+#[test]
+fn parse_binary_pattern_literal_value() {
+    // BT-4097: <<0:1, v:7, rest/binary>> — integer literal segment value
+    use crate::ast::Pattern;
+    let module = parse_ok("x match: [<<0:1, v:7, rest/binary>> -> v]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
+    assert!(
+        matches!(&segments[0].value, Pattern::Literal(Literal::Integer(0), _)),
+        "expected integer literal 0, got: {:?}",
+        segments[0].value
+    );
+}
+
+#[test]
+fn parse_binary_pattern_size_expression() {
+    // BT-4097: <<a:(4 - q), rest/binary>> — parenthesized size expression
+    use crate::ast::Pattern;
+    let module = parse_ok("x match: [<<a:(4 - q), rest/binary>> -> a]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
+    assert!(
+        matches!(
+            segments[0].size.as_deref(),
+            Some(Expression::Parenthesized { .. })
+        ),
+        "expected parenthesized size expression, got: {:?}",
+        segments[0].size
+    );
+}
+
+#[test]
+fn parse_binary_pattern_min_int_value() {
+    // Review finding 2: <<-9223372036854775808:64/signed>> parses (i64::MIN).
+    use crate::ast::Pattern;
+    let module = parse_ok("x match: [<<-9223372036854775808:64/signed, rest/binary>> -> rest]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
+    assert!(
+        matches!(
+            &segments[0].value,
+            Pattern::Literal(Literal::Integer(i64::MIN), _)
+        ),
+        "expected i64::MIN literal, got: {:?}",
+        segments[0].value
+    );
+}
+
+#[test]
+fn parse_binary_pattern_double_negated_min_int_is_clean_error() {
+    // Review finding 2: <<- -9223372036854775808:64/signed>> exceeds
+    // i64::MAX — a clean diagnostic, never a panic (or release wrap).
+    use crate::source_analysis::Severity;
+    let diagnostics = parse_err("x match: [<<- -9223372036854775808:64/signed>> -> 1]");
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert!(
+        errors[0].message.contains("out of range"),
+        "expected out-of-range error, got: {}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn parse_binary_pattern_negative_size_is_error() {
+    // Review finding 3: <<a:-5, rest/binary>> — erlc rejects negative sizes.
+    use crate::source_analysis::Severity;
+    let diagnostics = parse_err("x match: [<<a:-5, rest/binary>> -> a]");
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert!(
+        errors[0].message.contains("non-negative"),
+        "expected non-negative error, got: {}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn parse_binary_pattern_utf8_with_size_is_error() {
+    // Review finding 3: `erlc` rejects sizes on utf8 segments ("neither
+    // size nor unit must be given") — Beamtalk errors instead of emitting
+    // Core Erlang that `erlc` rejects with a "compiler bug" report.
+    use crate::source_analysis::Severity;
+    let diagnostics = parse_err("x match: [<<c:8/utf8, rest/binary>> -> c]");
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert!(
+        errors[0].message.contains("must not be given"),
+        "expected must-not-be-given error, got: {}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn parse_binary_pattern_misfit_literals_warn() {
+    // Review finding 3: values that cannot fit warn, erlc-style — but
+    // fitting literals (including `<<-1:8/signed>>`) stay silent.
+    use crate::source_analysis::Severity;
+    for (source, needle) in [
+        ("x match: [<<256:8, rest/binary>> -> rest]", "will not fit"),
+        ("x match: [<<256, rest/binary>> -> rest]", "will not fit"),
+        (
+            "x match: [<<-1:8, rest/binary>> -> rest]",
+            "negative value -1 will never match",
+        ),
+        (
+            "x match: [<<65/binary>> -> 1]",
+            "not of the expected type 'binary'",
+        ),
+        (
+            "x match: [<<v:8/float, rest/binary>> -> v]",
+            "bad float bit size",
+        ),
+    ] {
+        let diagnostics = parse_err(source);
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected one warning for {source}, got: {warnings:?}"
+        );
+        assert!(
+            warnings[0].message.contains(needle),
+            "expected {needle} for {source}, got: {}",
+            warnings[0].message
+        );
+    }
+    for source in [
+        "x match: [<<-1:8/signed, rest/binary>> -> rest]",
+        "x match: [<<255:8, rest/binary>> -> rest]",
+        "x match: [<<0:1, v:7, rest/binary>> -> v]",
+        "x match: [<<v:64/float, rest/binary>> -> v]",
+        "x match: [<<c/utf8, rest/binary>> -> c]",
+    ] {
+        let module = parse_ok(source);
+        assert_eq!(module.expressions.len(), 1);
+    }
+}
+
+#[test]
 fn lex_ltlt_gtgt_tokens() {
     use crate::source_analysis::TokenKind;
     let tokens = lex_with_eof("<<");

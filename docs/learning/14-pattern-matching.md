@@ -296,7 +296,10 @@ expr match: [
 ]
 ```
 
-Segment types: `name:8` (8-bit int), `name/binary` (rest as binary)
+Segment types: `name:8` (8-bit int), `name/binary` (rest as binary),
+`name/bits` (rest as possibly-unaligned bits). Segment values may be integer
+literals (`0:1`); sizes may name an earlier segment (`payload:n/binary`), a
+parameter or local, or a parenthesized expression (`v:(8 - p)`).
 
 ```beamtalk
 TestCase subclass: Ch14BinaryPatterns
@@ -329,6 +332,22 @@ TestCase subclass: Ch14BinaryPatterns
       _ -> "low"
     ]
     self assert: result equals: "low"
+
+  testMatchLengthPrefixed =>
+    // The size `n` comes from an earlier segment of the same pattern:
+    result := (Binary fromBytes: #(3, 104, 105, 33)) match: [
+      <<n:8, payload:n/binary>> -> payload toBytes;
+      _ -> #()
+    ]
+    self assert: result equals: #(104, 105, 33)
+
+  testMatchBits =>
+    // 234 is 0b11101010: skip 3 flag bits, take a 5-bit value:
+    result := (Binary fromBytes: #(234)) match: [
+      <<_:3, v:5>> -> v;
+      _ -> -1
+    ]
+    self assert: result equals: 10
 ```
 
 ## Summary

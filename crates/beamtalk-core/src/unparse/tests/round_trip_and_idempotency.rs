@@ -434,6 +434,99 @@ fn tuple_literal_interpolation_keeps_padding() {
     assert_identity("x := \"x {a} y\"\n");
 }
 
+// --- Round-trip: type annotations preserved (BT-4108) ---
+
+/// Assert `source` (already canonical, trailing newline included) survives
+/// a parse → unparse → parse round-trip with a byte-identical AST:
+///
+/// - `format_source` must succeed (no error diagnostics) and be a no-op,
+///   so the re-parse below sees identical bytes and identical spans;
+/// - the re-parsed [`Module`] must equal the original, proving no
+///   annotation (or anything else) was lost or altered.
+#[track_caller]
+fn assert_annotation_round_trip(source: &str) {
+    let formatted = format_source(source).expect("test source must parse without errors");
+    assert_eq!(
+        formatted, source,
+        "formatter changed canonical annotated source.\n\noriginal:\n{source}\n\nformatted:\n{formatted}"
+    );
+    let module = parse_source(source);
+    let module2 = parse_source(&formatted);
+    assert_eq!(
+        module, module2,
+        "AST changed by parse → unparse → parse round-trip.\n\nsource:\n{source}"
+    );
+}
+
+#[test]
+fn round_trip_typed_block_param_simple() {
+    // The BT-4108 repro: `[:x :: Integer | x + 1]` must keep its annotation.
+    assert_annotation_round_trip("#(1, 2, 3) collect: [:x :: Integer | x + 1]\n");
+}
+
+#[test]
+fn round_trip_typed_block_params_multiple() {
+    assert_annotation_round_trip(
+        "d inject: 0 into: [:acc :: Integer :each :: Integer | acc + each]\n",
+    );
+}
+
+#[test]
+fn round_trip_typed_block_param_generic() {
+    assert_annotation_round_trip("xs do: [:each :: List(Integer) | each println]\n");
+}
+
+#[test]
+fn round_trip_typed_block_param_block_type() {
+    assert_annotation_round_trip("self run: [:f :: Block(Integer, String) | f value: 1]\n");
+}
+
+#[test]
+fn round_trip_typed_block_param_union() {
+    // A top-level union would swallow the block's `|` separator, so the
+    // unparser keeps the grouping parens the source needs to re-parse.
+    assert_annotation_round_trip("[:x :: (Integer | String) | x]\n");
+}
+
+#[test]
+fn round_trip_typed_block_param_singleton() {
+    assert_annotation_round_trip("[:s :: #north | s]\n");
+}
+
+#[test]
+fn round_trip_typed_block_param_difference() {
+    // Like unions, `&`/`\` chains only re-parse in annotation position
+    // inside grouping parens.
+    assert_annotation_round_trip("[:s :: (Symbol \\ #foo) | s]\n");
+    assert_annotation_round_trip("[:p :: (Printable & Comparable) | p]\n");
+}
+
+// --- Round-trip: the other annotation sites (BT-4108 sweep) ---
+
+#[test]
+fn round_trip_method_param_annotations() {
+    assert_annotation_round_trip(
+        "Object subclass: Calc\n\n  add: x :: Integer to: y :: Integer -> Integer => x + y\n",
+    );
+}
+
+#[test]
+fn round_trip_method_return_type_annotation() {
+    assert_annotation_round_trip("Object subclass: Box\n\n  size -> Integer => 42\n");
+}
+
+#[test]
+fn round_trip_state_and_field_annotations() {
+    assert_annotation_round_trip(
+        "Object subclass: Annotated\n  state: count :: Integer = 0\n  field: name :: String | Nil\n",
+    );
+}
+
+#[test]
+fn round_trip_annotated_local() {
+    assert_annotation_round_trip("x :: Integer := 5\n");
+}
+
 // --- Native declarations (BT-4144) ---
 
 /// Assert `source` (already canonical, trailing newline included) survives
