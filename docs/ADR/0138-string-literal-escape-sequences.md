@@ -10,7 +10,8 @@ Beamtalk string literals have no usable escape sequences. The lexer
 only `""` (a literal `"`) and `\{` / `\}` (a literal brace — the backslash is
 consumed; the language guide's claim that it is preserved is stale, see below).
 Any other backslash sequence is passed through verbatim: `"GET / HTTP/1.1\r\n"`
-is the 19 characters `GET / HTTP/1.1\r\n`, backslashes included. There is no
+is 18 characters — `GET / HTTP/1.1` plus literal backslash-r-backslash-n.
+There is no
 `String crlf`/`String cr` either, so HTTP code — status lines, headers, chunk
 framing, raw test requests — spells CRLF via
 `(Character value: 13) asString ++ (Character value: 10) asString` (BT-4100).
@@ -31,7 +32,10 @@ The codebase is full of exhibits. These are written as if `\n` were newline:
 - Language guide § Character Methods:
   `(Character value: 10) asString // => "\n" (LF, not "10")`
 
-Every one of them is literal backslash-n today.
+Every one of them is literal backslash-n today. A fourth exhibit lives in the
+repo's own prior ADR: ADR 0023 documents
+`"JSON-like: \{\"key\": 42\}" // => JSON-like: {"key": 42}` — written as if
+`\"` consumed the backslash, which it does not.
 
 ### Current state
 
@@ -53,8 +57,9 @@ Every one of them is literal backslash-n today.
 
 ### Constraints
 
-- Edge-case literal meanings may change (accepted for this decision); the
-  breakage must be loud and mechanical, never silent.
+- Edge-case literal meanings may change (accepted for this decision), but the
+  breakage must be bounded and reviewable: unknown escapes fail loudly, and
+  the six in-table sequences are the only silent reinterpretations.
 - The decision must keep `{expr}` interpolation, `""` doubling, and the
   double-quotes-only rule (ADR 0023) intact.
 
@@ -80,8 +85,14 @@ model (`\xFF` = error? latin-1?) and needs real design; deferred with
 prejudice. `\u{…}` is out — covered by `Character value:` /
 `String fromCodePoints:` until someone needs astral literals. `\e` is out
 (niche; `Character value: 27` works). `\a \b \f \v` are out (archaic, likely
-never). Each deferral is documented with its reason so the next person does
-not relitigate it.
+never) — with one caution for a future author: `\b` has a live PCRE meaning
+(word boundary), so migrated `\\b` regex sites assume `\b` stays an error;
+never add backspace-`\b` without re-auditing them. Each deferral is
+documented with its reason so the next person does not relitigate it.
+
+Known wart introduced here: `"\0"` is NUL while `$\0` still yields `0`
+(U+0030) via the untouched `$` fall-through. Accepted alongside the rest of
+`$` (see below); `$` gets no new behavior in this ADR.
 
 Existing behavior kept: `""` → `"`; `\{` / `\}` → literal brace (enshrined;
 the guide is corrected, no behavior change).
@@ -97,13 +108,18 @@ rule is also a ratchet: anything omitted fails loudly, so the set can only
 widen deliberately. That is the answer to "why not more" — more can come later
 without breaking anything.
 
-### One table, both directions
+### One mapping, every direction, pinned by a corpus
 
-The lexer and `printString` share the escape mapping, with round-trip tests:
-`printString` output re-parses to the identical string. Once `"a<LF>b"` exists,
-logs and debuggers must emit `\n` or produce ambiguous output — this is in
-scope, not a follow-up. (`printString` keeps `""` doubling for quotes and adds
-backslash escapes for `\`, CR, LF, TAB, NUL; backslash is escaped first.)
+The lexer, `printString`, and the unparser share one escape mapping. Three
+languages cannot literally share one table (Rust lexer, Beamtalk
+`printString`, Erlang-adjacent consumers), so the mapping is pinned by a
+shared conformance corpus instead: lex-value ↔ `printString` ↔ `fmt`
+round-trips over every escape, including braces and backslashes. Once
+`"a<LF>b"` exists, logs and debuggers must emit `\n` or produce ambiguous
+output — this is in scope, not a follow-up. (`printString` keeps `""`
+doubling for quotes and escapes `\` first, then `"`, `{` (as `\{` — without
+this a brace-containing string re-parses as interpolation and the mandated
+round-trip test fails), CR, LF, TAB, NUL. Bare `}` is safe to leave.)
 
 ### com.example.Grapheme unity
 
@@ -145,7 +161,7 @@ REPL:
 | **Erlang** | `"…"` with C-style escapes incl. octal | Same runtime conventions; we reject octal continuation (`\0` is exactly NUL). |
 | **Gleam** | `"…"` with `\n \r \t \\ \" \u{…}` | Same shape on BEAM; supports `\u{}` which we defer. |
 | **Pharo/Squeak** | `'…'`, no backslash escapes, `''` doubling, `String crlf` / `String tab` constants | The ancestor and the stdlib-constants precedent. Rejected as the *primary* fix: constants don't fix `"a\rb"` looking like CR — the silent failure this ADR exists to kill. Kept as a complementary nicety implementers may add. |
-| **Rust / Python** | Raw strings (`r"…"` / `r"…"`) alongside escapes | The literal-prefix precedent. Rejected for v1: `\\d` regexes are standard-issue annoyance (Java, Python-without-`r`), not a gap — and unknown-escape-as-error already makes every such site loud. |
+| **Rust / Python** | Raw strings (`r"…"` / `r"…"`) alongside escapes | The literal-prefix precedent. Rejected for v1: `\\d` regexes are standard-issue annoyance (Java, Python-without-`r`), not a gap — and unknown-escape-as-error already makes every such site loud. If demand ever materializes, the revisit path is ADR 0012's reserved `#r"raw string"` (and `#/…/` regex), not a new sigil design. |
 
 Smalltalk's `''` doubling is the ancestor we deliberately depart from by
 *adding* `\"` alongside the kept `""` — additive, so existing literals using
@@ -155,10 +171,13 @@ Smalltalk's `''` doubling is the ancestor we deliberately depart from by
 
 - **Newcomer**: `"a\nb"` and `"say \"hi\""` finally do what every other
   language taught them. Unknown escapes error with a pointer instead of
-  silently misbehaving. Discoverable in the REPL in one line.
+  silently misbehaving. Discoverable in the REPL in one line. Cost: regexes
+  need doubling (`"\\d"`, the Java-style annoyance) — no raw strings in v1.
 - **Smalltalk developer**: a pragmatic departure in the ADR 0039 line
   (`//` comments, PEMDAS, interpolation). `""` doubling still works, so old
-  muscle memory survives; the break is pick-uppable in minutes.
+  muscle memory survives; the break is pick-uppable in minutes. Cost: backslash
+  escapes in strings are un-Smalltalk, full stop — this is the departure, and
+  the security exhibit is the justification.
 - **Erlang/BEAM developer**: the table is the Elixir subset they expect;
   generated code stays plain UTF-8 binaries. No new runtime machinery.
 - **Operator**: no hot-reload or performance implications (compile-time
@@ -193,6 +212,19 @@ Genuine strength, and it fails on two: it doesn't fix `"a\rb"` either (the
 default literal stays a footgun), and it spends the "which quote?" confusion
 ADR 0023 deliberately killed. V1 doesn't need it; `\\d` is annoyance, not gap.
 
+### Rejected alternative: warn on backslash, no escapes
+
+- 🧑‍💻 **Newcomer**: "I get told about every `\` without breaking my build."
+- 🎩 **Smalltalk purist**: "No syntax change at all — the language stays minimal."
+- ⚙️ **BEAM veteran**: "Cheapest possible change; dialyzer-style nudges work."
+- 🏭 **Operator**: "Zero migration risk; warnings don't break deploys."
+- 🎨 **Language designer**: "Reversible: warn now, decide later with data."
+
+Genuine strength, and it fails on one point: warnings rot, and the Headers
+bug is the proof — a passing suite with a warning nobody reads ships the same
+vulnerability. (Status quo has no steelman worth writing: nobody defends a
+demonstrated silent failure on a security boundary.)
+
 ### Tension points
 
 - Purists and operators prefer zero-breakage options; the security exhibit
@@ -211,12 +243,32 @@ ADR 0023 deliberately killed. V1 doesn't need it; `\\d` is annoyance, not gap.
 A second literal form (sigil, `r"…"`-style, or revived single quotes) carrying
 escapes while plain `"…"` stays literal. Rejected for v1: doesn't fix the
 default literal's silent failure; reintroduces the quote-confusion ADR 0023
-removed. Revisit only if `\\`-heavy domains (regex) demand it.
+removed. Revisit only if `\\`-heavy domains (regex) demand it — via ADR
+0012's reserved `#r"…"`, not a new design.
+
+### Strictness without reinterpretation
+Error on every `\x` except `\{ \} ""` (no new meanings at all), with CRLF
+spelled via new stdlib constants (`String crlf`, …). This kills the silent
+class with *zero* reinterpretation risk — strictly safer than the chosen path
+— and was the strongest unconsidered option at review time. Not chosen: the
+BT-4100 acceptance criterion is "CR LF writable without a helper", and the
+judgment call is that `"a\r\n"` writability (the Elixir-convergent shape every
+downstream HTTP package wants) is worth the six bounded reinterpretations over
+constants-plus-error. If the breakage audit turns up worse than expected, this
+is the fallback: keep the error machinery, drop the new meanings.
 
 ### Warn on backslash, no escapes
 Keep passthrough but warn on any `\x`. Rejected: warnings rot (see every
 `@expect` ever); the Headers bug would have shipped with a warning nobody
 read. An error is the only honest response to an unrepresentable intent.
+
+### Do nothing (status quo)
+Leave the lexer as-is; HTTP code keeps the `Character value:` helper.
+Rejected: it preserves the demonstrated silent-failure class on a security
+boundary, and every downstream package (catalina, buccaneer, exdura) pays the
+helper tax forever. The migration cost of deciding now is bounded and
+mechanical; the cost of every future developer re-discovering the footgun is
+not.
 
 ## Consequences
 
@@ -232,9 +284,16 @@ read. An error is the only honest response to an unrepresentable intent.
 ### Negative
 
 - Breaking change to literals containing backslashes: `\r \n \t \" \0`
-  change meaning; all other `\x` become compile errors. Migration is
-  mechanical (`\` → `\\`) but touches stdlib, corpus/examples, docs, and
-  downstream packages (catalina, buccaneer, http/yaml/collections).
+  and `\\` change meaning *silently* (no diagnostic — the ratchet catches
+  only non-table escapes). Unknown `\x` becomes a compile error, which is
+  loud and mechanical (`\` → `\\`), but the six in-table sequences need
+  human review at every site: grep any `\` before `r n t " \ 0` and judge
+  intent. Blind `\` → `\\` replacement corrupts `\{` (into backslash +
+  interpolation start). Audit surface: stdlib, corpus/examples,
+  `docs/learning` (executed via `test-learn`), `docs/*.md` snippets, and
+  downstream packages (catalina, buccaneer, http/yaml/collections) — whose
+  in-table sites cannot be audited from here, so "no silent drift" is
+  asserted for this repo, not for them.
 - `\"` alongside `""` is a mild two-spellings wart (kept: erroring on `\"`
   would be hostile to every newcomer).
 - `\{` uses in migrated code need eyes, not just search-replace (behavior
@@ -248,42 +307,89 @@ read. An error is the only honest response to an unrepresentable intent.
 ## Implementation
 
 1. **Lexer** (`source_analysis/lexer.rs`, `lex_string`): implement the six
-   escapes; unknown escape → `TokenKind::Error` with span + `\\` hint.
-   Phases: table, error path, unit tests (each escape, unknown-each,
-   `""`/`\{` regression, `"\r\n" size =:= 1` + `Character`-built equality).
+   escapes; unknown escape → `TokenKind::Error` with span + `\\` hint, using
+   the existing lowercase-diagnostic convention (a message starting with a
+   lowercase letter, as the single-quote removal does) so the parser reports
+   it as complete-but-invalid rather than incomplete input. Phases: table,
+   error path, unit tests (each escape, unknown-each, `""`/`\{` regression,
+   `"\r\n" size =:= 1` + `Character`-built equality).
 2. **`printString`** (`stdlib/src/string.bt` + builtins regen): escape `\`
    first, then `"`, CR, LF, TAB, NUL; round-trip tests
-   (re-parse `printString` output, compare identical).
+   (re-parse `printString` output, compare identical). This extends, not
+   contradicts, ADR 0094: `printString` is Debug, and unambiguous Debug
+   output is the point.
+3. **Unparser** (`unparse/leaf.rs`, `string_content`): ship-blocking. It
+   emits raw backslashes today, so after this change `fmt` would emit source
+   that re-parses to a different value or fails to compile. Extend it to
+   escape `\\` (mandatory) and control characters canonically (`\n`, `\r`,
+   `\t`), with formatter round-trip tests over escape-containing values
+   (idempotency property tests cover this shape). Reconcile the two
+   producers while here: `escape_string_literal` (`unparse/mod.rs`, used by
+   `tool_expr`, MCP editing, hover, codegen doc comments, stdlib metadata)
+   emits `\"` where `leaf` emits `""` — pick one convention for generated
+   code and document it. `char_lit` already emits the table — no change
+   there. Note `escape_string_literal` already emits `\"`, which misparses
+   today (backslash-quote, 2 chars) and becomes correct under this ADR —
+   another exhibit for the decision.
 3. **Docs**: rewrite the guide's § Strings escape table (including correcting
    the stale `\{` "backslash preserved" note); fix the three `\n`-as-newline
    doc exhibits (`string.bt:330`, `inspector.bt:245`, guide § Character
    Methods).
-4. **Migration audit**: stdlib, compiler corpus/examples, catalina,
-   buccaneer (including new `"\r"` literals), http/yaml/collections, doc
-   snippets. Known in-repo loud breaks: `uuid_test.bt` `\z` → `\\z`;
-   `change_log`/`console`/`subprocess` `\n` literals (re-verify each test's
-   intent — several were written *as if* `\n` were newline and may now pass
-   for the first time, or need `\\n`).
-5. **Single source of truth**: the escape mapping lives in exactly one shared
-   table used by both the lexer and `printString` (same crate boundary rules
-   as ever — grep before adding a second copy); round-trip tests enforce it.
+4. **Migration audit** (verified inventory, not a guess):
+   - `docs/learning/06-strings.md`: `multiline size // => 22` becomes 20 —
+     executed via `test-learn` (`test-docs --warnings-as-errors`), so this
+     goes red on day one. Update value + prose.
+   - `examples/sicp/.../scheme_reader.bt` `isWs:`: `#(" ", "\n", "\t", "\r")`
+     silently starts matching real whitespace (today it matches nothing) —
+     intended behavior arriving by accident; re-verify the scheme tests'
+     intent.
+   - Self-consistent fixtures (`change_log_test`, `subprocess_test` printf,
+     `console_test`): pass before *and* after while testing different
+     inputs — verify intent, don't just re-bless.
+   - `uuid_test.bt`: compile-blocked until `\z` → `\\z` (the loud case
+     working as designed); the trailing-`"\n"` cases then test new behavior.
+   - `just build-corpus` + builtins regen (`check-corpus` freshness fails
+     otherwise), catalina, buccaneer (including new `"\r"` literals),
+     http/yaml/collections, `docs/*.md` snippets.
+5. **Conformance, not a shared table**: three languages cannot share one
+   table, so pin the mapping with a shared corpus — extend
+   `string_and_character_literal_span_corpus.json` or add an escape corpus
+   asserting lex-value ↔ `printString` ↔ `fmt` round-trips. The Rust-side hub
+   is `unparse_literal_display` (already the documented single source of
+   truth for literal-to-source rendering); `printString` is the Beamtalk
+   side; the corpus keeps them honest.
+6. **Error-channel acceptance**: the unknown-escape diagnostic's span must
+   cover the offending backslash; the message starts lowercase (REPL
+   completeness convention); verify the REPL prints the error rather than a
+   continuation prompt for `"\q"`.
 
-Effort: S (lexer + tests) + S (`printString` + round-trip) + migration sweep.
+Effort: S (lexer + tests) + S (`printString` + unparser + round-trip) + migration sweep.
 
 ## Migration Path
 
-- `\` followed by `r n t " 0` or `\` takes the new meaning — intended.
-- Any other `\x` is a compile error pointing at the backslash: write `\\x`
-  for a literal backslash (regex `\d` → `\\d`, paths `C:\t` → `C:\\t`).
-- `\{` / `\}`: unchanged behavior (literal brace); confirm each site during
-  the audit rather than bulk-replacing.
-- Downstream packages get the same loud errors on upgrade; no silent drift.
+Two classes of breakage, handled differently:
+
+- **Loud (unknown `\x`)**: compile error pointing at the backslash. Fix is
+  mechanical: write `\\x` for a literal backslash (regex `\d` → `\\d`).
+  `uuid_test.bt`'s `\z` is the in-repo example.
+- **Silent (in-table `\r \n \t \" \\ \0`)**: meaning changes with no
+  diagnostic. NOT mechanical: grep every `\` before `r n t " \ 0` and judge
+  intent at each site. `C:\new\test` (path) becomes `C:` + LF + `ew` +
+  TAB + `est` — the reviewer must decide `C:\\new\\test`. Never bulk
+  `\` → `\\`: it corrupts `\{` into backslash + interpolation start.
+
+`\{` / `\}`: unchanged behavior (literal brace); confirm each site rather
+than bulk-replacing. Downstream packages get loud errors for unknown
+escapes on upgrade; their in-table sites need the same human grep — run it
+before upgrading catalina, buccaneer, http/yaml/collections, exdura.
 
 ## References
 
 - Related issues: BT-4100 (this decision), BT-4079 (Buccaneer spikes),
   BT-4019 (Catalina spikes, `telemetry` FFI context)
-- Related ADRs: ADR 0023 (double quotes, interpolation), ADR 0039 (syntax
-  pragmatism), ADR 0086 (string subclass of binary)
+- Related ADRs: ADR 0012 (reserved `#r"…"`, `#/…/` — the revisit path),
+  ADR 0023 (double quotes, interpolation), ADR 0039 (syntax pragmatism),
+  ADR 0086 (string subclass of binary), ADR 0094 (`printString` = Debug
+  contract, extended here)
 - Documentation: `docs/beamtalk-language-features.md` (§ Strings,
   § Character Methods)
