@@ -21,6 +21,12 @@ error wrapping, and printString formatting.
 %% BT-4021 fixtures: a target that raises `undef` itself, and one whose charlist
 %% retry hits a nested `undef`.
 -export([explicit_undef_stub/1, retry_then_nested_undef/1, empty_stack_undef_stub/1]).
+%% BT-4153 fixtures: bare-ok and charlist results for mode-equivalence tests.
+-export([bt4153_ok_stub/0, bt4153_charlist_stub/0]).
+
+bt4153_ok_stub() -> ok.
+
+bt4153_charlist_stub() -> "hi".
 
 explicit_undef_stub(_Arg) -> erlang:error(undef).
 
@@ -1654,4 +1660,124 @@ native_call_badarg_with_fun_arg_is_not_retried_test() ->
         ?assertEqual(1, get(bt4055_runs))
     after
         erase(bt4055_runs)
+    end.
+
+%%% ===================================================================
+%%% BT-4153: coercion fast path (shape-first + precomputed mode)
+%%% ===================================================================
+
+is_beamtalk_module_conformance_test() ->
+    %% Same table as `test_is_beamtalk_module` in
+    %% crates/beamtalk-codegen/src/core_erlang/util.rs — update both together
+    %% so the Rust/Erlang pair cannot drift silently. Probed through
+    %% coerce_ffi_result/2: a charlist result comes back a binary in stock
+    %% mode and an unchanged list in beamtalk mode.
+    Beamtalk = [
+        beamtalk_actor, beamtalk_stream, beamtalk_, 'bt@stdlib@list', 'bt@test@foo', 'bt@'
+    ],
+    Stock = [
+        lists, erlang, maps, vs_bench, beamtalk, beamtalkx, bt, 'btx@foo', my_beamtalk_mod,
+        'BEAMTALK_FOO', ''
+    ],
+    [
+        ?assertEqual("hi", beamtalk_erlang_proxy:coerce_ffi_result(M, "hi"))
+     || M <- Beamtalk
+    ],
+    [
+        ?assertEqual(<<"hi">>, beamtalk_erlang_proxy:coerce_ffi_result(M, "hi"))
+     || M <- Stock
+    ].
+
+coerce_ffi_result_3_equivalence_test() ->
+    %% /3 with the runtime-derived mode answers exactly what /2 does, for
+    %% every result shape in each module class (stock, beamtalk, raw).
+    {module, beamtalk_ets} = code:ensure_loaded(beamtalk_ets),
+    Shapes = [
+        42, -1, 4.5, <<>>, <<"bin">>, self(), make_ref(), fun() -> ok end, #{}, #{a => 1}, [],
+        foo, nil, true, ok, error, {ok, 1}, {error, x}, {ok, 1, 2}, {error}, {a, b}, {}, {1},
+        [1, 2, 3], "hi", [<<>>, ok]
+    ],
+    Modes = [{lists, stock}, {beamtalk_stream, beamtalk}, {beamtalk_ets, beamtalk}],
+    [
+        ?assertEqual(
+            beamtalk_erlang_proxy:coerce_ffi_result(M, S),
+            beamtalk_erlang_proxy:coerce_ffi_result(M, S, Mode)
+        )
+     || {M, Mode} <- Modes, S <- Shapes
+    ].
+
+coerce_ffi_result_3_raw_ok_passthrough_test() ->
+    %% Raw-result beamtalk modules pass even `ok` through under /3 ...
+    {module, beamtalk_ets} = code:ensure_loaded(beamtalk_ets),
+    ?assertEqual(ok, beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_ets, ok, beamtalk)),
+    ?assertEqual(
+        {ok, 1}, beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_ets, {ok, 1}, beamtalk)
+    ),
+    %% ... while non-raw beamtalk modules still wrap.
+    Wrapped = beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_stream, ok, beamtalk),
+    ?assertEqual('Result', maps:get('$beamtalk_class', Wrapped)).
+
+direct_call_4_equivalence_test() ->
+    %% /4 with the runtime-derived mode behaves exactly like /3.
+    ?assertEqual(
+        beamtalk_erlang_proxy:direct_call(erlang, phash2, [5]),
+        beamtalk_erlang_proxy:direct_call(erlang, phash2, [5], stock)
+    ),
+    ?assertEqual(
+        beamtalk_erlang_proxy:direct_call(erlang, integer_to_binary, [5]),
+        beamtalk_erlang_proxy:direct_call(erlang, integer_to_binary, [5], stock)
+    ),
+    ?assertEqual(
+        beamtalk_erlang_proxy:direct_call(maps, find, [k, #{k => 3}]),
+        beamtalk_erlang_proxy:direct_call(maps, find, [k, #{k => 3}], stock)
+    ),
+    %% beamtalk mode: a charlist result passes through unconverted.
+    ?assertEqual(
+        "hi", beamtalk_erlang_proxy:direct_call(?MODULE, bt4153_charlist_stub, [], beamtalk)
+    ),
+    ?assertEqual(
+        beamtalk_erlang_proxy:direct_call(?MODULE, bt4153_charlist_stub, []),
+        beamtalk_erlang_proxy:direct_call(?MODULE, bt4153_charlist_stub, [], beamtalk)
+    ),
+    %% stock mode wraps even a beamtalk-module `ok` (the mode is the contract).
+    StockOk = beamtalk_erlang_proxy:direct_call(?MODULE, bt4153_ok_stub, [], stock),
+    ?assertEqual('Result', maps:get('$beamtalk_class', StockOk)),
+    ?assertEqual(true, maps:get('isOk', StockOk)),
+    %% ... and beamtalk mode wraps it too here (?MODULE is not a raw module).
+    BtOk = beamtalk_erlang_proxy:direct_call(?MODULE, bt4153_ok_stub, [], beamtalk),
+    ?assertEqual('Result', maps:get('$beamtalk_class', BtOk)).
+
+direct_call_4_error_equivalence_test() ->
+    %% /4 classifies errors exactly like /3.
+    assert_same_ffi_error(
+        fun() -> beamtalk_erlang_proxy:direct_call(no_such_mod_bt4153, f, []) end,
+        fun() -> beamtalk_erlang_proxy:direct_call(no_such_mod_bt4153, f, [], stock) end
+    ),
+    assert_same_ffi_error(
+        fun() -> beamtalk_erlang_proxy:direct_call(lists, no_such_fun_bt4153, [1]) end,
+        fun() -> beamtalk_erlang_proxy:direct_call(lists, no_such_fun_bt4153, [1], stock) end
+    ).
+
+native_call_5_equivalence_test() ->
+    %% /5 with the runtime-derived mode behaves exactly like /4.
+    Ctx = {'Stream', 'asList'},
+    ?assertEqual(
+        beamtalk_erlang_proxy:native_call(lists, reverse, [[1, 2, 3]], Ctx),
+        beamtalk_erlang_proxy:native_call(lists, reverse, [[1, 2, 3]], Ctx, stock)
+    ),
+    ?assertEqual(
+        beamtalk_erlang_proxy:native_call(?MODULE, bt4153_charlist_stub, [], Ctx),
+        beamtalk_erlang_proxy:native_call(?MODULE, bt4153_charlist_stub, [], Ctx, beamtalk)
+    ).
+
+assert_same_ffi_error(FunA, FunB) ->
+    ?assertEqual(catch_ffi_error(FunA), catch_ffi_error(FunB)).
+
+catch_ffi_error(Fun) ->
+    try Fun() of
+        Unexpected -> {unexpected_return, Unexpected}
+    catch
+        error:#{error := Err} ->
+            {Err#beamtalk_error.kind, Err#beamtalk_error.class, Err#beamtalk_error.selector,
+                Err#beamtalk_error.hint}
     end.
