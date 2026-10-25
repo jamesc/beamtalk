@@ -888,9 +888,10 @@ fn true_false_if_true_if_false_bodies_match_codegen_recognizer() {
         .expect("repo root")
         .to_path_buf();
 
-    for (file, class_name, taken_param) in
-        [("stdlib/src/true.bt", "True", "trueBlock"), ("stdlib/src/false.bt", "False", "falseBlock")]
-    {
+    for (file, class_name, taken_param) in [
+        ("stdlib/src/true.bt", "True", "trueBlock"),
+        ("stdlib/src/false.bt", "False", "falseBlock"),
+    ] {
         let path = repo_root.join(file);
         let Ok(source) = std::fs::read_to_string(&path) else {
             eprintln!("skipping: {} not present in this checkout", path.display());
