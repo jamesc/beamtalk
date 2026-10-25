@@ -87,6 +87,11 @@ pub(crate) struct LintResult {
 /// `diagnostic_summary` report the same file-name/class-name mismatch
 /// `beamtalk build`/`beamtalk lint`/the LSP do — `None` for callers with no
 /// real file backing the module skips the check.
+///
+/// `known_erlang_modules` mirrors `beamtalk lint`'s
+/// `CompilerOptions::known_erlang_modules` (BT-4022): the package's
+/// hex-dep/native ebin modules plus own `native/*.erl`, so the
+/// `unresolved_ffi` check agrees with `build`/`lint`/LSP.
 #[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
 pub(crate) fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
@@ -102,6 +107,7 @@ pub(crate) fn run_module_analysis(
     current_package: Option<&str>,
     is_stub_file: bool,
     file_stem: Option<&str>,
+    known_erlang_modules: &std::collections::HashSet<String>,
 ) -> (
     Vec<beamtalk_core::source_analysis::Diagnostic>,
     beamtalk_core::semantic_analysis::ClassHierarchy,
@@ -114,6 +120,7 @@ pub(crate) fn run_module_analysis(
     let options = beamtalk_core::CompilerOptions {
         has_package_dependencies,
         current_package: current_package.map(str::to_string),
+        known_erlang_modules: known_erlang_modules.clone(),
         ..Default::default()
     };
     let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
@@ -150,6 +157,24 @@ pub(crate) fn build_native_type_registry(
     let project_root = camino::Utf8PathBuf::from_path_buf(project_root).ok()?;
     let layout = beamtalk_cli::build_layout::BuildLayout::new(&project_root);
     beamtalk_cli::native_type_specs::extract_project_type_specs(&layout).map(std::sync::Arc::new)
+}
+
+/// Collect the project-known Erlang modules for `path`'s package (BT-4022),
+/// the same way `beamtalk lint` does — via the shared
+/// `collect_project_known_erlang_modules`, anchored on the package root
+/// found from `path`. Returns an empty set outside a manifest-backed
+/// package (or when the root is not UTF-8), preserving the
+/// static-list-only `unresolved_ffi` behaviour there.
+pub(crate) fn collect_known_erlang_modules(path: &str) -> std::collections::HashSet<String> {
+    let Some(project_root) =
+        beamtalk_project::package::find_package_root(std::path::Path::new(path))
+    else {
+        return std::collections::HashSet::new();
+    };
+    let Ok(project_root) = camino::Utf8PathBuf::from_path_buf(project_root) else {
+        return std::collections::HashSet::new();
+    };
+    beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&project_root)
 }
 
 /// Compute a diagnostic summary (counts + type coverage) for a path.
@@ -276,6 +301,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
+    // BT-4022: project-known Erlang modules for the `unresolved_ffi` check.
+    let known_erlang_modules = collect_known_erlang_modules(path);
     let pre_loaded_protocol_defs =
         package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
     let protocol_sources =
@@ -318,6 +345,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             std::path::Path::new(file_str)
                 .file_stem()
                 .and_then(std::ffi::OsStr::to_str),
+            &known_erlang_modules,
         );
 
         let (provision_diags, file_diags) =
@@ -725,6 +753,8 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
 
     // Populate the FFI type registry the same way `beamtalk lint` does.
     let native_type_registry = build_native_type_registry(path);
+    // BT-4022: project-known Erlang modules for the `unresolved_ffi` check.
+    let known_erlang_modules = collect_known_erlang_modules(path);
     let pre_loaded_protocol_defs =
         package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
     let protocol_sources =
@@ -766,6 +796,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             current_package.as_deref(),
             is_stub_file,
             file.file_stem().and_then(std::ffi::OsStr::to_str),
+            &known_erlang_modules,
         );
 
         let (provision_diags, lint_diags) =

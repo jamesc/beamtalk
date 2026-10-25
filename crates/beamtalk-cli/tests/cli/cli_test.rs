@@ -316,3 +316,46 @@ fn test_file_calls_sealed_dependency_class_method_bt_4094() {
         .stdout(contains("3 passed"))
         .stdout(contains("0 failed"));
 }
+
+/// BT-4022: `beamtalk test` must agree with `build`/`lint` — an FFI call
+/// in a test file to the package's own `native/*.erl` module must not warn
+/// `Unknown Erlang module`, while a genuinely unknown module still does.
+/// The native call is executed (proving the module resolves at runtime);
+/// the unknown call sits in a never-invoked helper so the suite still
+/// passes while analysis still checks it.
+#[test]
+fn test_knows_own_native_module_but_warns_on_unknown() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("native")).expect("mkdir native");
+    std::fs::write(
+        project.path().join("native/my_nif.erl"),
+        "%% Copyright 2026 James Casey\n\
+         %% SPDX-License-Identifier: Apache-2.0\n\
+         -module(my_nif).\n\
+         -moduledoc \"Fixture native module for the BT-4022 test.\".\n\
+         -export([ping/0]).\n\
+         -doc \"Returns `pong`.\".\n\
+         ping() -> pong.\n",
+    )
+    .expect("write native/my_nif.erl");
+    std::fs::write(
+        project.path().join("test/NativeFfiTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: NativeFfiTest\n\
+         \n\
+         \x20\x20probeUnknown => Erlang definitely_unknown_xyz ping\n\
+         \n\
+         \x20\x20testNative => self assert: (Erlang my_nif ping) equals: #pong\n",
+    )
+    .expect("write test/NativeFfiTest.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet"])
+        .assert()
+        .success()
+        .stderr(contains("Unknown Erlang module `definitely_unknown_xyz`"))
+        .stderr(contains("Unknown Erlang module `my_nif`").not());
+}

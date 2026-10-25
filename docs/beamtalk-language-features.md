@@ -7736,7 +7736,7 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 (Erlang some_module) someCall   // suppresses both categories on this one expression
 ```
 
-**Combined form (BT-3387):** A single `@expect` can list more than one category, separated by commas, to suppress every listed category on the same following expression or declaration — useful when one expression genuinely triggers two independent diagnostics at once (e.g. an FFI call to a module outside the known-OTP list, whose return type is also inferred as `Dynamic`). The directive is only reported stale if *none* of its listed categories match a real diagnostic; if at least one does, the directive is satisfied even though another listed category turned out unnecessary.
+**Combined form (BT-3387):** A single `@expect` can list more than one category, separated by commas, to suppress every listed category on the same following expression or declaration — useful when one expression genuinely triggers two independent diagnostics at once (e.g. an FFI call to an unknown module — outside the known-OTP list, the `beamtalk_*` modules, and the package's own dependency/native modules — whose return type is also inferred as `Dynamic`). The directive is only reported stale if *none* of its listed categories match a real diagnostic; if at least one does, the directive is satisfied even though another listed category turned out unnecessary.
 
 **Suppression categories:**
 

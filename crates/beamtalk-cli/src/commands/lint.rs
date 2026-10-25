@@ -87,6 +87,7 @@ fn collect_diagnostics(
     is_stub_file: bool,
     file_stem: Option<&str>,
     stdlib_mode: bool,
+    known_erlang_modules: &std::collections::HashSet<String>,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.`)
     // plus AST-level lint passes.
@@ -117,6 +118,9 @@ fn collect_diagnostics(
         has_package_dependencies,
         current_package: current_package.map(str::to_string),
         stdlib_mode,
+        // BT-4022: project-known Erlang modules so the `unresolved_ffi`
+        // check agrees with `build` on hex-dep and own-`native/` modules.
+        known_erlang_modules: known_erlang_modules.clone(),
         ..Default::default()
     };
     let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
@@ -332,6 +336,17 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         None
     };
 
+    // BT-4022: project-known Erlang modules for the `unresolved_ffi`
+    // check — same package-root anchoring as `native_type_registry`
+    // above. `beamtalk lint` never compiles native/hex deps itself, so the
+    // ebin tier reflects whatever a previous `beamtalk build` left on disk
+    // (absent on a fresh checkout — genuinely-unknown modules still warn);
+    // the `native/` source tier is known regardless.
+    let known_erlang_modules = package_root.as_deref().map_or_else(
+        std::collections::HashSet::new,
+        beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules,
+    );
+
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
     let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
@@ -397,6 +412,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             is_stub_file,
             file.file_stem(),
             stdlib_mode,
+            &known_erlang_modules,
         );
 
         // Drop repeat sightings of a pre-loaded alias collision —
@@ -926,6 +942,7 @@ fn collect_lint_diagnostics_with_stub_flag(
         is_stub_file,
         None,
         false,
+        &std::collections::HashSet::new(),
     )
 }
 
@@ -955,6 +972,7 @@ fn collect_lint_diagnostics_with_file_stem(
         false,
         file_stem,
         false,
+        &std::collections::HashSet::new(),
     )
 }
 
@@ -985,6 +1003,7 @@ fn collect_lint_diagnostics_with_stdlib_flag(
         false,
         None,
         stdlib_mode,
+        &std::collections::HashSet::new(),
     )
 }
 
@@ -1256,6 +1275,7 @@ mod tests {
             false,
             None,
             false,
+            &std::collections::HashSet::new(),
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -1494,6 +1514,7 @@ mod tests {
             false,
             None,
             false,
+            &std::collections::HashSet::new(),
         );
 
         let unresolved: Vec<_> = diags
@@ -1706,6 +1727,7 @@ mod tests {
             false,
             None,
             false,
+            &std::collections::HashSet::new(),
         );
 
         let unresolved_names: Vec<String> = diags
@@ -1902,6 +1924,7 @@ mod tests {
                 false,
                 None,
                 false,
+                &std::collections::HashSet::new(),
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -2029,6 +2052,7 @@ mod tests {
                 false,
                 None,
                 false,
+                &std::collections::HashSet::new(),
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -2195,6 +2219,7 @@ mod tests {
             false,
             None,
             false,
+            &std::collections::HashSet::new(),
         );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
@@ -2249,6 +2274,7 @@ mod tests {
             false,
             None,
             false,
+            &std::collections::HashSet::new(),
         );
 
         let untyped_ffi: Vec<_> = diags
@@ -2318,6 +2344,7 @@ mod tests {
             false,
             None,
             false,
+            &std::collections::HashSet::new(),
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(

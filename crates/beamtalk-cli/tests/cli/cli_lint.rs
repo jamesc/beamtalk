@@ -796,3 +796,55 @@ fn qualified_dependency_provision_diagnostic_lands_in_dependency_file_bt_3944() 
         "reported against the dependency's file and line, got: {location}\n{stderr}"
     );
 }
+
+/// BT-4022: an FFI call to a hex-dependency module (a `.beam` in the
+/// compiled rebar3 dep ebin dir) or to the package's own `native/*.erl`
+/// must not warn `Unknown Erlang module`, while a genuinely unknown
+/// module still does. `beamtalk lint` never compiles native code itself,
+/// so the dep ebin is planted to stand in for a previous `beamtalk build`'s
+/// rebar3 output (only the `.beam` stem is ever read, never its content).
+#[test]
+fn lint_knows_hex_dep_and_native_modules_but_warns_on_unknown() {
+    let project = cli_common::fixture_project();
+
+    // Stand-in for `_build/dev/native/default/lib/telemetry/ebin/` after a
+    // rebar3 hex-dep compile — `beamtalk lint` reads only the stem.
+    let hex_ebin = project
+        .path()
+        .join("_build/dev/native/default/lib/fakelib/ebin");
+    std::fs::create_dir_all(&hex_ebin).expect("mkdir hex ebin");
+    std::fs::write(hex_ebin.join("fakelib.beam"), b"not a real beam").expect("write fake beam");
+
+    std::fs::create_dir_all(project.path().join("native")).expect("mkdir native");
+    std::fs::write(
+        project.path().join("native/my_nif.erl"),
+        "%% Copyright 2026 James Casey\n\
+         %% SPDX-License-Identifier: Apache-2.0\n\
+         -module(my_nif).\n\
+         -moduledoc \"Fixture native module for the BT-4022 lint test.\".\n\
+         -export([ping/0]).\n\
+         -doc \"Returns `pong`.\".\n\
+         ping() -> pong.\n",
+    )
+    .expect("write native/my_nif.erl");
+
+    std::fs::write(
+        project.path().join("src/FfiUser.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         hex_result := Erlang fakelib ping: 1.\n\
+         native_result := Erlang my_nif ping.\n\
+         unknown_result := Erlang definitely_unknown_xyz ping.\n",
+    )
+    .expect("write src/FfiUser.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(contains("Unknown Erlang module `definitely_unknown_xyz`"))
+        .stderr(contains("Unknown Erlang module `fakelib`").not())
+        .stderr(contains("Unknown Erlang module `my_nif`").not());
+}

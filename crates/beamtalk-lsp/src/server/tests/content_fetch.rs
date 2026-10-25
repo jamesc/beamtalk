@@ -40,6 +40,38 @@ async fn load_type_cache_extracts_live_on_cold_cache() {
     assert!(root.join("_build").join("type_cache").exists());
 }
 
+/// BT-4022: the same `load_type_cache` walk installs the workspace's
+/// project-known Erlang modules (a hex dep's `.beam`, own `native/*.erl`)
+/// for the `unresolved_ffi` check — no `beamtalk build` needed for the
+/// `native/` tier, and only the `.beam` stem is ever read for the ebin
+/// tier, never its content.
+#[tokio::test]
+async fn load_type_cache_collects_project_known_erlang_modules() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let root = temp.path().to_path_buf();
+
+    let hex_ebin = root.join("_build/dev/native/default/lib/fakelib/ebin");
+    std::fs::create_dir_all(&hex_ebin).unwrap();
+    std::fs::write(hex_ebin.join("fakelib.beam"), b"not a real beam").unwrap();
+    std::fs::create_dir_all(root.join("native")).unwrap();
+    std::fs::write(root.join("native/my_nif.erl"), b"-module(my_nif).\n").unwrap();
+
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend: &Backend = service.inner();
+    backend.load_type_cache(std::slice::from_ref(&root)).await;
+
+    let svc = backend.service.lock().expect("service lock poisoned");
+    let known = svc.known_erlang_modules();
+    assert!(
+        known.contains("fakelib"),
+        "hex-dep .beam stem should be known: {known:?}"
+    );
+    assert!(
+        known.contains("my_nif"),
+        "own native/*.erl stem should be known: {known:?}"
+    );
+}
+
 #[tokio::test]
 async fn fetch_content_returns_error_for_unsupported_scheme() {
     let (service, _socket) = tower_lsp::LspService::new(Backend::new);

@@ -429,12 +429,19 @@ const KNOWN_OTP_MODULES: &[&str] = &[
 ///
 /// Detects the `Erlang <module> <selector>` FFI call pattern where
 /// `<module>` is used as a unary message to `Erlang`.
-pub(crate) fn check_unresolved_ffi_modules(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    // Collect Erlang source files in the project (their module names are valid).
-    // We don't have access to the filesystem here, so we only check the static list.
-
+///
+/// `extra_known_modules` carries the package's own project-known modules
+/// (compiled dependency ebin dirs + own `native/*.erl`, via
+/// [`crate::ffi_type_specs::collect_project_known_erlang_modules`]) —
+/// this layer still has no filesystem access itself; the driver supplies
+/// the set through [`AnalysisContext`](crate::semantic_analysis::AnalysisContext).
+pub(crate) fn check_unresolved_ffi_modules(
+    module: &Module,
+    extra_known_modules: &std::collections::HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     walk_module(module, &mut |expr| {
-        visit_unresolved_ffi(expr, diagnostics);
+        visit_unresolved_ffi(expr, extra_known_modules, diagnostics);
     });
 }
 
@@ -444,7 +451,11 @@ pub(crate) fn check_unresolved_ffi_modules(module: &Module, diagnostics: &mut Ve
 /// `ClassReference("Erlang")` with a `Unary` selector naming the module.
 /// This catches both standalone proxy construction (`Erlang typo_mod`)
 /// and calls like `Erlang typo_mod reverse: xs` (the inner send).
-fn visit_unresolved_ffi(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+fn visit_unresolved_ffi(
+    expr: &Expression,
+    extra_known_modules: &std::collections::HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     if let Expression::MessageSend {
         receiver,
         selector: MessageSelector::Unary(module_name),
@@ -458,7 +469,7 @@ fn visit_unresolved_ffi(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             if package.is_none()
                 && name.name == "Erlang"
                 && !crate::ffi_receiver::is_class_protocol_selector(module_name.as_str())
-                && !is_known_erlang_module(module_name.as_str())
+                && !is_known_erlang_module(module_name.as_str(), extra_known_modules)
             {
                 diagnostics.push(
                     Diagnostic::warning(
@@ -476,8 +487,13 @@ fn visit_unresolved_ffi(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-fn is_known_erlang_module(name: &str) -> bool {
-    KNOWN_OTP_MODULES.contains(&name) || name.starts_with("beamtalk_")
+fn is_known_erlang_module(
+    name: &str,
+    extra_known_modules: &std::collections::HashSet<String>,
+) -> bool {
+    KNOWN_OTP_MODULES.contains(&name)
+        || name.starts_with("beamtalk_")
+        || extra_known_modules.contains(name)
 }
 
 // ── FFI arity mismatches ─────────────────────────────────────────────────────
@@ -764,6 +780,24 @@ mod tests {
         )
     }
 
+    /// Empty project-known module set, for FFI tests that exercise only the
+    /// static OTP list / `beamtalk_*` behaviour.
+    fn empty_known_modules() -> std::collections::HashSet<String> {
+        std::collections::HashSet::new()
+    }
+
+    /// A `(Erlang <module>)` FFI proxy: `Erlang <module>` as a unary send
+    /// to the `Erlang` class reference.
+    fn ffi_proxy(module: &str) -> Expression {
+        Expression::MessageSend {
+            receiver: Box::new(class_ref("Erlang")),
+            selector: MessageSelector::Unary(module.into()),
+            arguments: vec![],
+            is_cast: false,
+            span: test_span(),
+        }
+    }
+
     // ── Unresolved class tests ──────────────────────────────────────────────
 
     #[test]
@@ -968,19 +1002,25 @@ mod tests {
 
     #[test]
     fn test_known_otp_modules_accepted() {
-        assert!(is_known_erlang_module("lists"));
-        assert!(is_known_erlang_module("maps"));
-        assert!(is_known_erlang_module("erlang"));
-        assert!(is_known_erlang_module("io"));
-        assert!(is_known_erlang_module("crypto"));
-        assert!(is_known_erlang_module("ssl"));
-        assert!(is_known_erlang_module("public_key"));
+        assert!(is_known_erlang_module("lists", &empty_known_modules()));
+        assert!(is_known_erlang_module("maps", &empty_known_modules()));
+        assert!(is_known_erlang_module("erlang", &empty_known_modules()));
+        assert!(is_known_erlang_module("io", &empty_known_modules()));
+        assert!(is_known_erlang_module("crypto", &empty_known_modules()));
+        assert!(is_known_erlang_module("ssl", &empty_known_modules()));
+        assert!(is_known_erlang_module("public_key", &empty_known_modules()));
     }
 
     #[test]
     fn test_unknown_module_not_accepted() {
-        assert!(!is_known_erlang_module("my_custom_module"));
-        assert!(!is_known_erlang_module("nonexistent"));
+        assert!(!is_known_erlang_module(
+            "my_custom_module",
+            &empty_known_modules()
+        ));
+        assert!(!is_known_erlang_module(
+            "nonexistent",
+            &empty_known_modules()
+        ));
     }
 
     #[test]
@@ -1004,7 +1044,7 @@ mod tests {
         let module = empty_module_with_exprs(vec![outer_send]);
         let mut diags = Vec::new();
 
-        check_unresolved_ffi_modules(&module, &mut diags);
+        check_unresolved_ffi_modules(&module, &empty_known_modules(), &mut diags);
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("custom_mod"));
@@ -1027,7 +1067,7 @@ mod tests {
         let module = empty_module_with_exprs(vec![send]);
         let mut diags = Vec::new();
 
-        check_unresolved_ffi_modules(&module, &mut diags);
+        check_unresolved_ffi_modules(&module, &empty_known_modules(), &mut diags);
 
         assert!(diags.is_empty());
     }
@@ -1051,9 +1091,44 @@ mod tests {
         let module = empty_module_with_exprs(vec![outer_send]);
         let mut diags = Vec::new();
 
-        check_unresolved_ffi_modules(&module, &mut diags);
+        check_unresolved_ffi_modules(&module, &empty_known_modules(), &mut diags);
 
         assert!(diags.is_empty(), "Known OTP modules should not warn");
+    }
+
+    /// BT-4022: a module in the project-known set (a hex dep's `.beam` or an
+    /// own `native/*.erl`, supplied by the driver) must not warn.
+    #[test]
+    fn test_ffi_module_accepts_project_known_modules() {
+        let module = empty_module_with_exprs(vec![ffi_proxy("telemetry"), ffi_proxy("my_nif")]);
+        let mut diags = Vec::new();
+        let extra: std::collections::HashSet<String> =
+            ["telemetry".to_string(), "my_nif".to_string()]
+                .into_iter()
+                .collect();
+
+        check_unresolved_ffi_modules(&module, &extra, &mut diags);
+
+        assert!(
+            diags.is_empty(),
+            "Project-known modules should not warn: {diags:?}"
+        );
+    }
+
+    /// BT-4022: the project-known set suppresses only its own members — a
+    /// genuinely unknown module still warns.
+    #[test]
+    fn test_ffi_module_still_warns_on_unknown_with_project_known_set() {
+        let module = empty_module_with_exprs(vec![ffi_proxy("telemetry"), ffi_proxy("typo_mod")]);
+        let mut diags = Vec::new();
+        let extra: std::collections::HashSet<String> =
+            ["telemetry".to_string()].into_iter().collect();
+
+        check_unresolved_ffi_modules(&module, &extra, &mut diags);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("typo_mod"));
+        assert_eq!(diags[0].category, Some(DiagnosticCategory::UnresolvedFfi));
     }
 
     // ── Arity mismatch tests ────────────────────────────────────────────────
@@ -1221,7 +1296,7 @@ mod tests {
         let module = empty_module_with_exprs(vec![proxy]);
         let mut diags = Vec::new();
 
-        check_unresolved_ffi_modules(&module, &mut diags);
+        check_unresolved_ffi_modules(&module, &empty_known_modules(), &mut diags);
 
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("typo_mod"));
@@ -1247,7 +1322,7 @@ mod tests {
         let module = empty_module_with_exprs(vec![proxy]);
         let mut diags = Vec::new();
 
-        check_unresolved_ffi_modules(&module, &mut diags);
+        check_unresolved_ffi_modules(&module, &empty_known_modules(), &mut diags);
 
         assert!(
             diags.is_empty(),
@@ -1409,9 +1484,18 @@ mod tests {
 
     #[test]
     fn test_beamtalk_prefix_accepted() {
-        assert!(is_known_erlang_module("beamtalk_extensions"));
-        assert!(is_known_erlang_module("beamtalk_runtime"));
-        assert!(!is_known_erlang_module("my_custom_module"));
+        assert!(is_known_erlang_module(
+            "beamtalk_extensions",
+            &empty_known_modules()
+        ));
+        assert!(is_known_erlang_module(
+            "beamtalk_runtime",
+            &empty_known_modules()
+        ));
+        assert!(!is_known_erlang_module(
+            "my_custom_module",
+            &empty_known_modules()
+        ));
     }
 
     // ── Native declaration location tests ────────────────────────────────────
