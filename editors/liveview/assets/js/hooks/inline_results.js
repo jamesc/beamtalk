@@ -13,16 +13,21 @@
 // the buffer yet invisible to the eval path (which reads the hidden textarea the
 // CmEditor hook mirrors from the doc text).
 //
-// A long result (more than COLLAPSE_LINES lines) renders collapsed by default to
-// a one-line summary (`→ Session help · 120 lines ▸`); clicking the widget (or
-// its toggle) expands it inline. Each widget carries a stable `id` so toggling
-// survives the decoration rebuild that every transaction triggers.
+// A long result (more than COLLAPSE_LINES lines, or longer than COLLAPSE_CHARS)
+// renders collapsed by default to a one-line summary (`→ Session help · 120
+// lines ▸`); clicking the widget (or its toggle) expands it inline. Each widget
+// carries a stable `id` so toggling survives the decoration rebuild that every
+// transaction triggers.
 
 import { StateField, StateEffect } from "@codemirror/state"
 import { Decoration, EditorView, WidgetType } from "@codemirror/view"
 
 // Past this many lines an inline result collapses by default (≥ 5 lines collapse).
 const COLLAPSE_LINES = 4
+// BT-4167: Strings display quoted with `\n` escapes (single line), so a long
+// multi-line value (e.g. `Beamtalk help: Integer`) no longer has real newlines
+// to trip the line count — collapse it on length instead.
+const COLLAPSE_CHARS = 200
 // One-line summary truncation width.
 const SUMMARY_WIDTH = 60
 // Sliding-window cap on retained inline results. Without a bound `items` would
@@ -60,7 +65,7 @@ class ResultWidget extends WidgetType {
   toDOM(view) {
     const wrap = document.createElement("div")
     wrap.className = "cm-inline-result"
-    const collapsible = this.lineCount > COLLAPSE_LINES
+    const collapsible = this.lineCount > COLLAPSE_LINES || this.text.length > COLLAPSE_CHARS
 
     if (collapsible && this.collapsed) {
       wrap.classList.add("is-collapsed")
