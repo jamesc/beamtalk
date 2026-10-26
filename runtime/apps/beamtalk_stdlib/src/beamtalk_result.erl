@@ -248,7 +248,9 @@ Result tryDo: [1 / 0]                           // => Result error: <RuntimeErro
             <<"tryDo: expected a zero-arity block, got: ",
                 (beamtalk_primitive:print_string(Block))/binary>>
         ),
-        hint = beamtalk_primitive:string_from_binary(<<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>
+        ),
         details = #{got => Block}
     }).
 
@@ -300,7 +302,9 @@ it rather than a copy across the Rust/Erlang line.
             <<"tryDo: expected a one-argument stateful block, got: ",
                 (beamtalk_primitive:print_string(Block))/binary>>
         ),
-        hint = beamtalk_primitive:string_from_binary(<<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>
+        ),
         details = #{got => Block}
     }).
 

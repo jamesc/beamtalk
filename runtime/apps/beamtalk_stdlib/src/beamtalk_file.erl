@@ -179,8 +179,12 @@ Write string contents to a file.
 Creates the file if it doesn't exist, overwrites if it does.
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'writeAll:contents:'(beamtalk_string:t() | binary(), Contents :: beamtalk_string:t() | binary()) -> beamtalk_result:t().
-'writeAll:contents:'({beamtalk_string, Path}, {beamtalk_string, Contents}) when is_binary(Path), is_binary(Contents) ->
+-spec 'writeAll:contents:'(
+    beamtalk_string:t() | binary(), Contents :: beamtalk_string:t() | binary()
+) -> beamtalk_result:t().
+'writeAll:contents:'({beamtalk_string, Path}, {beamtalk_string, Contents}) when
+    is_binary(Path), is_binary(Contents)
+->
     PathStr = unicode:characters_to_list(Path),
     %% Ensure directory exists
     Dir = filename:dirname(PathStr),
@@ -282,7 +286,9 @@ Creates the file if it doesn't exist, overwrites if it does.
 Auto-creates parent directories. Contents must be a binary.
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'writeBinary:contents:'(beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
+-spec 'writeBinary:contents:'(
+    beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()
+) -> beamtalk_result:t().
 'writeBinary:contents:'({beamtalk_string, Path}, Contents) when is_binary(Path) ->
     %% BT-4170: contents admit a String (subclass) or a Binary; the path is text.
     RawContents = binary_contents('writeBinary:contents:', Contents),
@@ -326,7 +332,9 @@ Opens the file in append mode and writes the binary contents.
 Auto-creates parent directories. Contents must be a binary.
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'appendBinary:contents:'(beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
+-spec 'appendBinary:contents:'(
+    beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()
+) -> beamtalk_result:t().
 'appendBinary:contents:'({beamtalk_string, Path}, Contents) when is_binary(Path) ->
     %% BT-4170: contents admit a String (subclass) or a Binary; the path is text.
     RawContents = binary_contents('appendBinary:contents:', Contents),
@@ -427,7 +435,8 @@ Opens the file, passes a FileHandle to the block, and ensures the handle
 is closed when the block exits (whether normally or via exception).
 Returns a Result ok map with the result of the block.
 """.
--spec 'open:do:'(beamtalk_string:t() | binary(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
+-spec 'open:do:'(beamtalk_string:t() | binary(), Do :: fun((map()) -> term())) ->
+    beamtalk_result:t().
 'open:do:'({beamtalk_string, Path}, Block) when is_binary(Path), is_function(Block, 1) ->
     case file:open(unicode:characters_to_list(Path), [read, binary]) of
         {ok, Fd} ->
@@ -604,7 +613,8 @@ past that the caller gets a timeout while the block keeps running.
 Returns a Result ok map holding the block's value, or a Result error map if the
 file could not be opened.
 """.
--spec 'open:mode:do:'(beamtalk_string:t() | binary(), atom(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
+-spec 'open:mode:do:'(beamtalk_string:t() | binary(), atom(), Do :: fun((map()) -> term())) ->
+    beamtalk_result:t().
 'open:mode:do:'({beamtalk_string, Path}, Mode, Block) when
     is_binary(Path), is_atom(Mode), is_function(Block, 1)
 ->
@@ -937,13 +947,12 @@ if the directory does not exist or cannot be read.
             case file:list_dir(PathStr) of
                 {ok, Entries} ->
                     beamtalk_result:from_tagged_tuple(
-                        {ok,
-                            [
-                                beamtalk_primitive:string_from_binary(
-                                    unicode:characters_to_binary(E)
-                                )
-                             || E <- Entries
-                            ]}
+                        {ok, [
+                            beamtalk_primitive:string_from_binary(
+                                unicode:characters_to_binary(E)
+                            )
+                         || E <- Entries
+                        ]}
                     );
                 {error, enoent} ->
                     Error0 = beamtalk_error:new(directory_not_found, 'File'),
@@ -1093,7 +1102,8 @@ Rename or move a file or directory.
 
 Returns a Result ok map on success, Result error map on failure.
 """.
--spec 'rename:to:'(beamtalk_string:t() | binary(), To :: beamtalk_string:t() | binary()) -> beamtalk_result:t().
+-spec 'rename:to:'(beamtalk_string:t() | binary(), To :: beamtalk_string:t() | binary()) ->
+    beamtalk_result:t().
 'rename:to:'({beamtalk_string, From}, {beamtalk_string, To}) when is_binary(From), is_binary(To) ->
     case file:rename(unicode:characters_to_list(From), unicode:characters_to_list(To)) of
         ok ->
@@ -1145,9 +1155,10 @@ Returns a Result ok map with the absolute path as a String.
         _ ->
             AbsPath = filename:absname(PathList),
             beamtalk_result:from_tagged_tuple(
-                {ok, beamtalk_primitive:string_from_binary(
-                    unicode:characters_to_binary(AbsPath)
-                )}
+                {ok,
+                    beamtalk_primitive:string_from_binary(
+                        unicode:characters_to_binary(AbsPath)
+                    )}
             )
     end;
 'absolutePath:'(Path) when is_binary(Path) -> 'absolutePath:'({beamtalk_string, Path});
@@ -1307,12 +1318,15 @@ is_drive_root(_) ->
 
 exists(Path) -> 'exists:'(Path).
 readAll(Path) -> 'readAll:'(Path).
--spec writeAll(beamtalk_string:t() | binary(), Contents :: beamtalk_string:t() | binary()) -> beamtalk_result:t().
+-spec writeAll(beamtalk_string:t() | binary(), Contents :: beamtalk_string:t() | binary()) ->
+    beamtalk_result:t().
 writeAll(Path, Contents) -> 'writeAll:contents:'(Path, Contents).
 readBinary(Path) -> 'readBinary:'(Path).
--spec writeBinary(beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
+-spec writeBinary(beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()) ->
+    beamtalk_result:t().
 writeBinary(Path, Contents) -> 'writeBinary:contents:'(Path, Contents).
--spec appendBinary(beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
+-spec appendBinary(beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()) ->
+    beamtalk_result:t().
 appendBinary(Path, Contents) -> 'appendBinary:contents:'(Path, Contents).
 lines(Path) -> 'lines:'(Path).
 %% `open:do:` and `open:mode:` both lower to the arity-2 shim (the shim name is
@@ -1332,7 +1346,8 @@ lines(Path) -> 'lines:'(Path).
 %% booleans are atoms too) is reported against `open:mode:`, but passing a
 %% non-Block as a block is the rarer and more obviously broken call, and the
 %% message still names what a valid mode looks like.
--spec open(beamtalk_string:t() | binary(), Do :: fun((map()) -> term()) | atom()) -> beamtalk_result:t().
+-spec open(beamtalk_string:t() | binary(), Do :: fun((map()) -> term()) | atom()) ->
+    beamtalk_result:t().
 open(Path, Block) when is_function(Block, 1) ->
     'open:do:'(Path, Block);
 open(Path, Mode) when is_atom(Mode) ->
@@ -1354,7 +1369,8 @@ open(_Path, _Other) ->
             >>
         )
     ).
--spec open(beamtalk_string:t() | binary(), atom(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
+-spec open(beamtalk_string:t() | binary(), atom(), Do :: fun((map()) -> term())) ->
+    beamtalk_result:t().
 open(Path, Mode, Block) -> 'open:mode:do:'(Path, Mode, Block).
 isDirectory(Path) -> 'isDirectory:'(Path).
 isFile(Path) -> 'isFile:'(Path).
@@ -1363,7 +1379,8 @@ mkdirAll(Path) -> 'mkdirAll:'(Path).
 listDirectory(Path) -> 'listDirectory:'(Path).
 delete(Path) -> 'delete:'(Path).
 deleteAll(Path) -> 'deleteAll:'(Path).
--spec rename(beamtalk_string:t() | binary(), To :: beamtalk_string:t() | binary()) -> beamtalk_result:t().
+-spec rename(beamtalk_string:t() | binary(), To :: beamtalk_string:t() | binary()) ->
+    beamtalk_result:t().
 rename(From, To) -> 'rename:to:'(From, To).
 absolutePath(Path) -> 'absolutePath:'(Path).
 lastModified(Path) -> 'lastModified:'(Path).

@@ -227,7 +227,11 @@ exists_tmp_directory_via_tempDirectory_test() ->
 readAll_success_test() ->
     with_temp_file("_bt_test_read.txt", <<"hello">>, fun() ->
         ?assertMatch(
-            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, <<"hello">>}},
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := true,
+                'okValue' := {beamtalk_string, <<"hello">>}
+            },
             beamtalk_file:'readAll:'(<<"_bt_test_read.txt">>)
         )
     end).
@@ -395,7 +399,11 @@ writeAll_absolute_path_via_temp_test() ->
             beamtalk_file:'writeAll:contents:'(TmpFile, <<"abs-path-data">>)
         ),
         ?assertMatch(
-            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, <<"abs-path-data">>}},
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := true,
+                'okValue' := {beamtalk_string, <<"abs-path-data">>}
+            },
             beamtalk_file:'readAll:'(TmpFile)
         )
     after
@@ -705,7 +713,10 @@ lines_success_test() ->
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
-        ?assertEqual([{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}], Result)
+        ?assertEqual(
+            [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}],
+            Result
+        )
     end).
 
 lines_file_not_found_test() ->
@@ -757,7 +768,10 @@ lines_windows_crlf_test() ->
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
-        ?assertEqual([{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}], Result)
+        ?assertEqual(
+            [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}],
+            Result
+        )
     end).
 
 lines_single_line_test() ->
@@ -1068,7 +1082,9 @@ listDirectory_success_test() ->
         R = beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Entries} = R,
-        ?assertEqual([{beamtalk_string, <<"a.txt">>}, {beamtalk_string, <<"b.txt">>}], lists:sort(Entries))
+        ?assertEqual(
+            [{beamtalk_string, <<"a.txt">>}, {beamtalk_string, <<"b.txt">>}], lists:sort(Entries)
+        )
     end).
 
 listDirectory_empty_dir_test() ->
@@ -1330,7 +1346,9 @@ absolutePath_absolute_input_test() ->
     %% absolutePath: on an already-absolute path returns it unchanged
     {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     R = beamtalk_file:'absolutePath:'(TmpDir),
-    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, TmpDir}}, R).
+    ?assertMatch(
+        #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, TmpDir}}, R
+    ).
 
 absolutePath_type_error_test() ->
     ?assertError(
@@ -2001,7 +2019,11 @@ readAll_writeAll_unicode_roundtrip_test() ->
             beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), Content)
         ),
         ?assertMatch(
-            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, Content}},
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := true,
+                'okValue' := {beamtalk_string, Content}
+            },
             beamtalk_file:'readAll:'(list_to_binary(FileName))
         )
     after
@@ -2025,7 +2047,11 @@ open_do_handle_lines_success_test() ->
             #{
                 '$beamtalk_class' := 'Result',
                 'isOk' := true,
-                'okValue' := [{beamtalk_string, <<"x">>}, {beamtalk_string, <<"y">>}, {beamtalk_string, <<"z">>}]
+                'okValue' := [
+                    {beamtalk_string, <<"x">>},
+                    {beamtalk_string, <<"y">>},
+                    {beamtalk_string, <<"z">>}
+                ]
             },
             R
         )

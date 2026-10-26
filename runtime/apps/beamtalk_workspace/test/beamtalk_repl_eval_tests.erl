@@ -1645,8 +1645,12 @@ handle_protocol_definition_register_class_failure_returns_structured_error_test(
     {error, Err, _, _, _} = Result,
     ?assertEqual(registration_error, Err#beamtalk_error.kind),
     %% Verify the error message mentions the module and reason
-    ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration failed">>)),
-    ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration_boom">>)),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration failed">>)
+    ),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration_boom">>)
+    ),
     %% Cleanup
     code:purge(ModuleName),
     code:delete(ModuleName).
@@ -1678,7 +1682,9 @@ handle_protocol_definition_register_class_returns_error_tuple_test() ->
     ?assertMatch({error, #beamtalk_error{}, <<>>, [], _}, Result),
     {error, Err, _, _, _} = Result,
     ?assertEqual(registration_error, Err#beamtalk_error.kind),
-    ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration_declined">>)),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration_declined">>)
+    ),
     code:purge(ModuleName),
     code:delete(ModuleName).
 

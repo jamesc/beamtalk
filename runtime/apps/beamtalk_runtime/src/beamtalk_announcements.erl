@@ -1305,7 +1305,9 @@ bad_subscribe_args(AnnouncementClass, SubscriberPid, OnceFlag) ->
         message = beamtalk_primitive:string_from_binary(
             <<"subscribe expects an atom class, a pid subscriber, and a boolean once flag">>
         ),
-        hint = beamtalk_primitive:string_from_binary(<<"check the announcement class and subscriber arguments">>),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"check the announcement class and subscriber arguments">>
+        ),
         details = #{
             announcement_class => AnnouncementClass,
             subscriber => SubscriberPid,

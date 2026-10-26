@@ -113,11 +113,13 @@ sha512(Input) -> 'sha512:'(Input).
 md5(Input) -> 'md5:'(Input).
 
 -doc "FFI alias for hmacSha256:key:/2.".
--spec hmacSha256(beamtalk_binary:binary_or_string(), beamtalk_binary:binary_or_string()) -> binary().
+-spec hmacSha256(beamtalk_binary:binary_or_string(), beamtalk_binary:binary_or_string()) ->
+    binary().
 hmacSha256(Input, Key) -> 'hmacSha256:key:'(Input, Key).
 
 -doc "FFI alias for hmacSha512:key:/2.".
--spec hmacSha512(beamtalk_binary:binary_or_string(), beamtalk_binary:binary_or_string()) -> binary().
+-spec hmacSha512(beamtalk_binary:binary_or_string(), beamtalk_binary:binary_or_string()) ->
+    binary().
 hmacSha512(Input, Key) -> 'hmacSha512:key:'(Input, Key).
 
 %%% ============================================================================

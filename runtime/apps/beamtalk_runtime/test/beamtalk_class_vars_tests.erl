@@ -312,7 +312,9 @@ get_late_test() ->
         ?assert(beamtalk_class_vars:has(self_obj(), late)),
         E1 = raised_error(fun() -> beamtalk_class_vars:get_late(self_obj(), missing) end),
         ?assertMatch(
-            #beamtalk_error{kind = uninitialized_state_error, selector = undefined, hint = {beamtalk_string, H}} when is_binary(H),
+            #beamtalk_error{
+                kind = uninitialized_state_error, selector = undefined, hint = {beamtalk_string, H}
+            } when is_binary(H),
             E1
         ),
         ?assertNot(beamtalk_class_vars:has(self_obj(), missing))
@@ -334,7 +336,8 @@ put_without_key_unreachable_test() ->
             #beamtalk_error{
                 kind = class_state_unreachable,
                 message =
-                    {beamtalk_string, <<"ClassVarsTestClass's class variable x cannot be written from this process">>},
+                    {beamtalk_string,
+                        <<"ClassVarsTestClass's class variable x cannot be written from this process">>},
                 details = #{class_variable := x},
                 hint = {beamtalk_string, H}
             } when is_binary(H),
@@ -542,7 +545,9 @@ with_snapshot_write_raises_test() ->
             end),
             ?assertMatch(
                 #beamtalk_error{
-                    kind = class_state_read_only, details = #{class_variable := n}, hint = {beamtalk_string, H}
+                    kind = class_state_read_only,
+                    details = #{class_variable := n},
+                    hint = {beamtalk_string, H}
                 } when is_binary(H),
                 E
             ),

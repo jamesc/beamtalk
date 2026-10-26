@@ -205,7 +205,9 @@ pid_positive_test() ->
 get_env_shim_set_variable_test() ->
     os:putenv("BT_TEST_ENV_SHIM", "shim_value"),
     try
-        ?assertEqual({beamtalk_string, <<"shim_value">>}, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM">>))
+        ?assertEqual(
+            {beamtalk_string, <<"shim_value">>}, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM">>)
+        )
     after
         os:unsetenv("BT_TEST_ENV_SHIM")
     end.
@@ -217,7 +219,10 @@ get_env_shim_unset_returns_nil_test() ->
 get_env_shim_default_set_variable_test() ->
     os:putenv("BT_TEST_ENV_SHIM2", "value2"),
     try
-        ?assertEqual({beamtalk_string, <<"value2">>}, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM2">>, <<"fallback">>))
+        ?assertEqual(
+            {beamtalk_string, <<"value2">>},
+            beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM2">>, <<"fallback">>)
+        )
     after
         os:unsetenv("BT_TEST_ENV_SHIM2")
     end.

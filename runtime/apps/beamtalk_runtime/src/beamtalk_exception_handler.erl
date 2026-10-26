@@ -693,7 +693,8 @@ dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
 
 -doc "Wrap a possibly-undefined hint for `wrap_classified/6` (BT-4170).".
 -spec wrap_hint(binary() | undefined) -> {beamtalk_string, binary()} | undefined.
-wrap_hint(undefined) -> undefined;
+wrap_hint(undefined) ->
+    undefined;
 wrap_hint(Hint) when is_binary(Hint) ->
     beamtalk_primitive:string_from_binary(Hint).
 

@@ -124,7 +124,9 @@ dispatch_unwrap_or_test() ->
 
 dispatch_as_string_test() ->
     %% Atoms use #symbol notation
-    ?assertEqual({beamtalk_string, <<"{#ok, 42}">>}, 'bt@stdlib@tuple':dispatch('asString', [], {ok, 42})).
+    ?assertEqual(
+        {beamtalk_string, <<"{#ok, 42}">>}, 'bt@stdlib@tuple':dispatch('asString', [], {ok, 42})
+    ).
 
 dispatch_unwrap_or_else_test() ->
     ?assertEqual(42, 'bt@stdlib@tuple':dispatch('unwrapOrElse:', [fun() -> default end], {ok, 42})),

@@ -1443,15 +1443,20 @@ sanitize_value({beamtalk_string, Bin}) when is_binary(Bin) ->
 sanitize_value(V) when is_binary(V) -> V;
 sanitize_value(V) when is_integer(V) -> V;
 sanitize_value(V) when is_float(V) -> V;
-sanitize_value(true) -> true;
-sanitize_value(false) -> false;
-sanitize_value(null) -> null;
-sanitize_value(undefined) -> null;
+sanitize_value(true) ->
+    true;
+sanitize_value(false) ->
+    false;
+sanitize_value(null) ->
+    null;
+sanitize_value(undefined) ->
+    null;
 sanitize_value(V) when is_atom(V) -> atom_to_binary(V, utf8);
 sanitize_value(V) when is_pid(V) -> list_to_binary(pid_to_list(V));
 sanitize_value(V) when is_list(V) -> [sanitize_value(E) || E <- V];
 sanitize_value(V) when is_map(V) -> sanitize_metadata(V);
-sanitize_value(V) -> iolist_to_binary(io_lib:format("~p", [V])).
+sanitize_value(V) ->
+    iolist_to_binary(io_lib:format("~p", [V])).
 
 -doc """
 Get aggregate stats, optionally filtered by Pid.

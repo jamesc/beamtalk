@@ -234,7 +234,8 @@ getEnv/1 and getEnv/2 respectively, delegating to the canonical forms.
 -spec getEnv(beamtalk_string:t() | binary()) -> beamtalk_string:t() | 'nil'.
 getEnv(Name) -> 'getEnv:'(Name).
 
--spec getEnv(beamtalk_string:t() | binary(), Default :: beamtalk_string:t() | binary()) -> beamtalk_string:t() | binary().
+-spec getEnv(beamtalk_string:t() | binary(), Default :: beamtalk_string:t() | binary()) ->
+    beamtalk_string:t() | binary().
 getEnv(Name, Default) -> 'getEnv:default:'(Name, Default).
 
 -spec setEnv(beamtalk_string:t() | binary(), Value :: beamtalk_string:t() | binary()) -> 'true'.

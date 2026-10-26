@@ -82,7 +82,9 @@ load_type_error_for_integer_test() ->
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
             ?assertEqual('Workspace', Err#beamtalk_error.class),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Integer">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Integer">>)
+            )
     end.
 
 load_file_not_found_test() ->
@@ -435,7 +437,9 @@ load_type_error_for_float_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Float">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Float">>)
+            )
     end.
 
 %% Boolean input → "Boolean" in error message
@@ -446,7 +450,9 @@ load_type_error_for_boolean_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Boolean">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Boolean">>)
+            )
     end.
 
 %% nil input → "nil" in error message
@@ -457,7 +463,9 @@ load_type_error_for_nil_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"nil">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"nil">>)
+            )
     end.
 
 %% Atom (non-boolean, non-nil) → "Symbol" in error message
@@ -468,7 +476,9 @@ load_type_error_for_atom_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Symbol">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Symbol">>)
+            )
     end.
 
 %% Map input → "Dictionary" in error message
@@ -479,7 +489,9 @@ load_type_error_for_map_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Dictionary">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Dictionary">>)
+            )
     end.
 
 %% beamtalk_object input → "Object" in error message
@@ -490,7 +502,9 @@ load_type_error_for_object_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Object">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Object">>)
+            )
     end.
 
 %%====================================================================
@@ -510,7 +524,9 @@ bind_type_error_for_float_name_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Float">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Float">>)
+            )
     end.
 
 %% beamtalk_object name → type_error with "Object" in message
@@ -523,7 +539,9 @@ bind_type_error_for_object_name_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Object">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Object">>)
+            )
     end.
 
 %% List name → type_error with "List" in message
@@ -534,7 +552,9 @@ bind_type_error_for_list_name_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"List">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"List">>)
+            )
     end.
 
 %% Map name → type_error with "Dictionary" in message
@@ -545,7 +565,9 @@ bind_type_error_for_map_name_test() ->
     catch
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Dictionary">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Dictionary">>)
+            )
     end.
 
 %%====================================================================
@@ -909,9 +931,13 @@ new_class_non_string_source_test() ->
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
             ?assertEqual('newClass:at:', Err#beamtalk_error.selector),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"source">>)),
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"source">>)
+            ),
             %% value_type_name/1 reports the Integer type in the message.
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Integer">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Integer">>)
+            )
     end.
 
 %% String source but non-String path → type_error naming the "path" argument.
@@ -925,8 +951,12 @@ new_class_non_string_path_test() ->
         error:#{error := Err} ->
             ?assertEqual(type_error, Err#beamtalk_error.kind),
             ?assertEqual('newClass:at:', Err#beamtalk_error.selector),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"path">>)),
-            ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Symbol">>))
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"path">>)
+            ),
+            ?assertNotEqual(
+                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Symbol">>)
+            )
     end.
 
 %%====================================================================

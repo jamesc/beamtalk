@@ -1009,8 +1009,6 @@ unwrap_string_args(Args) ->
 unwrap_string_arg({beamtalk_string, Bin}) when is_binary(Bin) -> Bin;
 unwrap_string_arg(Other) -> Other.
 
-
-
 -doc """
 Apply both charlist and result coercion, skipping charlist coercion
 for Beamtalk's own modules.

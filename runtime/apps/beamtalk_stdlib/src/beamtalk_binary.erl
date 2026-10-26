@@ -473,7 +473,9 @@ print_string(Bin) when is_binary(Bin) ->
         end
     );
 print_string({beamtalk_string, _}) ->
-    raise_type_error(print_string, <<"Binary printString renders bytes; Strings render via String printString">>);
+    raise_type_error(
+        print_string, <<"Binary printString renders bytes; Strings render via String printString">>
+    );
 print_string(_) ->
     raise_type_error(print_string, <<"Receiver must be a Binary">>).
 

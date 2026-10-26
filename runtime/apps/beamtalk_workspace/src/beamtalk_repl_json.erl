@@ -322,7 +322,8 @@ term_to_json(Value) when is_map(Value) ->
                     %% BT-4170: `printString` answers a `String` — unwrap it.
                     beamtalk_transcript_stream:ensure_utf8(Bin);
                 {reply, Result, _} when is_binary(Result) -> Result;
-                _ -> beamtalk_runtime_api:print_string(Value)
+                _ ->
+                    beamtalk_runtime_api:print_string(Value)
             catch
                 _:_ -> beamtalk_runtime_api:print_string(Value)
             end

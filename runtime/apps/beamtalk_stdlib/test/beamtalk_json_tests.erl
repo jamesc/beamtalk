@@ -25,7 +25,14 @@ parse_integer_test() ->
 
 parse_string_test() ->
     R = beamtalk_json:'parse:'(<<"\"hello\"">>),
-    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, <<"hello">>}}, R).
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := true,
+            'okValue' := {beamtalk_string, <<"hello">>}
+        },
+        R
+    ).
 
 parse_array_test() ->
     R = beamtalk_json:'parse:'(<<"[1,2,3]">>),
@@ -512,8 +519,12 @@ parse_unicode_leaf_answers_string_test() ->
 
 parse_object_keys_and_values_answer_string_test() ->
     #{okValue := Val} = beamtalk_json:'parse:'(<<"{\"name\":\"Ada\",\"city\":\"Berlin\"}">>),
-    ?assertEqual('String', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"name">>}, Val))),
-    ?assertEqual('String', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"city">>}, Val))),
+    ?assertEqual(
+        'String', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"name">>}, Val))
+    ),
+    ?assertEqual(
+        'String', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"city">>}, Val))
+    ),
     lists:foreach(
         fun(K) -> ?assertEqual('String', beamtalk_primitive:class_of(K)) end,
         maps:keys(Val)
@@ -524,15 +535,21 @@ parse_nested_strings_answer_string_test() ->
         <<"{\"users\":[{\"name\":\"Ada\"},{\"name\":\"Grace\"}]}">>
     ),
     [U1, U2] = maps:get({beamtalk_string, <<"users">>}, Val),
-    ?assertEqual('String', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"name">>}, U1))),
-    ?assertEqual('String', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"name">>}, U2))).
+    ?assertEqual(
+        'String', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"name">>}, U1))
+    ),
+    ?assertEqual(
+        'String', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"name">>}, U2))
+    ).
 
 parse_non_string_leaves_keep_class_test() ->
     %% The new binary arm in normalize_decoded/1 must not disturb other types.
     #{okValue := Val} = beamtalk_json:'parse:'(<<"{\"n\":42,\"t\":true,\"z\":null}">>),
     ?assertEqual('Integer', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"n">>}, Val))),
     ?assertEqual('True', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"t">>}, Val))),
-    ?assertEqual('UndefinedObject', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"z">>}, Val))).
+    ?assertEqual(
+        'UndefinedObject', beamtalk_primitive:class_of(maps:get({beamtalk_string, <<"z">>}, Val))
+    ).
 
 parse_invalid_utf8_input_answers_result_error_test() ->
     %% OTP rejects the bad byte before normalization; still Result error:.

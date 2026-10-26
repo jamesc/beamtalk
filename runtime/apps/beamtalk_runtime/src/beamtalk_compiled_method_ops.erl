@@ -98,9 +98,10 @@ builtin_dispatch('class', [], _Value) ->
 builtin_dispatch('printString', [], #{
     '__selector__' := Sel
 }) ->
-    {ok, beamtalk_primitive:string_from_binary(
-        iolist_to_binary(io_lib:format("CompiledMethod(~s)", [Sel]))
-    )};
+    {ok,
+        beamtalk_primitive:string_from_binary(
+            iolist_to_binary(io_lib:format("CompiledMethod(~s)", [Sel]))
+        )};
 %% asString => same as printString
 builtin_dispatch('asString', [], Value) ->
     builtin_dispatch('printString', [], Value);

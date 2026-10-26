@@ -136,7 +136,13 @@ open(Command, Args, Env, Dir, Notify) when is_map(Env), is_record(Notify, beamta
         'ReactiveSubprocess', EnvMap, 'open:args:env:dir:notify:'
     ),
     start_subprocess(
-        #{executable => Executable, args => BinArgs, env => BinEnv, dir => BinDir, notify => Notify},
+        #{
+            executable => Executable,
+            args => BinArgs,
+            env => BinEnv,
+            dir => BinDir,
+            notify => Notify
+        },
         'open:args:env:dir:notify:'
     );
 open(_Command, _Args, _Env, _Dir, _Notify) ->

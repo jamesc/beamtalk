@@ -82,7 +82,8 @@ Compile a regex pattern string with PCRE options.
 Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
 Unknown options still raise (programming error).
 """.
--spec 'from:options:'(beamtalk_string:t() | binary(), Options :: [regex_option()]) -> beamtalk_result:t().
+-spec 'from:options:'(beamtalk_string:t() | binary(), Options :: [regex_option()]) ->
+    beamtalk_result:t().
 'from:options:'(Pattern, Options) when is_binary(Pattern) ->
     'from:options:'({beamtalk_string, Pattern}, Options);
 'from:options:'({beamtalk_string, Pattern} = Tagged, Options) when
@@ -142,7 +143,8 @@ source(#{source := Src}) -> Src.
 %%% ============================================================================
 
 -doc "Test if string matches pattern (String or Regex).".
--spec matches_regex(beamtalk_string:t() | binary(), beamtalk_string:t() | binary() | map()) -> boolean().
+-spec matches_regex(beamtalk_string:t() | binary(), beamtalk_string:t() | binary() | map()) ->
+    boolean().
 matches_regex(Str, Regex) when is_binary(Str), is_map(Regex) ->
     matches_regex({beamtalk_string, Str}, Regex);
 matches_regex(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
@@ -169,7 +171,8 @@ matches_regex(_, _) ->
     ).
 
 -doc "Test if string matches pattern with options (String only pattern).".
--spec matches_regex_options(beamtalk_string:t() | binary(), beamtalk_string:t() | binary(), list()) -> boolean().
+-spec matches_regex_options(beamtalk_string:t() | binary(), beamtalk_string:t() | binary(), list()) ->
+    boolean().
 matches_regex_options(Str, Pattern, Options) when is_binary(Str), is_binary(Pattern) ->
     matches_regex_options({beamtalk_string, Str}, {beamtalk_string, Pattern}, Options);
 matches_regex_options({beamtalk_string, _} = Str, Pattern, Options) when is_binary(Pattern) ->
@@ -250,7 +253,11 @@ all_matches(_, _) ->
     ).
 
 -doc "Replace first match with replacement string.".
--spec replace_regex(beamtalk_string:t() | binary(), beamtalk_string:t() | binary() | map(), beamtalk_string:t() | binary()) ->
+-spec replace_regex(
+    beamtalk_string:t() | binary(),
+    beamtalk_string:t() | binary() | map(),
+    beamtalk_string:t() | binary()
+) ->
     beamtalk_string:t().
 %% BT-4173: a bare binary spells the same text (pre-flip calls stay valid).
 replace_regex(S, P, R) when is_binary(S) -> replace_regex({beamtalk_string, S}, P, R);
@@ -281,7 +288,11 @@ replace_regex(_, _, _) ->
     ).
 
 -doc "Replace all matches with replacement string.".
--spec replace_all_regex(beamtalk_string:t() | binary(), beamtalk_string:t() | binary() | map(), beamtalk_string:t() | binary()) ->
+-spec replace_all_regex(
+    beamtalk_string:t() | binary(),
+    beamtalk_string:t() | binary() | map(),
+    beamtalk_string:t() | binary()
+) ->
     beamtalk_string:t().
 %% BT-4173: a bare binary spells the same text (pre-flip calls stay valid).
 replace_all_regex(S, P, R) when is_binary(S) -> replace_all_regex({beamtalk_string, S}, P, R);

@@ -214,9 +214,7 @@ from_list_like({beamtalk_string, _}, List) ->
     %% grapheme `String`s; unwrap each before joining, then wrap the
     %% result — mirroring the pure path (`String withAll:`).
     beamtalk_primitive:string_from_binary(
-        erlang:iolist_to_binary([
-            beamtalk_primitive:string_to_binary(E) || E <- List
-        ])
+        erlang:iolist_to_binary([beamtalk_primitive:string_to_binary(E) || E <- List])
     );
 from_list_like(Recv, List) when is_binary(Recv) ->
     %% BT-4170: elements may be byte integers or `String`s (a `collect:`
