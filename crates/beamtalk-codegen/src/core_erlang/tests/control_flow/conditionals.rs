@@ -114,9 +114,12 @@ fn test_if_true_if_false_with_field_mutation_generates_inline_case() {
 }
 
 #[test]
-fn test_if_true_without_mutation_uses_runtime_dispatch() {
-    // `flag ifTrue: [42]` with no mutations should still use runtime dispatch,
-    // not the inline case generation. This ensures we don't break the non-mutation path.
+fn test_if_true_without_mutation_uses_pure_inline_case() {
+    // BT-4070: `flag ifTrue: [42]` with no mutations compiles to an inline
+    // `case` with a dynamic-send fallback — not a fully-dynamic send. The
+    // non-taken (false) arm answers the receiver (`False>>ifTrue: => self`),
+    // matching dynamic dispatch exactly.
+    use super::pure_conditionals::{arm_between, boolean_arms, case_scope, cond_var};
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  check: flag =>\n    flag ifTrue: [42]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -125,10 +128,25 @@ fn test_if_true_without_mutation_uses_runtime_dispatch() {
 
     eprintln!("Generated code for ifTrue: without mutation:\n{code}");
 
-    // Pure ifTrue: should go through runtime dispatch
+    let scope = case_scope(&code);
+    let cond = cond_var(scope).to_string();
+    assert_eq!(
+        arm_between(scope, "<'true'> when 'true' ->", "<'false'>"),
+        "42",
+        "true arm must inline the block body. Got:\n{code}"
+    );
+    assert_eq!(
+        arm_between(scope, "<'false'> when 'true' ->", "<_CondNoMatch"),
+        cond,
+        "false arm must answer the receiver, not nil. Got:\n{code}"
+    );
+    assert!(
+        !boolean_arms(scope).contains("'beamtalk_message_dispatch':'send'"),
+        "Boolean arms must hold no dynamic send. Got:\n{code}"
+    );
     assert!(
         code.contains("'beamtalk_message_dispatch':'send'"),
-        "Pure ifTrue: should use runtime dispatch. Got:\n{code}"
+        "fallback arm must keep the dynamic send. Got:\n{code}"
     );
 }
 

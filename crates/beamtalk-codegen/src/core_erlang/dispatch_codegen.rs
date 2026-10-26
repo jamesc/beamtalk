@@ -981,6 +981,30 @@ impl CoreErlangGenerator {
         Ok(seq.close(self, call_doc, "CastRes"))
     }
 
+    /// BT-4070: the `beamtalk_message_dispatch:send/3` call itself, over
+    /// already-compiled operand documents — the one construction of the
+    /// runtime-dispatch call shape, shared by
+    /// [`Self::generate_runtime_dispatch`] (which sequences `&Expression`
+    /// operands first) and the pure-conditional fallback arm (whose receiver
+    /// is the precomputed `Cond` variable and whose closures compile where
+    /// the arm is taken). The call is byte-identical however the operands
+    /// were sourced; only the sourcing differs.
+    pub(in crate::core_erlang) fn runtime_send_call(
+        receiver_doc: Document<'static>,
+        selector_atom: &str,
+        arg_docs: Vec<Document<'static>>,
+    ) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            receiver_doc,
+            ", ",
+            leaf::atom(selector_atom),
+            ", [",
+            Self::join_docs_with_commas(arg_docs),
+            "])"
+        ]
+    }
+
     /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3`.
     ///
     /// This is the fallback path for messages that don't match any compiler intrinsic.
@@ -1023,17 +1047,11 @@ impl CoreErlangGenerator {
         }
         let mut seq = self.sequence_call(&all_exprs, "Disp")?;
         let actual_receiver = seq.next();
-        let args_doc = Self::join_docs_with_commas(seq.rest());
 
-        let call_doc = docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
-            actual_receiver,
-            ", ",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "])"
-        ];
+        // BT-4070: the call shape itself lives in `runtime_send_call`,
+        // shared with the pure-conditional fallback arm — byte-identical
+        // to the inline splice this replaces.
+        let call_doc = Self::runtime_send_call(actual_receiver, &selector_atom, seq.rest());
 
         Ok(seq.close(self, call_doc, "DispRes"))
     }
