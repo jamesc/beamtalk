@@ -21,7 +21,7 @@
 use std::collections::HashSet;
 
 use super::super::control_flow::ArmFrame;
-use super::super::threaded_ir::VersionPrefix;
+use super::super::threaded_ir::{ThreadedValue, VersionPrefix};
 use super::super::util::index_lit;
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
@@ -95,7 +95,42 @@ impl CoreErlangGenerator {
                 span: Some(value.span()),
             });
         }
+        let recv_tv = self.compile_match_scrutinee(value)?;
+        let value_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
+        let value_doc = self.threaded_value_doc(&recv_tv.value);
+        let inner = self.generate_match_after_scrutinee(arms, &value_doc, producer)?;
+        Ok(docvec![value_preamble, inner])
+    }
 
+    /// BT-4146: the scrutinee compiles through `threaded_expression`, like a
+    /// conditional's receiver (`compile_conditional_receiver`): it may be a
+    /// call that must run inside a `SyncedCall` window in an actor method
+    /// (`0 + x` coerces through a user `plusFromNumber:` when `x` is not
+    /// statically numeric), or thread state ahead of the `case`. An enclosing
+    /// sequencing that already compiled it ahead (`single_sequenced_child`)
+    /// reads the precompiled value back here instead of compiling it twice.
+    /// The prelude is empty for a pure scrutinee.
+    ///
+    /// BT-4196: a local-threading producer calls this BEFORE reading the base
+    /// `State` for its scratch seed, so the scrutinee's field writes are seen.
+    pub(in crate::core_erlang) fn compile_match_scrutinee(
+        &mut self,
+        value: &Expression,
+    ) -> Result<ThreadedValue> {
+        let recv_frame = self.current_frame();
+        self.threaded_expression(value, recv_frame)
+    }
+
+    /// The arms half of [`Self::generate_match_with`]: everything after the
+    /// scrutinee has been compiled. Returns `let Match = <value> in case ...`
+    /// without the scrutinee's prelude (the caller places it).
+    #[allow(clippy::too_many_lines)]
+    pub(in crate::core_erlang) fn generate_match_after_scrutinee(
+        &mut self,
+        arms: &[MatchArm],
+        value_doc: &Document<'static>,
+        producer: Option<&MatchThreading<'_>>,
+    ) -> Result<Document<'static>> {
         // BT-3489: a value-type instance-method `self.field := ...` arm body
         // has no `Self`-version merge to thread through (only
         // `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` have one — see
@@ -135,19 +170,6 @@ impl CoreErlangGenerator {
         }
 
         let match_var = self.fresh_temp_var("Match");
-        // BT-4146: the scrutinee compiles through `threaded_expression`,
-        // like a conditional's receiver (`compile_conditional_receiver`):
-        // it may be a call that must run inside a `SyncedCall` window in an
-        // actor method (`0 + x` coerces through a user `plusFromNumber:`
-        // when `x` is not statically numeric), or thread state ahead of the
-        // `case`. An enclosing sequencing that already compiled it ahead
-        // (`single_sequenced_child`) reads the precompiled value back here
-        // instead of compiling it twice. The prelude is `Document::Nil`
-        // for a pure scrutinee, so this is a no-op there.
-        let recv_frame = self.current_frame();
-        let recv_tv = self.threaded_expression(value, recv_frame)?;
-        let value_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
-        let value_doc = self.threaded_value_doc(&recv_tv.value);
 
         // Guard against unsupported pattern forms reaching array-match codegen.
         for arm in arms {
@@ -291,11 +313,10 @@ impl CoreErlangGenerator {
         };
 
         Ok(docvec![
-            value_preamble,
             "let ",
             leaf::var(match_var.clone()),
             " = ",
-            value_doc,
+            value_doc.clone(),
             " in ",
             inner_doc
         ])

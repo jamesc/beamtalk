@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4196: actor fixture whose `match:` scrutinee writes a field while the
+// arms write an outer local (a local-threading producer `match:`).
+
+Actor subclass: MatchScrutineeStateCtr
+  state: n = 0
+
+  bump =>
+    self.n := self.n + 1
+    self.n
+
+  run =>
+    t := 0
+    t := self bump match: [
+      1 -> (t := 11);
+      _ -> (t := 20)
+    ]
+    {self.n, t}
+
+  runPlain =>
+    u := self bump match: [
+      1 -> 11;
+      _ -> 20
+    ]
+    {self.n, u}
