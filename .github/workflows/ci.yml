@@ -43,8 +43,11 @@ on:
 # its own SHA and never cancelled: main is the safety net for everything the PR
 # path skips (macOS/Windows, the older OTP, path-gated jobs), so every merge must
 # get a complete verdict even when the next merge lands minutes later (BT-4209).
+# A `labeled` event for any label but `ci:all-platforms` (Linear/GitHub automation
+# adds labels routinely) is a no-op: it gets its own group, so it cancels nothing,
+# and every root job skips on it (dependents skip with them).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}${{ github.event.action == 'labeled' && github.event.label.name != 'ci:all-platforms' && '-label-noop' || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -66,6 +69,7 @@ jobs:
   # The corpus-tier path list is not repeated here: it lives in
   # scripts/ci/corpus-gate.sh, which `just ci-changed` also calls.
   changes:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -194,6 +198,7 @@ jobs:
   # typical PR's wall-clock is the slowest job, not their sum. macOS and
   # Windows are the separate, opt-in `check` job below.
   lint:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -262,6 +267,7 @@ jobs:
   # test-corpus job). Full test-stdlib/test-bunit/test-runtime run in the
   # test-beam / test-runtime jobs.
   test-rust:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -595,6 +601,7 @@ jobs:
   # test sources; this fails the PR if it wasn't regenerated after a source
   # change. Rust-only (no Erlang/OTP needed), so it stays fast.
   check-corpus:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -626,6 +633,7 @@ jobs:
   # pass every existing test, silently regressing the build-time win. Rust-only
   # (just resolves the dependency graph, no compilation needed), so it stays fast.
   check-codegen-boundary:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -841,6 +849,7 @@ jobs:
   # subcommand's output equals the declared window, so this job's matrix can
   # never silently drift from doctor's/build's/release's own window checks.
   otp-matrix:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
