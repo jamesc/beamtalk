@@ -194,3 +194,12 @@ TestCase subclass: ActorClosureCellTest
     ] raise: #deadlock_detected
     self assert: b n equals: 0
     self assert: a n equals: 0
+
+  // BT-4122 item 5: the protected region commits a write to the host's cell
+  // and then raises. The catch runs away from the block's home, so the
+  // host's committed write survives instead of being rolled back.
+  testAwayOnDoCatchLeavesHostCellWritesAlone =>
+    a := ClosureCellRestoreAway spawn
+    b := ClosureCellRestoreHost spawn
+    self assert: (b run: (a guardedBlock: b)) equals: 7
+    self assert: b m equals: 1

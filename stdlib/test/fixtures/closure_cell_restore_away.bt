@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4122 item 5: the guest actor. Builds a block whose protected region
+// commits a write to the host's cell and then raises.
+
+Actor subclass: ClosureCellRestoreAway
+
+  guardedBlock: host =>
+    [
+      [
+        host commit
+        Error signal: "boom"
+      ] on: Error do: [:ex | 7]
+    ]
