@@ -1536,7 +1536,7 @@ Some checks (macOS, Windows, desktop, non-required jobs such as `test-learn`) ar
 
 - an existing open issue (or one closed or cancelled in the last 7 days) for the same failure gets a comment, and is reopened if the failure is back;
 - known-flaky failures (`Flaky:` issues) get a comment instead of a new regression issue;
-- otherwise one `main red: <job> — <cause> (since #PR)` Bug is filed (Urgent if `lint`, `test-rust`, `test-corpus`, `platform-check` or the build is red).
+- otherwise one `main red: <job> — <cause> (since #PR)` Bug is filed (Urgent if `lint`, `test-rust`, `test-corpus` or the build is red, because that blocks merges; High for a red `platform-check` or `platform-desktop` from a scheduled `CI (all platforms)` run, which is opt-in and not a required check).
 
 It triages only: it never pushes, opens PRs, re-runs workflows or runs tests. It never runs for PR or fork runs, so the Claude and Linear secrets are not exposed to them. The prompt is `.github/claude-ci-triage-prompt.md`; the setup shared with `fuzz-triage.yml` is the composite action `.github/actions/claude-triage`. `workflow_run` workflows run from the default branch, so to test a change, dispatch it against a past failed main run (`gh workflow run ci-triage.yml -f run_id=<id>`), keeping in mind it writes to Linear. If the nightly workflow is renamed, update the `workflows:` list in `ci-triage.yml`.
 
