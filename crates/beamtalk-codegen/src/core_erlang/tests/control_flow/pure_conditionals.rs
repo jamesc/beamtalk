@@ -513,6 +513,167 @@ fn guarded_operator_in_actor_receiver_still_inlines() {
 }
 
 #[test]
+fn stateful_while_condition_tail_keeps_dynamic_dispatch() {
+    // BT-4070: a stateful while-condition tail keeps today's dynamic
+    // dispatch: its value splices into the `{Bool, StateAcc[, Self]}`
+    // hand-back tuple, where a bare `case` breaks erlc's `beam_clean`
+    // (`undefined_label`) in complex nestings. Shape minimized from
+    // `while_condition_carrier_corpus` run70/run139.
+    let src = concat!(
+        "Value subclass: Probe\n",
+        "  field: f = 0\n",
+        "  run =>\n",
+        "    loc0 := [self.f := self.f + 1. (self done) and: [\"Q\"]] whileFalse: [1].\n",
+        "    0\n",
+    );
+    let code = compile(src, "bt@probe_splice_while_carry");
+    eprintln!("decline while-carry:\n{code}");
+
+    assert!(
+        !code.contains("CondNoMatch"),
+        "condition tail must not pure-inline. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'"),
+        "condition tail must keep the dynamic send. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@probe_splice_while_carry", &code);
+}
+
+#[test]
+fn stateful_while_condition_full_shape_compiles() {
+    // The corpus run139 shape verbatim (body writes outer locals, NLR
+    // tail after the loop): the other half of the minimized pair.
+    let src = concat!(
+        "Value subclass: Probe\n",
+        "  field: f = 0\n",
+        "  run139 =>\n",
+        "    loc0 := [self.f := self.f + 1. (self done) and: [\"Q\"]]\n",
+        "      whileFalse: [loc0 := false. loc1 := nil. 1428995853].\n",
+        "    [^loc0] value\n",
+    );
+    let code = compile(src, "bt@probe_splice_while_full");
+    eprintln!("decline while-full:\n{code}");
+
+    assert!(
+        !code.contains("CondNoMatch"),
+        "condition tail must not pure-inline. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@probe_splice_while_full", &code);
+}
+
+#[test]
+fn stateful_while_condition_plain_tuple_keeps_dynamic_dispatch() {
+    // Same decline on the `{Value, StateAcc}` (no `Self` slot) path: a
+    // local-threading condition with a pure tail.
+    let src = concat!(
+        "Value subclass: Probe\n",
+        "  field: f = 0\n",
+        "  run: c =>\n",
+        "    self.f := 1.\n",
+        "    t := 0.\n",
+        "    [t := t + 1. c ifTrue: [t > 0] ifFalse: [false]] whileTrue: [1].\n",
+        "    t\n",
+    );
+    let code = compile(src, "bt@probe_splice_while_plain");
+    eprintln!("decline while-plain:\n{code}");
+
+    assert!(
+        !code.contains("CondNoMatch"),
+        "condition tail must not pure-inline. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@probe_splice_while_plain", &code);
+}
+
+#[test]
+fn mutation_arm_tail_still_inlines() {
+    // A mutation arm whose tail is a pure conditional (C13 closer) keeps
+    // inlining: only stateful loop-condition tails decline.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: flag other: other =>\n",
+        "    self.x := self.x + 1.\n",
+        "    flag ifTrue: [self.x := self.x + 1. other ifTrue: [1] ifFalse: [2]].\n",
+        "    self.x\n",
+    );
+    let code = compile(src, "ctr_splice_arm_tail");
+    eprintln!("inline arm-tail:\n{code}");
+
+    let scope = case_scope(&code);
+    let fallback = &scope[scope.find("CondNoMatch").unwrap()..];
+    assert!(
+        fallback.contains("beamtalk_message_dispatch':'send'"),
+        "the case must be the pure-inline one (send fallback). Got:\n{code}"
+    );
+    assert_compiles_through_erlc("ctr_splice_arm_tail", &code);
+}
+
+#[test]
+fn vt_arm_tail_still_inlines() {
+    // A value-type mutation arm in value position whose tail is a pure
+    // conditional keeps inlining: only stateful loop-condition tails
+    // decline.
+    let src = concat!(
+        "Value subclass: Probe\n",
+        "  field: m = 0\n",
+        "  run: c1 c2: c2 =>\n",
+        "    x := c1 ifTrue: [self.m := self.m + 1. c2 ifTrue: [5] ifFalse: [6]] ifFalse: [0].\n",
+        "    x\n",
+    );
+    let code = compile(src, "bt@probe_splice_vt_arm");
+    eprintln!("inline vt-arm:\n{code}");
+
+    let scope = case_scope(&code);
+    let fallback = &scope[scope.find("CondNoMatch").unwrap()..];
+    assert!(
+        fallback.contains("beamtalk_message_dispatch':'send'"),
+        "the case must be the pure-inline one (send fallback). Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@probe_splice_vt_arm", &code);
+}
+
+#[test]
+fn tuple_splice_fold_tail_with_field_write_compiles() {
+    // A field-writing fold whose tail is a pure conditional: the fold
+    // machinery binds accumulator values itself (`_AccOut`), so the
+    // tail never lands bare in the family `Return` tuple.
+    let src = concat!(
+        "Value subclass: Probe\n",
+        "  field: total = 0\n",
+        "  run: coll =>\n",
+        "    coll inject: 0 into: [:a :e |\n",
+        "      self.total := self.total + 1.\n",
+        "      e =:= 1 ifTrue: [a + 1] ifFalse: [a]]\n",
+    );
+    let code = compile(src, "bt@probe_splice_fold");
+    eprintln!("splice fold:\n{code}");
+
+    assert_compiles_through_erlc("bt@probe_splice_fold", &code);
+}
+
+#[test]
+fn operand_positions_with_pure_case_compile() {
+    // A pure `case` nested as a send's last argument and as another
+    // send's receiver, in a field-writing method (the deep-combination
+    // shape): pins that operand splices stay erlc-clean.
+    let src = concat!(
+        "Value subclass: Probe\n",
+        "  field: f = 0\n",
+        "  combine: a with: b => a + b\n",
+        "  run: c1 c2: c2 coll: coll =>\n",
+        "    self.f := self.f + 1.\n",
+        "    x := self combine: 1 with: (c1 ifTrue: [10] ifFalse: [20]).\n",
+        "    y := (c2 ifTrue: [coll] ifFalse: [#()]) size.\n",
+        "    x + y\n",
+    );
+    let code = compile(src, "bt@probe_splice_operands");
+    eprintln!("splice operands:\n{code}");
+
+    assert_compiles_through_erlc("bt@probe_splice_operands", &code);
+}
+
+#[test]
 fn guarded_operator_in_value_type_arm_still_inlines() {
     // Value-type methods bracket nothing, so a guarded operator in an arm
     // inlines there.

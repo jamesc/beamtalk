@@ -661,7 +661,15 @@ impl CoreErlangGenerator {
                     stmts.push(ThreadedStmt::Statement(doc, span));
                 }
             }
-            this.lower_stateful_while_condition_tail(tail, frame, carry_self, &mut stmts)?;
+            // BT-4070: the tail value splices into the hand-back tuple, so
+            // the pure-boolean gate declines while it lowers (see
+            // `decline_pure_boolean_inline`): the tail keeps today's
+            // dynamic dispatch, byte for byte.
+            let prev_decline = std::mem::replace(&mut this.decline_pure_boolean_inline, true);
+            let tail_out =
+                this.lower_stateful_while_condition_tail(tail, frame, carry_self, &mut stmts);
+            this.decline_pure_boolean_inline = prev_decline;
+            tail_out?;
             Ok::<_, CodeGenError>(stmts)
         })?;
         // The condition's frame is a `StateAcc` frame because the condition
