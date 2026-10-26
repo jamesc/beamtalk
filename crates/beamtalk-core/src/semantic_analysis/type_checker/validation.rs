@@ -3310,18 +3310,6 @@ impl TypeChecker {
         }
     }
 
-    /// Returns true if `value_type` is assignable to `declared_type`.
-    ///
-    /// A type is assignable if it is the same type or a subclass of the declared type.
-    /// For example, Integer is assignable to Number because Integer's superclass
-    /// chain includes Number.
-    ///
-    /// For union declared types (containing `|`), the value is assignable if it's
-    /// compatible with any member. For union *value* types, every member must
-    /// be assignable (`A | B <: T` iff `A <: T` and `B <: T`) — the direction
-    /// the local-annotation narrowing check needs. For generic types
-    /// (`Result(Integer, Error)`), compares the base type name. Singleton
-    /// (`#`) types require an exact match or `Symbol`.
     /// Whether a class object `C class` (`Meta{C}`) may flow into a slot or
     /// parameter declared `declared_type` (BT-4199).
     ///
@@ -3342,6 +3330,18 @@ impl TypeChecker {
         Self::is_type_compatible(&class_name_ty, declared_type, hierarchy)
     }
 
+    /// Returns true if `value_type` is assignable to `declared_type`.
+    ///
+    /// A type is assignable if it is the same type or a subclass of the declared type.
+    /// For example, Integer is assignable to Number because Integer's superclass
+    /// chain includes Number.
+    ///
+    /// For union declared types (containing `|`), the value is assignable if it's
+    /// compatible with any member. For union *value* types, every member must
+    /// be assignable (`A | B <: T` iff `A <: T` and `B <: T`) — the direction
+    /// the local-annotation narrowing check needs. For generic types
+    /// (`Result(Integer, Error)`), compares the base type name. Singleton
+    /// (`#`) types require an exact match or `Symbol`.
     pub(super) fn is_assignable_to(
         value_type: &EcoString,
         declared_type: &EcoString,
