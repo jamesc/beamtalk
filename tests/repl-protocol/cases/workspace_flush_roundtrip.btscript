@@ -323,7 +323,7 @@ _conflictDesc := _conflicts first
 // => _
 
 Erlang maps get: #reason with: _conflictDesc
-// => external_edit
+// => "external_edit"
 
 // Nothing was written: the Phase A failure aborted the whole flush.
 Erlang maps get: #flushed with: _conflictFlush

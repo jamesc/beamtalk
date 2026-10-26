@@ -50,7 +50,7 @@ Value subclass: ReplRenameClassDemo
 // => _
 
 ReplRenameClassDemo new greet
-// => hi
+// => "hi"
 
 Object allSubclasses includes: ReplRenameClassDemo
 // => true
@@ -65,7 +65,7 @@ Object allSubclasses includes: ReplRenameClassRenamed
 // => true
 
 ReplRenameClassRenamed new greet
-// => hi
+// => "hi"
 
 // The old name no longer resolves.
 ReplRenameClassDemo
@@ -95,13 +95,13 @@ Value subclass: ReplRenameMethodDemo
 // => _
 
 ReplRenameMethodDemo new greet
-// => hi
+// => "hi"
 
 :rename-method ReplRenameMethodDemo greet sayHi
 // => _
 
 ReplRenameMethodDemo new sayHi
-// => hi
+// => "hi"
 
 // The old selector no longer resolves.
 ReplRenameMethodDemo new greet

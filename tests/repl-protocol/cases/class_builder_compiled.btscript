@@ -105,11 +105,11 @@ c2 getTotal
 // ---------------------------------------------------------------------------
 
 [Object classBuilder name: #CBBadSeal; superclass: Float; register] on: Error do: [:e | "sealed rejected"]
-// => sealed rejected
+// => "sealed rejected"
 
 // ---------------------------------------------------------------------------
 // Registering without a name raises missing_parameter
 // ---------------------------------------------------------------------------
 
 [Object classBuilder register] on: Error do: [:e | "no name"]
-// => no name
+// => "no name"

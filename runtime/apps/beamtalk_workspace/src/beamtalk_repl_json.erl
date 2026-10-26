@@ -268,7 +268,10 @@ term_to_json(Value) when is_float(Value) ->
 term_to_json(Value) when is_atom(Value) ->
     atom_to_binary(Value, utf8);
 term_to_json(Value) when is_binary(Value) ->
-    beamtalk_transcript_stream:ensure_utf8(Value);
+    %% BT-4167: Strings display quoted + escaped (ADR 0138 spelling via
+    %% print_string), Binaries (non-UTF-8) as <<AB CD>> hex — distinct from
+    %% each other and from bare class names. Previously both showed bare.
+    beamtalk_runtime_api:print_string(Value);
 term_to_json(Value) when is_list(Value) ->
     case Value of
         [] ->
@@ -319,6 +322,14 @@ term_to_json(Value) when is_map(Value) ->
     end;
 term_to_json(#beamtalk_error{} = Error) ->
     iolist_to_binary(beamtalk_error:format(Error));
+term_to_json({beamtalk_character, CP}) when is_integer(CP) ->
+    %% BT-4167: Character-typed REPL results (tagged by beamtalk_repl_ops_eval
+    %% via resolve_completion_type) display as $X, distinct from Integers.
+    %% Invalid scalars fall back to Integer display rather than crashing.
+    case CP >= 0 andalso CP =< 16#10FFFF andalso not (CP >= 16#D800 andalso CP =< 16#DFFF) of
+        true -> beamtalk_runtime_api:character_print_string(CP);
+        false -> beamtalk_runtime_api:print_string(CP)
+    end;
 term_to_json(Value) when is_tuple(Value) ->
     case Value of
         {beamtalk_supervisor, _Class, _Module, _Pid} = Sup ->

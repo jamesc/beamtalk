@@ -69,6 +69,9 @@ TestCase subclass: StringBinaryInheritanceTest
   testAsStringOnString =>
     // asString on a String is a no-op, returns the string itself
     self assert: "hello" asString equals: "hello"
+    // Pin the class too: Binary>>asString's String arm depends on
+    // String>>asString answering a bare String (BT-4169)
+    self assert: ("hello" asString) class equals: String
 
   testAsStringUncheckedOnString =>
     // asStringUnchecked on a String returns the string itself

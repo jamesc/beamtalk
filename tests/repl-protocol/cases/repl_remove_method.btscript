@@ -24,10 +24,10 @@
 Actor subclass: RemoveMethodDemo
   state: value = 0
   increment => self.value := self.value + 1
-// => RemoveMethodDemo
+// => "RemoveMethodDemo"
 
 RemoveMethodDemo >> triple => self.value * 3
-// => RemoveMethodDemo>>triple
+// => "RemoveMethodDemo>>triple"
 
 d := RemoveMethodDemo spawn
 // => Actor(RemoveMethodDemo, _)

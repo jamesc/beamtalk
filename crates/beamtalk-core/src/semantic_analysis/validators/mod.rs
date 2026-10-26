@@ -30,6 +30,7 @@ mod handleinfo_catch_all_validators;
 mod late_slot_validators;
 mod lint_validators;
 mod local_threading;
+mod match_arm_block_validators;
 mod match_validators;
 mod native_validators;
 mod operator_validators;
@@ -61,6 +62,7 @@ pub(crate) use lint_validators::{
     check_redundant_local_type_annotation, check_redundant_super_initialize,
     check_testcase_setup_drops_field_assignments,
 };
+pub(crate) use match_arm_block_validators::check_match_arm_block;
 pub(crate) use match_validators::{
     check_match_exhaustiveness, check_type_pattern_classes, is_concrete_leaf_class,
     warn_assignment_in_match_arms,

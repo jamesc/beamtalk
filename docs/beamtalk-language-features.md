@@ -713,7 +713,7 @@ x < 5              // => ERROR: UndefinedObject does not understand '<'
 
 This holds however the receiver is typed: an untyped local or parameter, or an `:: Integer | Nil` field that holds `nil`. Only a receiver statically known to be a number, character or string (a literal, a `:: Integer`/`:: String`-style parameter or field, `self` in those classes) compiles to the bare comparison instruction; everything else is checked at run time (one inline type test), so there is no "total order over every value" to fall back on.
 
-The **argument** is not checked at run time: a number, character, string or symbol receiver compared with an argument of a different kind falls back to the BEAM's term order and does not raise, so `5 < nil` answers `true` and `#a < 5` answers `false`. The compiler warns when it can see the mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `'x' < nil`, `#a < 5`); an untyped or generic argument stays silent. Comparison operators have no number-on-the-left coercion (see above).
+The **argument** is not checked at run time: a number, character, string or symbol receiver compared with an argument of a different kind falls back to the BEAM's term order and does not raise, so `5 < nil` answers `true` and `#a < 5` answers `false`. The compiler warns when it can see the mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `$x < nil`, `#a < 5`); an untyped or generic argument stays silent. Comparison operators have no number-on-the-left coercion (see above).
 
 ##### Arithmetic and comparison on fields: annotate numeric state
 
@@ -4457,7 +4457,7 @@ x match: [
 
 **Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). Dependent sizes and size expressions are only supported when the binary pattern is the whole arm pattern — nested ones must match the enclosing value first, then the binary. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
 
-**An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is a compile error; one that does neither compiles without a warning and silently never runs. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`).
+**An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. A zero-parameter block body alongside non-block arms warns (`MatchArmBlock`: "this `match:` arm answers a Block without running it"); a match whose every arm is a block literal is read as an intentional dispatch table and stays silent. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is additionally a compile error. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`). Suppress a deliberate block-valued arm with `@expect match_arm_block`, or the whole package with `match-arm-block = "off"` under `[diagnostics]`.
 
 **Arms do not thread assignments.** An arm body is not a block, so assigning an
 enclosing local inside one has no effect: the compiler warns (`Assignment to
@@ -4793,7 +4793,7 @@ the next workspace restart.
 #### Creating a brand-new class file
 
 ```beamtalk
-> Workspace newClass: "Object subclass: Greeter\n  greet => 'hello'" at: "src/greeter.bt"
+> Workspace newClass: "Object subclass: Greeter\n  greet => ""hello""" at: "src/greeter.bt"
 => [Greeter]                        // compiled and installed in memory
 > Workspace flush
 => _                                // writes src/greeter.bt
@@ -7195,10 +7195,16 @@ Binary fromBytes: #(65, 66)  // => Binary
 (Binary fromBytes: #(104, 101, 108, 108, 111)) asString           // => "hello"
 (Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked  // => "hello"
 
-// Invalid UTF-8: asString answers an error tuple with the byte offset;
+// Invalid UTF-8: asString answers `Result error:` with the byte offset;
 // asStringUnchecked keeps the bytes, still dispatched as Binary
-(Binary fromBytes: #(255, 254)) asString                          // => {#error, {#invalid_utf8, 0}}
+((Binary fromBytes: #(255, 254)) asString) isError                // => true
+((Binary fromBytes: #(255, 254)) asString) error message          // => "Invalid UTF-8 at byte offset 0"
 (Binary fromBytes: #(255, 254)) asStringUnchecked class           // => Binary
+
+// Narrow before continuing: success answers a bare String (which has
+// no isError), failure a Result (which has no String methods)
+r := (Binary fromBytes: #(255, 254)) asString
+(r class equals: Result) ifTrue: [r isError] ifFalse: [false]      // => true
 
 // Serialization (class methods)
 etf := Binary serialize: #(1, 2, 3)
@@ -7224,7 +7230,7 @@ bin isEmpty                   // => false
 | `do: block` | iterate elements (via String at runtime¹) | iterate graphemes |
 | `part: offset size: n` | byte-level slice, returns Binary | inherited — byte-level slice, returns Binary |
 | `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
-| `asString` | UTF-8 validation, returns String | no-op, returns self |
+| `asString` | UTF-8 validation: String, or `Result error:` with offset | no-op, returns self |
 | `asStringUnchecked` | unchecked cast to String | no-op, returns self |
 
 ¹ Only when the bytes are valid UTF-8 — see below.
@@ -7784,11 +7790,12 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `type_annotation` | Missing or redundant type annotation warnings in typed classes |
 | `inheritance` | Sealed-class/sealed-method constraint errors |
 | `class_state_abroad` | A block that reads or writes its class's variables where it runs outside an invocation of that class (ADR 0130 §5) |
+| `actor_state_abroad` | A block that touches its actor's state where it runs outside the actor's process (ADR 0137) *(lint-only, see below)* |
 | `dead_assignment` | `beamtalk lint`'s "assignment inside an escaping block" check *(lint-only, see below)* |
 | `lint` | Style/redundancy findings: `beamtalk lint`'s unnecessary-parentheses, redundant trailing `^`, cascade-candidate, … passes, plus the unreachable-code / shadowed-variable / unattached-doc-comment advisories *(lint-only, see below)* |
 | `all` | Any diagnostic on the following expression *(discouraged — use a specific category)* |
 
-**Lint-only categories (`dead_assignment`, `lint`):** the diagnostics these suppress are produced only by `beamtalk lint`'s dedicated passes, which `beamtalk build`/`beamtalk test`, the LSP, and the REPL never run. Those surfaces therefore leave such a directive alone — neither satisfied nor reported stale — and only `beamtalk lint` validates it (BT-3384). `@expect lint` exists for test fixtures that deliberately pin a codegen shape the style lint would otherwise tell you to rewrite (e.g. a trailing `^` whose explicit-return lowering is the thing under test); ordinary code should just take the lint's advice.
+**Lint-only categories (`dead_assignment`, `lint`, `actor_state_abroad`):** the diagnostics these suppress are produced only by `beamtalk lint`'s dedicated passes, which `beamtalk build`/`beamtalk test`, the LSP, and the REPL never run. Those surfaces therefore leave such a directive alone — neither satisfied nor reported stale — and only `beamtalk lint` validates it (BT-3384). `@expect lint` exists for test fixtures that deliberately pin a codegen shape the style lint would otherwise tell you to rewrite (e.g. a trailing `^` whose explicit-return lowering is the thing under test); ordinary code should just take the lint's advice.
 
 **`@expect type` for method-not-found diagnostics:**
 

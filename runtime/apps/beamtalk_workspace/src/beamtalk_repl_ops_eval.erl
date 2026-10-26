@@ -66,6 +66,10 @@ handle_term(<<"eval">>, Params, _Msg, SessionPid) ->
         _ ->
             case beamtalk_repl_shell:eval(SessionPid, Code) of
                 {ok, Result, Output, Warnings} ->
+                    %% BT-4167 Character tagging happens inside
+                    %% `beamtalk_repl_eval:do_eval/3` (shared by the sync
+                    %% `handle_term` path and the async WebSocket eval path),
+                    %% so `Result` here is already tagged when appropriate.
                     {ok, Result, Output, Warnings};
                 {script_exit, Code2, Output, Warnings} ->
                     %% `Program exit: Code2` ended this connected session.

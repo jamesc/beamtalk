@@ -2205,17 +2205,18 @@ fn e2e_library_project_program_package_and_sync() {
     let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
 
     // `Program package` answers the root Package; `Package named:` succeeds.
+    // BT-4167: package names are Strings, so they display quoted.
     assert_eq!(
         client
             .eval("Program package name")
             .expect("Program package"),
-        package
+        format!("\"{package}\"")
     );
     assert_eq!(
         client
             .eval(&format!("(Package named: \"{package}\") name"))
             .expect("Package named:"),
-        package
+        format!("\"{package}\"")
     );
     let classes = client
         .eval("Program package classes")
@@ -2519,6 +2520,8 @@ fn is_distribution_case(path: &std::path::Path) -> bool {
 fn node_name_from_print_string(rendered: &str) -> String {
     rendered
         .trim()
+        // BT-4167: printString answers a String, so the REPL shows it quoted.
+        .trim_matches('"')
         .trim_start_matches("Node(")
         .trim_end_matches(')')
         .to_string()

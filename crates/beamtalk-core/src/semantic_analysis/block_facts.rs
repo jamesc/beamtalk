@@ -69,6 +69,16 @@ impl BlockMutationAnalysis {
         !self.field_writes.is_empty() || self.has_self_sends
     }
 
+    /// Whether running the block may write the actor's fields: a direct
+    /// field write, a self-send (which may mutate), or a send that may run
+    /// user code (a `super` send counts — in a block it runs against the
+    /// cell). Reads don't count: they see current values through either
+    /// channel. The Tier 2 merge predicate (BT-4122): only such a block
+    /// threads its fields through the cell instead of `StateAcc`.
+    pub fn may_write_actor_state(&self) -> bool {
+        !self.field_writes.is_empty() || self.has_self_sends || self.has_user_code_sends
+    }
+
     /// ADR 0137: whether the block holds a call that is bracketed with a
     /// store/reload of `State` in an actor instance method (the switch is on
     /// and the block has a send that may run user code). It threads `State`
@@ -3775,6 +3785,18 @@ mod tests {
         assert!(!analysis.needs_mutation_threading(Some(RootMethodKind::ValueType), true));
         assert!(!analysis.needs_mutation_threading(Some(RootMethodKind::Class), true));
         assert!(!analysis.needs_mutation_threading(None, true));
+    }
+
+    #[test]
+    fn may_write_actor_state_covers_writes_sends_and_super_but_not_reads() {
+        // BT-4122: the Tier 2 merge predicate.
+        assert!(analyzed("[self.n := 1]").may_write_actor_state());
+        assert!(analyzed("[self bump]").may_write_actor_state());
+        assert!(analyzed("[x foo]").may_write_actor_state());
+        assert!(analyzed("[super bump]").may_write_actor_state());
+        assert!(!analyzed("[self.n]").may_write_actor_state());
+        assert!(!analyzed("[count := count + 1]").may_write_actor_state());
+        assert!(!analyzed("[42]").may_write_actor_state());
     }
 
     #[test]

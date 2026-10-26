@@ -68,6 +68,9 @@ pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<D
 
         // Conversion
         "toBytes" => Some(Document::Str("call 'beamtalk_binary':'to_bytes'(Self)")),
+        // BT-4170: pre-flip, valid UTF-8 never reaches this call (String
+        // dispatch handles it); post-flip it does, and .bt-level success
+        // flips from bare String to `Result ok:`.
         "asString" => Some(Document::Str("call 'beamtalk_binary':'as_string'(Self)")),
         "asStringUnchecked" => Some(Document::Str(
             "call 'beamtalk_binary':'as_string_unchecked'(Self)",

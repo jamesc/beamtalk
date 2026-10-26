@@ -18,11 +18,11 @@
 
 // Basic command execution with binary string arg
 Erlang os cmd: "echo hello"
-// => hello_
+// => "hello_"
 
 // Multi-word command
 Erlang os cmd: "echo foo bar"
-// => foo bar_
+// => "foo bar_"
 
 // ===========================================================================
 // calendar:system_time_to_rfc3339 — charlist result coerced without badarg retry (BT-1398)

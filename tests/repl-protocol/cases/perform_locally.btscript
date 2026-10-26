@@ -14,7 +14,7 @@
 
 // Zero-argument class method via performLocally:
 LocalDispatchHelper performLocally: #greeting withArguments: #()
-// => hello from local dispatch
+// => "hello from local dispatch"
 
 // One-argument keyword class method via performLocally:
 LocalDispatchHelper performLocally: #echo: withArguments: #(42)

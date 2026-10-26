@@ -1084,6 +1084,8 @@ fn confirm_destructive_action_with<R: std::io::BufRead>(reader: &mut R) -> bool 
 ///
 /// Routes through `Beamtalk help: ClassName` evaluation rather
 /// than the deprecated `docs` protocol op (which has been removed).
+/// Prints via Transcript (BT-4167) so multi-line docs stay readable
+/// instead of showing as a quoted, escaped eval value.
 fn handle_help_topic(args: &str, client: &mut ReplClient) {
     if args.is_empty() {
         print_help();
@@ -1111,10 +1113,15 @@ fn handle_help_topic(args: &str, client: &mut ReplClient) {
         _ => (args.to_string(), None),
     };
 
-    let expr = match selector {
+    let help_expr = match selector {
         Some(sel) => format!("Beamtalk help: {receiver} selector: #{sel}"),
         None => format!("Beamtalk help: {receiver}"),
     };
+    // BT-4167: Strings (including help text) display quoted via the eval
+    // value. Help is documentation for human reading, not a value to
+    // inspect as a literal, so route it through Transcript (bare
+    // displayString) and print the captured output instead of the value.
+    let expr = format!("Transcript show: ({help_expr}). nil");
 
     match client.eval(&expr) {
         Ok(response) => {
@@ -1123,7 +1130,12 @@ fn handle_help_topic(args: &str, client: &mut ReplClient) {
                     eprintln!("{msg}");
                 }
             } else {
-                let text = response.value_string();
+                let output = response.output.clone().unwrap_or_default();
+                let text = if output.is_empty() {
+                    response.value_string()
+                } else {
+                    output
+                };
                 if !text.is_empty() {
                     println!("{text}");
                 }
@@ -1937,10 +1949,11 @@ mod tests {
         fn help_topic_command_evaluates_beamtalk_help() {
             let port = spawn_auth_ok_server(|req, ws| {
                 if req.get("op").and_then(|v| v.as_str()) == Some("eval")
-                    && req.get("code").and_then(|v| v.as_str()) == Some("Beamtalk help: Counter")
+                    && req.get("code").and_then(|v| v.as_str())
+                        == Some("Transcript show: (Beamtalk help: Counter). nil")
                 {
                     let _ = ws.send(Message::Text(
-                        serde_json::json!({"status": ["done"], "value": "Counter docs"})
+                        serde_json::json!({"status": ["done"], "value": "nil", "output": "Counter docs"})
                             .to_string()
                             .into(),
                     ));

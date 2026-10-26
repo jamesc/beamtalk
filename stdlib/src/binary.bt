@@ -218,14 +218,23 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
 
   /// Validate UTF-8 and return the binary as a String.
   ///
-  /// Returns a Result: success gives a String, failure gives an error
-  /// with the byte offset of the invalid sequence.
+  /// Success answers the String itself: valid UTF-8 binaries dispatch
+  /// as String, so `String>>asString` (which answers `self`) handles
+  /// them and this method's body only runs for invalid UTF-8 — which
+  /// answers `Result error:` with a `parse_error` carrying the byte
+  /// offset of the invalid sequence. `String>>asString` must keep
+  /// answering a bare String (the `Printable` contract), so a uniform
+  /// `Result` on both sides is not expressible through this selector.
+  /// TODO(BT-4170): when dispatch becomes construction type, valid
+  /// binaries reach this body too and success flips to `Result ok:` —
+  /// update the annotation, docs, and tests then.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asString   // => _
+  /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asString   // => "hello"
+  /// ((Binary fromBytes: #(255, 254)) asString) isError        // => true
   /// ```
-  asString -> Object => @primitive
+  asString -> String | Result(String, Error) => @primitive
 
   /// Return this binary as a String without UTF-8 validation.
   ///

@@ -448,33 +448,125 @@ from_bytes_round_trip_test() ->
     ?assertEqual(Bin, beamtalk_binary:from_bytes(beamtalk_binary:to_bytes(Bin))).
 
 %%% ============================================================================
-%%% as_string/1 — UTF-8 validation
+%%% as_string/1 — UTF-8 validation (BT-4169: real Result on both arms)
 %%% ============================================================================
 
 as_string_valid_ascii_test() ->
-    ?assertEqual({ok, <<"hello">>}, beamtalk_binary:as_string(<<"hello">>)).
+    ?assertEqual(
+        #{
+            '$beamtalk_class' => 'Result',
+            'isOk' => true,
+            'okValue' => <<"hello">>,
+            'errReason' => nil
+        },
+        beamtalk_binary:as_string(<<"hello">>)
+    ).
 
 as_string_valid_utf8_test() ->
     Bin = <<"héllo"/utf8>>,
-    ?assertEqual({ok, Bin}, beamtalk_binary:as_string(Bin)).
+    ?assertEqual(
+        #{
+            '$beamtalk_class' => 'Result',
+            'isOk' => true,
+            'okValue' => Bin,
+            'errReason' => nil
+        },
+        beamtalk_binary:as_string(Bin)
+    ).
 
 as_string_empty_test() ->
-    ?assertEqual({ok, <<>>}, beamtalk_binary:as_string(<<>>)).
+    ?assertEqual(
+        #{
+            '$beamtalk_class' => 'Result',
+            'isOk' => true,
+            'okValue' => <<>>,
+            'errReason' => nil
+        },
+        beamtalk_binary:as_string(<<>>)
+    ).
 
 as_string_invalid_utf8_test() ->
-    %% 0xFF is not valid UTF-8
-    Result = beamtalk_binary:as_string(<<255>>),
-    ?assertMatch({error, {invalid_utf8, _}}, Result).
+    %% 0xFF is not valid UTF-8 — failure is a Result error: wrapping a
+    %% structured parse_error whose message and details carry offset 0.
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'okValue' := nil,
+            'errReason' := #{'$beamtalk_class' := 'Error', error := #beamtalk_error{}}
+        },
+        beamtalk_binary:as_string(<<255>>)
+    ),
+    #{'errReason' := #{error := Error}} = beamtalk_binary:as_string(<<255>>),
+    ?assertEqual(parse_error, Error#beamtalk_error.kind),
+    ?assertEqual('Binary', Error#beamtalk_error.class),
+    ?assertEqual(asString, Error#beamtalk_error.selector),
+    ?assertEqual(#{offset => 0}, Error#beamtalk_error.details),
+    ?assertEqual(<<"Use asStringUnchecked to skip validation">>, Error#beamtalk_error.hint),
+    ?assertEqual(<<"Invalid UTF-8 at byte offset 0">>, Error#beamtalk_error.message).
 
 as_string_partial_utf8_test() ->
     %% Start of a 2-byte UTF-8 sequence without continuation
-    Result = beamtalk_binary:as_string(<<192>>),
-    ?assertMatch({error, {invalid_utf8, _}}, Result).
+    #{'errReason' := #{error := Error}} = beamtalk_binary:as_string(<<192>>),
+    ?assertEqual(parse_error, Error#beamtalk_error.kind),
+    ?assertEqual(asString, Error#beamtalk_error.selector),
+    ?assertEqual(#{offset => 0}, Error#beamtalk_error.details).
 
 as_string_mixed_valid_invalid_test() ->
-    %% Valid ASCII followed by invalid byte
+    %% Valid ASCII followed by invalid byte — offset 5 is preserved.
     Result = beamtalk_binary:as_string(<<"hello", 255>>),
-    ?assertMatch({error, {invalid_utf8, 5}}, Result).
+    ?assertMatch(
+        #{'$beamtalk_class' := 'Result', 'isOk' := false},
+        Result
+    ),
+    #{'errReason' := #{error := Error}} = Result,
+    ?assertEqual(asString, Error#beamtalk_error.selector),
+    ?assertEqual(#{offset => 5}, Error#beamtalk_error.details),
+    ?assertEqual(<<"Invalid UTF-8 at byte offset 5">>, Error#beamtalk_error.message).
+
+as_string_incomplete_reports_offset_test() ->
+    %% Truncated 3-byte sequence after 2 valid bytes — incomplete arm, offset 2.
+    #{'errReason' := #{error := Error}} = beamtalk_binary:as_string(<<"hi", 226, 130>>),
+    ?assertEqual(parse_error, Error#beamtalk_error.kind),
+    ?assertEqual(#{offset => 2}, Error#beamtalk_error.details).
+
+as_string_overlong_reports_offset_zero_test() ->
+    %% Overlong encoding C0 AF is rejected at offset 0.
+    #{'errReason' := #{error := Error}} = beamtalk_binary:as_string(<<192, 175>>),
+    ?assertEqual(parse_error, Error#beamtalk_error.kind),
+    ?assertEqual(#{offset => 0}, Error#beamtalk_error.details).
+
+as_string_surrogate_reports_offset_zero_test() ->
+    %% UTF-16 surrogate ED A0 80 is rejected at offset 0.
+    #{'errReason' := #{error := Error}} = beamtalk_binary:as_string(<<237, 160, 128>>),
+    ?assertEqual(parse_error, Error#beamtalk_error.kind),
+    ?assertEqual(#{offset => 0}, Error#beamtalk_error.details).
+
+as_string_above_max_reports_offset_zero_test() ->
+    %% F5 ... encodes above U+10FFFF — rejected at offset 0.
+    #{'errReason' := #{error := Error}} = beamtalk_binary:as_string(<<245, 128, 128, 128>>),
+    ?assertEqual(parse_error, Error#beamtalk_error.kind),
+    ?assertEqual(#{offset => 0}, Error#beamtalk_error.details).
+
+as_string_split_multibyte_reports_offset_zero_test() ->
+    %% C3 must be followed by a continuation byte, not 0x28 — offset 0.
+    #{'errReason' := #{error := Error}} = beamtalk_binary:as_string(<<195, 40>>),
+    ?assertEqual(parse_error, Error#beamtalk_error.kind),
+    ?assertEqual(#{offset => 0}, Error#beamtalk_error.details).
+
+as_string_valid_four_byte_test() ->
+    %% U+1F600 (grinning face) is a valid 4-byte sequence — pins
+    %% validator agreement (dispatch scan vs check_utf8 vs offset walker).
+    Bin = <<240, 159, 152, 128>>,
+    ?assertEqual(
+        #{
+            '$beamtalk_class' => 'Result',
+            'isOk' => true,
+            'okValue' => Bin,
+            'errReason' => nil
+        },
+        beamtalk_binary:as_string(Bin)
+    ).
 
 as_string_type_error_test() ->
     ?assertError(

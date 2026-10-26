@@ -78,8 +78,8 @@ c3 doubleValue
 
 // Source for patched method should return the NEW implementation
 (Counter >> #increment) source
-// => increment => self.value := self.value + 10
+// => "increment => self.value := self.value + 10"
 
 // Source for newly added method should return its source
 (Counter >> #doubleValue) source
-// => doubleValue => self.value * 2
+// => "doubleValue => self.value * 2"

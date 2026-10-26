@@ -7,13 +7,13 @@
 // Previously REPL-loaded method bodies silently evaluated it to `nil`.
 
 Value subclass: BT3644Sender
-// => BT3644Sender
+// => "BT3644Sender"
 
 BT3644Sender >> send => BT3644NoSuchClass someMessage
-// => BT3644Sender>>send
+// => "BT3644Sender>>send"
 
 BT3644Sender >> sendWith => BT3644NoSuchClass with: 1 and: 2
-// => BT3644Sender>>sendWith
+// => "BT3644Sender>>sendWith"
 
 BT3644Sender new send
 // => ERROR: not found

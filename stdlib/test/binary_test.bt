@@ -365,21 +365,61 @@ TestCase subclass: BinaryTest
     self assert: "hello" toBytes equals: #(104, 101, 108, 108, 111)
 
   // ═══════════════════════════════════════════════════════════════════
-  // asString — UTF-8 validation
-  // At runtime, dispatches to String's asString (returns self).
-  // Binary's primitive (returns {ok, ...} tuple) is tested via
-  // string_binary_inheritance_test.bt.
+  // asString — UTF-8 validation (BT-4169)
+  // Success dispatches to String's asString (answers the String itself);
+  // failure answers `Result error:` with the byte offset. These are the
+  // issue's REPL probes, kept as regression tests:
+  //   (Binary fromBytes: #(104, 101, 108, 108, 111)) asString  // => "hello"
+  //   (Binary fromBytes: #(255, 254)) asString                 // => Result error: (offset 0)
   // ═══════════════════════════════════════════════════════════════════
   testAsStringOnBinaryReturnsString =>
     // At runtime, asString dispatches to String's override → returns self
     bin := Binary fromBytes: #(104, 101, 108, 108, 111)
     result := bin asString
     self assert: result equals: "hello"
+    self assert: result class equals: String
 
   testAsStringEmptyBinary =>
     bin := Binary fromBytes: #()
     result := bin asString
     self assert: result equals: ""
+    self assert: result class equals: String
+
+  testAsStringInvalidUtf8IsErrorResult =>
+    // Statically String | Result, but invalid bytes guarantee a Result
+    // at runtime — @expect type suppresses the union-member hints below
+    result := (Binary fromBytes: #(255, 254)) asString
+    self assert: result class equals: Result
+    @expect type
+    self assert: result isError
+    @expect type
+    self deny: result isOk
+
+  testAsStringInvalidUtf8ReportsOffset =>
+    result := (Binary fromBytes: #(104, 101, 108, 108, 111, 255)) asString
+    @expect type
+    self assert: result isError
+    @expect type
+    self assert: (result error kind) equals: #parse_error
+    // Pin the exact message: the offset is only reachable from Beamtalk
+    // via message parsing until Exception exposes details (BT-4169 review)
+    @expect type
+    self assert: (result error message) equals: "Invalid UTF-8 at byte offset 5"
+
+  testAsStringInvalidUtf8UnwrapRaises =>
+    result := (Binary fromBytes: #(255, 254)) asString
+    @expect type
+    self should: [result unwrap] raise: #parse_error
+
+  testAsStringInvalidUtf8ValueOr =>
+    result := (Binary fromBytes: #(255, 254)) asString
+    @expect type
+    self assert: (result valueOr: "fallback") equals: "fallback"
+
+  testPrintStringInvalidUtf8 =>
+    // Pins the dispatch + render chain: BT-4169 rewired print_string/1
+    // internals from as_string/1 to check_utf8/1
+    self assert: (Binary fromBytes: #(255)) printString equals: "<<FF>>"
 
   // ═══════════════════════════════════════════════════════════════════
   // asStringUnchecked — no validation
