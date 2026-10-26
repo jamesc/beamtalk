@@ -324,6 +324,20 @@ impl CoreErlangGenerator {
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
                     Ok(docvec![leaf::var(var_name)])
                 } else {
+                    // BT-4121: inside a stateless loop that brackets its
+                    // guarded operators, the entry `State` is stale for
+                    // the slow paths' writes — read the live cell. Checked
+                    // before the hybrid params below (like the `self.field`
+                    // path): a bracketing loop's parameters are stale too.
+                    if self.guarded_op_take_reads() {
+                        return Ok(docvec![
+                            "call 'maps':'get'(",
+                            leaf::atom(id.name.to_string()),
+                            ", ",
+                            super::threaded_ir::cell_take_call(),
+                            ")",
+                        ]);
+                    }
                     // In hybrid mode, check if this is a read-only field
                     // accessed implicitly (bare name without self. prefix).
                     if self.loop_mode.in_hybrid_loop {
@@ -397,17 +411,6 @@ impl CoreErlangGenerator {
                     } else if self.in_cell_closure() {
                         // ADR 0137 §3: an actor closure reads a bare field through the cell.
                         Ok(self.cell_field_read_doc(id.name.as_str()))
-                    } else if self.guarded_op_take_reads() {
-                        // BT-4121: inside a stateless loop that brackets its
-                        // guarded operators, the entry `State` is stale for
-                        // the slow paths' writes — read the live cell.
-                        Ok(docvec![
-                            "call 'maps':'get'(",
-                            leaf::atom(id.name.to_string()),
-                            ", ",
-                            super::threaded_ir::cell_take_call(),
-                            ")",
-                        ])
                     } else {
                         Ok(docvec![
                             "call 'maps':'get'(",

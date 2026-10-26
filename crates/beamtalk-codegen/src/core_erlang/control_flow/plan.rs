@@ -1009,6 +1009,10 @@ impl ThreadingPlan {
             StateAccFallbackReason::ControlFlowMutations
         } else if effects.has_conditional_threaded_writes {
             StateAccFallbackReason::InlineConditionalThreadedWrite
+        } else if effects.has_guarded_operator {
+            // BT-4121: a hybrid body with a guarded operator falls back to
+            // `StateAcc` (a hybrid loop cannot bracket its slow path).
+            StateAccFallbackReason::GuardedOperator
         } else if effects.last_is_destructure {
             StateAccFallbackReason::DestructureAsLastExpr
         } else if body_analysis.has_self_sends {
