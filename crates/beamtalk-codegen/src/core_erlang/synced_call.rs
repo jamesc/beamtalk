@@ -779,10 +779,10 @@ impl CoreErlangGenerator {
         self.synced.guarded_op_gaps.push(gap);
     }
 
-    /// BT-4122: records one Tier 2 `StateAcc` field read, reported as
+    /// BT-4122: records one Tier 2 `StateAcc` field access, reported as
     /// [`VerifyError::FieldReadFromStateAcc`] separately from both lists
     /// above. `selector` names the send or access, suffixed by the caller
-    /// with which arm fired (fun body, caller unpack, nested call).
+    /// with which fun-body arm fired (read or write).
     pub(in crate::core_erlang) fn record_tier2_stateacc_gap(&mut self, selector: String, at: Span) {
         let gap = self.make_unbracketed_send(selector, at);
         self.synced.tier2_stateacc_gaps.push(gap);
@@ -1013,8 +1013,8 @@ impl CoreErlangGenerator {
     /// local rebinds its live Core name, not the deterministic one). The
     /// bracket renders them after its reload, reading each fresh value
     /// out of the reloaded state. Empty when the prescan recorded no
-    /// mutations (defensive: the hand-off already proved this is a
-    /// may-write Tier 2 call, so the merge still threads its state).
+    /// mutations (defensive: the merge predicate already proved this is
+    /// a may-write Tier 2 call, so the merge still threads its state).
     pub(in crate::core_erlang) fn tier2_merge_rebinds(
         &mut self,
         expr: &Expression,

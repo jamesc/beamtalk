@@ -169,7 +169,7 @@ def run_send(send, shape):
 
     `None` value with kind `"raise"` (or a raising shape outside its
     catching sends) means the send raises; the test asserts the error
-    tag (`ERROR_TAG`) and the final `n` instead of a value.
+    tag (`error_tag`) and the final `n` instead of a value.
     """
     _, kind, runs = SENDS[send]
     if send in ROLLBACK_FIXED:
@@ -317,7 +317,8 @@ def away_cells():
     # local; the inner block reads its home capture away from home. A
     # read answers from the creation-time capture; a write raises like
     # any away write.
-    for shape, expected, error in (("R", str(N0), None), ("RW", None, "actor_state_unreachable")):
+    nested = (("R", str(N0), None), ("RW", None, "actor_state_unreachable"))
+    for shape, expected, error in nested:
         body = SHAPES[shape][0]
         name = f"awayNestedRun{shape}"
         code = [f"inner := [{body}]", "b := [inner value]", "self.n := 50", "other run: b"]

@@ -503,7 +503,9 @@ impl CoreErlangGenerator {
         self.with_closed_fun_scope(|this| {
             // Track block nesting so self-cast sends route through the mailbox
             this.block_depth += 1;
-            // Tier 2 marks (save/restore: Tier 2 nests).
+            // Tier 2 marks (save/restore: Tier 2 nests — no `?`
+            // between, so the error path restores too, like the legacy
+            // builder below).
             let saved_body = std::mem::replace(&mut this.in_tier2_stateful_body, true);
             let saved_merged = this.tier2_merged_fun.replace(Tier2MergedFun {
                 captured: captured_vars.to_vec(),
