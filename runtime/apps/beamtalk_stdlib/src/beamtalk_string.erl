@@ -17,8 +17,10 @@ All operations are grapheme-aware and handle UTF-8 correctly.
 Representation (BT-4170): a `String` is the tagged term
 `{beamtalk_string, Bin}` — see `beamtalk_primitive:string_from_binary/1`,
 the single authority for constructing it. Every function here matches
-that tag in its head and wraps text results through that constructor; a
-bare binary is a `Binary`, not a `String`, and raises `type_error`.
+that tag in its head and wraps text results through that constructor.
+Receivers also accept a bare binary (pre-flip Erlang callers stay valid —
+see the `BT-4173` clauses); anything else raises `type_error` via
+`raise_not_string/2`, as do bare-binary join elements (`join_element/2`).
 """.
 -type t() :: {beamtalk_string, binary()}.
 -export_type([t/0]).
