@@ -293,6 +293,19 @@ term_to_json_binary_non_utf8_test() ->
     ?assertEqual(<<"\"\"">>, beamtalk_repl_json:term_to_json(<<>>)),
     ?assertEqual(<<"<<FF 00>>">>, beamtalk_repl_json:term_to_json(<<255, 0>>)).
 
+term_to_json_list_elements_not_prequoted_test() ->
+    %% BT-4203: list elements are bare (JSON encoding quotes them); top-level is quoted.
+    ?assertEqual(
+        [<<"a">>, <<"b">>], beamtalk_repl_json:term_to_json([<<"a">>, <<"b">>])
+    ),
+    ?assertEqual(
+        [[<<"a">>], [<<"b">>]],
+        beamtalk_repl_json:term_to_json([[<<"a">>], [<<"b">>]])
+    ),
+    ?assertEqual(
+        [<<"<<FF 00>>">>], beamtalk_repl_json:term_to_json([<<255, 0>>])
+    ).
+
 term_to_json_character_tag_test() ->
     %% BT-4167: tagged Character results display as $X, distinct from Integers.
     ?assertEqual(<<"$A">>, beamtalk_repl_json:term_to_json({beamtalk_character, 65})),

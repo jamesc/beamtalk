@@ -32,6 +32,7 @@ Uses OTP `json` module (OTP 27+) for encoding/decoding.
     format_modules/1,
     format_docs/1,
     term_to_json/1,
+    element_to_json/1,
     format_error_message/1,
     parse_json/1,
     encode_reloaded/4, encode_reloaded/5,
@@ -285,7 +286,7 @@ term_to_json(Value) when is_list(Value) ->
                         {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [Value]))
                     end;
                 false ->
-                    [term_to_json(E) || E <- Value]
+                    [element_to_json(E) || E <- Value]
             end
     end;
 term_to_json({beamtalk_future, Pid}) when is_pid(Pid) ->
@@ -374,6 +375,25 @@ term_to_json(Value) ->
     beamtalk_transcript_stream:ensure_utf8(
         iolist_to_binary(io_lib:format("~p", [Value]))
     ).
+
+-doc """
+Render an element nested inside a List (BT-4203).
+
+Elements become JSON strings inside a JSON array, so a String element must
+not be pre-quoted by `print_string` (the JSON encoder already quotes it:
+`["a","b"]`, not `["\\"a\\""]`). Only the top-level value is quoted
+(BT-4167). UTF-8 Binaries are bare; non-UTF-8 Binaries keep the `<<AB CD>>`
+hex form so they stay distinguishable. Nested lists recurse; everything else
+uses the normal rendering.
+""".
+-spec element_to_json(term()) -> term().
+element_to_json(Value) when is_binary(Value) ->
+    case unicode:characters_to_binary(Value, utf8, utf8) of
+        Bin when is_binary(Bin) -> Bin;
+        _ -> beamtalk_runtime_api:print_string(Value)
+    end;
+element_to_json(Value) ->
+    term_to_json(Value).
 
 -doc "Format a tagged future's underlying pid for display.".
 -spec term_to_json_future_pid(pid()) -> binary().
