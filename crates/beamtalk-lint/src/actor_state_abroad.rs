@@ -22,9 +22,10 @@
 //!   unless the callee keeps the block and runs it later: the actor and
 //!   class-method clauses say "may keep it". `Parallel all:`/`any:` always
 //!   blocks, so reads there are exempt outright.
-//! - **self-sends.** A block that makes a synchronous `self` send (a cast is
-//!   fine) in the same positions "is served remotely and can deadlock if the
-//!   actor is waiting on the callee".
+//! - **self-sends.** A block that makes a synchronous `self` send, directly
+//!   or through a local bound to `self` (a cast is fine), in the same
+//!   positions "is served remotely rather than inline, and can deadlock if
+//!   the actor is waiting on the callee".
 //!
 //! A block is reported at most once, in flavor priority order: writes, then
 //! reads, then self-sends.
@@ -52,18 +53,22 @@
 //! here the actor's mutable instance fields, not class variables.
 //!
 //! Overlap: a synchronous `self` send in a `Timer` block also fires
-//! `sync_send_in_timer_block` (at the send, about the deadlock); this lint
-//! fires at the block, about the away execution. Both are accurate.
+//! `sync_send_in_timer_block` (at the send); this lint fires at the block,
+//! about the away execution.
 //!
-//! Shapes the lint does not see: a block handed to a `Future` (runtime-only,
-//! no hierarchy entry); `parallelCollect:` (an instance send on an unknown
+//! Shapes the lint does not see: a subclass whose actor ancestor is declared
+//! in another file (each file is linted as its own module, so the subclass
+//! resolves non-actor); a block handed to a `Future` (runtime-only, no
+//! hierarchy entry); `parallelCollect:` (an instance send on an unknown
 //! receiver — the lint judges sends by receiver, except `Timer`/`Parallel`
 //! via the hierarchy's `spawns_block` mark); a `super` send in the block
 //! (away-`super` runs the superclass method against the capture and needs its
-//! own message); a block passed as a `spawnWith:` argument; reflective
-//! `fieldAt:`/`fieldAt:put:` access; a block reaching an actor held in a
-//! field or a parameter; and a standalone definition for a class outside this
-//! module.
+//! own message); a block nested in a `spawnWith:` argument map; reflective
+//! field access (`fieldAt:` reads and `fieldAt:put:`/`clearField:` writes
+//! warn only as self-sends, not with their read/write hazard); a block
+//! reaching an actor held in a field or parameter not typed as another actor
+//! class, or an actor behind `unwrap`/`value`; and a standalone definition
+//! for a class outside this module.
 //!
 //! **Category.** These diagnostics carry `DiagnosticCategory::Lint`
 //! (site-level `@expect lint`) until the sequenced `beamtalk-core` change
@@ -76,9 +81,10 @@ use std::collections::HashSet;
 
 use crate::{LintPass, hierarchy_for_lint};
 use beamtalk_core::ast::{
-    Block, ClassKind, DeclaredKeyword, Expression, ExpressionStatement, MethodKind, Module,
+    Block, ClassDefinition, ClassKind, DeclaredKeyword, Expression, ExpressionStatement,
+    MessageSelector, MethodKind, Module, ParameterDefinition, TypeAnnotation,
 };
-use beamtalk_core::ast_walker::{SendRef, walk_expression, walk_sends};
+use beamtalk_core::ast_walker::{SendRef, SendSite, walk_expression, walk_sends};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::semantic_analysis::block_facts::{
     ClassVarAccesses, HasFieldProbe, class_var_accesses,
@@ -102,6 +108,7 @@ impl LintPass for ActorStateAbroadPass {
             let ctx = ClassCtx {
                 class_name,
                 fields,
+                actor_fields: actor_typed_fields(module, &hierarchy, class_name),
                 hierarchy: &hierarchy,
             };
             for method in class
@@ -109,7 +116,7 @@ impl LintPass for ActorStateAbroadPass {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Primary)
             {
-                check_method_body(&method.body, &ctx, diagnostics);
+                check_method_body(&method.body, &method.parameters, &ctx, diagnostics);
             }
         }
         // Standalone `Counter >> tick => ...` definitions are instance methods
@@ -130,9 +137,15 @@ impl LintPass for ActorStateAbroadPass {
             let ctx = ClassCtx {
                 class_name,
                 fields,
+                actor_fields: actor_typed_fields(module, &hierarchy, class_name),
                 hierarchy: &hierarchy,
             };
-            check_method_body(&standalone.method.body, &ctx, diagnostics);
+            check_method_body(
+                &standalone.method.body,
+                &standalone.method.parameters,
+                &ctx,
+                diagnostics,
+            );
         }
     }
 }
@@ -143,6 +156,8 @@ struct ClassCtx<'a> {
     /// Mutable (`state:`) instance fields visible to the class's methods, own
     /// and inherited.
     fields: HashSet<String>,
+    /// Fields (own and in-module-ancestor) declared `:: AnotherActor`.
+    actor_fields: HashSet<String>,
     hierarchy: &'a ClassHierarchy,
 }
 
@@ -151,10 +166,10 @@ struct ClassCtx<'a> {
 /// block written in one has no away hazard; a standalone definition for a
 /// class outside this module resolves non-actor too and is skipped.
 ///
-/// Own `field:` (immutable) declarations are excluded: data that cannot
-/// change reads the same anywhere, so warning on it would be noise. An
-/// inherited `field:` keeps its slot in the set — its keyword is not visible
-/// cross-module — and may warn on a read.
+/// `field:` (immutable) declarations visible in this module are excluded:
+/// data that cannot change reads the same anywhere, so warning on it would
+/// be noise. A `field:` inherited from another module keeps its slot in the
+/// set — its keyword is not visible cross-module — and may warn on a read.
 fn actor_state_fields(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -163,30 +178,113 @@ fn actor_state_fields(
     if hierarchy.resolve_class_kind(class_name) != ClassKind::Actor {
         return None;
     }
-    let own_immutable: HashSet<&str> = module
-        .classes
-        .iter()
-        .find(|c| c.name.name.as_str() == class_name)
-        .map(|c| {
-            c.state
-                .iter()
-                .filter(|d| d.declared_keyword == DeclaredKeyword::Field)
-                .map(|d| d.name.name.as_str())
-                .collect()
-        })
-        .unwrap_or_default();
+    // Most-derived declaration wins: a subclass redeclaring an ancestor's
+    // `field:` as `state:` is mutable again.
+    let mut seen = HashSet::new();
+    let mut immutable = HashSet::new();
+    for class in module_ancestry(module, class_name) {
+        for declaration in &class.state {
+            if seen.insert(declaration.name.name.as_str())
+                && declaration.declared_keyword == DeclaredKeyword::Field
+            {
+                immutable.insert(declaration.name.name.as_str());
+            }
+        }
+    }
     Some(
         hierarchy
             .all_state(class_name)
             .iter()
             .map(ToString::to_string)
-            .filter(|name| !own_immutable.contains(name.as_str()))
+            .filter(|name| !immutable.contains(name.as_str()))
             .collect(),
     )
 }
 
+/// The class and its in-module ancestors, nearest first: follows `superclass`
+/// while it names another unqualified class in this module. Cycle-guarded.
+/// Shared by the `field:` filter above and [`actor_typed_fields`].
+fn module_ancestry<'m>(module: &'m Module, class_name: &'m str) -> Vec<&'m ClassDefinition> {
+    let mut chain = Vec::new();
+    let mut visited = HashSet::new();
+    let mut current = Some(class_name);
+    while let Some(name) = current {
+        if !visited.insert(name) {
+            break;
+        }
+        let Some(class) = module.classes.iter().find(|c| c.name.name.as_str() == name) else {
+            break;
+        };
+        chain.push(class);
+        current = class
+            .superclass
+            .as_ref()
+            .filter(|_| class.superclass_package.is_none())
+            .map(|superclass| superclass.name.as_str());
+    }
+    chain
+}
+
+/// Names of fields (own and in-module-ancestor, most-derived declaration
+/// wins) declared `:: ActorClass` for statically another actor.
+fn actor_typed_fields(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    class_name: &str,
+) -> HashSet<String> {
+    let mut seen = HashSet::new();
+    let mut actors = HashSet::new();
+    for class in module_ancestry(module, class_name) {
+        for declaration in &class.state {
+            if !seen.insert(declaration.name.name.as_str()) {
+                continue;
+            }
+            if is_another_actor_annotation(
+                declaration.type_annotation.as_ref(),
+                hierarchy,
+                class_name,
+            ) {
+                actors.insert(declaration.name.name.to_string());
+            }
+        }
+    }
+    actors
+}
+
+/// Parameter names declared `:: ActorClass` for statically another actor.
+fn actor_typed_params(
+    parameters: &[ParameterDefinition],
+    hierarchy: &ClassHierarchy,
+    class_name: &str,
+) -> HashSet<String> {
+    parameters
+        .iter()
+        .filter(|parameter| {
+            is_another_actor_annotation(parameter.type_annotation.as_ref(), hierarchy, class_name)
+        })
+        .map(|parameter| parameter.name.name.to_string())
+        .collect()
+}
+
+/// Whether a type annotation statically names another actor: a simple
+/// `:: ActorClass` where the class is an actor subclass, but not the
+/// enclosing class itself (which may hold `self`). Unions, generics and
+/// anything else are not read.
+fn is_another_actor_annotation(
+    annotation: Option<&TypeAnnotation>,
+    hierarchy: &ClassHierarchy,
+    class_name: &str,
+) -> bool {
+    let Some(TypeAnnotation::Simple(name)) = annotation else {
+        return false;
+    };
+    let annotated = name.name.as_str();
+    annotated != class_name && hierarchy.is_actor_subclass(annotated)
+}
+
 fn check_method_body(
     body: &[ExpressionStatement],
+    parameters: &[ParameterDefinition],
     ctx: &ClassCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -198,7 +296,12 @@ fn check_method_body(
         }
     };
 
-    let actors = actor_locals(body, ctx);
+    let mut actors = actor_locals(body, ctx);
+    actors.extend(actor_typed_params(
+        parameters,
+        ctx.hierarchy,
+        ctx.class_name,
+    ));
     for stmt in body {
         // Cascades expanded: a later cascade message is judged against the
         // shared receiver like any send (BT-3716).
@@ -325,8 +428,8 @@ fn check_block(
         report(block, writes_diagnostic(ctx, block, field, shape));
     } else if !skip_reads && accesses.reads_class_state() {
         report(block, reads_diagnostic(ctx, block, &accesses, shape));
-    } else if let Some(selector) = first_sync_self_send(block) {
-        report(block, self_send_diagnostic(ctx, block, &selector, shape));
+    } else if let Some(self_send) = first_sync_self_send(block) {
+        report(block, self_send_diagnostic(ctx, block, &self_send, shape));
     }
 }
 
@@ -357,7 +460,8 @@ impl ClassCtx<'_> {
     }
 
     /// Shape B: a send, cast or plain, whose receiver is statically another
-    /// actor: a local bound to `ActorClass spawn...`, or an inline
+    /// actor: a local bound to `ActorClass spawn...` or typed `::
+    /// ActorClass`, a field typed `:: ActorClass`, or an inline
     /// `ActorClass spawn...` chain. A send to `self` never matches (it runs
     /// in this process, threaded or bracketed); anything unresolvable is
     /// missed.
@@ -372,6 +476,11 @@ impl ClassCtx<'_> {
         };
         match receiver.unwrap_parens() {
             Expression::Identifier(id) => actors.contains(id.name.as_str()).then(to_actor),
+            Expression::FieldAccess {
+                receiver, field, ..
+            } if is_self(receiver) && self.actor_fields.contains(field.name.as_str()) => {
+                Some(to_actor())
+            }
             // `Worker spawn keep: [...]`.
             Expression::MessageSend {
                 receiver: inner,
@@ -382,9 +491,17 @@ impl ClassCtx<'_> {
         }
     }
 
-    /// `ActorClass spawn` / `spawnWith:` / ... : an instance of an actor.
+    /// `ActorClass spawn` / `spawnWith:`: an instance of an actor. The named
+    /// (`spawnAs:`, ...) and remote (`spawnOn:`, ...) variants answer
+    /// `Result(Self, Error)`, not an actor (`actor.bt`,
+    /// `generated_builtins.rs`); an actor behind `unwrap`/`value` is missed
+    /// (see the module docs).
     fn is_actor_spawn(&self, receiver: &Expression, selector: &str) -> bool {
         selector.starts_with("spawn")
+            && !selector.contains("As:")
+            && !selector.contains("as:")
+            && !selector.contains("On:")
+            && !selector.contains("on:")
             && matches!(
                 receiver.unwrap_parens(),
                 Expression::ClassReference { name, package, .. }
@@ -395,17 +512,28 @@ impl ClassCtx<'_> {
     /// Shape C: a class-side send that runs in the target class's process.
     /// The target is any user-defined class that is not direct-called —
     /// including the actor's own class, whose class-side methods run in the
-    /// class process, away from an instance method's actor process. A stdlib
-    /// class is stateless and its blocks run at home (`Result tryDo:`,
+    /// class process, away from an instance method's actor process — reached
+    /// as a class reference or through `self class` / `super class`. A
+    /// stdlib class is stateless and its blocks run at home (`Result tryDo:`,
     /// `Array`, ...; `Timer` and `Parallel` are Shape A, not this shape).
     fn class_side_shape(&self, receiver: &Expression, selector: &str) -> Option<AbroadShape> {
-        let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() else {
-            return None;
+        let target = match receiver.unwrap_parens() {
+            Expression::ClassReference { name, package, .. } if package.is_none() => {
+                name.name.as_str()
+            }
+            Expression::MessageSend {
+                receiver: inner,
+                selector: class,
+                arguments,
+                ..
+            } if class.name() == "class"
+                && arguments.is_empty()
+                && (is_self(inner) || is_super(inner)) =>
+            {
+                self.class_name
+            }
+            _ => return None,
         };
-        let target = name.name.as_str();
-        if package.is_some() {
-            return None;
-        }
         if ClassHierarchy::is_builtin_class(target) {
             return None;
         }
@@ -470,21 +598,70 @@ fn parallel_list_blocks(arguments: &[Expression]) -> Vec<&Block> {
     blocks
 }
 
-/// The first synchronous `self` send in `block`, in walk order, if any.
-/// Casts (`self bump!`) message the actor's own mailbox and are fine;
-/// cascades on `self` count (their messages are inherently synchronous).
-/// Nested blocks included: a nested block runs wherever the block carrying
-/// it runs.
-fn first_sync_self_send(block: &Block) -> Option<String> {
+/// A synchronous send to the actor from inside a block.
+struct SyncSelfSend {
+    /// How to name the send in the message (`self bump`, `alias bump`).
+    send: String,
+    /// The concrete cast spelling for the hint (`self bump!`), when one
+    /// exists: only a plain unary send — `!` terminates the full send, so
+    /// `self update: 42!`, not `self update:!`, and a cascade message has
+    /// no cast spelling.
+    cast: Option<String>,
+}
+
+/// The first synchronous `self` send in `block`, in walk order, if any —
+/// directly or through a local bound to `self` (ADR 0137 treats aliased
+/// self-sends as self-sends). Casts (`self bump!`) message the actor's own
+/// mailbox and are fine; cascades on `self` count (their messages are
+/// inherently synchronous). Nested blocks included: a nested block runs
+/// wherever the block carrying it runs.
+fn first_sync_self_send(block: &Block) -> Option<SyncSelfSend> {
+    let aliases = self_aliases(block);
     let mut found = None;
     for stmt in &block.body {
         walk_sends(&stmt.expression, &mut |send| {
-            if found.is_none() && !send.is_cast && is_self(send.receiver) {
-                found = Some(send.selector.name().to_string());
+            if found.is_some() || send.is_cast {
+                return;
             }
+            let Expression::Identifier(id) = send.receiver.unwrap_parens() else {
+                return;
+            };
+            let name = id.name.as_str();
+            if name != "self" && !aliases.contains(name) {
+                return;
+            }
+            let send_display = format!("{name} {}", send.selector.name());
+            let cast = (matches!(send.selector, MessageSelector::Unary(_))
+                && send.site == SendSite::Plain)
+                .then(|| format!("{send_display}!"));
+            found = Some(SyncSelfSend {
+                send: send_display,
+                cast,
+            });
         });
     }
     found
+}
+
+/// Locals bound to `self` anywhere in `block` (`alias := self`): a send to
+/// one messages the actor like a `self` send (ADR 0137 treats aliased
+/// self-sends as self-sends).
+fn self_aliases(block: &Block) -> HashSet<String> {
+    let mut aliases = HashSet::new();
+    for stmt in &block.body {
+        walk_expression(&stmt.expression, &mut |e| {
+            let Expression::Assignment { target, value, .. } = e else {
+                return;
+            };
+            let Expression::Identifier(local) = &**target else {
+                return;
+            };
+            if is_self(value) {
+                aliases.insert(local.name.to_string());
+            }
+        });
+    }
+    aliases
 }
 
 /// Returns `true` if `expr` is the identifier `self`.
@@ -493,6 +670,11 @@ fn is_self(expr: &Expression) -> bool {
         expr.unwrap_parens(),
         Expression::Identifier(id) if id.name.as_str() == "self"
     )
+}
+
+/// Returns `true` if `expr` is `super`.
+fn is_super(expr: &Expression) -> bool {
+    matches!(expr.unwrap_parens(), Expression::Super(_))
 }
 
 /// `` `hasField: #n` ``, `` `hasField:` (#a, #b) `` or, when no probe names a
@@ -529,7 +711,7 @@ fn writes_diagnostic(
     )
     .with_hint(format!(
         "Return the value from the block and write the field from the calling method, \
-         or send {class} a message that makes the write (ADR 0137)"
+         or send {class} an async cast (`!`) that makes the write (ADR 0137)"
     ))
 }
 
@@ -546,34 +728,40 @@ fn reads_diagnostic(
         .map(String::as_str)
         .collect::<Vec<_>>()
         .join(", ");
-    let (what, hint) = if accesses.has_field_probes.is_empty() {
+    // The fix advice and the verb for the Timer-only message alternative.
+    let (what, base, verb) = if accesses.has_field_probes.is_empty() {
         (
             format!("reads field {fields} of {class}"),
-            format!(
-                "Read the field into a local before building the block, or have the block \
-                 send {class} a message that returns it (ADR 0137)"
-            ),
+            "Read the field into a local before building the block",
+            "returns it",
         )
     } else {
         let probe = probe_clause(&accesses.has_field_probes);
         if fields.is_empty() {
             (
                 format!("probes the state of {class} with {probe}"),
-                format!(
-                    "Evaluate the `hasField:` test into a local before building the block, or \
-                     have the block send {class} a message that makes it (ADR 0137)"
-                ),
+                "Evaluate the `hasField:` test into a local before building the block",
+                "makes it",
             )
         } else {
             (
                 format!("reads field {fields} of {class} and probes its state with {probe}"),
-                format!(
-                    "Read the field and evaluate the `hasField:` test into locals before \
-                     building the block, or have the block send {class} a message that does \
-                     (ADR 0137)"
-                ),
+                "Read the field and evaluate the `hasField:` test into locals before \
+                 building the block",
+                "does",
             )
         }
+    };
+    // A `self` send that returns the value is safe from a `Timer` block (the
+    // actor is free) but deadlocks from a synchronous call the actor waits
+    // on, so only the `Timer` hint offers it.
+    let hint = if matches!(shape, AbroadShape::Spawned { .. }) {
+        format!("{base}, or have the block send {class} a message that {verb} (ADR 0137)")
+    } else {
+        format!(
+            "{base}; a `self` send from the block can deadlock while {class} waits on this \
+             call (ADR 0137)"
+        )
     };
     Diagnostic::lint(
         format!(
@@ -588,21 +776,24 @@ fn reads_diagnostic(
 fn self_send_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
-    selector: &str,
+    self_send: &SyncSelfSend,
     shape: &AbroadShape,
 ) -> Diagnostic {
     let class = ctx.class_name;
+    let hint = self_send.cast.as_ref().map_or_else(
+        || "Use an async cast (`!` after the full send) instead (ADR 0137)".to_string(),
+        |cast| format!("Use `{cast}` (async cast) instead (ADR 0137)"),
+    );
     Diagnostic::lint(
         format!(
-            "block sends `self {selector}` and is {}: the send is served by {class} remotely \
-             and can deadlock if {class} is waiting on the callee",
+            "block sends `{}` and is {}: the send is served by {class} remotely \
+             rather than inline, and can deadlock if {class} is waiting on the callee",
+            self_send.send,
             shape.run_clause(class)
         ),
         block.span,
     )
-    .with_hint(format!(
-        "Use `self {selector}!` (async cast) instead (ADR 0137)"
-    ))
+    .with_hint(hint)
 }
 
 #[cfg(test)]
@@ -630,7 +821,7 @@ mod tests {
                 d.message.starts_with("block writes field")
                     || d.message.starts_with("block reads field")
                     || d.message.starts_with("block probes the state")
-                    || d.message.starts_with("block sends `self")
+                    || d.message.starts_with("block sends `")
             })
             .collect()
     }
@@ -697,7 +888,11 @@ Actor subclass: Counter
             "{}",
             d[0].message
         );
-        assert!(d[0].hint.is_some(), "expected a hint");
+        assert!(
+            d[0].hint.as_ref().unwrap().contains("async cast"),
+            "hint should suggest an async cast: {:?}",
+            d[0].hint
+        );
     }
 
     #[test]
@@ -710,10 +905,23 @@ Actor subclass: Counter
             d[0].message
         );
         assert!(
+            d[0].message.contains("passed to 'Timer every:do:'"),
+            "{}",
+            d[0].message
+        );
+        assert!(
             d[0].message
                 .contains("reads the values captured at creation"),
             "{}",
             d[0].message
+        );
+        assert!(
+            d[0].hint
+                .as_ref()
+                .unwrap()
+                .contains("send Counter a message"),
+            "Timer hint offers the message alternative: {:?}",
+            d[0].hint
         );
     }
 
@@ -728,10 +936,49 @@ Actor subclass: Counter
             "{}",
             d[0].message
         );
+        assert!(
+            d[0].message.contains("remotely rather than inline"),
+            "{}",
+            d[0].message
+        );
         assert!(d[0].message.contains("can deadlock"), "{}", d[0].message);
         assert!(
             d[0].hint.as_ref().unwrap().contains("self bump!"),
             "hint should suggest async cast: {:?}",
+            d[0].hint
+        );
+    }
+
+    #[test]
+    fn keyword_self_send_hint_is_generic() {
+        // `!` terminates the full send: `self update:!` would not parse.
+        let d = only("  startKw => Timer after: 1 do: [self update: 42]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("sends `self update:`"),
+            "{}",
+            d[0].message
+        );
+        let hint = d[0].hint.as_ref().unwrap();
+        assert!(
+            hint.contains("`!` after the full send"),
+            "keyword hint must be generic: {hint:?}"
+        );
+        assert!(!hint.contains("update:!"), "invalid spelling: {hint:?}");
+    }
+
+    #[test]
+    fn aliased_self_send_warns() {
+        let d = only("  startAlias => Timer after: 1 do: [alias := self. alias bump]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("sends `alias bump`"),
+            "{}",
+            d[0].message
+        );
+        assert!(
+            d[0].hint.as_ref().unwrap().contains("alias bump!"),
+            "hint should name the alias: {:?}",
             d[0].hint
         );
     }
@@ -758,6 +1005,52 @@ Actor subclass: Counter
             "{}",
             d[0].message
         );
+        assert!(
+            d[0].message.contains("passed to 'Timer after:do:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn computed_probe_warns() {
+        let d = only("  probeDynamic: k => Timer after: 1 do: [self hasField: k]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message
+                .contains("probes the state of Counter with `hasField:`"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn read_and_probe_combined() {
+        let d = only("  startBoth => Timer after: 1 do: [self.n printNl. self hasField: #m]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message
+                .contains("reads field n of Counter and probes its state with `hasField: #m`"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn timer_every_write_warns() {
+        let d = only("  startEvery => Timer every: 5 do: [self.n := 1]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("passed to 'Timer every:do:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn paren_wrapped_block_warns() {
+        let d = only("  startParen => Timer after: 1 do: ([self.n := 1])\n");
+        assert_eq!(d.len(), 1, "{d:?}");
     }
 
     #[test]
@@ -766,6 +1059,34 @@ Actor subclass: Counter
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(
             d[0].message.contains("writes field 'n'"),
+            "{}",
+            d[0].message
+        );
+        assert!(
+            d[0].message.contains("passed to 'Timer after:do:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn write_beats_self_send() {
+        let d = only("  startBoth => Timer after: 1 do: [self.n := 1. self bump]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("raises `actor_state_unreachable`"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn read_beats_self_send() {
+        let d = only("  startBoth => Timer after: 1 do: [self.n printNl. self bump]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message
+                .contains("reads the values captured at creation"),
             "{}",
             d[0].message
         );
@@ -795,6 +1116,22 @@ Actor subclass: Counter
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(
             d[0].message.contains("sends `self bump`"),
+            "{}",
+            d[0].message
+        );
+        assert!(
+            d[0].message.contains("passed to 'Parallel all:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn parallel_any_write_warns() {
+        let d = only("  fanAny => Parallel any: #([self.n := 1])\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("passed to 'Parallel any:'"),
             "{}",
             d[0].message
         );
@@ -840,6 +1177,11 @@ Actor subclass: Counter
             "{}",
             d[0].message
         );
+        assert!(
+            d[0].hint.as_ref().unwrap().contains("deadlock"),
+            "sync-shape hint must not offer the message alternative: {:?}",
+            d[0].hint
+        );
     }
 
     #[test]
@@ -858,10 +1200,61 @@ Actor subclass: Counter
         let d = only("  pokeCast =>\n    a := Worker spawn\n    a keep: [self.n := 1]!\n");
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(
+            d[0].message.contains("handed to another actor by 'keep:'"),
+            "{}",
+            d[0].message
+        );
+        assert!(
             d[0].message.contains("raises `actor_state_unreachable`"),
             "{}",
             d[0].message
         );
+    }
+
+    #[test]
+    fn typed_param_receiver_warns() {
+        let d = only("  pokeTyped: other :: Runner => other run: [self.n := 0]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("handed to another actor by 'run:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn typed_field_receiver_warns() {
+        let d = abroad(
+            "Actor subclass: Runner
+  run: aBlock => aBlock value
+
+Actor subclass: Counter
+  state: n = 0
+  state: helper :: Runner = nil
+
+  pokeField => self.helper run: [self.n := 0]
+",
+        );
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("handed to another actor by 'run:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn own_class_typed_receiver_quiet() {
+        // Typed as the enclosing class itself: it may hold `self`.
+        let d = only("  pokeSelf: other :: Counter => other run: [self.n := 0]\n");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn named_spawn_result_quiet() {
+        // `spawnAs:` answers `Result(Self, Error)`, not an actor.
+        let d = only("  named =>\n    a := Worker spawnAs: #w\n    a run: [self.n := 1]\n");
+        assert!(d.is_empty(), "{d:?}");
     }
 
     #[test]
@@ -896,6 +1289,15 @@ Actor subclass: Counter
             d[0].message.contains("sends `self bump`"),
             "{}",
             d[0].message
+        );
+        // A cascade message has no cast spelling: the hint stays generic.
+        assert!(
+            d[0].hint
+                .as_ref()
+                .unwrap()
+                .contains("`!` after the full send"),
+            "cascade hint must be generic: {:?}",
+            d[0].hint
         );
     }
 
@@ -934,6 +1336,11 @@ Actor subclass: Counter
         // Direct-called needs a sealed class too, not just a sealed method.
         let d = only("  viaLibSealed => Lib eachSealed: [self.n := 1]\n");
         assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("passed to 'Lib eachSealed:'"),
+            "{}",
+            d[0].message
+        );
     }
 
     #[test]
@@ -941,6 +1348,52 @@ Actor subclass: Counter
         // Direct-called needs no class variables.
         let d = only("  viaStateful => StatefulSealed each: [self.n := 1]\n");
         assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("passed to 'StatefulSealed each:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn inherited_class_side_method_warns() {
+        // An inherited method is not in the class's own table, so it is
+        // never direct-called.
+        let d = abroad(
+            "Object subclass: Lib
+  class each: aBlock => aBlock value
+
+Lib subclass: Kid
+  kidHelper => nil
+
+Actor subclass: Counter
+  state: n = 0
+
+  viaKid => Kid each: [self.n := 1]
+",
+        );
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("passed to 'Kid each:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn class_side_self_send_warns() {
+        let d = only("  viaLibTick => Lib each: [self bump]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("sends `self bump`"),
+            "{}",
+            d[0].message
+        );
+        assert!(
+            d[0].message.contains("passed to 'Lib each:'"),
+            "{}",
+            d[0].message
+        );
     }
 
     #[test]
@@ -960,6 +1413,42 @@ Actor subclass: Counter
     #[test]
     fn direct_called_class_method_quiet() {
         let d = only("  viaSealed => SealedLib each: [self.n := 1]\n");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn self_class_receiver_warns() {
+        let d = only("  viaSelfClass => self class each: [self.n := 1]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("passed to 'Counter each:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn super_class_receiver_warns() {
+        let d = only("  viaSuperClass => super class each: [self.n := 1]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("passed to 'Counter each:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn self_class_direct_called_quiet() {
+        let d = abroad(
+            "sealed Actor subclass: SealedCounter
+  state: n = 0
+
+  class sealed each: aBlock => aBlock value
+
+  viaSelf => self class each: [self.n := 1]
+",
+        );
         assert!(d.is_empty(), "{d:?}");
     }
 
@@ -987,6 +1476,81 @@ Actor subclass: Counter
     fn immutable_field_read_quiet() {
         // `field:` data cannot change, so the capture is always current.
         let d = only("  startTag => Timer after: 1 do: [self.tag printNl]\n");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn inherited_immutable_field_read_quiet() {
+        let d = abroad(
+            "Actor subclass: Base
+  field: tag = #c
+
+Base subclass: Child
+  state: n = 0
+
+  startTag => Timer after: 1 do: [self.tag printNl]
+",
+        );
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn same_module_subclass_warns() {
+        // A subclass in the same module resolves actor through its parent,
+        // and sees inherited fields.
+        let d = abroad(
+            "Actor subclass: Base
+  state: n = 0
+
+Base subclass: Sub
+  startLate => Timer after: 1 do: [self.n := 1]
+",
+        );
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("writes field 'n' of Sub"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn super_send_quiet() {
+        // A `super` send in the block is a documented miss: away-`super`
+        // runs the superclass method against the capture and needs its own
+        // message.
+        let d = only("  startSuper => Timer after: 1 do: [super tick]\n");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn parallel_collect_quiet() {
+        // An instance send on an unknown receiver: the lint judges sends by
+        // receiver. The block touches state; the shape is the miss.
+        let d = only("  collectP: xs => xs parallelCollect: [:x | self.n + x]\n");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn untyped_field_receiver_quiet() {
+        let d = abroad(
+            "Actor subclass: Runner
+  run: aBlock => aBlock value
+
+Actor subclass: Counter
+  state: n = 0
+  state: helper = nil
+
+  pokeHelper => self.helper run: [self.n := 1]
+",
+        );
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn spawnwith_map_block_quiet() {
+        // A block nested in a `spawnWith:` argument map is not inspected.
+        let d = only("  spawnCb => Worker spawnWith: #{#cb => [self.n := 1]}\n");
         assert!(d.is_empty(), "{d:?}");
     }
 
@@ -1029,6 +1593,11 @@ Actor subclass: Counter
             "{HEADER}Counter >> startLate => Timer after: 100 do: [self.n := 1]\n"
         ));
         assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("passed to 'Timer after:do:'"),
+            "{}",
+            d[0].message
+        );
     }
 
     #[test]
@@ -1036,6 +1605,14 @@ Actor subclass: Counter
         let d = abroad(&format!(
             "{HEADER}Lib >> helper => Timer after: 1 do: [self.n := 1]\n"
         ));
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn standalone_unknown_class_quiet() {
+        // A standalone definition for a class outside this module resolves
+        // non-actor and is skipped.
+        let d = abroad("Ghost >> m => Timer after: 1 do: [self.n := 1]\n");
         assert!(d.is_empty(), "{d:?}");
     }
 }

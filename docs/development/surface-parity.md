@@ -601,10 +601,14 @@ and the LSP never see it. No operation is surface-specific.
   checks actor classes only (value types and plain objects have no actor
   cell). Unlike `class-state-abroad`, there is no stored/returned rule, and a
   send to the actor's own class's class-side method is abroad.
-- Known gaps (false negatives; the lint is a hint, not a guarantee): a block
-  handed to a `Future` or `parallelCollect:`, a `super` send or reflective
-  `fieldAt:` access inside the block, a block passed as a `spawnWith:`
-  argument, and a standalone definition for a class outside the module.
+- Known gaps (false negatives; the lint is a hint, not a guarantee): a
+  subclass whose actor ancestor is declared in another file; a block handed
+  to a `Future` or `parallelCollect:`; a `super` send or reflective
+  `fieldAt:`/`fieldAt:put:`/`clearField:` access inside the block (reflective
+  access warns only as a self-send); a block nested in a `spawnWith:`
+  argument map; a send to an actor held in a field or parameter (unless
+  typed as another actor class); and a standalone definition for a class
+  outside the module.
 - The runtime error the lint predicts, `actor_state_unreachable` (ADR 0137),
   is an ordinary `#beamtalk_error{}` value and reaches every surface through
   its existing error path; none is surface-specific.
