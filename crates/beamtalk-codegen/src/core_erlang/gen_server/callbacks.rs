@@ -1707,6 +1707,60 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
+    /// BT-4090: the success arm's reply. A deferred call (`self deferReply`)
+    /// is answered `{noreply, _}` *before* encoding, so the method's ignored
+    /// return value is never encoded; otherwise the reply is wire-encoded and
+    /// tagged exactly as described on [`Self::handle_call_dispatch_case`].
+    fn success_reply_case() -> Document<'static> {
+        docvec![
+            "case _CallDeferred of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'true'> when 'true' ->",
+                    nest(INDENT, docvec![line(), "{'noreply', CleanNewState}"]),
+                    line(),
+                    "<_NotDeferred> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<{'error', EncErr}> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "{'reply', {'error', EncErr}, CleanNewState}",
+                                        ]
+                                    ),
+                                    line(),
+                                    "<{'ok', EncodedResult}> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "{'reply', {'ok', EncodedResult}, CleanNewState}",
+                                        ]
+                                    ),
+                                ]
+                            ),
+                            line(),
+                            "end",
+                        ]
+                    ),
+                ]
+            ),
+            line(),
+            "end"
+        ]
+    }
+
     /// Generates the inner `case safe_dispatch ... end` block for `handle_call`.
     /// Shared between 3-tuple (with `PropCtx`) and 2-tuple (backward compat) patterns.
     ///
@@ -1753,6 +1807,9 @@ impl CoreErlangGenerator {
             // Stash State for re-entrant self-sends
             Self::pdict_stash_preamble(),
             line(),
+            // BT-4090: expose the caller's `From` to `self deferReply`
+            "let _CallFromInstalled = call 'beamtalk_actor':'install_call_from'(From) in",
+            line(),
             // Use safe_dispatch for error isolation
             docvec![
                 "let _DispatchResult = call ",
@@ -1761,6 +1818,11 @@ impl CoreErlangGenerator {
             ],
             // Restore pdict
             Self::pdict_restore_epilogue(),
+            line(),
+            // BT-4090: remove the `From` cell; `true` when the method deferred
+            // its reply. Only the success arm acts on it — error arms reply
+            // the error, so a raise after deferring never hangs the caller.
+            "let _CallDeferred = call 'beamtalk_actor':'uninstall_call_from'() in",
             line(),
             "case _DispatchResult of",
             nest(
@@ -1789,33 +1851,12 @@ impl CoreErlangGenerator {
                             // branch on the outer {ok,_}/{error,_} tag
                             // encode_reply_for_tagged/3 itself always adds —
                             // never on the payload's own shape.
+                            //
+                            // BT-4090: a deferred reply (`self deferReply`) is
+                            // answered `{noreply, _}` *before* encoding — the
+                            // method's ignored return value must not be encoded.
                             line(),
-                            "case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "<{'error', EncErr}> when 'true' ->",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "{'reply', {'error', EncErr}, CleanNewState}",
-                                        ]
-                                    ),
-                                    line(),
-                                    "<{'ok', EncodedResult}> when 'true' ->",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "{'reply', {'ok', EncodedResult}, CleanNewState}",
-                                        ]
-                                    ),
-                                ]
-                            ),
-                            line(),
-                            "end",
+                            Self::success_reply_case(),
                         ]
                     ),
                     // Error case: reclassify a stale-block badfun/undef, then

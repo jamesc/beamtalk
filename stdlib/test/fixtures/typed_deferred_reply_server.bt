@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4090 fixture: the API-sketch shape in a `typed` class, with a declared
+// non-Nil return type and no @expect — the checker skips the return-type
+// check of a method that sends `self deferReply`.
+
+typed Server subclass: TypedDeferredReplyServer
+  state: waiting :: Dictionary(Integer, ReplyTo) = #{}
+
+  readData: streamId :: Integer -> Binary =>
+    self.waiting := self.waiting at: streamId put: self deferReply
+    nil
+
+  onDataFrame: streamId :: Integer data: data :: Binary -> Symbol =>
+    (self.waiting at: streamId) reply: data
+    self.waiting := self.waiting removeKey: streamId
+    #ok
+
+  waitingCount -> Integer => self.waiting size

@@ -202,6 +202,9 @@ handle_getValue([], State) ->
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+%% BT-4090: the `ReplyTo` handle (runtime-minted, `'$beamtalk_class'`-tagged).
+-type reply_to() :: #{'$beamtalk_class' := 'ReplyTo', from := term()}.
+
 %% Default `gen_server:stop/3` timeout for `stop` / `stopWith:` (ms).
 -define(STOP_TIMEOUT, 5000).
 
@@ -215,6 +218,14 @@ handle_getValue([], State) ->
 %% `{Selector, Args}`, consumed by apply_pending_actions/1 once the current
 %% gen_server callback returns — it becomes OTP's `{continue, _}` action.
 -define(PENDING_CONTINUE_KEY, '$bt_pending_continue').
+
+%% BT-4090: process-dictionary key holding the `From` of the sync call being
+%% dispatched (installed around dispatch by handle_call, see
+%% install_call_from/1). `self deferReply` (takeDeferredCall/1) rewrites it to
+%% `{deferred, From}`; uninstall_call_from/0 reports that to the success arm,
+%% which then answers `{noreply, State}` instead of replying. One put/erase
+%% per sync call, nothing otherwise.
+-define(CALL_FROM_KEY, '$bt_call_from').
 
 %% BT-3968: the `handle_continue/2` term carrying the continuation queue.
 -define(BT_CONTINUE_TAG, '$bt_continue').
@@ -309,6 +320,8 @@ handle_getValue([], State) ->
 %% discard_pending_continuations/0 (from the replying dispatch-error arms)
 %% drops the continuations a failed dispatch requested.
 -export([
+    install_call_from/1,
+    uninstall_call_from/0,
     clear_pending_actions/0,
     apply_pending_actions/1,
     seed_pending_continuations/1,
@@ -403,6 +416,9 @@ handle_getValue([], State) ->
     doSpawnWith/2,
     doSpawnWith/3,
     registerAs/2,
+    takeDeferredCall/1,
+    replyToDeferred/2,
+    replyErrorToDeferred/2,
     unregister/1,
     registeredName/1,
     isRegistered/1,
@@ -1980,6 +1996,7 @@ both the stashed actor state and the call stack.
 -spec restore_dispatch_pdict(term()) -> ok.
 restore_dispatch_pdict(OldState) ->
     ok = beamtalk_actor_state:uninstall(OldState),
+    _ = erase(?CALL_FROM_KEY),
     erase('$bt_call_stack'),
     ok.
 
@@ -2348,7 +2365,32 @@ some unwrapped path earlier.
 clear_pending_actions() ->
     _ = erase(?PENDING_STOP_KEY),
     _ = erase(?PENDING_CONTINUE_KEY),
+    _ = erase(?CALL_FROM_KEY),
     ok.
+
+-doc """
+BT-4090: record the `From` of the sync call about to be dispatched, so
+`self deferReply` (takeDeferredCall/1) can take it. Paired with
+uninstall_call_from/0 around dispatch in every `handle_call` path.
+""".
+-spec install_call_from(term()) -> ok.
+install_call_from(From) ->
+    put(?CALL_FROM_KEY, From),
+    ok.
+
+-doc """
+BT-4090: remove the call-`From` cell after dispatch. Returns `true` when the
+dispatched method deferred its reply (`self deferReply`), in which case the
+`handle_call` success arm must answer `{noreply, State}` without encoding
+the (ignored) return value. Error arms ignore the result, so a method that
+raises after deferring replies the error to its caller instead of hanging it.
+""".
+-spec uninstall_call_from() -> boolean().
+uninstall_call_from() ->
+    case erase(?CALL_FROM_KEY) of
+        {deferred, _From} -> true;
+        _ -> false
+    end.
 
 -doc """
 BT-3967 / BT-3968: apply the deferred pending actions to a gen_server
@@ -2543,18 +2585,24 @@ a rejected cast has no caller to tell).
 """.
 -spec mailbox_continuation_check(atom(), term()) -> ok | {error, #beamtalk_error{}}.
 mailbox_continuation_check(Selector, Args) ->
-    case continuation_target(Selector, Args) of
+    case restricted_target(Selector, Args) of
         none -> ok;
+        deferReply -> rejected_mailbox_defer();
         Target -> rejected_mailbox_continuation(Target)
     end.
 
-%% The continuation selector a message requests, unwrapping nested `perform:`
-%% forms (`perform: #perform:withArguments: withArguments: #(#continueWith:, ...)`),
-%% or `none`.
--spec continuation_target(term(), term()) -> atom() | none.
-continuation_target(Selector, _Args) when ?IS_CONTINUATION_SELECTOR(Selector) ->
+%% The restricted selector a message requests — a continuation selector or
+%% BT-4090's `deferReply` — unwrapping nested `perform:` forms
+%% (`perform: #perform:withArguments: withArguments: #(#continueWith:, ...)`),
+%% or `none`. Both are in-process-only sends (`self continueWith:`,
+%% `self deferReply`), so one arriving through the mailbox came from another
+%% process.
+-spec restricted_target(term(), term()) -> atom() | none.
+restricted_target(Selector, _Args) when ?IS_CONTINUATION_SELECTOR(Selector) ->
     Selector;
-continuation_target(Selector, [Target | Rest]) when
+restricted_target(deferReply, _Args) ->
+    deferReply;
+restricted_target(Selector, [Target | Rest]) when
     Selector =:= 'perform:';
     Selector =:= 'perform:withArguments:';
     Selector =:= 'perform:withArguments:timeout:'
@@ -2564,8 +2612,8 @@ continuation_target(Selector, [Target | Rest]) when
             [ArgList | _] when is_list(ArgList) -> ArgList;
             _ -> []
         end,
-    continuation_target(Target, InnerArgs);
-continuation_target(_Selector, _Args) ->
+    restricted_target(Target, InnerArgs);
+restricted_target(_Selector, _Args) ->
     none.
 
 -spec rejected_mailbox_continuation(atom()) -> {error, #beamtalk_error{}}.
@@ -2575,6 +2623,29 @@ rejected_mailbox_continuation(Selector) ->
         selector => Selector, domain => [beamtalk, runtime]
     }),
     {error, Error}.
+
+-spec rejected_mailbox_defer() -> {error, #beamtalk_error{}}.
+rejected_mailbox_defer() ->
+    ?LOG_WARNING("Rejected deferReply request from another process", #{
+        selector => deferReply, domain => [beamtalk, runtime]
+    }),
+    {error, invalid_defer_error(external)}.
+
+-spec invalid_defer_error(external | no_call) -> #beamtalk_error{}.
+invalid_defer_error(Why) ->
+    Message =
+        case Why of
+            external ->
+                <<"deferReply can only be sent to self, from inside the actor's own methods">>;
+            no_call ->
+                <<"deferReply is only valid inside a sync method (a call in flight)">>
+        end,
+    beamtalk_error:with_hint(
+        beamtalk_error:with_message(
+            beamtalk_error:new(invalid_defer, 'Actor', deferReply), Message
+        ),
+        <<"Use `self deferReply` inside a method that was sent synchronously">>
+    ).
 
 -spec invalid_continuation_error(term(), atom()) -> #beamtalk_error{}.
 invalid_continuation_error(Pid, RequestSelector) ->
@@ -3217,14 +3288,17 @@ Dispatches to method and returns result immediately.
 -spec handle_call(term(), term(), map()) ->
     {reply, term(), map()}
     | {reply, term(), map(), {continue, term()}}
-    | {stop, term(), term(), map()}.
+    | {noreply, map()}
+    | {noreply, map(), {continue, term()}}
+    | {stop, term(), term(), map()}
+    | {stop, term(), map()}.
 handle_call(Msg, From, State) ->
     %% BT-3967 / BT-3968: honour a `self stopWith:` / `self continueWith:`
     %% requested during the dispatch.
     ok = clear_pending_actions(),
     apply_pending_actions(do_handle_call(Msg, From, State)).
 
--spec do_handle_call(term(), term(), map()) -> {reply, term(), map()}.
+-spec do_handle_call(term(), term(), map()) -> {reply, term(), map()} | {noreply, map()}.
 %% Wire-tagged remote sends (ADR 0126 §5.1) — decode_wire_call/1 recognises
 %% every `'$beamtalk_wire'` call shape (the one place that logic lives,
 %% shared with generated compiled-actor handle_call/3 — see its own doc and
@@ -3264,7 +3338,7 @@ do_handle_call(Msg, _From, State) ->
     {reply, {error, Error}, State}.
 
 %% Sync dispatch for do_handle_call/3's `{Selector, Args}` clause.
--spec dispatch_call(atom(), list(), term(), map()) -> {reply, term(), map()}.
+-spec dispatch_call(atom(), list(), term(), map()) -> {reply, term(), map()} | {noreply, map()}.
 dispatch_call(Selector, Args, From, State) ->
     Self = make_self(State),
     ?LOG_DEBUG("Actor dispatch (sync)", #{
@@ -3278,17 +3352,19 @@ dispatch_call(Selector, Args, From, State) ->
     %% Stash State in pdict so re-entrant self-sends (Layer 1)
     %% can dispatch directly without going through gen_server:call.
     OldState = beamtalk_actor_state:install(State),
+    %% BT-4090: expose `From` to `self deferReply`.
+    ok = install_call_from(From),
     try
         case beamtalk_actor_state:adapt(dispatch(Selector, Args, Self, State)) of
             {reply, Result} ->
                 NewState = beamtalk_actor_state:take(),
                 log_dispatch_complete(State, NewState, Selector, sync, T0),
-                {reply, encode_reply_for(From, Selector, Result), NewState};
+                call_reply(From, Selector, Result, NewState);
             noreply ->
                 %% Method didn't return a value, return nil
                 NewState = beamtalk_actor_state:take(),
                 log_dispatch_complete(State, NewState, Selector, sync, T0),
-                {reply, encode_reply_for(From, Selector, nil), NewState};
+                call_reply(From, Selector, nil, NewState);
             {error, Reason} ->
                 NewState = beamtalk_actor_state:take(),
                 %% Method failed, return error tuple.
@@ -3299,6 +3375,16 @@ dispatch_call(Selector, Args, From, State) ->
         end
     after
         restore_dispatch_pdict(OldState)
+    end.
+
+%% BT-4090: a deferred call (`self deferReply`) is answered `{noreply, _}`
+%% *before* encoding — the ignored return value must not be encoded (an
+%% unencodable filler would otherwise replace the parked caller's reply).
+-spec call_reply(term(), atom(), term(), map()) -> {reply, term(), map()} | {noreply, map()}.
+call_reply(From, Selector, Result, NewState) ->
+    case uninstall_call_from() of
+        true -> {noreply, NewState};
+        false -> {reply, encode_reply_for(From, Selector, Result), NewState}
     end.
 
 -doc """
@@ -4890,6 +4976,63 @@ do_spawn_with_selector(Scope, Self, InitArgs, Name, Selector) ->
         {error, #beamtalk_error{} = Err} ->
             {error, beamtalk_error:with_selector(Err, Selector)}
     end.
+
+-doc """
+FFI shim for `Actor>>deferReply -> ReplyTo` (BT-4090).
+
+Takes the reply token of the sync call being dispatched: marks it deferred, so
+the `handle_call` success arm answers `{noreply, State}` without replying, and
+returns a `ReplyTo` handle (a runtime-minted tagged map, like `Inspector`)
+carrying the opaque `From`. The caller stays blocked until `replyToDeferred/2`
+or `replyErrorToDeferred/2` answers it via `gen_server:reply/2`.
+
+Raises `invalid_defer` when no sync call is in flight (a cast, `handleInfo:`
+or continuation step, or outside any dispatch) — nothing would consume it.
+""".
+-spec takeDeferredCall(term()) -> reply_to().
+takeDeferredCall(_Self) ->
+    case get(?CALL_FROM_KEY) of
+        undefined ->
+            beamtalk_exception_handler:reraise(invalid_defer_error(no_call));
+        {deferred, From} ->
+            reply_to_handle(From);
+        From ->
+            put(?CALL_FROM_KEY, {deferred, From}),
+            reply_to_handle(From)
+    end.
+
+-spec reply_to_handle(term()) -> reply_to().
+reply_to_handle(From) ->
+    #{'$beamtalk_class' => 'ReplyTo', from => From}.
+
+-doc """
+FFI shim for `ReplyTo>>reply:` (BT-4090): answer a parked caller with
+`Value`. Mirrors the `handle_call` success arm exactly — wire-encoded for a
+remote caller, an encode failure replies `{error, EncErr}` — and answers
+`gen_server:reply(From, {ok, Encoded})`. Replying to a caller that already
+timed out or died, or a second reply to the same caller, is a silent no-op
+(OTP drops it). Answers `ok`.
+""".
+-spec replyToDeferred(reply_to(), term()) -> ok.
+replyToDeferred(#{'$beamtalk_class' := 'ReplyTo', from := From}, Value) ->
+    Reply =
+        case encode_reply_for_tagged(From, 'reply:', Value) of
+            {ok, Encoded} -> {ok, Encoded};
+            {error, EncErr} -> {error, EncErr}
+        end,
+    gen_server:reply(From, Reply),
+    ok.
+
+-doc """
+FFI shim for `ReplyTo>>replyError:` (BT-4090): answer a parked caller with an
+error, which the caller sees raised exactly like a failed sync call. Mirrors
+the `handle_call` error arm (`{error, Encoded}`, wire-encoded when remote).
+Same silent no-op rules as `replyToDeferred/2`. Answers `ok`.
+""".
+-spec replyErrorToDeferred(reply_to(), term()) -> ok.
+replyErrorToDeferred(#{'$beamtalk_class' := 'ReplyTo', from := From}, Error) ->
+    gen_server:reply(From, {error, encode_reply_for(From, 'replyError:', Error)}),
+    ok.
 
 -doc """
 FFI shim for `registerAs: name :: Symbol -> Result(Self, Error)`.

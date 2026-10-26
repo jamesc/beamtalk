@@ -1,0 +1,262 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4090: Actor>>deferReply / ReplyTo — a sync method parks its caller and
+// answers it later (OTP `{noreply, State}` + `gen_server:reply/2`).
+//
+// Fixtures: stdlib/test/fixtures/deferred_reply_server.bt
+//           stdlib/test/fixtures/typed_deferred_reply_server.bt
+
+TestCase subclass: ServerDeferredReplyTest
+
+  // === Parking and answering ===
+  testParkedCallersAnsweredOutOfOrderFromHandleInfo =>
+    results := Ets new: #deferredOutOfOrder type: #set
+    server := DeferredReplyServer spawn
+    #(#a, #b, #c) do: [:key | [results at: key put: (server wait: key)] fork]
+    100 timesRepeat: [server waitingCount < 3 ifTrue: [Timer sleep: 10]]
+    self assert: server waitingCount equals: 3
+    // Answer c first: a and b stay parked.
+    server pid send: {#release, #c, 3}
+    100 timesRepeat: [(results at: #c) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #c) equals: 3
+    self assert: (results at: #a) equals: nil
+    self assert: (results at: #b) equals: nil
+    server pid send: {#release, #a, 1}
+    server pid send: {#release, #b, 2}
+    100 timesRepeat: [(results at: #b) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #a) equals: 1
+    self assert: (results at: #b) equals: 2
+    self assert: server waitingCount equals: 0
+    results delete
+    server stop
+
+  testParkedCallerAnsweredFromAnotherSyncMethod =>
+    results := Ets new: #deferredFromSync type: #set
+    server := DeferredReplyServer spawn
+    [results at: #r put: (server wait: #k)] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    self assert: (server release: #k with: #answer) equals: #ok
+    100 timesRepeat: [(results at: #r) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #r) equals: #answer
+    results delete
+    server stop
+
+  testServerStaysResponsiveWhileCallerIsParked =>
+    results := Ets new: #deferredResponsive type: #set
+    server := DeferredReplyServer spawn
+    [results at: #r put: (server wait: #k)] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    self assert: server waitingCount equals: 1
+    self assert: (results at: #r) equals: nil
+    server release: #k with: 1
+    results delete
+    server stop
+
+  testDeferViaHelperParksTheOuterCaller =>
+    results := Ets new: #deferredViaHelper type: #set
+    server := DeferredReplyServer spawn
+    [results at: #r put: (server waitViaHelper: #k)] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    server release: #k with: #viaHelper
+    100 timesRepeat: [(results at: #r) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #r) equals: #viaHelper
+    results delete
+    server stop
+
+  testActorsOwnPerformOfDeferReplyParksTheCaller =>
+    results := Ets new: #deferredViaPerform type: #set
+    server := DeferredReplyServer spawn
+    [results at: #r put: (server performDefer: #k)] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    server release: #k with: #performed
+    100 timesRepeat: [(results at: #r) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #r) equals: #performed
+    results delete
+    server stop
+
+  testUnencodableFillerReturnValueDoesNotHangCaller =>
+    results := Ets new: #deferredFiller type: #set
+    server := DeferredReplyServer spawn
+    [results at: #r put: (server waitReturningBlock: #k)] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    self assert: server waitingCount equals: 1
+    server release: #k with: #real
+    100 timesRepeat: [(results at: #r) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #r) equals: #real
+    results delete
+    server stop
+
+  // === replyError: ===
+  testReplyErrorRaisesInTheParkedCaller =>
+    results := Ets new: #deferredReplyError type: #set
+    server := DeferredReplyServer spawn
+    [
+      results at: #r put: ([server wait: #k] on: Error do: [:e | e message])
+    ] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    server releaseError: #k
+    100 timesRepeat: [(results at: #r) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #r) equals: "denied"
+    results delete
+    server stop
+
+  testRaiseAfterDeferringRepliesTheErrorInsteadOfHanging =>
+    server := DeferredReplyServer spawn
+    self should: [server waitThenFail: #k] raise: #user_error
+    self assert: server isAlive
+    // The failed method's state change rolls back with it, so nothing is
+    // left parked (and the stale token is unreachable): the caller got the
+    // error and the server carries on.
+    self assert: server waitingCount equals: 0
+    self assert: server isAlive
+    server stop
+
+  // === Silent no-ops ===
+  testReplyAfterCallerTimedOutIsSilent =>
+    server := DeferredReplyServer spawn
+    self
+      should: [
+        server
+          perform: #wait:
+          withArguments: #(#k)
+          timeout: 100
+      ]
+      raise: #timeout
+    self assert: server waitingCount equals: 1
+    self assert: (server release: #k with: #tooLate) equals: #ok
+    self assert: server isAlive
+    self assert: server waitingCount equals: 0
+    server stop
+
+  testReplyToDeadCallerIsSilent =>
+    server := DeferredReplyServer spawn
+    pid := [server wait: #k] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    pid kill
+    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    self deny: pid isAlive
+    self assert: (server release: #k with: #nobodyHome) equals: #ok
+    self assert: server isAlive
+    server stop
+
+  testDoubleReplyFirstWins =>
+    results := Ets new: #deferredDoubleReply type: #set
+    server := DeferredReplyServer spawn
+    [results at: #r put: (server wait: #k)] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    self
+      assert: (server
+        releaseTwice: #k
+        first: 1
+        second: 2)
+      equals: #ok
+    100 timesRepeat: [(results at: #r) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #r) equals: 1
+    self assert: server isAlive
+    results delete
+    server stop
+
+  // === Stop interaction ===
+  testStopWithParkedCallerRaisesActorDead =>
+    results := Ets new: #deferredStop type: #set
+    server := DeferredReplyServer spawn
+    [results at: #r put: ([server wait: #k] on: Error do: [:e | e kind])] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    server stop
+    100 timesRepeat: [(results at: #r) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #r) equals: #actor_dead
+    results delete
+
+  testStopWithDeferInTheSameMethodRaisesActorDead =>
+    server := DeferredReplyServer spawn
+    self should: [server stopAfterDeferring: #k] raise: #actor_dead
+    self deny: server isAlive
+
+  testTerminateMayReplyToRescueParkedCallers =>
+    results := Ets new: #deferredRescue type: #set
+    server := DeferredReplyServer spawn
+    server enableRescue
+    [results at: #r put: ([server wait: #k] on: Error do: [:e | e kind])] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    server stop
+    100 timesRepeat: [(results at: #r) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #r) equals: #rescued
+    results delete
+
+  // === defer + continueWith: ===
+  testDeferAndContinueWithComposeReplyFromTheStep =>
+    server := DeferredReplyServer spawn
+    self assert: (server waitThenContinue: #k) equals: #fromContinuation
+    self assert: server waitingCount equals: 0
+    server stop
+
+  // === invalid_defer ===
+  testDeferReplyFromAnotherProcessRaises =>
+    server := DeferredReplyServer spawn
+    self should: [server deferReply] raise: #invalid_defer
+    self should: [server perform: #deferReply] raise: #invalid_defer
+    self should: [
+      server perform: #deferReply withArguments: #()
+    ] raise: #invalid_defer
+    self
+      should: [
+        server
+          perform: #deferReply
+          withArguments: #()
+          timeout: 1000
+      ]
+      raise: #invalid_defer
+    self should: [
+      server perform: #perform:withArguments: withArguments: #(#deferReply, #())
+    ] raise: #invalid_defer
+    self assert: server waitingCount equals: 0
+    self assert: server isAlive
+    server stop
+
+  testDeferReplyCastFromAnotherProcessIsDropped =>
+    server := DeferredReplyServer spawn
+    server deferReply!
+    self assert: server waitingCount equals: 0
+    self assert: server isAlive
+    server stop
+
+  testDeferReplyFromCastRaisesInvalidDefer =>
+    table := Ets new: #deferredProbeCast type: #set
+    server := DeferredReplyServer spawnWith: #{#tableName => #deferredProbeCast}
+    server probeCast!
+    100 timesRepeat: [(table at: #cast) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #cast) equals: #invalid_defer
+    table delete
+    server stop
+
+  testDeferReplyFromHandleInfoRaisesInvalidDefer =>
+    table := Ets new: #deferredProbeInfo type: #set
+    server := DeferredReplyServer spawnWith: #{#tableName => #deferredProbeInfo}
+    server pid send: {#probe}
+    100 timesRepeat: [(table at: #handleInfo) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #handleInfo) equals: #invalid_defer
+    table delete
+    server stop
+
+  testDeferReplyFromContinuationRaisesInvalidDefer =>
+    table := Ets new: #deferredProbeCont type: #set
+    server := DeferredReplyServer spawnWith: #{#tableName => #deferredProbeCont}
+    server probeContinuation!
+    100 timesRepeat: [(table at: #continuation) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #continuation) equals: #invalid_defer
+    table delete
+    server stop
+
+  // === typed class: the API-sketch shape compiles without @expect ===
+  testTypedServerWithNonNilReturnTypeParksAndAnswers =>
+    results := Ets new: #deferredTyped type: #set
+    server := TypedDeferredReplyServer spawn
+    [results at: #r put: (server readData: 7)] fork
+    100 timesRepeat: [server waitingCount < 1 ifTrue: [Timer sleep: 10]]
+    data := Binary fromBytes: #(104, 105)
+    self assert: (server onDataFrame: 7 data: data) equals: #ok
+    100 timesRepeat: [(results at: #r) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (results at: #r) equals: data
+    results delete
+    server stop

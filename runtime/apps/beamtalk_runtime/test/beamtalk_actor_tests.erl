@@ -4905,3 +4905,92 @@ bt3968_mailbox_continuation_check_test() ->
             'perform:withArguments:', ['perform:withArguments:', [increment, []]]
         )
     ).
+
+%%% ====================================================================
+%%% BT-4090: deferred reply (`self deferReply` / `ReplyTo`)
+%%% ====================================================================
+
+bt4090_clean() ->
+    _ = erase('$bt_call_from'),
+    ok.
+
+bt4090_take_deferred_call_without_call_raises_invalid_defer_test() ->
+    bt4090_clean(),
+    try
+        beamtalk_actor:takeDeferredCall(self_placeholder),
+        ?assert(false)
+    catch
+        _:Ex ->
+            ?assertMatch(#{error := #beamtalk_error{kind = invalid_defer}}, Ex)
+    end.
+
+bt4090_take_deferred_call_marks_the_call_deferred_test() ->
+    bt4090_clean(),
+    From = {self(), make_ref()},
+    ok = beamtalk_actor:install_call_from(From),
+    try
+        ?assertMatch(
+            #{'$beamtalk_class' := 'ReplyTo', from := From},
+            beamtalk_actor:takeDeferredCall(self_placeholder)
+        ),
+        %% A second take in the same call answers the same token.
+        ?assertMatch(#{from := From}, beamtalk_actor:takeDeferredCall(self_placeholder)),
+        ?assert(beamtalk_actor:uninstall_call_from()),
+        %% The cell is gone: nothing left to defer, nothing left deferred.
+        ?assertNot(beamtalk_actor:uninstall_call_from())
+    after
+        bt4090_clean()
+    end.
+
+bt4090_uninstall_call_from_without_defer_is_false_test() ->
+    bt4090_clean(),
+    ok = beamtalk_actor:install_call_from({self(), make_ref()}),
+    ?assertNot(beamtalk_actor:uninstall_call_from()).
+
+bt4090_clear_pending_actions_clears_call_cell_test() ->
+    bt4090_clean(),
+    ok = beamtalk_actor:install_call_from({self(), make_ref()}),
+    _ = beamtalk_actor:takeDeferredCall(self_placeholder),
+    ok = beamtalk_actor:clear_pending_actions(),
+    ?assertNot(beamtalk_actor:uninstall_call_from()).
+
+bt4090_reply_to_deferred_answers_tagged_test() ->
+    Tag = make_ref(),
+    Handle = #{'$beamtalk_class' => 'ReplyTo', from => {self(), Tag}},
+    ok = beamtalk_actor:replyToDeferred(Handle, 42),
+    ok = beamtalk_actor:replyErrorToDeferred(Handle, boom),
+    receive
+        {Tag, {ok, 42}} -> ok
+    after 1000 -> ?assert(false)
+    end,
+    receive
+        {Tag, {error, boom}} -> ok
+    after 1000 -> ?assert(false)
+    end.
+
+bt4090_reply_to_dead_caller_is_silent_test() ->
+    Dead = spawn(fun() -> ok end),
+    Ref = monitor(process, Dead),
+    receive
+        {'DOWN', Ref, _, _, _} -> ok
+    end,
+    Handle = #{'$beamtalk_class' => 'ReplyTo', from => {Dead, make_ref()}},
+    ?assertEqual(ok, beamtalk_actor:replyToDeferred(Handle, 1)),
+    ?assertEqual(ok, beamtalk_actor:replyErrorToDeferred(Handle, boom)).
+
+bt4090_mailbox_check_rejects_defer_reply_test() ->
+    ?assertMatch(
+        {error, #beamtalk_error{kind = invalid_defer}},
+        beamtalk_actor:mailbox_continuation_check(deferReply, [])
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = invalid_defer}},
+        beamtalk_actor:mailbox_continuation_check('perform:', [deferReply])
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = invalid_defer}},
+        beamtalk_actor:mailbox_continuation_check(
+            'perform:withArguments:', ['perform:withArguments:', [deferReply, []]]
+        )
+    ),
+    ?assertEqual(ok, beamtalk_actor:mailbox_continuation_check(wait, [])).

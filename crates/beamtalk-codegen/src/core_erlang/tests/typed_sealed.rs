@@ -601,6 +601,7 @@ const KNOWN_TAGGED_SEALED_BUILTINS: &[&str] = &[
     "Protocol",
     "Random",
     "Regex",
+    "ReplyTo",
     "Result",
     "Session",
     "Set",

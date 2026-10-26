@@ -1603,6 +1603,27 @@ impl TypeChecker {
         }
     }
 
+    /// BT-4090: whether `expr` contains a `self deferReply` send (descending
+    /// into blocks and arguments).
+    fn contains_defer_reply_send(expr: &Expression) -> bool {
+        let mut found = false;
+        crate::ast_walker::walk_expression(expr, &mut |e| {
+            if let Expression::MessageSend {
+                receiver,
+                selector: crate::ast::MessageSelector::Unary(name),
+                ..
+            } = e
+            {
+                if name == "deferReply"
+                    && matches!(&**receiver, Expression::Identifier(id) if id.name == "self")
+                {
+                    found = true;
+                }
+            }
+        });
+        found
+    }
+
     /// Check that a method body's inferred return type matches its declared return type.
     #[allow(clippy::too_many_lines)] // includes the type_args comparison arm
     pub(super) fn check_return_type(
@@ -1617,6 +1638,19 @@ impl TypeChecker {
             .body
             .iter()
             .any(|s| matches!(s.expression, Expression::Primitive { .. }))
+        {
+            return;
+        }
+
+        // BT-4090: a method that defers its reply (`self deferReply`) returns
+        // a filler that is never delivered — the caller is answered later by
+        // `ReplyTo>>reply:` — so its declared return type describes that later
+        // reply, not the body. Skip syntactically; a conditional deferral also
+        // skips the check for the non-deferred path (documented caveat).
+        if method
+            .body
+            .iter()
+            .any(|s| Self::contains_defer_reply_send(&s.expression))
         {
             return;
         }
