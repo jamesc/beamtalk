@@ -1,7 +1,63 @@
 # ADR 0139: BEAM Abstraction Boundaries — What Leaks and What Doesn't
 
 ## Status
-Accepted (2026-10-26)
+Accepted (2026-10-26). Amended 2026-10-26 (post-acceptance lead review): raw-mode flag renamed, frame semantics and printString rule decided, tuple scope clamped, `error_info` mechanism specified, crash-report hook and 0028 verdict scoped into Phase 1 — see "Amendment (2026-10-26)" below.
+
+## Amendment (2026-10-26): post-acceptance review fixes
+
+A lead review pass after acceptance found eight gaps: an under-specified
+frame shape, a raw-mode flag that collides with btscript, two unresolved ADR
+tensions (0028, 0094), a missing hybrid alternative, an overbroad tuple rule,
+and two Phase 1 scope holes (crash reports, the 0028 verdict). This amendment
+is additive and clarifying except for the flag rename, which replaces the
+original name everywhere below. No original verdict is withdrawn.
+
+### Decision
+
+1. **The raw-mode flag is `--raw-mfa`, not `--verbose`.** btscript already
+   owns `--verbose`, so every `--verbose` in this ADR reads `--raw-mfa`:
+   the one flag that renders raw MFA on any user-facing surface, alongside
+   machine MFA in the JSON formatter and explicit tooling APIs.
+2. **Frames reconstruct, Elixir-style.** Inlined `dispatch/4` erases the
+   send frame; the translator does not preserve synthetic send frames.
+   Traces show callee frames only, with each MFA translated to
+   `Class>>selector (file.bt:line)` — the Elixir shape this ADR adopts as
+   its closest reference. No per-call-site codegen cost; inlining stays
+   free to optimize.
+3. **The `error_info` mechanism is specified.** EEP-54 carries no
+   module→source map, so the translator resolves display names from
+   line-annotated codegen maps plus the ADR 0119 module registry. ADR 0119
+   is a named dependency of Phase 1, not background reading.
+4. **`printString` renders display names.** The ADR 0094
+   (printString=Debug) tension resolves against an exemption: `printString`
+   is the largest user-facing surface (inspectors, logs, test failures),
+   and raw MFA there would leak the whole policy through one hole. Raw MFA
+   stays one flag (`--raw-mfa`) away.
+5. **The tuple rule covers public surfaces.** "Handwritten `.bt` never sees
+   a 2-tuple" means public API surfaces: stdlib signatures, FFI returns,
+   user-visible values. Codegen-internal ok/error traffic is unaffected.
+6. **Rejected alternative: lightly-translated MFA in default output.**
+   Elixir shows `Foo.bar/1` — an MFA that reads cleanly — so a hybrid
+   could show our MFAs with only cosmetic translation. Rejected: our
+   compiled names (`bt@package:'class_sel'/2`) are unreadable
+   un-translated, so the hybrid keeps BEAM names in the default surface
+   while still paying the two-mode maintenance cost. Full translation plus
+   `--raw-mfa` dominates it.
+7. **The crash-report logger hook is Phase 1 scope.** SASL-style crash
+   reports render through the translator (display names by default, raw
+   under `--raw-mfa`); Phase 1 owns the logger hook that does it.
+8. **The ADR 0028 verdict is Phase 1 acceptance.** Whether the interop
+   strategy needs amending is decided by the Phase 1 epic, which records
+   the verdict back here; this ADR does not pre-decide it.
+
+### Consequences
+
+- The two-mode maintenance cost is unchanged in kind; the rename only
+  removes the btscript collision.
+- The Phase 1 epic must name all of: the translator, line-annotated
+  codegen, 0119-registry resolution, the crash-report logger hook, the
+  0028 verdict, and its suites (per the Implementation section's test
+  rule).
 
 ## Context
 
@@ -54,8 +110,8 @@ verdicts:
 | Area | Verdict | Rule |
 |------|---------|------|
 | Display names | **HIDE** | Every user-facing surface (errors, stacktraces, `describe`, FFI diagnostics, test failures) renders `Class>>selector`, never `bt@package:'class_sel'/2`. Raw MFA available via `--verbose`/tooling flag only. One shared translator, no ad-hoc prefix stripping. |
-| Errors + stacktraces | **HIDE mechanics** | Frames render as `Class>>selector (file.bt:line)`; Erlang reasons translate to `#beamtalk_error{}` with Smalltalk-readable messages. Line-annotated codegen + `error_info`-style rendering. |
-| Tuples / Result | **CONVERT at boundary** | Codegen owns the conversion both directions; handwritten `.bt` never sees a 2-tuple. Extends ADR 0076's direction to a rule. |
+| Errors + stacktraces | **HIDE mechanics** | Frames render as `Class>>selector (file.bt:line)`; Erlang reasons translate to `#beamtalk_error{}` with Smalltalk-readable messages. Line-annotated codegen + `error_info`-style rendering. *(Amended: callee frames only, reconstructed Elixir-style — no synthetic send frames; names resolve via codegen maps + the ADR 0119 registry. `printString` renders display names. See Amendment.)* |
+| Tuples / Result | **CONVERT at boundary** | Codegen owns the conversion both directions; handwritten `.bt` never sees a 2-tuple. Extends ADR 0076's direction to a rule. *(Amended: public API surfaces only; codegen-internal traffic unaffected. See Amendment.)* |
 | Binaries | **BYTES for Binary, GRAPHEMES for String — decided in BT-4170** | Epic BT-4170 (Remove Binary UTF-8 sniffing, in progress) owns this row: class = construction type, no sniffed dispatch — `Binary>>size` bytes, `String>>size` graphemes, `Binary>>at:` 1-based bytes, `Binary>>do:` yields Integers, `byteSize` deleted, native text boundaries construct String, `asString` returns a real Result. This ADR adds no new verdict here; it cites the split as the policy's worked example (representation is essence, like lifecycle — decided explicitly, not leaked accidentally). |
 | FFI membrane | **TYPED + Beamtalk-shaped** | FFI calls get typed specs; failures name the selector and expectation (`telemetry execute: expected 3 args`), never arities and module atoms. `native/` is a first-class package member, not a trapdoor. |
 | Process lifecycle | **KEEP, with OOB defaults** | Supervision, links, restarts, `terminate:` stay visible with Beamtalk spelling — plus one template supervised app and defaults (restart intensity, shutdown timeouts) so the common case needs no OTP knowledge. |
@@ -186,6 +242,9 @@ Phased, each phase its own epic (no code in this ADR):
    translator; `Class>>selector (file.bt:line)` frames via line-annotated
    codegen; Erlang-reason → `#beamtalk_error{}` translation;
    `--verbose` raw mode. Consumes BT-4094/4106-class issues.
+   *(Amended: also owns the crash-report logger hook, 0119-registry
+   resolution, and the ADR 0028 verdict; `--verbose` reads `--raw-mfa`.
+   See Amendment.)*
 2. **FFI membrane**: typed FFI specs with named errors; `native/` as
    first-class package member; `declare native:` parity (BT-4144).
 3. **Tuples + binaries**: codegen-owned boundary conversion; the
