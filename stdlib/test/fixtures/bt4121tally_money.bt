@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4121 fixture: a money amount that reports every addition back to its
+// tally actor. The `+`/`plusFromNumber:` slow path sends to the actor
+// (aliased), so when it runs inside a loop that holds no whole `State` it
+// exercises the cell bracket for guarded operators.
+
+Value subclass: Bt4121TallyMoney
+  field: cents = 0
+  field: tally = nil
+
+  /// The amount in cents.
+  cents -> Integer => self.cents
+
+  /// Add two money amounts, reporting the sum to the tally actor.
+  + other :: Bt4121TallyMoney -> Bt4121TallyMoney =>
+    sum := self.cents + other cents.
+    self.tally noteAdd: sum.
+    ((Bt4121TallyMoney new) withCents: sum) withTally: self.tally
+
+  /// `0 + aMoney` (number-on-the-left): report and wrap, like `+`.
+  plusFromNumber: n :: Number -> Bt4121TallyMoney =>
+    sum := n + self.cents.
+    self.tally noteAdd: sum.
+    ((Bt4121TallyMoney new) withCents: sum) withTally: self.tally

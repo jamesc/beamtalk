@@ -1,0 +1,104 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4121 fixture: an actor whose loops add `Bt4121TallyMoney` amounts over
+// untyped locals. Each slow path reports back through `noteAdd:`, so the
+// count answers how many slow-path writes the loop loaded back. Every loop
+// below holds no whole `State` (tuple-accumulator fold or direct-params
+// letrec): the guarded operator must still see the live cell.
+
+Actor subclass: Bt4121TallyActor
+  state: count = 0
+  state: total = 0
+
+  count => self.count
+  total => self.total
+
+  noteAdd: sum =>
+    self.count := self.count + 1.
+    self.total := sum.
+    self.count
+
+  items =>
+    t := self.
+    #((((Bt4121TallyMoney new) withCents: 100) withTally: t), (((Bt4121TallyMoney new) withCents: 200) withTally: t), (((Bt4121TallyMoney new) withCents: 300) withTally: t))
+
+  // `do:` over untyped locals: `acc + m` dispatches to `Bt4121TallyMoney>>+`.
+  sum: items =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    items do: [:m | acc := acc + m].
+    acc cents
+
+  // A field write before the loop must be visible to the slow path.
+  sumSeeded: items =>
+    self.count := 100.
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    items do: [:m | acc := acc + m].
+    self.count
+
+  // `0 + m` reaches `plusFromNumber:` through the coercion branch.
+  sumFromNumber: items =>
+    acc := 0.
+    items do: [:m | acc := acc + m].
+    self.count
+
+  // Non-carried block: the `do:` itself must bracket the closure call.
+  pokeAll: items =>
+    items do: [:m | m + m].
+    self.count
+
+  // `whileTrue:` direct-params loop over untyped locals.
+  repeatAdd: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    i := n.
+    [i > 0] whileTrue: [acc := acc + m. i := i - 1].
+    acc cents
+
+  // Counted `to:do:` loop over untyped locals.
+  repeatAddTo: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    1 to: n do: [:i | acc := acc + m].
+    acc cents
+
+  // `timesRepeat:` loop over untyped locals.
+  repeatAddTimes: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    n timesRepeat: [acc := acc + m].
+    acc cents
+
+  // `collect:` with a carried local answers every running sum.
+  collectSums: items =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    items collect: [:m | acc := acc + m]
+
+  // `inject:into:` already brackets its closure call; pins that behaviour.
+  injectSums: items =>
+    items inject: (((Bt4121TallyMoney new) withCents: 0) withTally: self) into: [:acc :m | acc + m]
+
+  // Non-carried `timesRepeat:` lowers to a runtime call: the send itself
+  // must bracket the closure holding the guarded operator.
+  pokeTimes: g count: n =>
+    n timesRepeat: [g + g].
+    self.count
+
+  // An evaluated literal block holding only a guarded operator: the
+  // `value:` send must bracket the closure call.
+  applyValue: x =>
+    [:m | m + m] value: x.
+    self.count
+
+  // A field read inside the loop must see the slow paths' writes, not the
+  // loop-entry `State`.
+  readCountWhileAdding: items =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    k := 0.
+    items do: [:m | k := self.count. acc := acc + m].
+    k
+
+  // Same, for a `whileTrue:` direct-params loop.
+  repeatAddCounting: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    k := 0.
+    i := n.
+    [i > 0] whileTrue: [k := self.count. acc := acc + m. i := i - 1].
+    k

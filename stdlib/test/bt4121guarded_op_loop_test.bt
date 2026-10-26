@@ -1,0 +1,80 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4121 (ADR 0137): a guarded operator's slow path in a loop that holds
+// no whole `State` must see the live cell and have its writes loaded back.
+// Each cell below adds tally-reporting money over untyped locals and then
+// answers the actor's count. Fixtures: fixtures/bt4121tally_money.bt and
+// fixtures/bt4121tally_actor.bt.
+
+TestCase subclass: Bt4121GuardedOpLoopTest
+
+  testDoLoopLoadsSlowPathWrites =>
+    a := Bt4121TallyActor spawn
+    self assert: (a sum: a items) equals: 600
+    self assert: a count equals: 3
+
+  testDoLoopSeesPreLoopWrite =>
+    a := Bt4121TallyActor spawn
+    self assert: (a sumSeeded: a items) equals: 103
+
+  testDoLoopFromNumberCoercion =>
+    a := Bt4121TallyActor spawn
+    self assert: (a sumFromNumber: a items) equals: 3
+    self assert: a total equals: 600
+
+  testNonCarriedDoBracketsClosureCall =>
+    a := Bt4121TallyActor spawn
+    a pokeAll: a items
+    self assert: a count equals: 3
+
+  testWhileLoopLoadsSlowPathWrites =>
+    a := Bt4121TallyActor spawn
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
+    self assert: (a repeatAdd: m times: 3) equals: 300
+    self assert: a count equals: 3
+
+  testToDoLoopLoadsSlowPathWrites =>
+    a := Bt4121TallyActor spawn
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
+    self assert: (a repeatAddTo: m times: 3) equals: 300
+    self assert: a count equals: 3
+
+  testTimesRepeatLoadsSlowPathWrites =>
+    a := Bt4121TallyActor spawn
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
+    self assert: (a repeatAddTimes: m times: 3) equals: 300
+    self assert: a count equals: 3
+
+  testCollectLoadsSlowPathWrites =>
+    a := Bt4121TallyActor spawn
+    self assert: (a collectSums: a items) size equals: 3
+    self assert: a count equals: 3
+
+  testInjectStaysBracketed =>
+    a := Bt4121TallyActor spawn
+    self assert: (a injectSums: a items) cents equals: 600
+    self assert: a count equals: 3
+
+  testNonCarriedTimesRepeatBracketsClosureCall =>
+    a := Bt4121TallyActor spawn
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
+    a pokeTimes: m count: 3
+    self assert: a count equals: 3
+
+  testEvaluatedBlockBracketsClosureCall =>
+    a := Bt4121TallyActor spawn
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
+    a applyValue: m
+    self assert: a count equals: 1
+
+  testDoLoopFieldReadSeesSlowPathWrites =>
+    a := Bt4121TallyActor spawn
+    self assert: (a readCountWhileAdding: a items) equals: 2
+    self assert: a count equals: 3
+
+  testWhileLoopFieldReadSeesSlowPathWrites =>
+    a := Bt4121TallyActor spawn
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
+    self assert: (a repeatAddCounting: m times: 3) equals: 2
+    self assert: a count equals: 3
