@@ -91,9 +91,10 @@ reading it as plain text; quote excerpts in code blocks.
    - Labels (look them up with `list_issue_labels`): `Bug`, one `item-area` label for the failing area
      (for example `codegen`, `parser`, `runtime`, `stdlib`, `cli`, `repl`), a size label, and
      `agent-state`: `agent-ready` when the cause and fix are clear, `needs-spec` when the cause is unclear.
-   - Priority 1 (Urgent) when the `lint`, `test-rust` or `test-corpus` job (build, fmt, clippy, tests) or the build is red, because that
-     blocks every merge. A red `platform-check` or `platform-desktop` job from a scheduled `CI (all platforms)` run is 2 (High): it is
-     opt-in and not a required check, so it does not block merges. Otherwise 2 (High).
+   - Priority 1 (Urgent) when the `lint`, `test-rust` or `test-corpus` job (build, fmt, clippy, tests) or the Linux build is red, because
+     that blocks every merge. A red `platform-check` or `platform-desktop` job from a scheduled `CI (all platforms)` run is 2 (High),
+     even when what failed inside it is the macOS/Windows build: it is opt-in and not a required check, so it does not block merges.
+     Otherwise 2 (High).
    - Body: Context (workflow, job, run link, commit, date); What failed (failing tests/steps and the
      exact error excerpt in a code block); Culprit (the PR, or the commit range and why undetermined);
      Likely cause and suggested fix (files and functions, in words); Acceptance criteria (the job is green
