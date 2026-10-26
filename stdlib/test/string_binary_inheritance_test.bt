@@ -43,24 +43,23 @@ TestCase subclass: StringBinaryInheritanceTest
     self assert: ("hello" byteAt: 1) equals: 101
     self assert: ("hello" byteAt: 4) equals: 111
 
-  testByteSizeReturnsBytes =>
-    // byteSize returns byte count (same as size for ASCII)
-    self assert: "hello" byteSize equals: 5
-
-  testByteSizeVsSize =>
-    // "café" — é is 2 bytes (C3 A9) but 1 grapheme
-    self assert: "café" byteSize equals: 5
+  testSizeCountsGraphemesNotBytes =>
+    // BT-4173: byteSize is deleted. "café" — é is 2 bytes (C3 A9)
+    // but 1 grapheme; size counts graphemes on a String.
     self assert: "café" size equals: 4
+    self assert: "hello" size equals: 5
 
   testPartReturnsBinary =>
     // part:size: returns a Binary slice (not String)
     result := "hello" part: 0 size: 3
-    self assert: result equals: "hel"
+    self assert: result class equals: Binary
+    self assert: result equals: (Binary fromIolist: #("hel"))
 
   testConcatReturnsBinary =>
     // concat: returns Binary (not String)
     result := "hello" concat: "world"
-    self assert: result equals: "helloworld"
+    self assert: result class equals: Binary
+    self assert: result equals: (Binary fromIolist: #("helloworld"))
 
   testToBytes =>
     // toBytes returns list of byte integers
@@ -69,8 +68,8 @@ TestCase subclass: StringBinaryInheritanceTest
   testAsStringOnString =>
     // asString on a String is a no-op, returns the string itself
     self assert: "hello" asString equals: "hello"
-    // Pin the class too: Binary>>asString's String arm depends on
-    // String>>asString answering a bare String (BT-4169)
+    // Pin the class too: Binary>>asString rejects Strings outright, so
+    // String>>asString answering a bare String is the only path (BT-4173)
     self assert: ("hello" asString) class equals: String
 
   testAsStringUncheckedOnString =>

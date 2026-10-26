@@ -4,11 +4,11 @@
 // Stdlib tests for Binary class — instance methods, Collection protocol,
 // byte access, slicing, conversion, and serialization (BT-1594, ADR 0086 Phase 3a)
 //
-// Note: On BEAM, all binaries dispatch as String at runtime. Binary-only
-// methods (byteSize, byteAt:, part:size:, concat:, toBytes, asString,
-// asStringUnchecked) work correctly. String-overridden methods (size, at:,
-// do:, printString) and inherited Collection methods use grapheme-level
-// semantics via String's dispatch.
+// BT-4173: binaries dispatch as Binary (byte-level). Only tagged Strings
+// dispatch as String. `size`/`at:`/`do:` and the inherited Collection
+// protocol (`collect:`/`select:`/`reject:`/`detect:`/`anySatisfy:`,
+// `allSatisfy:`/`includes:`) are byte-level here; `byteSize` is deleted
+// (use `size`); `asString` answers `Result ok:`/`error:` uniformly.
 
 TestCase subclass: BinaryTest
   field: bin = nil
@@ -45,7 +45,7 @@ TestCase subclass: BinaryTest
 
   testSerializeProducesBinary =>
     bin := Binary serialize: 42
-    self assert: bin byteSize > 0
+    self assert: bin size > 0
 
   // testDeserializeTypeError: removed — type checker now prevents Binary deserialize: 42
   // at compile time (BT-1828 tightened :: Object → :: Binary)
@@ -58,28 +58,28 @@ TestCase subclass: BinaryTest
   // ═══════════════════════════════════════════════════════════════════
   testFromIolist =>
     result := Binary fromIolist: #("hello", " ", "world")
-    self assert: result equals: "hello world"
+    self assert: result class equals: Binary
+    self assert: result equals: (Binary fromIolist: #("hello world"))
 
   testFromIolistEmpty =>
     result := Binary fromIolist: #()
-    self assert: result equals: ""
+    self assert: result equals: (Binary fromBytes: #())
 
   testFromBytes =>
     bin := Binary fromBytes: #(104, 101, 108, 108, 111)
-    self assert: bin equals: "hello"
+    self assert: bin equals: (Binary fromIolist: #("hello"))
 
   testFromBytesEmpty =>
     bin := Binary fromBytes: #()
-    self assert: bin equals: ""
+    self assert: bin size equals: 0
 
   testFromBytesSingleByte =>
     bin := Binary fromBytes: #(65)
-    self assert: bin equals: "A"
+    self assert: bin equals: (Binary fromIolist: #("A"))
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: size, isEmpty, isNotEmpty
-  // At runtime, size dispatches to String (grapheme count).
-  // For ASCII data, grapheme count == byte count.
+  // size is byte-level on Binary, grapheme-level on String.
   // ═══════════════════════════════════════════════════════════════════
   testSize =>
     bin := Binary fromBytes: #(65, 66, 67, 68, 69)
@@ -91,7 +91,7 @@ TestCase subclass: BinaryTest
 
   testSizeOfSerializedValue =>
     bin := Binary serialize: 42
-    self assert: bin byteSize > 0
+    self assert: bin size > 0
 
   testIsEmpty => self assert: (Binary fromBytes: #()) isEmpty
 
@@ -103,14 +103,12 @@ TestCase subclass: BinaryTest
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: do:
-  // At runtime, dispatches to String's do: (grapheme iteration).
-  // Elements are single-character strings, not byte integers.
+  // Byte-level on Binary: elements are byte Integers.
   // ═══════════════════════════════════════════════════════════════════
-  testDoIteratesGraphemes =>
-    // At runtime, do: goes through String's grapheme iteration
+  testDoIteratesBytes =>
     collected := List new
-    self.bin do: [:ch | collected := collected add: ch]
-    self assert: collected equals: #("A", "B", "C")
+    self.bin do: [:b | collected := collected add: b]
+    self assert: collected equals: #(65, 66, 67)
 
   testDoOnEmptyBinary =>
     bin := Binary fromBytes: #()
@@ -126,111 +124,113 @@ TestCase subclass: BinaryTest
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: includes:
-  // Uses String's grapheme iteration; compares grapheme strings.
+  // Byte-level on Binary: compares byte Integers.
   // ═══════════════════════════════════════════════════════════════════
-  testIncludesGrapheme =>
-    // At runtime, includes: compares graphemes (single-char strings)
-    self assert: (self.bin includes: "B")
+  testIncludesByte =>
+    self assert: (self.bin includes: 66)
 
-  testIncludesGraphemeNotFound => self deny: (self.bin includes: "Z")
+  testIncludesByteNotFound => self deny: (self.bin includes: 90)
 
   testIncludesOnEmpty =>
     bin := Binary fromBytes: #()
-    self deny: (bin includes: "A")
+    self deny: (bin includes: 65)
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: collect:
-  // Uses String's grapheme iteration; returns String via species.
+  // Byte-level on Binary; answers a Binary via species.
   // ═══════════════════════════════════════════════════════════════════
-  testCollectTransformsGraphemes =>
-    // collect: iterates graphemes and returns String (via species)
-    result := self.bin collect: [:ch | ch]
-    self assert: result equals: "ABC"
+  testCollectTransformsBytes =>
+    // Identity over bytes reassembles the same Binary
+    result := self.bin collect: [:b | b]
+    self assert: result class equals: Binary
+    self assert: result equals: self.bin
+
+  testCollectMapsBytes =>
+    result := self.bin collect: [:b | b + 1]
+    self assert: result equals: (Binary fromBytes: #(66, 67, 68))
 
   testCollectOnEmpty =>
     bin := Binary fromBytes: #()
-    result := bin collect: [:ch | ch]
-    self assert: result equals: ""
+    result := bin collect: [:b | b]
+    self assert: result equals: (Binary fromBytes: #())
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: select:, reject:
-  // Uses String's grapheme iteration; returns String via species.
+  // Byte-level on Binary; answer a Binary via species.
   // ═══════════════════════════════════════════════════════════════════
-  testSelectFiltersGraphemes =>
+  testSelectFiltersBytes =>
     bin := Binary fromBytes: #(65, 66, 67, 68, 69)
-    // Selects graphemes matching condition
-    result := bin select: [:ch | ch /= "C"]
-    self assert: result equals: "ABDE"
+    result := bin select: [:b | b /= 67]
+    self assert: result equals: (Binary fromBytes: #(65, 66, 68, 69))
 
   testSelectNoneMatch =>
-    result := self.bin select: [:ch | ch =:= "Z"]
-    self assert: result equals: ""
+    result := self.bin select: [:b | b =:= 90]
+    self assert: result equals: (Binary fromBytes: #())
 
-  testRejectFiltersGraphemes =>
+  testRejectFiltersBytes =>
     bin := Binary fromBytes: #(65, 66, 67, 68, 69)
-    result := bin reject: [:ch | ch =:= "C"]
-    self assert: result equals: "ABDE"
+    result := bin reject: [:b | b =:= 67]
+    self assert: result equals: (Binary fromBytes: #(65, 66, 68, 69))
 
   testRejectNoneMatch =>
-    result := self.bin reject: [:ch | ch =:= "Z"]
-    self assert: result equals: "ABC"
+    result := self.bin reject: [:b | b =:= 90]
+    self assert: result equals: self.bin
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: inject:into:
-  // Uses String's grapheme iteration; accumulates grapheme strings.
+  // Byte-level on Binary: elements are byte Integers.
   // ═══════════════════════════════════════════════════════════════════
-  testInjectIntoConcatsGraphemes =>
-    result := self.bin inject: "" into: [:acc :ch | acc ++ ch]
-    self assert: result equals: "ABC"
+  testInjectIntoSumsBytes =>
+    result := self.bin inject: 0 into: [:acc :b | acc + b]
+    self assert: result equals: 198
 
   testInjectIntoOnEmpty =>
     bin := Binary fromBytes: #()
-    result := bin inject: "start" into: [:acc :ch | acc ++ ch]
-    self assert: result equals: "start"
+    result := bin inject: 42 into: [:acc :b | acc + b]
+    self assert: result equals: 42
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: detect:
-  // Uses String's grapheme iteration.
+  // Byte-level on Binary: elements are byte Integers.
   // ═══════════════════════════════════════════════════════════════════
   testDetectFindsFirstMatch =>
     bin := Binary fromBytes: #(65, 66, 67, 68, 69)
-    result := bin detect: [:ch | ch =:= "C"]
-    self assert: result equals: "C"
+    result := bin detect: [:b | b =:= 67]
+    self assert: result equals: 67
 
   // BT-3028: a no-match raises `not_found` rather than answering nil — the
   // inherited `Collection>>detect:` answers `E`, on every receiver.
   testDetectRaisesNotFoundWhenNoMatch =>
-    self should: [self.bin detect: [:ch | ch =:= "Z"]] raise: #not_found
+    self should: [self.bin detect: [:b | b =:= 90]] raise: #not_found
 
   testDetectIfNoneAnswersDefaultWhenNoMatch =>
-    self assert: (self.bin detect: [:ch |
-      ch =:= "Z"
+    self assert: (self.bin detect: [:b |
+      b =:= 90
     ] ifNone: ["none"]) equals: "none"
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: anySatisfy:, allSatisfy:
-  // Uses String's grapheme iteration.
+  // Byte-level on Binary: elements are byte Integers.
   // ═══════════════════════════════════════════════════════════════════
-  testAnySatisfyTrue => self assert: (self.bin anySatisfy: [:ch | ch =:= "B"])
+  testAnySatisfyTrue => self assert: (self.bin anySatisfy: [:b | b =:= 66])
 
-  testAnySatisfyFalse => self deny: (self.bin anySatisfy: [:ch | ch =:= "Z"])
+  testAnySatisfyFalse => self deny: (self.bin anySatisfy: [:b | b =:= 90])
 
-  testAllSatisfyTrue => self assert: (self.bin allSatisfy: [:ch | ch size == 1])
+  testAllSatisfyTrue => self assert: (self.bin allSatisfy: [:b | b > 0])
 
-  testAllSatisfyFalse => self deny: (self.bin allSatisfy: [:ch | ch =:= "A"])
+  testAllSatisfyFalse => self deny: (self.bin allSatisfy: [:b | b =:= 65])
 
   // ═══════════════════════════════════════════════════════════════════
   // Byte access: at: (1-based)
-  // At runtime, dispatches to String's at: (grapheme access).
+  // 1-based, byte-level on Binary.
   // ═══════════════════════════════════════════════════════════════════
-  testAtReturnsGrapheme =>
+  testAtReturnsByte =>
     bin := Binary fromBytes: #(104, 101, 108)
-    // String's at: returns grapheme string
-    self assert: (bin at: 1) equals: "h"
+    self assert: (bin at: 1) equals: 104
 
-  testAtLastGrapheme =>
+  testAtLastByte =>
     bin := Binary fromBytes: #(104, 101, 108)
-    self assert: (bin at: 3) equals: "l"
+    self assert: (bin at: 3) equals: 108
 
   testAtOutOfBoundsHigh =>
     self should: [self.binBytes at: 4] raise: #index_out_of_bounds
@@ -240,10 +240,7 @@ TestCase subclass: BinaryTest
 
   // BT-3021: indexing an empty collection is `empty_collection`, not
   // `index_out_of_bounds` — the latter is reserved for an index that misses a
-  // populated receiver. Note an empty Binary and an empty String are the same
-  // term (`<<>>`), which classifies as String, so this actually dispatches to
-  // String's `at:`; `beamtalk_binary:at/2` raises the same kind so the result
-  // does not depend on that.
+  // populated receiver.
   testAtOnEmptyBinary =>
     bin := Binary fromBytes: #()
     self should: [bin at: 1] raise: #empty_collection
@@ -278,17 +275,18 @@ TestCase subclass: BinaryTest
     self should: [bin byteAt: 0] raise: #index_out_of_bounds
 
   // ═══════════════════════════════════════════════════════════════════
-  // byteSize — Binary-only, not overridden by String
+  // size — byte count on Binary (BT-4173: byteSize deleted), grapheme
+  // count on String
   // ═══════════════════════════════════════════════════════════════════
-  testByteSize => self assert: self.binBytes byteSize equals: 3
+  testSizeCountsBytesOnBinary => self assert: self.binBytes size equals: 3
 
-  testByteSizeEmpty =>
+  testSizeEmptyBinary =>
     bin := Binary fromBytes: #()
-    self assert: bin byteSize equals: 0
+    self assert: bin size equals: 0
 
-  testByteSizeOfString => self assert: "hello" byteSize equals: 5
+  testSizeCountsGraphemesOnString => self assert: "hello" size equals: 5
 
-  testByteSizeOfEmptyString => self assert: "" byteSize equals: 0
+  testSizeOfEmptyString => self assert: "" size equals: 0
 
   // ═══════════════════════════════════════════════════════════════════
   // part:size: — zero-copy slicing (Binary-only, not overridden)
@@ -332,10 +330,11 @@ TestCase subclass: BinaryTest
     self assert: result equals: (Binary fromBytes: #(1, 2, 3, 4))
 
   testConcatBinaryAndString =>
-    // Strings are Binaries, so concat: works
+    // A String concatenates as its UTF-8 bytes; the result is a Binary
     bin := Binary fromBytes: #(104, 105)
     result := bin concat: "!"
-    self assert: result equals: "hi!"
+    self assert: result class equals: Binary
+    self assert: result equals: (Binary fromIolist: #("hi!"))
 
   testConcatWithEmptyBinary =>
     empty := Binary fromBytes: #()
@@ -365,55 +364,44 @@ TestCase subclass: BinaryTest
     self assert: "hello" toBytes equals: #(104, 101, 108, 108, 111)
 
   // ═══════════════════════════════════════════════════════════════════
-  // asString — UTF-8 validation (BT-4169)
-  // Success dispatches to String's asString (answers the String itself);
-  // failure answers `Result error:` with the byte offset. These are the
-  // issue's REPL probes, kept as regression tests:
-  //   (Binary fromBytes: #(104, 101, 108, 108, 111)) asString  // => "hello"
-  //   (Binary fromBytes: #(255, 254)) asString                 // => Result error: (offset 0)
+  // asString — UTF-8 validation (BT-4169, BT-4173)
+  // Answers `Result` uniformly: `ok:` the String on success, `error:`
+  // with the byte offset on invalid UTF-8.
   // ═══════════════════════════════════════════════════════════════════
-  testAsStringOnBinaryReturnsString =>
-    // At runtime, asString dispatches to String's override → returns self
+  testAsStringOnBinaryReturnsOkResult =>
     bin := Binary fromBytes: #(104, 101, 108, 108, 111)
     result := bin asString
-    self assert: result equals: "hello"
-    self assert: result class equals: String
+    self assert: result class equals: Result
+    self assert: result isOk
+    self assert: result value equals: "hello"
+    self assert: (result value class) equals: String
 
   testAsStringEmptyBinary =>
     bin := Binary fromBytes: #()
     result := bin asString
-    self assert: result equals: ""
-    self assert: result class equals: String
+    self assert: result isOk
+    self assert: result value equals: ""
 
   testAsStringInvalidUtf8IsErrorResult =>
-    // Statically String | Result, but invalid bytes guarantee a Result
-    // at runtime — @expect type suppresses the union-member hints below
     result := (Binary fromBytes: #(255, 254)) asString
     self assert: result class equals: Result
-    @expect type
     self assert: result isError
-    @expect type
     self deny: result isOk
 
   testAsStringInvalidUtf8ReportsOffset =>
     result := (Binary fromBytes: #(104, 101, 108, 108, 111, 255)) asString
-    @expect type
     self assert: result isError
-    @expect type
     self assert: (result error kind) equals: #parse_error
     // Pin the exact message: the offset is only reachable from Beamtalk
     // via message parsing until Exception exposes details (BT-4169 review)
-    @expect type
     self assert: (result error message) equals: "Invalid UTF-8 at byte offset 5"
 
   testAsStringInvalidUtf8UnwrapRaises =>
     result := (Binary fromBytes: #(255, 254)) asString
-    @expect type
     self should: [result unwrap] raise: #parse_error
 
   testAsStringInvalidUtf8ValueOr =>
     result := (Binary fromBytes: #(255, 254)) asString
-    @expect type
     self assert: (result valueOr: "fallback") equals: "fallback"
 
   testPrintStringInvalidUtf8 =>
@@ -442,13 +430,13 @@ TestCase subclass: BinaryTest
     result := Binary deserializeWithUsed: bin
     self assert: result size equals: 2
     self assert: (result at: 1) equals: 42
-    self assert: (result at: 2) equals: bin byteSize
+    self assert: (result at: 2) equals: bin size
 
   testDeserializeWithUsedString =>
     bin := Binary serialize: "hello"
     result := Binary deserializeWithUsed: bin
     self assert: (result at: 1) equals: "hello"
-    self assert: (result at: 2) equals: bin byteSize
+    self assert: (result at: 2) equals: bin size
 
   // testDeserializeWithUsedTypeError: removed — type checker now prevents
   // Binary deserializeWithUsed: 42 at compile time (BT-1828)
