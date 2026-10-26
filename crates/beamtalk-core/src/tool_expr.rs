@@ -235,7 +235,7 @@ mod tests {
         // precheckCompile: #selector source: body`.
         assert_eq!(
             precheck_method_expr("Counter", "getCount", "getCount => \"nope\""),
-            "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\"",
+            "Counter precheckCompile: #getCount source: \"getCount => \"\"nope\"\"\"",
         );
     }
 
@@ -266,7 +266,7 @@ mod tests {
         let got = save_class_expr(source, "src/greeter.bt");
         assert_eq!(
             got,
-            "Workspace newClass: \"Object subclass: Greeter\n  greet => \\\"hi \\{name}\\\"\" at: \"src/greeter.bt\"",
+            "Workspace newClass: \"Object subclass: Greeter\n  greet => \"\"hi \\{name}\"\"\" at: \"src/greeter.bt\"",
         );
     }
 
@@ -327,7 +327,7 @@ mod tests {
     fn flush_expr_file_filter_escapes_path() {
         assert_eq!(
             flush_expr(FlushFilter::File("src/\"weird\".bt")),
-            "Workspace flush: #{ #file => \"src/\\\"weird\\\".bt\" }",
+            "Workspace flush: #{ #file => \"src/\"\"weird\"\".bt\" }",
         );
     }
 

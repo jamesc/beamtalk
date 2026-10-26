@@ -100,6 +100,11 @@ pub(super) fn char_lit(c: char) -> Document<'static> {
 /// - `\` becomes `\\`, and CR/LF/TAB/NUL become `\r`/`\n`/`\t`/`\0`
 ///   (ADR 0138) — emitted raw, a backslash would re-parse as an escape (or
 ///   an unknown-escape error) and change the value on round-trip.
+///
+/// These spellings are the Rust leg of the ADR 0138 shared escape mapping,
+/// pinned byte-for-byte by `stdlib/test/fixtures/string_escape_corpus.json`
+/// (see `super::tests::escape_corpus_conformance` and the `printString`
+/// `BUnit` suite over the same file).
 #[must_use]
 pub(super) fn string_content(s: impl AsRef<str>) -> Document<'static> {
     let s = s.as_ref();

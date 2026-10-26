@@ -1,0 +1,117 @@
+[
+  {
+    "value": "hello",
+    "display": "\"hello\"",
+    "why": "plain string passes through with only the surrounding quotes added"
+  },
+  {
+    "value": "",
+    "display": "\"\"",
+    "why": "empty string is just the two delimiters"
+  },
+  {
+    "value": "say \"hi\"",
+    "display": "\"say \"\"hi\"\"\"",
+    "why": "embedded quotes use \"\" doubling (kept from the pre-escape convention)"
+  },
+  {
+    "value": "\"quoted\"",
+    "display": "\"\"\"quoted\"\"\"",
+    "why": "doubling also holds at both boundaries of the value"
+  },
+  {
+    "value": "\"",
+    "display": "\"\"\"\"",
+    "why": "a lone quote doubles inside its own delimiters"
+  },
+  {
+    "value": "\"\"",
+    "display": "\"\"\"\"\"\"",
+    "why": "adjacent quotes each double: 2-char value, 6-char spelling"
+  },
+  {
+    "value": "a\\b",
+    "display": "\"a\\\\b\"",
+    "why": "backslash doubles, otherwise it would re-parse as an escape"
+  },
+  {
+    "value": "\\",
+    "display": "\"\\\\\"",
+    "why": "a lone backslash is still just a doubled backslash in quotes"
+  },
+  {
+    "value": "a\rb",
+    "display": "\"a\\rb\"",
+    "why": "CR uses its \\r spelling"
+  },
+  {
+    "value": "a\nb",
+    "display": "\"a\\nb\"",
+    "why": "LF uses its \\n spelling"
+  },
+  {
+    "value": "a\tb",
+    "display": "\"a\\tb\"",
+    "why": "TAB uses its \\t spelling"
+  },
+  {
+    "value": "a\u0000b",
+    "display": "\"a\\0b\"",
+    "why": "NUL uses its \\0 spelling"
+  },
+  {
+    "value": "\r\n",
+    "display": "\"\\r\\n\"",
+    "why": "CRLF pair: each control char keeps its own spelling"
+  },
+  {
+    "value": "a{b",
+    "display": "\"a\\{b\"",
+    "why": "{ must escape or the spelling re-parses as interpolation"
+  },
+  {
+    "value": "a}b",
+    "display": "\"a}b\"",
+    "why": "bare } is safe: only { starts interpolation"
+  },
+  {
+    "value": "{x}",
+    "display": "\"\\{x}\"",
+    "why": "bracketed text escapes only the opener"
+  },
+  {
+    "value": "\\{x}",
+    "display": "\"\\\\\\{x}\"",
+    "why": "backslash escapes before the brace: \\\\ then \\{"
+  },
+  {
+    "value": "a\\\"b",
+    "display": "\"a\\\\\"\"b\"",
+    "why": "backslash and quote combine: \\\\ doubling plus \"\" doubling"
+  },
+  {
+    "value": "\r\n\t\\\"{}",
+    "display": "\"\\r\\n\\t\\\\\"\"\\{}\"",
+    "why": "every escape in one value: controls, backslash, quote, braces"
+  },
+  {
+    "value": "\u00001",
+    "display": "\"\\01\"",
+    "why": "\\0 is exactly NUL: a following digit stays literal (no octal)"
+  },
+  {
+    "value": "\\n",
+    "display": "\"\\\\n\"",
+    "why": "backslash-n as two chars keeps the n literal via \\\\"
+  },
+  {
+    "value": "{name}",
+    "display": "\"\\{name}\"",
+    "why": "interpolation-shaped text stays inert through the escaped opener"
+  },
+  {
+    "value": "héllo→",
+    "display": "\"héllo→\"",
+    "why": "non-ASCII content passes through verbatim"
+  }
+]

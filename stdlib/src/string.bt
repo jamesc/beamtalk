@@ -599,13 +599,27 @@ sealed typed Binary subclass: String
   // === Printing ===
 
   /// Return a developer-readable string representation (with surrounding quotes).
-  /// Embedded double-quote characters are doubled (Beamtalk string literal convention).
+  /// The output re-parses to the identical string: backslash doubles first,
+  /// then embedded quotes double (`""`), `{` escapes (or the output would
+  /// re-parse as interpolation), and CR/LF/TAB/NUL use their `\r` `\n` `\t`
+  /// `\0` spellings. Bare `}` is left as-is. This is the Beamtalk leg of the
+  /// ADR 0138 shared escape mapping — the spellings are pinned by
+  /// `test/fixtures/string_escape_corpus.json`, which the Rust unparser
+  /// (`unparse_literal_display`) asserts byte-identically.
   ///
   /// ## Examples
   /// ```beamtalk
   /// "hello" printString         // => """hello"""
   /// ```
-  printString -> String => """" ++ (self replaceAll: """" with: """""") ++ """"
+  printString -> String =>
+    escaped := self replaceAll: "\\" with: "\\\\"
+    escaped := escaped replaceAll: """" with: """"""
+    escaped := escaped replaceAll: "\{" with: "\\\{"
+    escaped := escaped replaceAll: "\r" with: "\\r"
+    escaped := escaped replaceAll: "\n" with: "\\n"
+    escaped := escaped replaceAll: "\t" with: "\\t"
+    escaped := escaped replaceAll: "\0" with: "\\0"
+    """" ++ escaped ++ """"
 
   /// Return the string itself (identity conversion).
   ///

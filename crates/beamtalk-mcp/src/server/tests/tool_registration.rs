@@ -150,7 +150,7 @@ fn save_method_expr_escapes_body_quotes_and_braces() {
     // a String value, not interpolated source.
     assert_eq!(
         save_method_expr("Greeter", "greet", "\"Hello, {name}\""),
-        "Greeter compile: #greet source: \"\\\"Hello, \\{name}\\\"\"",
+        "Greeter compile: #greet source: \"\"\"Hello, \\{name}\"\"\"",
     );
 }
 
