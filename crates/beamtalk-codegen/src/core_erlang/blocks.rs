@@ -588,8 +588,8 @@ impl CoreErlangGenerator {
     /// The `FieldReadFromStateAcc` fun-body read arm (BT-4122): a Tier 2
     /// `fun` reads this field through its `StateAcc`. Merged bodies never
     /// reach here (their pushed actor closure routes reads through the
-    /// cell first), so a hit is a legacy `fun`, which loses field writes
-    /// where its return does not thread back — loud, forcing the merged
+    /// cell first), so a hit is a legacy `fun`, which drops field writes
+    /// in positions that discard its return — loud, forcing the merged
     /// shape.
     pub(super) fn note_tier2_fun_body_field_read(&mut self, name: &str, span: Span) {
         if self.in_tier2_stateful_body && self.synced_calls_scope() {

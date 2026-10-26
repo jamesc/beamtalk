@@ -3172,8 +3172,8 @@ impl CoreErlangGenerator {
     // from a fresh call-time state, so it is correct, and flagging it
     // would fire only on correct code. The `FieldReadFromStateAcc`
     // fun-body arm is the rule's tripwire instead: it forces the
-    // position-robust merged shape (a legacy `fun` loses field writes
-    // where its return does not thread back — operand drops, closure
+    // position-robust merged shape (a legacy `fun` drops field writes
+    // in positions that discard its return — operand drops, closure
     // scratch maps).
 
     /// Generates the `Document` for an
