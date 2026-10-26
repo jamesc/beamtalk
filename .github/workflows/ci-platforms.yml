@@ -1,0 +1,225 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# macOS / Windows / desktop CI, opt-in (BT-4209).
+#
+# ci.yml runs the Linux suite on every PR and push. The other platforms are off
+# there by default: they run here, on a daily schedule, on workflow_dispatch, and
+# on a PR carrying the `ci:all-platforms` label. This is a separate workflow so
+# that labelling a PR never re-triggers (or cancels) ci.yml, and so that none of
+# its job names can shadow a required check from ci.yml (`check-corpus`).
+# nightly.yml additionally runs the full test suite on macOS/Windows and builds
+# the distribution archives.
+
+name: CI (all platforms)
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '**'
+      - '!*.md'
+      - '!docs/**'
+      - 'docs/learning/**'
+      - '!LICENSE'
+      - '!SECURITY.md'
+      - '!.github/skills/**'
+      - '!.devcontainer/**'
+
+# One group per PR. A `labeled` event for any label but `ci:all-platforms`
+# (Linear/GitHub automation adds labels routinely) gets its own group, so it
+# cancels nothing; its jobs skip. None of these jobs are required checks.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}${{ github.event.action == 'labeled' && github.event.label.name != 'ci:all-platforms' && '-label-noop' || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ─── macOS / Windows fast checks ───────────────────────────────────────
+  platform-check:
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:all-platforms') && (github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'))
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS and Windows only: Linux build, lint and tests are ci.yml's
+        # lint / test-rust / test-corpus jobs.
+        # Pin Windows to 2022: erlef/setup-beam@v1 doesn't support win25 (windows-2025) yet
+        os: [macos-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    # 40, not 30: a run with a cold rust-cache (every Cargo.toml profile
+    # change) is ~28 min on Windows (11 min of dependency build alone), and a
+    # job the timeout cancels never reaches the post step that saves the
+    # cache, so it would stay cold on every rerun. Warm runs were 17-24.5 min
+    # on Windows, of which 4.6 min was cargo recompiling the whole workspace at
+    # the start of the test step and 1.5 min recompiling it again for the
+    # doctests; BT-3879 removed both (see the beamtalk-build profile in
+    # Cargo.toml, `test-rust-platform` in the Justfile, and
+    # emit_beamtalk_version in crates/beamtalk-build).
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      # `just test-rust` runs the Rust tests through cargo-nextest (one scheduler
+      # across every test binary, see the Justfile). Prebuilt from nextest's own
+      # CDN, the same source scripts/setup-cloud.sh uses: nextest refuses a source
+      # build without --locked, and this needs no GitHub release API. Pinned.
+      - name: Install cargo-nextest
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux) platform=linux ;;
+            macOS) platform=mac ;;
+            Windows) platform=windows-tar ;;
+          esac
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          # On Windows CARGO_HOME is a native path (C:\Users\...); Git Bash's tar
+          # needs the POSIX spelling.
+          if [ "${{ runner.os }}" = "Windows" ]; then cargo_home="$(cygpath -u "$cargo_home")"; fi
+          bin="$cargo_home/bin"
+          mkdir -p "$bin"
+          curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+            "https://get.nexte.st/0.9.148/${platform}" | tar -xz -C "$bin"
+          cargo nextest --version
+
+      # Node.js only needed on Linux for fmt-check-js (Windows fmt-check skips JS/Erlang checks)
+      - name: Setup Node.js
+        if: runner.os != 'Windows'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
+
+      - name: Cache Erlang/rebar3 artifacts (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      - name: Cache Erlang/rebar3 artifacts (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/AppData/Local/rebar3
+            runtime/_build
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      - name: Use toolchain cargo directly (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          TOOLCHAIN_CARGO="$(rustup which cargo)"
+          TOOLCHAIN_BIN="$(dirname "$TOOLCHAIN_CARGO")"
+          echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
+          "$TOOLCHAIN_CARGO" --version
+
+      - name: Build, lint, and fast tests
+        # build first so clippy and test-rust reuse its artifacts.
+        # Full test-stdlib/test-bunit/test-runtime run only in the Linux-only 'test' job.
+        # The full Rust suite (`test-rust`) runs on Linux only; macOS and Windows run
+        # `test-rust-platform`, which skips the two pure compiler crates whose
+        # platform-independent corpus tests were ~15 of the step's ~21 minutes per OS
+        # (a nextest filterset, so the test build reuses `just build`'s artifacts).
+        # On Windows, fmt-check skips Erlang/JS checks (platform-agnostic, Linux covers them).
+        # lint-workaround-comments (BT-2347 ratchet) is a no-op on Windows and enforces
+        # the same allowlist gate here that `just ci` enforces locally (BT-2841).
+        # lint-binary-literal-encoding (BT-3026) likewise no-ops on Windows; it rejects
+        # non-ASCII in Erlang binary literals lacking /utf8, which the compiler silently
+        # truncates to a control character.
+        # test-grammar (BT-3261) also no-ops on Windows (JS-only, Linux covers it): keeps
+        # the TextMate section-divider grammar and parse_divider_name from silently
+        # drifting apart, via a shared fixture run through the real Oniguruma engine.
+        # lint-removed-facade-names (BT-3646, ADR 0129) also no-ops on Windows; it keeps the
+        # retired injected-singleton names (see scripts/ci/lint-removed-facade-names.sh) out.
+        # lint-nlr-tuple-matches (BT-3758) also no-ops on Windows; it rejects hand-rolled
+        # `{'$bt_nlr', ...}` patterns in runtime sources (use the ?IS_NLR guard instead).
+        # lint-class-var-catchers (BT-3769, ADR 0130 §4) also no-ops on Windows; every
+        # runtime catch that applies a fun must use protect/1 or a bt-catcher-audit marker.
+        # test-lint-stamp (BT-3926) also no-ops on Windows; the pre-push hook's lint
+        # stamps must not depend on the cwd or the GIT_* variables a hook inherits.
+        run: just build clippy fmt-check test-rust-platform lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar test-lint-stamp
+
+      - name: Surface parity drift check (BT-2082)
+        # Verifies REPL ops × CLI × MCP × LSP coverage matches
+        # docs/development/surface-parity.md. Fails fast on inventory drift.
+        run: just check-surface-drift
+
+  # ─── Desktop app (Tauri) crate tests (BT-3061), all three OSes ─────────
+  # desktop/src-tauri is excluded from the root Cargo workspace (root
+  # Cargo.toml's `exclude`, see desktop/README.md) because it needs the
+  # Tauri toolchain — webkit2gtk-4.1/glib/gtk3 dev packages on Linux;
+  # WebView2 (preinstalled) on Windows and WKWebView (part of the OS) on
+  # macOS need no extra packages — that the rest of the workspace doesn't
+  # require, so `just build`/`just test`'s `cargo build --workspace` never
+  # touches it. That left this crate's `#[cfg(test)]` unit tests (e.g.
+  # `commands::tests::locked_recovers_from_a_poisoned_mutex`) running only
+  # via a manual local `cargo test -p beamtalk-desktop` (easy to forget) or
+  # indirectly via desktop/e2e/'s whole-stack Playwright scripts — this job
+  # closes that gap on every platform desktop-release.yml ships for
+  # (BT-3061). Runs `just test-desktop`, which mirrors this same
+  # webkit2gtk-4.1 install list from desktop-release.yml's build job (minus
+  # `patchelf`, needed only for that lane's AppImage bundling, not for
+  # compiling/testing this crate).
+  #
+  # ci.yml's `test-desktop` is the ubuntu-only leg for PRs touching the desktop
+  # paths; both run the composite action .github/actions/test-desktop.
+  platform-desktop:
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:all-platforms') && (github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'))
+    strategy:
+      fail-fast: false
+      matrix:
+        # Same OS set as the old ci.yml job (including the win25 pin), not
+        # desktop-release.yml's full release matrix: that workflow also builds
+        # macos-15-intel as a second *shipping* architecture, but this crate's
+        # Rust source has no architecture-specific logic, so one macOS
+        # unit-test run is sufficient coverage.
+        os: [ubuntu-latest, macos-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/test-desktop

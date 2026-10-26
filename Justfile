@@ -139,11 +139,11 @@ ci-changed:
 
     # The Rust corpus tier (`test-corpus`, ~10 min on 4 cores) runs only when
     # scripts/ci/corpus-gate.sh says the changed paths can affect it; ci.yml's
-    # Linux `check` job calls the same script, so the path list has one home.
+    # `changes` job calls the same script, so the path list has one home.
     if printf '%s\n' "$changed_files" | scripts/ci/corpus-gate.sh; then
       just test-corpus
     else
-      echo "⏭️  compiler crates untouched — skipping the Rust corpus tier (just test-corpus; CI's Linux check job runs the same gate)"
+      echo "⏭️  compiler crates untouched — skipping the Rust corpus tier (just test-corpus; CI's test-corpus job runs the same gate)"
     fi
 
 # Windows: path-based skip logic below is unix-only for now — run the full suite.
@@ -1136,7 +1136,7 @@ test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 # frame family so no test runs over a minute (BT-3888): roughly 10 of the
 # suite's 18 minutes on a 4-core runner. They only prove things
 # about the compiler crates they call in-process, so `ci-changed` and CI's
-# Linux `check` job run them only when those crates change; `just ci` always
+# Linux `test-corpus` job runs them only when those crates change; `just ci` always
 # runs both tiers. The set is one nextest filterset, defined once here.
 test-rust: (_test-rust "")
 
@@ -1145,23 +1145,25 @@ test-rust: (_test-rust "")
 # whole workspace to `just ci-changed`, the one full local run of a PR.
 test-rust-crate CRATE: (_test-rust "-p " + CRATE)
 
+# PARTITION is an optional nextest `--partition` spec (e.g. `count:1/2`) so CI can
+# shard the tier across jobs; empty runs the whole tier.
 # The slow tier (see `test-rust`). Linux-only in CI; no platform subset.
 [unix]
-test-corpus:
+test-corpus PARTITION="":
     #!/usr/bin/env bash
     set -o pipefail
     echo "🧬 Running the Rust corpus tier (state-threading agreement and corpus proofs)..."
     if command -v cargo-nextest >/dev/null 2>&1; then
-        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}' || exit $?
+        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}' {{ if PARTITION == "" { "" } else { "--partition " + PARTITION } }} || exit $?
     else
         echo "⏭️  cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)"
     fi
     echo "✅ Rust corpus tier complete"
 
 [windows]
-test-corpus:
+test-corpus PARTITION="":
     @echo "🧬 Running the Rust corpus tier (state-threading agreement and corpus proofs)..."
-    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)" }
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}' {{ if PARTITION == "" { "" } else { "--partition " + PARTITION } }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)" }
     @echo "✅ Rust corpus tier complete"
 
 # The platform-sensitive subset of the Rust tests: every crate except the pure
