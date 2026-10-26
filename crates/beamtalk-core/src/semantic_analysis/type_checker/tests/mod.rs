@@ -35,6 +35,7 @@ mod bt3463_union_receiver_chained_block_param;
 mod bt3604_known_remote_diagnostics;
 mod bt4023_ffi_result_exception;
 mod bt4032_dynamic_state_default;
+mod bt4039_alias_union_field_default;
 mod bt4040_interval_element_type;
 mod bt4043_metaclass_slot_assignment;
 mod bt4044_perform_explicit_dynamic;

@@ -308,16 +308,24 @@ impl ClassHierarchy {
     /// table the same way [`Self::with_builtins`] bootstraps stdlib classes
     /// from that file's `generated_builtin_classes()`.
     ///
-    /// Unlike [`Self::with_builtins`], this is *not* baked automatically into
-    /// every [`ClassHierarchy`]/[`AliasRegistry`](crate::semantic_analysis::alias_registry::AliasRegistry)
-    /// — `AliasRegistry` has no built-in-alias concept analogous to
-    /// `with_builtins`'s always-on class seeding, so a caller that wants
-    /// stdlib's own cross-file aliases visible (today: only
-    /// `beamtalk build-stdlib`'s own compile loop, via
-    /// `ClassHierarchyContext::pre_loaded_aliases`) must call this and thread
-    /// the result through explicitly. Wiring this into every ordinary
-    /// compile's `AliasRegistry` (so application code can reference a stdlib
-    /// alias without importing it) is deliberately out of scope here.
+    /// Every entry is stamped with the stdlib package identity (see
+    /// [`STDLIB_PACKAGE`](crate::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE)),
+    /// so [`AliasRegistry::add_pre_loaded`](crate::semantic_analysis::alias_registry::AliasRegistry::add_pre_loaded)'s
+    /// seeding-boundary check treats these exactly like live stdlib aliases:
+    /// an `internal` stdlib alias seeded into a downstream compile is
+    /// excluded, the same as a dependency's `internal` alias.
+    ///
+    /// BT-4039: [`analyse_full`](crate::semantic_analysis::analyse_full)
+    /// seeds this snapshot as the last alias-resolution tier of every
+    /// non-stdlib compile, so application code can reference a stdlib alias
+    /// (e.g. `field: t :: Timeout = 5`) without declaring or importing it —
+    /// mirroring how [`Self::with_builtins`] makes stdlib *classes* visible
+    /// everywhere. A same-named local declaration (current module,
+    /// pre-loaded package/dependency alias, or known class/protocol) always
+    /// wins over the snapshot, so seeding only ever resolves names that
+    /// would otherwise stay opaque — it never changes the meaning of a name
+    /// that already resolved. Compiling the stdlib itself never seeds the
+    /// snapshot (live sources win; a snapshot could lag the working tree).
     ///
     /// The underlying re-parse (one `AliasRegistry::from_source_text` call
     /// per stdlib alias) is computed once and cached in a `OnceLock`, exactly
@@ -328,7 +336,17 @@ impl ClassHierarchy {
     pub fn generated_stdlib_aliases() -> Vec<crate::semantic_analysis::alias_registry::AliasInfo> {
         static STDLIB_ALIASES: OnceLock<Vec<crate::semantic_analysis::alias_registry::AliasInfo>> =
             OnceLock::new();
-        STDLIB_ALIASES.get_or_init(builtins::stdlib_aliases).clone()
+        STDLIB_ALIASES
+            .get_or_init(|| {
+                let mut aliases = builtins::stdlib_aliases();
+                for info in &mut aliases {
+                    info.package = Some(EcoString::from(
+                        crate::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE,
+                    ));
+                }
+                aliases
+            })
+            .clone()
     }
 
     /// How complete the knowledge injected into this hierarchy is.
