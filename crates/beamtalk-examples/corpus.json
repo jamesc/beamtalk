@@ -43537,7 +43537,7 @@
         "object",
         "subclassing"
       ],
-      "source": "// BT-1664: Test fixture for performLocally:withArguments:\n// Non-sealed class with a class method that returns the caller's Erlang PID.\n\nObject subclass: LocalCallHelper\n\n  class callerPid => Erlang erlang self\n\n  class echo: value => value\n\n  class add: a to: b => a + b",
+      "source": "// BT-1664: Test fixture for performLocally:withArguments:\n// Non-sealed class with a class method that returns the caller's Erlang PID.\n\nObject subclass: LocalCallHelper\n\n  class callerPid =>\n    @expect class_process_ffi \"deliberately open: the test observes the class process vs the caller\"\n    Erlang erlang self\n\n  class echo: value => value\n\n  class add: a to: b => a + b",
       "explanation": "BT-1664: Test fixture for performLocally:withArguments: Non-sealed class with a class method that returns the caller's Erlang PID."
     },
     {
