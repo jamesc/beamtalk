@@ -474,3 +474,14 @@ TestCase subclass: BinaryTest
 
   testIndexOfEmptyNeedle =>
     self assert: ((Binary fromBytes: #(255, 1)) indexOf: (Binary fromBytes: #())) equals: nil
+
+  testIncludesSubstringStringNeedle =>
+    // A String is a Binary: a String needle searches its bytes (BT-4173).
+    hay := Binary fromBytes: #(255, 97, 98, 0)
+    self assert: (hay includesSubstring: "ab") equals: true
+    self assert: (hay includesSubstring: "ba") equals: false
+
+  testIndexOfStringNeedle =>
+    hay := Binary fromBytes: #(255, 97, 98, 0)
+    self assert: (hay indexOf: "ab") equals: 2
+    self assert: (hay indexOf: "ba") equals: nil

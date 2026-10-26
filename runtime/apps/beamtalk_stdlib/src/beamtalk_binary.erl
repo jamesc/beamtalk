@@ -449,16 +449,24 @@ Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding
     raise_type_error('asBase64Url:', <<"Receiver must be a Binary">>).
 
 -doc "True if Needle occurs as a byte sequence in Bin. Empty needle is found.".
--spec includes_substring(binary(), binary()) -> boolean().
+-spec includes_substring(binary_or_string(), binary_or_string()) -> boolean().
+includes_substring({beamtalk_string, Raw}, Needle) when is_binary(Raw) ->
+    includes_substring(Raw, Needle);
+includes_substring(Bin, {beamtalk_string, Raw}) when is_binary(Bin), is_binary(Raw) ->
+    includes_substring(Bin, Raw);
 includes_substring(Bin, Needle) when is_binary(Bin), is_binary(Needle) ->
     Needle =:= <<>> orelse binary:match(Bin, Needle) =/= nomatch;
 includes_substring(Bin, _Needle) when not is_binary(Bin) ->
-    raise_type_error(includes_substring, <<"Receiver must be a Binary">>);
+    raise_type_error('includesSubstring:', <<"Receiver must be a Binary">>);
 includes_substring(_Bin, _Needle) ->
-    raise_type_error(includes_substring, <<"Argument must be a Binary">>).
+    raise_type_error('includesSubstring:', <<"Argument must be a Binary">>).
 
 -doc "1-based byte index of the first occurrence of Needle, or nil. Empty needle yields nil.".
--spec index_of(binary(), binary()) -> pos_integer() | nil.
+-spec index_of(binary_or_string(), binary_or_string()) -> pos_integer() | nil.
+index_of({beamtalk_string, Raw}, Needle) when is_binary(Raw) ->
+    index_of(Raw, Needle);
+index_of(Bin, {beamtalk_string, Raw}) when is_binary(Bin), is_binary(Raw) ->
+    index_of(Bin, Raw);
 index_of(Bin, Needle) when is_binary(Bin), is_binary(Needle) ->
     case Needle of
         <<>> ->
@@ -470,9 +478,9 @@ index_of(Bin, Needle) when is_binary(Bin), is_binary(Needle) ->
             end
     end;
 index_of(Bin, _Needle) when not is_binary(Bin) ->
-    raise_type_error(index_of, <<"Receiver must be a Binary">>);
+    raise_type_error('indexOf:', <<"Receiver must be a Binary">>);
 index_of(_Bin, _Needle) ->
-    raise_type_error(index_of, <<"Argument must be a Binary">>).
+    raise_type_error('indexOf:', <<"Argument must be a Binary">>).
 
 -doc "Encode as a lowercase hexadecimal string.".
 -spec 'asHex:'(binary_or_string()) -> beamtalk_string:t().
