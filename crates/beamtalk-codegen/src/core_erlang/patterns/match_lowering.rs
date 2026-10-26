@@ -246,58 +246,58 @@ impl CoreErlangGenerator {
             if has_array_arm || has_type_arm || has_segmented_binary_arm || has_binary_arm {
                 self.generate_match_chain(&match_var, arms, threading)?
             } else {
-            // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
-            let mut parts: Vec<Document<'static>> = Vec::new();
-            parts.push(docvec!["case ", leaf::var(match_var.clone()), " of "]);
-            for (i, arm) in arms.iter().enumerate() {
-                if i > 0 {
-                    parts.push(Document::Str(" "));
+                // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
+                let mut parts: Vec<Document<'static>> = Vec::new();
+                parts.push(docvec!["case ", leaf::var(match_var.clone()), " of "]);
+                for (i, arm) in arms.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::Str(" "));
+                    }
+                    let pattern_doc = self.generate_pattern(&arm.pattern)?;
+                    parts.push(Document::Str("<"));
+                    parts.push(pattern_doc);
+                    parts.push(Document::Str(">"));
+                    self.push_scope();
+                    Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+                        self.bind_var(name, core_var);
+                    });
+                    if let Some(guard) = &arm.guard {
+                        parts.push(Document::Str(" when "));
+                        let guard_doc = self.generate_guard_expression(guard)?;
+                        parts.push(guard_doc);
+                    } else {
+                        parts.push(Document::Str(" when 'true'"));
+                    }
+                    parts.push(Document::Str(" -> "));
+                    let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
+                    parts.push(body_doc);
+                    self.pop_scope();
                 }
-                let pattern_doc = self.generate_pattern(&arm.pattern)?;
-                parts.push(Document::Str("<"));
-                parts.push(pattern_doc);
-                parts.push(Document::Str(">"));
-                self.push_scope();
-                Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
-                    self.bind_var(name, core_var);
+                // BT-3943: no arm may match — raise a structured `#pattern_mismatch`
+                // rather than the compiler's implicit raw `case_clause`
+                // (`internal_error`). Skipped when an unguarded wildcard/variable
+                // arm already makes the `case` exhaustive (the clause would be dead).
+                let exhaustive = arms.iter().any(|arm| {
+                    arm.guard.is_none()
+                        && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
                 });
-                if let Some(guard) = &arm.guard {
-                    parts.push(Document::Str(" when "));
-                    let guard_doc = self.generate_guard_expression(guard)?;
-                    parts.push(guard_doc);
-                } else {
-                    parts.push(Document::Str(" when 'true'"));
+                if !exhaustive {
+                    let no_match_var = self.fresh_temp_var("NoMatch");
+                    let raise = self.pattern_mismatch_raise_doc(
+                        &match_var,
+                        "match:",
+                        "no match: arm matches the value",
+                    );
+                    parts.push(docvec![
+                        " <",
+                        leaf::var(no_match_var),
+                        "> when 'true' -> ",
+                        raise
+                    ]);
                 }
-                parts.push(Document::Str(" -> "));
-                let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
-                parts.push(body_doc);
-                self.pop_scope();
-            }
-            // BT-3943: no arm may match — raise a structured `#pattern_mismatch`
-            // rather than the compiler's implicit raw `case_clause`
-            // (`internal_error`). Skipped when an unguarded wildcard/variable
-            // arm already makes the `case` exhaustive (the clause would be dead).
-            let exhaustive = arms.iter().any(|arm| {
-                arm.guard.is_none()
-                    && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
-            });
-            if !exhaustive {
-                let no_match_var = self.fresh_temp_var("NoMatch");
-                let raise = self.pattern_mismatch_raise_doc(
-                    &match_var,
-                    "match:",
-                    "no match: arm matches the value",
-                );
-                parts.push(docvec![
-                    " <",
-                    leaf::var(no_match_var),
-                    "> when 'true' -> ",
-                    raise
-                ]);
-            }
-            parts.push(Document::Str(" end"));
-            Document::Vec(parts)
-        };
+                parts.push(Document::Str(" end"));
+                Document::Vec(parts)
+            };
 
         Ok(docvec![
             value_preamble,
@@ -740,8 +740,7 @@ impl CoreErlangGenerator {
         // BT-4173: a top-level binary arm matches against unwrapped bytes
         // (a `String` subject matches like the `Binary` it encodes); every
         // other arm keeps the raw scrutinee.
-        let (scrutinee_prefix, scrutinee_var) = if matches!(arm.pattern, Pattern::Binary { .. })
-        {
+        let (scrutinee_prefix, scrutinee_var) = if matches!(arm.pattern, Pattern::Binary { .. }) {
             let (prefix, var) = self.binary_match_scrutinee(match_var);
             (prefix, var)
         } else {
