@@ -279,18 +279,18 @@ aggregate_counters_updated_test_() ->
                     %% Check aggregate stats (always-on class entry; no
                     %% per-actor entry while tracing is disabled)
                     Stats = beamtalk_trace_store:get_stats(),
-                    PidKey = list_to_binary(pid_to_list(Pid)),
+                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
                     ?assertNot(maps:is_key(PidKey, Stats)),
-                    #{<<"class:Counter">> := CounterStats} = Stats,
-                    Methods = maps:get(<<"methods">>, CounterStats),
+                    #{{beamtalk_string, <<"class:Counter">>} := CounterStats} = Stats,
+                    Methods = maps:get({beamtalk_string, <<"methods">>}, CounterStats),
 
                     %% increment should have 2 calls
-                    IncStats = maps:get(<<"increment">>, Methods),
-                    ?assertEqual(2, maps:get(<<"calls">>, IncStats)),
+                    IncStats = maps:get({beamtalk_string, <<"increment">>}, Methods),
+                    ?assertEqual(2, maps:get({beamtalk_string, <<"calls">>}, IncStats)),
 
                     %% getValue should have 1 call
-                    GetStats = maps:get(<<"getValue">>, Methods),
-                    ?assertEqual(1, maps:get(<<"calls">>, GetStats))
+                    GetStats = maps:get({beamtalk_string, <<"getValue">>}, Methods),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, GetStats))
                 after
                     gen_server:stop(Pid)
                 end
@@ -324,15 +324,25 @@ trace_events_captured_when_enabled_test_() ->
                     DispatchTraces = [
                         T
                      || T <- Traces,
-                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                        maps:get({beamtalk_string, <<"mode">>}, T) =/=
+                            {beamtalk_string, <<"lifecycle">>}
                     ],
                     ?assertEqual(1, length(DispatchTraces)),
                     [Trace] = DispatchTraces,
-                    PidStr = list_to_binary(pid_to_list(Pid)),
-                    ?assertEqual(PidStr, maps:get(<<"actor">>, Trace)),
-                    ?assertEqual(<<"Counter">>, maps:get(<<"class">>, Trace)),
-                    ?assertEqual(<<"getValue">>, maps:get(<<"selector">>, Trace)),
-                    ?assertEqual(<<"sync">>, maps:get(<<"mode">>, Trace))
+                    PidStr = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
+                    ?assertEqual(PidStr, maps:get({beamtalk_string, <<"actor">>}, Trace)),
+                    ?assertEqual(
+                        {beamtalk_string, <<"Counter">>},
+                        maps:get({beamtalk_string, <<"class">>}, Trace)
+                    ),
+                    ?assertEqual(
+                        {beamtalk_string, <<"getValue">>},
+                        maps:get({beamtalk_string, <<"selector">>}, Trace)
+                    ),
+                    ?assertEqual(
+                        {beamtalk_string, <<"sync">>},
+                        maps:get({beamtalk_string, <<"mode">>}, Trace)
+                    )
                 after
                     gen_server:stop(Pid)
                 end
@@ -558,21 +568,21 @@ multiple_modes_aggregate_test_() ->
                     %% Verify stats show calls for both methods (in the
                     %% always-on class entry)
                     Stats = beamtalk_trace_store:get_stats(),
-                    #{<<"class:Counter">> := CounterStats} = Stats,
-                    Methods = maps:get(<<"methods">>, CounterStats),
+                    #{{beamtalk_string, <<"class:Counter">>} := CounterStats} = Stats,
+                    Methods = maps:get({beamtalk_string, <<"methods">>}, CounterStats),
 
                     %% increment: 1 sync + 1 cast = 2 calls
-                    IncStats = maps:get(<<"increment">>, Methods),
-                    ?assertEqual(2, maps:get(<<"calls">>, IncStats)),
+                    IncStats = maps:get({beamtalk_string, <<"increment">>}, Methods),
+                    ?assertEqual(2, maps:get({beamtalk_string, <<"calls">>}, IncStats)),
 
                     %% getValue: 1 sync call
-                    GetStats = maps:get(<<"getValue">>, Methods),
-                    ?assertEqual(1, maps:get(<<"calls">>, GetStats)),
+                    GetStats = maps:get({beamtalk_string, <<"getValue">>}, Methods),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, GetStats)),
 
                     %% Duration is recorded. `>= 0`, not `> 0`: Windows'
                     %% monotonic clock has 1ms resolution, so a single fast
                     %% call can measure 0 there (BT-3980).
-                    ?assert(maps:get(<<"total_duration_ns">>, GetStats) >= 0)
+                    ?assert(maps:get({beamtalk_string, <<"total_duration_ns">>}, GetStats) >= 0)
                 after
                     gen_server:stop(Pid)
                 end
@@ -729,7 +739,8 @@ lifecycle_events_in_traces_test_() ->
                 LifecycleTraces = [
                     T
                  || T <- Traces,
-                    maps:get(<<"mode">>, T) =:= <<"lifecycle">>
+                    maps:get({beamtalk_string, <<"mode">>}, T) =:=
+                        {beamtalk_string, <<"lifecycle">>}
                 ],
                 %% Should have at least start + stop events
                 ?assert(length(LifecycleTraces) >= 2),
@@ -738,7 +749,8 @@ lifecycle_events_in_traces_test_() ->
                 StartTraces = [
                     T
                  || T <- LifecycleTraces,
-                    maps:get(<<"selector">>, T) =:= <<"start">>
+                    maps:get({beamtalk_string, <<"selector">>}, T) =:=
+                        {beamtalk_string, <<"start">>}
                 ],
                 ?assert(length(StartTraces) >= 1),
 
@@ -746,7 +758,7 @@ lifecycle_events_in_traces_test_() ->
                 StopTraces = [
                     T
                  || T <- LifecycleTraces,
-                    maps:get(<<"selector">>, T) =:= <<"stop">>
+                    maps:get({beamtalk_string, <<"selector">>}, T) =:= {beamtalk_string, <<"stop">>}
                 ],
                 ?assert(length(StopTraces) >= 1)
             end)
@@ -771,16 +783,19 @@ lifecycle_aggregate_stats_test_() ->
                 %% Death changes nothing: the always-on class entry holds
                 %% every dispatch (BT-4103).
                 Stats = beamtalk_trace_store:get_stats(),
-                PidKey = list_to_binary(pid_to_list(Pid)),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
                 ?assertNot(maps:is_key(PidKey, Stats)),
-                ?assertMatch(#{<<"class:Counter">> := _}, Stats),
-                Methods = maps:get(<<"methods">>, maps:get(<<"class:Counter">>, Stats)),
+                ?assertMatch(#{{beamtalk_string, <<"class:Counter">>} := _}, Stats),
+                Methods = maps:get(
+                    {beamtalk_string, <<"methods">>},
+                    maps:get({beamtalk_string, <<"class:Counter">>}, Stats)
+                ),
 
                 %% Start and stop should each have at least 1 call
-                StartStats = maps:get(<<"start">>, Methods),
-                ?assert(maps:get(<<"calls">>, StartStats) >= 1),
-                StopStats = maps:get(<<"stop">>, Methods),
-                ?assert(maps:get(<<"calls">>, StopStats) >= 1)
+                StartStats = maps:get({beamtalk_string, <<"start">>}, Methods),
+                ?assert(maps:get({beamtalk_string, <<"calls">>}, StartStats) >= 1),
+                StopStats = maps:get({beamtalk_string, <<"stop">>}, Methods),
+                ?assert(maps:get({beamtalk_string, <<"calls">>}, StopStats) >= 1)
             end)
         ]
     end}.
@@ -966,12 +981,15 @@ trace_context_in_traces_test_() ->
                     DispatchTraces = [
                         T
                      || T <- Traces,
-                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                        maps:get({beamtalk_string, <<"mode">>}, T) =/=
+                            {beamtalk_string, <<"lifecycle">>}
                     ],
                     ?assert(length(DispatchTraces) >= 1),
                     [Trace | _] = DispatchTraces,
                     %% Trace context should be merged into the trace event
-                    ?assertEqual(<<"wf-trace-1">>, maps:get(<<"workflowId">>, Trace))
+                    ?assertEqual(
+                        <<"wf-trace-1">>, maps:get({beamtalk_string, <<"workflowId">>}, Trace)
+                    )
                 after
                     gen_server:stop(Pid),
                     erase('$beamtalk_trace_ctx'),
@@ -1004,7 +1022,8 @@ empty_trace_context_no_overhead_test_() ->
                     DispatchTraces = [
                         T
                      || T <- Traces,
-                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                        maps:get({beamtalk_string, <<"mode">>}, T) =/=
+                            {beamtalk_string, <<"lifecycle">>}
                     ],
                     ?assert(length(DispatchTraces) >= 1),
                     [Trace | _] = DispatchTraces,
@@ -1116,12 +1135,13 @@ causal_root_span_test_() ->
                     DispatchTraces = [
                         T
                      || T <- Traces,
-                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                        maps:get({beamtalk_string, <<"mode">>}, T) =/=
+                            {beamtalk_string, <<"lifecycle">>}
                     ],
                     ?assert(length(DispatchTraces) >= 1),
                     [Trace | _] = DispatchTraces,
-                    ?assertEqual(TraceId, maps:get(<<"trace_id">>, Trace)),
-                    ?assertEqual(SpanId, maps:get(<<"span_id">>, Trace))
+                    ?assertEqual(TraceId, maps:get({beamtalk_string, <<"trace_id">>}, Trace)),
+                    ?assertEqual(SpanId, maps:get({beamtalk_string, <<"span_id">>}, Trace))
                 after
                     gen_server:stop(Pid)
                 end
@@ -1214,7 +1234,8 @@ causal_trace_id_filter_test_() ->
                     T1Dispatch = [
                         T
                      || T <- T1Traces,
-                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                        maps:get({beamtalk_string, <<"mode">>}, T) =/=
+                            {beamtalk_string, <<"lifecycle">>}
                     ],
                     ?assertEqual(2, length(T1Dispatch)),
 
@@ -1223,7 +1244,8 @@ causal_trace_id_filter_test_() ->
                     T2Dispatch = [
                         T
                      || T <- T2Traces,
-                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                        maps:get({beamtalk_string, <<"mode">>}, T) =/=
+                            {beamtalk_string, <<"lifecycle">>}
                     ],
                     ?assertEqual(1, length(T2Dispatch))
                 after
@@ -1300,13 +1322,17 @@ causal_multi_hop_chain_test_() ->
                     DispatchTraces = [
                         T
                      || T <- AllTraces,
-                        maps:get(<<"mode">>, T) =/= <<"lifecycle">>
+                        maps:get({beamtalk_string, <<"mode">>}, T) =/=
+                            {beamtalk_string, <<"lifecycle">>}
                     ],
                     %% 3 dispatches: A getValue, B increment, C getValue
                     ?assertEqual(3, length(DispatchTraces)),
 
                     %% Verify different span_ids
-                    SpanIds = [maps:get(<<"span_id">>, T) || T <- DispatchTraces],
+                    SpanIds = [
+                        maps:get({beamtalk_string, <<"span_id">>}, T)
+                     || T <- DispatchTraces
+                    ],
                     ?assertEqual(3, length(lists:usort(SpanIds)))
                 after
                     gen_server:stop(PidA)

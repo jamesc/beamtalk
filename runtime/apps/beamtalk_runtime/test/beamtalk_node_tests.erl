@@ -93,7 +93,7 @@ current_node_is_trivially_reachable_test() ->
 
 print_string_test() ->
     ?assertEqual(
-        <<"Node(worker@localhost)">>,
+        {beamtalk_string, <<"Node(worker@localhost)">>},
         beamtalk_node:printString(beamtalk_node:from_atom('worker@localhost'))
     ).
 

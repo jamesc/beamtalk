@@ -275,7 +275,7 @@ await_with_timeout_expired_test() ->
         #beamtalk_error{
             kind = timeout,
             class = 'Future',
-            message = <<"Await timed out">>
+            message = {beamtalk_string, <<"Await timed out">>}
         },
         beamtalk_future:await(Future, 50)
     ).

@@ -1248,9 +1248,9 @@ object_delegation_nonzero_state_test_() ->
         end,
         fun(Counter) -> gen_server:stop(Counter) end, fun(Counter) ->
             [
-                {"printString returns a binary", fun() ->
+                {"printString returns a String", fun() ->
                     Result = gen_server:call(Counter, {'printString', []}),
-                    ?assert(is_binary(Result))
+                    ?assertMatch({beamtalk_string, _}, Result)
                 end},
                 {"inspect returns an Inspector cursor seeded from actor state",
                     %% ADR 0095 Phase 3: inspect on an actor (inherited from Object

@@ -97,13 +97,15 @@ dispatch_class_test() ->
 dispatch_print_string_test() ->
     Proxy = beamtalk_erlang_proxy:new(lists),
     ?assertEqual(
-        <<"#ErlangModule<lists>">>, beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
+        {beamtalk_string, <<"#ErlangModule<lists>">>},
+        beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
     ).
 
 dispatch_print_string_erlang_test() ->
     Proxy = beamtalk_erlang_proxy:new(erlang),
     ?assertEqual(
-        <<"#ErlangModule<erlang>">>, beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
+        {beamtalk_string, <<"#ErlangModule<erlang>">>},
+        beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
     ).
 
 %%% ===================================================================
@@ -182,7 +184,10 @@ send_erlang_module_class_test() ->
 
 send_erlang_module_print_string_test() ->
     Proxy = beamtalk_erlang_proxy:new(lists),
-    ?assertEqual(<<"#ErlangModule<lists>">>, beamtalk_primitive:send(Proxy, 'printString', [])).
+    ?assertEqual(
+        {beamtalk_string, <<"#ErlangModule<lists>">>},
+        beamtalk_primitive:send(Proxy, 'printString', [])
+    ).
 
 %%% ===================================================================
 %%% Erlang class-side proxy (construct ErlangModule)
@@ -559,13 +564,13 @@ dispatch_methods_returns_exports_test() ->
     ?assert(is_list(Result)),
     ?assert(length(Result) > 0),
     %% Should contain reverse/1
-    ?assert(lists:member(<<"reverse/1">>, Result)),
+    ?assert(lists:member({beamtalk_string, <<"reverse/1">>}, Result)),
     %% Should contain sort/1
-    ?assert(lists:member(<<"sort/1">>, Result)),
+    ?assert(lists:member({beamtalk_string, <<"sort/1">>}, Result)),
     %% Should NOT contain module_info
     ?assertNot(
         lists:any(
-            fun(S) ->
+            fun({beamtalk_string, S}) ->
                 binary:match(S, <<"module_info">>) =/= nomatch
             end,
             Result

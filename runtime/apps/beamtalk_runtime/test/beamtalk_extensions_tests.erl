@@ -475,7 +475,7 @@ register_with_source_stores_source_test_() ->
 
             %% Source is retrievable.
             ?assertEqual(
-                {ok, Source},
+                {ok, {beamtalk_string, Source}},
                 beamtalk_extensions:getSource('Integer', 'double')
             )
         end
@@ -548,8 +548,8 @@ list_all_with_source_returns_only_register5_entries_test_() ->
             %% list_all_with_source/0 only surfaces entries with stored
             %% source. Order is ETS-dependent, so check membership.
             ?assertEqual(2, length(Listed)),
-            ?assert(lists:member({'Integer', double, Src1}, Listed)),
-            ?assert(lists:member({'String', trim, Src2}, Listed))
+            ?assert(lists:member({'Integer', double, {beamtalk_string, Src1}}, Listed)),
+            ?assert(lists:member({'String', trim, {beamtalk_string, Src2}}, Listed))
         end
     end}.
 
@@ -581,7 +581,9 @@ register_with_source_updates_source_on_reregister_test_() ->
             beamtalk_extensions:register('Integer', 'go', Fun, mylib, Src2),
 
             %% Latest source wins (mirrors last-writer-wins dispatch entry).
-            ?assertEqual({ok, Src2}, beamtalk_extensions:getSource('Integer', 'go'))
+            ?assertEqual(
+                {ok, {beamtalk_string, Src2}}, beamtalk_extensions:getSource('Integer', 'go')
+            )
         end
     end}.
 
@@ -593,7 +595,9 @@ register_arity4_clears_stale_source_test_() ->
 
             %% First register with source so the sources table has an entry.
             beamtalk_extensions:register('Integer', 'flip', Fun, mylib, Src),
-            ?assertEqual({ok, Src}, beamtalk_extensions:getSource('Integer', 'flip')),
+            ?assertEqual(
+                {ok, {beamtalk_string, Src}}, beamtalk_extensions:getSource('Integer', 'flip')
+            ),
 
             %% Re-register via the legacy 4-arity path. The dispatch entry
             %% updates as usual, but the old source body must NOT linger —
@@ -619,7 +623,9 @@ register_with_undefined_clears_stale_source_test_() ->
 
             %% Seed with source via register/5.
             beamtalk_extensions:register('Integer', 'spin', Fun, mylib, Src),
-            ?assertEqual({ok, Src}, beamtalk_extensions:getSource('Integer', 'spin')),
+            ?assertEqual(
+                {ok, {beamtalk_string, Src}}, beamtalk_extensions:getSource('Integer', 'spin')
+            ),
 
             %% Explicit undefined source must also wipe the stale row.
             beamtalk_extensions:register('Integer', 'spin', Fun, mylib, undefined),

@@ -117,7 +117,7 @@ test_print_string() ->
     %% actor reference) renders structurally via the canonical renderer.
     State = counter_state(),
     {reply, Str, _} = beamtalk_object_ops:dispatch('printString', [], self_ref(), State),
-    ?assertEqual(<<"Counter(value: 0)">>, Str).
+    ?assertEqual({beamtalk_string, <<"Counter(value: 0)">>}, Str).
 
 test_inspect() ->
     State = counter_state(),
@@ -243,7 +243,7 @@ test_display_string() ->
     %% structurally (ADR 0094).
     State = counter_state(),
     {reply, Str, _} = beamtalk_object_ops:dispatch('displayString', [], self_ref(), State),
-    ?assertEqual(<<"Counter(value: 0)">>, Str).
+    ?assertEqual({beamtalk_string, <<"Counter(value: 0)">>}, Str).
 
 %%% ============================================================================
 %%% inspect on class objects (empty state) Tests
@@ -371,7 +371,7 @@ test_print_string_class_object() ->
     Self = #beamtalk_object{class = 'Counter', pid = self(), class_mod = counter},
     State = #{},
     {reply, Str, _} = beamtalk_object_ops:dispatch('printString', [], Self, State),
-    ?assert(is_binary(Str)).
+    ?assertMatch({beamtalk_string, _}, Str).
 
 %%% ============================================================================
 %%% fieldAt:put: returns updated state correctly
@@ -463,10 +463,10 @@ test_print_string_class_tagged_record() ->
     %% Exercises print_string_label/2 line 254 and class_display_name/2 lines 278-279.
     Self = #beamtalk_object{class = 'Counter class', pid = self(), class_mod = counter},
     {reply, Str, _} = beamtalk_object_ops:dispatch('printString', [], Self, #{}),
-    ?assertEqual(<<"Counter">>, Str).
+    ?assertEqual({beamtalk_string, <<"Counter">>}, Str).
 
 test_print_string_non_record_empty_state() ->
     %% Non-record Self (atom nil) with empty State triggers the
     %% map_size(State) =:= 0 branch (line 269) and class_display_name/2.
     {reply, Str, _} = beamtalk_object_ops:dispatch('printString', [], nil, #{}),
-    ?assertEqual(<<"Object">>, Str).
+    ?assertEqual({beamtalk_string, <<"Object">>}, Str).
