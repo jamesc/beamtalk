@@ -4793,7 +4793,7 @@ the next workspace restart.
 #### Creating a brand-new class file
 
 ```beamtalk
-> Workspace newClass: "Object subclass: Greeter\n  greet => 'hello'" at: "src/greeter.bt"
+> Workspace newClass: "Object subclass: Greeter\n  greet => ""hello""" at: "src/greeter.bt"
 => [Greeter]                        // compiled and installed in memory
 > Workspace flush
 => _                                // writes src/greeter.bt
