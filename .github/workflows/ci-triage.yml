@@ -17,9 +17,11 @@ name: CI Triage
 
 on:
   workflow_run:
-    # BT-4209 moves macOS/Windows/desktop checks into the existing "Nightly" workflow.
-    # If it renames that workflow, update this list.
-    workflows: ["CI", "Nightly"]
+    # "CI (all platforms)" is ci-platforms.yml (BT-4209): the scheduled macOS/Windows/
+    # desktop run. Its schedule runs report head_branch main with event `schedule`, so
+    # they pass the guard below; its labelled PR runs have event `pull_request` and do
+    # not. If any of these workflows is renamed, update this list.
+    workflows: ["CI", "Nightly", "CI (all platforms)"]
     types: [completed]
   workflow_dispatch:
     inputs:
