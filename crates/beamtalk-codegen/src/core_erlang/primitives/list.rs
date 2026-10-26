@@ -207,9 +207,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
         "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
         // BT-4170: elements are tagged `String`s — join strictly through
         // `beamtalk_string:join/2` (unwraps, assembles, wraps).
-        "join" => Some(Document::Str(
-            "call 'beamtalk_string':'join'(Self, 'join')",
-        )),
+        "join" => Some(Document::Str("call 'beamtalk_string':'join'(Self, 'join')")),
         "join:" => {
             let p0 = param(params, 0, "_Sep");
             Some(docvec![
@@ -592,7 +590,10 @@ mod tests {
         let result = doc_to_string(generate_list_bif("join:", &["Sep".to_string()]));
         assert_eq!(
             result,
-            Some("call 'beamtalk_string':'join'(call 'lists':'join'(Sep, Self), 'join:')".to_string())
+            Some(
+                "call 'beamtalk_string':'join'(call 'lists':'join'(Sep, Self), 'join:')"
+                    .to_string()
+            )
         );
     }
 

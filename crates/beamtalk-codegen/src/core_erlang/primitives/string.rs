@@ -192,7 +192,11 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
             unwrap_self(),
             ")"
         ]),
-        "asFloat" => Some(docvec!["call 'erlang':'binary_to_float'(", unwrap_self(), ")"]),
+        "asFloat" => Some(docvec![
+            "call 'erlang':'binary_to_float'(",
+            unwrap_self(),
+            ")"
+        ]),
         "asAtom" => Some(docvec![
             "call 'erlang':'binary_to_atom'(",
             unwrap_self(),
@@ -319,7 +323,13 @@ mod tests {
     #[test]
     fn test_length() {
         let result = doc_to_string(generate_string_bif("length", &[]));
-        assert_eq!(result, Some("call 'string':'length'(call 'beamtalk_primitive':'string_to_binary'(Self))".to_string()));
+        assert_eq!(
+            result,
+            Some(
+                "call 'string':'length'(call 'beamtalk_primitive':'string_to_binary'(Self))"
+                    .to_string()
+            )
+        );
     }
 
     #[test]
