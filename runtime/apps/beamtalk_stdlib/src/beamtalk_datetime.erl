@@ -217,7 +217,8 @@ DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
 // => false
 ```
 """.
--spec 'parse:format:'(binary() | beamtalk_string:t(), binary() | beamtalk_string:t()) -> beamtalk_result:t().
+-spec 'parse:format:'(binary() | beamtalk_string:t(), binary() | beamtalk_string:t()) ->
+    beamtalk_result:t().
 'parse:format:'({beamtalk_string, Str}, Pattern) when is_binary(Str) ->
     'parse:format:'(Str, Pattern);
 'parse:format:'(Str, {beamtalk_string, Pattern}) when is_binary(Pattern) ->

@@ -1291,7 +1291,9 @@ static_init_config_messaging_self_fails_with_hint_test() ->
             #beamtalk_error{kind = supervisor_start_failed, selector = childSpecs}, Reason
         ),
         #beamtalk_error{hint = Hint} = Reason,
-        ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"do not send messages to `self`">>))
+        ?assertNotEqual(
+            nomatch, binary:match(element(2, Hint), <<"do not send messages to `self`">>)
+        )
     end).
 
 static_init_config_raise_fails_start_with_structured_error_test() ->
@@ -1333,7 +1335,8 @@ start_failed_error_uses_cause_hint_message_or_kind_test() ->
     %% A static parent reports a nested supervisor's init failure wrapped by
     %% OTP; the nested error's hint still reaches the caller.
     ?assertEqual(
-        {beamtalk_string, <<"the hint">>}, Hint({shutdown, {failed_to_start_child, 'Inner', WithHint}})
+        {beamtalk_string, <<"the hint">>},
+        Hint({shutdown, {failed_to_start_child, 'Inner', WithHint}})
     ),
     %% ... at any depth (Root -> MidSup -> Pool).
     ?assertEqual(

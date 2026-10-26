@@ -28,7 +28,9 @@ new3_creates_error_with_selector_test() ->
     ?assertEqual('Integer', Error#beamtalk_error.class),
     ?assertEqual('foo', Error#beamtalk_error.selector),
     ?assertEqual(undefined, Error#beamtalk_error.hint),
-    ?assertEqual({beamtalk_string, <<"Integer does not understand 'foo'">>}, Error#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Integer does not understand 'foo'">>}, Error#beamtalk_error.message
+    ).
 
 %%% Test: Create error with new/4
 new4_creates_error_with_selector_and_hint_test() ->
@@ -38,14 +40,18 @@ new4_creates_error_with_selector_and_hint_test() ->
     ?assertEqual('Integer', Error#beamtalk_error.class),
     ?assertEqual('foo', Error#beamtalk_error.selector),
     ?assertEqual({beamtalk_string, Hint}, Error#beamtalk_error.hint),
-    ?assertEqual({beamtalk_string, <<"Integer does not understand 'foo'">>}, Error#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Integer does not understand 'foo'">>}, Error#beamtalk_error.message
+    ).
 
 %%% Test: with_selector/2 adds selector and updates message
 with_selector_adds_selector_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
     Error = beamtalk_error:with_selector(Error0, 'foo'),
     ?assertEqual('foo', Error#beamtalk_error.selector),
-    ?assertMatch({beamtalk_string, <<"Integer does not understand 'foo'">>}, Error#beamtalk_error.message).
+    ?assertMatch(
+        {beamtalk_string, <<"Integer does not understand 'foo'">>}, Error#beamtalk_error.message
+    ).
 
 %%% Test: with_hint/2 adds hint
 with_hint_adds_hint_test() ->
@@ -129,26 +135,42 @@ pipeline_construction_test() ->
 %%% Test: does_not_understand message generation
 does_not_understand_message_test() ->
     Error1 = beamtalk_error:new(does_not_understand, 'Integer'),
-    ?assertEqual({beamtalk_string, <<"Integer does not understand message">>}, Error1#beamtalk_error.message),
+    ?assertEqual(
+        {beamtalk_string, <<"Integer does not understand message">>}, Error1#beamtalk_error.message
+    ),
 
     Error2 = beamtalk_error:with_selector(Error1, 'foo'),
-    ?assertEqual({beamtalk_string, <<"Integer does not understand 'foo'">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Integer does not understand 'foo'">>}, Error2#beamtalk_error.message
+    ).
 
 %%% Test: immutable_value message generation
 immutable_value_message_test() ->
     Error1 = beamtalk_error:new(immutable_value, 'Integer'),
-    ?assertEqual({beamtalk_string, <<"Cannot mutate Integer (immutable value)">>}, Error1#beamtalk_error.message),
+    ?assertEqual(
+        {beamtalk_string, <<"Cannot mutate Integer (immutable value)">>},
+        Error1#beamtalk_error.message
+    ),
 
     Error2 = beamtalk_error:with_selector(Error1, 'fieldAt:put:'),
-    ?assertEqual({beamtalk_string, <<"Cannot call 'fieldAt:put:' on Integer (immutable value)">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Cannot call 'fieldAt:put:' on Integer (immutable value)">>},
+        Error2#beamtalk_error.message
+    ).
 
 %%% Test: arity_mismatch message generation
 arity_mismatch_message_test() ->
     Error1 = beamtalk_error:new(arity_mismatch, 'Counter'),
-    ?assertEqual({beamtalk_string, <<"Wrong number of arguments to Counter method">>}, Error1#beamtalk_error.message),
+    ?assertEqual(
+        {beamtalk_string, <<"Wrong number of arguments to Counter method">>},
+        Error1#beamtalk_error.message
+    ),
 
     Error2 = beamtalk_error:with_selector(Error1, 'at:'),
-    ?assertEqual({beamtalk_string, <<"Wrong number of arguments to 'at:' on Counter">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Wrong number of arguments to 'at:' on Counter">>},
+        Error2#beamtalk_error.message
+    ).
 
 %%% Test: type_error message generation
 type_error_message_test() ->
@@ -156,7 +178,9 @@ type_error_message_test() ->
     ?assertEqual({beamtalk_string, <<"Type error in String">>}, Error1#beamtalk_error.message),
 
     Error2 = beamtalk_error:with_selector(Error1, '+'),
-    ?assertEqual({beamtalk_string, <<"Type error in '+' on String">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Type error in '+' on String">>}, Error2#beamtalk_error.message
+    ).
 
 %%% Test: future_not_awaited message generation
 future_not_awaited_message_test() ->
@@ -205,8 +229,13 @@ does_not_understand_with_hint_test() ->
     ?assertEqual(does_not_understand, Error#beamtalk_error.kind),
     ?assertEqual('Integer', Error#beamtalk_error.class),
     ?assertEqual('foo', Error#beamtalk_error.selector),
-    ?assertEqual({beamtalk_string, <<"Integer does not understand 'foo'">>}, Error#beamtalk_error.message),
-    ?assertEqual({beamtalk_string, <<"Check spelling or use 'respondsTo:' to verify method exists">>}, Error#beamtalk_error.hint),
+    ?assertEqual(
+        {beamtalk_string, <<"Integer does not understand 'foo'">>}, Error#beamtalk_error.message
+    ),
+    ?assertEqual(
+        {beamtalk_string, <<"Check spelling or use 'respondsTo:' to verify method exists">>},
+        Error#beamtalk_error.hint
+    ),
     ?assertEqual(#{arity => 0}, Error#beamtalk_error.details),
 
     Formatted = iolist_to_binary(beamtalk_error:format(Error)),
@@ -220,35 +249,55 @@ class_not_found_message_test() ->
     Error = beamtalk_error:new(class_not_found, 'Counter'),
     ?assertEqual({beamtalk_string, <<"Class 'Counter' not found">>}, Error#beamtalk_error.message),
     ErrorWithSel = beamtalk_error:with_selector(Error, increment),
-    ?assertEqual({beamtalk_string, <<"Class 'Counter' not found (while resolving 'increment')">>}, ErrorWithSel#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Class 'Counter' not found (while resolving 'increment')">>},
+        ErrorWithSel#beamtalk_error.message
+    ).
 
 no_superclass_message_test() ->
     Error = beamtalk_error:new(no_superclass, 'ProtoObject'),
-    ?assertEqual({beamtalk_string, <<"ProtoObject has no superclass">>}, Error#beamtalk_error.message),
+    ?assertEqual(
+        {beamtalk_string, <<"ProtoObject has no superclass">>}, Error#beamtalk_error.message
+    ),
     ErrorWithSel = beamtalk_error:with_selector(Error, someMethod),
-    ?assertEqual({beamtalk_string, <<"ProtoObject has no superclass (cannot resolve 'someMethod' via super)">>}, ErrorWithSel#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string,
+            <<"ProtoObject has no superclass (cannot resolve 'someMethod' via super)">>},
+        ErrorWithSel#beamtalk_error.message
+    ).
 
 class_already_exists_message_test() ->
     Error = beamtalk_error:new(class_already_exists, 'Counter'),
-    ?assertEqual({beamtalk_string, <<"Class 'Counter' already exists">>}, Error#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Class 'Counter' already exists">>}, Error#beamtalk_error.message
+    ).
 
 internal_error_message_test() ->
     Error = beamtalk_error:new(internal_error, 'Runtime'),
     ?assertEqual({beamtalk_string, <<"Internal error in Runtime">>}, Error#beamtalk_error.message),
     ErrorWithSel = beamtalk_error:with_selector(Error, dispatch),
-    ?assertEqual({beamtalk_string, <<"Internal error in 'dispatch' on Runtime">>}, ErrorWithSel#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Internal error in 'dispatch' on Runtime">>},
+        ErrorWithSel#beamtalk_error.message
+    ).
 
 dispatch_error_message_test() ->
     Error = beamtalk_error:new(dispatch_error, 'Counter'),
     ?assertEqual({beamtalk_string, <<"Dispatch error for Counter">>}, Error#beamtalk_error.message),
     ErrorWithSel = beamtalk_error:with_selector(Error, increment),
-    ?assertEqual({beamtalk_string, <<"Dispatch error for 'increment' on Counter">>}, ErrorWithSel#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Dispatch error for 'increment' on Counter">>},
+        ErrorWithSel#beamtalk_error.message
+    ).
 
 callback_failed_message_test() ->
     Error = beamtalk_error:new(callback_failed, 'Actor'),
     ?assertEqual({beamtalk_string, <<"Callback failed for Actor">>}, Error#beamtalk_error.message),
     ErrorWithSel = beamtalk_error:with_selector(Error, 'on_actor_spawned'),
-    ?assertEqual({beamtalk_string, <<"Callback 'on_actor_spawned' failed for Actor">>}, ErrorWithSel#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Callback 'on_actor_spawned' failed for Actor">>},
+        ErrorWithSel#beamtalk_error.message
+    ).
 
 %%% Test: raise/1 wraps and throws as Exception tagged map (ADR 0015)
 raise_wraps_and_throws_test() ->
@@ -393,31 +442,42 @@ with_message_tuple_formats_as_binary_test() ->
 
 actor_dead_message_test() ->
     Error1 = beamtalk_error:new(actor_dead, 'Counter'),
-    ?assertEqual({beamtalk_string, <<"Counter actor process has terminated">>}, Error1#beamtalk_error.message),
+    ?assertEqual(
+        {beamtalk_string, <<"Counter actor process has terminated">>}, Error1#beamtalk_error.message
+    ),
 
     Error2 = beamtalk_error:with_selector(Error1, 'increment'),
-    ?assertEqual({beamtalk_string, <<"Cannot send 'increment' to Counter (actor process has terminated)">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Cannot send 'increment' to Counter (actor process has terminated)">>},
+        Error2#beamtalk_error.message
+    ).
 
 file_not_found_message_test() ->
     Error1 = beamtalk_error:new(file_not_found, 'File'),
     ?assertEqual({beamtalk_string, <<"File: file not found">>}, Error1#beamtalk_error.message),
 
     Error2 = beamtalk_error:with_selector(Error1, 'open'),
-    ?assertEqual({beamtalk_string, <<"File 'open': file not found">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"File 'open': file not found">>}, Error2#beamtalk_error.message
+    ).
 
 permission_denied_message_test() ->
     Error1 = beamtalk_error:new(permission_denied, 'File'),
     ?assertEqual({beamtalk_string, <<"File: permission denied">>}, Error1#beamtalk_error.message),
 
     Error2 = beamtalk_error:with_selector(Error1, 'write'),
-    ?assertEqual({beamtalk_string, <<"File 'write': permission denied">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"File 'write': permission denied">>}, Error2#beamtalk_error.message
+    ).
 
 io_error_message_test() ->
     Error1 = beamtalk_error:new(io_error, 'FileHandle'),
     ?assertEqual({beamtalk_string, <<"FileHandle: I/O error">>}, Error1#beamtalk_error.message),
 
     Error2 = beamtalk_error:with_selector(Error1, 'read'),
-    ?assertEqual({beamtalk_string, <<"FileHandle 'read': I/O error">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"FileHandle 'read': I/O error">>}, Error2#beamtalk_error.message
+    ).
 
 user_error_message_test() ->
     Error1 = beamtalk_error:new(user_error, 'Widget'),
@@ -428,27 +488,44 @@ user_error_message_test() ->
 
 stdlib_shadowing_message_test() ->
     Error1 = beamtalk_error:new(stdlib_shadowing, 'Object'),
-    ?assertEqual({beamtalk_string, <<"Cannot redefine stdlib class 'Object'">>}, Error1#beamtalk_error.message),
+    ?assertEqual(
+        {beamtalk_string, <<"Cannot redefine stdlib class 'Object'">>},
+        Error1#beamtalk_error.message
+    ),
 
     Error2 = beamtalk_error:with_selector(Error1, 'redefine'),
-    ?assertEqual({beamtalk_string, <<"Cannot redefine stdlib class 'Object' (via 'redefine')">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Cannot redefine stdlib class 'Object' (via 'redefine')">>},
+        Error2#beamtalk_error.message
+    ).
 
 uninitialized_state_error_message_test() ->
     Error1 = beamtalk_error:new(uninitialized_state_error, 'Counter'),
-    ?assertEqual({beamtalk_string, <<"UninitializedStateError in Counter">>}, Error1#beamtalk_error.message),
+    ?assertEqual(
+        {beamtalk_string, <<"UninitializedStateError in Counter">>}, Error1#beamtalk_error.message
+    ),
 
     Error2 = beamtalk_error:with_selector(Error1, 'getValue'),
-    ?assertEqual({beamtalk_string, <<"UninitializedStateError in 'getValue' on Counter">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"UninitializedStateError in 'getValue' on Counter">>},
+        Error2#beamtalk_error.message
+    ).
 
 class_already_exists_with_selector_message_test() ->
     Error = beamtalk_error:new(class_already_exists, 'Counter'),
     ErrorWithSel = beamtalk_error:with_selector(Error, 'load'),
-    ?assertEqual({beamtalk_string, <<"Class 'Counter' already exists (via 'load')">>}, ErrorWithSel#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Class 'Counter' already exists (via 'load')">>},
+        ErrorWithSel#beamtalk_error.message
+    ).
 
 generate_message_catchall_with_selector_test() ->
     Error = beamtalk_error:new(custom_kind, 'Widget'),
     ErrorWithSel = beamtalk_error:with_selector(Error, 'doSomething'),
-    ?assertEqual({beamtalk_string, <<"custom_kind error in 'doSomething' on Widget">>}, ErrorWithSel#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"custom_kind error in 'doSomething' on Widget">>},
+        ErrorWithSel#beamtalk_error.message
+    ).
 
 %%% Test: unknown_field message generation (BT-4030)
 unknown_field_message_test() ->
@@ -456,7 +533,9 @@ unknown_field_message_test() ->
     ?assertEqual({beamtalk_string, <<"Unknown field for Conf">>}, Error1#beamtalk_error.message),
 
     Error2 = beamtalk_error:with_selector(Error1, 'new:'),
-    ?assertEqual({beamtalk_string, <<"'new:': unknown field for Conf">>}, Error2#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"'new:': unknown field for Conf">>}, Error2#beamtalk_error.message
+    ).
 
 %%% Test: is_unknown_field/1 predicate (BT-4030)
 is_unknown_field_test() ->

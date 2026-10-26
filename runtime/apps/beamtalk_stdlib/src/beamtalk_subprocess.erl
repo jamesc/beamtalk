@@ -357,9 +357,11 @@ coerce_args(_Other) ->
 -spec normalize_text_env(map()) -> {ok, map()} | {error, term()}.
 normalize_text_env(Env) ->
     try
-        {ok, maps:from_list([
-            {unwrap_text_entry(K), unwrap_text_entry(V)} || {K, V} <- maps:to_list(Env)
-        ])}
+        {ok,
+            maps:from_list([
+                {unwrap_text_entry(K), unwrap_text_entry(V)}
+             || {K, V} <- maps:to_list(Env)
+            ])}
     catch
         error:bad_text -> {error, {type_error, env, expected_binary_keys_and_values}}
     end.

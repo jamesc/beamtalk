@@ -205,11 +205,12 @@ reverse(Str) ->
 -spec includes(t() | binary(), t() | binary()) -> boolean().
 includes(_Str, {beamtalk_string, <<>>}) ->
     true;
-includes({beamtalk_string, Str}, {beamtalk_string, Sub})
-    when is_binary(Str), is_binary(Sub)
+includes({beamtalk_string, Str}, {beamtalk_string, Sub}) when
+    is_binary(Str), is_binary(Sub)
 ->
     binary:match(Str, Sub) =/= nomatch;
-includes(S, Sub) when is_binary(S), is_binary(Sub) -> includes({beamtalk_string, S}, {beamtalk_string, Sub});
+includes(S, Sub) when is_binary(S), is_binary(Sub) ->
+    includes({beamtalk_string, S}, {beamtalk_string, Sub});
 includes({beamtalk_string, _} = S, Sub) when is_binary(Sub) -> includes(S, {beamtalk_string, Sub});
 includes(S, {beamtalk_string, _} = Sub) when is_binary(S) -> includes({beamtalk_string, S}, Sub);
 includes(Str, _) ->
@@ -219,17 +220,20 @@ includes(Str, _) ->
 -spec starts_with(t() | binary(), t() | binary()) -> boolean().
 starts_with(_Str, {beamtalk_string, <<>>}) ->
     true;
-starts_with({beamtalk_string, Str}, {beamtalk_string, Prefix})
-    when is_binary(Str), is_binary(Prefix)
+starts_with({beamtalk_string, Str}, {beamtalk_string, Prefix}) when
+    is_binary(Str), is_binary(Prefix)
 ->
     PrefixSize = byte_size(Prefix),
     case Str of
         <<Prefix:PrefixSize/binary, _/binary>> -> true;
         _ -> false
     end;
-starts_with(S, Sub) when is_binary(S), is_binary(Sub) -> starts_with({beamtalk_string, S}, {beamtalk_string, Sub});
-starts_with({beamtalk_string, _} = S, Sub) when is_binary(Sub) -> starts_with(S, {beamtalk_string, Sub});
-starts_with(S, {beamtalk_string, _} = Sub) when is_binary(S) -> starts_with({beamtalk_string, S}, Sub);
+starts_with(S, Sub) when is_binary(S), is_binary(Sub) ->
+    starts_with({beamtalk_string, S}, {beamtalk_string, Sub});
+starts_with({beamtalk_string, _} = S, Sub) when is_binary(Sub) ->
+    starts_with(S, {beamtalk_string, Sub});
+starts_with(S, {beamtalk_string, _} = Sub) when is_binary(S) ->
+    starts_with({beamtalk_string, S}, Sub);
 starts_with(Str, _) ->
     raise_not_string('startsWith:', Str).
 
@@ -237,8 +241,8 @@ starts_with(Str, _) ->
 -spec ends_with(t() | binary(), t() | binary()) -> boolean().
 ends_with(_Str, {beamtalk_string, <<>>}) ->
     true;
-ends_with({beamtalk_string, Str}, {beamtalk_string, Suffix})
-    when is_binary(Str), is_binary(Suffix)
+ends_with({beamtalk_string, Str}, {beamtalk_string, Suffix}) when
+    is_binary(Str), is_binary(Suffix)
 ->
     SuffixSize = byte_size(Suffix),
     StringSize = byte_size(Str),
@@ -252,8 +256,10 @@ ends_with({beamtalk_string, Str}, {beamtalk_string, Suffix})
         false ->
             false
     end;
-ends_with(S, Sub) when is_binary(S), is_binary(Sub) -> ends_with({beamtalk_string, S}, {beamtalk_string, Sub});
-ends_with({beamtalk_string, _} = S, Sub) when is_binary(Sub) -> ends_with(S, {beamtalk_string, Sub});
+ends_with(S, Sub) when is_binary(S), is_binary(Sub) ->
+    ends_with({beamtalk_string, S}, {beamtalk_string, Sub});
+ends_with({beamtalk_string, _} = S, Sub) when is_binary(Sub) ->
+    ends_with(S, {beamtalk_string, Sub});
 ends_with(S, {beamtalk_string, _} = Sub) when is_binary(S) -> ends_with({beamtalk_string, S}, Sub);
 ends_with(Str, _) ->
     raise_not_string('endsWith:', Str).
@@ -262,13 +268,14 @@ ends_with(Str, _) ->
 -spec index_of(t() | binary(), t() | binary()) -> integer() | 'nil'.
 index_of(_Str, {beamtalk_string, <<>>}) ->
     nil;
-index_of({beamtalk_string, Str}, {beamtalk_string, Sub})
-    when is_binary(Str), is_binary(Sub)
+index_of({beamtalk_string, Str}, {beamtalk_string, Sub}) when
+    is_binary(Str), is_binary(Sub)
 ->
     StrGs = string:to_graphemes(Str),
     SubGs = string:to_graphemes(Sub),
     index_of_graphemes(StrGs, SubGs, 1);
-index_of(S, Sub) when is_binary(S), is_binary(Sub) -> index_of({beamtalk_string, S}, {beamtalk_string, Sub});
+index_of(S, Sub) when is_binary(S), is_binary(Sub) ->
+    index_of({beamtalk_string, S}, {beamtalk_string, Sub});
 index_of({beamtalk_string, _} = S, Sub) when is_binary(Sub) -> index_of(S, {beamtalk_string, Sub});
 index_of(S, {beamtalk_string, _} = Sub) when is_binary(S) -> index_of({beamtalk_string, S}, Sub);
 index_of(Str, _) ->
@@ -276,11 +283,12 @@ index_of(Str, _) ->
 
 -doc "Global `binary:split/3`, wrapping each part as a String (backs `split:`).".
 -spec split(t() | binary(), t() | binary()) -> [t()].
-split({beamtalk_string, Str}, {beamtalk_string, Sep})
-    when is_binary(Str), is_binary(Sep)
+split({beamtalk_string, Str}, {beamtalk_string, Sep}) when
+    is_binary(Str), is_binary(Sep)
 ->
     [beamtalk_primitive:string_from_binary(P) || P <- binary:split(Str, Sep, [global])];
-split(S, Sub) when is_binary(S), is_binary(Sub) -> split({beamtalk_string, S}, {beamtalk_string, Sub});
+split(S, Sub) when is_binary(S), is_binary(Sub) ->
+    split({beamtalk_string, S}, {beamtalk_string, Sub});
 split({beamtalk_string, _} = S, Sub) when is_binary(Sub) -> split(S, {beamtalk_string, Sub});
 split(S, {beamtalk_string, _} = Sub) when is_binary(S) -> split({beamtalk_string, S}, Sub);
 split(Str, _) ->
@@ -290,11 +298,12 @@ split(Str, _) ->
 -spec split_on(t() | binary(), t() | binary()) -> [t()].
 split_on({beamtalk_string, Str}, {beamtalk_string, <<>>}) when is_binary(Str) ->
     [beamtalk_primitive:string_from_binary(Str)];
-split_on({beamtalk_string, Str}, {beamtalk_string, Pattern})
-    when is_binary(Str), is_binary(Pattern)
+split_on({beamtalk_string, Str}, {beamtalk_string, Pattern}) when
+    is_binary(Str), is_binary(Pattern)
 ->
     [beamtalk_primitive:string_from_binary(P) || P <- binary:split(Str, Pattern, [global])];
-split_on(S, Sub) when is_binary(S), is_binary(Sub) -> split_on({beamtalk_string, S}, {beamtalk_string, Sub});
+split_on(S, Sub) when is_binary(S), is_binary(Sub) ->
+    split_on({beamtalk_string, S}, {beamtalk_string, Sub});
 split_on({beamtalk_string, _} = S, Sub) when is_binary(Sub) -> split_on(S, {beamtalk_string, Sub});
 split_on(S, {beamtalk_string, _} = Sub) when is_binary(S) -> split_on({beamtalk_string, S}, Sub);
 split_on(Str, _) ->

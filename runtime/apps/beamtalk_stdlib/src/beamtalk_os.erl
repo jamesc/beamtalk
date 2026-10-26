@@ -61,7 +61,8 @@ Behaves like `run:` but the caller controls the wall-clock deadline.
 Raises `#beamtalk_error{kind = timeout}` if the command has not exited
 within `TimeoutMs` milliseconds.
 """.
--spec 'run:timeout:'(beamtalk_string:t() | binary(), Timeout :: pos_integer()) -> beamtalk_string:t().
+-spec 'run:timeout:'(beamtalk_string:t() | binary(), Timeout :: pos_integer()) ->
+    beamtalk_string:t().
 'run:timeout:'(Cmd, TimeoutMs) when is_binary(Cmd) ->
     'run:timeout:'({beamtalk_string, Cmd}, TimeoutMs);
 'run:timeout:'({beamtalk_string, Cmd}, TimeoutMs) when

@@ -292,7 +292,8 @@ Symbol from Beamtalk and a String both work. Returns a list of 1-based line
 numbers (relative to the supplied source); returns `[]` if no senders are
 found or the source cannot be parsed.
 """.
--spec findSendersIn(binary() | beamtalk_string:t(), atom() | binary() | beamtalk_string:t()) -> [pos_integer()].
+-spec findSendersIn(binary() | beamtalk_string:t(), atom() | binary() | beamtalk_string:t()) ->
+    [pos_integer()].
 findSendersIn({beamtalk_string, B}, Sel) when is_binary(B) -> findSendersIn(B, Sel);
 findSendersIn(Src, {beamtalk_string, B}) when is_binary(B) -> findSendersIn(Src, B);
 findSendersIn(Source, Selector) when
@@ -518,7 +519,8 @@ logged and degraded to `[]` rather than aborting the caller's whole iteration.
 -spec find_field_access(binary(), atom() | binary(), readers | writers, atom()) ->
     [pos_integer()].
 find_field_access({beamtalk_string, B}, F, K, S) when is_binary(B) -> find_field_access(B, F, K, S);
-find_field_access(Src, {beamtalk_string, B}, K, S) when is_binary(B) -> find_field_access(Src, B, K, S);
+find_field_access(Src, {beamtalk_string, B}, K, S) when is_binary(B) ->
+    find_field_access(Src, B, K, S);
 find_field_access(Source, Field, Kind, Selector) when
     is_binary(Source), (is_atom(Field) orelse is_binary(Field))
 ->

@@ -484,8 +484,12 @@ as_string_invalid_utf8_test() ->
     ?assertEqual('Binary', Error#beamtalk_error.class),
     ?assertEqual(asString, Error#beamtalk_error.selector),
     ?assertEqual(#{offset => 0}, Error#beamtalk_error.details),
-    ?assertEqual({beamtalk_string, <<"Use asStringUnchecked to skip validation">>}, Error#beamtalk_error.hint),
-    ?assertEqual({beamtalk_string, <<"Invalid UTF-8 at byte offset 0">>}, Error#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Use asStringUnchecked to skip validation">>}, Error#beamtalk_error.hint
+    ),
+    ?assertEqual(
+        {beamtalk_string, <<"Invalid UTF-8 at byte offset 0">>}, Error#beamtalk_error.message
+    ).
 
 as_string_partial_utf8_test() ->
     %% Start of a 2-byte UTF-8 sequence without continuation
@@ -504,7 +508,9 @@ as_string_mixed_valid_invalid_test() ->
     #{'errReason' := #{error := Error}} = Result,
     ?assertEqual(asString, Error#beamtalk_error.selector),
     ?assertEqual(#{offset => 5}, Error#beamtalk_error.details),
-    ?assertEqual({beamtalk_string, <<"Invalid UTF-8 at byte offset 5">>}, Error#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Invalid UTF-8 at byte offset 5">>}, Error#beamtalk_error.message
+    ).
 
 as_string_incomplete_reports_offset_test() ->
     %% Truncated 3-byte sequence after 2 valid bytes — incomplete arm, offset 2.
@@ -594,7 +600,9 @@ print_string_invalid_utf8_test() ->
 
 print_string_with_quotes_test() ->
     %% Embedded quotes should be escaped
-    ?assertEqual({beamtalk_string, <<"\"say \\\"hi\\\"\"">>}, beamtalk_binary:print_string(<<"say \"hi\"">>)).
+    ?assertEqual(
+        {beamtalk_string, <<"\"say \\\"hi\\\"\"">>}, beamtalk_binary:print_string(<<"say \"hi\"">>)
+    ).
 
 print_string_with_backslash_test() ->
     ?assertEqual({beamtalk_string, <<"\"a\\\\b\"">>}, beamtalk_binary:print_string(<<"a\\b">>)).

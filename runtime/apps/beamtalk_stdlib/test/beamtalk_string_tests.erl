@@ -29,7 +29,9 @@ at_utf8_grapheme_test() ->
     ?assertEqual({beamtalk_string, <<"\x{E9}"/utf8>>}, beamtalk_string:at(<<"caf\x{E9}"/utf8>>, 4)).
 
 at_emoji_test() ->
-    ?assertEqual({beamtalk_string, <<"\x{1F44B}"/utf8>>}, beamtalk_string:at(<<"hi\x{1F44B}"/utf8>>, 3)).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{1F44B}"/utf8>>}, beamtalk_string:at(<<"hi\x{1F44B}"/utf8>>, 3)
+    ).
 
 at_out_of_bounds_test() ->
     ?assertError(
@@ -104,7 +106,9 @@ last_utf8_grapheme_test() ->
     ?assertEqual({beamtalk_string, <<"\x{E9}"/utf8>>}, beamtalk_string:last(<<"caf\x{E9}"/utf8>>)).
 
 last_emoji_test() ->
-    ?assertEqual({beamtalk_string, <<"\x{1F44B}"/utf8>>}, beamtalk_string:last(<<"hi\x{1F44B}"/utf8>>)).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{1F44B}"/utf8>>}, beamtalk_string:last(<<"hi\x{1F44B}"/utf8>>)
+    ).
 
 first_empty_string_test() ->
     ?assertError(
@@ -143,7 +147,9 @@ capitalize_single_char_test() ->
     ?assertEqual({beamtalk_string, <<"A">>}, beamtalk_string:capitalize(<<"a">>)).
 
 capitalize_utf8_test() ->
-    ?assertEqual({beamtalk_string, <<"\x{DC}ber"/utf8>>}, beamtalk_string:capitalize(<<"\x{FC}ber"/utf8>>)).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{DC}ber"/utf8>>}, beamtalk_string:capitalize(<<"\x{FC}ber"/utf8>>)
+    ).
 
 %%% ============================================================================
 %%% reverse/1
@@ -159,7 +165,9 @@ reverse_single_char_test() ->
     ?assertEqual({beamtalk_string, <<"a">>}, beamtalk_string:reverse(<<"a">>)).
 
 reverse_utf8_test() ->
-    ?assertEqual({beamtalk_string, <<"\x{E9}fac"/utf8>>}, beamtalk_string:reverse(<<"caf\x{E9}"/utf8>>)).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{E9}fac"/utf8>>}, beamtalk_string:reverse(<<"caf\x{E9}"/utf8>>)
+    ).
 
 %%% ============================================================================
 %%% includes/2
@@ -282,7 +290,13 @@ repeat_one_test() ->
 
 as_list_simple_test() ->
     ?assertEqual(
-        [{beamtalk_string, <<"h">>}, {beamtalk_string, <<"e">>}, {beamtalk_string, <<"l">>}, {beamtalk_string, <<"l">>}, {beamtalk_string, <<"o">>}],
+        [
+            {beamtalk_string, <<"h">>},
+            {beamtalk_string, <<"e">>},
+            {beamtalk_string, <<"l">>},
+            {beamtalk_string, <<"l">>},
+            {beamtalk_string, <<"o">>}
+        ],
         beamtalk_string:as_list(<<"hello">>)
     ).
 
@@ -291,7 +305,12 @@ as_list_empty_test() ->
 
 as_list_utf8_test() ->
     ?assertEqual(
-        [{beamtalk_string, <<"c">>}, {beamtalk_string, <<"a">>}, {beamtalk_string, <<"f">>}, {beamtalk_string, <<"\x{E9}"/utf8>>}],
+        [
+            {beamtalk_string, <<"c">>},
+            {beamtalk_string, <<"a">>},
+            {beamtalk_string, <<"f">>},
+            {beamtalk_string, <<"\x{E9}"/utf8>>}
+        ],
         beamtalk_string:as_list(<<"caf\x{E9}"/utf8>>)
     ).
 
@@ -330,7 +349,11 @@ collect_uppercase_test() ->
         {beamtalk_string, <<"HI">>},
         beamtalk_string:collect(
             <<"hi">>,
-            fun({beamtalk_string, G}) -> beamtalk_primitive:string_from_binary(unicode:characters_to_binary(string:uppercase(G))) end
+            fun({beamtalk_string, G}) ->
+                beamtalk_primitive:string_from_binary(
+                    unicode:characters_to_binary(string:uppercase(G))
+                )
+            end
         )
     ).
 
@@ -346,8 +369,13 @@ collect_empty_test() ->
 
 select_vowels_test() ->
     %% BT-4173: iteration yields tagged grapheme Strings.
-    Vowels = [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"e">>}, {beamtalk_string, <<"i">>},
-        {beamtalk_string, <<"o">>}, {beamtalk_string, <<"u">>}],
+    Vowels = [
+        {beamtalk_string, <<"a">>},
+        {beamtalk_string, <<"e">>},
+        {beamtalk_string, <<"i">>},
+        {beamtalk_string, <<"o">>},
+        {beamtalk_string, <<"u">>}
+    ],
     ?assertEqual(
         {beamtalk_string, <<"eoo">>},
         beamtalk_string:select(
@@ -374,8 +402,13 @@ select_none_test() ->
 
 reject_vowels_test() ->
     %% BT-4173: iteration yields tagged grapheme Strings.
-    Vowels = [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"e">>}, {beamtalk_string, <<"i">>},
-        {beamtalk_string, <<"o">>}, {beamtalk_string, <<"u">>}],
+    Vowels = [
+        {beamtalk_string, <<"a">>},
+        {beamtalk_string, <<"e">>},
+        {beamtalk_string, <<"i">>},
+        {beamtalk_string, <<"o">>},
+        {beamtalk_string, <<"u">>}
+    ],
     ?assertEqual(
         {beamtalk_string, <<"hll wrld">>},
         beamtalk_string:reject(
@@ -608,7 +641,9 @@ from_code_points_empty_test() ->
     ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:from_code_points([])).
 
 from_code_points_multibyte_test() ->
-    ?assertEqual({beamtalk_string, <<"\x{20AC}\x{A3}"/utf8>>}, beamtalk_string:from_code_points([8364, 163])).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{20AC}\x{A3}"/utf8>>}, beamtalk_string:from_code_points([8364, 163])
+    ).
 
 from_code_point_non_integer_raises_test() ->
     ?assertError(
@@ -676,13 +711,20 @@ from_code_points_surrogate_in_list_raises_test() ->
 %%% ============================================================================
 
 join_basic_test() ->
-    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_string:join([{beamtalk_string, <<"he">>}, {beamtalk_string, <<"ll">>}, {beamtalk_string, <<"o">>}])).
+    ?assertEqual(
+        {beamtalk_string, <<"hello">>},
+        beamtalk_string:join([
+            {beamtalk_string, <<"he">>}, {beamtalk_string, <<"ll">>}, {beamtalk_string, <<"o">>}
+        ])
+    ).
 
 join_empty_test() ->
     ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:join([])).
 
 join_single_test() ->
-    ?assertEqual({beamtalk_string, <<"abc">>}, beamtalk_string:join([{beamtalk_string, <<"abc">>}])).
+    ?assertEqual(
+        {beamtalk_string, <<"abc">>}, beamtalk_string:join([{beamtalk_string, <<"abc">>}])
+    ).
 
 %%% ============================================================================
 %%% from_iolist/1

@@ -172,7 +172,9 @@ matches_regex_options_type_error_test() ->
 %%% ============================================================================
 
 first_match_string_pattern_found_test() ->
-    ?assertEqual({beamtalk_string, <<"123">>}, beamtalk_regex:first_match(<<"abc123def">>, <<"\\d+">>)).
+    ?assertEqual(
+        {beamtalk_string, <<"123">>}, beamtalk_regex:first_match(<<"abc123def">>, <<"\\d+">>)
+    ).
 
 first_match_string_pattern_not_found_test() ->
     ?assertEqual(nil, beamtalk_regex:first_match(<<"abc">>, <<"\\d+">>)).
@@ -212,7 +214,10 @@ all_matches_no_match_test() ->
 
 all_matches_compiled_test() ->
     R = make_regex(<<"\\d+">>),
-    ?assertEqual([{beamtalk_string, <<"123">>}, {beamtalk_string, <<"456">>}], beamtalk_regex:all_matches(<<"123abc456">>, R)).
+    ?assertEqual(
+        [{beamtalk_string, <<"123">>}, {beamtalk_string, <<"456">>}],
+        beamtalk_regex:all_matches(<<"123abc456">>, R)
+    ).
 
 all_matches_invalid_pattern_test() ->
     ?assertError(
@@ -238,10 +243,15 @@ replace_regex_string_pattern_test() ->
 
 replace_regex_compiled_test() ->
     R = make_regex(<<"\\d+">>),
-    ?assertEqual({beamtalk_string, <<"abc_def">>}, beamtalk_regex:replace_regex(<<"abc123def">>, R, <<"_">>)).
+    ?assertEqual(
+        {beamtalk_string, <<"abc_def">>}, beamtalk_regex:replace_regex(<<"abc123def">>, R, <<"_">>)
+    ).
 
 replace_regex_no_match_test() ->
-    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_regex:replace_regex(<<"hello">>, <<"\\d+">>, <<"X">>)).
+    ?assertEqual(
+        {beamtalk_string, <<"hello">>},
+        beamtalk_regex:replace_regex(<<"hello">>, <<"\\d+">>, <<"X">>)
+    ).
 
 replace_regex_invalid_pattern_test() ->
     ?assertError(
@@ -268,7 +278,8 @@ replace_all_regex_string_pattern_test() ->
 replace_all_regex_compiled_test() ->
     R = make_regex(<<"[aeiou]">>),
     ?assertEqual(
-        {beamtalk_string, <<"h_ll_ w_rld">>}, beamtalk_regex:replace_all_regex(<<"hello world">>, R, <<"_">>)
+        {beamtalk_string, <<"h_ll_ w_rld">>},
+        beamtalk_regex:replace_all_regex(<<"hello world">>, R, <<"_">>)
     ).
 
 replace_all_regex_invalid_pattern_test() ->

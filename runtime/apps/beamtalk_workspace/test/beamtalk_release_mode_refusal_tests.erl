@@ -123,9 +123,12 @@ direct_compile_entry_points_refused_without_compiler_test() ->
 eval_refusal_message_names_release_mode_test() ->
     with_capabilities(?RELEASE, fun() ->
         {error, Err} = dispatch(<<"eval">>, #{<<"code">> => <<"3 + 4">>}),
-        ?assertNotEqual(nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"OTP release">>)),
         ?assertNotEqual(
-            nomatch, binary:match(element(2, Err#beamtalk_error.hint), <<"include-compiler = true">>)
+            nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"OTP release">>)
+        ),
+        ?assertNotEqual(
+            nomatch,
+            binary:match(element(2, Err#beamtalk_error.hint), <<"include-compiler = true">>)
         )
     end).
 

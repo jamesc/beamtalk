@@ -89,7 +89,9 @@ do_handle_term(<<"export-traces">>, Params, _Msg, _SessionPid) ->
                 kind = io_error,
                 class = 'Tracing',
                 message = beamtalk_primitive:string_from_binary(ErrMsg),
-                hint = beamtalk_primitive:string_from_binary(<<"Check file path and permissions.">>),
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"Check file path and permissions.">>
+                ),
                 details = #{}
             })
     end.
@@ -149,10 +151,14 @@ build_trace_filter_opts(Params) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
-                message = beamtalk_primitive:string_from_binary(iolist_to_binary(
-                    io_lib:format("Invalid min_duration_ns: ~p", [BadNs])
-                )),
-                hint = beamtalk_primitive:string_from_binary(<<"min_duration_ns must be a non-negative integer (nanoseconds).">>),
+                message = beamtalk_primitive:string_from_binary(
+                    iolist_to_binary(
+                        io_lib:format("Invalid min_duration_ns: ~p", [BadNs])
+                    )
+                ),
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"min_duration_ns must be a non-negative integer (nanoseconds).">>
+                ),
                 details = #{}
             })
     end.
@@ -214,10 +220,14 @@ parse_selector(SelectorBin) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
-                message = beamtalk_primitive:string_from_binary(iolist_to_binary(
-                    [<<"Unknown selector: ">>, SelectorBin]
-                )),
-                hint = beamtalk_primitive:string_from_binary(<<"The selector must match an existing method name.">>),
+                message = beamtalk_primitive:string_from_binary(
+                    iolist_to_binary(
+                        [<<"Unknown selector: ">>, SelectorBin]
+                    )
+                ),
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"The selector must match an existing method name.">>
+                ),
                 details = #{}
             })
     end.
@@ -236,10 +246,14 @@ parse_class(ClassBin) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
-                message = beamtalk_primitive:string_from_binary(iolist_to_binary(
-                    [<<"Unknown class: ">>, ClassBin]
-                )),
-                hint = beamtalk_primitive:string_from_binary(<<"The class must match an existing actor class name.">>),
+                message = beamtalk_primitive:string_from_binary(
+                    iolist_to_binary(
+                        [<<"Unknown class: ">>, ClassBin]
+                    )
+                ),
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"The class must match an existing actor class name.">>
+                ),
                 details = #{}
             })
     end.
@@ -260,9 +274,11 @@ parse_outcome(OutcomeBin) ->
     error(#beamtalk_error{
         kind = invalid_argument,
         class = 'Tracing',
-        message = beamtalk_primitive:string_from_binary(iolist_to_binary(
-            [<<"Invalid outcome: ">>, OutcomeBin]
-        )),
+        message = beamtalk_primitive:string_from_binary(
+            iolist_to_binary(
+                [<<"Invalid outcome: ">>, OutcomeBin]
+            )
+        ),
         hint = beamtalk_primitive:string_from_binary(<<"Valid outcomes are: ok, error, timeout.">>),
         details = #{}
     }).

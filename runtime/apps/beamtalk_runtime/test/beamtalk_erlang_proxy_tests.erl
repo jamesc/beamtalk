@@ -1280,7 +1280,8 @@ direct_call_missing_function_error_unchanged_test() ->
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             ?assertEqual(nonexistent_xyz, Inner#beamtalk_error.selector),
             ?assertEqual(
-                {beamtalk_string, <<"This Erlang function does not exist. Check spelling and arity.">>},
+                {beamtalk_string,
+                    <<"This Erlang function does not exist. Check spelling and arity.">>},
                 Inner#beamtalk_error.hint
             ),
             ?assertEqual(

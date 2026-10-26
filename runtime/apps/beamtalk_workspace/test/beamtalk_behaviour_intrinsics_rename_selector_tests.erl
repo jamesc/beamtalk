@@ -585,8 +585,13 @@ rename_selector_collision(_Fixture) ->
         } ->
             [
                 ?_assertEqual(selector_already_exists, Kind),
-                ?_assert(binary:match(element(2, Message), <<"already defines #bar locally">>) =/= nomatch),
-                ?_assert(binary:match(element(2, Message), <<"refusing to overwrite">>) =/= nomatch),
+                ?_assert(
+                    binary:match(element(2, Message), <<"already defines #bar locally">>) =/=
+                        nomatch
+                ),
+                ?_assert(
+                    binary:match(element(2, Message), <<"refusing to overwrite">>) =/= nomatch
+                ),
                 ?_assert(binary:match(element(2, Hint), <<"removeSelector: #bar">>) =/= nomatch)
             ]
     end.
@@ -710,7 +715,8 @@ rename_selector_inherited_target_collision(_Fixture) ->
             [
                 ?_assertEqual(selector_already_exists, Kind),
                 ?_assert(
-                    binary:match(element(2, Message), <<"Bt3279InheritedTCollisionSub">>) =/= nomatch
+                    binary:match(element(2, Message), <<"Bt3279InheritedTCollisionSub">>) =/=
+                        nomatch
                 ),
                 %% Nothing was mutated: the refusal happens before any rewrite.
                 ?_assertEqual(

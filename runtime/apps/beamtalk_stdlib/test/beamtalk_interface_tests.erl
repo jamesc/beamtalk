@@ -602,7 +602,10 @@ live_registry_test_() ->
 
 make_method_not_found_error_quotes_selector_test() ->
     Error = beamtalk_interface:make_method_not_found_error('Counter', increment),
-    ?assertEqual({beamtalk_string, <<"Counter does not understand 'increment'">>}, Error#beamtalk_error.message),
+    ?assertEqual(
+        {beamtalk_string, <<"Counter does not understand 'increment'">>},
+        Error#beamtalk_error.message
+    ),
     ?assertEqual(increment, Error#beamtalk_error.selector),
     ?assertEqual(
         {beamtalk_string, <<"Use Beamtalk help: Counter to see available methods.">>},

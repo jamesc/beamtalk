@@ -1057,7 +1057,10 @@ class_signal_kind_sets_kind_class_selector_hint_test() ->
             ?assertEqual(index_out_of_bounds, Inner#beamtalk_error.kind),
             ?assertEqual('ListZipper', Inner#beamtalk_error.class),
             ?assertEqual('left', Inner#beamtalk_error.selector),
-            ?assertEqual({beamtalk_string, <<"already at the start of the sequence">>}, Inner#beamtalk_error.hint)
+            ?assertEqual(
+                {beamtalk_string, <<"already at the start of the sequence">>},
+                Inner#beamtalk_error.hint
+            )
     end.
 
 class_signal_kind_supports_any_named_kind_test() ->

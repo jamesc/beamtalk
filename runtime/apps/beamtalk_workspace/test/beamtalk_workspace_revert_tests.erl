@@ -1033,7 +1033,8 @@ revert_remove_method_entry_on_eval_defined_class_has_no_source_to_recover_from(#
         ?_assert(
             case RevertResult of
                 {error, #beamtalk_error{message = Msg}} ->
-                    binary:match(element(2, Msg), <<"prior body could not be recovered">>) =/= nomatch;
+                    binary:match(element(2, Msg), <<"prior body could not be recovered">>) =/=
+                        nomatch;
                 _ ->
                     false
             end
