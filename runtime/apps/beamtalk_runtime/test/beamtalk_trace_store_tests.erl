@@ -2654,3 +2654,68 @@ free_slots_upgrade_recreates_unsharded_table_test_() ->
                 P ! stop
             end)}
     end}.
+
+%%====================================================================
+%% Test: dead-pid sweep with remote pids and orphaned rows (BT-4197)
+%%====================================================================
+
+%% A pid of a node that is not this one, built from the external term format.
+remote_pid() ->
+    Node = <<"bt4197@nowhere">>,
+    NodeLen = byte_size(Node),
+    binary_to_term(
+        <<131, 88, 119, NodeLen, Node/binary, 1:32, 0:32, 1:32>>
+    ).
+
+pid_row_count() ->
+    ets:info(beamtalk_agg_pid, size).
+
+sweep_and_sync() ->
+    beamtalk_trace_store ! sweep_eviction,
+    %% A call is served after the sweep message, so the sweep has finished.
+    _ = sys:get_state(beamtalk_trace_store),
+    ok.
+
+sweep_remote_pid_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                Remote = remote_pid(),
+                ?assertNotEqual(node(), node(Remote)),
+                %% Remote pids get no per-actor row (class aggregate only).
+                beamtalk_trace_store:record_dispatch(Remote, ping, 10, ok, sync, 'Counter'),
+                ?assertEqual(0, pid_row_count()),
+                %% Even a remote row that got in (older data) must not crash the sweep.
+                Ref = atomics:new(8, [{signed, true}]),
+                true = ets:insert(beamtalk_agg_pid, {{Remote, ping}, Ref, 1, 'Counter'}),
+                true = ets:insert(beamtalk_agg_pid_keys, {Remote, ping}),
+                Store = whereis(beamtalk_trace_store),
+                sweep_and_sync(),
+                ?assertEqual(Store, whereis(beamtalk_trace_store)),
+                ?assert(is_process_alive(Store))
+            end)
+        ]
+    end}.
+
+sweep_reclaims_row_without_keys_entry_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                Dead = spawn(fun() -> ok end),
+                Mon = erlang:monitor(process, Dead),
+                receive
+                    {'DOWN', Mon, process, Dead, _} -> ok
+                end,
+                beamtalk_trace_store:record_dispatch(Dead, ping, 10, ok, sync, 'Counter'),
+                ?assertEqual(1, pid_row_count()),
+                %% Simulate the clear/0 race: row present, keys entry gone.
+                true = ets:delete_all_objects(beamtalk_agg_pid_keys),
+                sweep_and_sync(),
+                ?assertEqual(0, pid_row_count())
+            end)
+        ]
+    end}.
