@@ -100,10 +100,10 @@
     class :: atom(),
     % method that failed
     selector :: atom() | undefined,
-    % human-readable explanation
-    message :: binary(),
-    % actionable suggestion
-    hint :: binary() | undefined,
+    % human-readable explanation (a tagged String value — BT-4170)
+    message :: {beamtalk_string, binary()},
+    % actionable suggestion (a tagged String value — BT-4170)
+    hint :: {beamtalk_string, binary()} | undefined,
     % additional context (arity, expected types, etc.)
     details :: map()
 }).

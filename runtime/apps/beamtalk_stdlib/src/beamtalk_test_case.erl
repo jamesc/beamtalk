@@ -860,7 +860,12 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                         beamtalk_exception_handler:ensure_wrapped(
                             error, undef, TestST
                         ),
-                    {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)};
+                    %% BT-4173: message is a tagged String — unwrap like the
+                    %% sibling clauses (ensure_test_context renders bytes).
+                    {fail, MethodName,
+                        ensure_test_context(
+                            beamtalk_text:to_binary(FailMsg), Module, MethodName, TestST
+                        )};
                 error:TestReason:TestST ->
                     FailMsg = format_test_error(error, TestReason, TestST),
                     {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)};

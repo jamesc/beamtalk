@@ -405,11 +405,11 @@ handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
                 kind = argument_error,
                 class = 'Object',
                 selector = undefined,
-                message = iolist_to_binary([
+                message = beamtalk_primitive:string_from_binary(iolist_to_binary([
                     <<"Unknown filter: '">>,
                     BadFilter,
                     <<"'. Use 'stdlib', 'user', or a class name like 'Value' or 'Actor'.">>
-                ]),
+                ])),
                 hint = undefined,
                 details = #{}
             },
@@ -424,10 +424,10 @@ handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
                             kind = runtime_error,
                             class = 'Object',
                             selector = undefined,
-                            message = iolist_to_binary(
+                            message = beamtalk_primitive:string_from_binary(iolist_to_binary(
                                 io_lib:format("Failed to list classes: ~p", [AllClassesErr])
-                            ),
-                            hint = <<"Is the runtime started?">>,
+                            )),
+                            hint = beamtalk_primitive:string_from_binary(<<"Is the runtime started?">>),
                             details = #{}
                         }}
                 end

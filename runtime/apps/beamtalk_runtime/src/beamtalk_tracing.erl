@@ -128,10 +128,10 @@ setContext(Other) ->
         kind = type_error,
         class = 'Tracing',
         selector = 'setContext:',
-        message = iolist_to_binary(
+        message = beamtalk_primitive:string_from_binary(iolist_to_binary(
             io_lib:format("setContext: requires a Dictionary, got: ~p", [Other])
-        ),
-        hint = <<"Pass a dictionary, e.g. Tracing setContext: #{#workflowId => \"wf-123\"}">>,
+        )),
+        hint = beamtalk_primitive:string_from_binary(<<"Pass a dictionary, e.g. Tracing setContext: #{#workflowId => \"wf-123\"}">>),
         details = #{}
     }).
 
@@ -332,10 +332,10 @@ extract_pid(Other) ->
         kind = type_error,
         class = 'Tracing',
         selector = undefined,
-        message = iolist_to_binary(
+        message = beamtalk_primitive:string_from_binary(iolist_to_binary(
             io_lib:format("Expected an actor or pid, got: ~p", [Other])
-        ),
-        hint = <<"Pass an actor instance, e.g. Tracing tracesFor: myActor">>,
+        )),
+        hint = beamtalk_primitive:string_from_binary(<<"Pass an actor instance, e.g. Tracing tracesFor: myActor">>),
         details = #{}
     }).
 
@@ -375,9 +375,9 @@ positive_integer_error(Selector, Value, Hint) ->
         kind = type_error,
         class = 'Tracing',
         selector = Selector,
-        message = iolist_to_binary(
+        message = beamtalk_primitive:string_from_binary(iolist_to_binary(
             io_lib:format("~s requires a positive Integer, got: ~p", [atom_to_list(Selector), Value])
-        ),
-        hint = Hint,
+        )),
+        hint = beamtalk_primitive:string_from_binary(Hint),
         details = #{}
     }).
