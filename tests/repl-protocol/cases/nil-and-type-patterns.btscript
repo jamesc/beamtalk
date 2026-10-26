@@ -26,17 +26,17 @@ workspaceRoot match: [
   s :: String -> s;
   _ -> "other"
 ]
-// => default_root
+// => "default_root"
 
 configuredRoot := "/custom/workspace"
-// => /custom/workspace
+// => "/custom/workspace"
 
 configuredRoot match: [
   nil -> "default_root";
   s :: String -> s;
   _ -> "other"
 ]
-// => /custom/workspace
+// => "/custom/workspace"
 
 // ===========================================================================
 // `nil` + `items :: List` dispatch — the `renderForBody:`-shaped motivating
@@ -51,7 +51,7 @@ coll match: [
   items :: List -> items size;
   _ -> "other"
 ]
-// => none
+// => "none"
 
 populatedColl := #(1, 2, 3)
 // => [1,2,3]

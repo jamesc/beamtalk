@@ -28,7 +28,7 @@ bev class name
 
 // The value field is populated correctly
 bev value
-// => cold
+// => "cold"
 
 // ===========================================================================
 // COFFEE — INHERITED CLASS METHOD (wrap: from Beverage)
@@ -45,8 +45,8 @@ cof class name
 
 // Inherited value field is accessible on the Coffee instance
 cof value
-// => hot
+// => "hot"
 
 // Coffee-specific flavor field has its default value
 cof flavor
-// => espresso
+// => "espresso"

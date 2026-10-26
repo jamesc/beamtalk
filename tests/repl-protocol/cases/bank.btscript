@@ -53,7 +53,7 @@ acct setOwner: "Test"
 // => _
 
 acct getOwner
-// => Test
+// => "Test"
 
 // ===========================================================================
 // ACCOUNT — OVERDRAFT PROTECTION
@@ -87,13 +87,13 @@ txn getAmount
 // => 100
 
 txn getFrom
-// => Alice
+// => "Alice"
 
 txn getTo
-// => Bob
+// => "Bob"
 
 txn getStatus
-// => completed
+// => "completed"
 
 // ===========================================================================
 // BANK — REGISTRY AND FACTORY
@@ -119,10 +119,10 @@ bob := bank accountFor: "Bob"
 
 // Verify owner names
 alice getOwner
-// => Alice
+// => "Alice"
 
 bob getOwner
-// => Bob
+// => "Bob"
 
 // Unknown account raises an error
 bank accountFor: "Nobody"

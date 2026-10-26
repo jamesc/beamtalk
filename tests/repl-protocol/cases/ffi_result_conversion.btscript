@@ -33,7 +33,7 @@ result ok
 // => true
 
 result value
-// => hello ffi
+// => "hello ffi"
 
 // ===========================================================================
 // ERROR PATH — file:read_file/1 returns {error, enoent} → Result error:

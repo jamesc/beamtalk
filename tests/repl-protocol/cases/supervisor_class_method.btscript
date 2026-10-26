@@ -30,7 +30,7 @@ cmChild := (cmSup which: E2EClassMethodActor) unwrap
 
 // The class method combined #test + 99 into "test:99"
 cmChild label
-// => test:99
+// => "test:99"
 
 // ===========================================================================
 // CLASS METHOD SUPERVISION — cleanup

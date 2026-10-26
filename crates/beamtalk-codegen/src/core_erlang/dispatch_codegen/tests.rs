@@ -668,11 +668,11 @@ fn character_value_call(arg: Expression) -> Expression {
 
 /// Builds `[body]` — a zero-parameter block literal answering `body`.
 fn block_answering(body: Expression) -> Expression {
-    Expression::Block(Block {
-        parameters: vec![],
-        body: vec![ExpressionStatement::bare(body)],
-        span: s(),
-    })
+    Expression::Block(Block::new(
+        vec![],
+        vec![ExpressionStatement::bare(body)],
+        s(),
+    ))
 }
 
 /// Builds `<condition> ifTrue: <true_branch> ifFalse: <false_branch>`.
@@ -779,14 +779,14 @@ fn if_true_if_false_recurses_through_nested_branches() {
     )));
 
     // Multi-statement branch: the last statement decides.
-    let multi = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![
+    let multi = Expression::Block(Block::new(
+        vec![],
+        vec![
             ExpressionStatement::bare(int_lit(99)),
             ExpressionStatement::bare(Expression::Literal(Literal::Character('C'), s())),
         ],
-        span: s(),
-    });
+        s(),
+    ));
     assert!(is_character_typed_receiver(&if_true_if_false(
         bool_ident("true"),
         multi,
@@ -819,11 +819,7 @@ fn if_true_if_false_recurses_through_nested_branches() {
 #[test]
 fn if_true_if_false_rejects_untyped_shapes() {
     // Empty taken branch answers nil.
-    let empty = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![],
-        span: s(),
-    });
+    let empty = Expression::Block(Block::new(vec![], vec![], s()));
     assert!(!is_character_typed_receiver(&if_true_if_false(
         bool_ident("true"),
         empty,

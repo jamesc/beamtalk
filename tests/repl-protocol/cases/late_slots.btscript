@@ -54,19 +54,19 @@ typed Actor subclass: LateSlotsReplActor
   state: count :: Integer = 0
   late classState: current :: Integer
   getProc -> Integer => self.proc
-// => LateSlotsReplActor
+// => "LateSlotsReplActor"
 
 LateSlotsReplActor >> setProc: value :: Integer -> Integer => self.proc := value
-// => LateSlotsReplActor>>setProc:
+// => "LateSlotsReplActor>>setProc:"
 
 LateSlotsReplActor >> getCount -> Integer => self.count
-// => LateSlotsReplActor>>getCount
+// => "LateSlotsReplActor>>getCount"
 
 LateSlotsReplActor class >> getCurrent -> Integer => self.current
-// => LateSlotsReplActor>>getCurrent
+// => "LateSlotsReplActor>>getCurrent"
 
 LateSlotsReplActor class >> setCurrent: value :: Integer -> Integer => self.current := value
-// => LateSlotsReplActor>>setCurrent:
+// => "LateSlotsReplActor>>setCurrent:"
 
 // ===========================================================================
 // SPAWN + READ BEFORE ASSIGN — `hasField:` is false, the direct read raises
@@ -109,7 +109,7 @@ a hasField: #proc
 // ===========================================================================
 
 (Erlang beamtalk_object_printer) structural_from_state: ((Erlang sys) get_state: a pid)
-// => LateSlotsReplActor(count: 0, proc: <unassigned>)
+// => "LateSlotsReplActor(count: 0, proc: <unassigned>)"
 
 // ===========================================================================
 // ASSIGN — the read now succeeds, and `hasField:` flips to true.
@@ -126,7 +126,7 @@ a hasField: #proc
 
 // Assigned — `proc` is a present key now, so it renders its real value.
 (Erlang beamtalk_object_printer) structural_from_state: ((Erlang sys) get_state: a pid)
-// => LateSlotsReplActor(count: 0, proc: 42)
+// => "LateSlotsReplActor(count: 0, proc: 42)"
 
 // ===========================================================================
 // fieldKinds — `#eager` / `#late`, keyed per declared slot.
@@ -154,7 +154,7 @@ a hasField: #proc
 // clearField: is maps:remove/2 (beamtalk_reflection:clear_field/2) — the
 // slot renders `<unassigned>` again, exactly as before the first assignment.
 (Erlang beamtalk_object_printer) structural_from_state: ((Erlang sys) get_state: a pid)
-// => LateSlotsReplActor(count: 0, proc: <unassigned>)
+// => "LateSlotsReplActor(count: 0, proc: <unassigned>)"
 
 a setProc: 7
 // => 7
@@ -226,22 +226,22 @@ typed Actor subclass: LateSlotsReplActor
   state: extra :: Integer = 11
   late classState: current :: Integer
   getProc -> Integer => self.proc
-// => LateSlotsReplActor
+// => "LateSlotsReplActor"
 
 LateSlotsReplActor >> setProc: value :: Integer -> Integer => self.proc := value
-// => LateSlotsReplActor>>setProc:
+// => "LateSlotsReplActor>>setProc:"
 
 LateSlotsReplActor >> getCount -> Integer => self.count
-// => LateSlotsReplActor>>getCount
+// => "LateSlotsReplActor>>getCount"
 
 LateSlotsReplActor >> getExtra -> Integer => self.extra
-// => LateSlotsReplActor>>getExtra
+// => "LateSlotsReplActor>>getExtra"
 
 LateSlotsReplActor class >> getCurrent -> Integer => self.current
-// => LateSlotsReplActor>>getCurrent
+// => "LateSlotsReplActor>>getCurrent"
 
 LateSlotsReplActor class >> setCurrent: value :: Integer -> Integer => self.current := value
-// => LateSlotsReplActor>>setCurrent:
+// => "LateSlotsReplActor>>setCurrent:"
 
 LateSlotsReplActor shapeVersion
 // => 2
@@ -281,22 +281,22 @@ typed Actor subclass: LateSlotsReplActor
   state: extra :: Integer = 11
   late classState: current :: Integer
   getProc -> Integer => self.proc
-// => LateSlotsReplActor
+// => "LateSlotsReplActor"
 
 LateSlotsReplActor >> setProc: value :: Integer -> Integer => self.proc := value
-// => LateSlotsReplActor>>setProc:
+// => "LateSlotsReplActor>>setProc:"
 
 LateSlotsReplActor >> getCount -> Integer => self.count
-// => LateSlotsReplActor>>getCount
+// => "LateSlotsReplActor>>getCount"
 
 LateSlotsReplActor >> getExtra -> Integer => self.extra
-// => LateSlotsReplActor>>getExtra
+// => "LateSlotsReplActor>>getExtra"
 
 LateSlotsReplActor class >> getCurrent -> Integer => self.current
-// => LateSlotsReplActor>>getCurrent
+// => "LateSlotsReplActor>>getCurrent"
 
 LateSlotsReplActor class >> setCurrent: value :: Integer -> Integer => self.current := value
-// => LateSlotsReplActor>>setCurrent:
+// => "LateSlotsReplActor>>setCurrent:"
 
 LateSlotsReplActor shapeVersion
 // => 3

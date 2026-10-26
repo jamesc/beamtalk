@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4122 item 5: the host actor. Runs a guest's guarded block; an `on:do:`
+// in that block runs away from home and must not roll back `m`.
+
+Actor subclass: ClosureCellRestoreHost
+  state: m = 0
+
+  m => self.m
+
+  commit => self.m := self.m + 1
+
+  run: aBlock => aBlock value

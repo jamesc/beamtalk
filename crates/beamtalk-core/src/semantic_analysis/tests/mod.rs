@@ -12,6 +12,7 @@
 //! - [`local_threading`] — ADR 0131 §6 and Phase 0 outer-local threading
 //!   errors (BT-3745)
 //! - [`match_arm_analysis`] — `match:` arm pattern binding and scoping
+//! - [`match_arm_block`] — BT-4028 `match-arm-block` warning wiring
 //! - [`class_hierarchy_and_method_validators`] — `ClassHierarchy` and
 //!   reflection-method validator integration
 //! - [`self_misuse_and_unused_variables`] — `self`-misuse and unused-
@@ -58,6 +59,7 @@ mod flattened_provision_diagnostics;
 mod hierarchy_injection_and_singleton_types;
 mod local_threading;
 mod match_arm_analysis;
+mod match_arm_block;
 mod self_misuse_and_unused_variables;
 mod typed_params_knowledge_scope_and_cross_file;
 mod workspace_bindings_protocols_and_aliases;

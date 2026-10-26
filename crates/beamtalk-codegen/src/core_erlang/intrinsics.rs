@@ -233,7 +233,9 @@ impl CoreErlangGenerator {
         if let Expression::Identifier(id) = receiver {
             if self.tier2_local_vars.contains(id.name.as_str()) {
                 let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
-                return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
+                return Ok(Some(self.close_tier2_value_subexpr_doc(
+                    receiver, selector, arguments, tuple_doc,
+                )));
             }
         }
         // BT-3881: a block literal of another arity is applied, never
@@ -448,7 +450,9 @@ impl CoreErlangGenerator {
         if let Expression::Identifier(id) = receiver {
             if self.tier2_local_vars.contains(id.name.as_str()) {
                 let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
-                return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
+                return Ok(Some(self.close_tier2_value_subexpr_doc(
+                    receiver, selector, arguments, tuple_doc,
+                )));
             }
         }
         // BT-3881: a block literal of another arity is applied, never
@@ -1063,7 +1067,30 @@ impl CoreErlangGenerator {
     /// `generate_tier2_value_call_doc` at the top-level method-body/
     /// conditional-branch/loop-body sequencers — this fallback only applies
     /// where a plain value, not a state-threading statement, is expected.
-    fn close_tier2_value_subexpr_doc(&mut self, tuple_doc: Document<'static>) -> Document<'static> {
+    fn close_tier2_value_subexpr_doc(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        tuple_doc: Document<'static>,
+    ) -> Document<'static> {
+        // BT-4122: an operand Tier 2 call is noted like any other
+        // user-code send — a no-op inside its own window (which every
+        // operand Tier 2 call has), the unbracketed gap under the
+        // no-brackets fault, where nothing wraps it.
+        self.note_send(receiver, selector, arguments, false, receiver.span());
+        // A may-write call merges into its bracket: hand the raw tuple
+        // through (the `synced_call_value` wrap binds element 1 as the
+        // value, reloads the merged state the fun's exit stored, and
+        // rebinds the call's locals). Anything else keeps the legacy
+        // drop — a locals-only call, a call in a cell closure (no
+        // bracket wraps there; the fun's exit store still persists its
+        // field writes through the cell), or the no-brackets fault.
+        if let Expression::Identifier(id) = receiver
+            && self.tier2_operand_merges(id.name.as_str())
+        {
+            return tuple_doc;
+        }
         let tuple_var = self.fresh_temp_var("T2SubTuple");
         docvec![
             "let ",
@@ -3168,43 +3195,43 @@ mod tests {
 
     #[test]
     fn test_validate_if_not_nil_block_zero_args() {
-        let block = Expression::Block(Block {
-            parameters: vec![],
-            body: vec![ExpressionStatement::bare(Expression::Literal(
+        let block = Expression::Block(Block::new(
+            vec![],
+            vec![ExpressionStatement::bare(Expression::Literal(
                 Literal::Integer(1),
                 Span::new(1, 2),
             ))],
-            span: Span::new(0, 3),
-        });
+            Span::new(0, 3),
+        ));
         assert!(!validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
     }
 
     #[test]
     fn test_validate_if_not_nil_block_one_arg() {
-        let block = Expression::Block(Block {
-            parameters: vec![BlockParameter::new("v", Span::new(1, 2))],
-            body: vec![ExpressionStatement::bare(Expression::Literal(
+        let block = Expression::Block(Block::new(
+            vec![BlockParameter::new("v", Span::new(1, 2))],
+            vec![ExpressionStatement::bare(Expression::Literal(
                 Literal::Integer(1),
                 Span::new(5, 6),
             ))],
-            span: Span::new(0, 7),
-        });
+            Span::new(0, 7),
+        ));
         assert!(validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
     }
 
     #[test]
     fn test_validate_if_not_nil_block_two_args_errors() {
-        let block = Expression::Block(Block {
-            parameters: vec![
+        let block = Expression::Block(Block::new(
+            vec![
                 BlockParameter::new("a", Span::new(1, 2)),
                 BlockParameter::new("b", Span::new(3, 4)),
             ],
-            body: vec![ExpressionStatement::bare(Expression::Literal(
+            vec![ExpressionStatement::bare(Expression::Literal(
                 Literal::Integer(1),
                 Span::new(7, 8),
             ))],
-            span: Span::new(0, 9),
-        });
+            Span::new(0, 9),
+        ));
         let result = validate_if_not_nil_block(&block, "ifNotNil:");
         assert!(result.is_err());
         if let Err(CodeGenError::BlockArityMismatch { selector, arity }) = result {
@@ -3236,14 +3263,14 @@ mod tests {
                 BlockParameter::new(format!("p{i}"), span)
             })
             .collect();
-        Expression::Block(Block {
-            parameters: params,
-            body: vec![ExpressionStatement::bare(Expression::Literal(
+        Expression::Block(Block::new(
+            params,
+            vec![ExpressionStatement::bare(Expression::Literal(
                 Literal::Integer(1),
                 Span::new(1, 2),
             ))],
-            span: Span::new(0, 10),
-        })
+            Span::new(0, 10),
+        ))
     }
 
     #[test]

@@ -28,7 +28,7 @@ String sourceFile
 
 // After loading, sourceFile returns the path
 ReloadCounter sourceFile
-// => tests/repl-protocol/fixtures/reload_counter.bt
+// => "tests/repl-protocol/fixtures/reload_counter.bt"
 
 // ===========================================================================
 // RELOAD THE CLASS (recompiles from sourceFile — idempotent)

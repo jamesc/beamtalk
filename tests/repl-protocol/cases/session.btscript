@@ -162,7 +162,7 @@ Session withId: "nonexistent"
 
 // nil is messageable with ifNil: — the documented guard pattern.
 (Session withId: "nonexistent") ifNil: ["gone"]
-// => gone
+// => "gone"
 
 // ===========================================================================
 // SESSION CLEAR — empties this session's locals (deferred)

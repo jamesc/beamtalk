@@ -23,7 +23,7 @@
 
 // :help Erlang with no module name — shows the Erlang class docs
 :help Erlang
-// => == Erlang < ProtoObject ==_
+// => "== Erlang < ProtoObject ==_"
 
 // :help Erlang maps — another common module should work
 :help Erlang maps
@@ -41,12 +41,12 @@
 
 // Beamtalk erlangHelp: with a known module — should return module docs
 Beamtalk erlangHelp: "lists"
-// => Erlang module: lists_
+// => "Erlang module: lists_"
 
 // Beamtalk erlangHelp: with selector — should return function docs
 Beamtalk erlangHelp: "lists" selector: #reverse
-// => lists:reverse_
+// => "lists:reverse_"
 
 // Beamtalk erlangHelp: with a known module — maps
 Beamtalk erlangHelp: "maps"
-// => Erlang module: maps_
+// => "Erlang module: maps_"

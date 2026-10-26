@@ -15,37 +15,37 @@
 Value subclass: Greeter
   field: name = "World"
   greet => "Hello, " ++ self.name
-// => Greeter
+// => "Greeter"
 
 // ===========================================================================
 // Unary extension with :: -> return type
 // ===========================================================================
 
 Greeter >> shout :: -> String => self greet uppercase
-// => Greeter>>shout
+// => "Greeter>>shout"
 
 g := Greeter new
 // => Greeter(name: "World")
 
 g shout
-// => HELLO, WORLD
+// => "HELLO, WORLD"
 
 // ===========================================================================
 // Keyword extension with param type + :: -> return type
 // ===========================================================================
 
 Greeter >> greetWith: prefix :: String :: -> String => prefix ++ self.name
-// => Greeter>>greetWith:
+// => "Greeter>>greetWith:"
 
 g greetWith: "Hi, "
-// => Hi, World
+// => "Hi, World"
 
 // ===========================================================================
 // Standard -> return type on extension (for comparison)
 // ===========================================================================
 
 Greeter >> reversed -> String => self greet reverse
-// => Greeter>>reversed
+// => "Greeter>>reversed"
 
 g reversed
-// => dlroW ,olleH
+// => "dlroW ,olleH"

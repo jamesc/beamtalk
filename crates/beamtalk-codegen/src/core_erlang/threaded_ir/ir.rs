@@ -1049,6 +1049,11 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         result: Option<String>,
         load: Option<VersionedVar>,
         span: Span,
+        /// BT-4122: `(core var, state key)` rebinds for a merged Tier 2
+        /// call's captured locals, rendered after the reload (each fresh
+        /// value read out of the reloaded state). Empty for every other
+        /// bracket: only a Tier 2 `fun` mutates caller-scope locals.
+        tier2_local_rebinds: Vec<(String, String)>,
     },
 
     /// ADR 0131 §2: one conditional or handler arm, as a node. `threads` is

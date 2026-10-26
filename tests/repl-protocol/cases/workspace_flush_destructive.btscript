@@ -103,7 +103,7 @@ _skippedFirst := _skipped first
 // => _
 
 Erlang maps get: #reason with: _skippedFirst
-// => destructive
+// => "destructive"
 
 // The file survives untouched — an ordinary flush never reaches Tier 2.
 File exists: _classPath

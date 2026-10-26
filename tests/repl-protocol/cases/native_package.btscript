@@ -45,7 +45,7 @@ NativeCalc version
 
 // Save the path to the native .erl file for modification
 erlPath := "tests/repl-protocol/fixtures/native_package_project/native/native_calc.erl"
-// => tests/repl-protocol/fixtures/native_package_project/native/native_calc.erl
+// => "tests/repl-protocol/fixtures/native_package_project/native/native_calc.erl"
 
 // Save original content so we can restore it after the test
 originalContent := (File readAll: erlPath) unwrap

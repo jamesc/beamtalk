@@ -211,6 +211,59 @@ Actor subclass: ClosureMatrixSubject
       ]
     0
 
+  onDoRaiseRStmt =>
+    [
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseRAssign =>
+    r := [
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseRReturn =>
+    [
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseROperand =>
+    r := 1 + ([
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseRRaise =>
+    [
+      self.n
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
+
   litValueRWStmt =>
     [
       self.n := self.n + 1
@@ -559,6 +612,64 @@ Actor subclass: ClosureMatrixSubject
       ]
     0
 
+  onDoRaiseRWStmt =>
+    [
+      self.n := self.n + 1
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseRWAssign =>
+    r := [
+      self.n := self.n + 1
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseRWReturn =>
+    [
+      self.n := self.n + 1
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseRWOperand =>
+    r := 1 + ([
+      self.n := self.n + 1
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseRWRaise =>
+    [
+      self.n := self.n + 1
+      self.n
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
+
   litValueSStmt =>
     [
       self bump
@@ -906,6 +1017,64 @@ Actor subclass: ClosureMatrixSubject
         i == 2 ifTrue: [^self.n]
       ]
     0
+
+  onDoRaiseSStmt =>
+    [
+      self bump
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseSAssign =>
+    r := [
+      self bump
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseSReturn =>
+    [
+      self bump
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseSOperand =>
+    r := 1 + ([
+      self bump
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseSRaise =>
+    [
+      self bump
+      self.n
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
 
   litValueRWBStmt =>
     base := 10
@@ -1298,6 +1467,69 @@ Actor subclass: ClosureMatrixSubject
       ]
     0
 
+  onDoRaiseRWBStmt =>
+    base := 10
+    [
+      self.n := self.n + base
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseRWBAssign =>
+    base := 10
+    r := [
+      self.n := self.n + base
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseRWBReturn =>
+    base := 10
+    [
+      self.n := self.n + base
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseRWBOperand =>
+    base := 10
+    r := 1 + ([
+      self.n := self.n + base
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseRWBRaise =>
+    base := 10
+    [
+      self.n := self.n + base
+      self.n
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
+
   litValueRBStmt =>
     base := 10
     [self.n + base] value
@@ -1538,6 +1770,64 @@ Actor subclass: ClosureMatrixSubject
         i == 2 ifTrue: [^self.n]
       ]
     0
+
+  onDoRaiseRBStmt =>
+    base := 10
+    [
+      self.n + base
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseRBAssign =>
+    base := 10
+    r := [
+      self.n + base
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseRBReturn =>
+    base := 10
+    [
+      self.n + base
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseRBOperand =>
+    base := 10
+    r := 1 + ([
+      self.n + base
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseRBRaise =>
+    base := 10
+    [
+      self.n + base
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
 
   litValueSSStmt =>
     [
@@ -1887,6 +2177,1625 @@ Actor subclass: ClosureMatrixSubject
       ]
     0
 
+  onDoRaiseSSStmt =>
+    [
+      self.n := self.n + self peek
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseSSAssign =>
+    r := [
+      self.n := self.n + self peek
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseSSReturn =>
+    [
+      self.n := self.n + self peek
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseSSOperand =>
+    r := 1 + ([
+      self.n := self.n + self peek
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseSSRaise =>
+    [
+      self.n := self.n + self peek
+      self.n
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
+
+  litValueWLStmt =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] value
+    (self.n * 100)
+
+  litValueWLAssign =>
+    c := 0
+    r := [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] value
+    r * 10000 + (self.n * 100)
+
+  litValueWLReturn =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] value
+
+  doListWLStmt =>
+    c := 0
+    #(1, 2, 3)
+      do: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  timesRepeatWLStmt =>
+    c := 0
+    3
+      timesRepeat: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  toDoWLStmt =>
+    c := 0
+    1
+      to: 3
+      do: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  whileLoopWLStmt =>
+    c := 0
+    i := 0
+    [i < 3]
+      whileTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+        i := i + 1
+      ]
+    (self.n * 100)
+
+  collectWLStmt =>
+    c := 0
+    #(1, 2, 3)
+      collect: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  collectWLAssign =>
+    c := 0
+    r := #(1, 2, 3)
+      collect: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (r inject: 0 into: [:s :x | s + x]) * 10000 + (self.n * 100)
+
+  collectWLReturn =>
+    c := 0
+    #(1, 2, 3)
+      collect: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+
+  injectWLStmt =>
+    c := 0
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  injectWLAssign =>
+    c := 0
+    r := #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    r * 10000 + (self.n * 100)
+
+  injectWLReturn =>
+    c := 0
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+
+  injectWLOperand =>
+    c := 0
+    r := 1 + (#(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ])
+    r * 10000 + (self.n * 100)
+
+  ifTrueWLStmt =>
+    c := 0
+    self.n >= 0
+      ifTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+      ifFalse: [0]
+    (self.n * 100)
+
+  ifTrueWLAssign =>
+    c := 0
+    r := self.n >= 0
+      ifTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+      ifFalse: [0]
+    r * 10000 + (self.n * 100)
+
+  ifTrueWLReturn =>
+    c := 0
+    self.n >= 0
+      ifTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+      ifFalse: [0]
+
+  ifTrueWLOperand =>
+    c := 0
+    r := 1 + (self.n >= 0
+      ifTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+      ifFalse: [0])
+    r * 10000 + (self.n * 100)
+
+  onDoWLStmt =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] on: Error do: [:x | -1]
+    (self.n * 100)
+
+  onDoWLAssign =>
+    c := 0
+    r := [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] on: Error do: [:x | -1]
+    r * 10000 + (self.n * 100)
+
+  onDoWLReturn =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] on: Error do: [:x | -1]
+
+  onDoWLOperand =>
+    c := 0
+    r := 1 + ([
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] on: Error do: [:x | -1])
+    r * 10000 + (self.n * 100)
+
+  ensureWLStmt =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] ensure: [self.n]
+    (self.n * 100)
+
+  ensureWLAssign =>
+    c := 0
+    r := [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] ensure: [self.n]
+    r * 10000 + (self.n * 100)
+
+  ensureWLReturn =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] ensure: [self.n]
+
+  ensureWLOperand =>
+    c := 0
+    r := 1 + ([
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] ensure: [self.n])
+    r * 10000 + (self.n * 100)
+
+  nestedWLStmt =>
+    c := 0
+    #(1, 2)
+      do: [:e |
+        #(1, 2)
+          do: [:g |
+            c := c + 1
+            self.n := self.n + 10
+            c
+          ]
+      ]
+    (self.n * 100)
+
+  inCondWLStmt =>
+    c := 0
+    self.n >= 0
+      ifTrue: [
+        #(1, 2)
+          do: [:e |
+            c := c + 1
+            self.n := self.n + 10
+            c
+          ]
+      ]
+    (self.n * 100)
+
+  onDoInDoWLStmt =>
+    c := 0
+    #(1, 2)
+      do: [:e |
+        [
+          c := c + 1
+          self.n := self.n + 10
+          c
+        ] on: Error do: [:x | nil]
+      ]
+    (self.n * 100)
+
+  nlrDoWLEarly =>
+    c := 0
+    #(1, 2, 3)
+      do: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+        e == 2 ifTrue: [^self.n]
+      ]
+    0
+
+  nlrOnDoWLEarly =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+      ^self.n
+    ] on: Error do: [:x | -1]
+    0
+
+  nlrEnsureWLEarly =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+      ^self.n
+    ] ensure: [self.n]
+    0
+
+  nlrWhileWLEarly =>
+    c := 0
+    i := 0
+    [i < 3]
+      whileTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+        i := i + 1
+        i == 2 ifTrue: [^self.n]
+      ]
+    0
+
+  onDoRaiseWLStmt =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseWLAssign =>
+    c := 0
+    r := [
+      c := c + 1
+      self.n := self.n + 10
+      c
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseWLReturn =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseWLOperand =>
+    c := 0
+    r := 1 + ([
+      c := c + 1
+      self.n := self.n + 10
+      c
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseWLRaise =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
+
+  litValueALStmt =>
+    [
+      s := self
+      s bump
+      self.n
+    ] value
+    (self.n * 100)
+
+  litValueALAssign =>
+    r := [
+      s := self
+      s bump
+      self.n
+    ] value
+    r * 10000 + (self.n * 100)
+
+  litValueALReturn =>
+    [
+      s := self
+      s bump
+      self.n
+    ] value
+
+  varValueALStmt =>
+    b := [
+      s := self
+      s bump
+      self.n
+    ]
+    b value
+    (self.n * 100)
+
+  varValueALAssign =>
+    b := [
+      s := self
+      s bump
+      self.n
+    ]
+    r := b value
+    r * 10000 + (self.n * 100)
+
+  varValueALReturn =>
+    b := [
+      s := self
+      s bump
+      self.n
+    ]
+    b value
+
+  varValueALOperand =>
+    b := [
+      s := self
+      s bump
+      self.n
+    ]
+    r := 1 + (b value)
+    r * 10000 + (self.n * 100)
+
+  twiceALStmt =>
+    self
+      twice: [
+        s := self
+        s bump
+        self.n
+      ]
+    (self.n * 100)
+
+  doListALStmt =>
+    #(1, 2, 3)
+      do: [:e |
+        s := self
+        s bump
+        self.n
+      ]
+    (self.n * 100)
+
+  timesRepeatALStmt =>
+    3
+      timesRepeat: [
+        s := self
+        s bump
+        self.n
+      ]
+    (self.n * 100)
+
+  toDoALStmt =>
+    1
+      to: 3
+      do: [:e |
+        s := self
+        s bump
+        self.n
+      ]
+    (self.n * 100)
+
+  whileLoopALStmt =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        s := self
+        s bump
+        self.n
+        i := i + 1
+      ]
+    (self.n * 100)
+
+  collectALStmt =>
+    #(1, 2, 3)
+      collect: [:e |
+        s := self
+        s bump
+        self.n
+      ]
+    (self.n * 100)
+
+  collectALAssign =>
+    r := #(1, 2, 3)
+      collect: [:e |
+        s := self
+        s bump
+        self.n
+      ]
+    (r inject: 0 into: [:s :x | s + x]) * 10000 + (self.n * 100)
+
+  collectALReturn =>
+    #(1, 2, 3)
+      collect: [:e |
+        s := self
+        s bump
+        self.n
+      ]
+
+  injectALStmt =>
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        s := self
+        s bump
+        self.n
+      ]
+    (self.n * 100)
+
+  injectALAssign =>
+    r := #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        s := self
+        s bump
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  injectALReturn =>
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        s := self
+        s bump
+        self.n
+      ]
+
+  injectALOperand =>
+    r := 1 + (#(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        s := self
+        s bump
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ifTrueALStmt =>
+    self.n >= 0
+      ifTrue: [
+        s := self
+        s bump
+        self.n
+      ]
+      ifFalse: [0]
+    (self.n * 100)
+
+  ifTrueALAssign =>
+    r := self.n >= 0
+      ifTrue: [
+        s := self
+        s bump
+        self.n
+      ]
+      ifFalse: [0]
+    r * 10000 + (self.n * 100)
+
+  ifTrueALReturn =>
+    self.n >= 0
+      ifTrue: [
+        s := self
+        s bump
+        self.n
+      ]
+      ifFalse: [0]
+
+  ifTrueALOperand =>
+    r := 1 + (self.n >= 0
+      ifTrue: [
+        s := self
+        s bump
+        self.n
+      ]
+      ifFalse: [0])
+    r * 10000 + (self.n * 100)
+
+  onDoALStmt =>
+    [
+      s := self
+      s bump
+      self.n
+    ] on: Error do: [:x | -1]
+    (self.n * 100)
+
+  onDoALAssign =>
+    r := [
+      s := self
+      s bump
+      self.n
+    ] on: Error do: [:x | -1]
+    r * 10000 + (self.n * 100)
+
+  onDoALReturn =>
+    [
+      s := self
+      s bump
+      self.n
+    ] on: Error do: [:x | -1]
+
+  onDoALOperand =>
+    r := 1 + ([
+      s := self
+      s bump
+      self.n
+    ] on: Error do: [:x | -1])
+    r * 10000 + (self.n * 100)
+
+  ensureALStmt =>
+    [
+      s := self
+      s bump
+      self.n
+    ] ensure: [self.n]
+    (self.n * 100)
+
+  ensureALAssign =>
+    r := [
+      s := self
+      s bump
+      self.n
+    ] ensure: [self.n]
+    r * 10000 + (self.n * 100)
+
+  ensureALReturn =>
+    [
+      s := self
+      s bump
+      self.n
+    ] ensure: [self.n]
+
+  ensureALOperand =>
+    r := 1 + ([
+      s := self
+      s bump
+      self.n
+    ] ensure: [self.n])
+    r * 10000 + (self.n * 100)
+
+  storedALStmt =>
+    self.f := [
+      s := self
+      s bump
+      self.n
+    ]
+    self.f value
+    (self.n * 100)
+
+  storedALAssign =>
+    self.f := [
+      s := self
+      s bump
+      self.n
+    ]
+    r := self.f value
+    r * 10000 + (self.n * 100)
+
+  storedALReturn =>
+    self.f := [
+      s := self
+      s bump
+      self.n
+    ]
+    self.f value
+
+  storedALOperand =>
+    self.f := [
+      s := self
+      s bump
+      self.n
+    ]
+    r := 1 + (self.f value)
+    r * 10000 + (self.n * 100)
+
+  nestedALStmt =>
+    #(1, 2)
+      do: [:e |
+        #(1, 2)
+          do: [:g |
+            s := self
+            s bump
+            self.n
+          ]
+      ]
+    (self.n * 100)
+
+  inCondALStmt =>
+    self.n >= 0
+      ifTrue: [
+        #(1, 2)
+          do: [:e |
+            s := self
+            s bump
+            self.n
+          ]
+      ]
+    (self.n * 100)
+
+  onDoInDoALStmt =>
+    #(1, 2)
+      do: [:e |
+        [
+          s := self
+          s bump
+          self.n
+        ] on: Error do: [:x | nil]
+      ]
+    (self.n * 100)
+
+  passDoALStmt =>
+    self
+      runAll: [:e |
+        s := self
+        s bump
+        self.n
+      ]
+    (self.n * 100)
+
+  nlrDoALEarly =>
+    #(1, 2, 3)
+      do: [:e |
+        s := self
+        s bump
+        self.n
+        e == 2 ifTrue: [^self.n]
+      ]
+    0
+
+  nlrOnDoALEarly =>
+    [
+      s := self
+      s bump
+      self.n
+      ^self.n
+    ] on: Error do: [:x | -1]
+    0
+
+  nlrEnsureALEarly =>
+    [
+      s := self
+      s bump
+      self.n
+      ^self.n
+    ] ensure: [self.n]
+    0
+
+  nlrWhileALEarly =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        s := self
+        s bump
+        self.n
+        i := i + 1
+        i == 2 ifTrue: [^self.n]
+      ]
+    0
+
+  onDoRaiseALStmt =>
+    [
+      s := self
+      s bump
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseALAssign =>
+    r := [
+      s := self
+      s bump
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseALReturn =>
+    [
+      s := self
+      s bump
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseALOperand =>
+    r := 1 + ([
+      s := self
+      s bump
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseALRaise =>
+    [
+      s := self
+      s bump
+      self.n
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
+
+  litValueINHStmt =>
+    [
+      self yourself
+      self.n
+    ] value
+    (self.n * 100)
+
+  litValueINHAssign =>
+    r := [
+      self yourself
+      self.n
+    ] value
+    r * 10000 + (self.n * 100)
+
+  litValueINHReturn =>
+    [
+      self yourself
+      self.n
+    ] value
+
+  varValueINHStmt =>
+    b := [
+      self yourself
+      self.n
+    ]
+    b value
+    (self.n * 100)
+
+  varValueINHAssign =>
+    b := [
+      self yourself
+      self.n
+    ]
+    r := b value
+    r * 10000 + (self.n * 100)
+
+  varValueINHReturn =>
+    b := [
+      self yourself
+      self.n
+    ]
+    b value
+
+  varValueINHOperand =>
+    b := [
+      self yourself
+      self.n
+    ]
+    r := 1 + (b value)
+    r * 10000 + (self.n * 100)
+
+  twiceINHStmt =>
+    self
+      twice: [
+        self yourself
+        self.n
+      ]
+    (self.n * 100)
+
+  doListINHStmt =>
+    #(1, 2, 3)
+      do: [:e |
+        self yourself
+        self.n
+      ]
+    (self.n * 100)
+
+  timesRepeatINHStmt =>
+    3
+      timesRepeat: [
+        self yourself
+        self.n
+      ]
+    (self.n * 100)
+
+  toDoINHStmt =>
+    1
+      to: 3
+      do: [:e |
+        self yourself
+        self.n
+      ]
+    (self.n * 100)
+
+  whileLoopINHStmt =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self yourself
+        self.n
+        i := i + 1
+      ]
+    (self.n * 100)
+
+  collectINHStmt =>
+    #(1, 2, 3)
+      collect: [:e |
+        self yourself
+        self.n
+      ]
+    (self.n * 100)
+
+  collectINHAssign =>
+    r := #(1, 2, 3)
+      collect: [:e |
+        self yourself
+        self.n
+      ]
+    (r inject: 0 into: [:s :x | s + x]) * 10000 + (self.n * 100)
+
+  collectINHReturn =>
+    #(1, 2, 3)
+      collect: [:e |
+        self yourself
+        self.n
+      ]
+
+  injectINHStmt =>
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        self yourself
+        self.n
+      ]
+    (self.n * 100)
+
+  injectINHAssign =>
+    r := #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        self yourself
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  injectINHReturn =>
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        self yourself
+        self.n
+      ]
+
+  injectINHOperand =>
+    r := 1 + (#(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        self yourself
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ifTrueINHStmt =>
+    self.n >= 0
+      ifTrue: [
+        self yourself
+        self.n
+      ]
+      ifFalse: [0]
+    (self.n * 100)
+
+  ifTrueINHAssign =>
+    r := self.n >= 0
+      ifTrue: [
+        self yourself
+        self.n
+      ]
+      ifFalse: [0]
+    r * 10000 + (self.n * 100)
+
+  ifTrueINHReturn =>
+    self.n >= 0
+      ifTrue: [
+        self yourself
+        self.n
+      ]
+      ifFalse: [0]
+
+  ifTrueINHOperand =>
+    r := 1 + (self.n >= 0
+      ifTrue: [
+        self yourself
+        self.n
+      ]
+      ifFalse: [0])
+    r * 10000 + (self.n * 100)
+
+  onDoINHStmt =>
+    [
+      self yourself
+      self.n
+    ] on: Error do: [:x | -1]
+    (self.n * 100)
+
+  onDoINHAssign =>
+    r := [
+      self yourself
+      self.n
+    ] on: Error do: [:x | -1]
+    r * 10000 + (self.n * 100)
+
+  onDoINHReturn =>
+    [
+      self yourself
+      self.n
+    ] on: Error do: [:x | -1]
+
+  onDoINHOperand =>
+    r := 1 + ([
+      self yourself
+      self.n
+    ] on: Error do: [:x | -1])
+    r * 10000 + (self.n * 100)
+
+  ensureINHStmt =>
+    [
+      self yourself
+      self.n
+    ] ensure: [self.n]
+    (self.n * 100)
+
+  ensureINHAssign =>
+    r := [
+      self yourself
+      self.n
+    ] ensure: [self.n]
+    r * 10000 + (self.n * 100)
+
+  ensureINHReturn =>
+    [
+      self yourself
+      self.n
+    ] ensure: [self.n]
+
+  ensureINHOperand =>
+    r := 1 + ([
+      self yourself
+      self.n
+    ] ensure: [self.n])
+    r * 10000 + (self.n * 100)
+
+  storedINHStmt =>
+    self.f := [
+      self yourself
+      self.n
+    ]
+    self.f value
+    (self.n * 100)
+
+  storedINHAssign =>
+    self.f := [
+      self yourself
+      self.n
+    ]
+    r := self.f value
+    r * 10000 + (self.n * 100)
+
+  storedINHReturn =>
+    self.f := [
+      self yourself
+      self.n
+    ]
+    self.f value
+
+  storedINHOperand =>
+    self.f := [
+      self yourself
+      self.n
+    ]
+    r := 1 + (self.f value)
+    r * 10000 + (self.n * 100)
+
+  nestedINHStmt =>
+    #(1, 2)
+      do: [:e |
+        #(1, 2)
+          do: [:g |
+            self yourself
+            self.n
+          ]
+      ]
+    (self.n * 100)
+
+  inCondINHStmt =>
+    self.n >= 0
+      ifTrue: [
+        #(1, 2)
+          do: [:e |
+            self yourself
+            self.n
+          ]
+      ]
+    (self.n * 100)
+
+  onDoInDoINHStmt =>
+    #(1, 2)
+      do: [:e |
+        [
+          self yourself
+          self.n
+        ] on: Error do: [:x | nil]
+      ]
+    (self.n * 100)
+
+  passDoINHStmt =>
+    self
+      runAll: [:e |
+        self yourself
+        self.n
+      ]
+    (self.n * 100)
+
+  nlrDoINHEarly =>
+    #(1, 2, 3)
+      do: [:e |
+        self yourself
+        self.n
+        e == 2 ifTrue: [^self.n]
+      ]
+    0
+
+  nlrOnDoINHEarly =>
+    [
+      self yourself
+      self.n
+      ^self.n
+    ] on: Error do: [:x | -1]
+    0
+
+  nlrEnsureINHEarly =>
+    [
+      self yourself
+      self.n
+      ^self.n
+    ] ensure: [self.n]
+    0
+
+  nlrWhileINHEarly =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self yourself
+        self.n
+        i := i + 1
+        i == 2 ifTrue: [^self.n]
+      ]
+    0
+
+  onDoRaiseINHStmt =>
+    [
+      self yourself
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseINHAssign =>
+    r := [
+      self yourself
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseINHReturn =>
+    [
+      self yourself
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseINHOperand =>
+    r := 1 + ([
+      self yourself
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseINHRaise =>
+    [
+      self yourself
+      self.n
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
+
+  litValueDARaise =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+    ] value
+
+  varValueDARaise =>
+    @expect dnu
+    b := [
+      self noSuchZZZ
+      self.n
+    ]
+    b value
+
+  twiceDARaise =>
+    @expect dnu
+    self
+      twice: [
+        self noSuchZZZ
+        self.n
+      ]
+
+  doListDARaise =>
+    @expect dnu
+    #(1, 2, 3)
+      do: [:e |
+        self noSuchZZZ
+        self.n
+      ]
+
+  timesRepeatDARaise =>
+    @expect dnu
+    3
+      timesRepeat: [
+        self noSuchZZZ
+        self.n
+      ]
+
+  toDoDARaise =>
+    @expect dnu
+    1
+      to: 3
+      do: [:e |
+        self noSuchZZZ
+        self.n
+      ]
+
+  whileLoopDARaise =>
+    i := 0
+    @expect dnu
+    [i < 3]
+      whileTrue: [
+        self noSuchZZZ
+        self.n
+        i := i + 1
+      ]
+
+  collectDARaise =>
+    @expect dnu
+    #(1, 2, 3)
+      collect: [:e |
+        self noSuchZZZ
+        self.n
+      ]
+
+  injectDARaise =>
+    @expect dnu
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        self noSuchZZZ
+        self.n
+      ]
+
+  ifTrueDARaise =>
+    @expect dnu
+    self.n >= 0
+      ifTrue: [
+        self noSuchZZZ
+        self.n
+      ]
+      ifFalse: [0]
+
+  onDoDAStmt =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+    ] on: Error do: [:x | -1]
+    (self.n * 100)
+
+  onDoDAAssign =>
+    @expect dnu
+    r := [
+      self noSuchZZZ
+      self.n
+    ] on: Error do: [:x | -1]
+    r * 10000 + (self.n * 100)
+
+  onDoDAReturn =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+    ] on: Error do: [:x | -1]
+
+  onDoDAOperand =>
+    @expect dnu
+    r := 1 + ([
+      self noSuchZZZ
+      self.n
+    ] on: Error do: [:x | -1])
+    r * 10000 + (self.n * 100)
+
+  ensureDARaise =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+    ] ensure: [self.n]
+
+  storedDARaise =>
+    @expect dnu
+    self.f := [
+      self noSuchZZZ
+      self.n
+    ]
+    self.f value
+
+  nestedDARaise =>
+    @expect dnu
+    #(1, 2)
+      do: [:e |
+        #(1, 2)
+          do: [:g |
+            self noSuchZZZ
+            self.n
+          ]
+      ]
+
+  inCondDARaise =>
+    @expect dnu
+    self.n >= 0
+      ifTrue: [
+        #(1, 2)
+          do: [:e |
+            self noSuchZZZ
+            self.n
+          ]
+      ]
+
+  onDoInDoDAStmt =>
+    @expect dnu
+    #(1, 2)
+      do: [:e |
+        [
+          self noSuchZZZ
+          self.n
+        ] on: Error do: [:x | nil]
+      ]
+    (self.n * 100)
+
+  passDoDARaise =>
+    @expect dnu
+    self
+      runAll: [:e |
+        self noSuchZZZ
+        self.n
+      ]
+
+  nlrDoDARaise =>
+    @expect dnu
+    #(1, 2, 3)
+      do: [:e |
+        self noSuchZZZ
+        self.n
+        e == 2 ifTrue: [^self.n]
+      ]
+
+  nlrOnDoDAStmt =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+      ^self.n
+    ] on: Error do: [:x | -1]
+    (self.n * 100)
+
+  nlrOnDoDAAssign =>
+    @expect dnu
+    r := [
+      self noSuchZZZ
+      self.n
+      ^self.n
+    ] on: Error do: [:x | -1]
+    r * 10000 + (self.n * 100)
+
+  nlrOnDoDAReturn =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+      ^self.n
+    ] on: Error do: [:x | -1]
+
+  nlrOnDoDAOperand =>
+    @expect dnu
+    r := 1 + ([
+      self noSuchZZZ
+      self.n
+      ^self.n
+    ] on: Error do: [:x | -1])
+    r * 10000 + (self.n * 100)
+
+  nlrEnsureDARaise =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+      ^self.n
+    ] ensure: [self.n]
+
+  nlrWhileDARaise =>
+    i := 0
+    @expect dnu
+    [i < 3]
+      whileTrue: [
+        self noSuchZZZ
+        self.n
+        i := i + 1
+        i == 2 ifTrue: [^self.n]
+      ]
+
+  onDoRaiseDAStmt =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    (self.n * 100)
+
+  onDoRaiseDAAssign =>
+    @expect dnu
+    r := [
+      self noSuchZZZ
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+    r * 10000 + (self.n * 100)
+
+  onDoRaiseDAReturn =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ]
+
+  onDoRaiseDAOperand =>
+    @expect dnu
+    r := 1 + ([
+      self noSuchZZZ
+      self.n
+      Error signal: "boom"
+    ]
+      on: Error
+      do: [:x |
+        self.n := self.n + 50
+        self.n
+      ])
+    r * 10000 + (self.n * 100)
+
+  ensureRaiseDARaise =>
+    @expect dnu
+    [
+      self noSuchZZZ
+      self.n
+      Error signal: "boom"
+    ] ensure: [self.n := self.n + 100]
+
   awayRunR: other =>
     b := [self.n]
     self.n := 50
@@ -1927,3 +3836,18 @@ Actor subclass: ClosureMatrixSubject
     self.n := 50
     self.f := b
     other run: self.f
+
+  awayNestedRunR: other =>
+    inner := [self.n]
+    b := [inner value]
+    self.n := 50
+    other run: b
+
+  awayNestedRunRW: other =>
+    inner := [
+      self.n := self.n + 1
+      self.n
+    ]
+    b := [inner value]
+    self.n := 50
+    other run: b

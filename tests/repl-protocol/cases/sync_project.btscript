@@ -17,7 +17,7 @@
 
 // After sync, fixture classes should be available
 Greeter new greet
-// => Hello, World
+// => "Hello, World"
 
 // ===========================================================================
 // :s — SHORT ALIAS (incremental, no changes)

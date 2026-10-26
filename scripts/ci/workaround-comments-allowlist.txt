@@ -3,7 +3,6 @@
 # Each line: <path><TAB><text-hash>. Regenerate with --update; do NOT hand-edit
 # unless adding a genuine false positive. New offenders must add a BT-NNNN ref.
 crates/beamtalk-codegen/src/core_erlang/intrinsics.rs	1793420816
-crates/beamtalk-codegen/src/core_erlang/intrinsics.rs	2346773361
 crates/beamtalk-codegen/src/core_erlang/intrinsics.rs	2986145653
 crates/beamtalk-core/src/semantic_analysis/type_checker/tests/dynamic_iterable.rs	1945273604
 crates/beamtalk-core/src/semantic_analysis/type_checker/validation.rs	3460558164

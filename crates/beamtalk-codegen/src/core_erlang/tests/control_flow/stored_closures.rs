@@ -10,11 +10,7 @@ use super::*;
 #[test]
 fn test_validate_stored_closure_empty_block() {
     // Empty block should not trigger errors
-    let block = Block {
-        parameters: vec![],
-        body: vec![],
-        span: Span::new(0, 2),
-    };
+    let block = Block::new(vec![], vec![], Span::new(0, 2));
 
     let analysis = crate::core_erlang::block_analysis::analyze_block(&block);
     let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
@@ -25,9 +21,9 @@ fn test_validate_stored_closure_empty_block() {
 fn test_validate_stored_closure_with_captured_mutation() {
     // Block that reads and writes a captured variable: [count := count + 1]
     // `count` is read (captured from outer scope) and written → should error
-    let block = Block {
-        parameters: vec![],
-        body: vec![bare(Expression::Assignment {
+    let block = Block::new(
+        vec![],
+        vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "count",
                 Span::new(1, 6),
@@ -45,8 +41,8 @@ fn test_validate_stored_closure_with_captured_mutation() {
             type_annotation: None,
             span: Span::new(1, 19),
         })],
-        span: Span::new(0, 20),
-    };
+        Span::new(0, 20),
+    );
 
     let analysis = crate::core_erlang::block_analysis::analyze_block(&block);
     let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
@@ -66,9 +62,9 @@ fn test_validate_stored_closure_with_captured_mutation() {
 fn test_validate_stored_closure_with_new_local_definition() {
     // Block with only new local variable definition: [temp := 1]
     // `temp` is never read from outer scope → should be allowed
-    let block = Block {
-        parameters: vec![],
-        body: vec![bare(Expression::Assignment {
+    let block = Block::new(
+        vec![],
+        vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "temp",
                 Span::new(1, 5),
@@ -77,8 +73,8 @@ fn test_validate_stored_closure_with_new_local_definition() {
             type_annotation: None,
             span: Span::new(1, 10),
         })],
-        span: Span::new(0, 11),
-    };
+        Span::new(0, 11),
+    );
 
     let analysis = crate::core_erlang::block_analysis::analyze_block(&block);
     let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
@@ -92,9 +88,9 @@ fn test_validate_stored_closure_with_new_local_definition() {
 fn test_validate_stored_closure_with_new_local_used_later() {
     // Block defines a new local and uses it later: [:x | temp := x * 2. temp + 1]
     // `temp` is defined then read — NOT a captured variable → should be allowed
-    let block = Block {
-        parameters: vec![BlockParameter::new("x", Span::new(1, 2))],
-        body: vec![
+    let block = Block::new(
+        vec![BlockParameter::new("x", Span::new(1, 2))],
+        vec![
             bare(Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new(
                     "temp",
@@ -124,8 +120,8 @@ fn test_validate_stored_closure_with_new_local_used_later() {
                 span: Span::new(20, 28),
             }),
         ],
-        span: Span::new(0, 29),
-    };
+        Span::new(0, 29),
+    );
 
     let analysis = crate::core_erlang::block_analysis::analyze_block(&block);
     let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
@@ -138,9 +134,9 @@ fn test_validate_stored_closure_with_new_local_used_later() {
 #[test]
 fn test_validate_stored_closure_with_field_assignment() {
     // Block with field assignment: [self.value := 1]
-    let block = Block {
-        parameters: vec![],
-        body: vec![bare(Expression::Assignment {
+    let block = Block::new(
+        vec![],
+        vec![bare(Expression::Assignment {
             target: Box::new(Expression::FieldAccess {
                 receiver: Box::new(Expression::Identifier(Identifier::new(
                     "self",
@@ -153,8 +149,8 @@ fn test_validate_stored_closure_with_field_assignment() {
             type_annotation: None,
             span: Span::new(1, 16),
         })],
-        span: Span::new(0, 17),
-    };
+        Span::new(0, 17),
+    );
 
     let analysis = crate::core_erlang::block_analysis::analyze_block(&block);
     let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
@@ -185,9 +181,9 @@ fn test_validate_stored_closure_field_takes_precedence_contract() {
     // so validate_stored_closure only ever sees the local-mutation branch
     // when field_writes is already empty (which can only happen via direct
     // unit-test calls, not through generate_block).
-    let block = Block {
-        parameters: vec![],
-        body: vec![
+    let block = Block::new(
+        vec![],
+        vec![
             bare(Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new(
                     "count",
@@ -211,8 +207,8 @@ fn test_validate_stored_closure_field_takes_precedence_contract() {
                 span: Span::new(13, 28),
             }),
         ],
-        span: Span::new(0, 29),
-    };
+        Span::new(0, 29),
+    );
 
     let analysis = crate::core_erlang::block_analysis::analyze_block(&block);
     let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
@@ -250,18 +246,18 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
                 "test",
                 Span::new(0, 4),
             ))),
-            value: Box::new(Expression::Block(Block {
-                parameters: vec![],
-                body: vec![
+            value: Box::new(Expression::Block(Block::new(
+                vec![],
+                vec![
                     // myBlock := [self.value := self.value + 1]
                     bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new(
                             "myBlock",
                             Span::new(10, 17),
                         ))),
-                        value: Box::new(Expression::Block(Block {
-                            parameters: vec![],
-                            body: vec![bare(Expression::Assignment {
+                        value: Box::new(Expression::Block(Block::new(
+                            vec![],
+                            vec![bare(Expression::Assignment {
                                 target: Box::new(Expression::FieldAccess {
                                     receiver: Box::new(Expression::Identifier(Identifier::new(
                                         "self",
@@ -277,8 +273,8 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
                                 type_annotation: None,
                                 span: Span::new(22, 37),
                             })],
-                            span: Span::new(21, 38),
-                        })),
+                            Span::new(21, 38),
+                        ))),
                         type_annotation: None,
                         span: Span::new(10, 38),
                     }),
@@ -287,8 +283,8 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
                         Span::new(40, 47),
                     ))),
                 ],
-                span: Span::new(8, 49),
-            })),
+                Span::new(8, 49),
+            ))),
             type_annotation: None,
             span: Span::new(0, 49),
         })],
@@ -324,9 +320,9 @@ fn test_codegen_allows_stored_closure_with_local_mutation() {
                 "test",
                 Span::new(0, 4),
             ))),
-            value: Box::new(Expression::Block(Block {
-                parameters: vec![],
-                body: vec![
+            value: Box::new(Expression::Block(Block::new(
+                vec![],
+                vec![
                     // count := 0
                     bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new(
@@ -346,9 +342,9 @@ fn test_codegen_allows_stored_closure_with_local_mutation() {
                             "myBlock",
                             Span::new(22, 29),
                         ))),
-                        value: Box::new(Expression::Block(Block {
-                            parameters: vec![],
-                            body: vec![bare(Expression::Assignment {
+                        value: Box::new(Expression::Block(Block::new(
+                            vec![],
+                            vec![bare(Expression::Assignment {
                                 target: Box::new(Expression::Identifier(Identifier::new(
                                     "count",
                                     Span::new(34, 39),
@@ -369,8 +365,8 @@ fn test_codegen_allows_stored_closure_with_local_mutation() {
                                 type_annotation: None,
                                 span: Span::new(34, 52),
                             })],
-                            span: Span::new(33, 53),
-                        })),
+                            Span::new(33, 53),
+                        ))),
                         type_annotation: None,
                         span: Span::new(22, 53),
                     }),
@@ -379,8 +375,8 @@ fn test_codegen_allows_stored_closure_with_local_mutation() {
                         Span::new(55, 62),
                     ))),
                 ],
-                span: Span::new(8, 64),
-            })),
+                Span::new(8, 64),
+            ))),
             type_annotation: None,
             span: Span::new(0, 64),
         })],
