@@ -38,5 +38,5 @@ TestCase subclass: StringPrintStringEscapeTest
     // must use the same ADR 0138 mapping as top-level `printString`.
     value := "a\nb\{c}d\\e"
     display := value printString
-    self assert: display equals: "\"a\\nb\\\{c}d\\\\e\""
+    self assert: display equals: """a\\nb\\\{c}d\\\\e"""
     self assert: #(value) printString equals: "#(" ++ display ++ ")"
