@@ -154,7 +154,7 @@ raise_not_string(Selector, X) when is_binary(X) ->
     beamtalk_error:raise_type_error(
         'String',
         Selector,
-        <<"Expected a String; bare binaries are Binary — convert with asString">>
+        <<"Expected a String; bare binaries are Binary; convert with asString">>
     );
 raise_not_string(Selector, _) ->
     beamtalk_error:raise_type_error('String', Selector, <<"Expected a String">>).
