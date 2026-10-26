@@ -329,8 +329,11 @@ fn test_generate_spawn_function() {
     );
     assert!(code.contains("'__class_mod__' => 'counter'"));
     assert!(code.contains("'value' => 0"));
-    // Check that InitArgs is merged into DefaultState
-    assert!(code.contains("call 'maps':'merge'(DefaultState, InitArgs)"));
+    // Check that InitArgs is merged into DefaultState (BT-4030: validated
+    // against the merged state first, raising unknown_field for undeclared
+    // keys instead of silently merging them)
+    assert!(code.contains("call 'beamtalk_class_instantiation':'check_init_args'"));
+    assert!(code.contains("call 'maps':'merge'(DefaultState, CheckedArgs)"));
     assert!(code.contains("call 'beamtalk_actor':'take_init_ack'(FinalState, 'initialized')"));
     assert!(code.contains("{'ok', AckState}"));
 }

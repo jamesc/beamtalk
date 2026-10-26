@@ -12,7 +12,8 @@ module 'method_lookup' ['new'/0, 'new'/1, 'lookupLiteral'/1, 'lookupVariable:'/2
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'method_lookup':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('MethodLookupTest', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'lookupLiteral'/1 = fun (Self) ->

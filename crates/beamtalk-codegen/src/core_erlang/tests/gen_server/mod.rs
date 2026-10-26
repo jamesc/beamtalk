@@ -16,6 +16,8 @@
 //! - [`class_var_access`] — ADR 0130 class-variable access lowering (inlined
 //!   reads/writes, helper calls, the no-`ClassVars` class-method convention)
 //! - [`native_facade`] — `native:`-backed class facade codegen
+//! - [`new_spawn_unknown_field`] — BT-4030: `new/1`/`init/1`
+//!   unknown-key validation emission + `spawn` re-raise arm
 //! - [`protocol_and_xref_metadata`] — protocol-only modules and
 //!   `methodXref`/`stateVarXref` metadata
 //! - [`actor_init_and_field_validation`] — actor initialize chaining and
@@ -100,6 +102,7 @@ mod dispatch_and_lifecycle;
 mod extensions;
 mod late_field_read;
 mod native_facade;
+mod new_spawn_unknown_field;
 mod protocol_and_xref_metadata;
 mod state_field_init;
 mod state_threading_loops;

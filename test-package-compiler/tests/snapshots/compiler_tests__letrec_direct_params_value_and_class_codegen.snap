@@ -16,7 +16,8 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'letrec_direct_params_value_and_class':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('DirectParamsValue', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'countUpTo:'/2 = fun (Self, _limit1) ->

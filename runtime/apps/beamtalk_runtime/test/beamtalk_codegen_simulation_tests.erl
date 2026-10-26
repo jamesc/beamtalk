@@ -190,38 +190,26 @@ spawn_with_methods_still_work_test() ->
     gen_server:stop(Pid).
 
 spawn_with_preserves_unspecified_defaults_test() ->
-    %% spawnWith: #{extra => foo} - should preserve value default
-    InitArgs = #{extra => foo},
+    %% spawnWith: #{} - should preserve value default
+    InitArgs = #{},
     Object = 'bt@counter':spawn(InitArgs),
     Pid = element(4, Object),
 
     %% Value should still be default (0)
     ?assertEqual({ok, 0}, gen_server:call(Pid, {getValue, []})),
 
-    %% Extra field should be in state
-    ActorState = sys:get_state(Pid),
-    ?assertEqual(foo, maps:get(extra, ActorState)),
-
     gen_server:stop(Pid).
 
 %% Exercises the real compiled 'bt@counter' module rather than
-%% counter_module_state/raw start_link: spawn/1 merges InitArgs the same way
-%% as spawn_with_preserves_unspecified_defaults_test above, against real
-%% codegen instead of a hand-simulated stand-in.
+%% counter_module_state/raw start_link: an undeclared spawnWith: key raises
+%% #unknown_field (BT-4030) instead of merging silently as before.
 spawn_with_multiple_overrides_test() ->
     %% spawnWith: #{value => 10, extra => bar}
     InitArgs = #{value => 10, extra => bar},
-    Object = 'bt@counter':spawn(InitArgs),
-    Pid = element(4, Object),
-
-    %% Value was overridden
-    ?assertEqual({ok, 10}, gen_server:call(Pid, {getValue, []})),
-
-    %% Extra field present
-    ActorState = sys:get_state(Pid),
-    ?assertEqual(bar, maps:get(extra, ActorState)),
-
-    gen_server:stop(Pid).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unknown_field}},
+        'bt@counter':spawn(InitArgs)
+    ).
 
 %%% ===========================================================================
 %%% `late` slot tests (BT-3548, ADR 0124 §2/B2)

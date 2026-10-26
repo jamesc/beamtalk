@@ -31,7 +31,8 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
     raise_type_error/3,
     generate_message/3,
     format_reason/2,
-    is_does_not_understand/1
+    is_does_not_understand/1,
+    is_unknown_field/1
 ]).
 
 %% Type definition for the internal error record.
@@ -295,6 +296,22 @@ is_does_not_understand(#beamtalk_error{kind = does_not_understand}) -> true;
 is_does_not_understand(#beamtalk_error{}) -> false.
 
 -doc """
+Predicate: is this error an `unknown_field` initialiser rejection?
+
+Generated actor `spawn/0` and `spawn/1` use this to tell `init/1`'s own
+`check_init_args/5` rejection (re-raised transparently, BT-4030) apart
+from every other start failure (still wrapped as `instantiation_error`,
+e.g. a throwing `initialize` — see `actor_initialize_test.bt`).
+
+Total: `undefined` (no error found in the start reason) and any other
+term answer `false`, so generated code can call it directly on
+`extract_beamtalk_error/2`'s result.
+""".
+-spec is_unknown_field(term()) -> boolean().
+is_unknown_field(#beamtalk_error{kind = unknown_field}) -> true;
+is_unknown_field(_) -> false.
+
+-doc """
 Generate a human-readable error message from kind, class, and optional selector.
 
 Selector is normally an atom, but callers that only have an unregistered
@@ -445,6 +462,13 @@ generate_message(uninitialized_state_error, Class, undefined) ->
     iolist_to_binary(io_lib:format("UninitializedStateError in ~s", [Class]));
 generate_message(uninitialized_state_error, Class, Selector) ->
     iolist_to_binary(io_lib:format("UninitializedStateError in '~s' on ~s", [Selector, Class]));
+%% BT-4030: `new:`/`spawnWith:` with an undeclared initialiser key. The
+%% `check_init_args/5` call site overrides this with a message naming the
+%% key; these clauses keep a bare `new(unknown_field, ...)` readable.
+generate_message(unknown_field, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Unknown field for ~s", [Class]));
+generate_message(unknown_field, Class, Selector) ->
+    iolist_to_binary(io_lib:format("'~s': unknown field for ~s", [Selector, Class]));
 generate_message(Kind, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->

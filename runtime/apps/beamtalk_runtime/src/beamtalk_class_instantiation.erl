@@ -39,6 +39,7 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
     abstract_class_error/2,
     resolve_is_abstract_or_raise/2,
     resolve_module_or_raise/2,
+    check_init_args/5,
     %% ADR 0123 §3: shared with beamtalk_shape_migration's reconcile step —
     %% a Value class has no init/1, so its declared-field defaults are
     %% derived from new/0 instead (CLAUDE.md: no duplicate implementations).
@@ -238,17 +239,178 @@ handle_new_generic(Args, ClassName) ->
 -doc """
 Construct the generic instance map: class tag + defaults + new: overrides.
 
-Only keys already declared as fields (present in `Defaults`) are accepted from
-the `new:` initialiser; unknown keys are silently ignored, matching the
-compiled `new/1` which merges over a fixed default map and never introduces new
-slots. The `$beamtalk_class` tag always wins so it cannot be overwritten by a
+An initialiser key outside the declared fields raises `#unknown_field` via
+`check_init_args/5`, matching the compiled `new/1` (BT-4030). The
+`$beamtalk_class` tag always wins so it cannot be overwritten by a
 stray initialiser key.
 """.
 -spec build_generic_instance(class_name(), map(), map()) -> map().
 build_generic_instance(ClassName, Defaults, InitMap) ->
-    Filtered = maps:with(maps:keys(Defaults), InitMap),
-    Merged = maps:merge(Defaults, Filtered),
+    Checked = check_init_args(ClassName, 'new:', Defaults, InitMap, []),
+    Merged = maps:merge(Defaults, Checked),
     Merged#{beamtalk_tagged_map:class_key() => ClassName}.
+
+-doc """
+Validate a `new:`/`spawnWith:` initialiser map against the declared fields.
+
+The allowed set is the class's full declared field set — own, inherited,
+and `late` (which never appears in a state map) — resolved at runtime from
+the class metadata (see `declared_fields/2`), so no compile-time ancestor
+knowledge is needed and a standalone-compiled subclass still accepts
+inherited keys. Returns `InitArgs` unchanged when every key is declared
+(or listed in `ExtraAllowed`, e.g. the init-ack protocol key actor
+`init/1` passes). Otherwise raises a structured `#unknown_field` error
+naming the first undeclared key (alphabetically, for determinism) and
+carrying the full sorted declared set in `details` (`#{key => Key,
+declared => Declared}`), mirroring the compile-time diagnostic for
+literal dicts. Elixir `struct!/2` parity.
+
+Single validation home for all three instantiation paths (no duplicate
+implementations): generated value-type `new/1`, generated actor `init/1`
+(leaf call only — parent-helper calls carry the leaf's keys and skip),
+and `build_generic_instance/3`.
+
+Non-map `InitArgs` passes through untouched — each caller already handles
+that shape itself (`spawn/1` and `handle_new_generic/2` raise `type_error`;
+`new/1` lets `maps:merge/2` fail as before).
+""".
+-spec check_init_args(class_name(), atom(), map(), term(), [atom()]) -> term().
+check_init_args(Class, Selector, BaseState, InitArgs, ExtraAllowed) when
+    is_map(BaseState), is_map(InitArgs)
+->
+    Declared = declared_fields(Class, BaseState),
+    %% NOTE: parenthesised — `--` is right-associative, so an unparenthesised
+    %% `Keys -- Declared -- ExtraAllowed` would read as
+    %% `Keys -- (Declared -- ExtraAllowed)` and never subtract the extras.
+    case lists:sort((maps:keys(InitArgs) -- Declared) -- ExtraAllowed) of
+        [] ->
+            InitArgs;
+        [Bad | _] ->
+            SortedDeclared = lists:usort(Declared),
+            Error0 = beamtalk_error:new(unknown_field, Class, Selector),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                iolist_to_binary(
+                    %% `~p` for the key: initialiser keys are user data and
+                    %% need not be atoms.
+                    io_lib:format("Unknown field `~p` for class `~s`", [Bad, Class])
+                )
+            ),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                iolist_to_binary([
+                    "Declared fields: ",
+                    lists:join(
+                        ", ", [io_lib:format("~p", [F]) || F <- SortedDeclared]
+                    )
+                ])
+            ),
+            Error3 = beamtalk_error:with_details(
+                Error2, #{key => Bad, declared => SortedDeclared}
+            ),
+            beamtalk_error:raise(Error3)
+    end;
+check_init_args(_Class, _Selector, _BaseState, InitArgs, _ExtraAllowed) ->
+    InitArgs.
+
+-doc """
+Full declared field set for `Class`: own, inherited, and `late` names.
+
+Walks the superclass chain over ETS-only metadata reads
+(`lookup_instance_variables/1`, `lookup_superclass/1`, plus each level's
+own `__beamtalk_meta/0` `fields`) — deliberately no `gen_server:call`,
+which issued from `init/1` while the spawning class server is still inside
+its own `{spawn, ...}` handler would deadlock the two against each other
+(the same reason `publish_reflection/1` exists). Unioning the meta list
+with the published variables keeps a level fail-open: a stale extra name
+at worst accepts a key for a removed field (the pre-BT-4030 behaviour),
+never rejects a valid one.
+
+Every level of a class being instantiated is registered by the time this
+runs: a module's `on_load` `register_class/0` re-raises failures instead
+of swallowing them, so a loaded module implies a published row — and the
+leaf validates after its parent chain has run, so every ancestor module is
+loaded too. A missing level for a stateless root (`Actor`, `Object`,
+`Value`, `ProtoObject` — verified field-free) simply terminates the walk,
+covering suites that spawn fixtures without booting stdlib. Any other
+missing level (or a chain cycling past `?MAX_HIERARCHY_DEPTH`) degrades
+the whole walk to the base state's own keys: fail-open on the actor
+inheritance path (whose merged state already carries the user keys, so
+nothing is rejected) and default-complete on the base and value paths
+(whose states hold exactly their own defaults).
+""".
+-spec declared_fields(class_name(), map()) -> [term()].
+declared_fields(Class, BaseState) ->
+    case declared_fields_walk(Class, [], 0) of
+        {ok, Fields} ->
+            Fields;
+        not_found ->
+            maps:keys(BaseState) -- beamtalk_tagged_map:internal_fields()
+    end.
+
+-spec declared_fields_walk(class_name(), [term()], non_neg_integer()) ->
+    {ok, [term()]} | not_found.
+declared_fields_walk(_Class, _Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    not_found;
+declared_fields_walk(Class, Acc, Depth) ->
+    case own_declared_fields(Class) of
+        {ok, Names} ->
+            Acc2 = Names ++ Acc,
+            case beamtalk_class_metadata:lookup_superclass(Class) of
+                {ok, none} ->
+                    {ok, Acc2};
+                {ok, Super} ->
+                    declared_fields_walk(Super, Acc2, Depth + 1);
+                not_found ->
+                    not_found
+            end;
+        not_found when
+            Class =:= 'Actor';
+            Class =:= 'Object';
+            Class =:= 'Value';
+            Class =:= 'ProtoObject'
+        ->
+            %% Stateless roots (verified: no `state:` in their stdlib
+            %% sources) whose stdlib module simply hasn't loaded yet — e.g.
+            %% eunit suites spawning fixtures without booting stdlib:
+            %% contribute nothing and terminate. Their ancestors are roots
+            %% or `none`, equally stateless, so ending here loses no names.
+            %% (A missing NON-root level still aborts the whole walk to the
+            %% state-keys fallback — skipping it would fail closed on that
+            %% level's inherited keys.)
+            {ok, Acc};
+        not_found ->
+            not_found
+    end.
+
+%% One level's own declared names: the union of the compiled meta `fields`
+%% list (always includes `late` slots) and the published instance
+%% variables (the only source for module-less builder classes).
+-spec own_declared_fields(class_name()) -> {ok, [term()]} | not_found.
+own_declared_fields(Class) ->
+    MetaFields =
+        case beamtalk_class_metadata:lookup_module(Class) of
+            {ok, Module} ->
+                case beamtalk_class_metadata:read_meta(Module) of
+                    {ok, Meta} ->
+                        case maps:get(fields, Meta, []) of
+                            L when is_list(L) -> L;
+                            _ -> []
+                        end;
+                    not_available ->
+                        []
+                end;
+            not_found ->
+                []
+        end,
+    case beamtalk_class_metadata:lookup_instance_variables(Class) of
+        {ok, IVars} ->
+            {ok, MetaFields ++ (IVars -- MetaFields)};
+        not_found when MetaFields =/= [] ->
+            {ok, MetaFields};
+        not_found ->
+            not_found
+    end.
 
 -doc """
 Collect field defaults for a module-less class, including inherited fields.

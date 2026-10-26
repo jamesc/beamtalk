@@ -38,6 +38,59 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// The shared start-failure arm for `spawn/0` and `spawn/1`
+    /// (`selector` pre-quoted, e.g. `"'spawn'"`).
+    ///
+    /// BT-4030: `init/1`'s own `#unknown_field` rejection passes through
+    /// unwrapped; every other start failure keeps the `instantiation_error`
+    /// wrap as before (e.g. a throwing `initialize` — see
+    /// `actor_initialize_test.bt`).
+    fn spawn_error_arm_doc(class_name: &str, selector: &'static str) -> Document<'static> {
+        docvec![
+            "<{'error', Reason}> when 'true' ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in",
+                    line(),
+                    "case call 'beamtalk_error':'is_unknown_field'(InitErr) of",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "<'true'> when 'true' -> call 'beamtalk_error':'raise'(InitErr)",
+                            line(),
+                            "<'false'> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    // Include the actual error reason in the hint
+                                    super::super::errors::beamtalk_error_doc(
+                                        Document::Str("SpawnErr0"),
+                                        Document::Str("SpawnErr0"),
+                                        Document::Str("SpawnErr1"),
+                                        Document::Str("SpawnErr1"),
+                                        Document::Str("SpawnErr2"),
+                                        "instantiation_error",
+                                        leaf::atom(class_name.to_owned()),
+                                        Document::Str(selector),
+                                        Document::Str("Reason"),
+                                        line(),
+                                    ),
+                                    "call 'beamtalk_error':'raise'(SpawnErr2)",
+                                ]
+                            ),
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ]
+            ),
+        ]
+    }
+
     /// Generates the `spawn/0` class method for creating actor instances.
     ///
     /// This is a class-level method (not an instance method) that instantiates
@@ -67,6 +120,8 @@ impl CoreErlangGenerator {
     ///         <{'ok', Pid}> when 'true' ->
     ///             {'beamtalk_object', 'Counter', 'counter', Pid};
     ///         <{'error', Reason}> when 'true' ->
+    ///             %% BT-4030: init/1's own unknown_field re-raised;
+    ///             %% everything else wraps as instantiation_error
     ///             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'Counter') in
     ///             let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
     ///             call 'beamtalk_error':'raise'(SpawnErr1)
@@ -118,27 +173,7 @@ impl CoreErlangGenerator {
                                 ]
                             ),
                             line(),
-                            "<{'error', Reason}> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    // Include the actual error reason in the hint
-                                    super::super::errors::beamtalk_error_doc(
-                                        Document::Str("SpawnErr0"),
-                                        Document::Str("SpawnErr0"),
-                                        Document::Str("SpawnErr1"),
-                                        Document::Str("SpawnErr1"),
-                                        Document::Str("SpawnErr2"),
-                                        "instantiation_error",
-                                        leaf::atom(class_name.clone()),
-                                        Document::Str("'spawn'"),
-                                        Document::Str("Reason"),
-                                        line(),
-                                    ),
-                                    "call 'beamtalk_error':'raise'(SpawnErr2)",
-                                ]
-                            ),
+                            Self::spawn_error_arm_doc(&class_name, "'spawn'"),
                         ]
                     ),
                     line(),
@@ -171,15 +206,12 @@ impl CoreErlangGenerator {
     ///             <{'ok', Pid}> when 'true' ->
     ///                 {'beamtalk_object', 'Counter', 'counter', Pid};
     ///             <{'error', Reason}> when 'true' ->
-    ///                 %% instantiation_error
+    ///                 %% BT-4030: init/1's own unknown_field re-raised;
+    ///                 %% everything else wraps as instantiation_error
     ///         end
     ///     end
     /// ```
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    #[expect(
-        clippy::too_many_lines,
-        reason = "spawn-with-args codegen handles arg mapping and instance registration"
-    )]
     pub(in crate::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
         _module: &Module,
@@ -200,6 +232,9 @@ impl CoreErlangGenerator {
         // This is the single source of truth for spawnWith: argument validation.
         // The runtime (beamtalk_object_class.erl handle_call({spawn, Args})) delegates
         // validation to this generated code for both static and dynamic dispatch paths.
+        // (BT-4030's unknown-key check lives in init/1 instead, where the
+        // metadata-resolved declared set — own, inherited, and late — is
+        // available; the start-failure arm below re-raises it unwrapped.)
         let doc = docvec![
             "'spawn'/1 = fun (InitArgs) ->",
             nest(
@@ -261,27 +296,7 @@ impl CoreErlangGenerator {
                                                 ]
                                             ),
                                             line(),
-                                            "<{'error', Reason}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    // Include the actual error reason in the hint
-                                                    super::super::errors::beamtalk_error_doc(
-                                                        Document::Str("SpawnErr0"),
-                                                        Document::Str("SpawnErr0"),
-                                                        Document::Str("SpawnErr1"),
-                                                        Document::Str("SpawnErr1"),
-                                                        Document::Str("SpawnErr2"),
-                                                        "instantiation_error",
-                                                        leaf::atom(class_name.clone()),
-                                                        Document::Str("'spawnWith:'"),
-                                                        Document::Str("Reason"),
-                                                        line(),
-                                                    ),
-                                                    "call 'beamtalk_error':'raise'(SpawnErr2)",
-                                                ]
-                                            ),
+                                            Self::spawn_error_arm_doc(&class_name, "'spawnWith:'"),
                                         ]
                                     ),
                                     line(),
@@ -626,6 +641,56 @@ mod tests {
             "expected spawn/1 decl: {out}"
         );
         assert!(out.contains("is_map"), "expected is_map check: {out}");
+    }
+
+    #[test]
+    fn generate_spawn_with_args_reraises_init_unknown_field() {
+        // BT-4030: init/1's own unknown_field rejection passes through
+        // unwrapped; every other start failure keeps the
+        // instantiation_error wrap.
+        let mut g = generator();
+        let m = empty_module();
+        let out = g
+            .generate_spawn_with_args_function(&m)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4)"),
+            "expected extract_beamtalk_error call: {out}"
+        );
+        assert!(
+            out.contains("call 'beamtalk_error':'is_unknown_field'(InitErr)"),
+            "expected is_unknown_field dispatch: {out}"
+        );
+        assert!(
+            out.contains("<'true'> when 'true' -> call 'beamtalk_error':'raise'(InitErr)"),
+            "expected transparent unknown_field re-raise: {out}"
+        );
+        assert!(
+            out.contains("instantiation_error"),
+            "other failures must keep the instantiation_error wrap: {out}"
+        );
+    }
+
+    #[test]
+    fn generate_spawn_no_args_reraises_init_unknown_field() {
+        // BT-4030: spawn/0 shares spawn/1's start-failure arm — init/1's
+        // unknown_field passes through unwrapped there too.
+        let mut g = generator();
+        let m = empty_module();
+        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        assert!(
+            out.contains("call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4)"),
+            "expected extract_beamtalk_error call: {out}"
+        );
+        assert!(
+            out.contains("<'true'> when 'true' -> call 'beamtalk_error':'raise'(InitErr)"),
+            "expected transparent unknown_field re-raise: {out}"
+        );
+        assert!(
+            out.contains("instantiation_error"),
+            "other failures must keep the instantiation_error wrap: {out}"
+        );
     }
 
     #[test]

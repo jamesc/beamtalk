@@ -14,7 +14,8 @@ module 'match_exhaustiveness_missing_arm' ['new'/0, 'new'/1, 'run:'/2, 'dispatch
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'match_exhaustiveness_missing_arm':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('ExhaustivenessTest', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'run:'/2 = fun (Self, _r1) ->

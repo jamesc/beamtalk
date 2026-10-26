@@ -14,7 +14,8 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'nlr_matching_token_value_type':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('NlrValue', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'findFirstOver:in:'/3 = fun (Self, _threshold1, _coll2) ->

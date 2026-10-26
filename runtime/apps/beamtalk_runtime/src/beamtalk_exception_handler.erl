@@ -114,6 +114,10 @@ kind_to_class(internal_error) -> 'RuntimeError';
 %% for catchability (a future KeyError/ResourceError hierarchy can refine this).
 kind_to_class(key_error) -> 'RuntimeError';
 kind_to_class(pattern_mismatch) -> 'RuntimeError';
+%% BT-4030: `new:`/`spawnWith:` with an undeclared initialiser key. No
+%% dedicated stdlib class yet, so it lives under RuntimeError for
+%% catchability like the neighbouring classified kinds.
+kind_to_class(unknown_field) -> 'RuntimeError';
 kind_to_class(argument_error) -> 'RuntimeError';
 kind_to_class(resource_error) -> 'RuntimeError';
 kind_to_class(process_not_found) -> 'RuntimeError';

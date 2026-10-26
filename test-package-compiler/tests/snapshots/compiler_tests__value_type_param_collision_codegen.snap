@@ -12,7 +12,8 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'value_type_param_collision':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('ParamCollisionTest', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'compute:'/2 = fun (Self, _seq01) ->

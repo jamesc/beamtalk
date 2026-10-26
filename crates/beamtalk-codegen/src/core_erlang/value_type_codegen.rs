@@ -237,7 +237,8 @@ impl CoreErlangGenerator {
     ///
     /// 'new'/1 = fun (InitArgs) ->
     ///     DefaultState = call 'point':'new'(),
-    ///     call 'maps':'merge'(DefaultState, InitArgs)
+    ///     CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('Point', 'new:', DefaultState, InitArgs, []),
+    ///     call 'maps':'merge'(DefaultState, CheckedArgs)
     ///
     /// 'plus'/2 = fun (Self, Other) ->
     ///     % Direct function call, no gen_server
@@ -730,7 +731,8 @@ impl CoreErlangGenerator {
     /// - Dictionary: returns `InitArgs` directly (dictionary IS a map)
     /// - List, Tuple: raises `instantiation_error` (no meaningful init-from-map)
     /// - `native:` classes carrying no declared fields: raises `instantiation_error`
-    /// - Other value types: merges initialization arguments with defaults
+    /// - Other value types: validates initialization arguments against the
+    ///   declared fields (BT-4030 `#unknown_field`), then merges
     fn generate_value_type_new_with_args(
         &mut self,
         class: &ClassDefinition,
@@ -759,7 +761,18 @@ impl CoreErlangGenerator {
             "    let DefaultState = call '",
             leaf::var(module_name),
             "':'new'() in\n",
-            "    call 'maps':'merge'(DefaultState, InitArgs)\n",
+            // BT-4030: validate against the declared fields (resolved from
+            // metadata at runtime, so inherited fields stay accepted).
+            "    let CheckedArgs = ",
+            super::errors::check_init_args_call_doc(
+                leaf::atom(class_name.clone()),
+                "new:",
+                leaf::var("DefaultState".to_string()),
+                leaf::var("InitArgs".to_string()),
+                &[],
+            ),
+            " in\n",
+            "    call 'maps':'merge'(DefaultState, CheckedArgs)\n",
             "\n",
         ])
     }
