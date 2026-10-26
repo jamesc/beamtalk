@@ -3841,10 +3841,13 @@ fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
         "    nil\n",
     );
     let code = codegen_source(src);
+    // BT-4070: four, not three — `clearIfPresent`'s `ifTrue:` is pure and
+    // inlines, so its `clearField:` lowers once in the taken arm AND once
+    // in the fallback arm's closure.
     assert_eq!(
         code.matches("call 'beamtalk_class_vars':'clear'(ClassSelf, ")
             .count(),
-        3,
+        4,
         "every clearField: is a clear/2 helper call. Got:\n{code}"
     );
     assert!(

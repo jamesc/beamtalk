@@ -21,6 +21,8 @@
 //!   detectors, over the whole stdlib + bootstrap-test corpus
 //! - [`family_slots`] — BT-3511: the unified `ThreadedFamilies`
 //!   result-tuple append/extract emission helper
+//! - [`pure_conditionals`] — BT-4070: pure-literal-block conditional
+//!   inline (`case` with a dynamic-send fallback)
 
 use super::*;
 
@@ -80,6 +82,7 @@ mod family_slots;
 mod list_and_loop_value_threading;
 mod match_arm_state_threading;
 mod match_patterns;
+mod pure_conditionals;
 mod stored_closures;
 mod tier2_block_values;
 mod while_loops;

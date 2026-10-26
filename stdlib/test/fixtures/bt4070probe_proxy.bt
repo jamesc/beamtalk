@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4070: test fixture — an actor proxy whose `doesNotUnderstand:args:`
+// is a catch-all answering a marker, so the pure-conditional fallback
+// send for a non-Boolean receiver is observable. (An actor, because the
+// runtime consults `doesNotUnderstand:args:` overrides on the actor
+// dispatch path.)
+
+Actor subclass: Bt4070ProbeProxy
+
+  doesNotUnderstand: _selector args: _arguments =>
+    #bt4070Intercepted

@@ -334,6 +334,20 @@ pub(in crate::core_erlang) struct ArmFrame {
     pub(in crate::core_erlang) threads: Vec<String>,
 }
 
+/// BT-4070: what one arm of a pure-inline boolean `case`
+/// ([`CoreErlangGenerator::generate_pure_boolean_case`]) answers.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) enum PureArm<'b> {
+    /// The block's body compiled in place as the arm's plain value.
+    Inline(&'b Block),
+    /// The receiver itself (`C`) — the non-taken solo-branch contract
+    /// (`False>>ifTrue: => self`, `True>>ifFalse: => self`).
+    Receiver,
+    /// A boolean literal atom (`'true'`/`'false'`) — `and:`'s/`or:`'s
+    /// short-circuit arm (`Boolean>>and:`/`or:`, `stdlib/src/boolean.bt`).
+    Literal(&'static str),
+}
+
 /// Where a conditional's scratch map — element 2 of its result tuple, the
 /// `StateAcc` its arms thread their locals through — starts (ADR 0131 §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1473,6 +1487,199 @@ impl CoreErlangGenerator {
             not_nil_arm,
             " end",
         ])
+    }
+
+    /// BT-4070: the pure-inline producer for `R ifTrue: [B]` — the
+    /// expression-position counterpart of
+    /// [`Self::generate_if_true_with_mutations_tuple`], but a plain value,
+    /// not a `{Result, NewState}` tuple: the gate
+    /// ([`Self::try_generate_pure_boolean_conditional`]) guarantees no block
+    /// or receiver needs threading, so no state is threaded and no classifier
+    /// change is needed (`control_flow_has_mutations` is false, the plain
+    /// consumer path). Matches dynamic dispatch exactly: the non-taken
+    /// (false) arm answers the receiver (`False>>ifTrue: => self`), NOT
+    /// `nil` (the mutation path's `{'nil', State}` is a pre-existing
+    /// divergence, pinned by
+    /// `test_if_true_mutation_bypasses_runtime_dispatch` — follow-up, not
+    /// touched here).
+    pub(in crate::core_erlang) fn generate_if_true_pure(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+        fallback_args: &[Expression],
+    ) -> Result<Document<'static>> {
+        self.generate_pure_boolean_case(
+            receiver,
+            "ifTrue:",
+            PureArm::Inline(block),
+            PureArm::Receiver,
+            fallback_args,
+        )
+    }
+
+    /// BT-4070: the pure-inline producer for `R ifFalse: [B]` — the mirror
+    /// of [`Self::generate_if_true_pure`] (`True>>ifFalse: => self`).
+    pub(in crate::core_erlang) fn generate_if_false_pure(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+        fallback_args: &[Expression],
+    ) -> Result<Document<'static>> {
+        self.generate_pure_boolean_case(
+            receiver,
+            "ifFalse:",
+            PureArm::Receiver,
+            PureArm::Inline(block),
+            fallback_args,
+        )
+    }
+
+    /// BT-4070: the pure-inline producer for `R ifTrue: [T] ifFalse: [F]`.
+    pub(in crate::core_erlang) fn generate_if_true_if_false_pure(
+        &mut self,
+        receiver: &Expression,
+        true_block: &Block,
+        false_block: &Block,
+        fallback_args: &[Expression],
+    ) -> Result<Document<'static>> {
+        self.generate_pure_boolean_case(
+            receiver,
+            "ifTrue:ifFalse:",
+            PureArm::Inline(true_block),
+            PureArm::Inline(false_block),
+            fallback_args,
+        )
+    }
+
+    /// BT-4070: the pure-inline producer for `R and: [B]`. The non-taken
+    /// (false) arm is the literal `false`, matching `Boolean>>and:`
+    /// (`stdlib/src/boolean.bt`: `self ifTrue: aBlock ifFalse: [false]`).
+    pub(in crate::core_erlang) fn generate_and_pure(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+        fallback_args: &[Expression],
+    ) -> Result<Document<'static>> {
+        self.generate_pure_boolean_case(
+            receiver,
+            "and:",
+            PureArm::Inline(block),
+            PureArm::Literal("'false'"),
+            fallback_args,
+        )
+    }
+
+    /// BT-4070: the pure-inline producer for `R or: [B]`. The non-taken
+    /// (true) arm is the literal `true`, matching `Boolean>>or:`
+    /// (`stdlib/src/boolean.bt`: `self ifTrue: [true] ifFalse: aBlock`).
+    pub(in crate::core_erlang) fn generate_or_pure(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+        fallback_args: &[Expression],
+    ) -> Result<Document<'static>> {
+        self.generate_pure_boolean_case(
+            receiver,
+            "or:",
+            PureArm::Literal("'true'"),
+            PureArm::Inline(block),
+            fallback_args,
+        )
+    }
+
+    /// BT-4070: the shared core behind the five `generate_*_pure`
+    /// builders — `R <sel> [blocks]` with literal, non-mutating blocks as an
+    /// inline `case` over the once-evaluated receiver `C`:
+    ///
+    /// ```erlang
+    /// let _Cond1 = <receiver> in
+    /// case _Cond1 of
+    ///   <'true'> when 'true' -> <true_arm>
+    ///   <'false'> when 'true' -> <false_arm>
+    ///   <_CondNoMatch2> when 'true' -> call 'beamtalk_message_dispatch':'send'(
+    ///     _Cond1, '<sel>', [fun () -> <block> end, ...])
+    /// end
+    /// ```
+    ///
+    /// The wildcard arm is a real dynamic send — never a `case_clause`
+    /// raise — so a non-Boolean receiver (a custom `ifTrue:`
+    /// implementor, DNU, a proxy, `perform:`) behaves exactly as today; it
+    /// doubles as the static-exhaustiveness arm (see
+    /// `case_clause_fallback`'s doc comment) and shares its `CondNoMatch`
+    /// naming for grep-ability. The fallback closures compile through
+    /// today's Tier-1 builder via `expression_doc`, over the original
+    /// argument expressions, so they are byte-identical to the closures the
+    /// fully-dynamic send would allocate — allocated only when the arm is
+    /// taken.
+    ///
+    /// The receiver compiles through [`Self::compile_conditional_receiver`],
+    /// the same path the mutation builders use: the gate guarantees an
+    /// empty prelude, but any residual one still runs before `C` binds, so
+    /// the binding order can never be wrong.
+    pub(in crate::core_erlang) fn generate_pure_boolean_case(
+        &mut self,
+        receiver: &Expression,
+        selector_atom: &'static str,
+        true_arm: PureArm<'_>,
+        false_arm: PureArm<'_>,
+        fallback_args: &[Expression],
+    ) -> Result<Document<'static>> {
+        let recv_frame = self.current_frame();
+        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
+        let recv_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
+        let recv_val_doc = self.threaded_value_doc(&recv_tv.value);
+        let cond_var = self.fresh_temp_var("Cond");
+        let true_doc = self.pure_arm_doc(true_arm, &cond_var)?;
+        let false_doc = self.pure_arm_doc(false_arm, &cond_var)?;
+        let mut closure_docs = Vec::with_capacity(fallback_args.len());
+        for arg in fallback_args {
+            closure_docs.push(self.expression_doc(arg)?);
+        }
+        let fallback =
+            Self::runtime_send_call(leaf::var(cond_var.clone()), selector_atom, closure_docs);
+        let no_match_var = self.fresh_temp_var("CondNoMatch");
+
+        Ok(docvec![
+            recv_preamble,
+            "let ",
+            leaf::var(cond_var.clone()),
+            " = ",
+            recv_val_doc,
+            " in case ",
+            leaf::var(cond_var),
+            " of <'true'> when 'true' -> ",
+            true_doc,
+            " <'false'> when 'true' -> ",
+            false_doc,
+            " <",
+            leaf::var(no_match_var),
+            "> when 'true' -> ",
+            fallback,
+            " end",
+        ])
+    }
+
+    /// BT-4070: one arm's document of [`Self::generate_pure_boolean_case`].
+    fn pure_arm_doc(&mut self, arm: PureArm<'_>, cond_var: &str) -> Result<Document<'static>> {
+        match arm {
+            PureArm::Inline(block) => {
+                // A `case` arm is a Core Erlang scope of its own, but the
+                // generator's variable scope is not: a block-local temp the
+                // arm binds (`[t := 5. t]`) must not leak into the
+                // enclosing method's scope, where a later `t` would resolve
+                // to the arm's `let`-bound variable. Push/pop around the
+                // arm, as every closed-`fun` lowering does — but WITHOUT
+                // `with_closed_fun_scope`'s state-version reset, which is
+                // for closed funs only: a pure arm is inlined and shares
+                // the enclosing versioning.
+                self.push_scope();
+                let body = self.generate_block_body(block);
+                self.pop_scope();
+                body
+            }
+            PureArm::Receiver => Ok(leaf::var(cond_var)),
+            PureArm::Literal(atom) => Ok(Document::Str(atom)),
+        }
     }
 
     /// ADR 0118 phase 4: `true` if `expr` (already paren-unwrapped)
