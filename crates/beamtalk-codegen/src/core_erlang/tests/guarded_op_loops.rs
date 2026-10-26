@@ -56,6 +56,37 @@ fn takes(out: &str) -> usize {
 
 const ACTOR_PREAMBLE: &str = "Actor subclass: Probe\n  state: n = 0\n\n";
 
+/// BT-4194: the `[...] value` block in a `do:` body is lowered over a scratch
+/// map seeded fresh from the loop's locals; a bracket on its guarded operator
+/// stored that scratch map into the cell, so the enclosing loop's reload read
+/// it back as the `State` and the nest answered stale values. Inside a loop
+/// that holds no whole `State` the operator is covered by the loop's bracket
+/// instead.
+fn loop_nest_value_block(iter: &str) -> String {
+    format!(
+        "{ACTOR_PREAMBLE}  run: c =>\n    t := 0.\n    m := 0.\n    [m < 2] whileTrue: [m := m + 1. #(1, 2) {iter} [:z | u := 0. [u := u + 1] value. t := u]].\n    t\n"
+    )
+}
+
+#[test]
+fn value_block_over_scratch_in_stateless_loop_does_not_bracket_its_scratch() {
+    let src = loop_nest_value_block("do:");
+    // Verifier-clean (`SyncedCallOnPrivateScratch` would panic here).
+    assert_eq!(enforce_report(&src), None);
+    let out = compile(&src);
+    let seeded = out.find("_SeededState").expect("seeded scratch map");
+    let region_end = out[seeded..].find("_FoldResult").expect("fold result");
+    assert!(
+        !out[seeded..seeded + region_end].contains("'store'"),
+        "scratch map stored into the cell:\n{out}"
+    );
+}
+
+#[test]
+fn collect_twin_of_value_block_over_scratch_is_verifier_clean() {
+    assert_eq!(enforce_report(&loop_nest_value_block("collect:")), None);
+}
+
 #[test]
 fn do_loop_with_guarded_op_brackets() {
     let out = compile(&format!(

@@ -543,13 +543,11 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
         }
 
         // Check that ebin dir actually has .beam files
-        let has_beam = std::fs::read_dir(&ebin_dir)
-            .map(|entries| {
-                entries
-                    .filter_map(std::result::Result::ok)
-                    .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
-            })
-            .unwrap_or(false);
+        let has_beam = std::fs::read_dir(&ebin_dir).is_ok_and(|entries| {
+            entries
+                .filter_map(std::result::Result::ok)
+                .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+        });
 
         if !has_beam {
             debug!(dep = %dep.name, "Dependency ebin directory has no .beam files — deps are stale");

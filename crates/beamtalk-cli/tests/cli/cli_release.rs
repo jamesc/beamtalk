@@ -72,7 +72,7 @@ fn release_builds_staged_tree_and_boot_artifacts() {
         .current_dir(project.path())
         .args(["release", "--output"])
         .arg(&output_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success()
         .stdout(contains("Built release cli_subprocess_fixture-0.1.0"));
@@ -295,7 +295,7 @@ fn release_default_build_has_erts_tarball_provenance_and_shapes_test() {
         .current_dir(project.path())
         .args(["release", "--output"])
         .arg(&output_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success()
         .stdout(contains("Built release cli_subprocess_fixture-0.1.0"))
@@ -417,7 +417,7 @@ fn release_no_include_erts_skips_erts_and_still_boots_test() {
         .current_dir(project.path())
         .args(["release", "--no-include-erts", "--output"])
         .arg(&output_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success()
         .stdout(contains("no ERTS bundled"));
@@ -485,7 +485,7 @@ fn release_strip_beams_removes_debug_info_but_keeps_meta_test() {
         .current_dir(project.path())
         .args(["release", "--output"])
         .arg(&output_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success();
 
@@ -604,7 +604,7 @@ fn release_launcher_eval_adopts_program_exit_code_test() {
         .current_dir(project.path())
         .args(["release", "--output"])
         .arg(&output_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success();
 
@@ -664,7 +664,7 @@ fn release_foreground_actor_program_exit_and_system_halt_test() {
         .current_dir(project.path())
         .args(["release", "--output"])
         .arg(&output_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success();
 
@@ -705,7 +705,7 @@ fn release_foreground_actor_program_exit_and_system_halt_test() {
             .output()
             .expect("spawn bin/<name> rpc");
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
         let mut status = None;
         while std::time::Instant::now() < deadline {
             if let Ok(Some(st)) = foreground.0.try_wait() {
@@ -764,7 +764,7 @@ fn build_release_fixture(project: &std::path::Path, output_dir: &std::path::Path
         .current_dir(project)
         .args(["release", "--output"])
         .arg(output_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success();
 }
@@ -808,7 +808,7 @@ fn spawn_foreground_and_wait_for_ping(
     // is itself a failure worth surfacing directly rather than timing out).
     // 60s, not a shorter window: cheap insurance against a slow CI boot
     // under contention.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
     let mut pinged = false;
     let mut last_ping_output: Option<std::process::Output> = None;
     while std::time::Instant::now() < deadline {
@@ -887,7 +887,7 @@ fn stop_and_wait_for_exit(
         String::from_utf8_lossy(&stop.stderr)
     );
 
-    let stop_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let stop_deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
     let mut stopped = false;
     while std::time::Instant::now() < stop_deadline {
         if let Ok(Some(_status)) = foreground.0.try_wait() {
@@ -1096,7 +1096,7 @@ fn release_launcher_foreground_boots_under_no_include_erts_test() {
         .current_dir(project.path())
         .args(["release", "--no-include-erts", "--output"])
         .arg(&output_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success();
 
@@ -1165,7 +1165,7 @@ fn release_launcher_refuses_out_of_range_otp_via_provenance_test() {
         .current_dir(project.path())
         .args(["release", "--no-include-erts", "--output"])
         .arg(&output_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success();
 
@@ -1244,7 +1244,7 @@ fn release_upgrade_from_reports_missing_migration_and_removed_class_verbatim() {
         .current_dir(project.path())
         .args(["release", "--output"])
         .arg(&prev_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success()
         .stdout(contains("Built release cli_subprocess_fixture-1.3.0"));
@@ -1279,7 +1279,7 @@ fn release_upgrade_from_reports_missing_migration_and_removed_class_verbatim() {
         .arg(&new_dir)
         .arg("--upgrade-from")
         .arg(&prev_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .failure()
         .stdout(contains(
@@ -1318,7 +1318,7 @@ fn release_upgrade_from_falls_back_to_on_the_fly_extraction_when_shapes_json_is_
         .current_dir(project.path())
         .args(["release", "--output"])
         .arg(&prev_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success();
 
@@ -1341,7 +1341,7 @@ fn release_upgrade_from_falls_back_to_on_the_fly_extraction_when_shapes_json_is_
         .arg(&new_dir)
         .arg("--upgrade-from")
         .arg(&prev_dir)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success()
         .stdout(contains(
@@ -1370,7 +1370,7 @@ fn release_upgrade_from_accepts_a_tarball() {
         .current_dir(project.path())
         .args(["release", "--output"])
         .arg(project.path().join("dist-1.3.0"))
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success();
     let prev_tarball = project.path().join("cli_subprocess_fixture-1.3.0.tar.gz");
@@ -1392,7 +1392,7 @@ fn release_upgrade_from_accepts_a_tarball() {
         .arg(project.path().join("dist-1.4.0"))
         .arg("--upgrade-from")
         .arg(&prev_tarball)
-        .timeout(std::time::Duration::from_secs(180))
+        .timeout(std::time::Duration::from_mins(3))
         .assert()
         .success()
         .stdout(contains(

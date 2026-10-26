@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4070: test fixture — a class with its own `ifTrue:`, so the
+// pure-conditional fallback send for a non-Boolean receiver with a custom
+// implementor is observable.
+
+Value subclass: Bt4070CustomIfTrue
+
+  ifTrue: _aBlock => #bt4070Custom

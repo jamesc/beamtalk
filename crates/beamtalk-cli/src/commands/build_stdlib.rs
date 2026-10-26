@@ -955,6 +955,8 @@ const TIMER_SPAWN_SELECTORS: &[&str] = &["after:do:", "every:do:"];
 /// `Parallel` class methods that run their blocks in other processes.
 const PARALLEL_SPAWN_SELECTORS: &[&str] = &["all:", "all:timeout:", "any:"];
 /// `Collection` instance methods that delegate to `Parallel all:`.
+/// `Block` instance methods that run the *receiver* block in another process.
+const BLOCK_SPAWN_SELECTORS: &[&str] = &["fork"];
 const COLLECTION_SPAWN_SELECTORS: &[&str] =
     &["parallelCollect:", "parallelCollect:maxConcurrency:"];
 
@@ -988,6 +990,13 @@ fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
 /// public entry points.
 fn mark_parallel_collect_spawns(methods: &mut [MethodMeta]) -> Result<()> {
     mark_spawns_for_selectors(methods, COLLECTION_SPAWN_SELECTORS, "Collection")
+}
+
+/// Mark `Block>>fork`, which runs its receiver block in a new process
+/// (BT-4198). Here `spawns_block` means the receiver block is the spawned one,
+/// since `fork` takes no block argument.
+fn mark_block_spawns(methods: &mut [MethodMeta]) -> Result<()> {
+    mark_spawns_for_selectors(methods, BLOCK_SPAWN_SELECTORS, "Block")
 }
 
 /// A single stdlib type-alias declaration collected by
@@ -1394,6 +1403,9 @@ fn extract_class_metadata(
     // Mark Parallel/Collection methods that spawn their block argument(s)
     if class_name == "Parallel" {
         mark_parallel_spawns(&mut class_methods)?;
+    }
+    if class_name == "Block" {
+        mark_block_spawns(&mut methods)?;
     }
     if class_name == "Collection" {
         mark_parallel_collect_spawns(&mut methods)?;

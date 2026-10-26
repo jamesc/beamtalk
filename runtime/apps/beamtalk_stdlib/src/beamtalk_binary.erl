@@ -460,13 +460,8 @@ print_string(Bin) when is_binary(Bin) ->
     beamtalk_primitive:string_from_binary(
         case check_utf8(Bin) of
             {ok, _} ->
-                Escaped = binary:replace(
-                    binary:replace(Bin, <<"\\">>, <<"\\\\">>, [global]),
-                    <<"\"">>,
-                    <<"\\\"">>,
-                    [global]
-                ),
-                iolist_to_binary([<<"\"">>, Escaped, <<"\"">>]);
+                %% ADR 0138 escape mapping lives in one place.
+                beamtalk_primitive:print_string(Bin);
             {error, _} ->
                 iolist_to_binary([<<"<<">>, bytes_to_hex(Bin), <<">>">>])
         end

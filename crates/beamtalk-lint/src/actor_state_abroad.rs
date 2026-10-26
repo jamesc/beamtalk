@@ -56,6 +56,11 @@
 //! `sync_send_in_timer_block` (at the send); this lint fires at the block,
 //! about the away execution.
 //!
+//! A block literal that is the *receiver* of a `spawns_block` send
+//! (`[...] fork`, BT-4198) is away from home too and is judged like a
+//! `Timer` block. Only a literal receiver is seen: `blk fork` on a variable
+//! is missed.
+//!
 //! Shapes the lint does not see: a subclass whose actor ancestor is declared
 //! in another file (each file is linted as its own module, so the subclass
 //! resolves non-actor); a block handed to a `Future` (runtime-only, no
@@ -314,6 +319,10 @@ enum AbroadShape {
     /// class method): runs the block later in another process while the actor
     /// moves on.
     Spawned { class: String, selector: String },
+    /// A block literal that is the *receiver* of a send whose method carries
+    /// the `spawns_block` mark (`[...] fork`): the receiver block itself runs
+    /// in another process.
+    Forked { selector: String },
     /// `Parallel all:`/`any:`: runs the block in another process while this
     /// call blocks.
     Parallel { class: String, selector: String },
@@ -332,6 +341,9 @@ impl AbroadShape {
         match self {
             Self::Spawned { class, selector } => {
                 format!("passed to '{class} {selector}', which runs it in another process")
+            }
+            Self::Forked { selector } => {
+                format!("sent '{selector}', which runs it in another process")
             }
             Self::Parallel { class, selector } => format!(
                 "passed to '{class} {selector}', which runs it in another process \
@@ -356,7 +368,9 @@ impl AbroadShape {
             Self::ClassMethod { target, selector } => {
                 format!("passed to '{target} {selector}', which may keep it")
             }
-            Self::Spawned { .. } | Self::Parallel { .. } => self.run_clause(class),
+            Self::Spawned { .. } | Self::Forked { .. } | Self::Parallel { .. } => {
+                self.run_clause(class)
+            }
         }
     }
 }
@@ -377,6 +391,20 @@ fn check_send(
                 _ => None,
             })
     };
+    // Shape A': a block literal receiver whose method spawns its receiver
+    // (`[...] fork`).
+    if let Expression::Block(b) = receiver.unwrap_parens() {
+        if ctx
+            .hierarchy
+            .find_method("Block", sel)
+            .is_some_and(|m| m.spawns_block)
+        {
+            let shape = AbroadShape::Forked {
+                selector: sel.to_string(),
+            };
+            check_block(ctx, b, &shape, false, report);
+        }
+    }
     // Shape A: a class-side send that runs its block in another process.
     if let Some(shape) = ctx.spawned_shape(receiver, sel) {
         // `Parallel` blocks until its workers finish, so a read there sees
@@ -753,7 +781,10 @@ fn reads_diagnostic(
     // A `self` send that returns the value is safe from a `Timer` block (the
     // actor is free) but deadlocks from a synchronous call the actor waits
     // on, so only the `Timer` hint offers it.
-    let hint = if matches!(shape, AbroadShape::Spawned { .. }) {
+    let hint = if matches!(
+        shape,
+        AbroadShape::Spawned { .. } | AbroadShape::Forked { .. }
+    ) {
         format!("{base}, or have the block send {class} a message that {verb} (ADR 0137)")
     } else {
         format!(
@@ -864,6 +895,43 @@ Actor subclass: Counter
     /// and lints.
     fn only(body: &str) -> Vec<Diagnostic> {
         abroad(&format!("{HEADER}{body}"))
+    }
+
+    // ---- Shape A': Block fork (BT-4198) ------------------------------------
+
+    #[test]
+    fn fork_write_warns() {
+        let d = only("  kick => [self.n := self.n + 1] fork\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert_eq!(d[0].severity, Severity::Lint);
+        assert!(
+            d[0].message.contains("writes field 'n' of Counter"),
+            "{}",
+            d[0].message
+        );
+        assert!(d[0].message.contains("sent 'fork'"), "{}", d[0].message);
+        assert!(
+            d[0].message.contains("raises `actor_state_unreachable`"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn fork_self_send_warns() {
+        let d = only("  kick => [self bump] fork\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("sends `self bump`"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn fork_no_actor_state_quiet() {
+        let d = only("  kick => [1 + 1] fork\n");
+        assert!(d.is_empty(), "{d:?}");
     }
 
     // ---- Shape A: Timer ----------------------------------------------------

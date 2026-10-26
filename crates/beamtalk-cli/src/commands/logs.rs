@@ -212,7 +212,7 @@ fn extract_json_level(line: &str) -> Option<LogLevel> {
 /// Return the inode of an open file (Unix) or 0 (non-Unix).
 #[cfg(unix)]
 fn file_inode(file: &File) -> u64 {
-    file.metadata().map(|m| m.ino()).unwrap_or(0)
+    file.metadata().map_or(0, |m| m.ino())
 }
 
 #[cfg(not(unix))]
@@ -223,7 +223,7 @@ fn file_inode(_file: &File) -> u64 {
 /// Return the inode of a path (Unix) or 0 (non-Unix).
 #[cfg(unix)]
 fn path_inode(path: &PathBuf) -> u64 {
-    fs::metadata(path).map(|m| m.ino()).unwrap_or(0)
+    fs::metadata(path).map_or(0, |m| m.ino())
 }
 
 #[cfg(not(unix))]

@@ -2796,6 +2796,19 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         use super::CodeGenContext;
 
+        // BT-4070: pure-inline for literal, non-mutating blocks — BEFORE the
+        // Actor/Repl/loop-body early return below. That context gate exists
+        // for the state-threading mutation path; pure-inline is
+        // state-transparent in every context (no field/local writes, no
+        // self-sends, no threading receiver, guaranteed by
+        // `!needs_threading`), so it runs in value-type and class methods
+        // too, wherever the send reaches this handler.
+        if let Some(doc) =
+            self.try_generate_pure_boolean_conditional(receiver, selector, arguments)?
+        {
+            return Ok(Some(doc));
+        }
+
         // Only applies in actor context, REPL context, or when inside a loop body
         // (value-type methods may have inline conditionals mutating captured
         // locals inside do: blocks).
@@ -2949,6 +2962,152 @@ impl CoreErlangGenerator {
         }
 
         Ok(None)
+    }
+
+    /// BT-4070: pure-inline gate for `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+    /// and `and:`/`or:` with literal, non-mutating blocks — the check
+    /// [`Self::try_generate_boolean_protocol`] runs before its
+    /// Actor/Repl/loop-body early return. Fires only when the existing
+    /// `needs_threading` check is false (the same predicate the mutation
+    /// path reads, so the two halves can never disagree about what
+    /// "pure" means) AND every block argument is a direct, zero-arity
+    /// literal `Block` — the same direct-match style as the mutation
+    /// gate (no paren-unwrapping). An arity-≠-0 block keeps today's
+    /// runtime arity-error behavior by falling through to dynamic
+    /// dispatch, as does any shape this does not name (`xor:`, the
+    /// `ifNil:` family, non-literal blocks).
+    ///
+    /// Never fires on a bare-`self`, `super`, or class-reference receiver:
+    /// those sends are (or may be) intercepted by the self/super/class
+    /// dispatch paths — in a class method a runtime `send/3` to the
+    /// class's own process would deadlock where today's direct class-side
+    /// call does not (the BT-3985/BT-4005 hazard class) — so the fallback
+    /// arm's dynamic send would not be behavior-identical there. (`super`
+    /// is also intercepted before the handler chain ever runs; excluding
+    /// it here is defense in depth.)
+    ///
+    /// Never fires while [`Self::decline_pure_boolean_inline`] is set (a
+    /// stateful loop-condition tail — see the field's doc comment).
+    ///
+    /// Never fires in an actor instance method when a branch block holds a
+    /// guarded operator (see [`Self::pure_blocks_hold_guarded_operator`]): the
+    /// arm compiles via `generate_block_body`, whose closure frame carries
+    /// the `Loop(DirectParams)` kind — and the ADR 0137 bracket machinery
+    /// reads that kind as a stateless loop, so the operator's slow path
+    /// would flag a loop marker that was never pushed (or skip its
+    /// `SyncedCall`), tripping `UnbracketedGuardedOperator`. The receiver
+    /// is exempt: it compiles in the enclosing (truthful) frame via
+    /// `compile_conditional_receiver`, so its operators bracket normally.
+    fn try_generate_pure_boolean_conditional(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        // A stateful loop-condition tail keeps today's dynamic dispatch:
+        // its value splices into the `{Bool, StateAcc[, Self]}` hand-back
+        // tuple, where a bare `case` breaks erlc's `beam_clean`
+        // (`undefined_label`) in complex nestings (corpus run70/run139).
+        if self.decline_pure_boolean_inline {
+            return Ok(None);
+        }
+        // A `self`/`super`/class receiver keeps today's dispatch (see the
+        // doc comment). Parens are transparent here — this is a receiver
+        // classification, not the block-argument shape match below.
+        match receiver.unwrap_parens() {
+            Expression::Super(_) | Expression::ClassReference { .. } => return Ok(None),
+            recv if super::expr_shape::is_self_identifier(recv) => return Ok(None),
+            _ => {}
+        }
+
+        // `and:`/`or:` are not `WellKnownSelector`s (see
+        // `try_generate_boolean_protocol`'s own `and:`/`or:` arm); match the
+        // keyword shape directly, as it does.
+        if let MessageSelector::Keyword(parts) = selector {
+            if parts.len() == 1 && arguments.len() == 1 {
+                let kw = parts[0].keyword.as_str();
+                if kw == "and:" || kw == "or:" {
+                    if let Expression::Block(block) = &arguments[0] {
+                        if block.parameters.is_empty()
+                            && !self.and_or_needs_mutation_threading(receiver, block)
+                            && !self.pure_blocks_hold_guarded_operator(&[block])
+                        {
+                            let doc = if kw == "and:" {
+                                self.generate_and_pure(receiver, block, arguments)?
+                            } else {
+                                self.generate_or_pure(receiver, block, arguments)?
+                            };
+                            return Ok(Some(doc));
+                        }
+                    }
+                }
+            }
+        }
+
+        match selector.well_known() {
+            Some(WellKnownSelector::IfTrue) if arguments.len() == 1 => {
+                if let Expression::Block(block) = &arguments[0] {
+                    if block.parameters.is_empty()
+                        && !self.conditional_needs_mutation_threading(receiver, &[block])
+                        && !self.pure_blocks_hold_guarded_operator(&[block])
+                    {
+                        return Ok(Some(
+                            self.generate_if_true_pure(receiver, block, arguments)?,
+                        ));
+                    }
+                }
+            }
+            Some(WellKnownSelector::IfFalse) if arguments.len() == 1 => {
+                if let Expression::Block(block) = &arguments[0] {
+                    if block.parameters.is_empty()
+                        && !self.conditional_needs_mutation_threading(receiver, &[block])
+                        && !self.pure_blocks_hold_guarded_operator(&[block])
+                    {
+                        return Ok(Some(
+                            self.generate_if_false_pure(receiver, block, arguments)?,
+                        ));
+                    }
+                }
+            }
+            Some(WellKnownSelector::IfTrueIfFalse) if arguments.len() == 2 => {
+                if let (Expression::Block(true_block), Expression::Block(false_block)) =
+                    (&arguments[0], &arguments[1])
+                {
+                    if true_block.parameters.is_empty()
+                        && false_block.parameters.is_empty()
+                        && !self.conditional_needs_mutation_threading(
+                            receiver,
+                            &[true_block, false_block],
+                        )
+                        && !self.pure_blocks_hold_guarded_operator(&[true_block, false_block])
+                    {
+                        return Ok(Some(self.generate_if_true_if_false_pure(
+                            receiver,
+                            true_block,
+                            false_block,
+                            arguments,
+                        )?));
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(None)
+    }
+
+    /// BT-4070: whether pure-inline must decline `blocks` here — an actor
+    /// instance method (where calls are bracketed) with a guarded operator
+    /// in a branch. Read off [`Self::block_contains_guarded_operator`], the
+    /// same classifier the send emitter exempts, so the two cannot disagree
+    /// about what an operator is; the scope is the enclosing method's (the
+    /// arm's own scope starts empty — the arity gate admits no block
+    /// parameters — so lookups resolve identically when the arm lowers).
+    fn pure_blocks_hold_guarded_operator(&self, blocks: &[&Block]) -> bool {
+        self.synced_calls_active()
+            && blocks
+                .iter()
+                .any(|block| self.block_contains_guarded_operator(block))
     }
 
     /// Whether a nil-testing conditional (`ifNil:`, `ifNotNil:`, the two-arm

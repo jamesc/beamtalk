@@ -120,14 +120,12 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
             let repl_layout = crate::commands::build_layout::BuildLayout::new(project_root_utf8);
             let ebin_path = repl_layout.ebin_dir();
             // Count .beam files for summary
-            let beam_count = std::fs::read_dir(&ebin_path)
-                .map(|entries| {
-                    entries
-                        .filter_map(std::result::Result::ok)
-                        .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
-                        .count()
-                })
-                .unwrap_or(0);
+            let beam_count = std::fs::read_dir(&ebin_path).map_or(0, |entries| {
+                entries
+                    .filter_map(std::result::Result::ok)
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+                    .count()
+            });
             println!(
                 "Compiled {} v{} ({} {})",
                 pkg_manifest.name,
@@ -425,7 +423,7 @@ pub fn run(
                 );
             }
             // Give the node time to initialize
-            std::thread::sleep(Duration::from_millis(2000));
+            std::thread::sleep(Duration::from_secs(2));
         } else {
             println!("✓ Connected to existing workspace: {}", node_info.node_name);
             if timeout.is_some() {

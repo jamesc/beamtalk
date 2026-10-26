@@ -52,6 +52,7 @@ pub(in crate::core_erlang) struct BodyState {
     fold_self_slot_consumer: Option<Span>,
     in_fold_frame: bool,
     rebind_frames: HashMap<FrameId, RebindFrame>,
+    in_private_scratch: bool,
     block_depth: usize,
     class_var_capture: Option<String>,
     actor_closure: Option<crate::core_erlang::actor_state_access::ActorClosure>,
@@ -82,6 +83,7 @@ impl CoreErlangGenerator {
             fold_self_slot_consumer: self.fold_self_slot_consumer.take(),
             in_fold_frame: std::mem::take(&mut self.in_fold_frame),
             rebind_frames: std::mem::take(&mut self.rebind_frames),
+            in_private_scratch: std::mem::take(&mut self.in_private_scratch),
             block_depth: std::mem::take(&mut self.block_depth),
             class_var_capture: self.class_var_capture.take(),
             actor_closure: self.actor_closure.take(),
@@ -108,6 +110,7 @@ impl CoreErlangGenerator {
             fold_self_slot_consumer,
             in_fold_frame,
             rebind_frames,
+            in_private_scratch,
             block_depth,
             class_var_capture,
             actor_closure,
@@ -124,6 +127,7 @@ impl CoreErlangGenerator {
         self.fold_self_slot_consumer = fold_self_slot_consumer;
         self.in_fold_frame = in_fold_frame;
         self.rebind_frames = rebind_frames;
+        self.in_private_scratch = in_private_scratch;
         self.block_depth = block_depth;
         self.class_var_capture = class_var_capture;
         self.actor_closure = actor_closure;

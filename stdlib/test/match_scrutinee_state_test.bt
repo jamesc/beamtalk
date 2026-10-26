@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4196: a local-threading producer `match:` must seed its arms from the
+// State AFTER the scrutinee ran, so the scrutinee's field writes survive.
+
+TestCase subclass: MatchScrutineeStateTest
+  field: a = nil
+
+  setUp => self.a := MatchScrutineeStateCtr spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
+  testProducerMatchKeepsScrutineeFieldWrite =>
+    self assert: self.a run equals: {1, 11}
+
+  testPlainMatchKeepsScrutineeFieldWrite =>
+    self assert: self.a runPlain equals: {1, 11}
+
+  testProducerMatchThreadsAcrossCalls =>
+    self.a run
+    self assert: self.a run equals: {2, 20}

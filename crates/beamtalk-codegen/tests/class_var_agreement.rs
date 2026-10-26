@@ -297,7 +297,7 @@ fn measure_failure_rate() {
             }
         }
     }
-    by_cause.sort_by(|a, b| b.1.cmp(&a.1));
+    by_cause.sort_by_key(|a| std::cmp::Reverse(a.1));
     println!("shapes {shapes:?}: {failed} of {cases} programs fail verified codegen");
     for (c, n) in by_cause {
         println!("  {n:>4} x {c}");

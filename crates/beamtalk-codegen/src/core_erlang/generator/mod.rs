@@ -115,6 +115,15 @@ pub struct CoreErlangGenerator {
     pub(in crate::core_erlang) state_threading: VersionCounter,
     /// Whether we're inside a loop body (use `StateAcc` instead of `State`)
     pub(in crate::core_erlang) in_loop_body: bool,
+    /// BT-4070: while a stateful loop-condition tail lowers, the
+    /// pure-boolean gate declines (see
+    /// `try_generate_pure_boolean_conditional`): the tail value splices
+    /// into the `{Bool, StateAcc[, Self]}` hand-back tuple, where a bare
+    /// `case` breaks erlc's `beam_clean` (`undefined_label`) in complex
+    /// nestings. Set and restored synchronously around the tail lowering
+    /// only; never persists across methods. The underlying erlc trigger is
+    /// not yet root-caused — see BT-4202.
+    pub(in crate::core_erlang) decline_pure_boolean_inline: bool,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per
     /// [`Self::enter_branch_context`] call — every `with_branch_context` arm
@@ -312,6 +321,13 @@ pub struct CoreErlangGenerator {
     /// is never registered: it is `RebindFrame::implicit_root`.
     pub(in crate::core_erlang) rebind_frames:
         std::collections::HashMap<super::threaded_ir::FrameId, super::threaded_ir::RebindFrame>,
+    /// Whether the body being lowered runs inside a frame whose `StateAcc`
+    /// scratch map is not the actor's whole `State`: a direct-params or
+    /// tuple-acc loop frame, or an arm frame nested in one (its scratch map
+    /// is seeded fresh from the loop's locals, BT-4194). Maintained by
+    /// `with_rebind_frame`, the one place frames are entered; read by
+    /// `loop_holds_no_whole_state`.
+    pub(in crate::core_erlang) in_private_scratch: bool,
     /// Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     pub(in crate::core_erlang) source_path: Option<String>,
@@ -497,6 +513,7 @@ impl CoreErlangGenerator {
             var_context: VariableContext::new(),
             state_threading: VersionCounter::new(),
             in_loop_body: false,
+            decline_pure_boolean_inline: false,
             branch_frame_counter: 0,
             active_branch_frame: 0,
             closure_frame: None,
@@ -522,6 +539,7 @@ impl CoreErlangGenerator {
             fold_self_slot_consumer: None,
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),
+            in_private_scratch: false,
             source_path: None,
             tier2_local_vars: std::collections::HashSet::new(),
             tier2_local_var_captured_mutations: std::collections::HashMap::new(),

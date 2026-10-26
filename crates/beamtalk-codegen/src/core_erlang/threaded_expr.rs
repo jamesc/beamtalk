@@ -1585,8 +1585,22 @@ impl CoreErlangGenerator {
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
         let frame = rebind.frame;
+        // BT-4194: a direct-params or tuple-acc loop frame has no whole
+        // `State` (its locals are parameters), and an arm frame nested in it
+        // runs on a scratch map seeded fresh from those locals, so a bracket
+        // there would `store` that scratch map over the cell. Every other
+        // frame kind starts a scratch of its own.
+        let private_scratch = match &rebind.kind {
+            RebindFrameKind::Loop(
+                threaded_ir::ThreadingMode::DirectParams | threaded_ir::ThreadingMode::TupleAcc(_),
+            ) => true,
+            RebindFrameKind::BranchArm => self.in_private_scratch,
+            _ => false,
+        };
+        let saved_private = std::mem::replace(&mut self.in_private_scratch, private_scratch);
         let saved = self.rebind_frames.insert(frame, rebind);
         let out = f(self);
+        self.in_private_scratch = saved_private;
         match saved {
             Some(previous) => self.rebind_frames.insert(frame, previous),
             None => self.rebind_frames.remove(&frame),

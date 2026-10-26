@@ -198,10 +198,7 @@ pub(crate) fn write_stamp(stamp_path: &Utf8Path, otp_release: Option<&str>) {
 // (millions of years), so the `u64 → i64` cast cannot wrap.
 #[allow(clippy::cast_possible_wrap)]
 pub(crate) fn format_rfc3339_utc(time: SystemTime) -> String {
-    let secs = time
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let secs = time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
     let days = (secs / 86_400) as i64;
     let tod = secs % 86_400;
     let (hour, min, sec) = (tod / 3600, (tod % 3600) / 60, tod % 60);

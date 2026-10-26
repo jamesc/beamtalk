@@ -1,0 +1,25 @@
+{
+  "_comment": "BT-4200: the classes a typed-sealed guarded direct dispatch must NOT target, and why. Single source of truth for Rust's NON_TAGGED_MAP_CLASSES + exception-root walk (crates/beamtalk-codegen, dispatch_codegen.rs) and the runtime's beamtalk_primitive:tagged_map_dispatch/1 special arms (EUnit: beamtalk_tagged_map_routing_conformance_tests). Add or remove an entry here and BOTH sides must agree or a test fails. 'sample' is an Erlang expression for a representative value (null: representation shared with another class).",
+  "raw_term": [
+    {"class": "Integer", "sample": "1"},
+    {"class": "Float", "sample": "1.5"},
+    {"class": "Character", "sample": null},
+    {"class": "String", "sample": "{beamtalk_string, <<\"s\">>}"},
+    {"class": "Binary", "sample": "<<255>>"},
+    {"class": "Symbol", "sample": "foo"},
+    {"class": "True", "sample": "true"},
+    {"class": "False", "sample": "false"},
+    {"class": "Boolean", "sample": null},
+    {"class": "UndefinedObject", "sample": "nil"},
+    {"class": "Block", "sample": "fun() -> ok end"},
+    {"class": "Tuple", "sample": "{1, 2}"},
+    {"class": "List", "sample": "[1]"},
+    {"class": "Pid", "sample": "self()"},
+    {"class": "Port", "sample": null},
+    {"class": "Reference", "sample": "make_ref()"}
+  ],
+  "untagged_map": ["Dictionary"],
+  "record": ["Class", "Metaclass"],
+  "proxy_routed": ["ErlangModule"],
+  "exception_root": "Exception"
+}

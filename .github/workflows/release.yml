@@ -311,7 +311,7 @@ jobs:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Build Rust (release)
-        run: cargo build --all-targets --release --quiet
+        run: cargo build --all-targets --release --locked --quiet
 
       - name: Build Erlang runtime
         shell: bash

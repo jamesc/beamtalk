@@ -1054,6 +1054,14 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// value read out of the reloaded state). Empty for every other
         /// bracket: only a Tier 2 `fun` mutates caller-scope locals.
         tier2_local_rebinds: Vec<(String, String)>,
+        /// BT-4194: the bracket was lowered in a frame whose `StateAcc` is a
+        /// private scratch map, not the actor's whole `State`
+        /// (`CoreErlangGenerator::in_private_scratch`). Its `store` would put
+        /// that scratch map in the cell, so the verifier reports
+        /// [`VerifyError::SyncedCallOnPrivateScratch`](super::verify::VerifyError::SyncedCallOnPrivateScratch).
+        /// A node is verified without its ancestor frames, so the fact travels
+        /// on the node. `false` for every well-formed bracket.
+        on_private_scratch: bool,
     },
 
     /// ADR 0131 §2: one conditional or handler arm, as a node. `threads` is

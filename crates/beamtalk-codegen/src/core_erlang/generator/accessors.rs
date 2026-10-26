@@ -277,6 +277,37 @@ impl CoreErlangGenerator {
         self.class_context_mut().class_module_registry = registry;
     }
 
+    /// BT-4200: pins `class_name` (the class this unit compiles) to this
+    /// unit's own `module_name` in the registry, overriding whatever the
+    /// caller-supplied index said.
+    ///
+    /// The index is captured *before* the unit loads (REPL: the live
+    /// `beamtalk_repl_compiler:build_class_module_index/0`), so a class
+    /// redefined into a different module (compiled `bt@pkg@pt`, then an inline
+    /// REPL definition emitting `bt@pt`) would otherwise leave guarded direct
+    /// calls and direct constructors targeting the stale module. The unit's
+    /// own emitted module is authoritative for its own class.
+    ///
+    /// Only an *existing, disagreeing* index entry is overridden: with no
+    /// entry the registry-miss derivation already applies, and adding one
+    /// would change naming for harness modules whose `module_name` does not
+    /// follow the `bt@…` convention.
+    pub(in crate::core_erlang) fn register_own_class_module(&mut self, class_name: &str) {
+        use beamtalk_core::semantic_analysis::ModuleName;
+        let pkg = self.own_package_id();
+        let disagrees = self
+            .class_module_registry()
+            .module_for_class(&pkg, class_name)
+            .is_some_and(|indexed| indexed.as_str() != self.module_name.as_str());
+        if !disagrees {
+            return;
+        }
+        let module = ModuleName::Generated(self.module_name.to_string());
+        self.class_context_mut()
+            .class_module_registry
+            .insert(pkg, class_name, module);
+    }
+
     /// Computes and installs the direct-call eligibility table from `hierarchy`.
     ///
     /// Reuses [`CoreErlangGenerator::compute_direct_call_eligible`] (the single
@@ -560,6 +591,21 @@ impl CoreErlangGenerator {
     /// Warnings are returned to callers via [`generate_module_with_warnings`].
     pub(in crate::core_erlang) fn add_codegen_warning(&mut self, diag: Diagnostic) {
         self.codegen_warnings.push(diag);
+    }
+
+    /// Re-appends diagnostics raised while lowering a second copy of
+    /// already-reported AST, keeping only those not already recorded
+    /// (`Diagnostic: PartialEq`). BT-4070: pure-conditional fallback
+    /// closures lower the same blocks the inline arms already reported,
+    /// so exact repeats are dropped — but lowering-specific findings
+    /// (e.g. an `InternalVerifier` diagnostic from the Tier-1 closure
+    /// path) survive. A wholesale `truncate` would silently discard those.
+    pub(in crate::core_erlang) fn dedup_append_codegen_warnings(&mut self, new: Vec<Diagnostic>) {
+        for diag in new {
+            if !self.codegen_warnings.contains(&diag) {
+                self.codegen_warnings.push(diag);
+            }
+        }
     }
 
     /// Drains the diagnostics recorded so far. For drivers that build their own

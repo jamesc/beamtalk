@@ -734,3 +734,175 @@ fn character_literal_keeps_character_dispatch() {
         "Character literal send should not go dynamic. Got:\n{code}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BT-4200: hardening residuals
+// ---------------------------------------------------------------------------
+
+#[test]
+fn own_class_redefined_into_new_module_targets_the_emitted_module() {
+    // BT-4200 (1): the index is captured before the unit loads (REPL: the live
+    // `build_class_module_index/0`), so a class compiled as `bt@pkg@pt` and
+    // redefined inline into `bt@pt` is still indexed under the old module.
+    // The unit's own class must resolve to the module the unit emits, or the
+    // guarded direct call lands in the stale old module.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "sealed Value subclass: Pt\n",
+        "  field: x :: Integer = 0\n",
+        "  sameX: other :: Pt -> Integer =>\n",
+        "    other x\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let mut index = std::collections::HashMap::new();
+    index.insert("Pt".to_string(), "bt@pkg@pt".to_string());
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@pt").with_class_module_index(index),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("call 'bt@pt':'dispatch'('x'"),
+        "typed send must target the unit's own emitted module. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("bt@pkg@pt"),
+        "must not target the stale module from the pre-load index. Got:\n{code}"
+    );
+}
+
+#[test]
+fn stale_compiled_metadata_for_module_less_redefinition_stays_dynamic() {
+    // BT-4200 (2): a `ClassBuilder ... register` over an existing compiled
+    // class never refreshes compiler-server metadata (`is_module_less` stays
+    // `false`), while the live index now maps the class to its own name (the
+    // module-less convention). The fresher index must win: no direct call.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: AmbientWidget -> Object =>\n",
+        "    w frobnicate\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let mut index = std::collections::HashMap::new();
+    index.insert("AmbientWidget".to_string(), "AmbientWidget".to_string());
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("test")
+            .with_class_hierarchy(vec![ambient_sealed_object(false, None)])
+            .with_class_module_index(index),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        !code.contains("'dispatch'('frobnicate'"),
+        "index says module-less: must stay dynamic despite stale metadata. Got:\n{code}"
+    );
+}
+
+#[test]
+fn stale_module_less_metadata_for_compiled_redefinition_goes_direct() {
+    // BT-4200 (2), converse: metadata says module-less but the live index maps
+    // the class to a compiled `bt@` module (a later compiled load). One
+    // consistent source: the index decides.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: AmbientWidget -> Object =>\n",
+        "    w frobnicate\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let mut index = std::collections::HashMap::new();
+    index.insert("AmbientWidget".to_string(), "bt@ambient_widget".to_string());
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("test")
+            .with_class_hierarchy(vec![ambient_sealed_object(true, None)])
+            .with_class_module_index(index),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("call 'bt@ambient_widget':'dispatch'('frobnicate'"),
+        "index says compiled: should direct-call. Got:\n{code}"
+    );
+}
+
+#[test]
+fn abstract_value_new_stays_a_plain_builder_for_subclass_chaining() {
+    // BT-4200 (4), documented-not-fixed: a direct `Mod:new()` skips the
+    // gen_server abstract rejection, and the callee cannot add one — a Value
+    // subclass's `new/0` chains through its superclass module's `new/0` to
+    // collect inherited field defaults, so an abstract class's `new/0` must
+    // stay a plain map builder. Pin both halves of that dependency so a future
+    // "raise in abstract new/0" change cannot silently break subclass `new`.
+    let parent = codegen(concat!(
+        "abstract Value subclass: Shape\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        parent.contains("'new'/0 = fun () ->") && !parent.contains("instantiation_error"),
+        "abstract Value new/0 must remain a plain builder. Got:\n{parent}"
+    );
+    let child = codegen(concat!(
+        "Shape subclass: Circle\n",
+        "  field: r :: Integer = 0\n\n",
+        "abstract Value subclass: Shape\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        child.contains(":'new'() in"),
+        "subclass new/0 must chain through the superclass module's new/0. Got:\n{child}"
+    );
+}
+
+/// BT-4200 (3): the exclusion set mirrors the runtime's routing special arms
+/// (`beamtalk_primitive:tagged_map_dispatch/1`), so both sides are checked
+/// against one shared fixture. The `EUnit` half is
+/// `beamtalk_tagged_map_routing_conformance_tests`; changing either side
+/// alone fails one of the two.
+#[test]
+fn non_tagged_exclusions_match_shared_runtime_routing_fixture() {
+    use crate::core_erlang::dispatch_codegen::{EXCEPTION_ROOT_CLASS, NON_TAGGED_MAP_CLASSES};
+    use std::collections::BTreeSet;
+
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "../../runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json",
+    );
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+    let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture is JSON");
+
+    let mut expected: Vec<String> = fixture["raw_term"]
+        .as_array()
+        .expect("raw_term list")
+        .iter()
+        .map(|e| e["class"].as_str().expect("raw_term.class").to_string())
+        .collect();
+    for key in ["untagged_map", "record", "proxy_routed"] {
+        expected.extend(
+            fixture[key]
+                .as_array()
+                .unwrap_or_else(|| panic!("{key} list"))
+                .iter()
+                .map(|e| e.as_str().expect("class name").to_string()),
+        );
+    }
+
+    let expected_set: BTreeSet<&str> = expected.iter().map(String::as_str).collect();
+    assert_eq!(
+        expected_set.len(),
+        expected.len(),
+        "fixture lists a class under more than one routing kind"
+    );
+    let actual_set: BTreeSet<&str> = NON_TAGGED_MAP_CLASSES.iter().copied().collect();
+    assert_eq!(
+        actual_set.len(),
+        NON_TAGGED_MAP_CLASSES.len(),
+        "NON_TAGGED_MAP_CLASSES has duplicates"
+    );
+    assert_eq!(
+        actual_set, expected_set,
+        "NON_TAGGED_MAP_CLASSES drifted from the shared runtime-routing fixture \
+         (update both it and beamtalk_primitive's tagged_map_dispatch/1 arms)"
+    );
+    assert_eq!(
+        fixture["exception_root"].as_str(),
+        Some(EXCEPTION_ROOT_CLASS),
+        "exception-family root drifted from the shared runtime-routing fixture"
+    );
+}

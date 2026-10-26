@@ -1,0 +1,102 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4070: conditionals with literal, non-mutating blocks compile to an
+// inline `case` with a dynamic-send fallback instead of a fully-dynamic
+// send. These tests pin the runtime behavior of that inline shape: the
+// taken branch answers the block value, a non-taken solo branch answers
+// the receiver (`False>>ifTrue: => self`, not nil), `and:`/`or:`
+// short-circuit to the literal, and a non-Boolean receiver (nil, a proxy,
+// a custom `ifTrue:` implementor) behaves exactly as today via the
+// fallback send.
+//
+// Receivers route through `cond` parameters so the send sites keep
+// literal blocks (what the gate matches) while the receiver is a runtime
+// value (no dead-branch lint, no static-DNU expectation). The proxy and
+// custom-`ifTrue:` receivers live in fixtures/bt4070probe_proxy.bt and
+// fixtures/bt4070custom_if_true.bt (one class per file).
+
+TestCase subclass: Bt4070PureConditionalInlineTest
+
+  checkIfTrue: cond => cond ifTrue: [1]
+
+  checkIfFalse: cond => cond ifFalse: [2]
+
+  checkIfTrueIfFalse: cond => cond ifTrue: [1] ifFalse: [2]
+
+  checkAnd: cond => cond and: [true]
+
+  checkOr: cond => cond or: [false]
+
+  checkCounted: cond counter: counter =>
+    cond
+      ifTrue: [
+        counter increment
+        42
+      ]
+
+  testTrueIfTrueAnswersBlock => self assert: (self checkIfTrue: true) equals: 1
+
+  testFalseIfTrueAnswersReceiver =>
+    result := self checkIfTrue: false
+    self assert: result equals: false
+    self deny: result
+
+  testTrueIfFalseAnswersReceiver =>
+    result := self checkIfFalse: true
+    self assert: result equals: true
+    self assert: result
+
+  testFalseIfFalseAnswersBlock =>
+    self assert: (self checkIfFalse: false) equals: 2
+
+  testIfTrueIfFalseBothBranches =>
+    self assert: (self checkIfTrueIfFalse: true) equals: 1
+    self assert: (self checkIfTrueIfFalse: false) equals: 2
+
+  testAndAnswersBlockOnTrue => self assert: (self checkAnd: true)
+
+  testAndShortCircuitsFalse =>
+    result := self checkAnd: false
+    self deny: result
+
+  testOrShortCircuitsTrue =>
+    result := self checkOr: true
+    self assert: result
+
+  testOrAnswersBlockOnFalse =>
+    result := self checkOr: false
+    self deny: result
+
+  testNilIfTrueRaisesDoesNotUnderstand =>
+    self should: [self checkIfTrue: nil] raise: #does_not_understand
+
+  testNilAndRaisesDoesNotUnderstand =>
+    self should: [self checkAnd: nil] raise: #does_not_understand
+
+  testProxyForwardsIfTrueToDnu =>
+    proxy := Bt4070ProbeProxy spawn
+    [
+      self assert: (self checkIfTrue: proxy) equals: #bt4070Intercepted
+    ] ensure: [proxy stop]
+
+  testProxyForwardsIfTrueIfFalseToDnu =>
+    proxy := Bt4070ProbeProxy spawn
+    [
+      self assert: (self checkIfTrueIfFalse: proxy) equals: #bt4070Intercepted
+    ] ensure: [proxy stop]
+
+  testCustomIfTruePreserved =>
+    custom := Bt4070CustomIfTrue new
+    self assert: (self checkIfTrue: custom) equals: #bt4070Custom
+
+  testUnusedBranchNeverEvaluates =>
+    counter := AtomicCounter new: #bt4070SkippedBranch
+    [
+      result := self checkCounted: false counter: counter
+      self deny: result
+      self assert: counter value equals: 0
+      taken := self checkCounted: true counter: counter
+      self assert: taken equals: 42
+      self assert: counter value equals: 1
+    ] ensure: [counter delete]

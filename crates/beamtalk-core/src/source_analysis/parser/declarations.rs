@@ -1854,10 +1854,7 @@ impl Parser {
         // same-tier operator switch without explicit grouping (ADR 0102 §3).
         let mut chain_is_and: Option<bool> = None;
 
-        loop {
-            let TokenKind::BinarySelector(op) = self.current_kind() else {
-                break;
-            };
+        while let TokenKind::BinarySelector(op) = self.current_kind() {
             match op.as_str() {
                 // `\` — the difference operator, `&` — the intersection
                 // operator. Both share this precedence tier.

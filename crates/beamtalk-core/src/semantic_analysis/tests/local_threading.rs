@@ -1807,11 +1807,8 @@ fn adr0131_statement_probe_pins() {
 
 /// Cells that answer right but that Phase 0 still rejects, because the facts a
 /// statement position carries cannot tell them from a sibling cell that
-/// answers wrong. Empty since ADR 0133 Phase 3 (BT-3911): an actor
-/// `detect:`/`detect:ifNone:` is a loop-body producer like any other fold, so
-/// the last cells of this list (the `detect:` family's block-local rows) answer
-/// right and are accepted. A shape that answers right but cannot be told from
-/// one that does not goes back here with a `PIN-BUG` and an open issue.
+/// answers wrong. Empty now (BT-4194 fixed the last two); a phase that adds a
+/// carve-out lists its right-answering casualties here.
 const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[];
 
 /// PIN-BUG BT-3913: Phase 0 accepts exactly what codegen lowers correctly.
