@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4164 (ADR 0138): String printString escapes \, ", { (as \{), CR, LF,
+// TAB, NUL, keeping "" doubling for quotes; bare } stays as-is. The expected
+// spellings live in test/fixtures/string_escape_corpus.json — this suite pins
+// the value -> display leg (printString output), while the Rust side
+// (unparse/tests/escape_corpus_conformance.rs) pins display -> value
+// (re-lexing) plus fmt round-trip/idempotency over the same cases. Together
+// the two suites prove printString output re-parses to the identical string.
+
+TestCase subclass: StringPrintStringEscapeTest
+
+  testPrintStringMatchesEscapeCorpus =>
+    raw := (File readAll: "test/fixtures/string_escape_corpus.json") unwrap
+    cases := (Json parse: raw) unwrap
+    // Tripwire: the loop below must actually run — a silently empty corpus
+    // would pass every assertion by running none of them.
+    // (`Json parse:` erases to the JsonValue union, so each send below needs
+    // the same `@expect type` marker the JsonTest suite uses.)
+    @expect type
+    self assert: cases size equals: 23
+    @expect type
+    cases
+      do: [:case |
+        value := case at: "value"
+        display := case at: "display"
+        self assert: value printString equals: display
+      ]
+
+  testPrintStringPlainAndEmpty =>
+    self assert: "hello" printString equals: """hello"""
+    self assert: "" printString equals: """"""
