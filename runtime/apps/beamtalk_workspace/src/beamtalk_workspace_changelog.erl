@@ -1567,7 +1567,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec do_append(append_input(), #state{}) ->
     {ok, non_neg_integer(), #state{}} | {error, #beamtalk_error{}}.
-do_append(Input, State) ->
+do_append(RawInput, State) ->
+    %% BT-4173: entries persist raw bytes (disk format stability) — unwrap
+    %% tagged Strings from FFI input at the boundary.
+    Input = normalize_append_input(RawInput),
     Seq = State#state.next_seq,
     Source = maps:get(source, Input, undefined),
     %% ADR 0112: `source` is optional — a `'remove-method'` entry has no new
@@ -1618,6 +1621,25 @@ do_append(Input, State) ->
         {error, Reason} ->
             {error, append_error(Reason)}
     end.
+
+%% BT-4173: unwrap tagged-String text fields from FFI `append:` input —
+%% the entry record and on-disk format stay raw binaries.
+-spec normalize_append_input(map()) -> map().
+normalize_append_input(Input) ->
+    Fields = [
+        class, selector, source, prev_source, source_file, old_class, old_selector,
+        old_path, new_path, author, not_flushable_reason
+    ],
+    lists:foldl(
+        fun(Field, Acc) ->
+            case maps:get(Field, Acc, undefined) of
+                {beamtalk_string, Bin} when is_binary(Bin) -> Acc#{Field => Bin};
+                _ -> Acc
+            end
+        end,
+        Input,
+        Fields
+    ).
 
 %% Mark each given seq's entry as flushed. Updates ETS in-place and rewrites the
 %% on-disk log so the flag survives restart. Unknown seqs are silently skipped

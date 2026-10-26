@@ -202,7 +202,12 @@ clear_owner(OwnerBin) when is_binary(OwnerBin) ->
     gen_server:call(?MODULE, {clear_owner, OwnerBin}).
 
 -doc "Read-only lookup of `OwnerBin`'s current finding set (every origin, flattened). Does not mutate the store.".
--spec for_owner(binary()) -> [finding()].
+-spec for_owner(binary() | beamtalk_string:t()) -> [finding()].
+%% BT-4173: a String owner arrives tagged — unwrap for the raw-keyed lookup,
+%% then tag finding text for the Beamtalk surface (internal callers use
+%% `get_origin/2`, which stays raw).
+for_owner({beamtalk_string, OwnerBin}) when is_binary(OwnerBin) ->
+    tag_findings(gen_server:call(?MODULE, {for_owner, OwnerBin}));
 for_owner(OwnerBin) when is_binary(OwnerBin) ->
     gen_server:call(?MODULE, {for_owner, OwnerBin}).
 
@@ -302,6 +307,27 @@ code_change(_OldVsn, State, _Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+%% BT-4173: tag finding text fields for Beamtalk readers (see `for_owner/1`).
+-spec tag_findings([finding()]) -> [finding()].
+tag_findings(Findings) ->
+    S = fun beamtalk_primitive:string_from_binary/1,
+    MaybeS = fun
+        (undefined) -> undefined;
+        (Bin) when is_binary(Bin) -> S(Bin)
+    end,
+    [
+        F#{
+            owner => S(maps:get(owner, F)),
+            changed_class => S(maps:get(changed_class, F)),
+            selector => S(maps:get(selector, F)),
+            severity => S(maps:get(severity, F)),
+            category => MaybeS(maps:get(category, F, undefined)),
+            message => S(maps:get(message, F)),
+            note => MaybeS(maps:get(note, F, undefined))
+        }
+     || F <- Findings
+    ].
 
 -spec sort_key(finding(), finding()) -> boolean().
 sort_key(#{owner := O1, selector := S1, message := M1}, #{

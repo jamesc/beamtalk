@@ -56,7 +56,7 @@ Workspace changes isEmpty
 _meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
 // => _
 
-_projectPath := Erlang maps get: #project_path with: _meta
+_projectPath := (Erlang maps get: #project_path with: _meta) asStringUnchecked
 // => _
 
 _projDir := _projectPath ++ "/bt_e2e_rename_class_flush_" ++ (Erlang erlang) unique_integer asString
@@ -74,7 +74,7 @@ _userPath := _projDir ++ "/Bt3271RenameFlushDemoUser.bt"
 // A genuine LF byte built via the Erlang FFI (BT-3214: `(Character value:
 // 10) asString` empirically returns the two-character string "10" here, not
 // a newline — see `remove_class_flush_roundtrip.btscript`'s identical note).
-_nl := (Erlang unicode) characters_to_binary: #(10)
+_nl := "\n"
 // => _
 
 _demoSource := "Value subclass: Bt3271RenameFlushDemo" ++ _nl ++ "  greet -> String => ""hi from the rename-flush e2e"""

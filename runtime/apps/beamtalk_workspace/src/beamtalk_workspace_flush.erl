@@ -642,6 +642,9 @@ normalise_filter(Bin) when is_binary(Bin) ->
     {ok, {class, Bin}};
 normalise_filter(Map) when is_map(Map) ->
     case maps:get(file, Map, undefined) of
+        %% BT-4173: a String file arrives tagged — unwrap to bytes.
+        {beamtalk_string, Tagged} when is_binary(Tagged) ->
+            {ok, {file, Tagged}};
         File when is_binary(File) ->
             {ok, {file, File}};
         File when is_list(File) ->
