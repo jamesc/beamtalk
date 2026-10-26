@@ -29,6 +29,7 @@ see the `BT-4173` clauses); anything else raises `type_error` via
     first/1,
     last/1,
     capitalize/1,
+    ascii_lowercase/1,
     reverse/1,
     includes/2,
     starts_with/2,
@@ -175,6 +176,27 @@ join_element({beamtalk_string, Bin}, _Selector) when is_binary(Bin) ->
     Bin;
 join_element(E, Selector) ->
     raise_not_string(Selector, E).
+
+-doc """
+ASCII-only lowercase: only `A`-`Z` fold; every other byte passes through.
+
+UTF-8 multi-byte sequences consist solely of bytes >= 16#80, so non-ASCII
+characters are untouched. Single O(n) pass.
+""".
+-spec ascii_lowercase(t() | binary()) -> t().
+ascii_lowercase({beamtalk_string, Str}) when is_binary(Str) ->
+    beamtalk_primitive:string_from_binary(<<
+        <<
+            (if
+                C >= $A, C =< $Z -> C + 32;
+                true -> C
+            end)
+        >>
+     || <<C>> <= Str
+    >>);
+ascii_lowercase(Bin) when is_binary(Bin) -> ascii_lowercase({beamtalk_string, Bin});
+ascii_lowercase(Str) ->
+    raise_not_string('asciiLowercase', Str).
 
 -doc "Capitalize the first grapheme, keep rest unchanged.".
 -spec capitalize(t() | binary()) -> t().

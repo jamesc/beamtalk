@@ -80,6 +80,9 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 
 %% Instance methods — encoding
 -export(['asBase64:'/1, 'asBase64Url:'/1, 'asHex:'/1]).
+
+%% Instance methods — byte-level substring search (BT-4190)
+-export([includes_substring/2, index_of/2]).
 -export([asBase64/1, asBase64Url/1, asHex/1]).
 
 %%% ============================================================================
@@ -444,6 +447,32 @@ Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding
     beamtalk_primitive:string_from_binary(base64:encode(Bin, #{mode => urlsafe}));
 'asBase64Url:'(_) ->
     raise_type_error('asBase64Url:', <<"Receiver must be a Binary">>).
+
+-doc "True if Needle occurs as a byte sequence in Bin. Empty needle is found.".
+-spec includes_substring(binary(), binary()) -> boolean().
+includes_substring(Bin, Needle) when is_binary(Bin), is_binary(Needle) ->
+    Needle =:= <<>> orelse binary:match(Bin, Needle) =/= nomatch;
+includes_substring(Bin, _Needle) when not is_binary(Bin) ->
+    raise_type_error(includes_substring, <<"Receiver must be a Binary">>);
+includes_substring(_Bin, _Needle) ->
+    raise_type_error(includes_substring, <<"Argument must be a Binary">>).
+
+-doc "1-based byte index of the first occurrence of Needle, or nil. Empty needle yields nil.".
+-spec index_of(binary(), binary()) -> pos_integer() | nil.
+index_of(Bin, Needle) when is_binary(Bin), is_binary(Needle) ->
+    case Needle of
+        <<>> ->
+            nil;
+        _ ->
+            case binary:match(Bin, Needle) of
+                nomatch -> nil;
+                {Pos, _Len} -> Pos + 1
+            end
+    end;
+index_of(Bin, _Needle) when not is_binary(Bin) ->
+    raise_type_error(index_of, <<"Receiver must be a Binary">>);
+index_of(_Bin, _Needle) ->
+    raise_type_error(index_of, <<"Argument must be a Binary">>).
 
 -doc "Encode as a lowercase hexadecimal string.".
 -spec 'asHex:'(binary_or_string()) -> beamtalk_string:t().

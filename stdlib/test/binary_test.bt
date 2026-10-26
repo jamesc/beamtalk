@@ -453,3 +453,24 @@ TestCase subclass: BinaryTest
   testPrintStringOnString =>
     result := "hello" printString
     self assert: result equals: """hello"""
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Substring search (BT-4190) — raw bytes, non-UTF-8 safe
+  // ═══════════════════════════════════════════════════════════════════
+  testIncludesSubstringNonUtf8 =>
+    hay := Binary fromBytes: #(255, 254, 13, 10, 0)
+    self assert: (hay includesSubstring: (Binary fromBytes: #(13, 10))) equals: true
+    self assert: (hay includesSubstring: (Binary fromBytes: #(0))) equals: true
+    self assert: (hay includesSubstring: (Binary fromBytes: #(10, 13))) equals: false
+
+  testIncludesSubstringEmptyNeedle =>
+    self assert: ((Binary fromBytes: #(255, 1)) includesSubstring: (Binary fromBytes: #())) equals: true
+
+  testIndexOfNonUtf8 =>
+    hay := Binary fromBytes: #(255, 254, 13, 10, 13, 10)
+    self assert: (hay indexOf: (Binary fromBytes: #(13, 10))) equals: 3
+    self assert: (hay indexOf: (Binary fromBytes: #(255))) equals: 1
+    self assert: (hay indexOf: (Binary fromBytes: #(7))) equals: nil
+
+  testIndexOfEmptyNeedle =>
+    self assert: ((Binary fromBytes: #(255, 1)) indexOf: (Binary fromBytes: #())) equals: nil
