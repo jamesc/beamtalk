@@ -527,3 +527,23 @@ TestCase subclass: DateTimeTest
     self should: [
       DateTime fromString: "2026-07-25T14:30:00+15:00"
     ] raise: #type_error
+
+  testWeekdayMondayToSunday =>
+    // 2026-10-26 is a Monday (ISO 1) ... 2026-11-01 is a Sunday (ISO 7)
+    self assert: (DateTime year: 2026 month: 10 day: 26) weekday equals: 1
+    self assert: (DateTime year: 2026 month: 10 day: 27) weekday equals: 2
+    self assert: (DateTime year: 2026 month: 10 day: 28) weekday equals: 3
+    self assert: (DateTime year: 2026 month: 10 day: 29) weekday equals: 4
+    self assert: (DateTime year: 2026 month: 10 day: 30) weekday equals: 5
+    self assert: (DateTime year: 2026 month: 10 day: 31) weekday equals: 6
+    self assert: (DateTime year: 2026 month: 11 day: 1) weekday equals: 7
+
+  testWeekdayKnownDates =>
+    // Unix epoch was a Thursday
+    self assert: (DateTime fromTimestamp: 0) weekday equals: 4
+    // Leap day 2024-02-29 was a Thursday
+    self assert: (DateTime year: 2024 month: 2 day: 29) weekday equals: 4
+
+  testWeekdayNamesWithoutFfi =>
+    names := #("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    self assert: (names at: (DateTime year: 2026 month: 10 day: 26) weekday) equals: "Mon"

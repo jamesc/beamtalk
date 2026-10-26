@@ -388,3 +388,15 @@ monotonic_now_test() ->
     T2 = beamtalk_datetime:'monotonicNow'(),
     ?assert(is_integer(T1)),
     ?assert(T2 >= T1).
+
+weekday_iso_test() ->
+    %% 2026-10-26 is a Monday .. 2026-11-01 is a Sunday
+    Dates = [{10, 26}, {10, 27}, {10, 28}, {10, 29}, {10, 30}, {10, 31}, {11, 1}],
+    lists:foreach(
+        fun({N, {Mo, D}}) ->
+            DT = beamtalk_datetime:'year:month:day:'(2026, Mo, D),
+            ?assertEqual(N, beamtalk_datetime:weekday(DT)),
+            ?assertEqual(calendar:day_of_the_week(2026, Mo, D), beamtalk_datetime:weekday(DT))
+        end,
+        lists:zip(lists:seq(1, 7), Dates)
+    ).
