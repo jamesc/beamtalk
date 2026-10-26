@@ -279,14 +279,12 @@ fn get_otp_version() -> Option<String> {
 
 /// Count `.beam` files in a directory.
 fn count_beam_files(dir: &Path) -> usize {
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
-                .count()
-        })
-        .unwrap_or(0)
+    std::fs::read_dir(dir).map_or(0, |entries| {
+        entries
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+            .count()
+    })
 }
 
 /// Print platform-specific installation instructions, naming the declared

@@ -287,8 +287,7 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     }
 
     if !beamtalk_workspace::workspace_dir(&config.workspace_id)
-        .map(|d| d.join("metadata.json").exists())
-        .unwrap_or(false)
+        .is_ok_and(|d| d.join("metadata.json").exists())
     {
         return Err(BrokerError::UnknownWorkspace(config.workspace_id.clone()));
     }

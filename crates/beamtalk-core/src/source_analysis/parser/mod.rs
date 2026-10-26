@@ -348,10 +348,8 @@ pub fn is_input_complete(source: &str) -> bool {
             // closing quote) indicate incomplete input.  Diagnostic errors with
             // human-readable messages (e.g., "single-quoted strings are no longer
             // supported") are complete-but-invalid — let the compiler report them.
-            TokenKind::Error(msg) => {
-                if !is_diagnostic_error(msg) {
-                    return false;
-                }
+            TokenKind::Error(msg) if !is_diagnostic_error(msg) => {
+                return false;
             }
 
             // Opening delimiters
@@ -506,10 +504,8 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
         }
 
         match kind {
-            TokenKind::Error(msg) => {
-                if !is_diagnostic_error(msg) {
-                    return false;
-                }
+            TokenKind::Error(msg) if !is_diagnostic_error(msg) => {
+                return false;
             }
             TokenKind::LeftBracket | TokenKind::ArrayOpen => bracket_depth += 1,
             TokenKind::LeftParen | TokenKind::ListOpen => paren_depth += 1,

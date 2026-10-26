@@ -3060,11 +3060,9 @@ impl TypeChecker {
             InferredType::Known {
                 class_name: value_type,
                 ..
-            } => {
-                if !Self::is_assignable_to(value_type, &declared_structural, hierarchy) {
-                    let value_display =
-                        InferredType::class_name_for_diagnostic(value_type.as_str());
-                    self.diagnostics.push(
+            } if !Self::is_assignable_to(value_type, &declared_structural, hierarchy) => {
+                let value_display = InferredType::class_name_for_diagnostic(value_type.as_str());
+                self.diagnostics.push(
                         Diagnostic::warning(
                             format!(
                                 "type mismatch for state key `{slot_name}` on `{class_name}`: declared {declared_display}, got {value_display}"
@@ -3076,7 +3074,6 @@ impl TypeChecker {
                             "Expected {declared_display} for `{slot_name}`, got {value_display}"
                         )),
                     );
-                }
             }
             InferredType::Union { members, .. } => {
                 let Some((compat, total, incompatible)) =
@@ -3226,13 +3223,12 @@ impl TypeChecker {
                 InferredType::Known {
                     class_name: value_type,
                     ..
-                } => {
-                    if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
-                        let declared_display = declared_display.clone();
-                        // Render `UndefinedObject` as `Nil` in user-facing messages.
-                        let value_display =
-                            InferredType::class_name_for_diagnostic(value_type.as_str());
-                        self.diagnostics.push(
+                } if !Self::is_assignable_to(value_type, &declared_type, hierarchy) => {
+                    let declared_display = declared_display.clone();
+                    // Render `UndefinedObject` as `Nil` in user-facing messages.
+                    let value_display =
+                        InferredType::class_name_for_diagnostic(value_type.as_str());
+                    self.diagnostics.push(
                             Diagnostic::warning(
                                 format!(
                                     "Type mismatch: state `{}` declared as {declared_display}, default is {value_display}",
@@ -3245,7 +3241,6 @@ impl TypeChecker {
                                 "Default value type {value_display} is not compatible with {declared_display}"
                             )),
                         );
-                    }
                 }
                 InferredType::Union { members, .. } => {
                     // Check all union members against the declared field

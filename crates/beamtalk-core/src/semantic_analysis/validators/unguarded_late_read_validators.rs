@@ -176,13 +176,11 @@ fn report_unguarded_reads(
                 receiver,
                 field,
                 span,
-            } => {
-                if is_self_reference(receiver)
-                    && late_slots.contains(&field.name)
-                    && !write_target_spans.contains(span)
-                {
-                    reads.push((field.name.clone(), *span));
-                }
+            } if is_self_reference(receiver)
+                && late_slots.contains(&field.name)
+                && !write_target_spans.contains(span) =>
+            {
+                reads.push((field.name.clone(), *span));
             }
             Expression::MessageSend {
                 receiver,
