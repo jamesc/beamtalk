@@ -1627,8 +1627,17 @@ do_append(RawInput, State) ->
 -spec normalize_append_input(map()) -> map().
 normalize_append_input(Input) ->
     Fields = [
-        class, selector, source, prev_source, source_file, old_class, old_selector,
-        old_path, new_path, author, not_flushable_reason
+        class,
+        selector,
+        source,
+        prev_source,
+        source_file,
+        old_class,
+        old_selector,
+        old_path,
+        new_path,
+        author,
+        not_flushable_reason
     ],
     lists:foldl(
         fun(Field, Acc) ->
