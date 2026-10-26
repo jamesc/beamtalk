@@ -26,8 +26,8 @@
 //!   fine) in the same positions "is served remotely and can deadlock if the
 //!   actor is waiting on the callee".
 //!
-//! A block is reported at most once, whichever flavor finds it first (writes,
-//! then reads, then self-sends).
+//! A block is reported at most once, in flavor priority order: writes, then
+//! reads, then self-sends.
 //!
 //! This is a lint, not a guarantee: a block passed through a variable, a
 //! field, a parameter or an instance method is only caught at run time, and
@@ -80,7 +80,9 @@ use beamtalk_core::ast::{
 };
 use beamtalk_core::ast_walker::{SendRef, walk_expression, walk_sends};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
-use beamtalk_core::semantic_analysis::block_facts::{HasFieldProbe, class_var_accesses};
+use beamtalk_core::semantic_analysis::block_facts::{
+    ClassVarAccesses, HasFieldProbe, class_var_accesses,
+};
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns where a block touching actor state runs away from
@@ -331,7 +333,7 @@ fn check_block(
 impl ClassCtx<'_> {
     /// Shape A: a class-side send whose method carries the hierarchy's
     /// `spawns_block` mark (`Timer after:do:`/`every:do:`,
-    /// `Parallel all:`/`any:`) — the same mark codegen reads.
+    /// `Parallel all:`/`any:`) — the same mark `class-state-abroad` reads.
     fn spawned_shape(&self, receiver: &Expression, selector: &str) -> Option<AbroadShape> {
         let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() else {
             return None;
@@ -534,7 +536,7 @@ fn writes_diagnostic(
 fn reads_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
-    accesses: &beamtalk_core::semantic_analysis::block_facts::ClassVarAccesses,
+    accesses: &ClassVarAccesses,
     shape: &AbroadShape,
 ) -> Diagnostic {
     let class = ctx.class_name;
@@ -801,7 +803,7 @@ Actor subclass: Counter
     #[test]
     fn parallel_read_quiet() {
         // `Parallel` blocks until its workers finish, so the capture is live.
-        let d = only("  fanPeek => Parallel all: #([self.n printNl])\n");
+        let d = only("  fanPeek => Parallel all: #([self.n printNl]) timeout: 50\n");
         assert!(d.is_empty(), "{d:?}");
     }
 
@@ -866,6 +868,29 @@ Actor subclass: Counter
     fn actor_nested_self_send_warns() {
         let d =
             only("  fanRun =>\n    r := Runner spawn\n    r run: [items do: [:i | self bump]]\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("sends `self bump`"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn cascade_on_actor_warns() {
+        // Later cascade messages are judged against the shared receiver.
+        let d = only("  peekCasc =>\n    a := Worker spawn\n    a keep: [self.n]; run\n");
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("handed to another actor by 'keep:'"),
+            "{}",
+            d[0].message
+        );
+    }
+
+    #[test]
+    fn cascade_on_self_in_timer_warns_once() {
+        let d = only("  startCasc => Timer after: 1 do: [self bump; tick]\n");
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(
             d[0].message.contains("sends `self bump`"),
