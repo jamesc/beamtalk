@@ -113,5 +113,50 @@
     "value": "héllo→",
     "display": "\"héllo→\"",
     "why": "non-ASCII content passes through verbatim"
+  },
+  {
+    "value": "\u0001\u001f",
+    "display": "\"\u0001\u001f\"",
+    "why": "other C0 controls (SOH, US) have no spelling and pass through verbatim"
+  },
+  {
+    "value": "\u001b[0m",
+    "display": "\"\u001b[0m\"",
+    "why": "ESC passes through verbatim (ANSI sequences stay readable)"
+  },
+  {
+    "value": "",
+    "display": "\"\"",
+    "why": "DEL passes through verbatim"
+  },
+  {
+    "value": "a b c",
+    "display": "\"a b c\"",
+    "why": "U+2028/U+2029 line/paragraph separators pass through verbatim"
+  },
+  {
+    "value": "😀𝄞",
+    "display": "\"😀𝄞\"",
+    "why": "astral-plane characters pass through verbatim"
+  },
+  {
+    "value": "{{",
+    "display": "\"\\{\\{\"",
+    "why": "a run of openers escapes each one"
+  },
+  {
+    "value": "}{",
+    "display": "\"}\\{\"",
+    "why": "closer then opener: only the opener escapes"
+  },
+  {
+    "value": "a{}b",
+    "display": "\"a\\{}b\"",
+    "why": "} directly after an escaped { stays literal (does not close an interpolation)"
+  },
+  {
+    "value": "\\{",
+    "display": "\"\\\\\\{\"",
+    "why": "backslash then brace: \\\\ then \\{ (no accidental escape merge)"
   }
 ]
