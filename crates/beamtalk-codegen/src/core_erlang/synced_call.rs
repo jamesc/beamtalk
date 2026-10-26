@@ -198,6 +198,19 @@ pub(in crate::core_erlang) struct SyncedCallState {
     pub(in crate::core_erlang) window_depth: usize,
     /// Calls that may run user code compiled outside every window.
     pub(in crate::core_erlang) gaps: Vec<UnbracketedSend>,
+    /// Guarded operators compiled in a stateless loop with no loop-level
+    /// bracket (BT-4121): reported as
+    /// [`VerifyError::UnbracketedGuardedOperator`], separately from
+    /// [`Self::gaps`] so the two rules stay cleanly separable.
+    pub(in crate::core_erlang) guarded_op_gaps: Vec<UnbracketedSend>,
+    /// One marker per loop lowering in progress (BT-4121), innermost last.
+    /// A guarded operator compiled in a stateless loop body flags the
+    /// innermost marker instead of bracketing (there is no `State` in scope
+    /// to store); the loop lowering pops its marker after the body and
+    /// brackets the loop when the marker asked for it. Behind a [`RefCell`]
+    /// like [`Self::inlined_classes`] so a checkout can pop it while
+    /// holding `&mut self`.
+    pub(in crate::core_erlang) guarded_op_loops: std::cell::RefCell<Vec<GuardedOpLoopMarker>>,
     /// The class of a conditional with a `super` send in a branch
     /// ([`CoreErlangGenerator::classify_inlined`]), decided once per send.
     pub(in crate::core_erlang) inlined_classes:
@@ -209,9 +222,34 @@ impl SyncedCallState {
         Self {
             window_depth: 0,
             gaps: Vec::new(),
+            guarded_op_gaps: Vec::new(),
+            guarded_op_loops: std::cell::RefCell::default(),
             inlined_classes: std::cell::RefCell::default(),
         }
     }
+}
+
+/// BT-4121: one loop lowering's guarded-operator bracket state, pushed by
+/// [`CoreErlangGenerator::push_guarded_op_loop`] before the loop's body (and
+/// condition) is lowered and popped after.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct GuardedOpLoopMarker {
+    /// Whether the loop will bracket: the body or condition holds a guarded
+    /// operator (decided at push time by the same classifier the send
+    /// emitter uses, so the two cannot disagree) and the loop runs where
+    /// the cell protocol applies (an actor instance method).
+    pub(in crate::core_erlang) will_bracket: bool,
+    /// The first guarded operator that asked for the bracket while the body
+    /// was lowered (its operator and span, for the report when no enclosing
+    /// loop brackets). `None` until one fires.
+    pub(in crate::core_erlang) need: Option<GuardedOpNeed>,
+}
+
+/// BT-4121: one guarded operator's request for its loop's bracket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct GuardedOpNeed {
+    pub(in crate::core_erlang) selector: String,
+    pub(in crate::core_erlang) at: Span,
 }
 
 /// How a send relates to the cell.
@@ -519,10 +557,14 @@ impl CoreErlangGenerator {
                 });
         if carried {
             UserCodeCall::No
-        } else if blocks
-            .iter()
-            .any(|block| self.block_touches_actor_state(block))
-        {
+        } else if blocks.iter().any(|block| {
+            // BT-4121: a guarded operator's slow path can reach user code
+            // that touches this actor's fields, so a closure holding one is
+            // bracketed like a closure that touches the state syntactically.
+            // Read off the same classifier the send emitter exempts.
+            self.block_touches_actor_state(block)
+                || self.block_contains_guarded_operator(block)
+        }) {
             UserCodeCall::Yes
         } else {
             UserCodeCall::No
@@ -596,9 +638,16 @@ impl CoreErlangGenerator {
         if matches!(class, UserCodeCall::No | UserCodeCall::CompiledSelfSend) {
             return;
         }
-        // A guarded operator's slow path runs unbracketed in a loop that holds
-        // no whole `State` ([`Self::synced_call_value`]).
+        // A guarded operator in a loop that holds no whole `State` flags its
+        // loop's marker instead of bracketing (there is no `State` in the
+        // loop's fun to store); the loop brackets around it (BT-4121). Inside
+        // a window [`Self::synced_call_value`]'s arm below handles it — a
+        // sync site always lowers through `threaded_expression`, so exactly
+        // one of the two arms fires per send.
         if class == UserCodeCall::GuardedOperator && self.loop_holds_no_whole_state() {
+            if self.synced.window_depth == 0 {
+                self.note_stateless_guarded_op(selector.name().to_string(), at);
+            }
             return;
         }
         if self.synced.window_depth > 0 {
@@ -707,6 +756,21 @@ impl CoreErlangGenerator {
 
     /// Records one gap.
     pub(in crate::core_erlang) fn record_gap(&mut self, selector: String, at: Span) {
+        let gap = self.make_unbracketed_send(selector, at);
+        self.synced.gaps.push(gap);
+    }
+
+    /// BT-4121: records one guarded-operator gap, reported as
+    /// [`VerifyError::UnbracketedGuardedOperator`] separately from
+    /// [`Self::record_gap`].
+    pub(in crate::core_erlang) fn record_guarded_op_gap(&mut self, selector: String, at: Span) {
+        let gap = self.make_unbracketed_send(selector, at);
+        self.synced.guarded_op_gaps.push(gap);
+    }
+
+    /// One gap record for `selector` at `at`, shared by [`Self::record_gap`]
+    /// and [`Self::record_guarded_op_gap`].
+    fn make_unbracketed_send(&self, selector: String, at: Span) -> UnbracketedSend {
         let region = self.user_code_region();
         #[cfg(test)]
         let site = if COUNT_ONLY.with(std::cell::Cell::get) {
@@ -716,18 +780,22 @@ impl CoreErlangGenerator {
         };
         #[cfg(not(test))]
         let site = GapSite::default();
-        self.synced.gaps.push(UnbracketedSend {
+        UnbracketedSend {
             selector,
             region,
             at,
             site,
-        });
+        }
     }
 
     /// Reports the gaps recorded while compiling the module as verifier
     /// findings (or, in count-only test mode, logs them for the probe).
     pub(in crate::core_erlang) fn finish_synced_calls(&mut self, module_span: Span) {
         let gaps = std::mem::take(&mut self.synced.gaps);
+        // BT-4121: the guarded-operator gaps, reported as their own
+        // `VerifyError` variant (own arms, no shared shaping with the gaps
+        // above).
+        let guarded_op_gaps = std::mem::take(&mut self.synced.guarded_op_gaps);
         #[cfg(test)]
         if COUNT_ONLY.with(std::cell::Cell::get) {
             SITE_LOG.with(|log| {
@@ -736,6 +804,14 @@ impl CoreErlangGenerator {
                     chain: g.site.chain.clone(),
                     selector: g.selector.clone(),
                     region: g.region,
+                }));
+                log.borrow_mut().extend(guarded_op_gaps.iter().map(|g| {
+                    SiteRecord {
+                        site: g.site.site.clone(),
+                        chain: g.site.chain.clone(),
+                        selector: format!("guarded-op {}", g.selector),
+                        region: g.region,
+                    }
                 }));
             });
             return;
@@ -751,6 +827,19 @@ impl CoreErlangGenerator {
         self.report_threaded_ir_verify_errors(
             &errors,
             "call that may run user code outside a SyncedCall",
+            module_span,
+        );
+        let guarded_op_errors: Vec<VerifyError> = guarded_op_gaps
+            .iter()
+            .map(|g| VerifyError::UnbracketedGuardedOperator {
+                selector: g.selector.clone(),
+                region: g.region,
+                at: g.at,
+            })
+            .collect();
+        self.report_threaded_ir_verify_errors(
+            &guarded_op_errors,
+            "guarded operator in a stateless loop outside a loop-level bracket",
             module_span,
         );
     }
@@ -897,13 +986,17 @@ impl CoreErlangGenerator {
         };
         if self.loop_holds_no_whole_state() {
             // The loop's `fun` binds no whole `State` to store (direct
-            // params), or holds fields in pre-extracted parameters (hybrid):
-            // the loop has to thread one (its owning node's job). Except for
-            // a guarded operator, whose slow path is not worth a threaded
-            // loop (the block analysis does not count it, see
-            // `send_may_run_user_code`): it runs unbracketed here.
+            // params or a tuple accumulator), or holds fields in
+            // pre-extracted parameters (hybrid): a call that may run user
+            // code cannot bracket here, so the loop has to thread one (its
+            // owning node's job). Except for a guarded operator, whose slow
+            // path is not worth a threaded loop (the block analysis does not
+            // count it, see `send_may_run_user_code`): it flags its loop's
+            // marker and the loop brackets around it (BT-4121).
             if self.classify_expr(expr.unwrap_parens()) != UserCodeCall::GuardedOperator {
                 self.record_gap(Self::send_label(expr), span);
+            } else {
+                self.note_stateless_guarded_op(Self::send_label(expr), span);
             }
             return ThreadedValue {
                 prelude: tv.prelude,
@@ -952,7 +1045,7 @@ impl CoreErlangGenerator {
     /// Whether the loop being compiled has no whole `State` to store: a
     /// direct-params loop binds none, a hybrid loop holds fields in
     /// pre-extracted parameters and a tuple-accumulator fold carries only locals.
-    fn loop_holds_no_whole_state(&self) -> bool {
+    pub(in crate::core_erlang) fn loop_holds_no_whole_state(&self) -> bool {
         use super::threaded_ir::{RebindFrameKind, ThreadingMode};
         (self.loop_mode.in_direct_params_loop && !self.loop_mode.in_hybrid_loop)
             || !self.loop_mode.hybrid_readonly_field_params.is_empty()
@@ -973,5 +1066,263 @@ impl CoreErlangGenerator {
             Expression::Cascade { .. } => "cascade".to_string(),
             _ => "expression".to_string(),
         }
+    }
+}
+
+/// BT-4121: which exit a stateless loop lowering takes for its popped
+/// [`GuardedOpLoopMarker`] (decided by
+/// [`CoreErlangGenerator::checkout_guarded_op_loop`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum GuardedOpCheckout {
+    /// Nothing to do: the loop holds no guarded operator (or the operator
+    /// compiled elsewhere). Emit the loop exactly as before.
+    Nothing,
+    /// Bracket the loop: seed its exit packs from the cell (`take()`) and
+    /// store the loop-entry `State` before the loop. The fast path is
+    /// untouched; the slow path runs against a current cell and the exit
+    /// pack loads its writes back.
+    Bracket,
+}
+
+impl CoreErlangGenerator {
+    /// BT-4121: pushes a guarded-operator marker for the loop lowering
+    /// starting now. Call after the loop's method-level setup (receiver,
+    /// bounds) is lowered and before its condition and body are: the walk
+    /// below must see the same codegen facts the send emitter will, and the
+    /// pre-store name the caller captures alongside must be the
+    /// loop-entry `State`.
+    ///
+    /// `will_bracket` is decided here, from the same [`Self::classify_binary`]
+    /// the send emitter exempts, so the two cannot disagree; the `need` half
+    /// is set while the body lowers. Under [`FAULT_NO_BRACKETS`] no marker
+    /// is pushed, so the invariant probe sees every guarded-operator gap.
+    pub(in crate::core_erlang) fn push_guarded_op_loop(
+        &mut self,
+        body: &beamtalk_core::ast::Block,
+        condition: Option<&Expression>,
+    ) {
+        #[cfg(test)]
+        if FAULT_NO_BRACKETS.with(std::cell::Cell::get) {
+            return;
+        }
+        let will_bracket = self.synced_calls_active()
+            && (self.block_contains_guarded_operator(body)
+                || condition.is_some_and(|c| self.expr_contains_guarded_operator(c)));
+        self.synced.guarded_op_loops.borrow_mut().push(GuardedOpLoopMarker {
+            will_bracket,
+            need: None,
+        });
+    }
+
+    /// BT-4121: pops the marker [`Self::push_guarded_op_loop`] pushed, after
+    /// the loop's body (and condition) is lowered. The caller passes it to
+    /// [`Self::checkout_guarded_op_loop`] with the loop's mode. Takes `&self`
+    /// (the stack is a [`RefCell`]) so a checkout nests the pop in its own
+    /// call.
+    pub(in crate::core_erlang) fn pop_guarded_op_loop(&self) -> GuardedOpLoopMarker {
+        #[cfg(test)]
+        if FAULT_NO_BRACKETS.with(std::cell::Cell::get) {
+            return GuardedOpLoopMarker {
+                will_bracket: false,
+                need: None,
+            };
+        }
+        self.synced
+            .guarded_op_loops
+            .borrow_mut()
+            .pop()
+            .unwrap_or(GuardedOpLoopMarker {
+                will_bracket: false,
+                need: None,
+            })
+    }
+
+    /// BT-4121: checks out `marker` for a loop whose parameters hold no
+    /// whole `State` (tuple-accumulator, direct-params, or a hybrid loop,
+    /// which cannot bracket and reports loud instead — `hybrid`).
+    ///
+    /// A loop nested in another stateless loop's fun has no `State` to
+    /// store, so it hands its `need` to the enclosing loop, whose own walk
+    /// saw the same operators and whose bracket keeps the cell current for
+    /// both. Anything else that cannot bracket —
+    /// [`GuardedOpCheckout::Nothing`] is not returned for it — reports a
+    /// [`VerifyError::UnbracketedGuardedOperator`], never silently.
+    pub(in crate::core_erlang) fn checkout_guarded_op_loop(
+        &mut self,
+        marker: GuardedOpLoopMarker,
+        hybrid: bool,
+        at: Span,
+    ) -> GuardedOpCheckout {
+        let GuardedOpLoopMarker { will_bracket, need } = marker;
+        if !will_bracket && need.is_none() {
+            return GuardedOpCheckout::Nothing;
+        }
+        if hybrid {
+            // A hybrid loop holds fields in pre-extracted parameters that
+            // advance past the entry `State` every iteration, so a store of
+            // the entry would be stale the moment a param advances. The mode
+            // selection routes a hybrid body with a guarded operator to
+            // `StateAcc`; reaching here means it missed, which is loud.
+            let (selector, at) = need
+                .map(|n| (n.selector, n.at))
+                .unwrap_or_else(|| ("guarded operator".to_string(), at));
+            self.record_guarded_op_gap(selector, at);
+            return GuardedOpCheckout::Nothing;
+        }
+        if !will_bracket {
+            // An operator fired that the push-time walk missed (`need` is
+            // set: the early return above covered the unset case). The walk
+            // reads the same classifier over a superset of the positions
+            // the lowering inlines, so this is unreachable unless the two
+            // drift; field reads already lowered against the entry `State`
+            // cannot be covered after the fact, so it is loud.
+            if let Some(need) = need {
+                self.record_guarded_op_gap(need.selector, need.at);
+            }
+            return GuardedOpCheckout::Nothing;
+        }
+        if self.loop_holds_no_whole_state() {
+            // Nested in another stateless loop's fun: no `State` in scope
+            // to store. Hand the need outward (the outer loop's own walk saw
+            // the same operators); with no enclosing marker the shape is
+            // loud. The exit packs still seed from the cell, which the
+            // outer bracket keeps current.
+            if self.synced.guarded_op_loops.borrow().is_empty() {
+                let (selector, at) = need
+                    .map(|n| (n.selector, n.at))
+                    .unwrap_or_else(|| ("guarded operator".to_string(), at));
+                self.record_guarded_op_gap(selector, at);
+                return GuardedOpCheckout::Nothing;
+            }
+            if let Some(need) = need {
+                self.propagate_guarded_op_need(need);
+            }
+            return GuardedOpCheckout::Bracket;
+        }
+        GuardedOpCheckout::Bracket
+    }
+
+    /// BT-4121: checks out `marker` for a loop lowering that assembles
+    /// documents (every in-place loop): the [`Self::checkout_guarded_op_loop`]
+    /// decision plus the pre-store document to splice before the loop.
+    /// Answers `(seed_from_cell, prestore)`: `seed_from_cell` seeds the
+    /// loop's exit packs from the cell, and `prestore` is the
+    /// `let _ = store(<loop-entry State>) in ` prefix — [`Document::Nil`]
+    /// when the loop needs no store (identical code, hybrid (loud), or
+    /// nested stateless (the need propagated outward)), so the caller
+    /// splices it unconditionally.
+    pub(in crate::core_erlang) fn checkout_guarded_op_loop_docs(
+        &mut self,
+        marker: GuardedOpLoopMarker,
+        hybrid: bool,
+        at: Span,
+        prestore_state: &str,
+    ) -> (bool, Document<'static>) {
+        let bracket =
+            self.checkout_guarded_op_loop(marker, hybrid, at) == GuardedOpCheckout::Bracket;
+        if bracket && !self.loop_holds_no_whole_state() {
+            let prestore = docvec![
+                "let _ = ",
+                super::threaded_ir::cell_put_call(leaf::var(prestore_state.to_string())),
+                " in ",
+            ];
+            (true, prestore)
+        } else {
+            (bracket, Document::Nil)
+        }
+    }
+
+    /// BT-4121: flags the innermost loop marker for the guarded operator
+    /// `selector` at `at`, compiled in a stateless loop body. With no
+    /// marker the operator is covered by an enclosing bracket window (a
+    /// closure or evaluated-block call the classifier wrapped), and loud
+    /// otherwise.
+    pub(in crate::core_erlang) fn note_stateless_guarded_op(
+        &mut self,
+        selector: String,
+        at: Span,
+    ) {
+        let mut stack = self.synced.guarded_op_loops.borrow_mut();
+        if let Some(marker) = stack.last_mut() {
+            if marker.need.is_none() {
+                marker.need = Some(GuardedOpNeed { selector, at });
+            }
+            return;
+        }
+        drop(stack);
+        if self.synced.window_depth == 0 {
+            self.record_guarded_op_gap(selector, at);
+        }
+    }
+
+    /// BT-4121: hands `need` to the next enclosing loop marker (a nested
+    /// stateless loop's checkout, which has no `State` to store itself).
+    /// With no enclosing marker the shape is loud.
+    fn propagate_guarded_op_need(&mut self, need: GuardedOpNeed) {
+        let mut stack = self.synced.guarded_op_loops.borrow_mut();
+        if let Some(marker) = stack.last_mut() {
+            if marker.need.is_none() {
+                marker.need = Some(need);
+            }
+            return;
+        }
+        drop(stack);
+        self.record_guarded_op_gap(need.selector, need.at);
+    }
+
+    /// BT-4121: whether a field read lowered right now must read the live
+    /// cell (`maps:get` over `take()`) instead of the loop-entry `State`.
+    /// True inside a stateless loop that will bracket: the loop's slow
+    /// paths write the cell, so the entry `State` (or a parameter extracted
+    /// from it) is stale for them. Never inside a cell closure nested in
+    /// the loop: its reads are already live-at-home through the cell view
+    /// (and must stay capture-aware away from home).
+    pub(in crate::core_erlang) fn guarded_op_take_reads(&self) -> bool {
+        self.synced
+            .guarded_op_loops
+            .borrow()
+            .last()
+            .is_some_and(|m| m.will_bracket)
+            && self.loop_holds_no_whole_state()
+            && !self.in_cell_closure()
+    }
+
+    /// BT-4121: whether `expr` holds a binary send that compiles to a
+    /// guarded operator — read off the same [`Self::classify_binary`] the
+    /// send emitter exempts, over every syntactic position (nested blocks
+    /// included, whether the lowering inlines them or not), so a position
+    /// the lowering inlines is never missed. A send the lowering does not
+    /// inline only brackets a loop that needs none, which is harmless.
+    pub(in crate::core_erlang) fn expr_contains_guarded_operator(&self, expr: &Expression) -> bool {
+        let mut found = false;
+        beamtalk_core::ast_walker::walk_expression(expr, &mut |e| {
+            if found {
+                return;
+            }
+            if let Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } = e
+                && let MessageSelector::Binary(op) = selector
+            {
+                found |=
+                    self.classify_binary(receiver, op, arguments) == UserCodeCall::GuardedOperator;
+            }
+        });
+        found
+    }
+
+    /// BT-4121: whether any statement of `block` holds a guarded operator
+    /// ([`Self::expr_contains_guarded_operator`]).
+    pub(in crate::core_erlang) fn block_contains_guarded_operator(
+        &self,
+        block: &beamtalk_core::ast::Block,
+    ) -> bool {
+        block
+            .body
+            .iter()
+            .any(|s| self.expr_contains_guarded_operator(&s.expression))
     }
 }

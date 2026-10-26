@@ -79,6 +79,12 @@ impl CoreErlangGenerator {
                 ", StateAcc) -> ",
             ]);
 
+            // BT-4121: the guarded-operator marker spans the body lowering
+            // (the receiver above is method-level setup, already lowered).
+            // `prestore_state` is the loop-entry `State` the pre-store
+            // captures when the marker asks for the bracket.
+            let prestore_state = self.current_field_read_state_var();
+            self.push_guarded_op_loop(body, None);
             self.push_scope();
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
@@ -89,6 +95,15 @@ impl CoreErlangGenerator {
                 self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
             docs.push(body_doc);
             self.pop_scope();
+            // BT-4121: check out the marker; splice the pre-store (nil
+            // unless the loop brackets with a `State` in scope).
+            let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
+                self.pop_guarded_op_loop(),
+                false,
+                body.span,
+                &prestore_state,
+            );
+            docs.insert(0, prestore);
 
             // After foldl: extract vars from result tuple, repack into StateAcc.
             let fold_result = self.fresh_temp_var("FoldResult");
@@ -120,7 +135,8 @@ impl CoreErlangGenerator {
             } else {
                 // Re-pack updated locals into StateAcc so the outer method-body
                 // threading (`maps:get` in `lower_body_exprs_with_reply`) can extract them.
-                let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
+                let (repack_doc, stateacc) =
+                    plan.append_repack_stateacc_doc(self, guarded_op_bracket);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -287,6 +303,9 @@ impl CoreErlangGenerator {
                 ") in ",
             ]);
 
+            // BT-4121: the guarded-operator marker spans the body lowering.
+            let prestore_state = self.current_field_read_state_var();
+            self.push_guarded_op_loop(body, None);
             self.push_scope();
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
@@ -302,6 +321,15 @@ impl CoreErlangGenerator {
             )?;
             docs.push(body_doc);
             self.pop_scope();
+            // BT-4121: check out the marker; splice the pre-store (nil
+            // unless the loop brackets with a `State` in scope).
+            let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
+                self.pop_guarded_op_loop(),
+                false,
+                body.span,
+                &prestore_state,
+            );
+            docs.insert(0, prestore);
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let rev_list = self.fresh_temp_var("RevList");
@@ -316,7 +344,8 @@ impl CoreErlangGenerator {
                 self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
             // Re-pack into StateAcc for outer method-body `maps:get` extraction.
-            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
+            let (repack_doc, stateacc) =
+                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),

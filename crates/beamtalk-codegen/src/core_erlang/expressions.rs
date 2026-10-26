@@ -397,6 +397,17 @@ impl CoreErlangGenerator {
                     } else if self.in_cell_closure() {
                         // ADR 0137 §3: an actor closure reads a bare field through the cell.
                         Ok(self.cell_field_read_doc(id.name.as_str()))
+                    } else if self.guarded_op_take_reads() {
+                        // BT-4121: inside a stateless loop that brackets its
+                        // guarded operators, the entry `State` is stale for
+                        // the slow paths' writes — read the live cell.
+                        Ok(docvec![
+                            "call 'maps':'get'(",
+                            leaf::atom(id.name.to_string()),
+                            ", ",
+                            super::threaded_ir::cell_take_call(),
+                            ")",
+                        ])
                     } else {
                         Ok(docvec![
                             "call 'maps':'get'(",
@@ -690,6 +701,31 @@ impl CoreErlangGenerator {
             if recv_id.name == "self" {
                 let class_name = self.class_name();
                 let is_late = self.is_late_state_field(&class_name, field.name.as_str());
+                // BT-4121: inside a stateless loop that brackets its guarded
+                // operators, the entry `State` is stale for the slow paths'
+                // writes — read the live cell instead. (Never in hybrid
+                // mode: the mode selection routes those loops to `StateAcc`.)
+                if self.guarded_op_take_reads() {
+                    let cell = super::threaded_ir::cell_take_call();
+                    if is_late {
+                        let declared_type = self
+                            .class_hierarchy
+                            .as_ref()
+                            .and_then(|h| h.state_field_type(&class_name, field.name.as_str()));
+                        return Ok(self.generate_late_field_read_of(
+                            field.name.as_str(),
+                            cell,
+                            declared_type,
+                        ));
+                    }
+                    return Ok(docvec![
+                        "call 'maps':'get'(",
+                        leaf::atom(field.name.to_string()),
+                        ", ",
+                        cell,
+                        ")",
+                    ]);
+                }
                 // In hybrid mode, read-only fields are pre-extracted before the letrec.
                 // Use the direct parameter variable instead of generating maps:get every
                 // iteration. A `late` field is never pre-extracted this way (loop_mode.rs

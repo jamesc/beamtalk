@@ -18,6 +18,7 @@ fn clean_effects() -> BodyEffects {
     BodyEffects {
         cond_has_state_effects: false,
         body_has_synced_sends: false,
+        has_guarded_operator: false,
         has_tier2_threaded_assign: false,
         has_non_tuple_safe_list_op: false,
         has_nested_counted_loop_mutation: false,
