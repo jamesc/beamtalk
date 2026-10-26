@@ -274,7 +274,7 @@ fn pure_inline_at_repl() {
     }
     let code = docs
         .iter()
-        .map(|d| d.to_pretty_string())
+        .map(beamtalk_cerl_doc::Document::to_pretty_string)
         .collect::<Vec<_>>()
         .join("\n");
     eprintln!("repl ifTrue:ifFalse: pure:\n{code}");
