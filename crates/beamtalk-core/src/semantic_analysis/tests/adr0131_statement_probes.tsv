@@ -5615,7 +5615,7 @@ actor	iterLoop	local	ifNil	ok
 actor	iterLoop	local	and	ok
 actor	iterLoop	local	onDo	ok
 actor	iterLoop	local	ensure	ok
-actor	iterLoop	local	value	ok
+actor	iterLoop	local	value	bad
 actor	iterLoop	local	ewi	ok
 actor	iterLoop	local	dsb	ok
 actor	iterLoop	local	kv	ok
@@ -5634,7 +5634,7 @@ actor	iterLoop	dlocal	ifNil	ok
 actor	iterLoop	dlocal	and	ok
 actor	iterLoop	dlocal	onDo	ok
 actor	iterLoop	dlocal	ensure	ok
-actor	iterLoop	dlocal	value	ok
+actor	iterLoop	dlocal	value	over
 actor	iterLoop	dlocal	ewi	ok
 actor	iterLoop	dlocal	dsb	ok
 actor	iterLoop	dlocal	kv	ok
@@ -5653,7 +5653,7 @@ actor	collLoop	local	ifNil	ok
 actor	collLoop	local	and	ok
 actor	collLoop	local	onDo	ok
 actor	collLoop	local	ensure	ok
-actor	collLoop	local	value	ok
+actor	collLoop	local	value	bad
 actor	collLoop	local	ewi	ok
 actor	collLoop	local	dsb	ok
 actor	collLoop	local	kv	ok
@@ -5672,7 +5672,7 @@ actor	collLoop	dlocal	ifNil	ok
 actor	collLoop	dlocal	and	ok
 actor	collLoop	dlocal	onDo	ok
 actor	collLoop	dlocal	ensure	ok
-actor	collLoop	dlocal	value	ok
+actor	collLoop	dlocal	value	over
 actor	collLoop	dlocal	ewi	ok
 actor	collLoop	dlocal	dsb	ok
 actor	collLoop	dlocal	kv	ok

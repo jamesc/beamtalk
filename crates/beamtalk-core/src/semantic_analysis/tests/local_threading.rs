@@ -1807,12 +1807,16 @@ fn adr0131_statement_probe_pins() {
 
 /// Cells that answer right but that Phase 0 still rejects, because the facts a
 /// statement position carries cannot tell them from a sibling cell that
-/// answers wrong. Empty since ADR 0133 Phase 3 (BT-3911): an actor
-/// `detect:`/`detect:ifNone:` is a loop-body producer like any other fold, so
-/// the last cells of this list (the `detect:` family's block-local rows) answer
-/// right and are accepted. A shape that answers right but cannot be told from
-/// one that does not goes back here with a `PIN-BUG` and an open issue.
-const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[];
+/// answers wrong. PIN-BUG BT-3913: the `dlocal` twins of the two cells BT-4121
+/// broke (BT-4194, BT-3950): a block `value` send directly in a fold body
+/// nested in a `whileTrue:` loop in an actor method shares its whole chain
+/// with its `local` sibling, which answers wrong, so the carve-out in
+/// `check_construct` rejects both. BT-4194 deletes these entries when the
+/// lowering is fixed.
+const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
+    ("actor", "iterLoop", "dlocal", "value"),
+    ("actor", "collLoop", "dlocal", "value"),
+];
 
 /// PIN-BUG BT-3913: Phase 0 accepts exactly what codegen lowers correctly.
 /// `adr0131_statement_measured.tsv` records, for every class, value-type and
@@ -4618,4 +4622,42 @@ fn evaluated_block_nested_in_a_bt3948_site_is_reported_once() {
     );
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages[0].contains("BT-3948"), "{messages:?}");
+}
+
+/// BT-3950: the `actor_nested_fold_value` carve-out fires for a fold body
+/// nested in a `whileTrue:` loop wherever the loop sits, not just at method
+/// top level: under an arm (deny path, no `DENY_SET` row names it) and under
+/// another fold (producer path, the same lost write as the matrix pair). A
+/// counted loop outside threads fine (measured right), so that shape stays
+/// accepted. (A closure between the loop and the fold needs three blocks, so
+/// the depth gate rejects it regardless; the carve-out's own scan is pinned
+/// by `actor_nested_fold_value_matches_one_chain`.)
+#[test]
+fn actor_fold_value_nested_in_loop_is_rejected_wherever_the_loop_sits() {
+    let value_rejected = |body: &str| {
+        adr0131_diagnostics(&in_actor(body)).iter().any(|d| {
+            d.message
+                .as_str()
+                .contains("`value` writes outer local `u`")
+        })
+    };
+    // Under an arm (containers [Arm, LoopBody, DoBody]).
+    assert!(
+        value_rejected(
+            "t =:= 0 ifTrue: [m := 0. [m < 2] whileTrue: [m := m + 1. #(1, 2) do: [:z | u := 0. [u := u + 1] value. t := u]]]\nt"
+        ),
+        "the arm-nested fold value must be rejected"
+    );
+    // Under another fold (containers [DoBody, LoopBody, DoBody]).
+    assert!(
+        value_rejected(
+            "#(3, 4) do: [:y | m := 0. [m < 2] whileTrue: [m := m + 1. #(1, 2) do: [:z | u := 0. [u := u + 1] value. t := u]]]\nt"
+        ),
+        "the fold-nested fold value must be rejected"
+    );
+    // A counted loop outside threads fine: stays accepted.
+    let diags = adr0131_diagnostics(&in_actor(
+        "2 timesRepeat: [#(1, 2) do: [:z | u := 0. [u := u + 1] value. t := u]]\nt",
+    ));
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
