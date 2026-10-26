@@ -12,16 +12,10 @@
 *.vsix
 
 # Cargo
-Cargo.lock
+# Cargo.lock is committed (root workspace and desktop/src-tauri): both build
+# shipped binaries, so releases and CI must resolve the same dependency graph.
+# CI fails if Cargo.lock is out of date with Cargo.toml (`cargo tree --locked`).
 .cargo/
-
-# ...except desktop/src-tauri's: it's a shipped binary application (its own
-# Cargo workspace, excluded from the root one — see root Cargo.toml), and
-# unlike the main workspace's libraries, an application's Cargo.lock should
-# be committed so the desktop-release.yml packaging lane (BT-2987) builds a
-# reproducible, versioned artifact rather than re-resolving the full Tauri
-# dependency graph fresh on every CI run.
-!/desktop/src-tauri/Cargo.lock
 
 # IDEs and editors
 *.swp
