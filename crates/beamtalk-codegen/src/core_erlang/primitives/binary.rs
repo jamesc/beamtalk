@@ -66,6 +66,24 @@ pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<D
             ])
         }
 
+        // Byte-level substring search (BT-4190)
+        "includesSubstring:" => {
+            let needle = param(params, 0, "_Needle");
+            Some(docvec![
+                "call 'beamtalk_binary':'includes_substring'(Self, ",
+                leaf::var(needle.to_string()),
+                ")",
+            ])
+        }
+        "indexOf:" => {
+            let needle = param(params, 0, "_Needle");
+            Some(docvec![
+                "call 'beamtalk_binary':'index_of'(Self, ",
+                leaf::var(needle.to_string()),
+                ")",
+            ])
+        }
+
         // Conversion
         "toBytes" => Some(Document::Str("call 'beamtalk_binary':'to_bytes'(Self)")),
         // BT-4170: pre-flip, valid UTF-8 never reaches this call (String
@@ -112,6 +130,27 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_binary':'print_string'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_includes_substring() {
+        let result = doc_to_string(generate_binary_bif(
+            "includesSubstring:",
+            &["Needle".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_binary':'includes_substring'(Self, Needle)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_index_of() {
+        let result = doc_to_string(generate_binary_bif("indexOf:", &["Needle".to_string()]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_binary':'index_of'(Self, Needle)".to_string())
         );
     }
 

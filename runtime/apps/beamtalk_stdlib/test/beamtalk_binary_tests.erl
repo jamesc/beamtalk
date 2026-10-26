@@ -664,3 +664,27 @@ deserialize_with_used_type_error_test() ->
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
         beamtalk_binary:deserialize_with_used(not_a_binary)
     ).
+
+%%% ============================================================================
+%%% Substring search (BT-4190)
+%%% ============================================================================
+
+includes_substring_test() ->
+    ?assert(beamtalk_binary:includes_substring(<<255, 13, 10, 0>>, <<13, 10>>)),
+    ?assertNot(beamtalk_binary:includes_substring(<<255, 1>>, <<2>>)).
+
+includes_substring_empty_needle_test() ->
+    ?assert(beamtalk_binary:includes_substring(<<255>>, <<>>)),
+    ?assert(beamtalk_binary:includes_substring(<<>>, <<>>)).
+
+index_of_test() ->
+    ?assertEqual(3, beamtalk_binary:index_of(<<255, 254, 13, 10, 13, 10>>, <<13, 10>>)),
+    ?assertEqual(1, beamtalk_binary:index_of(<<255, 254>>, <<255>>)),
+    ?assertEqual(nil, beamtalk_binary:index_of(<<255, 254>>, <<7>>)).
+
+index_of_empty_needle_test() ->
+    ?assertEqual(nil, beamtalk_binary:index_of(<<255>>, <<>>)).
+
+search_type_errors_test() ->
+    ?assertError(_, beamtalk_binary:index_of(<<1>>, 5)),
+    ?assertError(_, beamtalk_binary:includes_substring(5, <<1>>)).

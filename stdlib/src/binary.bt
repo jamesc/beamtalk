@@ -206,6 +206,36 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```
   concat: other :: Binary -> Binary => @primitive
 
+  // === Searching ===
+
+  /// Test whether `needle` occurs as a contiguous byte sequence.
+  ///
+  /// Compares raw bytes, so it works on non-UTF-8 haystacks. An empty
+  /// needle is always found (`true`), matching `String>>includesSubstring:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Binary fromBytes: #(255, 13, 10, 0)) includesSubstring: (Binary fromBytes: #(13, 10))) // => true
+  /// ((Binary fromBytes: #(255, 1)) includesSubstring: (Binary fromBytes: #(2)))              // => false
+  /// ```
+  includesSubstring: needle :: Binary -> Boolean => @primitive
+
+  /// Return the 1-based byte index of the first occurrence of `needle`, or
+  /// `nil` if it does not occur.
+  ///
+  /// Compares raw bytes, so it works on non-UTF-8 haystacks. The index is
+  /// 1-based, like `at:` and `String>>indexOf:`. An empty needle answers
+  /// `nil` (as `String>>indexOf:` does). For a haystack that is valid UTF-8,
+  /// dispatch currently reaches `String>>indexOf:` (a grapheme index) until
+  /// BT-4170; the two agree for ASCII.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Binary fromBytes: #(255, 13, 10)) indexOf: (Binary fromBytes: #(13, 10))) // => 2
+  /// ((Binary fromBytes: #(255, 1)) indexOf: (Binary fromBytes: #(2)))           // => nil
+  /// ```
+  indexOf: needle :: Binary -> Integer | Nil => @primitive
+
   // === Conversion ===
 
   /// Convert this binary to a list of byte integers (0-255).
