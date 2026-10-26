@@ -10,8 +10,8 @@
 //! inline at every call site.
 
 use crate::ast::{
-    Block, CascadeMessage, Expression, ExpressionStatement, MessageSelector, MethodKind, Module,
-    StringSegment,
+    Block, BlockId, CascadeMessage, Expression, ExpressionStatement, MessageSelector, MethodKind,
+    Module, StringSegment,
 };
 use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
 use crate::source_analysis::Span;
@@ -170,8 +170,10 @@ impl ClassFacts {
 /// lookup instead of inline re-derivation.
 #[derive(Debug, Clone, Default)]
 pub struct SemanticFacts {
-    /// Block mutation/capture profile for every [`Block`] node, keyed by block span.
-    pub block_profiles: HashMap<Span, BlockProfile>,
+    /// Block mutation/capture profile for every [`Block`] node, keyed by node
+    /// identity ([`BlockId`]). A span key would alias a desugared block with
+    /// its user's block: both carry the user span for diagnostics (BT-4122).
+    pub block_profiles: HashMap<BlockId, BlockProfile>,
     /// Dispatch classification for every [`Expression::MessageSend`] node, keyed by message span.
     pub dispatch_kinds: HashMap<Span, DispatchKind>,
     /// [`StateEffects`] fact for every expression node reachable from
@@ -194,9 +196,11 @@ pub struct SemanticFacts {
 }
 
 impl SemanticFacts {
-    /// Returns the block profile for the given span, or `None` if not found.
-    pub fn block_profile(&self, span: &Span) -> Option<&BlockProfile> {
-        self.block_profiles.get(span)
+    /// Returns the block profile for the given node, or `None` if not found
+    /// (a block built after [`compute_semantic_facts`] ran, e.g. a desugared
+    /// fold: the caller analyzes it on the fly).
+    pub fn block_profile(&self, id: BlockId) -> Option<&BlockProfile> {
+        self.block_profiles.get(&id)
     }
 
     /// Returns the [`StateEffects`] fact for the given span, or the all-`false`
@@ -484,7 +488,7 @@ fn collect_expression_facts(expr: &Expression, facts: &mut SemanticFacts) {
         Expression::Block(block) => {
             // Compute block profile for this block node
             let profile = analyze_block(block);
-            facts.block_profiles.insert(block.span, profile);
+            facts.block_profiles.insert(block.id, profile);
             // Recurse into block body
             for stmt in &block.body {
                 collect_expression_facts(&stmt.expression, facts);
@@ -1089,7 +1093,8 @@ mod tests {
     #[test]
     fn semantic_facts_default_block_profile_is_none() {
         let facts = SemanticFacts::default();
-        assert!(facts.block_profile(&Span::new(0, 10)).is_none());
+        let id = empty_block(Span::new(0, 10)).id;
+        assert!(facts.block_profile(id).is_none());
     }
 
     #[test]
@@ -1175,9 +1180,33 @@ mod tests {
     fn compute_facts_block_in_module_expr_populates_block_profiles() {
         let block_span = Span::new(5, 20);
         let b = block_with(vec![bare(lit(1))], block_span);
+        let id = b.id;
         let module = Module::new(vec![bare(Expression::Block(b))], ts());
         let facts = compute_semantic_facts(&module);
-        assert!(facts.block_profiles.contains_key(&block_span));
+        assert!(facts.block_profiles.contains_key(&id));
+    }
+
+    #[test]
+    fn block_profiles_are_keyed_by_node_identity_not_span() {
+        // BT-4122: a desugared fold reuses its user block's span. The two
+        // nodes must not alias in the profile cache: the synthetic node
+        // misses and is analyzed on the fly.
+        let span = Span::new(5, 20);
+        let user = block_with(vec![bare(lit(1))], span);
+        let user_id = user.id;
+        let module = Module::new(vec![bare(Expression::Block(user))], ts());
+        let facts = compute_semantic_facts(&module);
+        assert!(facts.block_profile(user_id).is_some());
+        let synthetic = block_with(vec![bare(lit(2))], span);
+        assert_ne!(synthetic.id, user_id);
+        assert!(facts.block_profile(synthetic.id).is_none());
+        // A clone keeps its source's id: identical content, identical profile.
+        let module_block = match &module.expressions[0].expression {
+            Expression::Block(b) => b.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(module_block.id, user_id);
+        assert!(facts.block_profile(module_block.id).is_some());
     }
 
     #[test]

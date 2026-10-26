@@ -778,10 +778,30 @@ impl KeywordPart {
     }
 }
 
+/// Identity of one [`Block`] node: distinct for every block the parser or a
+/// later pass constructs, even when two nodes share a span (a desugared
+/// `inject:into:` fold reuses its user block's span for diagnostics).
+/// [`SemanticFacts::block_profiles`](crate::semantic_analysis::SemanticFacts::block_profiles)
+/// is keyed by this, so a synthetic block never aliases its user's cached
+/// profile (BT-4122). A clone keeps its source's id: identical content has an
+/// identical profile. Never rendered: [`Block`]'s `Debug` and `PartialEq`
+/// ignore it, so AST snapshots and structural equality are unaffected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BlockId(u64);
+
+impl BlockId {
+    /// Mints a fresh id. Process-wide atomic counter: parsing and codegen
+    /// run on many threads, and ids only ever serve as map keys.
+    fn fresh() -> Self {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        Self(COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
 /// A block (closure/lambda).
 ///
 /// Example: `[:x :y | x + y]`
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub struct Block {
     /// Block parameters.
     pub parameters: Vec<BlockParameter>,
@@ -789,6 +809,29 @@ pub struct Block {
     pub body: Vec<ExpressionStatement>,
     /// Source location of the entire block (including brackets).
     pub span: Span,
+    /// Node identity (see [`BlockId`]). Assigned by [`Block::new`]; construct
+    /// blocks through it, never as struct literals.
+    pub id: BlockId,
+}
+
+// Manual `Debug`/`PartialEq`: the id is identity, not content — it is
+// excluded so AST snapshots stay deterministic and structural equality keeps
+// comparing what the block says, not when it was built.
+#[allow(clippy::missing_fields_in_debug)]
+impl std::fmt::Debug for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Block")
+            .field("parameters", &self.parameters)
+            .field("body", &self.body)
+            .field("span", &self.span)
+            .finish()
+    }
+}
+
+impl PartialEq for Block {
+    fn eq(&self, other: &Self) -> bool {
+        self.parameters == other.parameters && self.body == other.body && self.span == other.span
+    }
 }
 
 impl Block {
@@ -803,6 +846,7 @@ impl Block {
             parameters,
             body,
             span,
+            id: BlockId::fresh(),
         }
     }
 

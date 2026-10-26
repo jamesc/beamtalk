@@ -3168,43 +3168,43 @@ mod tests {
 
     #[test]
     fn test_validate_if_not_nil_block_zero_args() {
-        let block = Expression::Block(Block {
-            parameters: vec![],
-            body: vec![ExpressionStatement::bare(Expression::Literal(
+        let block = Expression::Block(Block::new(
+            vec![],
+            vec![ExpressionStatement::bare(Expression::Literal(
                 Literal::Integer(1),
                 Span::new(1, 2),
             ))],
-            span: Span::new(0, 3),
-        });
+            Span::new(0, 3),
+        ));
         assert!(!validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
     }
 
     #[test]
     fn test_validate_if_not_nil_block_one_arg() {
-        let block = Expression::Block(Block {
-            parameters: vec![BlockParameter::new("v", Span::new(1, 2))],
-            body: vec![ExpressionStatement::bare(Expression::Literal(
+        let block = Expression::Block(Block::new(
+            vec![BlockParameter::new("v", Span::new(1, 2))],
+            vec![ExpressionStatement::bare(Expression::Literal(
                 Literal::Integer(1),
                 Span::new(5, 6),
             ))],
-            span: Span::new(0, 7),
-        });
+            Span::new(0, 7),
+        ));
         assert!(validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
     }
 
     #[test]
     fn test_validate_if_not_nil_block_two_args_errors() {
-        let block = Expression::Block(Block {
-            parameters: vec![
+        let block = Expression::Block(Block::new(
+            vec![
                 BlockParameter::new("a", Span::new(1, 2)),
                 BlockParameter::new("b", Span::new(3, 4)),
             ],
-            body: vec![ExpressionStatement::bare(Expression::Literal(
+            vec![ExpressionStatement::bare(Expression::Literal(
                 Literal::Integer(1),
                 Span::new(7, 8),
             ))],
-            span: Span::new(0, 9),
-        });
+            Span::new(0, 9),
+        ));
         let result = validate_if_not_nil_block(&block, "ifNotNil:");
         assert!(result.is_err());
         if let Err(CodeGenError::BlockArityMismatch { selector, arity }) = result {
@@ -3236,14 +3236,14 @@ mod tests {
                 BlockParameter::new(format!("p{i}"), span)
             })
             .collect();
-        Expression::Block(Block {
-            parameters: params,
-            body: vec![ExpressionStatement::bare(Expression::Literal(
+        Expression::Block(Block::new(
+            params,
+            vec![ExpressionStatement::bare(Expression::Literal(
                 Literal::Integer(1),
                 Span::new(1, 2),
             ))],
-            span: Span::new(0, 10),
-        })
+            Span::new(0, 10),
+        ))
     }
 
     #[test]

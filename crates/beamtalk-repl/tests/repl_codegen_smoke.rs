@@ -139,11 +139,7 @@ fn test_generate_repl_module_with_times_repeat_mutation() {
         type_annotation: None,
         span: Span::new(0, 20),
     };
-    let body = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(assignment)],
-        span: Span::new(0, 25),
-    });
+    let body = Expression::Block(Block::new(vec![], vec![bare(assignment)], Span::new(0, 25)));
 
     // Build: 5 timesRepeat: [...]
     let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
@@ -213,15 +209,15 @@ fn test_generate_repl_module_with_to_do_mutation() {
         type_annotation: None,
         span: Span::new(0, 20),
     };
-    let body = Expression::Block(Block {
-        parameters: vec![BlockParameter {
+    let body = Expression::Block(Block::new(
+        vec![BlockParameter {
             name: "n".into(),
             type_annotation: None,
             span: Span::new(0, 1),
         }],
-        body: vec![bare(assignment)],
-        span: Span::new(0, 25),
-    });
+        vec![bare(assignment)],
+        Span::new(0, 25),
+    ));
 
     // Build: 1 to: 5 do: [...]
     let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
@@ -282,11 +278,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
         is_cast: false,
         span: Span::new(0, 10),
     };
-    let condition = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(compare)],
-        span: Span::new(0, 12),
-    });
+    let condition = Expression::Block(Block::new(vec![], vec![bare(compare)], Span::new(0, 12)));
 
     // Build the body: [x := x + 1]
     let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
@@ -303,11 +295,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
         type_annotation: None,
         span: Span::new(0, 15),
     };
-    let body = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(assignment)],
-        span: Span::new(0, 17),
-    });
+    let body = Expression::Block(Block::new(vec![], vec![bare(assignment)], Span::new(0, 17)));
 
     // Build: [x < 5] whileTrue: [x := x + 1]
     let while_true = Expression::MessageSend {
@@ -564,11 +552,7 @@ fn test_generate_repl_multi_stmt_times_repeat_then_read() {
         type_annotation: None,
         span,
     };
-    let loop_body = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(loop_assign)],
-        span,
-    });
+    let loop_body = Expression::Block(Block::new(vec![], vec![bare(loop_assign)], span));
     let five = Expression::Literal(Literal::Integer(5), span);
     let times_repeat = Expression::MessageSend {
         receiver: Box::new(five),
@@ -644,11 +628,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
         is_cast: false,
         span,
     };
-    let condition = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(cmp)],
-        span,
-    });
+    let condition = Expression::Block(Block::new(vec![], vec![bare(cmp)], span));
     let x_body = Expression::Identifier(Identifier::new("x", span));
     let one = Expression::Literal(Literal::Integer(1), span);
     let add = Expression::MessageSend {
@@ -664,11 +644,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
         type_annotation: None,
         span,
     };
-    let loop_body = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(loop_assign)],
-        span,
-    });
+    let loop_body = Expression::Block(Block::new(vec![], vec![bare(loop_assign)], span));
     let while_true = Expression::MessageSend {
         receiver: Box::new(condition),
         selector: MessageSelector::Keyword(vec![KeywordPart {
@@ -745,11 +721,7 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
         type_annotation: None,
         span,
     };
-    let loop_body = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(loop_assign)],
-        span,
-    });
+    let loop_body = Expression::Block(Block::new(vec![], vec![bare(loop_assign)], span));
     let five = Expression::Literal(Literal::Integer(5), span);
     let times_repeat = Expression::MessageSend {
         receiver: Box::new(five),
@@ -816,11 +788,7 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
         type_annotation: None,
         span,
     };
-    let body = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(assignment)],
-        span,
-    });
+    let body = Expression::Block(Block::new(vec![], vec![bare(assignment)], span));
     let five = Expression::Literal(Literal::Integer(5), span);
     let times_repeat = Expression::MessageSend {
         receiver: Box::new(five),
@@ -909,11 +877,7 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
         type_annotation: None,
         span,
     };
-    let loop_body = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(loop_assign)],
-        span,
-    });
+    let loop_body = Expression::Block(Block::new(vec![], vec![bare(loop_assign)], span));
     let five = Expression::Literal(Literal::Integer(5), span);
     let times_repeat = Expression::MessageSend {
         receiver: Box::new(five),
@@ -1138,14 +1102,14 @@ fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
         tail: None,
         span,
     };
-    let inject_block = Expression::Block(Block {
-        parameters: vec![
+    let inject_block = Expression::Block(Block::new(
+        vec![
             BlockParameter::new("acc", span),
             BlockParameter::new("item", span),
         ],
-        body: vec![bare(x_mut), bare(list_result)],
+        vec![bare(x_mut), bare(list_result)],
         span,
-    });
+    ));
 
     // Build: #(10, 20) inject: #(0, 0) into: <inject_block>
     let receiver = Expression::ListLiteral {

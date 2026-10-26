@@ -409,11 +409,7 @@ fn test_block_infers_block_type() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut env = TypeEnv::new();
 
-    let block_expr = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(int_lit(42))],
-        span: span(),
-    });
+    let block_expr = Expression::Block(Block::new(vec![], vec![bare(int_lit(42))], span()));
 
     let ty = checker.infer_expr(&block_expr, &hierarchy, &mut env, false);
     assert_eq!(ty, InferredType::known("Block"));
