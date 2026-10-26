@@ -236,6 +236,37 @@ fn op_marker(will_bracket: bool, need: bool) -> GuardedOpLoopMarker {
 }
 
 #[test]
+fn take_reads_when_any_enclosing_loop_brackets() {
+    // `guarded_op_take_reads` is any-over-the-stack, not innermost-only: a
+    // bracketing loop's slow paths write the cell during the iteration, so
+    // every read in the iteration must be live — including reads in a
+    // nested loop with no guarded operator of its own. The take-reads
+    // decision has no verifier backstop (unlike gaps, which are loud), so
+    // the predicate stays conservative here even though no end-to-end
+    // shape nests a stateless reader inside a bracketing loop today.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.loop_mode.in_direct_params_loop = true;
+    generator
+        .synced
+        .guarded_op_loops
+        .borrow_mut()
+        .push(op_marker(true, false));
+    generator
+        .synced
+        .guarded_op_loops
+        .borrow_mut()
+        .push(op_marker(false, false));
+    assert!(generator.guarded_op_take_reads());
+    generator.synced.guarded_op_loops.borrow_mut().clear();
+    generator
+        .synced
+        .guarded_op_loops
+        .borrow_mut()
+        .push(op_marker(false, false));
+    assert!(!generator.guarded_op_take_reads());
+}
+
+#[test]
 fn checkout_brackets_when_flagged() {
     let mut generator = CoreErlangGenerator::new("test");
     let out = generator.checkout_guarded_op_loop(op_marker(true, true), false, Span::new(0, 1));

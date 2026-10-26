@@ -1272,17 +1272,19 @@ impl CoreErlangGenerator {
 
     /// BT-4121: whether a field read lowered right now must read the live
     /// cell (`maps:get` over `take()`) instead of the loop-entry `State`.
-    /// True inside a stateless loop that will bracket: the loop's slow
-    /// paths write the cell, so the entry `State` (or a parameter extracted
-    /// from it) is stale for them. Never inside a cell closure nested in
+    /// True inside a stateless loop that will bracket, or nested in one
+    /// that will: any bracketing loop's slow paths write the cell, so the
+    /// entry `State` (or a parameter extracted from it) is stale for every
+    /// read in the iteration — including reads in a nested loop with no
+    /// guarded operator of its own. Never inside a cell closure nested in
     /// the loop: its reads are already live-at-home through the cell view
     /// (and must stay capture-aware away from home).
     pub(in crate::core_erlang) fn guarded_op_take_reads(&self) -> bool {
         self.synced
             .guarded_op_loops
             .borrow()
-            .last()
-            .is_some_and(|m| m.will_bracket)
+            .iter()
+            .any(|m| m.will_bracket)
             && self.loop_holds_no_whole_state()
             && !self.in_cell_closure()
     }

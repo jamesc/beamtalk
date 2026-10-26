@@ -1514,7 +1514,7 @@ impl ThreadingPlan {
         #[cfg(not(test))]
         let force_ambient = false;
         let mut docs: Vec<Document<'static>> = Vec::new();
-        let take_var = if seed_from_cell && !self.packs_from_fresh_map(generator) {
+        let take_var = if seed_from_cell && !force_ambient && !self.packs_from_fresh_map(generator) {
             let take_var = generator.fresh_temp_var("TakeSt");
             docs.push(docvec![
                 "let ",

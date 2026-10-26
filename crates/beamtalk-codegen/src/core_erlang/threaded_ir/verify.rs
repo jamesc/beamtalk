@@ -446,8 +446,8 @@ pub(in crate::core_erlang) enum VerifyError {
     /// region brackets the slow path (a store before the loop, a reload
     /// woven into its exit); this fires only when no enclosing loop did (a
     /// loop lowering that never pushed a guarded-operator marker, or a
-    /// hybrid loop whose operator the mode selection missed). Reported by
-    /// the generator at the send emitter, like
+    /// hybrid loop whose operator the mode selection missed). Detected at
+    /// the send emitter and reported there or at the loop checkout, like
     /// [`Self::UnbracketedUserCodeSend`].
     UnbracketedGuardedOperator {
         selector: String,
