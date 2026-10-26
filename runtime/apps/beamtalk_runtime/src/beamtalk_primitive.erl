@@ -162,7 +162,7 @@ string_to_binary(X) when is_binary(X) ->
     beamtalk_error:raise_type_error(
         'String',
         string_to_binary,
-        <<"Expected a String; bare binaries are Binary — convert with asString">>
+        <<"Expected a String; bare binaries are Binary; convert with asString">>
     );
 string_to_binary(_) ->
     beamtalk_error:raise_type_error(
