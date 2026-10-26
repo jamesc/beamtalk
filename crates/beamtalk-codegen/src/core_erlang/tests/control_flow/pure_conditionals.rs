@@ -709,3 +709,39 @@ fn nested_pure_conditionals_grow_linearly() {
     );
     assert_compiles_through_erlc("bt@probe_nested_pure", &code);
 }
+
+#[test]
+fn fallback_closure_warnings_are_not_duplicated() {
+    // BT-4070 review: the fallback closure lowers the same AST the inline
+    // arm already reported, so a warning raised while lowering the block
+    // (non-literal callable at the Erlang boundary) must appear exactly
+    // once, not once per lowering.
+    let src = "Value subclass: Probe\n  check: flag items: items do: aBlock =>\n    flag ifTrue: [items do: aBlock]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module_ast, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let generated = crate::core_erlang::generate_module_with_warnings(
+        &module_ast,
+        crate::core_erlang::CodegenOptions::new("bt@probe_warn_once"),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        generated.code.contains("CondNoMatch"),
+        "expected the pure-inline case to fire. Got:\n{}",
+        generated.code
+    );
+    let count = generated
+        .warnings
+        .iter()
+        .filter(|w| w.message.contains("non-literal callable"))
+        .count();
+    assert_eq!(
+        count,
+        1,
+        "expected exactly one non-literal-callable warning, got {count}: {:?}",
+        generated
+            .warnings
+            .iter()
+            .map(|w| w.message.as_str())
+            .collect::<Vec<_>>()
+    );
+}

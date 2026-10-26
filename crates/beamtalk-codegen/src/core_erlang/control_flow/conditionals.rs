@@ -1615,7 +1615,10 @@ impl CoreErlangGenerator {
     /// for non-Boolean receivers, so the optimisation buys nothing there,
     /// and inlining inside them would duplicate nested blocks exponentially
     /// (each level compiles its blocks both inline and as fallback
-    /// closures).
+    /// closures). Codegen warnings are snapshot-truncated across the
+    /// fallback loop for the same reason — the fallback lowers the same
+    /// AST the inline arm already reported, and `add_codegen_warning`
+    /// does not dedup.
     ///
     /// The receiver compiles through [`Self::compile_conditional_receiver`],
     /// the same path the mutation builders use: the gate guarantees an
@@ -1636,15 +1639,21 @@ impl CoreErlangGenerator {
         let cond_var = self.fresh_temp_var("Cond");
         let true_doc = self.pure_arm_doc(true_arm, &cond_var)?;
         let false_doc = self.pure_arm_doc(false_arm, &cond_var)?;
-        // Decline pure-inline inside the fallback closures (same save/restore
-        // shape as `while_loops.rs`): without this, nested pure
-        // conditionals emit 2^n copies of the innermost arm.
+        // Decline pure-inline inside the fallback closures (same
+        // save/restore shape as `while_loops.rs` — bind the result,
+        // restore, then `?`, so an error never leaks the flag): without
+        // this, nested pure conditionals emit 2^n copies of the innermost
+        // arm. Warnings are snapshot-truncated across the loop: the
+        // fallback lowers the same AST the inline arm already reported.
         let prev = std::mem::replace(&mut self.decline_pure_boolean_inline, true);
-        let mut closure_docs = Vec::with_capacity(fallback_args.len());
-        for arg in fallback_args {
-            closure_docs.push(self.expression_doc(arg)?);
-        }
+        let warn_len = self.codegen_warnings.len();
+        let closures: Result<Vec<_>> = fallback_args
+            .iter()
+            .map(|a| self.expression_doc(a))
+            .collect();
         self.decline_pure_boolean_inline = prev;
+        self.codegen_warnings.truncate(warn_len);
+        let closure_docs = closures?;
         let fallback =
             Self::runtime_send_call(leaf::var(cond_var.clone()), selector_atom, closure_docs);
         let no_match_var = self.fresh_temp_var("CondNoMatch");
