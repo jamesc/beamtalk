@@ -84,22 +84,20 @@ dispatch('classNamed:', [ClassName], _Self) ->
 dispatch('help:', [ClassArg], _Self) ->
     case handle_help(ClassArg) of
         {error, Err} -> beamtalk_error:raise(Err);
-        Result -> Result
+        Result -> beamtalk_primitive:string_from_binary(Result)
     end;
 dispatch('help:selector:', [ClassArg, SelectorArg], _Self) ->
     case handle_help_selector(ClassArg, SelectorArg) of
         {error, Err} -> beamtalk_error:raise(Err);
-        Result -> Result
+        Result -> beamtalk_primitive:string_from_binary(Result)
     end;
 dispatch('erlangHelp:', [ModuleArg], _Self) ->
-    handle_erlang_help(ModuleArg);
+    beamtalk_primitive:string_from_binary(handle_erlang_help(ModuleArg));
 dispatch('erlangHelp:selector:', [ModuleArg, SelectorArg], _Self) ->
-    handle_erlang_help(ModuleArg, SelectorArg);
+    beamtalk_primitive:string_from_binary(handle_erlang_help(ModuleArg, SelectorArg));
 dispatch(version, [], _Self) ->
-    case application:get_key(beamtalk_runtime, vsn) of
-        {ok, Vsn} -> list_to_binary(Vsn);
-        _ -> <<"unknown">>
-    end;
+    %% BT-4173: the version is text — answer a String.
+    beamtalk_primitive:string_from_binary(version());
 dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
@@ -234,50 +232,57 @@ findClass(ClassName) ->
 Format class documentation (help: aClass).
 Called via `(Erlang beamtalk_interface) help: aClass`.
 """.
--spec help(term()) -> binary().
+-spec help(term()) -> beamtalk_string:t().
 help(ClassArg) ->
     case handle_help(ClassArg) of
         {error, Err} -> beamtalk_error:raise(Err);
-        Result -> Result
+        %% BT-4173: rendered help is text — answer a String.
+        Result -> beamtalk_primitive:string_from_binary(Result)
     end.
 
 -doc """
 Format method documentation (help: aClass selector: aSelector).
 Called via `(Erlang beamtalk_interface) help: aClass selector: aSelector`.
 """.
--spec help(term(), Selector :: atom()) -> binary().
+-spec help(term(), Selector :: atom()) -> beamtalk_string:t().
 help(ClassArg, SelectorArg) ->
     case handle_help_selector(ClassArg, SelectorArg) of
         {error, Err} -> beamtalk_error:raise(Err);
-        Result -> Result
+        %% BT-4173: rendered help is text — answer a String.
+        Result -> beamtalk_primitive:string_from_binary(Result)
     end.
 
 -doc """
 Format Erlang module documentation (erlangHelp: moduleName).
 Called via `(Erlang beamtalk_interface) erlangHelp: "lists"`.
 """.
--spec erlangHelp(binary()) -> binary().
+-spec erlangHelp(binary() | beamtalk_string:t()) -> beamtalk_string:t().
 erlangHelp(ModuleArg) ->
-    handle_erlang_help(ModuleArg).
+    %% BT-4173: rendered help is text — answer a String.
+    beamtalk_primitive:string_from_binary(handle_erlang_help(ModuleArg)).
 
 -doc """
 Format Erlang function documentation (erlangHelp: moduleName selector: #fn).
 Called via `(Erlang beamtalk_interface) erlangHelp: "lists" selector: #reverse`.
 """.
--spec erlangHelp(ModuleName :: binary(), Selector :: atom() | binary()) -> binary().
+-spec erlangHelp(ModuleName :: binary() | beamtalk_string:t(), Selector :: atom() | binary()) ->
+    beamtalk_string:t().
 erlangHelp(ModuleArg, SelectorArg) ->
-    handle_erlang_help(ModuleArg, SelectorArg).
+    beamtalk_primitive:string_from_binary(handle_erlang_help(ModuleArg, SelectorArg)).
 
 -doc """
 Return the Beamtalk runtime version string.
 Called via `(Erlang beamtalk_interface) version`.
 """.
--spec version() -> binary().
+-spec version() -> beamtalk_string:t().
 version() ->
-    case application:get_key(beamtalk_runtime, vsn) of
-        {ok, Vsn} -> list_to_binary(Vsn);
-        _ -> <<"unknown">>
-    end.
+    %% BT-4173: the version is text — answer a String.
+    beamtalk_primitive:string_from_binary(
+        case application:get_key(beamtalk_runtime, vsn) of
+            {ok, Vsn} -> list_to_binary(Vsn);
+            _ -> <<"unknown">>
+        end
+    ).
 
 -doc """
 Find call sites of a selector within a single method's source.
@@ -691,7 +696,10 @@ diagnostic_message(D) ->
     end.
 
 -doc "Format Erlang module help via beamtalk_erlang_help (dynamic call).".
--spec handle_erlang_help(binary()) -> binary().
+-spec handle_erlang_help(binary() | beamtalk_string:t()) -> binary().
+%% BT-4173: a String module name arrives tagged — unwrap to bytes.
+handle_erlang_help({beamtalk_string, ModuleBin}) when is_binary(ModuleBin) ->
+    handle_erlang_help(ModuleBin);
 handle_erlang_help(ModuleBin) when is_binary(ModuleBin) ->
     try binary_to_existing_atom(ModuleBin, utf8) of
         Module ->
@@ -732,7 +740,9 @@ handle_erlang_help(_ModuleArg) ->
     beamtalk_error:raise(Err2).
 
 -doc "Format Erlang function help via beamtalk_erlang_help (dynamic call).".
--spec handle_erlang_help(binary(), atom() | binary()) -> binary().
+-spec handle_erlang_help(binary() | beamtalk_string:t(), atom() | binary()) -> binary().
+handle_erlang_help({beamtalk_string, ModuleBin}, SelectorArg) when is_binary(ModuleBin) ->
+    handle_erlang_help(ModuleBin, SelectorArg);
 handle_erlang_help(ModuleBin, SelectorArg) when
     is_binary(ModuleBin), (is_atom(SelectorArg) orelse is_binary(SelectorArg))
 ->
@@ -1050,6 +1060,9 @@ resolve_class_name(#beamtalk_object{pid = ClassPid}) when is_pid(ClassPid) ->
     end;
 resolve_class_name(Name) when is_atom(Name) ->
     {ok, Name};
+resolve_class_name({beamtalk_string, Name}) when is_binary(Name) ->
+    %% BT-4173: a String class name arrives tagged — unwrap to bytes.
+    resolve_class_name(Name);
 resolve_class_name(Name) when is_binary(Name) ->
     try
         {ok, binary_to_existing_atom(Name, utf8)}
@@ -1064,6 +1077,8 @@ resolve_class_name(_Other) ->
 -doc "Ensure a selector argument is an existing atom.".
 -spec ensure_atom(atom() | binary()) -> atom() | {error, #beamtalk_error{}}.
 ensure_atom(A) when is_atom(A) -> A;
+%% BT-4173: a String selector arrives tagged — unwrap to bytes.
+ensure_atom({beamtalk_string, B}) when is_binary(B) -> ensure_atom(B);
 ensure_atom(B) when is_binary(B) ->
     try
         binary_to_existing_atom(B, utf8)
@@ -1087,6 +1102,10 @@ format_class_help(ClassName, ClassPid) ->
     ModuleDoc =
         case gen_server:call(ClassPid, get_doc, 5000) of
             none -> none;
+            %% BT-4173: `doc: nil` stores the atom `nil`; unset is `none`.
+            nil -> none;
+            %% Class docs arrive tagged — unwrap for rendering.
+            {beamtalk_string, TaggedDoc} when is_binary(TaggedDoc) -> TaggedDoc;
             Doc when is_binary(Doc) -> Doc
         end,
 
@@ -1233,6 +1252,8 @@ format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
     Signature =
         case maps:get('__signature__', MethodObj, nil) of
             nil -> SelectorBin;
+            %% BT-4173: signatures/docs arrive tagged — unwrap for rendering.
+            {beamtalk_string, TaggedSig} when is_binary(TaggedSig) -> TaggedSig;
             SigBin when is_binary(SigBin) -> SigBin
         end,
 
@@ -1241,6 +1262,8 @@ format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
     DocPart =
         case maps:get('__doc__', MethodObj, nil) of
             nil -> <<>>;
+            {beamtalk_string, TaggedDoc} when is_binary(TaggedDoc) ->
+                iolist_to_binary([<<"\n\n">>, TaggedDoc]);
             DocBin when is_binary(DocBin) -> iolist_to_binary([<<"\n\n">>, DocBin])
         end,
 
@@ -1470,6 +1493,8 @@ get_method_sig(ClassPid, Selector) ->
             Doc =
                 case maps:get('__doc__', MethodObj, nil) of
                     nil -> none;
+                    %% BT-4173: method docs arrive tagged — unwrap for rendering.
+                    {beamtalk_string, TaggedD} when is_binary(TaggedD) -> TaggedD;
                     D when is_binary(D) -> D
                 end,
             {atom_to_binary(Selector, utf8), Doc}

@@ -97,7 +97,8 @@ dispatch('class', _Args, _Self) ->
     'ErlangModule';
 dispatch('printString', _Args, Self) ->
     Module = maps:get(module, Self),
-    iolist_to_binary([<<"#ErlangModule<">>, atom_to_binary(Module, utf8), <<">">>]);
+    %% BT-4173: printString answers a String.
+    beamtalk_primitive:string_from_binary(iolist_to_binary([<<"#ErlangModule<">>, atom_to_binary(Module, utf8), <<">">>]));
 dispatch('methods', _Args, Self) ->
     %% REPL discoverability: return exported functions with arities.
     Module = maps:get(module, Self),
@@ -105,11 +106,11 @@ dispatch('methods', _Args, Self) ->
         {ok, Exports} ->
             %% Format as list of "function/arity" strings
             lists:sort([
-                iolist_to_binary([
+                beamtalk_primitive:string_from_binary(iolist_to_binary([
                     atom_to_binary(F, utf8),
                     <<"/">>,
                     integer_to_binary(A)
-                ])
+                ]))
              || {F, A} <- Exports, not beamtalk_reflection:is_predefined_function(F)
             ]);
         {error, not_loaded} ->

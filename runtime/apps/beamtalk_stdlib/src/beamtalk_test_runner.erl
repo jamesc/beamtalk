@@ -302,8 +302,10 @@ Returns a list of maps with name and error keys.
 """.
 -spec result_failures(map()) -> [map()].
 result_failures(#{'$beamtalk_class' := 'TestResult', tests := Tests}) ->
+    %% BT-4173: failure messages answer Strings (the stored records stay
+    %% binary for `format_failure_details` splicing).
     [
-        #{name => Name, error => Error}
+        #{name => Name, error => beamtalk_primitive:string_from_binary(Error)}
      || #{name := Name, status := fail, error := Error} <- Tests
     ].
 

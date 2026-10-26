@@ -207,7 +207,11 @@ structured error.
 super_value(Selector, Args, Self, CurrentClass) ->
     case super(Selector, Args, Self, #{}, CurrentClass) of
         {reply, Result, _State} -> Result;
-        {error, Error} -> beamtalk_error:raise(Error)
+        %% BT-4173: a walk miss answers an unwrapped record, but an invoked
+        %% method that raised answers an already-wrapped exception map —
+        %% re-raise each through its own channel (raise/1 only takes records).
+        {error, #beamtalk_error{} = Error} -> beamtalk_error:raise(Error);
+        {error, Wrapped} -> error(Wrapped)
     end.
 
 -doc """

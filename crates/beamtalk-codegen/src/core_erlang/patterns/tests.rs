@@ -41,7 +41,7 @@ fn int_expr(n: i64) -> Expression {
 }
 
 #[test]
-fn test_type_pattern_string_uses_is_binary() {
+fn test_type_pattern_string_uses_tag_test() {
     let mut generator = CoreErlangGenerator::new("test");
     let value = ident_expr("x");
     let arms = vec![
@@ -53,8 +53,8 @@ fn test_type_pattern_string_uses_is_binary() {
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.contains("'erlang':'is_binary'"),
-        "String pattern should test is_binary. Got: {output}"
+        output.contains("'beamtalk_string'"),
+        "String pattern should test the beamtalk_string tag. Got: {output}"
     );
 }
 
@@ -266,7 +266,7 @@ fn test_type_pattern_guard_scopes_over_binding() {
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.contains("'erlang':'is_binary'"),
+        output.contains("'beamtalk_string'"),
         "Guarded Type arm should still emit the class test. Got: {output}"
     );
     assert!(
@@ -297,7 +297,7 @@ fn test_match_mixes_primitive_type_arm_and_native_arm_in_one_case() {
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.contains("'erlang':'is_binary'"),
+        output.contains("'beamtalk_string'"),
         "Should still contain the String arm's test. Got: {output}"
     );
     assert!(

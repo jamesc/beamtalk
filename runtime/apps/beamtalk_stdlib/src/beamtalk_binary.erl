@@ -71,11 +71,10 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 
 %% Representation (BT-4170): a `Binary` is a bare BEAM `binary()`; a `String`
 %% is the tagged term `{beamtalk_string, Bin}`. `String` subclasses `Binary`,
-%% so every function here whose contract admits a `String` (the inherited
-%% byte-level operations, `concat:`'s argument, the class-side decoders'
-%% inputs) matches the tag and unwraps; `String`-only strictness lives in
-%% `beamtalk_string`, and byte-only strictness (`do/2`, `at/2`, `as_string/1`)
-%% raises on tagged input via the catch-alls below.
+%% so Binary methods accept a `String` self (reached via `super` sends from
+%% `String`): byte-level operations unwrap the tag and work on the bytes,
+%% and `as_string/1` answers `ok` with the self it was handed (valid UTF-8
+%% by construction). `String`-only strictness lives in `beamtalk_string`.
 -type binary_or_string() :: binary() | {beamtalk_string, binary()}.
 -export_type([binary_or_string/0]).
 
@@ -222,15 +221,15 @@ a Result: `Result error:` on odd length or non-hex-digit characters.
 -doc """
 Iterate over bytes in binary, calling Fun with each byte (Integer 0-255).
 
-BT-4170: byte-only — `String` overrides `do:` with grapheme iteration,
-so a tagged `String` never reaches here through dispatch; direct
-callers holding one must go through `String`'s `do:` instead.
+BT-4173: byte-level — a `String` self (e.g. via `super do:` from
+`String`, which overrides `do:` with grapheme iteration) iterates its
+bytes, the Binary semantics the super-send asked for.
 """.
--spec do(binary(), fun((non_neg_integer()) -> any())) -> nil.
+-spec do(binary() | beamtalk_string:t(), fun((non_neg_integer()) -> any())) -> nil.
 do(Bin, Fun) when is_binary(Bin), is_function(Fun, 1) ->
     do_loop(Bin, 0, erlang:byte_size(Bin), Fun);
-do({beamtalk_string, _}, _Fun) ->
-    raise_type_error(do, <<"Binary do: iterates bytes; Strings iterate graphemes via String do:">>);
+do({beamtalk_string, Raw}, Fun) when is_binary(Raw) ->
+    do(Raw, Fun);
 do(Bin, _Fun) when not is_binary(Bin) ->
     raise_type_error(do, <<"Receiver must be a Binary">>);
 do(_Bin, _Fun) ->
@@ -250,12 +249,12 @@ Indexing an empty Binary raises `empty_collection`, matching
 index below 1 is malformed whether or not the Binary is empty, so it stays
 `index_out_of_bounds`.
 
-BT-4170: byte-only — `String` overrides `at:` with grapheme access, so a
-tagged `String` never reaches here through dispatch.
+BT-4173: byte-level — a `String` self (e.g. via `super at:`) answers
+the byte at the index, the Binary semantics the super-send asked for.
 """.
--spec at(binary(), pos_integer()) -> non_neg_integer().
-at({beamtalk_string, _}, _Index) ->
-    raise_type_error(at, <<"Binary at: answers bytes; Strings answer graphemes via String at:">>);
+-spec at(binary() | beamtalk_string:t(), pos_integer()) -> non_neg_integer().
+at({beamtalk_string, Raw}, Index) when is_binary(Raw) ->
+    at(Raw, Index);
 at(Bin, Index) when is_binary(Bin), is_integer(Index) ->
     Size = erlang:byte_size(Bin),
     if
@@ -391,11 +390,11 @@ selector `asString`) whose message and `details` (`#{offset => N}`)
 carry the byte offset of the invalid sequence — the same `parse_error`
 kind the `fromBase64:`/`fromHex:` decoders use for malformed input.
 
-`String` overrides `asString` with `self`, so a tagged `String` never
-reaches here through dispatch; direct Erlang callers holding one
-already have their answer.
+`String` overrides `asString` with `self`; a tagged `String` still reaches
+here through `super asString` — its bytes are valid UTF-8 by construction,
+so it answers `ok` with itself.
 """.
--spec as_string(binary()) -> beamtalk_result:t().
+-spec as_string(binary() | beamtalk_string:t()) -> beamtalk_result:t().
 as_string(Bin) when is_binary(Bin) ->
     case check_utf8(Bin) of
         {ok, Valid} ->
@@ -405,8 +404,8 @@ as_string(Bin) when is_binary(Bin) ->
         {error, Offset} ->
             beamtalk_result:from_tagged_tuple({error, invalid_utf8_error(Offset)})
     end;
-as_string({beamtalk_string, _}) ->
-    raise_type_error(as_string, <<"Binary asString validates bytes; Strings answer self">>);
+as_string({beamtalk_string, _} = Str) ->
+    beamtalk_result:from_tagged_tuple({ok, Str});
 as_string(_) ->
     raise_type_error(as_string, <<"Receiver must be a Binary">>).
 
@@ -456,7 +455,7 @@ Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding
     raise_type_error('asHex:', <<"Receiver must be a Binary">>).
 
 -doc "Printable representation: hex for non-UTF-8, quoted for valid UTF-8.".
--spec print_string(binary()) -> beamtalk_string:t().
+-spec print_string(binary() | beamtalk_string:t()) -> beamtalk_string:t().
 print_string(Bin) when is_binary(Bin) ->
     beamtalk_primitive:string_from_binary(
         case check_utf8(Bin) of
@@ -472,10 +471,10 @@ print_string(Bin) when is_binary(Bin) ->
                 iolist_to_binary([<<"<<">>, bytes_to_hex(Bin), <<">>">>])
         end
     );
-print_string({beamtalk_string, _}) ->
-    raise_type_error(
-        print_string, <<"Binary printString renders bytes; Strings render via String printString">>
-    );
+print_string({beamtalk_string, Raw}) when is_binary(Raw) ->
+    %% BT-4173: a `String` self (e.g. via `super printString`) renders its
+    %% bytes — the Binary rendering the super-send asked for.
+    print_string(Raw);
 print_string(_) ->
     raise_type_error(print_string, <<"Receiver must be a Binary">>).
 
