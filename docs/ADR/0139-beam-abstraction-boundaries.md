@@ -1,0 +1,215 @@
+# ADR 0139: BEAM Abstraction Boundaries — What Leaks and What Doesn't
+
+## Status
+Accepted (2026-10-26)
+
+## Context
+
+Beamtalk runs on BEAM and embraces it (principles: BEAM-native, hot reload is
+core, actors map to natural BEAM concepts). But *which parts* of BEAM a
+Beamtalk developer sees was never decided — it accreted. The result is
+inconsistent leakage:
+
+- **Names leak.** `Undefined function: bt@catalina:'class_start:'/2`
+  (BT-4094), `bt@stdlib@stack_frame:module_info/1` in an eprof crash
+  (BT-4106), `{module}:{function}/{arity}` in FFI type errors
+  (`inference/send/ffi.rs`). There is no central MFA→display translator
+  (only `beamtalk_json_formatter`'s log-only `format_mfa`).
+- **Error rendering is half-built.** `#beamtalk_error{}` records +
+  `format/1`, the exception handler's wrap/reraise, ADR 0015 (REPL error
+  objects), ADR 0134 (crash semantics) exist — but there is no `error_info`
+  integration, no line-annotated codegen, no stacktrace translation. (The
+  repo's only "EEP" work is EEP-48 doc chunks — since removed by ADR 0033 —
+  and EEP-59 `-doc` attributes; no EEP-based error work exists.)
+- **Tuples leak.** `{#error, {#invalid_utf8, 0}}`, `{ok, nil}`, `unwrap` at
+  every FFI boundary, the `stopResult`-seam pattern (ADR 0101). ADR 0076
+  converts ok/error tuples at the boundary in one direction; handwritten
+  `.bt` still converts by hand.
+- **Bytes leak.** `byteAt:` vs `at:`, `byteSize` vs `size`,
+  `asStringUnchecked`, byte offsets in errors, `fromIolist:`. The default
+  path doesn't commit to graphemes.
+- **The FFI membrane is raw.** `(Erlang telemetry) execute: ...` with
+  arity-in-the-error, `Unknown Erlang module` warnings (BT-4022 fixed the
+  known-modules half), `native/*.erl` escape hatches, second-class
+  `declare native:` (BT-4144).
+- **Lifecycle is OTP transliterated.** Supervision, links, restarts,
+  `terminate:`, `handleInfo:`, `continueWith:` — faithful, but no on-ramp
+  and inconsistent naming (`stop:` vs `stopWithin:` vs `stopWith:timeout:`).
+
+### Constraints
+
+- BEAM-native is a core principle: the VM must stay reachable, not hidden
+  behind an opaque wall (operability, observer/recon/dbg, hot reload).
+- Lifecycle leakage is accepted policy: "you know you're on the BEAM" — but
+  with sensible out-of-box defaults so casual users don't pay the OTP
+  learning curve up front.
+- Interactive-first: whatever the policy, the REPL must demonstrate it.
+
+## Decision
+
+**Names hidden, lifecycle visible.** One line draws the boundary: *names are
+accidents of compilation; lifecycle is essence of the model.* Per-area
+verdicts:
+
+| Area | Verdict | Rule |
+|------|---------|------|
+| Display names | **HIDE** | Every user-facing surface (errors, stacktraces, `describe`, FFI diagnostics, test failures) renders `Class>>selector`, never `bt@package:'class_sel'/2`. Raw MFA available via `--verbose`/tooling flag only. One shared translator, no ad-hoc prefix stripping. |
+| Errors + stacktraces | **HIDE mechanics** | Frames render as `Class>>selector (file.bt:line)`; Erlang reasons translate to `#beamtalk_error{}` with Smalltalk-readable messages. Line-annotated codegen + `error_info`-style rendering. |
+| Tuples / Result | **CONVERT at boundary** | Codegen owns the conversion both directions; handwritten `.bt` never sees a 2-tuple. Extends ADR 0076's direction to a rule. |
+| Binaries | **GRAPHEMES by default** | The String API is total over graphemes; byte access (`byteAt:`, offsets) lives behind an explicit, well-named door for the FFI/binary-protocol minority. |
+| FFI membrane | **TYPED + Beamtalk-shaped** | FFI calls get typed specs; failures name the selector and expectation (`telemetry execute: expected 3 args`), never arities and module atoms. `native/` is a first-class package member, not a trapdoor. |
+| Process lifecycle | **KEEP, with OOB defaults** | Supervision, links, restarts, `terminate:` stay visible with Beamtalk spelling — plus one template supervised app and defaults (restart intensity, shutdown timeouts) so the common case needs no OTP knowledge. |
+| Distribution / releases / hot reload | **KEEP (OTP-native)** | Per ADR 0125/0126 direction; Beamtalk spelling where it exists, OTP concepts undisguised. |
+
+```beamtalk
+// Before:
+Catalina start: #{}                // when unreachable
+// => error: bt@catalina:'class_start:'/2 -> undef
+
+// After:
+Catalina start: #{}
+// => Error: Catalina>>start: failed: connection refused
+//    (raw MFA under --verbose)
+```
+
+REPL:
+
+```beamtalk
+> (Erlang gen_tcp) connect: "x" with: 1
+=> Error: gen_tcp connect: expected (host, port), got 2 args
+   "Beamtalk-shaped; no m:f/a"
+
+> #mt19937 seed: 42   "unknown module, typo'd"
+=> Unknown FFI module 'mt19937' — did you mean…?  "spans + suggestions, not atoms"
+```
+
+## Prior Art
+
+| Language | Posture | What we take |
+|----------|---------|--------------|
+| **Elixir** | Hides `Elixir.` prefix everywhere; `** (UndefinedFunctionError)` with `Foo.bar/1`; `error_info` pretty-printing | Closest reference: names hidden, VM reachable, errors structured. We adopt the shape. |
+| **Gleam** | Hides everything (`gleam/otp` wraps supervision, no raw processes) | The purity precedent — and the caution: Gleam chose it deliberately for its audience. Rejected here: it would hide the lifecycle this ADR keeps visible, and fight the BEAM-native principle. |
+| **Erlang** | Fully raw (`undef`, `badarg`, `{M,F,A}`) | The floor. Rejected as user-facing posture; kept as the `--verbose` substrate. |
+| **Pharo** | No VM concept at all (image model) | Proof that hiding works when the VM is truly an implementation detail — inapplicable while we embrace OTP interop. |
+
+## User Impact
+
+- **Newcomer**: errors speak their language from day one; lifecycle defaults mean the first actor program needs no OTP. Discovery: `--verbose` teaches the mapping on demand.
+- **Smalltalk developer**: message-passing stays pure at every surface they touch; supervision is the one new concept, and it arrives with a template, not a manual.
+- **Erlang/BEAM developer**: nothing is taken away — raw MFA, observer, recon all remain one flag away; typed FFI makes Beamtalk→Erlang calls safer than raw `apply`.
+- **Operator**: sensible OOB defaults (restart intensity, shutdowns) with full observability underneath; log output keeps machine-parseable MFA via the JSON formatter.
+- **Tooling developer**: one translator + one error taxonomy to consume instead of N ad-hoc formats; spans on every diagnostic.
+
+## Steelman Analysis
+
+### Rejected: thin membrane (errors only)
+
+- 🧑‍💻 **Newcomer**: "Fix my confusion with the smallest possible change."
+- 🎩 **Smalltalk purist**: "Minimal departure risk — don't touch what works."
+- ⚙️ **BEAM veteran**: "Errors are the only real pain; leave FFI and binaries alone."
+- 🏭 **Operator**: "Least migration risk of any option."
+- 🎨 **Language designer**: "Do one thing well; revisit the rest with data."
+
+Genuine — and it fails on coherence: fixing errors while leaving
+`(Erlang m) f:` raw and tuples manual preserves exactly the inconsistency
+this ADR exists to end. Half a membrane is no membrane.
+
+### Rejected: full Smalltalk purity (hide everything)
+
+- 🧑‍💻 **Newcomer**: "I never learn OTP at all."
+- 🎩 **Smalltalk purist**: "True Smalltalk — the VM disappears entirely."
+- ⚙️ **BEAM veteran**: *(cannot genuinely advocate hiding the substrate they
+  debug production with — telling in itself)*
+- 🏭 **Operator**: "Fewer concepts to learn to operate the system."
+- 🎨 **Language designer**: "Most elegant, most coherent — one model, no seams."
+
+Genuine for everyone except the cohort that operates the system — which is
+why it loses. It also contradicts the principles doc (actors map to natural
+BEAM concepts) and both distribution/releases ADRs.
+
+### Tension points
+
+- Newcomers split hide-more/hide-less; Smalltalkers prefer purity but accept
+  visible lifecycle with defaults.
+- BEAM veterans and operators firmly want lifecycle visible — debuggability
+  beats elegance in production.
+- The names/lifecycle line resolves the tension: accidents hidden, essence
+  visible.
+
+## Alternatives Considered
+
+### Thin membrane (errors only)
+MFA translation + stacktrace rendering, nothing else. Rejected: leaves the
+inconsistency in place; FFI/tuples/binaries stay raw.
+
+### Full Smalltalk purity
+Auto-supervision, no visible processes/monitors/links. Rejected: fights the
+BEAM-native principle, both OTP ADRs, and operability.
+
+### Do nothing
+Keep accreting per-issue fixes (BT-4094, BT-4106, BT-4022 each patched one
+leak). Rejected: nine issues of evidence show the whack-a-mole cost; without
+a policy every fix re-litigates hide-vs-keep.
+
+## Consequences
+
+### Positive
+
+- A durable rule for every future leak report: names hidden, lifecycle
+  visible — no re-litigation.
+- Day-one experience transforms (errors) while power users lose nothing
+  (`--verbose`, observer, recon intact).
+- FFI becomes approachable: typed specs + named errors instead of arities
+  and atoms.
+
+### Negative
+
+- Display changes break snapshot tests, log scrapers, and any docs showing
+  raw output — a migration sweep with each phase.
+- Line-annotated codegen + translator + typed FFI is real multi-epic work;
+  this ADR commits to it without funding it.
+- Two output modes (`--verbose`) to maintain forever.
+
+### Neutral
+
+- OTP lifecycle surface unchanged in shape, only in defaults and naming
+  consistency.
+- No runtime cost: translation happens at diagnostic-render time.
+
+## Implementation
+
+Phased, each phase its own epic (no code in this ADR):
+
+1. **Names + error rendering** (highest value): central MFA→display
+   translator; `Class>>selector (file.bt:line)` frames via line-annotated
+   codegen; Erlang-reason → `#beamtalk_error{}` translation;
+   `--verbose` raw mode. Consumes BT-4094/4106-class issues.
+2. **FFI membrane**: typed FFI specs with named errors; `native/` as
+   first-class package member; `declare native:` parity (BT-4144).
+3. **Tuples + binaries**: codegen-owned boundary conversion; grapheme-total
+   String API with explicit byte door.
+4. **Lifecycle defaults**: template supervised app; audited OOB defaults;
+   vocabulary pass (`stop:` family naming).
+
+Effort: L–XL total, sliced per phase. Each phase lands green independently.
+
+## Migration Path
+
+- Snapshot/golden tests asserting raw `bt@…` output get re-blessed to
+  display names per phase.
+- Log scrapers move to the JSON formatter (keeps machine MFA) or
+  `--verbose`.
+- Downstream packages: display-only changes; no API breaks intended. Any
+  phase that breaks an API states it in its own epic.
+
+## References
+
+- Related ADRs: ADR 0006 (dispatch), ADR 0015 (REPL errors), ADR 0016
+  (stdlib naming), ADR 0028 (interop strategy), ADR 0060 (Result hybrid),
+  ADR 0076 (tuple→Result), ADR 0094 (printString=Debug), ADR 0101 (native
+  objects), ADR 0119 (module registry), ADR 0121 (ok/error specs), ADR 0125
+  (releases), ADR 0126 (distribution), ADR 0134 (crash semantics)
+- Related issues: BT-4094 (naming), BT-4106 (stackframe), BT-4022 (FFI),
+  BT-4144 (native), BT-4052 (linked exits), BT-4046/47 (supervision)
+- Documentation: `docs/beamtalk-principles.md` (BEAM-native,
+  interactive-first)
