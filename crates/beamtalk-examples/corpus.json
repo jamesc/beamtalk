@@ -5,14 +5,18 @@
       "title": "String Types (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "append",
         "assign",
         "assignment",
         "beamtalk-language-features",
+        "concat",
+        "concatenate",
         "mutate",
         "mutation",
-        "set"
+        "set",
+        "string join"
       ],
-      "source": "// Double-quoted strings - UTF-8 binaries\nname := \"Alice\"\ngreeting := \"Hello, 世界! 🌍\"\n\n// String interpolation (ADR 0023)\nmessage := \"Welcome, {name}!\"\nemoji := \"Status: {status} ✓\"\n\n// Escape sequences inside strings:\n//   \"\"   doubled delimiter → literal double-quote character\n//   \\{   backslash preserved → literal \\{  (prevents interpolation)\n//   \\}   backslash preserved → literal \\}\nquote := \"\"\"\"                    // 1-char string containing \"\ndialog := \"She said \"\"hello\"\"\"  // → She said \"hello\"\n// Note: \\{ and \\} keep the backslash in the string value (current lexer behavior)\n\n// All strings are <<\"UTF-8 binary\">> in Erlang",
+      "source": "// Double-quoted strings - UTF-8 binaries\nname := \"Alice\"\ngreeting := \"Hello, 世界! 🌍\"\n\n// String interpolation (ADR 0023)\nmessage := \"Welcome, {name}!\"\nemoji := \"Status: {status} ✓\"\n\n// Escape sequences inside strings (ADR 0138):\n//   \\r   carriage return (U+000D)\n//   \\n   line feed (U+000A)\n//   \\t   horizontal tab (U+0009)\n//   \\\\   backslash\n//   \\\"   double quote (\"\" doubling still works too)\n//   \\0   NUL (U+0000) — exactly one char, no C-style octal continuation\n//   \"\"   doubled delimiter → literal double-quote character\n//   \\{   literal { — backslash consumed (prevents interpolation)\n//   \\}   literal } — backslash consumed\n// A backslash before anything else is a compile error pointing at the\n// backslash: \"\\q\" → unknown escape '\\q' … (use '\\\\' for a literal backslash).\n// Symbol literals (#'…') have no backslash handling: #'a\\nb' is backslash-n.\nquote := \"\"\"\"                    // 1-char string containing \"\ndialog := \"She said \"\"hello\"\"\"  // → She said \"hello\"\ncrlf := \"\\r\\n\"                   // 1 grapheme — byte-identical to (Character value: 13) asString ++ (Character value: 10) asString\n\n// All strings are <<\"UTF-8 binary\">> in Erlang",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
