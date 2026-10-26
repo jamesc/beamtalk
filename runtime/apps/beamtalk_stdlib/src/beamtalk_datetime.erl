@@ -51,7 +51,7 @@ adopted.
 -export(['parse:format:'/2]).
 
 %% Instance methods
--export([year/1, month/1, day/1, hour/1, minute/1, second/1, 'offsetMinutes'/1]).
+-export([year/1, month/1, day/1, weekday/1, hour/1, minute/1, second/1, 'offsetMinutes'/1]).
 -export(['asTimestamp'/1, 'asString'/1, 'printString'/1]).
 -export(['addSeconds:'/2, 'addDays:'/2, 'addDuration:'/2, 'diffSeconds:'/2]).
 -export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2, '-'/2, '<='/2, 'sameInstant'/2]).
@@ -240,6 +240,10 @@ month(#{month := V}) -> V.
 
 -spec day(t()) -> integer().
 day(#{day := V}) -> V.
+
+-doc "ISO day of the week of the wall-clock date: Monday=1 .. Sunday=7.".
+-spec weekday(t()) -> 1..7.
+weekday(#{year := Y, month := M, day := D}) -> calendar:day_of_the_week(Y, M, D).
 
 -spec hour(t()) -> integer().
 hour(#{hour := V}) -> V.

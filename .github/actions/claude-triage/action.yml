@@ -1,0 +1,98 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+name: Claude triage agent
+description: >-
+  Shared tail of the *-triage workflows (fuzz-triage.yml, ci-triage.yml): write the
+  Linear MCP config, run Claude with a fixed tool allowlist, delete the config, and
+  surface the agent's permission denials and execution output for debugging.
+
+inputs:
+  claude-oauth-token:
+    description: Claude subscription OAuth token
+    required: true
+  linear-api-key:
+    description: Linear API key, exposed only to the claude step as LINEAR_API_KEY
+    required: true
+  prompt:
+    description: The fully substituted triage prompt
+    required: true
+  allowed-tools:
+    description: Comma-separated --allowedTools list
+    required: true
+  disallowed-tools:
+    description: Comma-separated --disallowedTools list
+    required: false
+    default: "Read(//proc/**),Read(//home/runner/work/_temp/**)"
+  max-turns:
+    description: Turn limit for the agent
+    required: false
+    default: "60"
+  artifact-name:
+    description: Name of the uploaded execution-output artifact
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The key is referenced as ${LINEAR_API_KEY} (Claude Code expands env vars in
+    # MCP headers) and set only on the claude step, so it is not written to disk.
+    - name: Write Linear MCP config
+      shell: bash
+      run: |
+        cat > "${RUNNER_TEMP}/linear-mcp.json" <<'JSON'
+        {
+          "mcpServers": {
+            "linear": {
+              "type": "http",
+              "url": "https://mcp.linear.app/mcp",
+              "headers": { "Authorization": "Bearer ${LINEAR_API_KEY}" }
+            }
+          }
+        }
+        JSON
+
+    - name: Triage with Claude
+      uses: anthropics/claude-code-action@16f9f71ab9c490faf367f94dd294897edc25be33 # v1
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear-api-key }}
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-oauth-token }}
+        claude_args: >-
+          --max-turns ${{ inputs.max-turns }}
+          --mcp-config ${{ runner.temp }}/linear-mcp.json
+          --allowedTools "${{ inputs.allowed-tools }}"
+          --disallowedTools "${{ inputs.disallowed-tools }}"
+        prompt: ${{ inputs.prompt }}
+
+    - name: Remove Linear MCP config
+      if: always()
+      shell: bash
+      run: rm -f "${RUNNER_TEMP}/linear-mcp.json"
+
+    # Print the denied tool calls into the job log so they are readable without
+    # downloading the artifact below: tool name plus the first 400 characters of
+    # the input (a denied command or path). Best-effort; never fails the job.
+    - name: Show permission denials
+      if: always()
+      continue-on-error: true
+      shell: bash
+      run: |
+        f="${RUNNER_TEMP}/claude-execution-output.json"
+        if [ ! -f "$f" ]; then echo "no execution output at $f"; exit 0; fi
+        echo "== permission denials =="
+        jq -r '.. | objects | select(has("permission_denials")) | .permission_denials[]?
+               | "DENIED \(.tool_name): \(.tool_input | tostring | .[0:400])"' "$f" || true
+        echo "== end permission denials =="
+
+    # The action's step log omits the agent's tool calls and permission denials;
+    # they are only in this file. Upload it so a "green but did nothing" run can
+    # be diagnosed. Best-effort.
+    - name: Upload Claude execution output
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/claude-execution-output.json
+        if-no-files-found: warn
+        retention-days: 7
