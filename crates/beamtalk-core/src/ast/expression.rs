@@ -56,6 +56,10 @@ pub enum ExpectCategory {
     /// its home class's variables used where it runs outside an invocation of
     /// that class (ADR 0130 §5).
     ClassStateAbroad,
+    /// Suppress actor-state-abroad warnings — a block literal that touches
+    /// its actor's state used where it runs outside the actor's process
+    /// (ADR 0137).
+    ActorStateAbroad,
     /// Deprecated, parse-only (ADR 0130 §Migration Path): the stored-closure
     /// advisory it suppressed no longer exists, so nothing produces a matching
     /// diagnostic. The name is still accepted so existing
@@ -88,6 +92,7 @@ impl ExpectCategory {
             "inheritance" => Some(Self::Inheritance),
             "sendability" => Some(Self::Sendability),
             "class_state_abroad" => Some(Self::ClassStateAbroad),
+            "actor_state_abroad" => Some(Self::ActorStateAbroad),
             "stored_closure" => Some(Self::StoredClosure),
             "all" => Some(Self::All),
             _ => None,
@@ -114,6 +119,7 @@ impl ExpectCategory {
             Self::Inheritance => "inheritance",
             Self::Sendability => "sendability",
             Self::ClassStateAbroad => "class_state_abroad",
+            Self::ActorStateAbroad => "actor_state_abroad",
             Self::StoredClosure => "stored_closure",
             Self::All => "all",
         }
@@ -140,6 +146,7 @@ impl ExpectCategory {
             "inheritance",
             "sendability",
             "class_state_abroad",
+            "actor_state_abroad",
             "all",
         ]
     }

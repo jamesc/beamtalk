@@ -152,6 +152,7 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     ),
     ("unguarded-late-read", DiagnosticCategory::UnguardedLateRead),
     ("class-state-abroad", DiagnosticCategory::ClassStateAbroad),
+    ("actor-state-abroad", DiagnosticCategory::ActorStateAbroad),
     (
         "handleinfo-no-catch-all",
         DiagnosticCategory::HandleInfoNoCatchAll,
@@ -521,8 +522,16 @@ pub fn compute_diagnostics_with_known_vars(
 /// code after `^`, shadowed variables, unattached doc comments), so an
 /// `@expect lint` is left alone unconditionally by the excluding variant —
 /// `beamtalk lint` still validates it in full.
-const LINT_PASS_ONLY_CATEGORIES: &[DiagnosticCategory] =
-    &[DiagnosticCategory::DeadAssignment, DiagnosticCategory::Lint];
+///
+/// [`DiagnosticCategory::ActorStateAbroad`] is here for the same reason as
+/// `Lint`: only `beamtalk-lint`'s `ActorStateAbroadPass` produces it, and
+/// that pass runs nowhere else. Like `Lint` there is no cheap structural
+/// gate, so `@expect actor_state_abroad` is left alone unconditionally.
+const LINT_PASS_ONLY_CATEGORIES: &[DiagnosticCategory] = &[
+    DiagnosticCategory::DeadAssignment,
+    DiagnosticCategory::Lint,
+    DiagnosticCategory::ActorStateAbroad,
+];
 
 /// Returns `true` if this specific directive's staleness cannot be evaluated
 /// because the check that could confirm or refute it was never run in this
@@ -563,6 +572,9 @@ fn expect_category_unchecked(
         }
         // No structural gate — see `LINT_PASS_ONLY_CATEGORIES`'s doc.
         ExpectCategory::Lint => unchecked.contains(&DiagnosticCategory::Lint),
+        ExpectCategory::ActorStateAbroad => {
+            unchecked.contains(&DiagnosticCategory::ActorStateAbroad)
+        }
         // Every other category (including `all`, deliberately — see this
         // function's doc) is produced by `analyse_full`'s semantic analysis,
         // which every caller of this function always runs, so none of them
@@ -887,6 +899,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::ClassStateAbroad,
                     Some(DiagnosticCategory::ClassStateAbroad)
                 )
+                | (
+                    ExpectCategory::ActorStateAbroad,
+                    Some(DiagnosticCategory::ActorStateAbroad)
+                )
         )
 }
 
@@ -1073,6 +1089,7 @@ file-class-name-mismatch = "error"
 definite-assignment = "error"
 unguarded-late-read = "error"
 class-state-abroad = "off"
+actor-state-abroad = "off"
 handleinfo-no-catch-all = "error"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();

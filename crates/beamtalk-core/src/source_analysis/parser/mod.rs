@@ -660,6 +660,14 @@ pub enum DiagnosticCategory {
     /// carried into another class's class-side method raises
     /// `class_state_unreachable`. A lint, not a guarantee.
     ClassStateAbroad,
+    /// A block literal that reads or writes a `state:` field of its actor,
+    /// probes with `hasField:`, or makes a synchronous `self` send, and is
+    /// passed to `Timer`, to a send whose receiver is statically another
+    /// actor, or to a class-side method that is not direct-called (ADR 0137):
+    /// the write raises `actor_state_unreachable`, the read sees
+    /// creation-time values, and the send can deadlock. A lint, not a
+    /// guarantee.
+    ActorStateAbroad,
     /// ADR 0131 §6 (BT-3745): a Tier 2 block value — a block literal that
     /// writes an outer local, or a local bound to one — flows to a send that
     /// has no way to return the write (anything but a control-flow construct,

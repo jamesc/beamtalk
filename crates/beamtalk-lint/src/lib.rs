@@ -28,6 +28,7 @@
 //! Each branch touches only its own new file plus two sorted lines here —
 //! merge conflicts are minimal and trivially resolved.
 
+mod actor_state_abroad;
 mod cascade_candidate;
 mod dead_block_assignment;
 mod dead_returned_assignment;
@@ -74,6 +75,7 @@ pub(crate) fn hierarchy_for_lint(module: &Module) -> ClassHierarchy {
 /// alphabetical order. This is the only line that needs to change per lint.
 fn all_passes() -> Vec<Box<dyn LintPass>> {
     vec![
+        Box::new(actor_state_abroad::ActorStateAbroadPass),
         Box::new(cascade_candidate::CascadeCandidatePass),
         Box::new(dead_block_assignment::DeadBlockAssignmentPass),
         Box::new(dead_returned_assignment::DeadReturnedAssignmentPass),
