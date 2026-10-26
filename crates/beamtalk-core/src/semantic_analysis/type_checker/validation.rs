@@ -3313,8 +3313,11 @@ impl TypeChecker {
     /// chain includes Number.
     ///
     /// For union declared types (containing `|`), the value is assignable if it's
-    /// compatible with any member. For generic types (`Result(Integer, Error)`),
-    /// compares the base type name. Singleton (`#`) types require an exact match or `Symbol`.
+    /// compatible with any member. For union *value* types, every member must
+    /// be assignable (`A | B <: T` iff `A <: T` and `B <: T`) — the direction
+    /// the local-annotation narrowing check needs. For generic types
+    /// (`Result(Integer, Error)`), compares the base type name. Singleton
+    /// (`#`) types require an exact match or `Symbol`.
     pub(super) fn is_assignable_to(
         value_type: &EcoString,
         declared_type: &EcoString,
@@ -3322,6 +3325,24 @@ impl TypeChecker {
     ) -> bool {
         if value_type == declared_type {
             return true;
+        }
+        // Union value types (BT-4042): a union is assignable to the declared
+        // type iff *every* member is — the mirror of the union-declared arm
+        // below, and the same all-members rule `classify_union_members`
+        // applies to structured unions. Split at the top level only (shared
+        // `split_top_level` scanner) so a union nested in a generic member's
+        // type args (`Array(Integer | String) | Nil`) is not mistaken for a
+        // member separator; a single piece means no top-level `|` and falls
+        // through to the arms below. Each member is strictly shorter than the
+        // whole, so the recursion terminates.
+        if value_type.contains('|') {
+            let members = crate::semantic_analysis::string_utils::split_top_level(value_type, '|');
+            if members.len() > 1 {
+                return members.iter().all(|member| {
+                    let member_eco: EcoString = Self::resolve_type_keyword_static(member.trim());
+                    Self::is_assignable_to(&member_eco, declared_type, hierarchy)
+                });
+            }
         }
         // Singleton declared types: value must be the exact same singleton.
         // Symbol is NOT assignable to a singleton like #ok (wrong subtyping direction).
