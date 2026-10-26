@@ -229,6 +229,11 @@ struct BodyEffects {
     /// ADR 0137: the body holds a call bracketed with a `State` store/reload
     /// (actor instance method).
     body_has_synced_sends: bool,
+    /// BT-4121: the body or condition holds a guarded operator (read off
+    /// the same classifier the send emitter exempts). A hybrid loop cannot
+    /// bracket one's slow path — its parameters advance past the entry
+    /// `State` every iteration — so it falls back to `StateAcc`.
+    has_guarded_operator: bool,
     /// Body has a tier-2 value call assigned to a threaded local.
     has_tier2_threaded_assign: bool,
     /// Body has nested list ops incompatible with direct-params.
@@ -384,9 +389,13 @@ impl BodyEffects {
         let body_has_synced_sends = generator.synced_calls_active()
             && block_analysis::analyze_block(body).has_synced_user_code_sends();
 
+        let has_guarded_operator = generator.block_contains_guarded_operator(body)
+            || condition.is_some_and(|c| generator.expr_contains_guarded_operator(c));
+
         Self {
             cond_has_state_effects,
             body_has_synced_sends,
+            has_guarded_operator,
             has_tier2_threaded_assign,
             has_non_tuple_safe_list_op,
             has_nested_counted_loop_mutation,
@@ -943,6 +952,10 @@ impl ThreadingPlan {
             && !effects.has_cf_mutations
             && !effects.has_conditional_threaded_writes
             && !effects.has_non_tuple_safe_list_op
+            // BT-4121: a guarded operator's slow path can touch this actor's
+            // fields, which a hybrid loop holds in parameters that advance
+            // past the entry `State` — unbracketable, so thread instead.
+            && !effects.has_guarded_operator
     }
 
     /// Determine why `StateAcc` fallback was chosen (if no optimized mode was selected).
@@ -996,6 +1009,10 @@ impl ThreadingPlan {
             StateAccFallbackReason::ControlFlowMutations
         } else if effects.has_conditional_threaded_writes {
             StateAccFallbackReason::InlineConditionalThreadedWrite
+        } else if effects.has_guarded_operator {
+            // BT-4121: a hybrid body with a guarded operator falls back to
+            // `StateAcc` (a hybrid loop cannot bracket its slow path).
+            StateAccFallbackReason::GuardedOperator
         } else if effects.last_is_destructure {
             StateAccFallbackReason::DestructureAsLastExpr
         } else if body_analysis.has_self_sends {
@@ -1230,19 +1247,46 @@ impl ThreadingPlan {
     /// Reads [`Self::packs_from_fresh_map`] — this is the direct-params fast
     /// path's own `StateAcc` rebuild, and class methods have no `State` to
     /// rebuild from here either.
+    ///
+    /// BT-4121: `seed_from_cell` (a flagged stateless loop's checkout) seeds
+    /// from the cell instead of the entry `State`: the loop stored its entry
+    /// `State` before running and its slow paths wrote the cell, so the cell
+    /// is the loop's exit state. Without the flag the seed is the entry
+    /// `State` exactly as before. Never seeds from the cell in a fresh-map
+    /// frame (no callback installed one there).
     pub fn generate_exit_stateacc(
         &self,
         param_names: &[String],
         generator: &mut CoreErlangGenerator,
+        seed_from_cell: bool,
     ) -> Document<'static> {
         let starts_from_fresh_map = self.packs_from_fresh_map(generator);
+        let seed_from_cell = seed_from_cell && !starts_from_fresh_map;
         if self.threaded_locals.is_empty() && !starts_from_fresh_map {
+            if seed_from_cell {
+                return docvec!["{'nil', ", super::super::threaded_ir::cell_take_call(), "}",];
+            }
             return docvec!["{'nil', ", leaf::var(self.initial_state_var.clone()), "}",];
         }
         let mut docs: Vec<Document<'static>> = Vec::new();
+        let take_var = if seed_from_cell {
+            let take_var = generator.fresh_temp_var("TakeSt");
+            docs.push(docvec![
+                "let ",
+                leaf::var(take_var.clone()),
+                " = ",
+                super::super::threaded_ir::cell_take_call(),
+                " in ",
+            ]);
+            Some(take_var)
+        } else {
+            None
+        };
         // Value-type methods and class methods have no actor State
         // to rebuild from — start from a fresh empty map instead.
-        let mut current = if starts_from_fresh_map {
+        let mut current = if let Some(take_var) = take_var {
+            take_var
+        } else if starts_from_fresh_map {
             let exit_var = generator.fresh_temp_var("ExitSA");
             docs.push(docvec![
                 "let ",
@@ -1446,9 +1490,17 @@ impl ThreadingPlan {
     /// [`Self::initial_state_var`] unconditionally, which is the ambient actor
     /// `State`, unbound in an actor class method (`erlc` rejects the module
     /// with `unbound variable 'State'`).
+    ///
+    /// BT-4121: `seed_from_cell` (a flagged stateless loop's checkout) seeds
+    /// from the cell instead of the ambient `State`: the loop stored its
+    /// entry `State` before running and its slow paths wrote the cell, so
+    /// the cell is the loop's exit state. Without the flag the seed is the
+    /// ambient `State` exactly as before. Never seeds from the cell in a
+    /// fresh-map frame (no callback installed one there).
     pub fn append_repack_stateacc_doc(
         &self,
         generator: &mut CoreErlangGenerator,
+        seed_from_cell: bool,
     ) -> (Document<'static>, String) {
         // Test-only fault injection (BT-4089): the pre-fix repack, seeding
         // from the ambient actor `State` whatever the scope, so the pin below
@@ -1462,7 +1514,23 @@ impl ThreadingPlan {
         #[cfg(not(test))]
         let force_ambient = false;
         let mut docs: Vec<Document<'static>> = Vec::new();
-        let mut current = if !force_ambient && self.packs_from_fresh_map(generator) {
+        let take_var = if seed_from_cell && !force_ambient && !self.packs_from_fresh_map(generator)
+        {
+            let take_var = generator.fresh_temp_var("TakeSt");
+            docs.push(docvec![
+                "let ",
+                leaf::var(take_var.clone()),
+                " = ",
+                super::super::threaded_ir::cell_take_call(),
+                " in ",
+            ]);
+            Some(take_var)
+        } else {
+            None
+        };
+        let mut current = if let Some(take_var) = take_var {
+            take_var
+        } else if !force_ambient && self.packs_from_fresh_map(generator) {
             let fresh_map_var = generator.fresh_temp_var("InitMap");
             docs.push(docvec![
                 "let ",

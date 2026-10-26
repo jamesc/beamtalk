@@ -436,6 +436,24 @@ pub(in crate::core_erlang) enum VerifyError {
         region: UserCodeRegion,
         at: Span,
     },
+
+    /// BT-4121 (ADR 0137): the dispatching branch of a guarded operator
+    /// (`selector`, e.g. `+`) in an actor instance method compiled in a loop
+    /// that holds no whole `State` (direct-params, hybrid or tuple-accumulator
+    /// parameters) with no loop-level bracket around it, so a user-defined
+    /// operator that touches this actor's fields would run against a stale
+    /// cell and its writes would never load back. The loop that owns the
+    /// region brackets the slow path (a store before the loop, a reload
+    /// woven into its exit); this fires only when no enclosing loop did (a
+    /// loop lowering that never pushed a guarded-operator marker, or a
+    /// hybrid loop whose operator the mode selection missed). Detected at
+    /// the send emitter and reported there or at the loop checkout, like
+    /// [`Self::UnbracketedUserCodeSend`].
+    UnbracketedGuardedOperator {
+        selector: String,
+        region: UserCodeRegion,
+        at: Span,
+    },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the

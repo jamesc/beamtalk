@@ -220,6 +220,7 @@ mod expressions;
 mod field_assignment_value_position;
 mod fold_locals_carried_corpus;
 mod gen_server;
+mod guarded_op_loops;
 mod hybrid_field_rebind_corpus;
 mod late_reconcile_conformance;
 mod local_assignment_producer;

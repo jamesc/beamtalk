@@ -347,6 +347,14 @@ pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Documen
     actor_state_call(actor_state_helper::STORE, vec![state])
 }
 
+/// `call 'beamtalk_actor_state':'take'()`: the one emitter of every cell
+/// reload: the [`ThreadedStmt::SyncedCall`] bracket and the loop-exit packs
+/// BT-4121 weaves it into (a flagged stateless loop seeds its exit pack from
+/// the cell, which holds the loop's slow-path writes).
+pub(in crate::core_erlang) fn cell_take_call() -> Document<'static> {
+    actor_state_call(actor_state_helper::TAKE, vec![])
+}
+
 /// Renders one [`ThreadedStmt::SyncedCall`] (ADR 0137 §1): the store of
 /// `store` to the cell, the call, and (unless the call is store-only) the
 /// reload of the cell as `load`.
@@ -378,7 +386,7 @@ fn render_synced_call(
             "let ",
             leaf::var(ctx.resolve_prefix(load)),
             " = ",
-            actor_state_call(actor_state_helper::TAKE, vec![]),
+            cell_take_call(),
             " in "
         ]);
     }

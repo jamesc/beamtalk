@@ -284,6 +284,44 @@ source of truth across them. Every crossing is either a `SyncedCall` or a
 threaded self-send that passes `State` as an argument, and the verifier
 checks both.
 
+### 4b. Stateless loops bracket the guarded-operator slow path
+
+A loop that keeps its variables in parameters (tuple-accumulator folds,
+direct-params counted and `while` loops, the dict and list lowerings) holds
+no whole `State`, so the slow path of a guarded operator in its body or
+condition (`acc + m`, where `m` is a user object with its own `+`) would run
+user code against whatever the cell held at method entry — a stale cell
+(BT-4121). Threading `State` through every such loop would close it at the
+cost of gate 3. The bracket closes it without threading (BT-4121):
+
+- Before the body and condition lower, the loop pushes a marker
+  (`push_guarded_op_loop`, `synced_call.rs`). A walk over the same
+  `classify_binary` the send emitter uses decides `will_bracket`, so the two
+  cannot disagree; loops whose operators are all statically numeric emit no
+  guard, push a no-op marker, and compile byte-identical code to before.
+- When the marker brackets, the loop-entry `State` is stored before the loop,
+  every field read inside the loop body and condition reads through the cell
+  (`take()`), and the loop's exit packs and loads seed from the cell too.
+  The fast path is untouched; the slow path runs against a current cell and
+  the exit pack loads its writes back.
+- A loop nested in another stateless loop's `fun` has no `State` in scope to
+  store, so it hands its need to the enclosing marker, whose own walk saw
+  the same operators and whose bracket keeps the cell current for both. Its
+  exit packs still seed from the cell.
+- A hybrid loop cannot bracket: its pre-extracted field parameters advance
+  past the entry `State` every iteration, so a store of the entry would be
+  stale at once. Mode selection routes a hybrid body carrying a guarded
+  operator to the `StateAcc` fallback instead, and a hybrid checkout that
+  still reaches the bracket reports loud (below).
+
+A new `VerifyError`, `UnbracketedGuardedOperator` (`verify.rs`, kept as a
+separate variant for BT-4122), fails the build when a guarded operator
+escapes the bracket: a hybrid checkout, an operator the push-time walk
+missed (the walk/emitter drift alarm — field reads already lowered against
+the entry `State` cannot be covered after the fact), or a nested need with
+no enclosing marker. A missed sync point stays a build failure, never a
+stale read.
+
 ### 5. Rollback and `ensure:`
 
 The rule is ADR 0130 §4's. An error that escapes a callback discards its

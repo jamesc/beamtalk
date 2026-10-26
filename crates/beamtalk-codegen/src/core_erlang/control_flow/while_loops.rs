@@ -264,7 +264,19 @@ impl CoreErlangGenerator {
         // effects (a self-send, or an `and:`/`or:`/`ifTrue:ifFalse:` that
         // carries one) — decides whether `CondFun` must return a
         // `{Bool, FinalStateAcc}` pair instead of a bare boolean, below.
-        let cond_effects = super::condition_has_state_effects(self, condition, Some(body));
+        // BT-4121: a condition holding a guarded operator threads the state
+        // too. Lowered in a `DirectParams` closure frame, its slow path
+        // would run against a stale cell with nowhere to load back (this
+        // loop threads `StateAcc` past it); the stateful condition joins
+        // the `StateAcc` threading, so its operators bracket normally.
+        // (Direct loops cover their conditions through the loop-level
+        // bracket instead, and hybrid loops with one route here.)
+        // Actor methods only: where the cell protocol is off (REPL, class
+        // and value-type methods) no bracket applies, so the condition
+        // keeps the pre-BT-4121 answer — in particular the BT-4015
+        // `ConditionWritesNotCarried` fault keeps defeating it.
+        let cond_effects = super::condition_has_state_effects(self, condition, Some(body))
+            || (self.synced_calls_active() && self.expr_contains_guarded_operator(condition));
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
@@ -917,6 +929,11 @@ impl CoreErlangGenerator {
 
         let cond_var = self.fresh_temp_var("CondFun");
 
+        // BT-4121: the guarded-operator marker spans the condition and body
+        // lowering. `prestore_state` is the loop-entry `State` the
+        // pre-store captures when the marker asks for the bracket.
+        let prestore_state = self.current_field_read_state_var();
+        self.push_guarded_op_loop(body, Some(condition));
         self.push_scope();
         // Register var bindings — no unpack docs in direct-params mode
         // (structurally guaranteed by `generate_unpack_at_iteration_start`'s
@@ -959,8 +976,17 @@ impl CoreErlangGenerator {
         let (body_stmts, frame) = self.generate_letrec_body_ir(body, plan)?;
         self.loop_mode.direct_params_outer_state_var = prev_direct_params_outer_state_var;
 
+        // BT-4121: check out the marker (nil pre-store unless the loop
+        // brackets with a `State` in scope).
+        let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
+            self.pop_guarded_op_loop(),
+            false,
+            body.span,
+            &prestore_state,
+        );
+
         // Build exit StateAcc using the CURRENT iteration's param names.
-        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
+        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self, guarded_op_bracket);
 
         self.pop_scope();
 
@@ -1000,7 +1026,7 @@ impl CoreErlangGenerator {
             body.span,
         );
         let mut ctx = threaded_ir::RenderCtx::new(self);
-        Ok(threaded_ir::render(&ir, &mut ctx))
+        Ok(docvec![prestore, threaded_ir::render(&ir, &mut ctx)])
     }
 
     /// Full-extract variant of `generate_while_loop_with_mutations`.
@@ -1063,6 +1089,12 @@ impl CoreErlangGenerator {
         // inside the loop and at the outer call site.
         let initial_local_args = plan.initial_direct_args(self);
 
+        // BT-4121: the guarded-operator marker spans the condition and body
+        // lowering. A hybrid loop cannot bracket (its parameters advance
+        // past the entry `State`), so the checkout below only reports loud
+        // when the mode selection missed an operator (it routes hybrid
+        // bodies with one to `StateAcc`, so this never fires).
+        self.push_guarded_op_loop(body, Some(condition));
         self.push_scope();
         // Register var bindings — no unpack docs in hybrid mode (structurally
         // guaranteed by `generate_unpack_at_iteration_start`'s own
@@ -1103,6 +1135,10 @@ impl CoreErlangGenerator {
 
         let (body_stmts, frame) =
             self.generate_letrec_hybrid_body_ir(body, plan, &all_field_params)?;
+
+        // BT-4121: check out the marker (loud when the mode selection
+        // missed a guarded operator; a hybrid loop never brackets).
+        self.checkout_guarded_op_loop(self.pop_guarded_op_loop(), true, body.span);
 
         let exit_stateacc = plan.generate_exit_stateacc_full_extract(
             &local_param_names,
@@ -1607,7 +1643,10 @@ mod tests {
     fn test_while_true_field_plus_local_mutation_uses_full_extract() {
         // whileTrue: with BOTH local var mutation AND field mutation uses
         // full-extract mode — mutated field 'n' is a direct param, no State param.
-        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + 1. self.n := self.n + 1]\n    sum\n";
+        // BT-4121: neither the condition nor the body holds a guarded
+        // operator; one would route the loop to `StateAcc` (a hybrid loop
+        // cannot bracket its slow path).
+        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: go = true\n\n  run =>\n    sum := 0\n    [self.go] whileTrue: [sum := 1. self.n := sum]\n    sum\n";
         let code = codegen(src);
         assert!(
             code.contains("letrec"),
@@ -1647,7 +1686,10 @@ mod tests {
     fn test_while_true_readonly_field_pre_extracted_as_direct_param() {
         // whileTrue: body reads self.step (never written) and writes self.n:
         // self.step is pre-extracted as read-only param, self.n is pre-extracted as mutated param.
-        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
+        // BT-4121: neither the condition nor the body holds a guarded
+        // operator; one would route the loop to `StateAcc` (a hybrid loop
+        // cannot bracket its slow path).
+        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n  state: go = true\n\n  run =>\n    sum := 0\n    [self.go] whileTrue: [sum := self.step. self.n := sum]\n    sum\n";
         let code = codegen(src);
         assert!(
             !code.contains("fun (StateAcc)"),

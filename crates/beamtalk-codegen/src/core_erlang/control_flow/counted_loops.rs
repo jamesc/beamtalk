@@ -441,6 +441,11 @@ impl CoreErlangGenerator {
         // a method parameter's own gensym'd `Args`-pattern binding).
         let initial_direct_args = plan.initial_direct_args(self);
 
+        // BT-4121: the guarded-operator marker spans the body lowering.
+        // `prestore_state` is the loop-entry `State` the pre-store captures
+        // when the marker asks for the bracket.
+        let prestore_state = self.current_field_read_state_var();
+        self.push_guarded_op_loop(body, None);
         self.push_scope();
 
         // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
@@ -489,8 +494,17 @@ impl CoreErlangGenerator {
         self.loop_mode.direct_params_outer_state_var = prev_direct_params_outer_state_var;
         self.loop_mode.in_direct_params_loop = prev_direct_params_loop;
 
+        // BT-4121: check out the marker (nil pre-store unless the loop
+        // brackets with a `State` in scope).
+        let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
+            self.pop_guarded_op_loop(),
+            false,
+            body.span,
+            &prestore_state,
+        );
+
         // Build exit StateAcc using the INITIAL param names (current iteration values).
-        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
+        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self, guarded_op_bracket);
 
         self.pop_scope();
 
@@ -529,7 +543,7 @@ impl CoreErlangGenerator {
             threaded_ir::render(&ir, &mut ctx)
         };
 
-        Ok(docvec![frame.preamble.clone(), " ", rendered])
+        Ok(docvec![frame.preamble.clone(), " ", prestore, rendered])
     }
 
     /// Full-extract variant of `generate_counted_stateful_loop`.
@@ -584,6 +598,12 @@ impl CoreErlangGenerator {
         // inside the loop and at the outer call site.
         let initial_local_args = plan.initial_direct_args(self);
 
+        // BT-4121: the guarded-operator marker spans the body lowering. A
+        // hybrid loop cannot bracket (its parameters advance past the entry
+        // `State`), so the checkout below only reports loud when the mode
+        // selection missed an operator (it routes hybrid bodies with one to
+        // `StateAcc`, so this never fires).
+        self.push_guarded_op_loop(body, None);
         self.push_scope();
 
         // Bind block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
@@ -602,6 +622,10 @@ impl CoreErlangGenerator {
         // Run body with hybrid field params active.
         let (body_stmts, ir_frame) =
             self.generate_letrec_hybrid_body_ir(body, plan, &all_field_params)?;
+
+        // BT-4121: check out the marker (loud when the mode selection
+        // missed a guarded operator; a hybrid loop never brackets).
+        self.checkout_guarded_op_loop(self.pop_guarded_op_loop(), true, body.span);
 
         // Exit StateAcc: uses initial param names (current iteration's starting values).
         // In the exit arm (false branch), the body hasn't executed, so params are unchanged.
@@ -804,7 +828,9 @@ mod tests {
     fn test_to_do_field_plus_local_mutation_uses_full_extract() {
         // When both field AND local vars are mutated, full-extract mode
         // extracts mutated fields to direct params (no State param in loop).
-        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
+        // BT-4121: the body holds no guarded operator; one would route the
+        // loop to `StateAcc` (a hybrid loop cannot bracket its slow path).
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := i. self.n := sum]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
             code.contains("letrec"),
@@ -844,8 +870,9 @@ mod tests {
 
     #[test]
     fn test_times_repeat_field_plus_local_mutation_uses_full_extract() {
+        // BT-4121: see `test_to_do_field_plus_local_mutation_uses_full_extract`.
         // timesRepeat: with both field + local mutations uses full-extract mode.
-        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    3 timesRepeat: [sum := sum + 1. self.n := self.n + 1]\n    self.n := sum\n";
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    3 timesRepeat: [sum := 1. self.n := sum]\n    self.n := sum\n";
         let code = codegen(src);
         // No State in fun signature.
         assert!(
@@ -876,7 +903,8 @@ mod tests {
     #[test]
     fn test_to_by_do_field_plus_local_mutation_uses_full_extract() {
         // to:by:do: with both field + local mutations uses full-extract mode.
-        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
+        // BT-4121: see `test_to_do_field_plus_local_mutation_uses_full_extract`.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := i. self.n := sum]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
             !code.contains(", Sum, State) ->"),
@@ -974,7 +1002,9 @@ mod tests {
         // When the loop body reads a field that it never writes, that field is
         // pre-extracted before the letrec and passed as a direct fun parameter.
         // Body reads self.step (readonly) and writes self.n + local sum (hybrid mode).
-        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
+        // BT-4121: the body holds no guarded operator; one would route the
+        // loop to `StateAcc` (a hybrid loop cannot bracket its slow path).
+        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := self.step. self.n := i]\n    sum\n";
         let code = codegen(src);
         // Hybrid mode triggered (field write for n, local sum).
         assert!(
