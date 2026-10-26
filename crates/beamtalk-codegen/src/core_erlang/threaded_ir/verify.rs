@@ -454,6 +454,20 @@ pub(in crate::core_erlang) enum VerifyError {
         region: UserCodeRegion,
         at: Span,
     },
+
+    /// BT-4122 (ADR 0137 Tier 2 merge): a field read from a Tier 2 block's
+    /// `StateAcc`. After the merge a Tier 2 `StateAcc` carries only locals —
+    /// fields go through the cell — so a lowering that threads fields
+    /// through it is reported here: a Tier 2 fun body accessing fields via
+    /// `StateAcc`, a caller rebinding `State` from its return, or a Tier 2
+    /// call nested where its locals cannot merge. `selector` names the send
+    /// or access, suffixed with which arm fired. Own shaping, own gaps
+    /// list, same separability pattern as `UnbracketedGuardedOperator`.
+    FieldReadFromStateAcc {
+        selector: String,
+        region: UserCodeRegion,
+        at: Span,
+    },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the

@@ -340,6 +340,24 @@ pub struct CoreErlangGenerator {
     /// block literal receiver.
     pub(in crate::core_erlang) tier2_local_var_captured_mutations:
         std::collections::HashMap<String, Vec<String>>,
+    /// The names in `tier2_local_vars` whose assigned block may write the
+    /// actor's fields when run (`may_write_actor_state` on the block's
+    /// mutation analysis).
+    /// A later `value(:...)` call site only has the identifier, so the Tier 2
+    /// merge (BT-4122) reads this to decide whether the call brackets and
+    /// merges (fields from the cell load, locals from the `StateAcc`
+    /// return) or keeps the legacy `State`-from-`StateAcc` unpacking.
+    /// Populated alongside `tier2_local_vars` in `prescan_tier2_local_vars`.
+    pub(in crate::core_erlang) tier2_local_var_may_write_state: std::collections::HashSet<String>,
+    /// Whether the body being compiled is a Tier 2 stateful `fun` (BT-4122):
+    /// set while `generate_block_stateful_fun` lowers its body (legacy or
+    /// merged). Field access lowerings read it for the `FieldReadFromStateAcc`
+    /// rule's fun-body arm.
+    pub(in crate::core_erlang) in_tier2_stateful_body: bool,
+    /// The merged Tier 2 `fun` being lowered, if any (BT-4122): a Tier 2
+    /// call inside it merges its locals into the fun's own `StateAcc`
+    /// (opaque puts, no versions, no cell) instead of bracketing.
+    pub(in crate::core_erlang) tier2_merged_fun: Option<super::blocks::Tier2MergedFun>,
     /// Diagnostic warnings emitted during code generation.
     ///
     /// Collected during generation and returned to callers via
@@ -506,6 +524,9 @@ impl CoreErlangGenerator {
             source_path: None,
             tier2_local_vars: std::collections::HashSet::new(),
             tier2_local_var_captured_mutations: std::collections::HashMap::new(),
+            tier2_local_var_may_write_state: std::collections::HashSet::new(),
+            in_tier2_stateful_body: false,
+            tier2_merged_fun: None,
             codegen_warnings: Vec::new(),
             semantic_facts: beamtalk_core::semantic_analysis::SemanticFacts::default(),
             codegen_diagnostics_enabled: std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS")

@@ -87,6 +87,11 @@ thread_local! {
     /// the invariant probe can be shown to see a missing bracket.
     pub(in crate::core_erlang) static FAULT_NO_BRACKETS: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    /// Test-only fault (BT-4122): Tier 2 threads the legacy way (fields
+    /// through `StateAcc`, callers rebinding `State` from its return), so
+    /// the `FieldReadFromStateAcc` rule can be shown to fire on it.
+    pub(in crate::core_erlang) static FAULT_LEGACY_TIER2: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -203,6 +208,10 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// [`VerifyError::UnbracketedGuardedOperator`], separately from
     /// [`Self::gaps`] so the two rules stay cleanly separable.
     pub(in crate::core_erlang) guarded_op_gaps: Vec<UnbracketedSend>,
+    /// Tier 2 `StateAcc` field reads (BT-4122): reported as
+    /// [`VerifyError::FieldReadFromStateAcc`], separately from both lists
+    /// above so the three rules stay cleanly separable.
+    pub(in crate::core_erlang) tier2_stateacc_gaps: Vec<UnbracketedSend>,
     /// One marker per loop lowering in progress (BT-4121), innermost last.
     /// A guarded operator compiled in a stateless loop body flags the
     /// innermost marker instead of bracketing (there is no `State` in scope
@@ -223,6 +232,7 @@ impl SyncedCallState {
             window_depth: 0,
             gaps: Vec::new(),
             guarded_op_gaps: Vec::new(),
+            tier2_stateacc_gaps: Vec::new(),
             guarded_op_loops: std::cell::RefCell::default(),
             inlined_classes: std::cell::RefCell::default(),
         }
@@ -692,6 +702,7 @@ impl CoreErlangGenerator {
             result: None,
             load: None,
             span,
+            tier2_local_rebinds: Vec::new(),
         }
     }
 
@@ -748,6 +759,7 @@ impl CoreErlangGenerator {
             result: None,
             load: None,
             span,
+            tier2_local_rebinds: Vec::new(),
         };
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
         super::threaded_ir::render(&[node], &mut ctx)
@@ -767,8 +779,17 @@ impl CoreErlangGenerator {
         self.synced.guarded_op_gaps.push(gap);
     }
 
-    /// One gap record for `selector` at `at`, shared by [`Self::record_gap`]
-    /// and [`Self::record_guarded_op_gap`].
+    /// BT-4122: records one Tier 2 `StateAcc` field read, reported as
+    /// [`VerifyError::FieldReadFromStateAcc`] separately from both lists
+    /// above. `selector` names the send or access, suffixed by the caller
+    /// with which arm fired (fun body, caller unpack, nested call).
+    pub(in crate::core_erlang) fn record_tier2_stateacc_gap(&mut self, selector: String, at: Span) {
+        let gap = self.make_unbracketed_send(selector, at);
+        self.synced.tier2_stateacc_gaps.push(gap);
+    }
+
+    /// One gap record for `selector` at `at`, shared by [`Self::record_gap`],
+    /// [`Self::record_guarded_op_gap`] and [`Self::record_tier2_stateacc_gap`].
     fn make_unbracketed_send(&self, selector: String, at: Span) -> UnbracketedSend {
         let region = self.user_code_region();
         #[cfg(test)]
@@ -795,6 +816,7 @@ impl CoreErlangGenerator {
         // `VerifyError` variant (own arms, no shared shaping with the gaps
         // above).
         let guarded_op_gaps = std::mem::take(&mut self.synced.guarded_op_gaps);
+        let tier2_stateacc_gaps = std::mem::take(&mut self.synced.tier2_stateacc_gaps);
         #[cfg(test)]
         if COUNT_ONLY.with(std::cell::Cell::get) {
             SITE_LOG.with(|log| {
@@ -809,6 +831,13 @@ impl CoreErlangGenerator {
                         site: g.site.site.clone(),
                         chain: g.site.chain.clone(),
                         selector: format!("guarded-op {}", g.selector),
+                        region: g.region,
+                    }));
+                log.borrow_mut()
+                    .extend(tier2_stateacc_gaps.iter().map(|g| SiteRecord {
+                        site: g.site.site.clone(),
+                        chain: g.site.chain.clone(),
+                        selector: format!("tier2 {}", g.selector),
                         region: g.region,
                     }));
             });
@@ -838,6 +867,19 @@ impl CoreErlangGenerator {
         self.report_threaded_ir_verify_errors(
             &guarded_op_errors,
             "guarded operator in a stateless loop outside a loop-level bracket",
+            module_span,
+        );
+        let tier2_errors: Vec<VerifyError> = tier2_stateacc_gaps
+            .iter()
+            .map(|g| VerifyError::FieldReadFromStateAcc {
+                selector: g.selector.clone(),
+                region: g.region,
+                at: g.at,
+            })
+            .collect();
+        self.report_threaded_ir_verify_errors(
+            &tier2_errors,
+            "field read from a Tier 2 block's StateAcc",
             module_span,
         );
     }
@@ -965,6 +1007,34 @@ impl CoreErlangGenerator {
         self.synced.window_depth -= 1;
     }
 
+    /// Core-var rebinds for a merged Tier 2 call's captured locals
+    /// (BT-4122): `(core var, state key)` pairs, resolved against the
+    /// current bindings like the statement unpacker's rebinds (a shadowed
+    /// local rebinds its live Core name, not the deterministic one). The
+    /// bracket renders them after its reload, reading each fresh value
+    /// out of the reloaded state. Empty when the prescan recorded no
+    /// mutations (defensive: the hand-off already proved this is a
+    /// may-write Tier 2 call, so the merge still threads its state).
+    pub(in crate::core_erlang) fn tier2_merge_rebinds(
+        &mut self,
+        expr: &Expression,
+    ) -> Vec<(String, String)> {
+        // Unwrap: the operand may be paren-wrapped (`(b value) + ...`),
+        // and the prescan lookup matches sends, not parens.
+        let Some(mutations) = self.get_inline_block_captured_mutations(expr.unwrap_parens()) else {
+            return Vec::new();
+        };
+        mutations
+            .iter()
+            .map(|var| {
+                let core_var = self
+                    .lookup_var(var)
+                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                (core_var, Self::local_state_key(var))
+            })
+            .collect()
+    }
+
     /// Builds the [`ThreadedStmt::SyncedCall`] around the call `tv` ends in
     /// (`expr` compiled in a window): store the current `State`, make the
     /// call, reload the next version. A value that is not a call document
@@ -1001,6 +1071,30 @@ impl CoreErlangGenerator {
                 value: ValueRef::Doc(call),
             };
         }
+        // BT-4122: a may-write Tier 2 call merges here — the same
+        // predicate its `close_tier2_value_subexpr_doc` read, so the wrap
+        // unpacks exactly the calls the close handed a raw tuple.
+        let tier2_merged =
+            Self::tier2_merge_call_name(expr).is_some_and(|name| self.tier2_operand_merges(name));
+        let mut call = call;
+        let tier2_local_rebinds = if tier2_merged {
+            // The apply answered `{Result, NewState}`: the bracket's value
+            // is element 1 (element 2 went to the cell at the fun's exit,
+            // and the reload below reads it back).
+            let tuple_var = self.fresh_temp_var("T2Merge");
+            call = docvec![
+                "let ",
+                leaf::var(tuple_var.clone()),
+                " = ",
+                call,
+                " in call 'erlang':'element'(1, ",
+                leaf::var(tuple_var),
+                ")",
+            ];
+            self.tier2_merge_rebinds(expr)
+        } else {
+            Vec::new()
+        };
         let mut prelude = tv.prelude;
         // The `State` the call runs against is the one the prelude left, not the
         // counter: the call's own operands may have minted versions inside a
@@ -1033,6 +1127,7 @@ impl CoreErlangGenerator {
             result: Some(result.clone()),
             load: Some(load),
             span,
+            tier2_local_rebinds,
         });
         ThreadedValue {
             prelude,
