@@ -39,6 +39,7 @@ mod bt4039_alias_union_field_default;
 mod bt4040_interval_element_type;
 mod bt4043_metaclass_slot_assignment;
 mod bt4044_perform_explicit_dynamic;
+mod bt4102_block_param_annotations;
 mod bt4107_compound_nil_guard_narrowing;
 mod bt4199_false_positives;
 mod cast_and_sync_send;

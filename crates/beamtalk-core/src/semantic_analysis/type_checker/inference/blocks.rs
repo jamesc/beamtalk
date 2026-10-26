@@ -20,6 +20,7 @@ use crate::semantic_analysis::type_checker::narrowing::refinement::RefinementLay
 use crate::semantic_analysis::type_checker::narrowing::visitors::{
     block_has_any_return, block_has_return,
 };
+use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv,
@@ -631,7 +632,22 @@ impl TypeChecker {
                         // `false_type` above; class =:= still leaves
                         // it None, since its false branch can't be narrowed via
                         // subtree exclusion.)
-                        let ty = self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
+                        //
+                        // The false block deliberately stays a bare `Block`
+                        // (no `R`): the true block's body is `Dynamic` here
+                        // (`respondsTo:` narrows to `Dynamic`), and
+                        // `merge_method_local_binding` lets a Known `R` beat
+                        // a Dynamic one, so a precise `Block(Nil)` on this arm
+                        // would collapse `x := (o respondsTo: #foo) ifTrue:
+                        // [o foo] ifFalse: [nil]` to plain `Nil` and then
+                        // flag `x bar` as a DNU on `Nil` (BT-4102 fallout).
+                        let inferred =
+                            self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
+                        let ty = if matches!(false_arg.unwrap_parens(), Expression::Block(_)) {
+                            InferredType::known("Block")
+                        } else {
+                            inferred
+                        };
                         arg_types.push(ty);
                     }
                 }
@@ -1418,16 +1434,12 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
+        // BT-4102: explicit `:: T` annotations win over the pushed-down type,
+        // which wins over `Dynamic(UnannotatedParam)`.
+        let resolved = self.resolve_block_param_types(block, param_types, hierarchy);
         let mut block_env = env.child();
-        for (param, ty) in block.parameters.iter().zip(param_types.iter()) {
+        for (param, ty) in block.parameters.iter().zip(resolved.iter()) {
             block_env.set_local(param.name.clone(), ty.clone());
-        }
-        // Extra params beyond resolved types stay Dynamic
-        for param in block.parameters.iter().skip(param_types.len()) {
-            block_env.set_local(
-                param.name.clone(),
-                InferredType::Dynamic(DynamicReason::UnannotatedParam),
-            );
         }
         let body_ty = self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
         // A block whose body ends in a top-level non-local return
@@ -1455,7 +1467,10 @@ impl TypeChecker {
             body_ty
         };
         // Build Block type with resolved param types + inferred return type
-        let mut block_type_args: Vec<InferredType> = param_types.to_vec();
+        let mut block_type_args: Vec<InferredType> = resolved;
+        // Pushed types beyond the block's own arity (arity mismatch is
+        // deliberately silent) are kept as before.
+        block_type_args.extend(param_types.iter().skip(block.parameters.len()).cloned());
         block_type_args.push(body_ty);
         let ty = InferredType::Known {
             class_name: "Block".into(),
@@ -1466,6 +1481,147 @@ impl TypeChecker {
         };
         self.type_map.insert(block_span, ty.clone());
         ty
+    }
+
+    /// Resolve each parameter's type for a block literal (BT-4102 Decision A):
+    /// an explicit `:: T` annotation wins over the `pushed` type (from a
+    /// callee signature, declared return type or annotated local), which wins
+    /// over `Dynamic(UnannotatedParam)`.
+    ///
+    /// Annotations are resolved exactly like method parameters in
+    /// [`Self::set_param_types`] — alias and protocol registries, **empty**
+    /// substitution map. Known limitation (shared with method params): an
+    /// annotation naming a method-local type variable (`[:x :: E | ...]`)
+    /// does not see the method's substitution.
+    ///
+    /// When an annotation and a non-Dynamic pushed type are unrelated, a
+    /// mismatch warning is emitted at the parameter.
+    pub(in crate::semantic_analysis::type_checker) fn resolve_block_param_types(
+        &mut self,
+        block: &crate::ast::Block,
+        pushed: &[InferredType],
+        hierarchy: &ClassHierarchy,
+    ) -> Vec<InferredType> {
+        let subst = type_resolver::SubstitutionMap::new();
+        let mut out = Vec::with_capacity(block.parameters.len());
+        for (i, param) in block.parameters.iter().enumerate() {
+            let pushed_ty = pushed
+                .get(i)
+                .cloned()
+                .unwrap_or(InferredType::Dynamic(DynamicReason::UnannotatedParam));
+            let ty = match &param.type_annotation {
+                Some(ann) => {
+                    // Inline (not `resolution_context()`) so the disjoint
+                    // `protocol_registry` borrow composes.
+                    let declared = type_resolver::ResolutionContext::new(
+                        self.alias_registry.as_ref(),
+                        &mut self.referenced_aliases,
+                    )
+                    .resolve_type_annotation(
+                        ann,
+                        &subst,
+                        self.protocol_registry.as_ref(),
+                    );
+                    if let Some(mismatch) =
+                        Self::detect_assignment_type_mismatch(&pushed_ty, &declared, hierarchy)
+                    {
+                        self.emit_assignment_type_mismatch(&mismatch, param.span);
+                    }
+                    declared
+                }
+                None => pushed_ty,
+            };
+            out.push(ty);
+        }
+        out
+    }
+
+    /// The parameter types of the (single) `Block(P…, R)` arm of an expected
+    /// type — `Block(...)` itself, or a union with exactly one `Block`
+    /// member (mirrors [`Self::find_block_arm`] on `InferredType`).
+    fn block_arm_param_types(expected: &InferredType) -> Option<Vec<InferredType>> {
+        fn arm(ty: &InferredType) -> Option<Vec<InferredType>> {
+            match ty {
+                InferredType::Known {
+                    class_name,
+                    type_args,
+                    ..
+                } if class_name == "Block" && !type_args.is_empty() => {
+                    Some(type_args[..type_args.len() - 1].to_vec())
+                }
+                _ => None,
+            }
+        }
+        match expected {
+            InferredType::Union { members, .. } => {
+                let mut found = None;
+                for m in members {
+                    if let Some(p) = arm(m) {
+                        if found.is_some() {
+                            return None;
+                        }
+                        found = Some(p);
+                    }
+                }
+                found
+            }
+            other => arm(other),
+        }
+    }
+
+    /// If `expr` (parens unwrapped) is a block literal and `expected` has a
+    /// `Block(P…, R)` arm, stash the parameter types for the literal's
+    /// `infer_expr` Block arm (BT-4102 Decisions B/C).
+    pub(in crate::semantic_analysis::type_checker) fn stash_block_pushdown(
+        &mut self,
+        expr: &Expression,
+        expected: &InferredType,
+    ) {
+        if let Expression::Block(block) = expr.unwrap_parens() {
+            if let Some(params) = Self::block_arm_param_types(expected) {
+                self.block_param_pushdown.insert(block.span, params);
+            }
+        }
+    }
+
+    /// BT-4102 Decision B: when the method declares a `Block(...)` return
+    /// type, push its parameter types into a block literal in return position
+    /// — the tail expression, or the value of any top-level `^`. Nested `^`
+    /// inside inner blocks is out of scope.
+    pub(in crate::semantic_analysis::type_checker) fn stash_return_position_block_pushdown(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+    ) {
+        use crate::ast::TypeAnnotation;
+        let Some(ann) = &method.return_type else {
+            return;
+        };
+        // `Self`-flavoured returns can never be a Block arm.
+        if matches!(
+            ann,
+            TypeAnnotation::SelfType { .. }
+                | TypeAnnotation::SelfClass { .. }
+                | TypeAnnotation::ClassOf { .. }
+        ) {
+            return;
+        }
+        let expected = type_resolver::ResolutionContext::new(
+            self.alias_registry.as_ref(),
+            &mut self.referenced_aliases,
+        )
+        .resolve_type_annotation(
+            ann,
+            &type_resolver::SubstitutionMap::new(),
+            self.protocol_registry.as_ref(),
+        );
+        let last = method.body.len().saturating_sub(1);
+        for (i, stmt) in method.body.iter().enumerate() {
+            match &stmt.expression {
+                Expression::Return { value, .. } => self.stash_block_pushdown(value, &expected),
+                e if i == last => self.stash_block_pushdown(e, &expected),
+                _ => {}
+            }
+        }
     }
 
     /// Check whether a type is *only* the nil type (`UndefinedObject` or

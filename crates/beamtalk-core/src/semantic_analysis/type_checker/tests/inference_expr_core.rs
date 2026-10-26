@@ -123,7 +123,18 @@ fn infer_expr_block_returns_block_type() {
         span(),
     ));
     let ty = checker.infer_expr(&block, &hierarchy, &mut env, false);
-    assert_eq!(ty, InferredType::known("Block"));
+    // BT-4102: the block type now carries its param and body-return types.
+    assert_eq!(
+        ty,
+        InferredType::Known {
+            class_name: "Block".into(),
+            type_args: vec![
+                InferredType::Dynamic(DynamicReason::UnannotatedParam),
+                InferredType::known("Integer"),
+            ],
+            provenance: TypeProvenance::Inferred(span()),
+        }
+    );
 }
 
 #[test]

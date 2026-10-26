@@ -42,8 +42,17 @@ use std::collections::HashMap;
 ///
 /// Returns `None` for `Dynamic` and `Union` — those don't have a single
 /// canonical annotation and shouldn't be written back.
+///
+/// `Block(P…, R)` is written back as bare `Block`: the checker's block
+/// literals carry their param/return types (BT-4102), but the emitted
+/// metadata and Erlang specs have only ever described a block-returning method
+/// as plain `Block`, and a `Dynamic` component would otherwise suppress the
+/// writeback altogether.
 fn writeback_annotation(ty: &InferredType, span: Span) -> Option<TypeAnnotation> {
     match ty {
+        InferredType::Known { class_name, .. } if class_name == "Block" => {
+            Some(TypeAnnotation::simple(class_name.clone(), span))
+        }
         InferredType::Known {
             class_name,
             type_args,

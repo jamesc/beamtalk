@@ -332,6 +332,7 @@ impl TypeChecker {
             self.protocol_registry.as_ref(),
             &mut ctx,
         );
+        self.stash_return_position_block_pushdown(method);
         let body_type = self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
         let body_type =
             self.resolve_self_delegate_return_type(method, body_type, class_name, hierarchy);
@@ -701,15 +702,21 @@ impl TypeChecker {
             }
             // Blocks — infer body but return Block type
             Expression::Block(block) => {
-                let mut block_env = env.child();
-                for param in &block.parameters {
-                    block_env.set_local(
-                        param.name.clone(),
-                        InferredType::Dynamic(DynamicReason::UnannotatedParam),
-                    );
-                }
-                self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
-                InferredType::known("Block")
+                // BT-4102: explicit `:: T` annotations win over a pushed-down
+                // type (from a declared return type / annotated local, see
+                // `block_param_pushdown`) over `Dynamic(UnannotatedParam)`.
+                let pushed = self
+                    .block_param_pushdown
+                    .remove(&block.span)
+                    .unwrap_or_default();
+                self.infer_block_with_typed_params(
+                    block,
+                    block.span,
+                    &pushed,
+                    hierarchy,
+                    env,
+                    in_abstract_method,
+                )
             }
             // Match — union of arm body types (Never arms are eliminated) —
             // see `flow::infer_match`.
