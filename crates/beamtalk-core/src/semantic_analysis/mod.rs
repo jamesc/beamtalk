@@ -956,9 +956,52 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // re-check dependent annotation sites once this redefinition installs. A
     // REPL session has no `current_package`, so the seeding-boundary
     // exclusion above never filters a carried-over `internal` alias out.
+    //
+    // BT-4039: seed the compiler-baked stdlib alias snapshot
+    // (`ClassHierarchy::generated_stdlib_aliases`) as the last resolution
+    // tier — the alias counterpart to `ClassHierarchy::with_builtins`'s
+    // always-on stdlib classes, and to `stdlib_protocols`'s last-tier
+    // `uses:` fallback. Without it, application code referencing a stdlib
+    // alias (`field: t :: Timeout = 5`) sees an opaque name and draws a
+    // false "Type mismatch: state" warning for every member-compatible
+    // default, while the same union written inline (or a package-local
+    // alias) resolves fine. Seeding here — the one funnel every surface
+    // (CLI `build`/`test`/`lint`, LSP diagnostics, MCP lint, compiler-port)
+    // analyses through — keeps surfaces from disagreeing.
+    //
+    // Skipped when compiling the stdlib itself (live sources win; the
+    // snapshot could lag the working tree — same rule as the protocol
+    // fallback). A same-named current-module alias, pre-loaded alias, or
+    // known class/protocol always wins over the snapshot (filtered
+    // silently, not diagnosed — the snapshot is an implicit fallback, not
+    // an explicit declaration, so it must never change the meaning of a
+    // name that already resolved, nor break a package with e.g. its own
+    // `Timeout` class).
+    let current_alias_names: std::collections::HashSet<&EcoString> =
+        module.type_aliases.iter().map(|a| &a.name.name).collect();
+    if !stdlib_protocols::is_stdlib_package(current_package) {
+        let pre_loaded_names: std::collections::HashSet<&EcoString> =
+            pre_loaded_aliases.iter().map(|a| &a.name).collect();
+        let baked_stdlib_aliases: Vec<_> = ClassHierarchy::generated_stdlib_aliases()
+            .into_iter()
+            .filter(|info| {
+                !current_alias_names.contains(&info.name)
+                    && !pre_loaded_names.contains(&info.name)
+                    && !result.class_hierarchy.has_class(info.name.as_str())
+                    && !result.protocol_registry.has_protocol(info.name.as_str())
+            })
+            .collect();
+        if !baked_stdlib_aliases.is_empty() {
+            let baked_diags = result.alias_registry.add_pre_loaded(
+                baked_stdlib_aliases,
+                &result.class_hierarchy,
+                &result.protocol_registry,
+                current_package,
+            );
+            result.diagnostics.extend(baked_diags);
+        }
+    }
     if !pre_loaded_aliases.is_empty() {
-        let current_alias_names: std::collections::HashSet<&EcoString> =
-            module.type_aliases.iter().map(|a| &a.name.name).collect();
         let cross_file_aliases: Vec<_> = pre_loaded_aliases
             .into_iter()
             .filter(|a| !current_alias_names.contains(&a.name))

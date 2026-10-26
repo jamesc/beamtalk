@@ -489,6 +489,11 @@ fn stdlib_mode_manifest_less_build_collects_cross_file_aliases() {
 /// default is ..." warning. The negative control (no `pre_loaded_aliases`)
 /// reproduces the original false positive, proving the assertion is load
 /// bearing.
+///
+/// The fixture alias is deliberately NOT a stdlib alias name: since BT-4039
+/// seeds the baked stdlib snapshot as the last resolution tier, a fixture
+/// named e.g. `RestartStrategy` would resolve through the snapshot and the
+/// negative control could never reproduce its false positive.
 #[test]
 fn state_default_with_cross_file_alias_draws_no_type_mismatch() {
     let temp = TempDir::new().unwrap();
@@ -498,14 +503,14 @@ fn state_default_with_cross_file_alias_draws_no_type_mismatch() {
 
     write_test_file(
         &src_path.join("policy.bt"),
-        "type RestartStrategy = #permanent | #transient | #temporary\n\
+        "type RestartPolicy = #permanent | #transient | #temporary\n\
              typed Value subclass: Policy\n  \
-             default -> RestartStrategy => #temporary\n",
+             default -> RestartPolicy => #temporary\n",
     );
     write_test_file(
         &src_path.join("spec.bt"),
         "typed Value subclass: Spec\n  \
-             field: restart :: RestartStrategy = #temporary\n",
+             field: restart :: RestartPolicy = #temporary\n",
     );
 
     let build_dir = project_path.join("_build/dev/ebin");
@@ -543,7 +548,7 @@ fn state_default_with_cross_file_alias_draws_no_type_mismatch() {
              are seeded, got: {diagnostics:?}"
     );
 
-    // Negative control: without `pre_loaded_aliases`, `RestartStrategy`
+    // Negative control: without `pre_loaded_aliases`, `RestartPolicy`
     // stays an opaque name and the original false positive returns.
     let diagnostics_unfixed = compile_file(
         &src_path.join("spec.bt"),
@@ -565,7 +570,7 @@ fn state_default_with_cross_file_alias_draws_no_type_mismatch() {
     assert!(
         diagnostics_unfixed.iter().any(|d| {
             d.message.contains("Type mismatch: state `restart`")
-                && d.message.contains("RestartStrategy")
+                && d.message.contains("RestartPolicy")
         }),
         "Expected the negative control (no pre_loaded_aliases) to reproduce \
              the false positive, got: {diagnostics_unfixed:?}"
@@ -1186,4 +1191,156 @@ fn incremental_pass1_equals_cold_when_only_the_losing_duplicate_changes() {
     let cold = pass1_snapshot(&project, true);
 
     assert_eq!(incremental, cold);
+}
+
+/// BT-4039: `field: t :: Timeout = 5` where `Timeout` is the *stdlib*
+/// alias (`type Timeout = Integer | #infinity` in `timeout_proxy.bt`)
+/// draws no "Type mismatch: state" warning — with no project aliases
+/// seeded at all, so the only way `Timeout` can resolve is through
+/// `analyse_full`'s baked stdlib snapshot tier.
+#[test]
+fn bt4039_stdlib_alias_union_field_default_draws_no_type_mismatch() {
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_path = project_path.join("src");
+    fs::create_dir_all(&src_path).unwrap();
+
+    write_test_file(
+        &src_path.join("spec.bt"),
+        "typed Value subclass: Spec\n  \
+             field: a :: Timeout = 5\n  \
+             field: b :: Timeout = #infinity\n  \
+             field: c :: ShutdownTimeout = 5\n  \
+             field: d :: ShutdownTimeout = #brutalKill\n",
+    );
+
+    let build_dir = project_path.join("_build/dev/ebin");
+    fs::create_dir_all(&build_dir).unwrap();
+
+    let source_files = vec![src_path.join("spec.bt")];
+    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached) =
+        build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+
+    let options = default_options();
+    let diagnostics = compile_file(
+        &src_path.join("spec.bt"),
+        "bt@test_pkg@spec",
+        &build_dir.join("bt@test_pkg@spec.core"),
+        &options,
+        &CompileContext {
+            hierarchy: ClassHierarchyContext {
+                class_module_index,
+                class_superclass_index,
+                pre_loaded_classes: all_class_infos,
+                // Deliberately no pre_loaded_aliases: stdlib aliases must
+                // resolve via the baked snapshot, not project seeding.
+                ..ClassHierarchyContext::default()
+            },
+            ..CompileContext::default()
+        },
+        None,
+    )
+    .expect("stdlib alias-typed field defaults should compile");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("Type mismatch: state")),
+        "Expected no false state-default mismatch for stdlib alias unions, got: {diagnostics:?}"
+    );
+
+    // Negative control: a genuinely incompatible default still warns,
+    // rendering the stdlib alias with its baked expansion.
+    write_test_file(
+        &src_path.join("bad.bt"),
+        "typed Value subclass: Bad\n  \
+             field: t :: Timeout = \"bad\"\n",
+    );
+    let diagnostics_bad = compile_file(
+        &src_path.join("bad.bt"),
+        "bt@test_pkg@bad",
+        &build_dir.join("bt@test_pkg@bad.core"),
+        &options,
+        &CompileContext {
+            hierarchy: ClassHierarchyContext {
+                class_module_index: build_class_module_index(
+                    &[src_path.join("bad.bt")],
+                    Some(&src_path),
+                    "test_pkg",
+                )
+                .unwrap()
+                .0,
+                ..ClassHierarchyContext::default()
+            },
+            ..CompileContext::default()
+        },
+        None,
+    )
+    .expect("Compile should still succeed (warning, not error)");
+    assert!(
+        diagnostics_bad.iter().any(|d| d
+            .message
+            .contains("Type mismatch: state `t` declared as Timeout (Integer | #infinity)")),
+        "Expected the mismatch to render the baked stdlib expansion, got: {diagnostics_bad:?}"
+    );
+}
+
+/// BT-4039, package-local tier: `field: t :: LocalTimeout = 5` where
+/// `LocalTimeout` is a cross-file (package-local) alias with an Integer
+/// member draws no "Type mismatch: state" warning. Sibling to
+/// `state_default_with_cross_file_alias_draws_no_type_mismatch`, which
+/// covers the Symbol-member shape (`RestartStrategy`).
+#[test]
+fn bt4039_cross_file_alias_union_integer_default_draws_no_type_mismatch() {
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_path = project_path.join("src");
+    fs::create_dir_all(&src_path).unwrap();
+
+    write_test_file(
+        &src_path.join("timeouts.bt"),
+        "type LocalTimeout = Integer | #infinity\n",
+    );
+    write_test_file(
+        &src_path.join("spec.bt"),
+        "typed Value subclass: Spec\n  \
+             field: t :: LocalTimeout = 5\n",
+    );
+
+    let build_dir = project_path.join("_build/dev/ebin");
+    fs::create_dir_all(&build_dir).unwrap();
+
+    let source_files = vec![src_path.join("timeouts.bt"), src_path.join("spec.bt")];
+    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached) =
+        build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+    let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
+    assert!(
+        all_alias_infos.iter().any(|a| a.name == "LocalTimeout"),
+        "Pass 1 should extract the LocalTimeout alias"
+    );
+
+    let options = default_options();
+    let diagnostics = compile_file(
+        &src_path.join("spec.bt"),
+        "bt@test_pkg@spec",
+        &build_dir.join("bt@test_pkg@spec.core"),
+        &options,
+        &CompileContext {
+            hierarchy: ClassHierarchyContext {
+                class_module_index,
+                class_superclass_index,
+                pre_loaded_classes: all_class_infos,
+                pre_loaded_aliases: all_alias_infos,
+                ..ClassHierarchyContext::default()
+            },
+            ..CompileContext::default()
+        },
+        None,
+    )
+    .expect("should compile");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("Type mismatch: state")),
+        "Expected no false state-default mismatch, got: {diagnostics:?}"
+    );
 }
