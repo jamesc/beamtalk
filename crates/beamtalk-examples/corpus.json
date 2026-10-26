@@ -42101,10 +42101,11 @@
         "property",
         "set",
         "subclassing",
-        "unless"
+        "unless",
+        "watch:"
       ],
-      "source": "// BT-1457: Server subclass fixture for handleInfo: codegen testing\n\nServer subclass: HandleInfoCounter\n  state: count = 0\n  state: lastMsg = nil\n\n  handleInfo: msg =>\n    msg == #tick ifTrue: [\n      self.count := self.count + 1\n    ] ifFalse: [self.lastMsg := msg]\n\n  getCount => self.count\n\n  getLastMsg => self.lastMsg",
-      "explanation": "BT-1457: Server subclass fixture for handleInfo: codegen testing"
+      "source": "// BT-1457: Server subclass fixture for handleInfo: codegen testing\n// BT-4077: `watch:` monitors a pid from inside this Server, so the DOWN\n// lands in `handleInfo:` (and `getLastMsg`).\n\nServer subclass: HandleInfoCounter\n  state: count = 0\n  state: lastMsg = nil\n\n  handleInfo: msg =>\n    msg == #tick ifTrue: [\n      self.count := self.count + 1\n    ] ifFalse: [self.lastMsg := msg]\n\n  getCount => self.count\n\n  getLastMsg => self.lastMsg\n\n  watch: aPid => aPid monitor",
+      "explanation": "BT-1457: Server subclass fixture for handleInfo: codegen testing BT-4077: `watch:` monitors a pid from inside this Server, so the DOWN lands in `handleInfo:` (and `getLastMsg`)."
     },
     {
       "id": "stdlib-test-fixtures-handle-info-match-catch-all-server",
@@ -45564,10 +45565,11 @@
         "ownLabel",
         "process",
         "process_label_actor",
-        "subclassing"
+        "subclassing",
+        "whoAmI"
       ],
-      "source": "// BT-4049: an actor that labels its own process from inside a method.\n// Used by stdlib/test/process_primitives_test.bt.\n\nActor subclass: ProcessLabelActor\n\n  labelSelfWith: term => self processLabel: term\n\n  ownLabel => self processLabel",
-      "explanation": "BT-4049: an actor that labels its own process from inside a method. Used by stdlib/test/process_primitives_test.bt."
+      "source": "// BT-4049: an actor that labels its own process from inside a method.\n// BT-4077: also answers its own process via `Pid current` (`whoAmI`).\n// Used by stdlib/test/process_primitives_test.bt.\n\nActor subclass: ProcessLabelActor\n\n  labelSelfWith: term => self processLabel: term\n\n  ownLabel => self processLabel\n\n  whoAmI => Pid current",
+      "explanation": "BT-4049: an actor that labels its own process from inside a method. BT-4077: also answers its own process via `Pid current` (`whoAmI`). Used by stdlib/test/process_primitives_test.bt."
     },
     {
       "id": "stdlib-test-fixtures-protocol-creatable",
@@ -53080,13 +53082,16 @@
         "assign",
         "assignment",
         "async",
+        "branch",
         "concurrent",
+        "conditional",
         "constructor",
         "create",
         "duck typing",
         "extends",
         "gen_server",
         "genserver",
+        "if",
         "inherit",
         "inheritance",
         "instantiate",
@@ -53100,6 +53105,14 @@
         "protocol",
         "set",
         "subclassing",
+        "testForkNonZeroArgBlockRaisesTypeError",
+        "testForkRunsBlockAndExitsNormally",
+        "testForkedNonLocalReturnExitsWithForkReason",
+        "testForkedRaiseCrashesOnlyTheWorker",
+        "testPidCurrentAnswersAPid",
+        "testPidCurrentInsideActorEqualsSelfPid",
+        "testPidMonitorAnswersAReference",
+        "testPidMonitorDeliversDownToHandleInfo",
         "testPidSendAnswersNil",
         "testPidSendDeliversResultShapedTermsUnchanged",
         "testPidSendDynamicDispatch",
@@ -53114,8 +53127,8 @@
         "testReferenceNewIsUnique",
         "testReferenceNewIsUsableAsDictionaryKey"
       ],
-      "source": "// BT-4049: process primitives — `Pid>>send:`, `Reference new`,\n// `Actor>>processLabel:` / `processLabel`.\n//\n// Fixtures: stdlib/test/fixtures/handle_info_counter.bt\n//           stdlib/test/fixtures/process_label_actor.bt\n\nTestCase subclass: ProcessPrimitivesTest\n\n  // === Pid>>send: ===\n  testPidSendReachesHandleInfo =>\n    server := HandleInfoCounter spawn\n    server pid send: #tick\n    server pid send: #tick\n    self assert: server getCount equals: 2\n    server pid send: {#ready, 42}\n    self assert: server getLastMsg equals: {#ready, 42}\n    server stop\n\n  testPidSendAnswersNil =>\n    server := HandleInfoCounter spawn\n    self assert: (server pid send: #tick) equals: nil\n    server stop\n\n  testPidSendToDeadPidIsANoOp =>\n    server := HandleInfoCounter spawn\n    pid := server pid\n    server stop\n    self deny: pid isAlive\n    self assert: (pid send: #tick) equals: nil\n\n  testPidSendDeliversResultShapedTermsUnchanged =>\n    server := HandleInfoCounter spawn\n    server pid send: {#ok, 1}\n    self assert: server getLastMsg equals: {#ok, 1}\n    server pid send: #ok\n    self assert: server getLastMsg equals: #ok\n    server stop\n\n  testPidSendDynamicDispatch =>\n    server := HandleInfoCounter spawn\n    p := server pid\n    self assert: (p respondsTo: #send:)\n    self assert: (p perform: #send: withArguments: #(#tick)) equals: nil\n    self assert: server getCount equals: 1\n    server stop\n\n  // === Reference new ===\n  testReferenceNewDynamicDispatch =>\n    cls := Reference\n    self assert: (cls perform: #new) class equals: Reference\n\n  testReferenceNewAnswersAReference =>\n    self assert: Reference new class equals: Reference\n\n  testReferenceNewIsUnique =>\n    a := Reference new\n    b := Reference new\n    self deny: a =:= b\n    self assert: a =/= b\n    self assert: a =:= a\n\n  testReferenceNewIsUsableAsDictionaryKey =>\n    a := Reference new\n    b := Reference new\n    d := (Dictionary new at: a put: 1) at: b put: 2\n    self assert: d size equals: 2\n    self assert: (d at: a) equals: 1\n    self assert: (d at: b) equals: 2\n\n  // === Actor>>processLabel: / processLabel ===\n  testProcessLabelIsNilByDefault =>\n    actor := ProcessLabelActor spawn\n    self assert: actor processLabel equals: nil\n    self assert: actor ownLabel equals: nil\n    actor stop\n\n  testProcessLabelRoundTripsFromInside =>\n    actor := ProcessLabelActor spawn\n    self assert: (actor labelSelfWith: {#connection, 7}) equals: nil\n    self assert: actor ownLabel equals: {#connection, 7}\n    self assert: actor processLabel equals: {#connection, 7}\n    actor stop\n\n  testProcessLabelRoundTripsResultAndCharlistShapedTerms =>\n    actor := ProcessLabelActor spawn\n    actor processLabel: #ok\n    self assert: actor processLabel equals: #ok\n    actor processLabel: {#ok, 1}\n    self assert: actor processLabel equals: {#ok, 1}\n    actor processLabel: {#error, #closed}\n    self assert: actor processLabel equals: {#error, #closed}\n    actor processLabel: #(72, 105)\n    self assert: actor processLabel equals: #(72, 105)\n    actor stop\n\n  testProcessLabelLabelsTheActorNotTheCaller =>\n    actor := ProcessLabelActor spawn\n    actor processLabel: #worker\n    self assert: ((Erlang proc_lib) get_label: actor pid) equals: #worker\n    actor stop",
-      "explanation": "BT-4049: process primitives — `Pid>>send:`, `Reference new`, `Actor>>processLabel:` / `processLabel`.  Fixtures: stdlib/test/fixtures/handle_info_counter.bt           stdlib/test/fixtures/process_label_actor.bt"
+      "source": "// BT-4049: process primitives — `Pid>>send:`, `Reference new`,\n// `Actor>>processLabel:` / `processLabel`.\n// BT-4077: `Pid current`, `Pid>>monitor`, `Block>>fork`.\n//\n// Fixtures: stdlib/test/fixtures/handle_info_counter.bt\n//           stdlib/test/fixtures/process_label_actor.bt\n\nTestCase subclass: ProcessPrimitivesTest\n\n  // === Pid>>send: ===\n  testPidSendReachesHandleInfo =>\n    server := HandleInfoCounter spawn\n    server pid send: #tick\n    server pid send: #tick\n    self assert: server getCount equals: 2\n    server pid send: {#ready, 42}\n    self assert: server getLastMsg equals: {#ready, 42}\n    server stop\n\n  testPidSendAnswersNil =>\n    server := HandleInfoCounter spawn\n    self assert: (server pid send: #tick) equals: nil\n    server stop\n\n  testPidSendToDeadPidIsANoOp =>\n    server := HandleInfoCounter spawn\n    pid := server pid\n    server stop\n    self deny: pid isAlive\n    self assert: (pid send: #tick) equals: nil\n\n  testPidSendDeliversResultShapedTermsUnchanged =>\n    server := HandleInfoCounter spawn\n    server pid send: {#ok, 1}\n    self assert: server getLastMsg equals: {#ok, 1}\n    server pid send: #ok\n    self assert: server getLastMsg equals: #ok\n    server stop\n\n  testPidSendDynamicDispatch =>\n    server := HandleInfoCounter spawn\n    p := server pid\n    self assert: (p respondsTo: #send:)\n    self assert: (p perform: #send: withArguments: #(#tick)) equals: nil\n    self assert: server getCount equals: 1\n    server stop\n\n  // === Reference new ===\n  testReferenceNewDynamicDispatch =>\n    cls := Reference\n    self assert: (cls perform: #new) class equals: Reference\n\n  testReferenceNewAnswersAReference =>\n    self assert: Reference new class equals: Reference\n\n  testReferenceNewIsUnique =>\n    a := Reference new\n    b := Reference new\n    self deny: a =:= b\n    self assert: a =/= b\n    self assert: a =:= a\n\n  testReferenceNewIsUsableAsDictionaryKey =>\n    a := Reference new\n    b := Reference new\n    d := (Dictionary new at: a put: 1) at: b put: 2\n    self assert: d size equals: 2\n    self assert: (d at: a) equals: 1\n    self assert: (d at: b) equals: 2\n\n  // === Actor>>processLabel: / processLabel ===\n  testProcessLabelIsNilByDefault =>\n    actor := ProcessLabelActor spawn\n    self assert: actor processLabel equals: nil\n    self assert: actor ownLabel equals: nil\n    actor stop\n\n  testProcessLabelRoundTripsFromInside =>\n    actor := ProcessLabelActor spawn\n    self assert: (actor labelSelfWith: {#connection, 7}) equals: nil\n    self assert: actor ownLabel equals: {#connection, 7}\n    self assert: actor processLabel equals: {#connection, 7}\n    actor stop\n\n  testProcessLabelRoundTripsResultAndCharlistShapedTerms =>\n    actor := ProcessLabelActor spawn\n    actor processLabel: #ok\n    self assert: actor processLabel equals: #ok\n    actor processLabel: {#ok, 1}\n    self assert: actor processLabel equals: {#ok, 1}\n    actor processLabel: {#error, #closed}\n    self assert: actor processLabel equals: {#error, #closed}\n    actor processLabel: #(72, 105)\n    self assert: actor processLabel equals: #(72, 105)\n    actor stop\n\n  testProcessLabelLabelsTheActorNotTheCaller =>\n    actor := ProcessLabelActor spawn\n    actor processLabel: #worker\n    self assert: ((Erlang proc_lib) get_label: actor pid) equals: #worker\n    actor stop\n\n  // === Pid current (BT-4077) ===\n  testPidCurrentAnswersAPid =>\n    pid := Pid current\n    self assert: pid class equals: Pid\n    self assert: pid isAlive\n    self assert: pid =:= pid\n\n  testPidCurrentInsideActorEqualsSelfPid =>\n    actor := ProcessLabelActor spawn\n    who := actor whoAmI\n    self assert: who =:= actor pid\n    actor stop\n\n  // === Pid>>monitor (BT-4077) ===\n  testPidMonitorAnswersAReference =>\n    server := HandleInfoCounter spawn\n    ref := server pid monitor\n    self assert: ref class equals: Reference\n    ref demonitor\n    server stop\n\n  testPidMonitorDeliversDownToHandleInfo =>\n    watcher := HandleInfoCounter spawn\n    victim := HandleInfoCounter spawn\n    ref := watcher watch: victim pid\n    pid := victim pid\n    victim stop\n    50 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]\n    msg := watcher getLastMsg\n    self assert: (msg at: 1) equals: #DOWN\n    self assert: (msg at: 2) =:= ref\n    self assert: (msg at: 3) equals: #process\n    self assert: (msg at: 4) =:= pid\n    self assert: (msg at: 5) equals: #normal\n    watcher stop\n\n  // === Block>>fork (BT-4077) ===\n  testForkRunsBlockAndExitsNormally =>\n    table := Ets new: #forkRan type: #set\n    pid := [table at: #ran put: true] fork\n    self assert: pid class equals: Pid\n    self deny: pid =:= Pid current\n    50 timesRepeat: [(table at: #ran) isNil ifTrue: [Timer sleep: 10]]\n    self assert: (table at: #ran) equals: true\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive\n    table delete\n\n  testForkedRaiseCrashesOnlyTheWorker =>\n    pid := [1 / 0] fork\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive\n    // The worker is unlinked: the caller carries on.\n    self assert: Pid current isAlive\n\n  testForkedNonLocalReturnExitsWithForkReason =>\n    // The block waits on an Ets gate so the monitor below is established\n    // before the `^` fires; otherwise the DOWN could carry `noproc`.\n    table := Ets new: #forkNlrGate type: #set\n    watcher := HandleInfoCounter spawn\n    pid := [\n      50 timesRepeat: [(table at: #go) isNil ifTrue: [Timer sleep: 10]]\n      ^42\n    ] fork\n    ref := watcher watch: pid\n    table at: #go put: true\n    50 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]\n    msg := watcher getLastMsg\n    self assert: (msg at: 1) equals: #DOWN\n    self assert: (msg at: 2) =:= ref\n    self assert: (msg at: 4) =:= pid\n    self assert: (msg at: 5) equals: {#fork_non_local_return, 42}\n    table delete\n    watcher stop\n\n  testForkNonZeroArgBlockRaisesTypeError =>\n    self should: [[:x | x] fork] raise: #type_error",
+      "explanation": "BT-4049: process primitives — `Pid>>send:`, `Reference new`, `Actor>>processLabel:` / `processLabel`. BT-4077: `Pid current`, `Pid>>monitor`, `Block>>fork`.  Fixtures: stdlib/test/fixtures/handle_info_counter.bt           stdlib/test/fixtures/process_label_actor.bt"
     },
     {
       "id": "stdlib-test-program-test",

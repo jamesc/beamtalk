@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-4049: an actor that labels its own process from inside a method.
+// BT-4077: also answers its own process via `Pid current` (`whoAmI`).
 // Used by stdlib/test/process_primitives_test.bt.
 
 Actor subclass: ProcessLabelActor
@@ -9,3 +10,5 @@ Actor subclass: ProcessLabelActor
   labelSelfWith: term => self processLabel: term
 
   ownLabel => self processLabel
+
+  whoAmI => Pid current

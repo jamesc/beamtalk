@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-1457: Server subclass fixture for handleInfo: codegen testing
+// BT-4077: `watch:` monitors a pid from inside this Server, so the DOWN
+// lands in `handleInfo:` (and `getLastMsg`).
 
 Server subclass: HandleInfoCounter
   state: count = 0
@@ -15,3 +17,5 @@ Server subclass: HandleInfoCounter
   getCount => self.count
 
   getLastMsg => self.lastMsg
+
+  watch: aPid => aPid monitor
