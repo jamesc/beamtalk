@@ -2677,7 +2677,26 @@ impl<'d> Walker<'d> {
         }
         let ctx = self.loop_body_context();
         let actor_value_site = frame_site && is_actor_fold_value_site(expr, &ctx);
-        if frame_site && is_loop_body_producer_site(expr, &ctx) {
+        // BT-3950: a block `value` send directly in a fold body (`do:`,
+        // `collect:`) nested in a `whileTrue:` loop in an actor method is not
+        // threaded back since BT-4121 (BT-4194): the write is lost and the
+        // method silently answers wrong (`actor iterLoop/collLoop local value`,
+        // measured wrong). It is not a producer there, so it falls through to
+        // the §1 diagnostic below instead of being accepted. No DENY_SET row
+        // can name it: the producer return above runs before the table is
+        // consulted. The `dlocal` twins answer right and are unavoidably
+        // rejected too (same chain, `KNOWN_OVER_REJECTED`); BT-4194 deletes
+        // this carve-out when the lowering is fixed.
+        let actor_nested_fold_value = construct.family == LocalThreadingFamily::BlockValue
+            && self.context == Actor
+            && frame_site
+            && self.depth > 1
+            && matches!(self.containers.first(), Some(Container::LoopBody))
+            && matches!(
+                self.containers.last(),
+                Some(Container::DoBody | Container::ListOpBody)
+            );
+        if !actor_nested_fold_value && frame_site && is_loop_body_producer_site(expr, &ctx) {
             if is_lookup {
                 self.lookup_producers.insert(expr.unwrap_parens().span());
             }
@@ -2742,7 +2761,8 @@ impl<'d> Walker<'d> {
         // bindings map and is not shaped by it.
         let producer_shape =
             kind != DetectIfNone || self.context == Repl || producer_body_block(expr).is_some();
-        if !actor_value_site
+        if !actor_nested_fold_value
+            && !actor_value_site
             && producer_shape
             && self.allowed_beyond_producers(kind, position, root_producer.is_some())
         {

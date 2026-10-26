@@ -1807,12 +1807,16 @@ fn adr0131_statement_probe_pins() {
 
 /// Cells that answer right but that Phase 0 still rejects, because the facts a
 /// statement position carries cannot tell them from a sibling cell that
-/// answers wrong. Empty since ADR 0133 Phase 3 (BT-3911): an actor
-/// `detect:`/`detect:ifNone:` is a loop-body producer like any other fold, so
-/// the last cells of this list (the `detect:` family's block-local rows) answer
-/// right and are accepted. A shape that answers right but cannot be told from
-/// one that does not goes back here with a `PIN-BUG` and an open issue.
-const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[];
+/// answers wrong. PIN-BUG BT-3913: the `dlocal` twins of the two cells BT-4121
+/// broke (BT-4194, BT-3950): a block `value` send directly in a fold body
+/// nested in a `whileTrue:` loop in an actor method shares its whole chain
+/// with its `local` sibling, which answers wrong, so the carve-out in
+/// `check_construct` rejects both. BT-4194 deletes these entries when the
+/// lowering is fixed.
+const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[
+    ("actor", "iterLoop", "dlocal", "value"),
+    ("actor", "collLoop", "dlocal", "value"),
+];
 
 /// PIN-BUG BT-3913: Phase 0 accepts exactly what codegen lowers correctly.
 /// `adr0131_statement_measured.tsv` records, for every class, value-type and
