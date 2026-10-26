@@ -56,7 +56,7 @@ verdicts:
 | Display names | **HIDE** | Every user-facing surface (errors, stacktraces, `describe`, FFI diagnostics, test failures) renders `Class>>selector`, never `bt@package:'class_sel'/2`. Raw MFA available via `--verbose`/tooling flag only. One shared translator, no ad-hoc prefix stripping. |
 | Errors + stacktraces | **HIDE mechanics** | Frames render as `Class>>selector (file.bt:line)`; Erlang reasons translate to `#beamtalk_error{}` with Smalltalk-readable messages. Line-annotated codegen + `error_info`-style rendering. |
 | Tuples / Result | **CONVERT at boundary** | Codegen owns the conversion both directions; handwritten `.bt` never sees a 2-tuple. Extends ADR 0076's direction to a rule. |
-| Binaries | **GRAPHEMES by default** | The String API is total over graphemes; byte access (`byteAt:`, offsets) lives behind an explicit, well-named door for the FFI/binary-protocol minority. |
+| Binaries | **BYTES for Binary, GRAPHEMES for String — decided in BT-4170** | Epic BT-4170 (Remove Binary UTF-8 sniffing, in progress) owns this row: class = construction type, no sniffed dispatch — `Binary>>size` bytes, `String>>size` graphemes, `Binary>>at:` 1-based bytes, `Binary>>do:` yields Integers, `byteSize` deleted, native text boundaries construct String, `asString` returns a real Result. This ADR adds no new verdict here; it cites the split as the policy's worked example (representation is essence, like lifecycle — decided explicitly, not leaked accidentally). |
 | FFI membrane | **TYPED + Beamtalk-shaped** | FFI calls get typed specs; failures name the selector and expectation (`telemetry execute: expected 3 args`), never arities and module atoms. `native/` is a first-class package member, not a trapdoor. |
 | Process lifecycle | **KEEP, with OOB defaults** | Supervision, links, restarts, `terminate:` stay visible with Beamtalk spelling — plus one template supervised app and defaults (restart intensity, shutdown timeouts) so the common case needs no OTP knowledge. |
 | Distribution / releases / hot reload | **KEEP (OTP-native)** | Per ADR 0125/0126 direction; Beamtalk spelling where it exists, OTP concepts undisguised. |
@@ -186,8 +186,10 @@ Phased, each phase its own epic (no code in this ADR):
    `--verbose` raw mode. Consumes BT-4094/4106-class issues.
 2. **FFI membrane**: typed FFI specs with named errors; `native/` as
    first-class package member; `declare native:` parity (BT-4144).
-3. **Tuples + binaries**: codegen-owned boundary conversion; grapheme-total
-   String API with explicit byte door.
+3. **Tuples + binaries**: codegen-owned boundary conversion; the
+   Binary/String audit itself lives in Epic BT-4170 (BT-4168/69/71/72/73) —
+   this phase tracks its completion for the `bin at: 1` drift resolution
+   and conversion-door docs rather than re-doing it.
 4. **Lifecycle defaults**: template supervised app; audited OOB defaults;
    vocabulary pass (`stop:` family naming).
 
@@ -210,6 +212,7 @@ Effort: L–XL total, sliced per phase. Each phase lands green independently.
   objects), ADR 0119 (module registry), ADR 0121 (ok/error specs), ADR 0125
   (releases), ADR 0126 (distribution), ADR 0134 (crash semantics)
 - Related issues: BT-4094 (naming), BT-4106 (stackframe), BT-4022 (FFI),
-  BT-4144 (native), BT-4052 (linked exits), BT-4046/47 (supervision)
+  BT-4144 (native), BT-4052 (linked exits), BT-4046/47 (supervision),
+  BT-4170 (epic: Binary/String split — owns the binaries row)
 - Documentation: `docs/beamtalk-principles.md` (BEAM-native,
   interactive-first)
