@@ -4,7 +4,7 @@
 # statement<TAB>family<TAB>context<TAB>right<TAB>wrong<TAB>erlc
 # statement-group<TAB>group<TAB>family<TAB>context<TAB>not-right cells
 # operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>phase0-accepts<TAB>phase0-rejects-right
-statement	block-value	actor	110	2	0
+statement	block-value	actor	112	0	0
 statement	block-value	class	122	0	0
 statement	block-value	value	100	0	0
 statement	detect-ifnone	actor	188	0	0
@@ -34,7 +34,6 @@ statement	satisfy	value	94	0	0
 statement-group	loop-condition	other	actor	6
 statement-group	loop-condition	other	class	6
 statement-group	loop-condition	other	value	6
-statement-group	nested-loop	block-value	actor	2
 operand	arg	actor	57	41	3	13	38	3
 operand	arg	class	57	57	0	0	57	0
 operand	arg	value	57	57	0	0	57	0
