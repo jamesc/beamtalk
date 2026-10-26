@@ -22,10 +22,15 @@ module 'async_keyword_message' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
             in
             {'beamtalk_object', 'AsyncKeywordMessage', 'async_keyword_message', Pid}
         <{'error', Reason}> when 'true' ->
-            let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'AsyncKeywordMessage') in
-            let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
-            let SpawnErr2 = call 'beamtalk_error':'with_hint'(SpawnErr1, Reason) in
-            call 'beamtalk_error':'raise'(SpawnErr2)
+            let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
+            case call 'beamtalk_error':'is_unknown_field'(InitErr) of
+                <'true'> when 'true' -> call 'beamtalk_error':'raise'(InitErr)
+                <'false'> when 'true' ->
+                    let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'AsyncKeywordMessage') in
+                    let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
+                    let SpawnErr2 = call 'beamtalk_error':'with_hint'(SpawnErr1, Reason) in
+                    call 'beamtalk_error':'raise'(SpawnErr2)
+            end
     end
 
 
@@ -45,10 +50,15 @@ module 'async_keyword_message' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
                     in
                     {'beamtalk_object', 'AsyncKeywordMessage', 'async_keyword_message', Pid}
                 <{'error', Reason}> when 'true' ->
-                    let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'AsyncKeywordMessage') in
-                    let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in
-                    let SpawnErr2 = call 'beamtalk_error':'with_hint'(SpawnErr1, Reason) in
-                    call 'beamtalk_error':'raise'(SpawnErr2)
+                    let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
+                    case call 'beamtalk_error':'is_unknown_field'(InitErr) of
+                        <'true'> when 'true' -> call 'beamtalk_error':'raise'(InitErr)
+                        <'false'> when 'true' ->
+                            let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'AsyncKeywordMessage') in
+                            let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in
+                            let SpawnErr2 = call 'beamtalk_error':'with_hint'(SpawnErr1, Reason) in
+                            call 'beamtalk_error':'raise'(SpawnErr2)
+                    end
             end
     end
 
@@ -81,7 +91,12 @@ module 'async_keyword_message' ['start_link'/1, 'start_link'/2, 'init'/1, 'handl
         '__class_mod__' => 'async_keyword_message'
         , '__shape_version__' => 1
     }~
-    in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
+    in let CheckedArgs = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' -> InitArgs
+        <'false'> when 'true' ->
+            call 'beamtalk_class_instantiation':'check_init_args'('AsyncKeywordMessage', 'spawnWith:', DefaultState, InitArgs, ['$bt_init_ack'])
+    end
+    in let FinalState = call 'maps':'merge'(DefaultState, CheckedArgs)
     in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
         <'true'> when 'true' ->
             let CleanState = call 'maps':'remove'('__skip_initialize__', FinalState) in

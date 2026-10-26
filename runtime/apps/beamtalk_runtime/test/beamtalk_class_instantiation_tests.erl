@@ -100,8 +100,24 @@ instantiation_test_() ->
             {"module-less new returns a generic instance with field defaults",
                 fun test_generic_new_defaults/0},
             {"module-less new: merges initialiser over defaults", fun test_generic_new_with_map/0},
-            {"module-less new: ignores unknown initialiser keys",
-                fun test_generic_new_unknown_keys_ignored/0},
+            {"module-less new: raises unknown_field on unknown initialiser keys",
+                fun test_generic_new_unknown_keys_raise/0},
+            %% check_init_args/5 (BT-4030)
+            {"check_init_args passes through when all keys are declared",
+                fun test_check_init_args_all_declared/0},
+            {"check_init_args passes an empty map through", fun test_check_init_args_empty_map/0},
+            {"check_init_args rejects internal state keys",
+                fun test_check_init_args_internal_keys_rejected/0},
+            {"check_init_args resolves inherited names from metadata, not state",
+                fun test_check_init_args_registry_primary_inherited/0},
+            {"check_init_args accepts late fields absent from state",
+                fun test_check_init_args_registry_primary_late/0},
+            {"check_init_args raises unknown_field naming key and declared fields",
+                fun test_check_init_args_unknown_key/0},
+            {"check_init_args reports the first unknown key deterministically",
+                fun test_check_init_args_first_unknown_sorted/0},
+            {"check_init_args passes non-map args through untouched",
+                fun test_check_init_args_non_map_passthrough/0},
             {"module-less new with multiple args raises type_error",
                 fun test_generic_new_multi_args/0},
             {"module-less generic instance dispatches a fun-backed method",
@@ -635,15 +651,182 @@ test_generic_new_with_map() ->
         gen_server:stop(Pid, normal, 5000)
     end.
 
-test_generic_new_unknown_keys_ignored() ->
+test_generic_new_unknown_keys_raise() ->
+    %% BT-4030 changed the contract: an undeclared initialiser key raises
+    %% #unknown_field (matching the compiled new/1), no longer silently
+    %% dropped. This is the same test body as the old
+    %% `test_generic_new_unknown_keys_ignored`, asserting the new contract.
     Pid = register_builder_class('BT2275GNewUnknown', 'Object', #{a => 1}, #{}),
     try
-        {ok, Instance} = beamtalk_object_class:new(Pid, [#{a => 5, zzz => 99}]),
-        ?assertEqual(5, maps:get(a, Instance)),
-        %% Unknown keys are not introduced as slots (matches compiled new/1).
-        ?assertNot(maps:is_key(zzz, Instance))
+        Result = beamtalk_object_class:new(Pid, [#{a => 5, zzz => 99}]),
+        ?assertMatch(
+            {error, #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = unknown_field,
+                    class = 'BT2275GNewUnknown',
+                    selector = 'new:',
+                    details = #{key := zzz, declared := [a]}
+                }
+            }},
+            Result
+        )
     after
         gen_server:stop(Pid, normal, 5000)
+    end.
+
+%%====================================================================
+%% check_init_args/5 (BT-4030)
+%%====================================================================
+
+test_check_init_args_all_declared() ->
+    BaseState = #{
+        '$beamtalk_class' => 'Conf', port => 4000, handler => nil
+    },
+    InitArgs = #{port => 1, handler => 2},
+    ?assertEqual(
+        InitArgs,
+        beamtalk_class_instantiation:check_init_args('Conf', 'new:', BaseState, InitArgs, [])
+    ).
+
+test_check_init_args_empty_map() ->
+    BaseState = #{port => 4000, handler => nil},
+    ?assertEqual(
+        #{},
+        beamtalk_class_instantiation:check_init_args('Conf', 'new:', BaseState, #{}, [])
+    ).
+
+test_check_init_args_unknown_key() ->
+    %% The BT-4030 spec example: `Conf new:` with `#bogus` raises
+    %% `#beamtalk_error{kind = unknown_field}` with details
+    %% `#{key => bogus, declared => [handler, port]}`.
+    BaseState = #{
+        '$beamtalk_class' => 'Conf', port => 4000, handler => nil
+    },
+    try
+        beamtalk_class_instantiation:check_init_args(
+            'Conf', 'new:', BaseState, #{bogus => 1, handler => 1}, []
+        ),
+        error(expected_unknown_field_raise)
+    catch
+        error:#{'$beamtalk_class' := _, error := Error} ->
+            ?assertMatch(
+                #beamtalk_error{
+                    kind = unknown_field,
+                    class = 'Conf',
+                    selector = 'new:',
+                    details = #{key := bogus, declared := [handler, port]}
+                },
+                Error
+            ),
+            ?assertEqual(
+                <<"Unknown field `bogus` for class `Conf`">>,
+                Error#beamtalk_error.message
+            ),
+            ?assertEqual(
+                <<"Declared fields: handler, port">>, Error#beamtalk_error.hint
+            )
+    end.
+
+test_check_init_args_first_unknown_sorted() ->
+    %% Several unknown keys: the reported one is the alphabetically first,
+    %% so the error is deterministic regardless of map key order. The
+    %% init-ack protocol key passes via ExtraAllowed.
+    BaseState = #{'__class_mod__' => counter, '__shape_version__' => 1, value => 0},
+    InitArgs = #{zebra => 1, apple => 2, '$bt_init_ack' => {self(), make_ref()}},
+    try
+        beamtalk_class_instantiation:check_init_args(
+            'Counter', 'spawnWith:', BaseState, InitArgs, ['$bt_init_ack']
+        ),
+        error(expected_unknown_field_raise)
+    catch
+        error:#{'$beamtalk_class' := _, error := Error} ->
+            ?assertMatch(
+                #beamtalk_error{
+                    kind = unknown_field,
+                    selector = 'spawnWith:',
+                    details = #{key := apple, declared := [value]}
+                },
+                Error
+            )
+    end.
+
+test_check_init_args_internal_keys_rejected() ->
+    %% Internal state keys live in the base map but are never valid
+    %% initialiser keys — passing one raises instead of corrupting state.
+    BaseState = #{'__class_mod__' => counter, '__shape_version__' => 1, value => 0},
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unknown_field}},
+        beamtalk_class_instantiation:check_init_args(
+            'Counter', 'spawnWith:', BaseState, #{'__class_mod__' => evil}, []
+        )
+    ).
+
+test_check_init_args_non_map_passthrough() ->
+    %% Non-map args are each caller's own shape to handle (spawn/1 and the
+    %% generic path raise type_error; new/1 lets maps:merge/2 fail) — the
+    %% check passes them through untouched.
+    BaseState = #{port => 4000, handler => nil},
+    ?assertEqual(
+        [not_a_map],
+        beamtalk_class_instantiation:check_init_args(
+            'Conf', 'new:', BaseState, [not_a_map], []
+        )
+    ).
+
+test_check_init_args_registry_primary_inherited() ->
+    %% Primary path (registered class): inherited names resolve from the
+    %% metadata walk, NOT from BaseState — `value` is deliberately absent
+    %% from BaseState here to prove the walk supplies it. (The other
+    %% check_init_args tests use the unregistered 'Conf' and thus exercise
+    %% the state-keys fallback.)
+    ok = ensure_logging_counter_loaded(),
+    BaseState = #{logCount => 0},
+    InitArgs = #{value => 1, logCount => 2},
+    ?assertEqual(
+        InitArgs,
+        beamtalk_class_instantiation:check_init_args(
+            'LoggingCounter', 'spawnWith:', BaseState, InitArgs, []
+        )
+    ).
+
+test_check_init_args_registry_primary_late() ->
+    %% Primary path: a `late` field is declared but never present in a
+    %% state map — the metadata walk must still accept it (the documented
+    %% spawnWith: injection path for late slots).
+    ok = ensure_late_slot_actor_loaded(),
+    BaseState = #{count => 0},
+    InitArgs = #{proc => a_fake_subprocess},
+    ?assertEqual(
+        InitArgs,
+        beamtalk_class_instantiation:check_init_args(
+            'LateSlotActor', 'spawnWith:', BaseState, InitArgs, []
+        )
+    ).
+
+ensure_logging_counter_loaded() ->
+    ensure_fixture_class_loaded('LoggingCounter', 'bt@logging_counter').
+
+ensure_late_slot_actor_loaded() ->
+    ensure_fixture_class_loaded('LateSlotActor', 'bt@late_slot_actor').
+
+ensure_fixture_class_loaded(ClassName, Module) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            case code:ensure_loaded(Module) of
+                {module, Module} ->
+                    case erlang:function_exported(Module, register_class, 0) of
+                        true ->
+                            Module:register_class(),
+                            ok;
+                        false ->
+                            error({fixture_no_register_function, Module})
+                    end;
+                {error, Reason} ->
+                    error({fixture_module_not_found, Module, Reason})
+            end;
+        _Pid ->
+            ok
     end.
 
 test_generic_new_multi_args() ->
@@ -911,23 +1094,7 @@ register_builder_class_with_class_methods(
     Pid.
 
 ensure_counter_loaded() ->
-    case beamtalk_class_registry:whereis_class('Counter') of
-        undefined ->
-            case code:ensure_loaded('bt@counter') of
-                {module, 'bt@counter'} ->
-                    case erlang:function_exported('bt@counter', register_class, 0) of
-                        true ->
-                            'bt@counter':register_class(),
-                            ok;
-                        false ->
-                            error(counter_no_register_function)
-                    end;
-                {error, Reason} ->
-                    error({counter_module_not_found, Reason})
-            end;
-        _Pid ->
-            ok
-    end.
+    ensure_fixture_class_loaded('Counter', 'bt@counter').
 
 %% Stop process if result is a beamtalk_object with a pid
 cleanup_if_process(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->

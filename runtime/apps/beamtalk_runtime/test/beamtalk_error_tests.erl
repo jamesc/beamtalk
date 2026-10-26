@@ -483,3 +483,21 @@ generate_message_catchall_with_selector_test() ->
         <<"custom_kind error in 'doSomething' on Widget">>,
         ErrorWithSel#beamtalk_error.message
     ).
+
+%%% Test: unknown_field message generation (BT-4030)
+unknown_field_message_test() ->
+    Error1 = beamtalk_error:new(unknown_field, 'Conf'),
+    ?assertEqual(<<"Unknown field for Conf">>, Error1#beamtalk_error.message),
+
+    Error2 = beamtalk_error:with_selector(Error1, 'new:'),
+    ?assertEqual(<<"'new:': unknown field for Conf">>, Error2#beamtalk_error.message).
+
+%%% Test: is_unknown_field/1 predicate (BT-4030)
+is_unknown_field_test() ->
+    ?assert(beamtalk_error:is_unknown_field(beamtalk_error:new(unknown_field, 'Conf'))),
+    ?assertNot(
+        beamtalk_error:is_unknown_field(beamtalk_error:new(type_error, 'Conf', 'new:'))
+    ),
+    %% Total on non-errors (extract_beamtalk_error/2's undefined passes through).
+    ?assertNot(beamtalk_error:is_unknown_field(undefined)),
+    ?assertNot(beamtalk_error:is_unknown_field({error, timeout})).

@@ -16,7 +16,8 @@ module 'self_send_explicit_class_reference' ['new'/0, 'new'/1, 'dispatch'/3, 'di
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'self_send_explicit_class_reference':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('ExplicitRefOpenClass', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'dispatch'/3 = fun (Selector, Args, Self) ->

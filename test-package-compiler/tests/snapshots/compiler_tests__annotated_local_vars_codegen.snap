@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 138
 expression: core_erlang
 ---
 module 'annotated_local_vars' ['new'/0, 'new'/1, 'eventId'/1, 'withEventId:'/2, 'class_eventId:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
@@ -18,7 +17,8 @@ module 'annotated_local_vars' ['new'/0, 'new'/1, 'eventId'/1, 'withEventId:'/2, 
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'annotated_local_vars':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('Snapshot', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'eventId'/1 = fun (Self) ->

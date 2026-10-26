@@ -17,6 +17,7 @@
 
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::join;
 use beamtalk_cerl_doc::leaf;
 
 use super::CoreErlangGenerator;
@@ -81,6 +82,39 @@ pub(super) fn beamtalk_error_doc(
     ]
 }
 
+/// BT-4030: the one `new:`/`spawnWith:` initialiser validation call.
+///
+/// Builds the shared validation call every generated `new/1` (value types)
+/// and `init/1` (actors) emits before merging, so the two can never drift:
+/// `call 'beamtalk_class_instantiation':'check_init_args'(<class>,
+/// <selector>, <base>, <args>, [<extra...>])`. The allowed set resolves
+/// from metadata at runtime, keeping inherited fields accepted without any
+/// compile-time ancestor knowledge. Each call site wraps this in its own
+/// idiom (`let`-prefix for `new/1`, `__skip_initialize__`-guarded case for
+/// `init/1`, whose parent-helper calls carry the leaf's keys and skip).
+pub(super) fn check_init_args_call_doc(
+    class: Document<'static>,
+    selector: &'static str,
+    base_state_var: Document<'static>,
+    args_var: Document<'static>,
+    extra_allowed: &[&str],
+) -> Document<'static> {
+    let extra_docs: Vec<Document<'static>> = extra_allowed.iter().map(|f| leaf::atom(*f)).collect();
+    docvec![
+        "call 'beamtalk_class_instantiation':'check_init_args'(",
+        class,
+        ", ",
+        leaf::atom(selector),
+        ", ",
+        base_state_var,
+        ", ",
+        args_var,
+        ", [",
+        join(extra_docs, &Document::Str(", ")),
+        "])",
+    ]
+}
+
 impl CoreErlangGenerator {
     /// BT-3943: the structured `#pattern_mismatch` raise for a failed user
     /// pattern (tuple/array destructure, `match:` with no matching arm).
@@ -129,6 +163,7 @@ impl CoreErlangGenerator {
 #[cfg(test)]
 mod tests {
     use super::beamtalk_error_doc;
+    use super::check_init_args_call_doc;
     use beamtalk_cerl_doc::{Document, leaf};
 
     #[test]
@@ -210,6 +245,41 @@ mod tests {
         assert!(
             rendered.contains("with_hint'(Error1,"),
             "ref in with_hint: {rendered}"
+        );
+    }
+
+    #[test]
+    fn check_init_args_renders_call_with_base_state_and_extras() {
+        let doc = check_init_args_call_doc(
+            leaf::atom("Counter"),
+            "spawnWith:",
+            Document::Str("MergedState"),
+            Document::Str("InitArgs"),
+            &["$bt_init_ack"],
+        );
+        let rendered = doc.to_pretty_string();
+        assert!(
+            rendered.contains(
+                "call 'beamtalk_class_instantiation':'check_init_args'\
+                 ('Counter', 'spawnWith:', MergedState, InitArgs, ['$bt_init_ack'])"
+            ),
+            "unexpected: {rendered}"
+        );
+    }
+
+    #[test]
+    fn check_init_args_renders_empty_extras_for_value_new() {
+        let doc = check_init_args_call_doc(
+            leaf::atom("Conf"),
+            "new:",
+            Document::Str("DefaultState"),
+            Document::Str("InitArgs"),
+            &[],
+        );
+        let rendered = doc.to_pretty_string();
+        assert!(
+            rendered.contains("'check_init_args'('Conf', 'new:', DefaultState, InitArgs, [])"),
+            "value new/1 passes no extra-allowed keys, got: {rendered}"
         );
     }
 

@@ -1,0 +1,93 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4030: `Value new:` / `Actor spawnWith:` with a runtime Dictionary
+// containing an undeclared key must raise a structured `#unknown_field`
+// error naming the key and the declared fields (Elixir `struct!/2`
+// parity) instead of silently merging the unknown key into the instance.
+// Literal-dict sends keep the compile-time diagnostic (unchanged).
+//
+// Fixtures: ValuePoint (fields x, y),
+//           ValueSubCircle (own radius, inherited color),
+//           Counter (state value),
+//           LoggingCounter (own logCount, inherited value).
+
+TestCase subclass: NewUnknownFieldTest
+
+  // --- Value new: ---
+  testValueNewRuntimeDictUnknownKeyRaises =>
+    d := (Dictionary new at: #bogus put: 1) at: #x put: 1
+    self should: [ValuePoint new: d] raise: #unknown_field
+
+  testValueNewErrorNamesKeyAndDeclaredFields =>
+    d := (Dictionary new at: #bogus put: 1) at: #x put: 1
+    kind := [ValuePoint new: d] on: RuntimeError do: [:e | e kind]
+    self assert: kind equals: #unknown_field
+    msg := [ValuePoint new: d] on: RuntimeError do: [:e | e message]
+    self assert: (msg includesSubstring: "bogus")
+    hint := [ValuePoint new: d] on: RuntimeError do: [:e | e hint]
+    self assert: hint equals: "Declared fields: x, y"
+
+  testValueNewRuntimeDictAllValidKeysWorks =>
+    d := (Dictionary new at: #x put: 3) at: #y put: 4
+    p := ValuePoint new: d
+    self assert: p x equals: 3
+    self assert: p y equals: 4
+
+  testValueNewEmptyRuntimeDictWorks =>
+    p := ValuePoint new: Dictionary new
+    self assert: p x equals: 0
+    self assert: p y equals: 0
+
+  testValueNewInheritedFieldAccepted =>
+    d := Dictionary new at: #color put: "red"
+    c := ValueSubCircle new: d
+    self assert: c color equals: "red"
+    self assert: c radius equals: 1.0
+
+  testValueSubSubclassUnknownKeyRaises =>
+    d := (Dictionary new at: #bogus put: 1) at: #radius put: 2.0
+    self should: [ValueSubCircle new: d] raise: #unknown_field
+    hint := [ValueSubCircle new: d] on: RuntimeError do: [:e | e hint]
+    self assert: hint equals: "Declared fields: color, radius"
+
+  // --- Actor spawnWith: ---
+  testActorSpawnWithRuntimeDictUnknownKeyRaises =>
+    d := (Dictionary new at: #bogus put: 1) at: #value put: 1
+    self should: [Counter spawnWith: d] raise: #unknown_field
+
+  testActorSpawnWithErrorNamesKeyAndDeclaredFields =>
+    d := (Dictionary new at: #bogus put: 1) at: #value put: 1
+    kind := [Counter spawnWith: d] on: RuntimeError do: [:e | e kind]
+    self assert: kind equals: #unknown_field
+    msg := [Counter spawnWith: d] on: RuntimeError do: [:e | e message]
+    self assert: (msg includesSubstring: "bogus")
+    hint := [Counter spawnWith: d] on: RuntimeError do: [:e | e hint]
+    self assert: hint equals: "Declared fields: value"
+
+  testActorSpawnWithAllValidKeysWorks =>
+    d := Dictionary new at: #value put: 7
+    c := Counter spawnWith: d
+    self assert: c getValue equals: 7
+
+  testActorSpawnWithEmptyDictWorks =>
+    c := Counter spawnWith: Dictionary new
+    self assert: c getValue equals: 0
+
+  testActorSpawnWithInheritedFieldAccepted =>
+    d := Dictionary new at: #value put: 5
+    c := LoggingCounter spawnWith: d
+    self assert: c getValue equals: 5
+    self assert: c getLogCount equals: 0
+
+  testActorSpawnWithViaPerformRaises =>
+    d := (Dictionary new at: #bogus put: 1) at: #value put: 1
+    self should: [
+      Counter perform: #spawnWith: withArguments: (#() add: d)
+    ] raise: #unknown_field
+
+  testActorSubclassUnknownKeyRaises =>
+    d := (Dictionary new at: #bogus put: 1) at: #value put: 1
+    self should: [LoggingCounter spawnWith: d] raise: #unknown_field
+    hint := [LoggingCounter spawnWith: d] on: RuntimeError do: [:e | e hint]
+    self assert: hint equals: "Declared fields: logCount, value"

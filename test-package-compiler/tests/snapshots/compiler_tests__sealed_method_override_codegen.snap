@@ -14,7 +14,8 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'sealed_method_override':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('Parent', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'frozen'/1 = fun (Self) ->

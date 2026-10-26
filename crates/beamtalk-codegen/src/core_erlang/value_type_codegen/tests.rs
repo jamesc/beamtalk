@@ -45,6 +45,29 @@ fn make_value_class(name: &str, slots: &[&str]) -> ClassDefinition {
 // `has_opaque_native_representation` coverage moved to
 // `value_accessors::tests` alongside their production code.
 
+// ─── BT-4030 `new:` unknown-key validation ─────────────────────────────
+
+#[test]
+fn test_bt4030_new_with_args_validates_unknown_keys() {
+    let class = make_value_class("Conf", &["port", "handler"]);
+    let mut generator = CoreErlangGenerator::new("conf");
+    let out = generator
+        .generate_value_type_new_with_args(&class)
+        .expect("new/1 codegen should succeed")
+        .to_pretty_string();
+    assert!(
+        out.contains(
+            "'beamtalk_class_instantiation':'check_init_args'\
+             ('Conf', 'new:', DefaultState, InitArgs, [])"
+        ),
+        "new/1 must validate InitArgs against DefaultState. Got:\n{out}"
+    );
+    assert!(
+        out.contains("call 'maps':'merge'(DefaultState, CheckedArgs)"),
+        "new/1 must merge the validated CheckedArgs. Got:\n{out}"
+    );
+}
+
 // ─── Opaque `native:` representations ────────────────────────────────────
 
 fn parse_one_class(source: &str) -> ClassDefinition {

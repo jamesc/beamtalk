@@ -54,7 +54,12 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
         '__class_mod__' => 'abstract_class_spawn'
         , '__shape_version__' => 1
     }~
-    in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
+    in let CheckedArgs = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
+        <'true'> when 'true' -> InitArgs
+        <'false'> when 'true' ->
+            call 'beamtalk_class_instantiation':'check_init_args'('Shape', 'spawnWith:', DefaultState, InitArgs, ['$bt_init_ack'])
+    end
+    in let FinalState = call 'maps':'merge'(DefaultState, CheckedArgs)
     in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
         <'true'> when 'true' ->
             let CleanState = call 'maps':'remove'('__skip_initialize__', FinalState) in

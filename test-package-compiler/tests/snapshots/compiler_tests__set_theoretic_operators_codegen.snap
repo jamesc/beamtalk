@@ -18,7 +18,8 @@ module 'set_theoretic_operators' ['new'/0, 'new'/1, 'tagWithoutFoo'/1, 'describe
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'set_theoretic_operators':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('SetTheoreticOperatorsCase', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'tagWithoutFoo'/1 = fun (Self) ->

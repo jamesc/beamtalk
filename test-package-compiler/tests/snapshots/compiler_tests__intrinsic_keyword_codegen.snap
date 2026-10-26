@@ -12,7 +12,8 @@ module 'intrinsic_keyword' ['new'/0, 'new'/1, 'blockValue'/1, 'size'/1, 'dispatc
 
 'new'/1 = fun (InitArgs) ->
     let DefaultState = call 'intrinsic_keyword':'new'() in
-    call 'maps':'merge'(DefaultState, InitArgs)
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('Foo', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
 
 
 'blockValue'/1 = fun (Self) ->

@@ -55,6 +55,9 @@ kind_to_class_arity_mismatch_test() ->
 kind_to_class_pattern_mismatch_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(pattern_mismatch)).
 
+kind_to_class_unknown_field_test() ->
+    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(unknown_field)).
+
 kind_to_class_immutable_value_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(immutable_value)).
 

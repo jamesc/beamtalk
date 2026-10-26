@@ -71,7 +71,8 @@ impl CoreErlangGenerator {
     ///                 'logCount' => 0
     ///             }~
     ///             in let MergedState = call 'maps':'merge'(ParentState, ChildFields)
-    ///             in let FinalState = call 'maps':'merge'(MergedState, InitArgs)
+    ///             in let CheckedArgs = <BT-4030 unknown-key check, leaf call only>
+    ///             in let FinalState = call 'maps':'merge'(MergedState, CheckedArgs)
     ///             in {'ok', FinalState}
     ///         <{'error', Reason}> when 'true' ->
     ///             %% Propagate parent init error
@@ -88,7 +89,8 @@ impl CoreErlangGenerator {
     ///         '__shape_version__' => 1,
     ///         'value' => 0
     ///     }~
-    ///     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
+    ///     in let CheckedArgs = <BT-4030 unknown-key check>
+    ///     in let FinalState = call 'maps':'merge'(DefaultState, CheckedArgs)
     ///        in {'ok', FinalState}
     /// ```
     #[allow(clippy::too_many_lines)] // inheritance-aware init with parent state merge
@@ -237,7 +239,16 @@ impl CoreErlangGenerator {
                                         line(),
                                         // Merge InitArgs last so user-provided values override defaults
                                         // Order: parent defaults → child defaults → user overrides
-                                        "in let FinalState = call 'maps':'merge'(MergedState, InitArgs)",
+                                        // `self.class_name()` (not the AST-or-module
+                                        // `class_name` above): identical when a class is
+                                        // present, and consistent with the spawn arms
+                                        // for expression modules with no class.
+                                        Self::check_init_args_guarded_doc(
+                                            &self.class_name(),
+                                            "MergedState",
+                                        ),
+                                        line(),
+                                        "in let FinalState = call 'maps':'merge'(MergedState, CheckedArgs)",
                                         line(),
                                         init_return.clone(),
                                     ]
@@ -293,7 +304,10 @@ impl CoreErlangGenerator {
                         "}~",
                         line(),
                         // Merge InitArgs into DefaultState - InitArgs values override defaults
-                        "in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)",
+                        // `self.class_name()`: see the MergedState path above.
+                        Self::check_init_args_guarded_doc(&self.class_name(), "DefaultState"),
+                        line(),
+                        "in let FinalState = call 'maps':'merge'(DefaultState, CheckedArgs)",
                         line(),
                         init_return,
                     ]
@@ -303,6 +317,54 @@ impl CoreErlangGenerator {
             ];
             Ok(doc)
         }
+    }
+
+    /// BT-4030: the leaf-only `spawnWith:` unknown-key check.
+    ///
+    /// Binds `CheckedArgs` — `InitArgs` validated via `check_init_args/5`
+    /// against the class's full declared field set (own, inherited, and
+    /// `late`, resolved from metadata at runtime), raising `#unknown_field`
+    /// for undeclared keys. Guarded by `__skip_initialize__` like the
+    /// marker and `init_return` below: a parent-helper call carries the
+    /// leaf's own keys and skips, leaving validation to the leaf. The
+    /// `'$bt_init_ack'` protocol key rides in `ExtraAllowed` since the
+    /// spawner adds it to every map's start args.
+    ///
+    /// Let-chain convention: opens with `in` (closing the base-state
+    /// binding) and ends with a bare `end` (the following `in let
+    /// FinalState` closes this one) — mirroring the neighbouring
+    /// `in let MergedState` / `in let FinalState` items.
+    fn check_init_args_guarded_doc(
+        class_name: &str,
+        base_state_var: &'static str,
+    ) -> Document<'static> {
+        docvec![
+            "in let CheckedArgs = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<'true'> when 'true' -> InitArgs",
+                    line(),
+                    "<'false'> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            super::super::errors::check_init_args_call_doc(
+                                leaf::atom(class_name.to_owned()),
+                                "spawnWith:",
+                                Document::Str(base_state_var),
+                                Document::Str("InitArgs"),
+                                &["$bt_init_ack"],
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+            line(),
+            "end",
+        ]
     }
 
     /// The `'__class_mod__'` and `'__shape_version__' => N` internal-key
