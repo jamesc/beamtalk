@@ -339,6 +339,10 @@ impl TypeChecker {
                 return;
             };
             if !self.block_diverges(true_block) {
+                // BT-4199: the dual `ifTrue: [...] ifFalse: [diverging]` shape.
+                if is_if_true_if_false {
+                    self.narrow_after_diverging_false_block(&info, arguments, env);
+                }
                 return;
             }
             // For `ifTrue:ifFalse:`, execution may reach the next
@@ -395,6 +399,28 @@ impl TypeChecker {
         }
     }
 
+    /// BT-4199: `<test> ifTrue: [...] ifFalse: [diverging]` — reaching the
+    /// next statement proves the test held, so narrow to the true-branch type
+    /// (unless the true block reassigns the tested variable).
+    fn narrow_after_diverging_false_block(
+        &self,
+        info: &NarrowingInfo,
+        arguments: &[Expression],
+        env: &mut TypeEnv,
+    ) {
+        let (Some(Expression::Block(true_block)), Some(Expression::Block(false_block))) =
+            (arguments.first(), arguments.get(1))
+        else {
+            return;
+        };
+        if self.block_diverges(false_block) && !block_may_reassign(true_block, &info.variable) {
+            env.push_refinement(RefinementLayer::method_remainder(
+                info.variable.clone(),
+                info.true_type.clone(),
+            ));
+        }
+    }
+
     /// Apply post-guard narrowing for a compound nil-guard (BT-4107).
     ///
     /// Mirrors [`Self::apply_early_return_narrowing`]'s single-variable logic
@@ -408,8 +434,9 @@ impl TypeChecker {
     ///   (some var is nil, but not which), so solo `ifFalse:` never narrows.
     /// - [`CompoundNilGuardKind::AndNotNil`]: the dual — `and:` is true only
     ///   when every conjunct is true, so a diverging false block
-    ///   (`ifFalse: [^...]`) proves every tested var non-nil. Solo `ifTrue:`
-    ///   never narrows.
+    ///   (`ifFalse: [^...]`, or the combined `ifTrue: [...] ifFalse: [^...]`
+    ///   whose true block does not reassign a tested var) proves every tested
+    ///   var non-nil. Solo `ifTrue:` never narrows.
     ///
     /// Each variable resolves its *current* type live (locals and previously
     /// narrowed `self.field` keys via
@@ -453,14 +480,27 @@ impl TypeChecker {
                 self.push_non_nil_remainders(&variables, env, hierarchy);
             }
             CompoundNilGuardKind::AndNotNil => {
-                if !is_if_false {
+                if !(is_if_false || is_if_true_if_false) {
                     return;
                 }
-                let Some(Expression::Block(false_block)) = arguments.first() else {
+                // `ifFalse:` carries the false block first; `ifTrue:ifFalse:`
+                // carries it second (BT-4199).
+                let false_idx = usize::from(is_if_true_if_false);
+                let Some(Expression::Block(false_block)) = arguments.get(false_idx) else {
                     return;
                 };
                 if !self.block_diverges(false_block) {
                     return;
+                }
+                if is_if_true_if_false {
+                    if let Some(Expression::Block(true_block)) = arguments.first() {
+                        if variables
+                            .iter()
+                            .any(|var| block_may_reassign(true_block, var))
+                        {
+                            return;
+                        }
+                    }
                 }
                 self.push_non_nil_remainders(&variables, env, hierarchy);
             }

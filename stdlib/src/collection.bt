@@ -126,7 +126,7 @@ abstract typed Value subclass: Collection(E)
   /// #(1, 2, 3) includes: 2      // => true
   /// #(1, 2, 3) includes: 9      // => false
   /// ```
-  includes: element :: E -> Boolean =>
+  includes: element :: Object -> Boolean =>
     self do: [:each |
       ((Erlang beamtalk_equality) eq: each with: element) ifTrue: [^true]
     ]

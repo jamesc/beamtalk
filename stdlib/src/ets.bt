@@ -308,7 +308,7 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// ```beamtalk
   /// cache includes: 42    // => true or false
   /// ```
-  includes: value :: V -> Boolean => self values includes: value
+  includes: value :: Object -> Boolean => self values includes: value
 
   /// Remove every entry but keep the table. Returns `nil`.
   ///
