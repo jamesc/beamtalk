@@ -139,7 +139,7 @@ jobs:
           JSON
 
       - name: Triage with Claude
-        uses: anthropics/claude-code-action@f27be6b65a4652f08a2ba3cff79114829b588967 # v1
+        uses: anthropics/claude-code-action@16f9f71ab9c490faf367f94dd294897edc25be33 # v1
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         with:
