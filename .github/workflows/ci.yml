@@ -21,6 +21,8 @@ on:
       - '!.devcontainer/**'
   pull_request:
     branches: [main]
+    # `labeled` so adding `ci:all-platforms` starts the opt-in macOS/Windows run.
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - '**'
       - '!*.md'
@@ -31,9 +33,19 @@ on:
       - '!.github/skills/**'
       - '!.devcontainer/**'
 
+  # Daily full run on every platform (macOS, Windows, desktop), since those are
+  # off on PRs and on push to main (BT-4209). `paths` filters do not apply here.
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+
+# PR runs cancel the superseded run for the same PR. A push to main is keyed on
+# its own SHA and never cancelled: main is the safety net for everything the PR
+# path skips (macOS/Windows, the older OTP, path-gated jobs), so every merge must
+# get a complete verdict even when the next merge lands minutes later (BT-4209).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -42,13 +54,337 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # ─── Fast checks on all platforms ──────────────────────────────────────
-  check:
+  # ─── Path decisions, computed once (BT-4209) ───────────────────────────
+  # Every "does this PR touch X?" decision lives here and nowhere else. Jobs
+  # gate on these outputs with a job-level `if:`, so a job that has nothing to
+  # do never takes a runner (it used to occupy one just to exit from a
+  # step-level filter). On a push to main every path gate is true: main runs
+  # the full Linux suite, for every OTP in the window. macOS, Windows and the
+  # desktop tests run on schedule / workflow_dispatch / the `ci:all-platforms`
+  # PR label instead (the desktop ubuntu leg also on a PR touching its paths).
+  #
+  # The corpus-tier path list is not repeated here: it lives in
+  # scripts/ci/corpus-gate.sh, which `just ci-changed` also calls.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # macOS/Windows (`check`'s platform legs) run only on a schedule, a manual
+      # dispatch, or a PR carrying the `ci:all-platforms` label; never by default
+      # and not on a push to main.
+      platforms: ${{ steps.filter.outputs.platforms }}
+      # JSON array of runners for `test-desktop`: all three OSes when `platforms`
+      # is true; ubuntu alone on a PR touching the desktop app's own paths; `[]`
+      # (job skipped) otherwise, and on a push to main.
+      desktop_os: ${{ steps.filter.outputs.desktop_os }}
+      # crates/beamtalk-core|codegen|repl, Cargo.toml/lock, Justfile, ci.yml:
+      # can change the Rust corpus tier's verdict (scripts/ci/corpus-gate.sh).
+      corpus: ${{ steps.filter.outputs.corpus }}
+      # crates/beamtalk-codegen/ changed: core-diff has something to report.
+      codegen: ${{ steps.filter.outputs.codegen }}
+      # The core-diff snapshot pipelines changed: core-diff-modes has work.
+      core_diff_modes: ${{ steps.filter.outputs.core_diff_modes }}
+      # docs/learning/ or the doctest pipeline changed: test-learn has work.
+      learn: ${{ steps.filter.outputs.learn }}
+      # runtime/ changed: test-dialyzer runs the (slow) `just dialyzer` step.
+      runtime: ${{ steps.filter.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compute path gates
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          # Pin Windows to 2022: erlef/setup-beam@v1 doesn't support win25 (windows-2025) yet
+          all_os='["ubuntu-latest","macos-latest","windows-2022"]'
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            # push (main): the full Linux suite, no macOS/Windows/desktop.
+            # schedule / workflow_dispatch: everything, on every platform.
+            if [ "$EVENT_NAME" = "push" ]; then
+              platforms=false; desktop_os='[]'
+            else
+              platforms=true; desktop_os="$all_os"
+            fi
+            {
+              echo "platforms=$platforms"
+              echo "desktop_os=$desktop_os"
+              for k in corpus codegen core_diff_modes learn runtime; do echo "$k=true"; done
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch --depth=1 origin "$BASE_SHA"
+          changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+
+          # matches PATTERN...: true when any changed path matches a shell glob
+          # (`*` crosses `/`, so `dir/*` is a prefix match).
+          matches() {
+            local path pat
+            while IFS= read -r path; do
+              [ -z "$path" ] && continue
+              for pat in "$@"; do
+                # shellcheck disable=SC2254
+                case "$path" in $pat) return 0 ;; esac
+              done
+            done <<< "$changed"
+            return 1
+          }
+          flag() { if "$@"; then echo true; else echo false; fi; }
+
+          # Corpus tier: one path list, shared with `just ci-changed`.
+          if printf '%s\n' "$changed" | scripts/ci/corpus-gate.sh; then corpus=true; else corpus=false; fi
+
+          codegen=$(flag matches 'crates/beamtalk-codegen/*')
+
+          core_diff_modes=$(flag matches \
+            crates/beamtalk-cli/src/commands/build_stdlib.rs \
+            crates/beamtalk-cli/src/commands/test.rs \
+            crates/beamtalk-cli/src/commands/test_stdlib.rs \
+            crates/beamtalk-cli/src/commands/util.rs \
+            Justfile)
+
+          learn=$(flag matches \
+            'docs/learning/*' .github/workflows/ci.yml Justfile \
+            'crates/beamtalk-cli/src/commands/test*.rs' \
+            crates/beamtalk-cli/src/beam_compiler.rs \
+            runtime/apps/beamtalk_runtime/src/beamtalk_stdlib_test.erl \
+            runtime/apps/beamtalk_stdlib/src/beamtalk_test_case.erl \
+            runtime/apps/beamtalk_stdlib/src/beamtalk_test_runner.erl)
+
+          runtime=$(flag matches 'runtime/*')
+
+          # Opt-in: the `ci:all-platforms` label runs macOS, Windows and the
+          # desktop tests on all three OSes for this PR.
+          if jq -e 'index("ci:all-platforms")' <<< "$PR_LABELS" > /dev/null; then
+            platforms=true; desktop_os="$all_os"
+          else
+            platforms=false
+            # The desktop app's own paths (the crate, the workspace crates it
+            # links, the recipe and this workflow): ubuntu only, so a desktop
+            # change gets at least one check.
+            if matches 'desktop/*' 'crates/beamtalk-desktop-broker/*' \
+                'crates/beamtalk-desktop-shell/*' 'crates/beamtalk-workspace/*' \
+                Justfile .github/workflows/ci.yml; then
+              desktop_os='["ubuntu-latest"]'
+            else
+              desktop_os='[]'
+            fi
+          fi
+
+          {
+            echo "platforms=$platforms"
+            echo "desktop_os=$desktop_os"
+            echo "corpus=$corpus"
+            echo "codegen=$codegen"
+            echo "core_diff_modes=$core_diff_modes"
+            echo "learn=$learn"
+            echo "runtime=$runtime"
+          } >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+  # ─── Linux build, lint and Rust tests, as parallel jobs (BT-4209) ──────
+  # These used to be one ubuntu `check` job (~16 min of build, clippy, fmt,
+  # lints and the fast Rust tier) followed by the ~15 min corpus tier in the
+  # same job. Splitting them lets each run in parallel on its own runner, so a
+  # typical PR's wall-clock is the slowest job, not their sum. macOS and
+  # Windows are the separate, opt-in `check` job below.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      # Node.js for fmt-check-js
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      - name: Check Cargo.lock is up to date
+        # The root Cargo.lock is committed; fail if Cargo.toml changed without it.
+        run: cargo tree --locked --workspace --depth 0 > /dev/null
+
+      # The lint-* recipes carry their own history: lint-workaround-comments
+      # (BT-2347 ratchet, BT-2841), lint-binary-literal-encoding (BT-3026),
+      # test-grammar (BT-3261), lint-removed-facade-names (BT-3646, ADR 0129),
+      # lint-nlr-tuple-matches (BT-3758), lint-class-var-catchers (BT-3769,
+      # ADR 0130 §4), test-lint-stamp (BT-3926). See their Justfile comments.
+      - name: Clippy, format and repo lints
+        run: just clippy fmt-check lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar test-lint-stamp
+
+      - name: Surface parity drift check (BT-2082)
+        # Verifies REPL ops × CLI × MCP × LSP coverage matches
+        # docs/development/surface-parity.md. Fails fast on inventory drift.
+        run: just check-surface-drift
+
+  # The fast Rust tier on Linux (everything but the corpus tier, which is the
+  # test-corpus job). Full test-stdlib/test-bunit/test-runtime run in the
+  # test-beam / test-runtime jobs.
+  test-rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      # Prebuilt cargo-nextest from nextest's own CDN (see the `check` job).
+      - name: Install cargo-nextest
+        run: |
+          bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          mkdir -p "$bin"
+          curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+            "https://get.nexte.st/0.9.148/linux" | tar -xz -C "$bin"
+          cargo nextest --version
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: linux-test
+          key: profile-${{ hashFiles('Cargo.toml') }}
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      # build first: the CLI integration tests exec the real `beamtalk` binary
+      # against the built runtime and stdlib.
+      - name: Build and Rust tests
+        run: just build test-rust
+
+  # ─── Rust corpus tier (ADR 0111/0131 state-threading proofs) ───────────
+  # `just test-corpus` (agreement and corpus proofs, ~15 min as one job) runs
+  # on a PR only when scripts/ci/corpus-gate.sh (via the `changes` job) says the
+  # changed paths can affect it, and always on a push to main. Sharded in two
+  # with nextest --partition so the tier fits the PR time budget; the tests
+  # are OS-independent, so Linux only.
+  test-corpus:
+    needs: changes
+    if: needs.changes.outputs.corpus == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      # erlc: the repl crate's assembler corpora compile generated Core Erlang.
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Install cargo-nextest
+        run: |
+          bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          mkdir -p "$bin"
+          curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+            "https://get.nexte.st/0.9.148/linux" | tar -xz -C "$bin"
+          cargo nextest --version
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: linux-test
+          key: profile-${{ hashFiles('Cargo.toml') }}
+
+      - name: Rust corpus tier (state-threading agreement and corpus proofs)
+        run: just test-corpus count:${{ matrix.shard }}/2
+
+  # ─── macOS / Windows fast checks (opt-in, BT-4209) ─────────────────────
+  # Off on PRs and on push to main by default (the Linux jobs above cover
+  # everything platform-independent; nightly.yml runs the full suite on
+  # macOS/Windows daily). Runs on schedule, workflow_dispatch, or a PR carrying
+  # the `ci:all-platforms` label.
+  check:
+    needs: changes
+    if: needs.changes.outputs.platforms == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS and Windows only, and only when `changes` says so (schedule,
+        # workflow_dispatch, or the `ci:all-platforms` PR label). Linux build,
+        # lint and tests are the separate lint / test-rust / test-corpus jobs.
         # Pin Windows to 2022: erlef/setup-beam@v1 doesn't support win25 (windows-2025) yet
-        os: [ubuntu-latest, macos-latest, windows-2022]
+        os: [macos-latest, windows-2022]
     runs-on: ${{ matrix.os }}
     # 40, not 30: a run with a cold rust-cache (every Cargo.toml profile
     # change) is ~28 min on Windows (11 min of dependency build alone), and a
@@ -64,25 +400,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      # The Rust corpus tier (`just test-corpus`, the state-threading agreement and
-      # corpus proofs, ~13 min) runs on a PR only when scripts/ci/corpus-gate.sh says
-      # the changed paths can affect it (the same script `just ci-changed` calls, so
-      # the path list has one home); on a push to main it always runs. Linux only
-      # (the tests are OS-independent).
-      - name: Decide whether the Rust corpus tier runs
-        id: corpus
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD | scripts/ci/corpus-gate.sh; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -168,11 +485,6 @@ jobs:
           echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
           "$TOOLCHAIN_CARGO" --version
 
-      - name: Check Cargo.lock is up to date
-        # The root Cargo.lock is committed; fail if Cargo.toml changed without it.
-        if: runner.os == 'Linux'
-        run: cargo tree --locked --workspace --depth 0 > /dev/null
-
       - name: Build, lint, and fast tests
         # build first so clippy and test-rust reuse its artifacts.
         # Full test-stdlib/test-bunit/test-runtime run only in the Linux-only 'test' job.
@@ -197,11 +509,7 @@ jobs:
         # runtime catch that applies a fun must use protect/1 or a bt-catcher-audit marker.
         # test-lint-stamp (BT-3926) also no-ops on Windows; the pre-push hook's lint
         # stamps must not depend on the cwd or the GIT_* variables a hook inherits.
-        run: just build clippy fmt-check ${{ runner.os == 'Linux' && 'test-rust' || 'test-rust-platform' }} lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar test-lint-stamp
-
-      - name: Rust corpus tier (state-threading agreement and corpus proofs)
-        if: runner.os == 'Linux' && steps.corpus.outputs.run == 'true'
-        run: just test-corpus
+        run: just build clippy fmt-check test-rust-platform lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar test-lint-stamp
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
@@ -225,16 +533,20 @@ jobs:
   # `patchelf`, needed only for that lane's AppImage bundling, not for
   # compiling/testing this crate).
   test-desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop_os != '[]'
     strategy:
       fail-fast: false
       matrix:
-        # Same OS set as the 'check' job above (including the win25 pin —
-        # see its comment), not desktop-release.yml's full release matrix:
-        # that workflow also builds macos-15-intel as a second *shipping*
-        # architecture, but this crate's Rust source has no architecture-
-        # specific logic, so one macOS unit-test run is sufficient
+        # The `changes` job's desktop_os: off on PRs and on push to main by
+        # default; ubuntu alone when a PR touches the desktop app's paths; all
+        # three OSes (same set as 'check', including the win25 pin) on a
+        # schedule, workflow_dispatch or the `ci:all-platforms` label. Not
+        # desktop-release.yml's full release matrix: that workflow also builds macos-15-intel as a second
+        # *shipping* architecture, but this crate's Rust source has no
+        # architecture-specific logic, so one macOS unit-test run is sufficient
         # coverage.
-        os: [ubuntu-latest, macos-latest, windows-2022]
+        os: ${{ fromJson(needs.changes.outputs.desktop_os) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -347,7 +659,8 @@ jobs:
   # this job instead. See docs/development/testing-strategy.md § Corpus
   # `.core` diff harness.
   core-diff:
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.codegen == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -356,24 +669,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Check whether this PR touches crates/beamtalk-codegen/
-        id: filter
-        run: |
-          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- crates/beamtalk-codegen/ | grep -q .; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Install Rust toolchain
-        if: steps.filter.outputs.run == 'true'
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: stable
 
       - name: Install Erlang/OTP
-        if: steps.filter.outputs.run == 'true'
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           version-file: .tool-versions
@@ -381,11 +682,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        if: steps.filter.outputs.run == 'true'
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Erlang/rebar3 artifacts
-        if: steps.filter.outputs.run == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
         with:
           path: |
@@ -398,7 +697,6 @@ jobs:
             ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        if: steps.filter.outputs.run == 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
@@ -420,7 +718,6 @@ jobs:
       # action so the save happens only after a *successful* miss build, and
       # happens even when the diff step below then reports differences.
       - name: Restore cached base-side .core snapshot
-        if: steps.filter.outputs.run == 'true'
         id: base-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
         with:
@@ -432,7 +729,7 @@ jobs:
       # directory behind, so the diff step below fails loudly on "no base
       # snapshot" instead of diffing against half of one.
       - name: Snapshot the PR base (cache miss)
-        if: steps.filter.outputs.run == 'true' && steps.base-cache.outputs.cache-hit != 'true'
+        if: steps.base-cache.outputs.cache-hit != 'true'
         id: base-snapshot
         continue-on-error: true
         env:
@@ -443,7 +740,6 @@ jobs:
 
       - name: Save base-side .core snapshot to cache
         if: >-
-          steps.filter.outputs.run == 'true' &&
           steps.base-cache.outputs.cache-hit != 'true' &&
           steps.base-snapshot.outcome == 'success'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
@@ -452,7 +748,6 @@ jobs:
           key: ${{ steps.base-cache.outputs.cache-primary-key }}
 
       - name: Run corpus .core diff against the PR base
-        if: steps.filter.outputs.run == 'true'
         id: core-diff
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -478,7 +773,6 @@ jobs:
 
       - name: Fail if this PR opted in to enforcement
         if: >-
-          steps.filter.outputs.run == 'true' &&
           steps.core-diff.outputs.exit_code != '0' &&
           contains(github.event.pull_request.labels.*.name, 'core-diff:enforce')
         run: |
@@ -491,7 +785,8 @@ jobs:
   # head in both modes and fails on any difference. Runs only when the
   # command pipelines or core-diff recipes change.
   core-diff-modes:
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.core_diff_modes == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -500,29 +795,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Check whether this PR touches the snapshot pipelines
-        id: filter
-        run: |
-          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
-              crates/beamtalk-cli/src/commands/build_stdlib.rs \
-              crates/beamtalk-cli/src/commands/test.rs \
-              crates/beamtalk-cli/src/commands/test_stdlib.rs \
-              crates/beamtalk-cli/src/commands/util.rs \
-              Justfile | grep -q .; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Install Rust toolchain
-        if: steps.filter.outputs.run == 'true'
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: stable
 
       - name: Install Erlang/OTP
-        if: steps.filter.outputs.run == 'true'
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           version-file: .tool-versions
@@ -530,11 +808,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        if: steps.filter.outputs.run == 'true'
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Erlang/rebar3 artifacts
-        if: steps.filter.outputs.run == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
         with:
           path: |
@@ -547,13 +823,11 @@ jobs:
             ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        if: steps.filter.outputs.run == 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Compare snapshot-only and full .core output
-        if: steps.filter.outputs.run == 'true'
         run: just core-diff-modes
 
   # ─── OTP support-window matrix (ADR 0125 §3.1, BT-3572) ────────────────
@@ -589,9 +863,19 @@ jobs:
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
+      # A PR gets only the newest OTP in the window (`last` after the numeric
+      # sort); a push to main gets the full window. See the comment above
+      # test-beam.
       - name: Compute OTP support-window matrix
         id: otp-matrix
-        run: echo "matrix=$(just otp-matrix)" >> "$GITHUB_OUTPUT"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          matrix="$(just otp-matrix)"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            matrix="$(jq -c 'sort_by(tonumber) | [last]' <<< "$matrix")"
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   # ─── Full test suite on Linux only (requires Erlang/OTP) ──────────────
   # Split into parallel jobs for faster CI (~5 min wall-clock vs ~16 min sequential).
@@ -601,7 +885,11 @@ jobs:
   # test-beam, test-runtime and test-dialyzer additionally run across every
   # OTP major in the otp-matrix job's window (ADR 0125 §3.1) — at minimum
   # `just test`'s Erlang-touching stages and `just dialyzer` itself, per
-  # BT-3572's acceptance criteria. test-integration/test-parity stay pinned
+  # BT-3572's acceptance criteria. That full window runs on every push to main
+  # (post-merge); a pull request runs only the newest OTP in it (BT-4209), to
+  # keep the PR fan-out small. The nightly workflow does not cover the older
+  # OTPs (it runs the single .tool-versions OTP on macOS/Windows), so main is
+  # where an older-OTP regression is caught. test-integration/test-parity stay pinned
   # to `.tool-versions`'s single OTP: they exercise the workspace/REPL/MCP
   # wire protocol, not OTP-version-sensitive compiled output.
 
@@ -764,7 +1052,7 @@ jobs:
           if-no-files-found: warn
 
   test-dialyzer:
-    needs: otp-matrix
+    needs: [changes, otp-matrix]
     strategy:
       fail-fast: false
       matrix:
@@ -831,24 +1119,8 @@ jobs:
       - name: Build
         run: just build
 
-      - name: Check for Erlang changes
-        id: erlang-changes
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # On push to main, compare with previous commit
-            BASE="${{ github.event.before }}"
-          else
-            # On PR, compare with the merge base against main
-            BASE="origin/main"
-          fi
-          if git diff --name-only "$BASE"...HEAD | grep -qE '^runtime/'; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Dialyzer type checking (Erlang runtime)
-        if: steps.erlang-changes.outputs.changed == 'true'
+        if: needs.changes.outputs.runtime == 'true'
         run: just dialyzer
 
       - name: Dialyzer spec validation (generated -spec attributes)
@@ -865,6 +1137,8 @@ jobs:
   # to main it always runs, so a compiler change that breaks the guide still
   # surfaces there.
   test-learn:
+    needs: changes
+    if: needs.changes.outputs.learn == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -872,33 +1146,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check whether this change touches docs/learning/ or the doctest pipeline
-        id: filter
-        run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD -- \
-              docs/learning/ .github/workflows/ci.yml Justfile \
-              'crates/beamtalk-cli/src/commands/test*.rs' \
-              crates/beamtalk-cli/src/beam_compiler.rs \
-              runtime/apps/beamtalk_runtime/src/beamtalk_stdlib_test.erl \
-              runtime/apps/beamtalk_stdlib/src/beamtalk_test_case.erl \
-              runtime/apps/beamtalk_stdlib/src/beamtalk_test_runner.erl | grep -q .; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Install Rust toolchain
-        if: steps.filter.outputs.run == 'true'
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: stable
 
       - name: Install Erlang/OTP
-        if: steps.filter.outputs.run == 'true'
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           version-file: .tool-versions
@@ -906,11 +1159,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        if: steps.filter.outputs.run == 'true'
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Erlang/rebar3 artifacts
-        if: steps.filter.outputs.run == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
         with:
           path: |
@@ -923,13 +1174,11 @@ jobs:
             ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        if: steps.filter.outputs.run == 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
       - name: Test learning guide (docs/learning/)
-        if: steps.filter.outputs.run == 'true'
         run: just test-learn
 
   test-integration:

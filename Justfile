@@ -1145,23 +1145,25 @@ test-rust: (_test-rust "")
 # whole workspace to `just ci-changed`, the one full local run of a PR.
 test-rust-crate CRATE: (_test-rust "-p " + CRATE)
 
+# PARTITION is an optional nextest `--partition` spec (e.g. `count:1/2`) so CI can
+# shard the tier across jobs; empty runs the whole tier.
 # The slow tier (see `test-rust`). Linux-only in CI; no platform subset.
 [unix]
-test-corpus:
+test-corpus PARTITION="":
     #!/usr/bin/env bash
     set -o pipefail
     echo "🧬 Running the Rust corpus tier (state-threading agreement and corpus proofs)..."
     if command -v cargo-nextest >/dev/null 2>&1; then
-        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}' || exit $?
+        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}' {{ if PARTITION == "" { "" } else { "--partition " + PARTITION } }} || exit $?
     else
         echo "⏭️  cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)"
     fi
     echo "✅ Rust corpus tier complete"
 
 [windows]
-test-corpus:
+test-corpus PARTITION="":
     @echo "🧬 Running the Rust corpus tier (state-threading agreement and corpus proofs)..."
-    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)" }
+    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E '{{ corpus_tests }}' {{ if PARTITION == "" { "" } else { "--partition " + PARTITION } }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found: the corpus tier already ran inside test-rust's cargo test fallback (no tiering without nextest)" }
     @echo "✅ Rust corpus tier complete"
 
 # The platform-sensitive subset of the Rust tests: every crate except the pure
