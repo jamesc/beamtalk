@@ -920,7 +920,6 @@ fn lowered_chain(position: Position) -> bool {
     }
 }
 
-/// What the coarse rows say about a statement, before the measured carve-outs.
 /// BT-3950: whether a construct of `family` in an actor method, with enclosing
 /// block roles `containers` (outermost first), is the BT-4194 shape: a block
 /// `value` send directly in a fold body with a `whileTrue:` loop outside it
@@ -947,6 +946,7 @@ fn is_actor_nested_fold_value(
         && matches!(containers.last(), Some(DoBody | ListOpBody))
 }
 
+/// What the coarse rows say about a statement, before the measured carve-outs.
 fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
     if lowered_in(kind, context) && lowered_chain(position) {
         return true;
