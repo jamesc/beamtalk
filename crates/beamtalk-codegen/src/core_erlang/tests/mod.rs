@@ -245,6 +245,7 @@ mod threaded_locals;
 mod threaded_locals_agreement;
 mod tier2_block_local_corpus;
 mod tier2_block_local_inner_loop;
+mod tier2_merge;
 mod trait_flattening;
 mod typed_sealed;
 mod value_position_assignment_agreement;

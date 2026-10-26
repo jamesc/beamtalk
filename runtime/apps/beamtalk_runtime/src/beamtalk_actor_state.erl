@@ -58,7 +58,7 @@ only for `super_send/5` and `refresh/2`, which call them.
     take/0,
     uninstall/1,
     snapshot/0,
-    restore/1,
+    restore/2,
     installed/0,
     cell_owner/0,
     store/1,
@@ -122,17 +122,26 @@ uninstall({_, _} = Old) ->
 
 -doc """
 The cell as it is now (`undefined` outside a callback): the catch boundary of an
-`on:do:` inside a block takes one on entry (ADR 0137 §5) and `restore/1`s it when
+`on:do:` inside a block takes one on entry (ADR 0137 §5) and `restore/2`s it when
 an error is caught, so the handler sees the state from before the protected region.
 """.
 -spec snapshot() -> cell().
 snapshot() ->
     erlang:get(?CELL).
 
--doc "Put the cell back to a `snapshot/0` (an error caught inside a block discards the writes of its region).".
--spec restore(cell()) -> ok.
-restore(Snapshot) ->
-    uninstall(Snapshot).
+-doc """
+Put the cell back to a `snapshot/0` (an error caught inside a block discards the
+writes of its region) — but only at home. Away from home the cell holds another
+actor's state (or nothing): an `on:do:` in a block running there must not roll
+back writes that are not its own actor's (BT-4122), so it leaves the cell alone.
+The handler still sees the right fields: away it reads the block's capture.
+""".
+-spec restore(#beamtalk_object{}, cell()) -> ok.
+restore(Self, Snapshot) ->
+    case at_home(Self) of
+        {true, _} -> uninstall(Snapshot);
+        false -> ok
+    end.
 
 -doc "True when a callback's cell is installed in this process.".
 -spec installed() -> boolean().

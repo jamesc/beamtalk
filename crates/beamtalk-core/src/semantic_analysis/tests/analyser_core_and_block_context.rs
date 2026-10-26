@@ -464,11 +464,11 @@ fn test_field_assignment_in_stored_block_is_not_a_stored_closure_error() {
         span: test_span(),
     };
 
-    let block = Expression::Block(crate::ast::Block {
-        parameters: vec![],
-        body: vec![bare(field_assignment)],
-        span: test_span(),
-    });
+    let block = Expression::Block(crate::ast::Block::new(
+        vec![],
+        vec![bare(field_assignment)],
+        test_span(),
+    ));
 
     // Assign block to variable (Stored context)
     let assignment = Expression::Assignment {
@@ -513,11 +513,11 @@ fn test_field_assignment_in_passed_block_no_error() {
         span: test_span(),
     };
 
-    let block = Expression::Block(crate::ast::Block {
-        parameters: vec![crate::ast::BlockParameter::new("x", test_span())],
-        body: vec![bare(field_assignment)],
-        span: test_span(),
-    });
+    let block = Expression::Block(crate::ast::Block::new(
+        vec![crate::ast::BlockParameter::new("x", test_span())],
+        vec![bare(field_assignment)],
+        test_span(),
+    ));
 
     // Pass block to a message send with a non-control-flow selector
     let message_send = Expression::MessageSend {
@@ -567,11 +567,11 @@ fn test_field_assignment_in_field_stored_block_no_error() {
         span: test_span(),
     };
 
-    let block = Expression::Block(crate::ast::Block {
-        parameters: vec![crate::ast::BlockParameter::new("x", test_span())],
-        body: vec![bare(field_assignment)],
-        span: test_span(),
-    });
+    let block = Expression::Block(crate::ast::Block::new(
+        vec![crate::ast::BlockParameter::new("x", test_span())],
+        vec![bare(field_assignment)],
+        test_span(),
+    ));
 
     // self.onTick := [:x | self.sum := 0] — block stored into a field.
     let assignment = Expression::Assignment {
@@ -633,11 +633,11 @@ fn test_captured_variable_mutation_in_stored_block_is_the_escaping_block_error()
         span: test_span(),
     };
 
-    let block = Expression::Block(crate::ast::Block {
-        parameters: vec![],
-        body: vec![bare(count_mutation)],
-        span: test_span(),
-    });
+    let block = Expression::Block(crate::ast::Block::new(
+        vec![],
+        vec![bare(count_mutation)],
+        test_span(),
+    ));
 
     // Assign block to variable (Stored context)
     let block_assignment = Expression::Assignment {
@@ -683,11 +683,11 @@ fn test_field_assignment_in_control_flow_block_no_diagnostic() {
         span: test_span(),
     };
 
-    let block = Expression::Block(crate::ast::Block {
-        parameters: vec![],
-        body: vec![bare(field_assignment)],
-        span: test_span(),
-    });
+    let block = Expression::Block(crate::ast::Block::new(
+        vec![],
+        vec![bare(field_assignment)],
+        test_span(),
+    ));
 
     // Use in control flow position
     let message_send = Expression::MessageSend {
@@ -741,11 +741,11 @@ fn test_local_variable_mutation_in_stored_block_no_diagnostic() {
         span: test_span(),
     };
 
-    let block = Expression::Block(crate::ast::Block {
-        parameters: vec![],
-        body: vec![bare(x_def), bare(x_mutation)],
-        span: test_span(),
-    });
+    let block = Expression::Block(crate::ast::Block::new(
+        vec![],
+        vec![bare(x_def), bare(x_mutation)],
+        test_span(),
+    ));
 
     // Assign block to variable (Stored context)
     let block_assignment = Expression::Assignment {

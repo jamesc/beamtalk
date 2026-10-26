@@ -125,6 +125,7 @@ impl CoreErlangGenerator {
         // and the body being generated.
         frame.tier2_local_vars.clear();
         frame.tier2_local_var_captured_mutations.clear();
+        frame.tier2_local_var_may_write_state.clear();
 
         // Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
@@ -373,11 +374,16 @@ impl CoreErlangGenerator {
             else {
                 continue;
             };
-            let captured_mutations = Self::captured_mutations_for_block(block);
+            // One analysis pass feeds both facts below (mutations and the
+            // Tier 2 merge predicate) instead of re-walking the block.
+            let analysis = super::super::block_analysis::analyze_block(block);
+            let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
             // ADR 0137: only a block that mutates a captured local is Tier 2. A
             // block that writes a field is an ordinary closure over the actor's
-            // state (`actor_state_access.rs`); one that does both stays Tier 2,
-            // whose `StateAcc` is the caller's `State`.
+            // state (`actor_state_access.rs`); one that does both stays Tier 2.
+            // BT-4122: such a block's `StateAcc` carries its locals, while its
+            // fields go through the cell (the Tier 2 merge) — recorded in
+            // `tier2_local_var_may_write_state` when promoted below.
             let needs_tier2 = !captured_mutations.is_empty();
             if !needs_tier2 {
                 continue;
@@ -401,6 +407,12 @@ impl CoreErlangGenerator {
                 if !captured_mutations.is_empty() {
                     self.tier2_local_var_captured_mutations
                         .insert(var_name.to_string(), captured_mutations);
+                }
+                // BT-4122: and whether the block may write the actor's
+                // fields, so the Tier 2 merge knows which calls bracket.
+                if analysis.may_write_actor_state() {
+                    self.tier2_local_var_may_write_state
+                        .insert(var_name.to_string());
                 }
             }
         }
@@ -717,6 +729,7 @@ impl CoreErlangGenerator {
         // function without clearing it first.
         self.tier2_local_vars.clear();
         self.tier2_local_var_captured_mutations.clear();
+        self.tier2_local_var_may_write_state.clear();
         self.prescan_tier2_local_vars(body);
 
         // Classify and lower each expression to ThreadedStmts, in order.
@@ -3108,6 +3121,60 @@ impl CoreErlangGenerator {
         }
         Self::inline_block_captured_mutations(expr)
     }
+
+    /// Whether an operand-position Tier 2 call on the local `name` merges
+    /// into its bracket (BT-4122): a may-write Tier 2 local outside a
+    /// cell closure (no bracket wraps there) and outside the two faults
+    /// (test-only; the no-brackets fault wraps nothing, and the legacy
+    /// fault compiles the legacy `fun`, whose fields live in the return
+    /// the merge would drop — full legacy behavior instead). The single
+    /// source `close_tier2_value_subexpr_doc` (tuple through vs legacy
+    /// drop) and `synced_call_value` (unpack element 1 + rebind locals vs
+    /// plain value) both read, so the two cannot disagree.
+    pub(in crate::core_erlang) fn tier2_operand_merges(&self, name: &str) -> bool {
+        #[cfg(test)]
+        let fault = super::super::synced_call::FAULT_NO_BRACKETS.with(std::cell::Cell::get)
+            || super::super::synced_call::FAULT_LEGACY_TIER2.with(std::cell::Cell::get);
+        #[cfg(not(test))]
+        let fault = false;
+        !fault
+            && !self.in_cell_closure()
+            && self.tier2_local_vars.contains(name)
+            && self.tier2_local_var_may_write_state.contains(name)
+    }
+
+    /// The receiver name when `expr` is a Tier 2 `value`-family send on a
+    /// recorded Tier 2 local (BT-4122): `None` for an inline literal
+    /// (inlined, no `fun`), a cascade that normalizes to one, or anything
+    /// else. No selector check: promotion proved every use of the var is
+    /// a `value`-family send, so the name suffices. The wrap-side half of
+    /// [`Self::tier2_operand_merges`].
+    pub(in crate::core_erlang) fn tier2_merge_call_name(expr: &Expression) -> Option<&str> {
+        let inner = expr.unwrap_parens();
+        let receiver = match inner {
+            Expression::MessageSend { receiver, .. } => receiver.as_ref(),
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                beamtalk_core::semantic_analysis::block_facts::normalize_cascade(receiver, messages)
+                    .0
+            }
+            _ => return None,
+        };
+        match receiver.unwrap_parens() {
+            Expression::Identifier(id) => Some(id.name.as_str()),
+            _ => None,
+        }
+    }
+
+    // BT-4122: no caller-unpack arm — a legacy Tier 2 statement unpack
+    // rebinds `State` from a return the `fun` threaded self-consistently
+    // from a fresh call-time state, so it is correct, and flagging it
+    // would fire only on correct code. The `FieldReadFromStateAcc`
+    // fun-body arm is the rule's tripwire instead: it forces the
+    // position-robust merged shape (a legacy `fun` drops field writes
+    // in positions that discard its return — operand drops, closure
+    // scratch maps).
 
     /// Generates the `Document` for an
     /// expression already classified as `BodyExprKind::Tier2ValueCall` or the

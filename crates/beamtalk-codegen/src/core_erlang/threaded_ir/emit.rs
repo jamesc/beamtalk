@@ -306,12 +306,14 @@ pub(in crate::core_erlang) fn render(
                 call,
                 result,
                 load,
+                tier2_local_rebinds,
                 ..
             } => docs.push(render_synced_call(
                 store,
                 call,
                 result.as_deref(),
                 load.as_ref(),
+                tier2_local_rebinds,
                 ctx,
             )),
         }
@@ -363,6 +365,7 @@ fn render_synced_call(
     call: &Document<'static>,
     result: Option<&str>,
     load: Option<&VersionedVar>,
+    tier2_local_rebinds: &[(String, String)],
     ctx: &RenderCtx,
 ) -> Document<'static> {
     let store_name = ctx.resolve_prefix(store);
@@ -382,13 +385,28 @@ fn render_synced_call(
         None => parts.push(call.clone()),
     }
     if let Some(load) = load {
+        let load_name = ctx.resolve_prefix(load);
         parts.push(docvec![
             "let ",
-            leaf::var(ctx.resolve_prefix(load)),
+            leaf::var(load_name.clone()),
             " = ",
             cell_take_call(),
             " in "
         ]);
+        // BT-4122: a merged Tier 2 call mutated caller-scope locals (the
+        // only bracketed call that can); rebind each live Core name from
+        // the reloaded state, like the statement unpacker's rebinds.
+        for (core_var, key) in tier2_local_rebinds {
+            parts.push(docvec![
+                "let ",
+                leaf::var(core_var.clone()),
+                " = call 'maps':'get'(",
+                leaf::atom(key.clone()),
+                ", ",
+                leaf::var(load_name.clone()),
+                ") in ",
+            ]);
+        }
     }
     Document::Vec(parts)
 }

@@ -174,6 +174,35 @@ unreachable_error_shape_test() ->
             ?assertEqual(#{field => x}, D)
     end.
 
+%%% snapshot / restore (BT-4122: restore only rolls back at home)
+
+restore_puts_the_cell_back_to_the_snapshot_at_home_test() ->
+    Self = self_obj(),
+    with_cell(#{x => 0}, fun() ->
+        Snap = beamtalk_actor_state:snapshot(),
+        beamtalk_actor_state:put(Self, x, 9),
+        ?assertEqual(#{x => 9}, beamtalk_actor_state:take()),
+        ok = beamtalk_actor_state:restore(Self, Snap),
+        ?assertEqual(#{x => 0}, beamtalk_actor_state:take())
+    end).
+
+restore_away_leaves_the_other_actors_cell_alone_test() ->
+    %% An actor A block with on:do: running inside actor B's callback: the
+    %% region's snapshot is B's cell, and B may have committed writes after
+    %% it. Rolling back would discard B's writes, so restore/2 is a no-op.
+    Foreign = foreign_obj(),
+    with_cell(#{b => 1}, fun() ->
+        Snap = beamtalk_actor_state:snapshot(),
+        beamtalk_actor_state:store(#{b => 2}),
+        ok = beamtalk_actor_state:restore(Foreign, Snap),
+        ?assertEqual(#{b => 2}, beamtalk_actor_state:take())
+    end).
+
+restore_with_no_cell_is_a_noop_test() ->
+    ?assertEqual(undefined, beamtalk_actor_state:snapshot()),
+    ok = beamtalk_actor_state:restore(self_obj(), undefined),
+    ?assertEqual(false, beamtalk_actor_state:installed()).
+
 %%% protect
 
 protect_restores_cell_on_exception_test() ->

@@ -21,6 +21,7 @@ fn synced(store: VersionedVar, load: Option<VersionedVar>) -> ThreadedStmt {
         result: Some("_Synced1".to_string()),
         load,
         span: span(),
+        tier2_local_rebinds: Vec::new(),
     }
 }
 
@@ -47,6 +48,7 @@ fn a_store_only_synced_call_renders_the_statement_verbatim_after_the_store() {
         result: None,
         load: None,
         span: span(),
+        tier2_local_rebinds: Vec::new(),
     }];
     assert_eq!(
         lower_and_render(&ir).to_pretty_string(),
@@ -101,6 +103,7 @@ fn a_store_only_synced_call_consumes_nothing() {
             result: None,
             load: None,
             span: span(),
+            tier2_local_rebinds: Vec::new(),
         },
         ThreadedStmt::Bind {
             target: state(2, frame),

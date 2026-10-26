@@ -1733,6 +1733,18 @@ impl CoreErlangGenerator {
         let Expression::FieldAccess { field, .. } = target.as_ref() else {
             unreachable!("field-assignment lowering requires a FieldAccess target");
         };
+        // BT-4122 (`FieldReadFromStateAcc` fun-body arm): a Tier 2 `fun`
+        // threads this write through its `StateAcc`. After the merge the
+        // `fun` writes the cell instead; a merged body never reaches here.
+        if self.in_tier2_stateful_body && self.synced_calls_scope() {
+            self.record_tier2_stateacc_gap(
+                format!(
+                    "{} := (tier2 fun body writes field via StateAcc)",
+                    field.name
+                ),
+                span,
+            );
+        }
         if self.loop_mode.in_hybrid_loop
             && self
                 .loop_mode
