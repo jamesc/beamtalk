@@ -19,7 +19,8 @@ Covers:
 * trace mode success → `{trace, Steps, Output, Warnings}`;
 * trace mode error → `{error, #beamtalk_error{}, Output, Warnings}` (ensure_structured_error wrap);
 * `Program exit: N` in trace mode → `{script_exit, N, Output, Warnings}`;
-* `handle/4` WebSocket edge wrapper → encodes the term result to a JSON binary.
+* `handle/4` WebSocket edge wrapper → encodes the term result to a JSON binary;
+* BT-4167: Character-typed results tagged for `$X` display, Strings quoted.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -227,6 +228,59 @@ handle_websocket_encodes_eval_result_to_json_test_() ->
                 ?assert(is_map(Decoded)),
                 ?assert(maps:is_key(<<"value">>, Decoded)),
                 ?assertEqual(3, maps:get(<<"value">>, Decoded))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-4167 — REPL value display: Characters, Strings, Binaries, Classes
+%%====================================================================
+
+handle_term_character_literal_tags_result_test_() ->
+    {setup, fun() -> setup(<<"test-eval-ops-char">>) end, fun teardown/1, fun(SessionPid) ->
+        [
+            ?_test(begin
+                Msg = make_msg(<<"eval">>),
+                Result = beamtalk_repl_ops_eval:handle_term(
+                    <<"eval">>, #{<<"code">> => <<"$A">>}, Msg, SessionPid
+                ),
+                %% Statically Character-typed: tagged for $A display.
+                ?assertMatch({ok, {beamtalk_character, 65}, _, _}, Result)
+            end),
+            ?_test(begin
+                Msg = make_msg(<<"eval">>),
+                Result = beamtalk_repl_ops_eval:handle_term(
+                    <<"eval">>, #{<<"code">> => <<"65">>}, Msg, SessionPid
+                ),
+                %% Plain Integer: untagged, displays as 65.
+                ?assertMatch({ok, 65, _, _}, Result)
+            end)
+            %% NOTE: `Character value: 65` factory tagging is pinned by the
+            %% `repl_value_display.btscript` repl-protocol case instead — it
+            %% needs full stdlib (Character class), while this EUnit uses the
+            %% lightweight `setup` without stdlib.
+        ]
+    end}.
+
+handle_websocket_character_displays_distinctly_test_() ->
+    {setup, fun() -> setup(<<"test-eval-ops-char-ws">>) end, fun teardown/1, fun(SessionPid) ->
+        [
+            ?_test(begin
+                Msg = make_msg(<<"eval">>),
+                Result = beamtalk_repl_ops_eval:handle(
+                    <<"eval">>, #{<<"code">> => <<"$A">>}, Msg, SessionPid
+                ),
+                Decoded = json:decode(Result),
+                ?assertEqual(<<"$A">>, maps:get(<<"value">>, Decoded))
+            end),
+            ?_test(begin
+                Msg = make_msg(<<"eval">>),
+                Result = beamtalk_repl_ops_eval:handle(
+                    <<"eval">>, #{<<"code">> => <<"\"hello\"">>}, Msg, SessionPid
+                ),
+                Decoded = json:decode(Result),
+                %% Strings display quoted.
+                ?assertEqual(<<"\"hello\"">>, maps:get(<<"value">>, Decoded))
             end)
         ]
     end}.
