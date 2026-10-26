@@ -1306,6 +1306,171 @@ TestCase subclass: ActorClosureMatrixTest
     self assert: c nlrWhileSSEarly equals: 8
     self assert: c n equals: 8
 
+  testLitValueWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c litValueWLStmt equals: 1200
+    self assert: c n equals: 12
+
+  testLitValueWLAssign =>
+    c := ClosureMatrixSubject spawn
+    self assert: c litValueWLAssign equals: 11200
+    self assert: c n equals: 12
+
+  testLitValueWLReturn =>
+    c := ClosureMatrixSubject spawn
+    self assert: c litValueWLReturn equals: 1
+    self assert: c n equals: 12
+
+  testDoListWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c doListWLStmt equals: 3200
+    self assert: c n equals: 32
+
+  testTimesRepeatWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c timesRepeatWLStmt equals: 3200
+    self assert: c n equals: 32
+
+  testToDoWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c toDoWLStmt equals: 3200
+    self assert: c n equals: 32
+
+  testWhileLoopWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c whileLoopWLStmt equals: 3200
+    self assert: c n equals: 32
+
+  testCollectWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c collectWLStmt equals: 3200
+    self assert: c n equals: 32
+
+  testCollectWLAssign =>
+    c := ClosureMatrixSubject spawn
+    self assert: c collectWLAssign equals: 63200
+    self assert: c n equals: 32
+
+  testCollectWLReturn =>
+    c := ClosureMatrixSubject spawn
+    self assert: c collectWLReturn equals: #(1, 2, 3)
+    self assert: c n equals: 32
+
+  testInjectWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c injectWLStmt equals: 3200
+    self assert: c n equals: 32
+
+  testInjectWLAssign =>
+    c := ClosureMatrixSubject spawn
+    self assert: c injectWLAssign equals: 33200
+    self assert: c n equals: 32
+
+  testInjectWLReturn =>
+    c := ClosureMatrixSubject spawn
+    self assert: c injectWLReturn equals: 3
+    self assert: c n equals: 32
+
+  testInjectWLOperand =>
+    c := ClosureMatrixSubject spawn
+    self assert: c injectWLOperand equals: 43200
+    self assert: c n equals: 32
+
+  testIfTrueWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c ifTrueWLStmt equals: 1200
+    self assert: c n equals: 12
+
+  testIfTrueWLAssign =>
+    c := ClosureMatrixSubject spawn
+    self assert: c ifTrueWLAssign equals: 11200
+    self assert: c n equals: 12
+
+  testIfTrueWLReturn =>
+    c := ClosureMatrixSubject spawn
+    self assert: c ifTrueWLReturn equals: 1
+    self assert: c n equals: 12
+
+  testIfTrueWLOperand =>
+    c := ClosureMatrixSubject spawn
+    self assert: c ifTrueWLOperand equals: 21200
+    self assert: c n equals: 12
+
+  testOnDoWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c onDoWLStmt equals: 1200
+    self assert: c n equals: 12
+
+  testOnDoWLAssign =>
+    c := ClosureMatrixSubject spawn
+    self assert: c onDoWLAssign equals: 11200
+    self assert: c n equals: 12
+
+  testOnDoWLReturn =>
+    c := ClosureMatrixSubject spawn
+    self assert: c onDoWLReturn equals: 1
+    self assert: c n equals: 12
+
+  testOnDoWLOperand =>
+    c := ClosureMatrixSubject spawn
+    self assert: c onDoWLOperand equals: 21200
+    self assert: c n equals: 12
+
+  testEnsureWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c ensureWLStmt equals: 1200
+    self assert: c n equals: 12
+
+  testEnsureWLAssign =>
+    c := ClosureMatrixSubject spawn
+    self assert: c ensureWLAssign equals: 11200
+    self assert: c n equals: 12
+
+  testEnsureWLReturn =>
+    c := ClosureMatrixSubject spawn
+    self assert: c ensureWLReturn equals: 1
+    self assert: c n equals: 12
+
+  testEnsureWLOperand =>
+    c := ClosureMatrixSubject spawn
+    self assert: c ensureWLOperand equals: 21200
+    self assert: c n equals: 12
+
+  testNestedWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c nestedWLStmt equals: 4200
+    self assert: c n equals: 42
+
+  testInCondWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c inCondWLStmt equals: 2200
+    self assert: c n equals: 22
+
+  testOnDoInDoWLStmt =>
+    c := ClosureMatrixSubject spawn
+    self assert: c onDoInDoWLStmt equals: 2200
+    self assert: c n equals: 22
+
+  testNlrDoWLEarly =>
+    c := ClosureMatrixSubject spawn
+    self assert: c nlrDoWLEarly equals: 22
+    self assert: c n equals: 22
+
+  testNlrOnDoWLEarly =>
+    c := ClosureMatrixSubject spawn
+    self assert: c nlrOnDoWLEarly equals: 12
+    self assert: c n equals: 12
+
+  testNlrEnsureWLEarly =>
+    c := ClosureMatrixSubject spawn
+    self assert: c nlrEnsureWLEarly equals: 12
+    self assert: c n equals: 12
+
+  testNlrWhileWLEarly =>
+    c := ClosureMatrixSubject spawn
+    self assert: c nlrWhileWLEarly equals: 22
+    self assert: c n equals: 22
+
   testAwayRunR =>
     c := ClosureMatrixSubject spawn
     runner := ClosureCellRunner spawn

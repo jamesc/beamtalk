@@ -64,6 +64,12 @@ def m_ss(s):
     return s["n"]
 
 
+def m_wl(s):
+    s["c"] += 1
+    s["n"] += 10
+    return s["c"]
+
+
 SHAPES = {
     "R": ("self.n", m_r),
     "RW": ("self.n := self.n + 1. self.n", m_rw),
@@ -71,6 +77,8 @@ SHAPES = {
     "RWB": ("self.n := self.n + base. self.n", m_rwb),
     "RB": ("self.n + base", m_rb),
     "SS": ("self.n := self.n + self peek. self.n", m_ss),
+    # BT-4122 item 1: writes a captured local AND a field (Tier 2 merge).
+    "WL": ("c := c + 1. self.n := self.n + 10. c", m_wl),
 }
 
 # --- send kinds ------------------------------------------------------------------
@@ -116,7 +124,7 @@ SUM = "(r inject: 0 into: [:s :x | s + x])"
 def run_send(send, shape):
     """Run the model: returns (yielded value, state)."""
     _, kind, runs = SENDS[send]
-    state = {"n": N0}
+    state = {"n": N0, "c": 0}
     model = SHAPES[shape][1]
     values = [model(state) for _ in range(runs)]
     if kind == "list":
@@ -132,10 +140,18 @@ def literal(value):
     return str(value)
 
 
+# ADR 0133: a block that assigns a captured local (`WL`) may not be stored
+# (`varValue`, `stored`) or passed to a method the compiler does not lower in
+# place (`twice:`, `runAll:`) — those combinations are compile errors, not cells.
+WL_EXCLUDED_SENDS = {"varValue", "twice", "stored", "passDo"}
+
+
 def home_cells():
     cells = []
     for shape, (body_src, _) in SHAPES.items():
         for send, (lines, kind, _) in SENDS.items():
+            if shape == "WL" and send in WL_EXCLUDED_SENDS:
+                continue
             body = body_src
             rendered = [line.replace("BODY", body) for line in lines]
             pre, expr = rendered[:-1], rendered[-1]
@@ -150,6 +166,8 @@ def home_cells():
             for position in positions:
                 name = f"{send}{shape}{position.capitalize()}"
                 code = ([f"base := {BASE}"] if "base" in body else []) + pre
+                if "c := c" in body:
+                    code = ["c := 0"] + code
                 n = state["n"]
                 finish = n * 100
                 if position == "stmt":

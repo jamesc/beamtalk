@@ -1887,6 +1887,342 @@ Actor subclass: ClosureMatrixSubject
       ]
     0
 
+  litValueWLStmt =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] value
+    (self.n * 100)
+
+  litValueWLAssign =>
+    c := 0
+    r := [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] value
+    r * 10000 + (self.n * 100)
+
+  litValueWLReturn =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] value
+
+  doListWLStmt =>
+    c := 0
+    #(1, 2, 3)
+      do: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  timesRepeatWLStmt =>
+    c := 0
+    3
+      timesRepeat: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  toDoWLStmt =>
+    c := 0
+    1
+      to: 3
+      do: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  whileLoopWLStmt =>
+    c := 0
+    i := 0
+    [i < 3]
+      whileTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+        i := i + 1
+      ]
+    (self.n * 100)
+
+  collectWLStmt =>
+    c := 0
+    #(1, 2, 3)
+      collect: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  collectWLAssign =>
+    c := 0
+    r := #(1, 2, 3)
+      collect: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (r inject: 0 into: [:s :x | s + x]) * 10000 + (self.n * 100)
+
+  collectWLReturn =>
+    c := 0
+    #(1, 2, 3)
+      collect: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+
+  injectWLStmt =>
+    c := 0
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    (self.n * 100)
+
+  injectWLAssign =>
+    c := 0
+    r := #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+    r * 10000 + (self.n * 100)
+
+  injectWLReturn =>
+    c := 0
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+
+  injectWLOperand =>
+    c := 0
+    r := 1 + (#(1, 2, 3)
+      inject: 0
+      into: [:a :e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ])
+    r * 10000 + (self.n * 100)
+
+  ifTrueWLStmt =>
+    c := 0
+    self.n >= 0
+      ifTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+      ifFalse: [0]
+    (self.n * 100)
+
+  ifTrueWLAssign =>
+    c := 0
+    r := self.n >= 0
+      ifTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+      ifFalse: [0]
+    r * 10000 + (self.n * 100)
+
+  ifTrueWLReturn =>
+    c := 0
+    self.n >= 0
+      ifTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+      ifFalse: [0]
+
+  ifTrueWLOperand =>
+    c := 0
+    r := 1 + (self.n >= 0
+      ifTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+      ]
+      ifFalse: [0])
+    r * 10000 + (self.n * 100)
+
+  onDoWLStmt =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] on: Error do: [:x | -1]
+    (self.n * 100)
+
+  onDoWLAssign =>
+    c := 0
+    r := [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] on: Error do: [:x | -1]
+    r * 10000 + (self.n * 100)
+
+  onDoWLReturn =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] on: Error do: [:x | -1]
+
+  onDoWLOperand =>
+    c := 0
+    r := 1 + ([
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] on: Error do: [:x | -1])
+    r * 10000 + (self.n * 100)
+
+  ensureWLStmt =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] ensure: [self.n]
+    (self.n * 100)
+
+  ensureWLAssign =>
+    c := 0
+    r := [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] ensure: [self.n]
+    r * 10000 + (self.n * 100)
+
+  ensureWLReturn =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] ensure: [self.n]
+
+  ensureWLOperand =>
+    c := 0
+    r := 1 + ([
+      c := c + 1
+      self.n := self.n + 10
+      c
+    ] ensure: [self.n])
+    r * 10000 + (self.n * 100)
+
+  nestedWLStmt =>
+    c := 0
+    #(1, 2)
+      do: [:e |
+        #(1, 2)
+          do: [:g |
+            c := c + 1
+            self.n := self.n + 10
+            c
+          ]
+      ]
+    (self.n * 100)
+
+  inCondWLStmt =>
+    c := 0
+    self.n >= 0
+      ifTrue: [
+        #(1, 2)
+          do: [:e |
+            c := c + 1
+            self.n := self.n + 10
+            c
+          ]
+      ]
+    (self.n * 100)
+
+  onDoInDoWLStmt =>
+    c := 0
+    #(1, 2)
+      do: [:e |
+        [
+          c := c + 1
+          self.n := self.n + 10
+          c
+        ] on: Error do: [:x | nil]
+      ]
+    (self.n * 100)
+
+  nlrDoWLEarly =>
+    c := 0
+    #(1, 2, 3)
+      do: [:e |
+        c := c + 1
+        self.n := self.n + 10
+        c
+        e == 2 ifTrue: [^self.n]
+      ]
+    0
+
+  nlrOnDoWLEarly =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+      ^self.n
+    ] on: Error do: [:x | -1]
+    0
+
+  nlrEnsureWLEarly =>
+    c := 0
+    [
+      c := c + 1
+      self.n := self.n + 10
+      c
+      ^self.n
+    ] ensure: [self.n]
+    0
+
+  nlrWhileWLEarly =>
+    c := 0
+    i := 0
+    [i < 3]
+      whileTrue: [
+        c := c + 1
+        self.n := self.n + 10
+        c
+        i := i + 1
+        i == 2 ifTrue: [^self.n]
+      ]
+    0
+
   awayRunR: other =>
     b := [self.n]
     self.n := 50
