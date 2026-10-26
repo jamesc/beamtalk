@@ -97,6 +97,9 @@ pub(super) fn char_lit(c: char) -> Document<'static> {
 ///
 /// - `"` is doubled (`""`) — the doubled-delimiter convention.
 /// - `{` becomes `\{` — otherwise it would start an interpolation.
+/// - `\` becomes `\\`, and CR/LF/TAB/NUL become `\r`/`\n`/`\t`/`\0`
+///   (ADR 0138) — emitted raw, a backslash would re-parse as an escape (or
+///   an unknown-escape error) and change the value on round-trip.
 #[must_use]
 pub(super) fn string_content(s: impl AsRef<str>) -> Document<'static> {
     let s = s.as_ref();
@@ -110,6 +113,26 @@ pub(super) fn string_content(s: impl AsRef<str>) -> Document<'static> {
             '{' => {
                 result.push('\\');
                 result.push('{');
+            }
+            '\\' => {
+                result.push('\\');
+                result.push('\\');
+            }
+            '\r' => {
+                result.push('\\');
+                result.push('r');
+            }
+            '\n' => {
+                result.push('\\');
+                result.push('n');
+            }
+            '\t' => {
+                result.push('\\');
+                result.push('t');
+            }
+            '\0' => {
+                result.push('\\');
+                result.push('0');
             }
             _ => result.push(c),
         }
@@ -219,10 +242,21 @@ mod tests {
 
     #[test]
     fn string_content_leaves_other_chars_untouched() {
-        // Closing brace and backslash are not special to the unparser's
-        // string-content escaping.
+        // A closing brace is safe bare: only `{` starts interpolation.
         assert_eq!(render(&string_content("a}b")), "a}b");
-        assert_eq!(render(&string_content("a\\b")), "a\\b");
+    }
+
+    #[test]
+    fn string_content_escapes_backslash_and_controls() {
+        // ADR 0138: a raw backslash would re-parse as an escape, so `\`
+        // doubles and CR/LF/TAB/NUL use their escape spellings.
+        assert_eq!(render(&string_content("a\\b")), "a\\\\b");
+        assert_eq!(render(&string_content("a\rb")), "a\\rb");
+        assert_eq!(render(&string_content("a\nb")), "a\\nb");
+        assert_eq!(render(&string_content("a\tb")), "a\\tb");
+        assert_eq!(render(&string_content("a\0b")), "a\\0b");
+        // Combined: backslash before a brace escapes before the brace does.
+        assert_eq!(render(&string_content("\\{x}")), "\\\\\\{x}");
     }
 
     #[test]

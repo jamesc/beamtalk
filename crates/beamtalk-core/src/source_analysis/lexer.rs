@@ -520,6 +520,11 @@ impl<'src> Lexer<'src> {
     /// Interpolated strings produce `StringStart`, expression tokens, optional
     /// `StringSegment`s, and `StringEnd`.
     /// Literal braces are written as `\{` and `\}`, which produce `{` and `}` respectively.
+    ///
+    /// Escape sequences (ADR 0138): `\r` (CR), `\n` (LF), `\t` (TAB), `\\`
+    /// (backslash), `\"` (alongside the existing `""` doubling), and `\0`
+    /// (exactly NUL, no octal continuation). Any other `\x` is an
+    /// unknown-escape compile error whose span covers the backslash.
     fn lex_string(&mut self) -> TokenKind {
         let string_start = self.current_position();
         self.advance(); // opening quote
@@ -550,20 +555,65 @@ impl<'src> Lexer<'src> {
                     break;
                 }
                 Some('\\') => {
-                    self.advance();
-                    if self.peek_char().is_none() {
-                        let text = self.text_for(self.span_from(string_start));
-                        return TokenKind::Error(EcoString::from(text));
-                    }
-                    if let Some('{' | '}') = self.peek_char() {
-                        // \{ and \} produce literal braces; backslash is consumed
-                        if let Some(c) = self.advance() {
-                            content_buf.push(c);
+                    let escape_pos = self.current_position();
+                    self.advance(); // backslash
+                    match self.peek_char() {
+                        None => {
+                            // Trailing backslash at EOF — genuinely incomplete
+                            // input. Return raw source text so the REPL's
+                            // `is_input_complete` heuristic treats it as
+                            // incomplete and shows a continuation prompt.
+                            let text = self.text_for(self.span_from(string_start));
+                            return TokenKind::Error(EcoString::from(text));
                         }
-                    } else {
-                        content_buf.push('\\');
-                        if let Some(c) = self.advance() {
-                            content_buf.push(c);
+                        // ADR 0138 escape table (a ceiling, not a starting bid).
+                        Some('r') => {
+                            self.advance();
+                            content_buf.push('\r');
+                        }
+                        Some('n') => {
+                            self.advance();
+                            content_buf.push('\n');
+                        }
+                        Some('t') => {
+                            self.advance();
+                            content_buf.push('\t');
+                        }
+                        Some('\\') => {
+                            self.advance();
+                            content_buf.push('\\');
+                        }
+                        Some('"') => {
+                            self.advance();
+                            content_buf.push('"');
+                        }
+                        Some('0') => {
+                            self.advance();
+                            content_buf.push('\0');
+                        }
+                        // \{ and \} produce literal braces; backslash is consumed
+                        Some('{' | '}') => {
+                            if let Some(c) = self.advance() {
+                                content_buf.push(c);
+                            }
+                        }
+                        Some(c) => {
+                            // Unknown escape — a compile error, never silent
+                            // passthrough (ADR 0138). The message starts
+                            // lowercase so the parser's `is_diagnostic_error`
+                            // treats it as complete-but-invalid: the REPL
+                            // prints the error instead of a continuation
+                            // prompt. Skip to the end of the literal so lexing
+                            // resumes cleanly after the closing quote; the
+                            // span still covers just the offending backslash.
+                            self.advance(); // consume the escaped char
+                            let escape_end = self.current_position();
+                            self.skip_to_string_end(string_start);
+                            self.override_span = Some(Span::new(escape_pos, escape_end));
+                            return TokenKind::Error(EcoString::from(format!(
+                                "unknown escape '\\{c}' in string literal — \
+                                 use '\\\\' for a literal backslash"
+                            )));
                         }
                     }
                 }
@@ -599,6 +649,50 @@ impl<'src> Lexer<'src> {
 
         self.build_interpolation_tokens(&segments, &interp_ranges);
         TokenKind::StringStart(first_seg.0.clone())
+    }
+
+    /// Skips to the end of the current string literal during error recovery
+    /// (unknown escape), so lexing resumes cleanly after the closing quote.
+    ///
+    /// Mirrors the `lex_string` loop's extent rules: `""` is a doubled
+    /// delimiter, `\` escapes the next char (so `\"` doesn't end the skip),
+    /// and `{...}` interpolation bodies — which may contain nested strings
+    /// with their own quotes — are skipped with the real nesting scan.
+    /// Stops after the closing `"` or at EOF.
+    fn skip_to_string_end(&mut self, string_start: u32) {
+        loop {
+            match self.peek_char() {
+                None => break,
+                Some('"') if self.peek_char_n(1) == Some('"') => {
+                    self.advance(); // first "
+                    self.advance(); // second "
+                }
+                Some('"') => {
+                    self.advance(); // closing quote
+                    break;
+                }
+                Some('\\') => {
+                    self.advance(); // backslash
+                    if self.peek_char().is_some() {
+                        self.advance(); // escaped char
+                    }
+                }
+                Some('{') => {
+                    self.advance(); // consume `{`
+                    // A `"` inside the interpolation must not end the skip;
+                    // reuse the real nesting scan and discard its result —
+                    // the unknown-escape diagnostic (recorded by the caller)
+                    // stands regardless. Every `Err` path leaves the lexer
+                    // at EOF or just past the closing quote, so `break` is safe.
+                    if self.lex_interpolation_body(string_start).is_err() {
+                        break;
+                    }
+                }
+                Some(_) => {
+                    self.advance();
+                }
+            }
+        }
     }
 
     /// Scans the body of a `{...}` interpolation, tracking brace depth.
@@ -1265,10 +1359,201 @@ mod tests {
 
     #[test]
     fn lex_string_with_escaped_quote() {
+        // ADR 0138: \" is a real escape (alongside "" doubling) — the
+        // backslash is consumed, unlike the pre-0138 passthrough.
         assert_eq!(
             lex_kinds(r#""it\"s""#),
-            vec![TokenKind::String("it\\\"s".into())]
+            vec![TokenKind::String("it\"s".into())]
         );
+    }
+
+    #[test]
+    fn lex_string_escape_table() {
+        // ADR 0138: \r \n \t \\ \" \0 lex to CR LF TAB backslash " NUL.
+        assert_eq!(lex_kinds(r#""\r""#), vec![TokenKind::String("\r".into())]);
+        assert_eq!(lex_kinds(r#""\n""#), vec![TokenKind::String("\n".into())]);
+        assert_eq!(lex_kinds(r#""\t""#), vec![TokenKind::String("\t".into())]);
+        assert_eq!(lex_kinds(r#""\\""#), vec![TokenKind::String("\\".into())]);
+        assert_eq!(lex_kinds(r#""\"""#), vec![TokenKind::String("\"".into())]);
+        assert_eq!(lex_kinds(r#""\0""#), vec![TokenKind::String("\0".into())]);
+    }
+
+    #[test]
+    fn lex_string_escapes_combined() {
+        assert_eq!(
+            lex_kinds(r#""\r\n""#),
+            vec![TokenKind::String("\r\n".into())]
+        );
+        assert_eq!(
+            lex_kinds(r#""a\tb\\c""#),
+            vec![TokenKind::String("a\tb\\c".into())]
+        );
+    }
+
+    #[test]
+    fn lex_string_nul_has_no_octal_continuation() {
+        // \0 is exactly NUL — a following digit is literal content, not an
+        // octal escape (unlike C).
+        assert_eq!(
+            lex_kinds(r#""\01""#),
+            vec![TokenKind::String("\u{0}1".into())]
+        );
+    }
+
+    #[test]
+    fn lex_string_escaped_quote_and_doubling_agree() {
+        // \" and "" are two spellings of one meaning (ADR 0138).
+        assert_eq!(lex_kinds(r#""a\"b""#), lex_kinds(r#""a""b""#));
+        assert_eq!(
+            lex_kinds(r#""a\"b""#),
+            vec![TokenKind::String("a\"b".into())]
+        );
+    }
+
+    #[test]
+    fn lex_string_escaped_quote_keeps_string_open() {
+        // The string continues past \" to the real closing quote.
+        assert_eq!(
+            lex_kinds(r#""say \"hi\" loudly""#),
+            vec![TokenKind::String("say \"hi\" loudly".into())]
+        );
+    }
+
+    #[test]
+    fn lex_string_escapes_in_interpolation_segments() {
+        // Decoded values flow into StringStart/Segment/End contents too.
+        assert_eq!(
+            lex_kinds(r#""a\n{x}\t""#),
+            vec![
+                TokenKind::StringStart("a\n".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringEnd("\t".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_escaped_backslash_before_interpolation() {
+        // \\ is a literal backslash; the {x} after it still interpolates.
+        assert_eq!(
+            lex_kinds(r#""\\{x}""#),
+            vec![
+                TokenKind::StringStart("\\".into()),
+                TokenKind::Identifier("x".into()),
+                TokenKind::StringEnd("".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_unknown_escape_is_error() {
+        let tokens = lex(r#""\q""#);
+        assert_eq!(tokens.len(), 1);
+        match tokens[0].kind() {
+            TokenKind::Error(msg) => {
+                // Lowercase diagnostic (REPL completeness convention) that
+                // suggests \\ for a literal backslash.
+                assert!(
+                    msg.starts_with(|c: char| c.is_ascii_lowercase()),
+                    "message should start lowercase, got: {msg}"
+                );
+                assert!(
+                    msg.contains("'\\q'"),
+                    "message should name the escape, got: {msg}"
+                );
+                assert!(
+                    msg.contains("'\\\\'"),
+                    "message should suggest \\\\, got: {msg}"
+                );
+            }
+            other => panic!("expected Error token, got: {other:?}"),
+        }
+        // Span covers the backslash: `"\q"` → bytes 1..3.
+        assert_eq!(tokens[0].span().start(), 1);
+        assert_eq!(tokens[0].span().end(), 3);
+    }
+
+    #[test]
+    fn lex_string_unknown_escape_each() {
+        // Every non-table escape fails loudly — the ADR 0138 ratchet.
+        for c in [
+            'd', 'b', 'e', 'x', 'u', 'a', 'f', 'v', 'z', '.', '/', ' ', '\'',
+        ] {
+            let source = format!("\"\\{c}\"");
+            let kinds = lex_kinds(&source);
+            assert_eq!(kinds.len(), 1, "for escape \\{c}");
+            assert!(
+                matches!(&kinds[0], TokenKind::Error(msg) if msg.contains("unknown escape")),
+                "for escape \\{c}, got: {:?}",
+                kinds[0],
+            );
+        }
+    }
+
+    #[test]
+    fn lex_string_unknown_escape_resumes_after_string() {
+        // Error recovery consumes through the closing quote so the rest of
+        // the input lexes normally (no garbage cascade, no bogus
+        // incomplete-input signal from a re-lexed string tail).
+        assert_eq!(
+            lex_kinds(r#""a\qb" + 1"#),
+            vec![
+                TokenKind::Error(
+                    "unknown escape '\\q' in string literal — \
+                     use '\\\\' for a literal backslash"
+                        .into()
+                ),
+                TokenKind::BinarySelector("+".into()),
+                TokenKind::Integer("1".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_string_unknown_escape_span_covers_multibyte_char() {
+        // Span covers backslash + the full escaped char (`"\é"` → bytes 1..4).
+        let tokens = lex("\"\\é\"");
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind(), TokenKind::Error(_)));
+        assert_eq!(tokens[0].span().start(), 1);
+        assert_eq!(tokens[0].span().end(), 4);
+    }
+
+    #[test]
+    fn lex_string_unknown_escape_with_later_interpolation() {
+        // An interpolation after the unknown escape is skipped, not lexed:
+        // one error, then lexing resumes after the closing quote.
+        let kinds = lex_kinds(r#""a\q{x}b" + 1"#);
+        assert_eq!(kinds.len(), 3);
+        assert!(matches!(&kinds[0], TokenKind::Error(_)));
+        assert_eq!(kinds[1], TokenKind::BinarySelector("+".into()));
+        assert_eq!(kinds[2], TokenKind::Integer("1".into()));
+    }
+
+    #[test]
+    fn lex_string_unknown_escape_with_nested_string_in_interpolation() {
+        // A quote nested inside a later interpolation must not end error
+        // recovery early: `"a\q{"b"}c" + 1` is one error + `+ 1`.
+        let kinds = lex_kinds(r#""a\q{"b"}c" + 1"#);
+        assert_eq!(kinds.len(), 3);
+        assert!(matches!(&kinds[0], TokenKind::Error(_)));
+        assert_eq!(kinds[1], TokenKind::BinarySelector("+".into()));
+        assert_eq!(kinds[2], TokenKind::Integer("1".into()));
+    }
+
+    #[test]
+    fn lex_string_trailing_backslash_at_eof_is_incomplete() {
+        // A backslash with no following char is genuinely incomplete input:
+        // raw-text error (starts with ") so the REPL shows a continuation
+        // prompt rather than an unknown-escape diagnostic.
+        let kinds = lex_kinds("\"abc\\");
+        assert_eq!(kinds.len(), 1);
+        match &kinds[0] {
+            TokenKind::Error(msg) => {
+                assert!(msg.starts_with('"'), "expected raw-text error, got: {msg}");
+            }
+            other => panic!("expected Error token, got: {other:?}"),
+        }
     }
 
     #[test]

@@ -34,7 +34,7 @@ TestCase subclass: UuidTest
     // Canonical 8-4-4-4-12 lowercase hex form
     s := (Uuid v4) asString
     self assert: s size equals: 36
-    self assert: (s matchesRegex: "^[0-9a-f]\{8}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{12}\z")
+    self assert: (s matchesRegex: "^[0-9a-f]\{8}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{12}\\z")
 
   testPrintString =>
     s := (Uuid fromString: "550e8400-e29b-41d4-a716-446655440000") unwrap printString

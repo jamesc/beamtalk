@@ -171,12 +171,19 @@ Collect applies a block to each character and joins the results back into a stri
 
 ## Multiline strings
 
-There is no multi-line string literal syntax. Use `++` to concatenate lines:
+There is no multi-line string literal syntax. Use `++` to concatenate lines,
+with `"\n"` for the newline between them:
 
 ```beamtalk
 multiline := "line 1" ++ "\n" ++ "line 2" ++ "\n" ++ "line 3"  // => _
-multiline size  // => 22
+multiline size  // => 20
 ```
+
+`"\n"` is an escape sequence: a single newline character, not backslash-n.
+`"line 1"` (6) + newline (1) + `"line 2"` (6) + newline (1) + `"line 3"` (6)
+is 20 characters. The same table provides `"\r"` (carriage return), `"\t"`
+(tab), `"\\"` (backslash), `"\""` (quote, alongside `""` doubling), and
+`"\0"` (NUL); any other `\x` is a compile error.
 
 ## Summary
 

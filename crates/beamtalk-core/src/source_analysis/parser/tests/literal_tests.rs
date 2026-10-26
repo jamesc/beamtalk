@@ -728,6 +728,17 @@ fn complete_interpolated_string() {
 }
 
 #[test]
+fn complete_unknown_string_escape() {
+    // ADR 0138: an unknown escape is a lowercase diagnostic, i.e.
+    // complete-but-invalid — the REPL prints the error rather than a
+    // continuation prompt.
+    assert!(is_input_complete("\"\\q\""));
+    assert!(is_input_complete("\"a\\db\" + 1"));
+    // A trailing backslash with no following char is still incomplete.
+    assert!(!is_input_complete("\"abc\\"));
+}
+
+#[test]
 fn complete_with_period() {
     assert!(is_input_complete("x := 1."));
 }

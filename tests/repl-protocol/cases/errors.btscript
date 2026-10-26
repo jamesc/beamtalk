@@ -13,11 +13,12 @@
 // - Original syntax errors: 3 tests
 // - Runtime errors: 2 tests
 // - Near-miss syntax: 11 tests
-// - Invalid literals: 4 tests
+// - Invalid literals: 6 tests
+// - String escape decoding: 1 test
 // - Cascading errors: 5 tests (includes recovery validation)
 // - Unicode edge cases: 3 tests
 // - REPL edge cases: 4 tests
-// Total: 35 test cases (increased from 8)
+// Total: 38 test cases (increased from 8)
 
 // ===========================================================================
 // UNDEFINED VARIABLES
@@ -134,6 +135,22 @@ obj foo:
 // Number followed by invalid character sequence (tests lexer error recovery)
 42$
 // => ERROR: $
+
+// Unknown string escape (ADR 0138, BT-4163) — complete-but-invalid, so the
+// REPL prints the error rather than showing a continuation prompt
+"\q"
+// => ERROR: unknown escape
+
+"\d"
+// => ERROR: unknown escape
+
+// ===========================================================================
+// STRING ESCAPE DECODING
+// ===========================================================================
+
+// Escape sequences decode in evaluated strings (ADR 0138, BT-4163)
+"a\nb" size
+// => 3
 
 // ===========================================================================
 // CASCADING ERROR TESTS
