@@ -38,13 +38,16 @@ const HEADER: &str = "Actor subclass: HybridRebindProbe
 
 /// A loop whose body is `BODY` and whose index is `i`, ending in the method's value.
 const LOOPS: &[(&str, &str)] = &[
+    // BT-4121: the scaffold stays operator-free (`[true]`, `i := nil`) so the guard-free
+    // write probes below keep hybrid mode. A guarded add/compare in the condition or the
+    // loop epilogue would force the `StateAcc` fallback (same rule as the bracket).
     (
         "while_true",
-        "    i := 0.\n    [i < 3] whileTrue: [BODY. i := i + 1].\n    self.n\n",
+        "    i := 0.\n    [true] whileTrue: [BODY. i := nil].\n    self.n\n",
     ),
     (
         "while_false",
-        "    i := 0.\n    [i >= 3] whileFalse: [BODY. i := i + 1].\n    self.n\n",
+        "    i := 0.\n    [true] whileFalse: [BODY. i := nil].\n    self.n\n",
     ),
     ("to_do", "    1 to: 3 do: [:i | BODY].\n    self.n\n"),
     ("do", "    #(1, 2) do: [:i | BODY].\n    self.n\n"),
@@ -159,9 +162,10 @@ fn hybrid_field_rebind_is_verified_in_every_loop_and_container(loops: &[(&str, &
     // parameter; pin that those do, so a change that stops reaching it fails here.
     //
     //
-    // A guarded operator's slow path is not a call that makes a loop thread `State` (the
-    // adds and compares of these bodies keep hybrid mode, ADR 0137, BT-4121), so
-    // the pins reach the rebind exactly as they did before the bracket existed.
+    // A guarded operator inside a loop body forces the `StateAcc` fallback (ADR 0137,
+    // BT-4121), so the writes carrying one (`binary_operand_rhs`, `nested_rhs_then_read`)
+    // now verify through the bracket path instead of hybrid mode. The pins above stay
+    // green through the guard-free write probes, which still hybridize exactly as before.
     for expected in REACHES_THE_REBIND {
         let (loop_name, _) = expected.split_once(" / ").expect("`loop / container`");
         if !loops.iter().any(|(name, _)| *name == loop_name) {

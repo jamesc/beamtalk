@@ -65,6 +65,9 @@ pub(in crate::core_erlang) enum StateAccFallbackReason {
     NotLetrec,
     /// Destructure assignment as last expression (incompatible with tuple-acc).
     DestructureAsLastExpr,
+    /// Guarded operator in the body or condition (BT-4121: a hybrid loop
+    /// cannot bracket its slow path, so the loop threads `StateAcc`).
+    GuardedOperator,
 }
 
 impl std::fmt::Display for StateAccFallbackReason {
@@ -90,6 +93,9 @@ impl std::fmt::Display for StateAccFallbackReason {
             Self::NotLetrec => write!(f, "not a letrec loop"),
             Self::DestructureAsLastExpr => {
                 write!(f, "destructure assignment as last expression")
+            }
+            Self::GuardedOperator => {
+                write!(f, "guarded operator in loop body or condition")
             }
         }
     }

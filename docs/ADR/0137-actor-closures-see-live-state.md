@@ -3,7 +3,8 @@
 ## Status
 Accepted (2026-10-20); Proposed 2026-10-20; Amended 2026-10-21 (self-send
 exception after Phase 0, BT-4007; snapshot away and simple `call_foreign/3`
-after review)
+after review); Amended 2026-10-26 (stateless loops bracket the
+guarded-operator slow path, BT-4121)
 
 Amends ADR 0133 (an escaping block may assign `self.field`) and ADR 0041 (an
 actor's closures no longer capture `State`). ADR 0130 is the precedent and is
@@ -338,11 +339,16 @@ in another process.
 - A missed sync point fails the build.
 
 ### Negative
-- Known gap (BT-4121): a loop that keeps its variables in parameters and holds
-  no whole `State` leaves the slow path of a guarded operator (`acc + m`, where
-  `m` is a user object with its own `+`) unbracketed, so a user `+` that touches
-  this actor's fields runs against a stale cell. Bracketing it would force every
-  arithmetic loop over untyped locals to thread `State`.
+- Closed (BT-4121): a loop that keeps its variables in parameters and holds
+  no whole `State` brackets the slow path of a guarded operator (`acc + m`,
+  where `m` is a user object with its own `+`) without threading `State`: the
+  loop-entry `State` is stored before the loop, field reads inside the loop
+  and the exit packs load from the cell, and a nested stateless loop hands
+  its need to the enclosing bracket. Loops whose operators are all statically
+  numeric (gate 3) emit no guard and no bracket. A hybrid body with a guarded
+  operator is no longer hybrid: it falls back to `StateAcc`, and a new
+  `VerifyError`, `UnbracketedGuardedOperator`, fails the build if any guarded
+  operator still escapes the bracket. See the design note §4b.
 - Every send that may run user code pays a store and a load, about 10 ns
   (10.4 ns with 18 schedulers, just over the gate).
 - The protocol has two homes: compiled code and `call_foreign/3`. A native

@@ -393,7 +393,16 @@ impl CoreErlangGenerator {
                         // A direct-params loop binds no `StateAcc`: its body cannot
                         // write `State`, so the throw carries the state the loop
                         // captured on entry (BT-3562's `current_field_read_state_var`).
-                        leaf::var(self.current_field_read_state_var())
+                        // BT-4121: unless the loop brackets guarded operators, whose
+                        // slow paths wrote the cell — then the throw carries the
+                        // live cell, like the loop's own exit pack, and the
+                        // pre-throw store below keeps those writes instead of
+                        // clobbering them with the entry state.
+                        if self.guarded_op_take_reads() {
+                            threaded_ir::cell_take_call()
+                        } else {
+                            leaf::var(self.current_field_read_state_var())
+                        }
                     } else {
                         leaf::var(self.current_self_var())
                     };
