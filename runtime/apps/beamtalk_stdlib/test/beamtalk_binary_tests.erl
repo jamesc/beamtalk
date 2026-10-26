@@ -612,10 +612,23 @@ print_string_invalid_utf8_test() ->
 
 print_string_with_quotes_test() ->
     %% Embedded quotes should be escaped
-    ?assertEqual(<<"\"say \\\"hi\\\"\"">>, beamtalk_binary:print_string(<<"say \"hi\"">>)).
+    ?assertEqual(<<"\"say \"\"hi\"\"\"">>, beamtalk_binary:print_string(<<"say \"hi\"">>)).
 
 print_string_with_backslash_test() ->
     ?assertEqual(<<"\"a\\\\b\"">>, beamtalk_binary:print_string(<<"a\\b">>)).
+
+print_string_adr0138_mapping_test() ->
+    ?assertEqual(<<"\"a\\{b}\"">>, beamtalk_binary:print_string(<<"a{b}">>)),
+    ?assertEqual(
+        <<"\"\\r\\n\\t\\0\"">>,
+        beamtalk_binary:print_string(<<13, 10, 9, 0>>)
+    ).
+
+print_string_matches_primitive_test_() ->
+    [
+        ?_assertEqual(beamtalk_primitive:print_string(S), beamtalk_binary:print_string(S))
+     || S <- [<<"">>, <<"{x}">>, <<"q\"\\">>, <<"\r\n\t\0">>, <<"héllo ✓">>]
+    ].
 
 print_string_type_error_test() ->
     ?assertError(
