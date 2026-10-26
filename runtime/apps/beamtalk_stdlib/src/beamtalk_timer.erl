@@ -248,12 +248,15 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
     erlang:is_process_alive(Pid).
 
 -doc "Human-readable representation.".
--spec 'printString'(t()) -> binary().
+-spec 'printString'(t()) -> beamtalk_string:t().
 'printString'(#{'$beamtalk_class' := 'Timer'} = Self) ->
-    case 'isActive'(Self) of
-        true -> <<"Timer(active)">>;
-        false -> <<"Timer(inactive)">>
-    end.
+    %% BT-4173: printString answers a String.
+    beamtalk_primitive:string_from_binary(
+        case 'isActive'(Self) of
+            true -> <<"Timer(active)">>;
+            false -> <<"Timer(inactive)">>
+        end
+    ).
 
 %%% ============================================================================
 %%% FFI Shims

@@ -185,8 +185,9 @@ The codegen emits `call 'beamtalk_erlang_proxy':'direct_call'(M, F, [args])`
 for all `Erlang M fn: arg` expressions, routing through the proxy instead
 of calling `call 'M':'F'(args)` directly. This enables:
 - Actionable error messages for a missing module, function or arity
-- Automatic binary→charlist coercion on badarg
-- Charlist→binary result coercion for consistent string types
+- Automatic `String`→binary arg unwrapping for stock modules (BT-4170),
+  then binary→charlist coercion on badarg
+- Charlist→`String` result coercion for consistent string types
 
 Export validation is **lazy** (BT-4021): the happy path applies straight away
 and only reads `Module:module_info(exports)` after the apply fails with
@@ -312,10 +313,20 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context, Mode) ->
     %% class-variable writes the failed first attempt made must not survive into
     %% it (ADR 0130 §4, BT-3728), so remember the pre-call state.
     Snap = beamtalk_class_vars:snapshot(),
+    %% BT-4170: stock Erlang modules cannot handle tagged `String` terms, so
+    %% top-level `String` args are unwrapped to raw binaries before the first
+    %% attempt. Beamtalk-owned modules own the representation themselves (their
+    %% contracts name `String`/`Binary`) and receive args untouched, so an
+    %% unfixed native fails loudly instead of being silently unwrapped here.
+    CallArgs =
+        case Mode of
+            stock -> unwrap_string_args(Args);
+            beamtalk -> Args
+        end,
     %% bt-catcher-audit: converted - snapshot taken here is restored before the badarg retry
     %% (BT-3728)
     try
-        coerce_ffi_result(Module, erlang:apply(Module, FunName, Args), Mode)
+        coerce_ffi_result(Module, erlang:apply(Module, FunName, CallArgs), Mode)
     catch
         Class:Reason:Stack ->
             %% Single catch → shared classifier: the apply and the
@@ -366,7 +377,17 @@ discarded, the same rule `beamtalk_class_vars:protect/1` applies (BT-3728).
     coercion_mode()
 ) -> term().
 maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack, Snap, Mode) ->
-    CoercedArgs = coerce_binaries_to_charlists(Args),
+    %% BT-4170: the happy path only unwrapped top-level `String` args, so a
+    %% `badarg` from a stock callee may mean tags nested inside a list, tuple
+    %% or map arg (an iolist of Strings, a format-args list, a JSON map).
+    %% Deep-unwrap those before the charlist coercion. Beamtalk mode skips
+    %% this — its natives own the representation (see apply_with_coercion/6).
+    Unwrapped =
+        case Mode of
+            stock -> beamtalk_primitive:deep_unwrap_strings(Args);
+            beamtalk -> Args
+        end,
+    CoercedArgs = coerce_binaries_to_charlists(Unwrapped),
     %% Never retry a call that was passed a fun (a Beamtalk block): the retry
     %% would run caller code a second time, side effects included (BT-4055).
     case CoercedArgs =/= Args andalso not lists:any(fun erlang:is_function/1, Args) of
@@ -911,6 +932,15 @@ coerce_binaries_to_charlists(Args) ->
     [coerce_arg(A) || A <- Args].
 
 -spec coerce_arg(term()) -> term().
+coerce_arg({beamtalk_string, Bin}) when is_binary(Bin) ->
+    %% BT-4170: a tagged `String` that reached the retry path (beamtalk
+    %% mode passes args through untouched) coerces like the raw binary it
+    %% wraps — a `String` is valid UTF-8 by construction, so the
+    %% conversion cannot fail, but keep the same shape as the binary arm.
+    case unicode:characters_to_list(Bin, utf8) of
+        Charlist when is_list(Charlist) -> Charlist;
+        _ -> Bin
+    end;
 coerce_arg(Arg) when is_binary(Arg) ->
     case unicode:characters_to_list(Arg, utf8) of
         Charlist when is_list(Charlist) -> Charlist;
@@ -930,11 +960,17 @@ coerce_arg(Arg) ->
     Arg.
 
 -doc """
-Convert a charlist result to a binary.
+Convert a charlist result to a `String`.
 
 Erlang functions may return charlists (e.g., os:cmd/1, calendar:system_time_to_rfc3339/1).
-Convert those back to binaries for consistent Beamtalk string representation.
+Convert those to tagged `String` values for consistent Beamtalk string representation.
 Applied on both the direct success path and the badarg retry path.
+
+This is a native text boundary (BT-4170): the `characters_to_binary/2`
+conversion only succeeds on valid UTF-8, so a successful conversion is
+valid text by construction and is wrapped via
+`beamtalk_primitive:string_from_binary/1`. Raw binaries returned by
+Erlang stay raw — they are `Binary`, not `String`.
 
 Uses `io_lib:printable_unicode_list/1` rather than `io_lib:char_list/1` to avoid
 false positives on lists of small integers (e.g., [1,2,3]) that are valid codepoints
@@ -947,7 +983,7 @@ coerce_charlist_result(Result) when is_list(Result) ->
     case io_lib:printable_unicode_list(Result) of
         true ->
             case unicode:characters_to_binary(Result, utf8) of
-                Bin when is_binary(Bin) -> Bin;
+                Bin when is_binary(Bin) -> beamtalk_primitive:string_from_binary(Bin);
                 _ -> Result
             end;
         false ->
@@ -955,6 +991,25 @@ coerce_charlist_result(Result) when is_list(Result) ->
     end;
 coerce_charlist_result(Result) ->
     Result.
+
+-doc """
+Unwrap top-level tagged `String` args to raw binaries (BT-4170).
+
+Happy-path arg preparation for stock-mode FFI: stock Erlang modules
+cannot handle the `{beamtalk_string, Bin}` representation. Shallow by
+design — one `map` over the arg list, no traversal — so the common case
+(binaries, numbers, atoms) pays almost nothing; nested tags are handled
+by `deep_unwrap_strings/1` on the `badarg` retry path instead.
+""".
+-spec unwrap_string_args(list()) -> list().
+unwrap_string_args(Args) ->
+    [unwrap_string_arg(A) || A <- Args].
+
+-spec unwrap_string_arg(term()) -> term().
+unwrap_string_arg({beamtalk_string, Bin}) when is_binary(Bin) -> Bin;
+unwrap_string_arg(Other) -> Other.
+
+
 
 -doc """
 Apply both charlist and result coercion, skipping charlist coercion

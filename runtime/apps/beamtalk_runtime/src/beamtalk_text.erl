@@ -24,8 +24,12 @@ is pinned by a golden test instead — see `beamtalk_compiler_port_tests.erl`.
 
 -export([to_binary/1]).
 
--doc "Normalise an atom, binary, list, or arbitrary term to a UTF-8 binary.".
+-doc "Normalise an atom, binary, String, list, or arbitrary term to a UTF-8 binary.".
 -spec to_binary(term()) -> binary().
+to_binary({beamtalk_string, Bin}) when is_binary(Bin) ->
+    %% BT-4170: a tagged `String` unwraps to its bytes (valid UTF-8 by
+    %% construction). A bare binary below is bytes, passed through as-is.
+    Bin;
 to_binary(Name) when is_atom(Name) ->
     atom_to_binary(Name, utf8);
 to_binary(Name) when is_binary(Name) ->

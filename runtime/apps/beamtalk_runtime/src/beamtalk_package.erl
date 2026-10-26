@@ -64,14 +64,15 @@ A "package" is any OTP application whose env includes a non-empty
 list with no classes. The stdlib package is always present; user packages
 appear after their OTP application is loaded.
 """.
--spec all() -> [binary()].
+-spec all() -> [beamtalk_string:t()].
 all() ->
     Apps = application:loaded_applications(),
     lists:filtermap(
         fun({AppName, _Desc, _Vsn}) ->
             case package_name_for_app(AppName) of
                 undefined -> false;
-                Name -> {true, Name}
+                %% BT-4173: package names are text — answer Strings.
+                Name -> {true, beamtalk_primitive:string_from_binary(Name)}
             end
         end,
         Apps
@@ -113,9 +114,12 @@ The name can be a binary (`<<"stdlib">>`) or an atom (`stdlib`).
 Returns a map with keys: name, version, classes, dependencies, source.
 Raises `#beamtalk_error{}` with kind `package_not_found` if no such package.
 """.
--spec named(binary() | atom()) -> term().
+-spec named(binary() | beamtalk_string:t() | atom()) -> term().
 named(Name) when is_atom(Name) ->
     named(atom_to_binary(Name, utf8));
+named({beamtalk_string, Name}) when is_binary(Name) ->
+    %% BT-4173: a tagged String unwraps to the same name bytes.
+    named(Name);
 named(Name) when is_binary(Name) ->
     case find_app_for_package(Name) of
         {ok, AppName} ->
@@ -127,7 +131,9 @@ named(Name) when is_binary(Name) ->
                     [] ->
                         <<"No packages are currently loaded.">>;
                     _ ->
-                        PkgList = lists:join(<<", ">>, LoadedPkgs),
+                        %% BT-4173: all/0 answers Strings — unwrap for joining.
+                        RawPkgs = [P || {beamtalk_string, P} <- LoadedPkgs],
+                        PkgList = lists:join(<<", ">>, RawPkgs),
                         iolist_to_binary([
                             <<"Loaded packages: ">>,
                             PkgList
@@ -184,9 +190,11 @@ Returns the list of class names (atoms) belonging to a package.
 Reads from the `.app` environment `{classes, [...]}` metadata.
 Returns an empty list if the package is not found.
 """.
--spec classes(binary() | atom()) -> [atom()].
+-spec classes(binary() | beamtalk_string:t() | atom()) -> [atom()].
 classes(Name) when is_atom(Name) ->
     classes(atom_to_binary(Name, utf8));
+classes({beamtalk_string, Name}) when is_binary(Name) ->
+    classes(Name);
 classes(Name) when is_binary(Name) ->
     case find_app_for_package(Name) of
         {ok, AppName} ->
@@ -209,9 +217,11 @@ applications that are themselves Beamtalk packages (have a non-empty
 `type_aliases` env).
 Returns an empty list if the package is not found.
 """.
--spec dependencies(binary() | atom()) -> [binary()].
+-spec dependencies(binary() | beamtalk_string:t() | atom()) -> [beamtalk_string:t()].
 dependencies(Name) when is_atom(Name) ->
     dependencies(atom_to_binary(Name, utf8));
+dependencies({beamtalk_string, Name}) when is_binary(Name) ->
+    dependencies(Name);
 dependencies(Name) when is_binary(Name) ->
     case find_app_for_package(Name) of
         {ok, AppName} ->
@@ -221,7 +231,8 @@ dependencies(Name) when is_binary(Name) ->
                         fun(DepApp) ->
                             case package_name_for_app(DepApp) of
                                 undefined -> false;
-                                N -> {true, N}
+                                %% BT-4173: dependency names are Strings.
+                                N -> {true, beamtalk_primitive:string_from_binary(N)}
                             end
                         end,
                         DepApps
@@ -239,8 +250,13 @@ Beamtalk FFI shim for `Package packageNameFor: #ClassName`.
 Delegates to `package_name/1`. The Beamtalk FFI maps `packageNameFor:`
 to `packageNameFor/1`.
 """.
--spec packageNameFor(atom()) -> binary() | nil.
-packageNameFor(ClassName) -> package_name(ClassName).
+-spec packageNameFor(atom()) -> beamtalk_string:t() | nil.
+packageNameFor(ClassName) ->
+    %% BT-4173: a package name is text — answer a String.
+    case package_name(ClassName) of
+        nil -> nil;
+        Name -> beamtalk_primitive:string_from_binary(Name)
+    end.
 
 %%% ============================================================================
 %%% Internal Helpers
@@ -415,7 +431,10 @@ Exported so other package-discovery consumers (e.g.
 application without re-deriving the classes-or-type_aliases discovery
 signal themselves.
 """.
--spec find_app_for_package(binary()) -> {ok, atom()} | error.
+-spec find_app_for_package(binary() | beamtalk_string:t()) -> {ok, atom()} | error.
+find_app_for_package({beamtalk_string, PkgName}) when is_binary(PkgName) ->
+    %% BT-4173: e.g. supervisorClass/1 reads the tagged `name` field.
+    find_app_for_package(PkgName);
 find_app_for_package(PkgName) ->
     Apps = application:loaded_applications(),
     find_app_for_package(PkgName, Apps).
@@ -456,13 +475,16 @@ build_package_info(AppName, PkgName) ->
             {ok, Desc} when is_binary(Desc) -> Desc;
             _ -> <<"">>
         end,
+    %% BT-4173: name/version/source are Strings (`Deps` already tagged by
+    %% dependencies/1); class names stay symbols.
+    S = fun beamtalk_primitive:string_from_binary/1,
     #{
         '$beamtalk_class' => 'Package',
-        name => PkgName,
-        version => Version,
+        name => S(PkgName),
+        version => S(Version),
         classes => ClassNames,
         dependencies => Deps,
-        source => Source
+        source => S(Source)
     }.
 
 -doc "Extract the package segment from a bt@{pkg}@{class} module name.".

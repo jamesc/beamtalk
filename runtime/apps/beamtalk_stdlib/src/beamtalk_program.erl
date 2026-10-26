@@ -45,14 +45,17 @@ mechanism settled for the `program_name` Open Question (ADR 0099 §2). Absent
 %%% Public API
 %%% ============================================================================
 
--doc "Return the invoked program's name as a binary String.".
--spec commandName() -> binary().
+-doc "Return the invoked program's name as a String.".
+-spec commandName() -> beamtalk_string:t().
 commandName() ->
-    case application:get_env(beamtalk_runtime, program_name) of
-        {ok, Name} when is_binary(Name) -> Name;
-        {ok, Name} when is_list(Name) -> list_to_binary(Name);
-        _ -> <<"beamtalk">>
-    end.
+    %% BT-4173: the program name is text — answer a String.
+    beamtalk_primitive:string_from_binary(
+        case application:get_env(beamtalk_runtime, program_name) of
+            {ok, Name} when is_binary(Name) -> Name;
+            {ok, Name} when is_list(Name) -> list_to_binary(Name);
+            _ -> <<"beamtalk">>
+        end
+    ).
 
 -doc """
 The running application's root supervisor (`Program rootSupervisor`): the

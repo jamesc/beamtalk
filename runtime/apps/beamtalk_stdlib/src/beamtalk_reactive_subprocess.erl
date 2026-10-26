@@ -100,17 +100,16 @@ argument raises a structured `type_error` and a spawn failure surfaces as
 `Result ok: proc` on success.
 """.
 -spec open(term(), term(), term()) -> beamtalk_result:t().
-open(Command, Args, Notify) when
-    is_binary(Command), is_record(Notify, beamtalk_object)
-->
+open(Command, Args, Notify) when is_record(Notify, beamtalk_object) ->
+    Executable = unwrap_text_arg(Command, 'open:args:notify:'),
     ArgsList = beamtalk_subprocess_port:bt_array_to_list(
         'ReactiveSubprocess', Args, 'open:args:notify:'
     ),
-    beamtalk_subprocess_port:ensure_binary_args(
+    BinArgs = beamtalk_subprocess_port:normalize_args(
         'ReactiveSubprocess', ArgsList, 'open:args:notify:'
     ),
     start_subprocess(
-        #{executable => Command, args => ArgsList, notify => Notify}, 'open:args:notify:'
+        #{executable => Executable, args => BinArgs, notify => Notify}, 'open:args:notify:'
     );
 open(_Command, _Args, _Notify) ->
     Err = beamtalk_error:new(type_error, 'ReactiveSubprocess', 'open:args:notify:'),
@@ -123,26 +122,32 @@ Class-side constructor for `ReactiveSubprocess open:args:env:dir:notify:`; see
 `open/3` for the validation/spawn contract.
 """.
 -spec open(term(), term(), term(), term(), term()) -> beamtalk_result:t().
-open(Command, Args, Env, Dir, Notify) when
-    is_binary(Command), is_binary(Dir), is_map(Env), is_record(Notify, beamtalk_object)
-->
+open(Command, Args, Env, Dir, Notify) when is_map(Env), is_record(Notify, beamtalk_object) ->
+    Executable = unwrap_text_arg(Command, 'open:args:env:dir:notify:'),
+    BinDir = unwrap_text_arg(Dir, 'open:args:env:dir:notify:'),
     ArgsList = beamtalk_subprocess_port:bt_array_to_list(
         'ReactiveSubprocess', Args, 'open:args:env:dir:notify:'
     ),
-    beamtalk_subprocess_port:ensure_binary_args(
+    BinArgs = beamtalk_subprocess_port:normalize_args(
         'ReactiveSubprocess', ArgsList, 'open:args:env:dir:notify:'
     ),
     EnvMap = maps:without(['$beamtalk_class'], Env),
-    beamtalk_subprocess_port:ensure_binary_env(
+    BinEnv = beamtalk_subprocess_port:normalize_env(
         'ReactiveSubprocess', EnvMap, 'open:args:env:dir:notify:'
     ),
     start_subprocess(
-        #{executable => Command, args => ArgsList, env => EnvMap, dir => Dir, notify => Notify},
+        #{executable => Executable, args => BinArgs, env => BinEnv, dir => BinDir, notify => Notify},
         'open:args:env:dir:notify:'
     );
 open(_Command, _Args, _Env, _Dir, _Notify) ->
     Err = beamtalk_error:new(type_error, 'ReactiveSubprocess', 'open:args:env:dir:notify:'),
     beamtalk_error:raise(Err).
+
+%% BT-4173: command/dir arrive tagged from Beamtalk — unwrap to bytes.
+unwrap_text_arg({beamtalk_string, B}, _Selector) when is_binary(B) -> B;
+unwrap_text_arg(B, _Selector) when is_binary(B) -> B;
+unwrap_text_arg(_Other, Selector) ->
+    beamtalk_error:raise(beamtalk_error:new(type_error, 'ReactiveSubprocess', Selector)).
 
 -doc """
 Start a supervised beamtalk_reactive_subprocess gen_server.
@@ -332,7 +337,11 @@ terminate(_Reason, State) ->
 %%% ============================================================================
 
 -doc "Write Data + newline to subprocess stdin.".
--spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, #beamtalk_error{}}, map()}.
+-spec handle_writeLine(iodata() | beamtalk_string:t(), map()) ->
+    {reply, nil | {error, #beamtalk_error{}}, map()}.
+%% BT-4173: lines arrive tagged from Beamtalk — unwrap to bytes.
+handle_writeLine({beamtalk_string, B}, State) when is_binary(B) ->
+    handle_writeLine(B, State);
 handle_writeLine(Data, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed} = State,
     case PortClosed of

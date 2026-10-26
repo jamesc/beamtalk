@@ -122,8 +122,16 @@ Supports List, Set and String receivers.
 -spec on(term()) -> t().
 on(List) when is_list(List) ->
     make_stream(make_list_gen(List), <<"Stream(on: [...])">>);
-on(Str) when is_binary(Str) ->
-    Graphemes = [unicode:characters_to_binary([G]) || G <- string:to_graphemes(Str)],
+on(Bin) when is_binary(Bin) ->
+    %% BT-4173: a bare `Binary` streams byte `Integer`s (like `Binary do:`),
+    %% while a tagged `String` streams grapheme `String`s.
+    make_stream(make_list_gen(binary_to_list(Bin)), <<"Stream(on: Binary)">>);
+on({beamtalk_string, Str}) when is_binary(Str) ->
+    %% BT-4170: a `String` streams grapheme `String`s (tagged like the input).
+    Graphemes = [
+        beamtalk_primitive:string_from_binary(unicode:characters_to_binary([G]))
+     || G <- string:to_graphemes(Str)
+    ],
     make_stream(make_list_gen(Graphemes), <<"Stream(on: '...')">>);
 on(Map) when is_map(Map) ->
     case beamtalk_tagged_map:class_of(Map) of
@@ -145,7 +153,7 @@ on(Map) when is_map(Map) ->
             )
     end;
 on(_) ->
-    raise_type_error('on:', <<"Expected a collection (List, String, or Set)">>).
+    raise_type_error('on:', <<"Expected a collection (List, String, Binary, or Set)">>).
 
 %%% ============================================================================
 %%% Lazy Operations (return new Stream)
@@ -362,8 +370,10 @@ anySatisfy(Self, Pred) -> any_satisfy(Self, Pred).
 allSatisfy(Self, Pred) -> all_satisfy(Self, Pred).
 
 %% `printString:` → selector strips to `printString`, arity 1
--spec printString(t()) -> binary().
-printString(Self) -> print_string(Self).
+-spec printString(t()) -> beamtalk_string:t().
+%% BT-4173: user-facing text answers a String; the stored description stays
+%% a raw binary for `print_string_map` splicing.
+printString(Self) -> beamtalk_primitive:string_from_binary(print_string(Self)).
 
 %%% ============================================================================
 %%% Generator Constructors (internal)

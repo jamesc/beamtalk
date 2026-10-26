@@ -267,6 +267,10 @@ term_to_json(Value) when is_float(Value) ->
     beamtalk_runtime_api:print_string(Value);
 term_to_json(Value) when is_atom(Value) ->
     atom_to_binary(Value, utf8);
+term_to_json({beamtalk_string, Bin}) when is_binary(Bin) ->
+    %% BT-4170: tagged `String` unwraps to its text (`ensure_utf8/1`
+    %% re-checks, containing even `asStringUnchecked`-smuggled bytes).
+    beamtalk_transcript_stream:ensure_utf8(Bin);
 term_to_json(Value) when is_binary(Value) ->
     beamtalk_transcript_stream:ensure_utf8(Value);
 term_to_json(Value) when is_list(Value) ->
@@ -311,6 +315,9 @@ term_to_json(Value) when is_map(Value) ->
                     'printString', [], Value, Value, ClassName
                 )
             of
+                {reply, {beamtalk_string, Bin}, _} when is_binary(Bin) ->
+                    %% BT-4170: `printString` answers a `String` — unwrap it.
+                    beamtalk_transcript_stream:ensure_utf8(Bin);
                 {reply, Result, _} when is_binary(Result) -> Result;
                 _ -> beamtalk_runtime_api:print_string(Value)
             catch

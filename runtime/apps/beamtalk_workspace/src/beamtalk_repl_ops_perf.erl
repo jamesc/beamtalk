@@ -178,7 +178,10 @@ apply_limit(Traces, _) ->
 Parse a PID string (e.g. <<"<0.123.0>">>) to an Erlang pid.
 Raises a structured beamtalk_error on invalid input.
 """.
--spec parse_pid(binary()) -> pid().
+-spec parse_pid(binary() | beamtalk_string:t()) -> pid().
+parse_pid({beamtalk_string, PidBin}) when is_binary(PidBin) ->
+    %% BT-4173: pid strings from the REPL protocol arrive tagged.
+    parse_pid(PidBin);
 parse_pid(PidBin) when is_binary(PidBin) ->
     try
         list_to_pid(binary_to_list(PidBin))
@@ -187,10 +190,12 @@ parse_pid(PidBin) when is_binary(PidBin) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
-                message = iolist_to_binary(
-                    [<<"Invalid actor PID: ">>, PidBin]
+                message = beamtalk_primitive:string_from_binary(
+                    iolist_to_binary([<<"Invalid actor PID: ">>, PidBin])
                 ),
-                hint = <<"Use list-actors to find valid PIDs, e.g. \"<0.123.0>\"">>,
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"Use list-actors to find valid PIDs, e.g. \"<0.123.0>\"">>
+                ),
                 details = #{}
             })
     end.

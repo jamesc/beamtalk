@@ -889,8 +889,16 @@ format_start_failed_error(Kind, ClassName, Selector, Reason) ->
 %% The text to show for a start failure's cause: its hint, else its message,
 %% else its kind.
 -spec cause_hint(#beamtalk_error{}) -> binary().
+%% BT-4170: message/hint fields are tagged `String`s (raw bytes only in
+%% hand-built records) — render either to bytes.
+cause_hint(#beamtalk_error{hint = {beamtalk_string, Hint}}) when is_binary(Hint), Hint =/= <<>> ->
+    Hint;
 cause_hint(#beamtalk_error{hint = Hint}) when is_binary(Hint), Hint =/= <<>> ->
     Hint;
+cause_hint(#beamtalk_error{message = {beamtalk_string, Message}}) when
+    is_binary(Message), Message =/= <<>>
+->
+    Message;
 cause_hint(#beamtalk_error{message = Message}) when is_binary(Message), Message =/= <<>> ->
     Message;
 cause_hint(#beamtalk_error{kind = Kind}) ->

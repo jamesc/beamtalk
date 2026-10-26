@@ -543,8 +543,12 @@ message is rendered as `Binary printString` hex instead of being embedded raw.
 -spec ensure_utf8(binary()) -> binary().
 ensure_utf8(Bin) when is_binary(Bin) ->
     case beamtalk_primitive:is_utf8(Bin) of
-        true -> Bin;
-        false -> beamtalk_binary:print_string(Bin)
+        true ->
+            Bin;
+        false ->
+            %% BT-4170: `print_string/1` answers a `String` — unwrap the
+            %% hex rendering back to raw bytes for `json:encode/1`.
+            beamtalk_primitive:string_to_binary(beamtalk_binary:print_string(Bin))
     end.
 
 %%====================================================================
@@ -1023,9 +1027,11 @@ failures(Self) -> result_failures(Self).
 -spec hasPassed(test_result()) -> boolean().
 hasPassed(Self) -> result_has_passed(Self).
 -spec summary(test_result()) -> binary().
-summary(Self) -> result_summary(Self).
+%% BT-4173: user-facing text answers Strings; the raw builders stay binary
+%% for internal splicing.
+summary(Self) -> beamtalk_primitive:string_from_binary(result_summary(Self)).
 -spec printString(test_result()) -> binary().
-printString(Self) -> result_print_string(Self).
+printString(Self) -> beamtalk_primitive:string_from_binary(result_print_string(Self)).
 
 %%====================================================================
 %% Module loading with on_load failure reporting
