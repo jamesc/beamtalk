@@ -59,6 +59,10 @@ pub enum ExpectCategory {
     /// its home class's variables used where it runs outside an invocation of
     /// that class (ADR 0130 §5).
     ClassStateAbroad,
+    /// Suppress class-process-ffi warnings — a class-side method that runs in
+    /// its class's process and directly calls a process-sensitive Erlang
+    /// function (BT-4031).
+    ClassProcessFfi,
     /// Suppress actor-state-abroad warnings — a block literal that touches
     /// its actor's state used where it runs outside the actor's process
     /// (ADR 0137).
@@ -96,6 +100,7 @@ impl ExpectCategory {
             "sendability" => Some(Self::Sendability),
             "match_arm_block" => Some(Self::MatchArmBlock),
             "class_state_abroad" => Some(Self::ClassStateAbroad),
+            "class_process_ffi" => Some(Self::ClassProcessFfi),
             "actor_state_abroad" => Some(Self::ActorStateAbroad),
             "stored_closure" => Some(Self::StoredClosure),
             "all" => Some(Self::All),
@@ -124,6 +129,7 @@ impl ExpectCategory {
             Self::Sendability => "sendability",
             Self::MatchArmBlock => "match_arm_block",
             Self::ClassStateAbroad => "class_state_abroad",
+            Self::ClassProcessFfi => "class_process_ffi",
             Self::ActorStateAbroad => "actor_state_abroad",
             Self::StoredClosure => "stored_closure",
             Self::All => "all",
@@ -152,6 +158,7 @@ impl ExpectCategory {
             "sendability",
             "match_arm_block",
             "class_state_abroad",
+            "class_process_ffi",
             "actor_state_abroad",
             "all",
         ]

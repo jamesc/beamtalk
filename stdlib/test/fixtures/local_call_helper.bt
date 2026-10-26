@@ -6,7 +6,9 @@
 
 Object subclass: LocalCallHelper
 
-  class callerPid => Erlang erlang self
+  class callerPid =>
+    @expect class_process_ffi "deliberately open: the test observes the class process vs the caller"
+    Erlang erlang self
 
   class echo: value => value
 

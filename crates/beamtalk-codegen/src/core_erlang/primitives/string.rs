@@ -17,7 +17,7 @@ pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<D
         "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Concatenation, length, access, case, whitespace, reverse
         "++" | "," | "length" | "at:" | "first" | "last" | "uppercase" | "lowercase"
-        | "capitalize" | "trim" | "trimLeft" | "trimRight" | "reverse" => {
+        | "asciiLowercase" | "capitalize" | "trim" | "trimLeft" | "trimRight" | "reverse" => {
             generate_string_transform_bif(selector, params)
         }
         // Search, splitting, replace, substring, padding
@@ -58,6 +58,9 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
         )),
         "lowercase" => Some(Document::Str(
             "call 'unicode':'characters_to_binary'(call 'string':'lowercase'(Self))",
+        )),
+        "asciiLowercase" => Some(Document::Str(
+            "call 'beamtalk_string':'ascii_lowercase'(Self)",
         )),
         "capitalize" => Some(Document::Str("call 'beamtalk_string':'capitalize'(Self)")),
         "trim" => Some(Document::Str(
@@ -308,6 +311,15 @@ mod tests {
                 "call 'unicode':'characters_to_binary'(call 'string':'lowercase'(Self))"
                     .to_string()
             )
+        );
+    }
+
+    #[test]
+    fn test_ascii_lowercase() {
+        let result = doc_to_string(generate_string_bif("asciiLowercase", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'ascii_lowercase'(Self)".to_string())
         );
     }
 

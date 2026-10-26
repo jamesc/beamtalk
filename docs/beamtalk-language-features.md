@@ -134,6 +134,7 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 
 // Case conversion (locale-aware)
 "HELLO" lowercase     // => "hello"
+"Content-TYPE" asciiLowercase  // => "content-type" (only A-Z fold; non-ASCII untouched)
 "straße" uppercase    // => "STRASSE" (German ß → SS)
 ```
 
@@ -930,6 +931,7 @@ MathUtils fibonacci: 10    // => 55
 Common uses:
 - **Factory methods:** `Counter spawn`, `Point x: 3 y: 4` (auto-generated from `field:` declarations)
 - **FFI namespaces:** `File readAll: path`, `Json parse: str` — class methods wrapping Erlang modules
+  A class method runs in the class's gen_server process unless the class is `sealed` and the method is `class sealed` (direct-called in the caller's process, ADR 0129). That is invisible for pure wrappers, but wrong for FFI that depends on the *calling* process: `(Erlang gen_tcp) accept:` blocks the shared class process (every caller queues behind it), and `controlling_process`, `file:sendfile`, `erlang:self`, the process dictionary, `link` and `monitor` act on the class process, not the caller (`not_owner` failures for sockets the caller owns). The `class-process-ffi` lint warns at such a direct `(Erlang mod) fn …` call in a stateless class and names the missing piece (`sealed` on the class, `class sealed` on the method, or both). Suppress deliberate serialisation with `@expect class_process_ffi`, or package-wide with `class-process-ffi = "off"` under `[diagnostics]`. v1 limits: a curated list of `gen_tcp`/`gen_udp`/`ssl`/`erlang`/`file:sendfile` functions, direct calls only (a helper that does the FFI is not followed), and `ClassBuilder classMethods:` blocks are not inspected.
 - **Supervisor lifecycle:** `class supervise`, `class current` (configuration such as `childSpecs` and `strategy` is instance-side, ADR 0135)
 - **Singleton access:** `class current` — return the singleton instance (see `classState:` below)
 
@@ -3303,6 +3305,8 @@ MyClass performLocally: #add:to: withArguments: #(3, 7)
 **Limitations:** Local dispatch calls the method directly on the target class module — it does not walk the superclass chain. Class variables follow the read-only snapshot rule ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md) §5): the method *reads* the class variables as of the last completed class-method invocation, and a *write* raises `class_state_read_only`. When `performLocally:withArguments:` is reached from inside the class's own method mid-invocation, it reads and writes the live class variables instead. Use this only for stateless or read-only class methods.
 
 ### Passing Blocks Through Class Methods
+
+*See also:* process-sensitive FFI written directly in a non-direct-called class method also runs in the class process; the `class-process-ffi` lint flags it (see [Class-Side Methods](#class-side-methods-adr-0048)).
 
 Unless the method is direct-called (see below), a class method runs in the class object's gen_server process, so a block passed *into* one runs there too, not where it was written ([BT-3022](https://linear.app/beamtalk/issue/BT-3022)):
 
@@ -7790,6 +7794,7 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `type_annotation` | Missing or redundant type annotation warnings in typed classes |
 | `inheritance` | Sealed-class/sealed-method constraint errors |
 | `class_state_abroad` | A block that reads or writes its class's variables where it runs outside an invocation of that class (ADR 0130 §5) |
+| `class_process_ffi` | A class-side method that runs in its class's process and directly calls process-sensitive FFI (`gen_tcp:accept`, `controlling_process`, `erlang:self`, …); seal the class and the method (BT-4031) |
 | `actor_state_abroad` | A block that touches its actor's state where it runs outside the actor's process (ADR 0137) *(lint-only, see below)* |
 | `dead_assignment` | `beamtalk lint`'s "assignment inside an escaping block" check *(lint-only, see below)* |
 | `lint` | Style/redundancy findings: `beamtalk lint`'s unnecessary-parentheses, redundant trailing `^`, cascade-candidate, … passes, plus the unreachable-code / shadowed-variable / unattached-doc-comment advisories *(lint-only, see below)* |
