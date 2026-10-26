@@ -433,6 +433,18 @@ shapes the surviving validator rows still reject (an inlined `[...] value` that
 writes a field or sends to `self` as a message argument; the local-threading
 rows), so those rows stay until Phase 3 (BT-4010) deletes them.
 
+Phase 3 (BT-4010) result: the §8 table is deleted (the BT-3936 guard with its
+`closure_drops_state` plumbing, the BT-3985 super guard, the Tier 2 self-send
+promotion, the list-op forwarded-state-change error, the actor and class-var
+halves of BT-3922, the BT-3952 stale-read rejection, the BT-3998 alias check).
+Of the oracle rows: the five `stateful` `DENY_SET` rows are deleted (dead: every
+candidate shape is a local-threading producer, accepted before `DENY_SET`);
+`EvaluatedBlockValue` and `InlineBlockLocalInLoop` stay (re-measured on a BEAM
+with the model on: the tuple still leaks, the loop shape still fails `erlc`
+with unbound `StateAcc`). BT-3990's residuals (getter self-send in a block
+passed to a self-send, stored, and nested) are fixed, with `BUnit` cells in
+`stdlib/test/bt3990stale_getter_test.bt`; BT-1325's alias tests are restored.
+
 These stay because method bodies and plain self-sends still thread: the
 `State` family, the actor frame mode, the `{reply, R, State}` method
 convention with the state arms of `unwrap_dispatch_result/1`, the `State` slot

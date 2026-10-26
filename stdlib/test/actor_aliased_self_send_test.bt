@@ -18,3 +18,7 @@ TestCase subclass: ActorAliasedSelfSendTest
     self assert: (names includes: #y)
 
   testAliasedFieldAt => self assert: self.a aliasedFieldAt equals: 0
+
+  testAliasedFieldAtPut => self assert: self.a aliasedFieldAtPut equals: 42
+
+  testAliasedUserMethod => self assert: self.a aliasedUserMethod equals: 0

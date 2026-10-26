@@ -53,7 +53,6 @@ pub(in crate::core_erlang) struct BodyState {
     in_fold_frame: bool,
     rebind_frames: HashMap<FrameId, RebindFrame>,
     block_depth: usize,
-    closure_drops_state: bool,
     class_var_capture: Option<String>,
     actor_closure: Option<crate::core_erlang::actor_state_access::ActorClosure>,
     /// The enclosing body's non-local-return token variable
@@ -84,7 +83,6 @@ impl CoreErlangGenerator {
             in_fold_frame: std::mem::take(&mut self.in_fold_frame),
             rebind_frames: std::mem::take(&mut self.rebind_frames),
             block_depth: std::mem::take(&mut self.block_depth),
-            closure_drops_state: std::mem::take(&mut self.closure_drops_state),
             class_var_capture: self.class_var_capture.take(),
             actor_closure: self.actor_closure.take(),
             nlr_token: {
@@ -111,7 +109,6 @@ impl CoreErlangGenerator {
             in_fold_frame,
             rebind_frames,
             block_depth,
-            closure_drops_state,
             class_var_capture,
             actor_closure,
             nlr_token,
@@ -128,7 +125,6 @@ impl CoreErlangGenerator {
         self.in_fold_frame = in_fold_frame;
         self.rebind_frames = rebind_frames;
         self.block_depth = block_depth;
-        self.closure_drops_state = closure_drops_state;
         self.class_var_capture = class_var_capture;
         self.actor_closure = actor_closure;
         self.set_current_nlr_token(nlr_token);

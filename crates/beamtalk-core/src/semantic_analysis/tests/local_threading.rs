@@ -376,8 +376,7 @@ fn former_actor_exemptions_and_their_near_misses_are_errors() {
     // The near misses, each probed in an actor instance method on the debug
     // build (BT-3745): each answers 0 (write dropped) or raises.
     for body in [
-        // Self-send: stored block argument (detect_tier2_self_send promotes
-        // only a bare block literal or a Tier 2 block *parameter*).
+        // Self-send: stored block argument.
         "b := [t := t + 1]\nself ap: b\nt",
         "b := [t := t + 1]\nself ap: (b)\nt",
         // Self-send: parenthesized block argument.
@@ -570,11 +569,8 @@ fn section6_actor_self_send_to_a_non_threading_callee_is_an_error() {
     assert_eq!(section6_errors(second), 1);
 }
 
-/// A standalone `Ac >> probe` method is checked with no callee set: codegen's
-/// class pre-scan (`scan_class_for_tier2_blocks`) walks only the methods in the
-/// class body, so a callee is never compiled with a Tier 2 block parameter
-/// for a self-send made from a standalone method, even a `sealed` one in the
-/// same module. The self-send is therefore a §6 error (BT-3755).
+/// A standalone `Ac >> probe` method's self-send of a writing block is a §6
+/// error like any other (BT-3755): no callee shape threads such a block.
 #[test]
 fn section6_standalone_method_actor_self_send_is_an_error() {
     let src = "Actor subclass: Ac\n  sealed ap: b => b value\n\nAc >> probe =>\n  t := 0\n  self ap: [t := t + 1]\n  t\n";

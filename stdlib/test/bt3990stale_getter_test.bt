@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3990 (fixed by ADR 0137, BT-4010): a getter self-send in a block passed
+// to a self-send read the actor's creation-time state. Each cell below
+// answers the live field. Fixture: fixtures/bt3990stale_getter_actor.bt.
+
+TestCase subclass: Bt3990StaleGetterTest
+
+  testGetterInBlockPassedToSelfSendReadsLiveState =>
+    a := Bt3990StaleGetterActor spawn
+    self assert: a staleGetter equals: 1
+    self assert: a peek equals: 1
+
+  testStoredGetterBlockReadsLiveStateInALaterMessage =>
+    a := Bt3990StaleGetterActor spawn
+    a armGetter
+    self assert: a runGetter equals: 1
+    self assert: a peek equals: 1
+
+  testGetterInNestedSelfSendReadsLiveState =>
+    a := Bt3990StaleGetterActor spawn
+    self assert: a nestedGetter equals: 1
+    self assert: a peek equals: 1

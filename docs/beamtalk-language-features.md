@@ -826,10 +826,10 @@ self.y := self.x + 1
 self.y
 ```
 
-**Limitation:** In an actor instance method a block reads and writes the actor's fields live, wherever it is made and run (see [Actor Blocks See Live State](#actor-blocks-see-live-state)). In a value-type or class method, field assignments (`self.x :=`) in stored closures are still a compile error — they require control-flow context for state threading. A closure that assigns an outer local may not be stored at all: a block may assign a captured variable only where it is written directly as the argument of a control-flow construct or a compiler-known collection message (`do:`, `inject:into:`, `on:do:`, ...), and a block that is stored, returned, placed in a collection literal or passed to any other method is rejected at the assignment ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), see [What Works and What Doesn't](#what-works-and-what-doesnt)). Have the block answer the new value and assign it where the block is called.
+**Limitation:** In an actor instance method a block reads and writes the actor's fields live, wherever it is made and run (see [Actor Blocks See Live State](#actor-blocks-see-live-state)), and in a class method a block may assign class variables wherever it is written (they live in the class process, [ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md)). In a value-type method, field assignments (`self.x :=`) in stored closures are still a compile error — they require control-flow context for state threading. A closure that assigns an outer local may not be stored at all: a block may assign a captured variable only where it is written directly as the argument of a control-flow construct or a compiler-known collection message (`do:`, `inject:into:`, `on:do:`, ...), and a block that is stored, returned, placed in a collection literal or passed to any other method is rejected at the assignment ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), see [What Works and What Doesn't](#what-works-and-what-doesnt)). Have the block answer the new value and assign it where the block is called.
 
 ```beamtalk
-// ❌ ERROR in a value-type or class method; works in an actor instance method (ADR 0137)
+// ❌ ERROR in a value-type method; works in an actor instance method (ADR 0137)
 nestedBlock := [:m | self.x := m]
 
 // ✅ Field mutation in control flow blocks
@@ -2834,7 +2834,7 @@ The compiler uses a two-tier optimization for block mutations:
 - **Tier 1 (stdlib control flow):** `whileTrue:`, `do:`, `collect:`, `timesRepeat:`, etc. — inlined tail-recursive loops with versioned state variables. Zero overhead.
 - **Tier 2 (user-defined methods):** All other methods accepting blocks — universal `{Result, StateAcc}` protocol. Pure blocks have no overhead; stateful blocks pay ~65ns per invocation.
 
-**Local variable mutations** work in the blocks of control-flow messages (the table below, conditionals, `on:do:`/`ensure:`, `Result tryDo:`), written directly as the message's argument, in every method kind and in the REPL, including when the construct is an operand of a larger expression. A block that assigns a captured local and escapes (stored, returned, or passed to any other method, the actor's own methods included) is a compile error ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), which amends ADR 0041's "local mutations work in all blocks"; see [What Works and What Doesn't](#what-works-and-what-doesnt)). The Tier 2 protocol remains inside the stdlib's own collection messages for dynamic receivers. **Field mutations** (`self.x :=`) in an actor instance method work in every block, stored or not ([Actor Blocks See Live State](#actor-blocks-see-live-state)); in value-type and class methods they require control-flow context and are a compile error in stored closures.
+**Local variable mutations** work in the blocks of control-flow messages (the table below, conditionals, `on:do:`/`ensure:`, `Result tryDo:`), written directly as the message's argument, in every method kind and in the REPL, including when the construct is an operand of a larger expression. A block that assigns a captured local and escapes (stored, returned, or passed to any other method, the actor's own methods included) is a compile error ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), which amends ADR 0041's "local mutations work in all blocks"; see [What Works and What Doesn't](#what-works-and-what-doesnt)). The Tier 2 protocol remains inside the stdlib's own collection messages for dynamic receivers. **Field mutations** (`self.x :=`) in an actor instance method work in every block, stored or not ([Actor Blocks See Live State](#actor-blocks-see-live-state)); class-variable writes in a class method likewise work in every block ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md)). In value-type methods they require control-flow context and are a compile error in stored closures.
 
 ### Control Flow Constructs
 
@@ -2954,9 +2954,9 @@ processItems =>
 | `#([t := t + 1])` | `` `t` is assigned in a block placed in a collection literal `` |
 | `xs collect: [:x \| [t := t + x]]` | `` `t` is assigned in a block answered by the block of a collection operation `` |
 
-A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). A block literal that assigns a captured local and is passed as an Erlang FFI argument (`Erlang lists foreach: [:e \| t := t + e] with: xs`) is the same compile error (BT-3917): Erlang calls it as a plain fun and the write would be dropped. Return the value from the block and use the call's result instead (ADR 0041 §Erlang Interop Boundary); a block that only reads captured variables is fine. The same holds for object state: a block that assigns `self.field` (an actor or value-type field, or a class variable in a class method) and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; an actor field write through a `sealed` method of the same class, ADR 0132's BT-1140 path, is no longer accepted). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
+A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process unless it is direct-called (a `class sealed` method of a sealed class without class variables, ADR 0129 Phase 0b). A block literal that assigns a captured local and is passed as an Erlang FFI argument (`Erlang lists foreach: [:e \| t := t + e] with: xs`) is the same compile error (BT-3917): Erlang calls it as a plain fun and the write would be dropped. Return the value from the block and use the call's result instead (ADR 0041 §Erlang Interop Boundary); a block that only reads captured variables is fine. The same holds for value-type object state: a block that assigns `self.field` in a value-type method and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; a `Value` subclass reports `Cannot assign to slot` instead, since value types are immutable). An actor field write, or a class-variable write in a class method, in an escaping block is legal: the block writes the live state at home (ADR 0137) and the live class variable (ADR 0130). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
 
-**An actor block that reads a field may escape** (ADR 0137, BT-4009; this retires the BT-3952 restriction of ADR 0133's amendment). In an actor instance method a block reads the actor's fields as they are when it runs, not when it was made; see [Actor Blocks See Live State](#actor-blocks-see-live-state). Some other rejections for actor blocks in this section (the `[...] value` and local-threading rows listed in `validators/local_threading.rs`) remain until BT-4010.
+**An actor block that reads a field may escape** (ADR 0137; this retires the BT-3952 restriction of ADR 0133's amendment). In an actor instance method a block reads the actor's fields as they are when it runs, not when it was made; see [Actor Blocks See Live State](#actor-blocks-see-live-state). The `[...] value` and local-threading rows listed in `validators/local_threading.rs` remain until BT-3947 lowers them.
 
 These lookup handlers are lowered inline, behind a runtime check that the receiver is a `Dictionary`: a handler that writes an outer local sent to anything else (an `Ets`, a value-type instance with its own `at:ifAbsent:`, a user class) raises a structured `type_error` instead of dropping the write. A receiver statically known not to be a `Dictionary` (`self`/`super` outside one, or an inferred type that is a known other class such as `Ets`) keeps the compile error. In a closure that is not inlined (a stored block, a block passed to another method) the enclosing block escapes, and in the REPL the handler is still a compile error.
 
@@ -3096,7 +3096,7 @@ Actor subclass: Counter
 
 A block *at home* (running in the actor's own process, inside one of its messages) reads and writes the live fields. A block that has been carried *away* to another process (handed to another actor, or run by a task) reads the fields as they were when the block was created; a **write** from there raises `actor_state_unreachable`, and a send to `self` from there is an ordinary message to the actor. `on:do:` restores the actor's fields to their values on entry to the protected block when it handles an error; `ensure:` cleanups see every write the protected block made before it ended; a `^` stores its writes before it leaves. Blocks that **assign a captured local** are still governed by ADR 0133's rule above.
 
-Some older rejections remain until BT-4010 deletes their validator rows: an inlined `[...] value` that writes a field or sends to `self` as the argument of another message in an actor method (BT-3981, until BT-3947), the local-threading rows listed at the end of the [Capturing Variables](#what-works-and-what-doesnt) discussion, and field writes in stored closures of value-type and class methods. Those messages say so when they fire.
+Two older rejections remain until BT-3947 lowers them: an inlined `[...] value` that writes a field or sends to `self` as the argument of another message in an actor method (BT-3981), and the local-threading rows listed at the end of the [Capturing Variables](#what-works-and-what-doesnt) discussion. Field writes in stored closures of value-type methods stay a compile error. Those messages say so when they fire.
 
 ### Why This Design?
 
@@ -3104,20 +3104,20 @@ Some older rejections remain until BT-4010 deletes their validator rows: an inli
 |----------|-----------|
 | **Universal** | Local variable mutations work in every control-flow block — no whitelist; a block with no way back is a compile error, not a lost write |
 | **Smalltalk-like** | Natural iteration patterns work; a user-defined HOM takes a block that answers a value (ADR 0133) |
-| **Safe** | In value-type and class methods, field mutations in stored closures are caught at compile time; in actors they see live state (ADR 0137) |
+| **Safe** | In value-type methods, field mutations in stored closures are caught at compile time; in actors they see live state (ADR 0137), and class-variable writes in class methods write the live variable (ADR 0130) |
 | **Good DX** | Clear errors with fix suggestions |
 | **BEAM-idiomatic** | Compiles to tail recursion + state threading |
 | **Performant** | Stdlib hot paths are zero overhead (Tier 1); user HOMs ~65ns (Tier 2) |
 
 ### Error Messages
 
-In a value-type or class method, a field assignment inside a stored closure is a compile error that suggests moving the mutation into a method of its own:
+In a value-type method, a field assignment inside a stored closure is a compile error that suggests moving the mutation into a method of its own:
 
 ```beamtalk
 addToSum: item => self.sum := self.sum + item
 ```
 
-The same assignment in an actor instance method compiles and writes the live field.
+The same assignment in an actor instance method compiles and writes the live field, and a class-variable assignment in a class method compiles and writes the live class variable.
 
 ---
 
@@ -3185,17 +3185,12 @@ mailbox: `foo` runs after the current message finishes, and its field writes
 are kept. It does not run inline, so the rest of the current method does not
 see its effects.
 
-A state-changing send to a local that is bound only to `self` (`other := self.
-other setX: 7`) is a compile error: it is an ordinary send, not a self-send,
-and the state change it makes is lost when the message ends. So is any send
-to such a local after an earlier field write in the same method. Read-only
-reflective sends to it (`other fieldNames`, `other fieldAt: #x`) and `!` casts
-(`other foo!`) are fine. Every other selector, including every user method
-and overridable ones such as `printString`, counts as state-changing, since the
-compiler cannot tell. Send to `self` directly. The check is narrow: it only
-finds a local assigned from a bare `self`, not `self` passed as an argument,
-`self yourself`, or `self` read back out of a collection, which can still lose
-a write until ADR 0137 lifts this restriction.
+A send to a local bound to `self` (`other := self. other setX: 7`) works
+like a self-send on the live state (ADR 0137): it runs against the actor's
+current fields and its writes are kept, whether `self` got there by
+assignment, as an argument, via `yourself`, or out of a collection. It is an
+ordinary send, not a statically resolved self-send, so it pays the dispatch
+cost; prefer `self` directly where that matters.
 
 ### Deadlock Prevention
 
@@ -3518,11 +3513,18 @@ Actor subclass: Ticker
   state: count = 0
 
   initialize =>
-    Timer every: 1000 do: [self tick!]   // async cast — MUST use ! not .
+    Timer every: 1000 do: [self tick!]   // async cast: the block runs away, so it messages the actor
 
   tick => self.count := self.count + 1
   getValue => self.count
 ```
+
+A timer block runs in the timer's process, away from the actor (ADR 0137): a
+field read there sees the value from when the block was made, a field write
+raises `actor_state_unreachable`, and a self-send is an ordinary message to
+the actor. Prefer the `!` cast: a synchronous `self tick` from the timer
+works, but it blocks the timer until the actor answers, and it deadlocks if
+the actor is ever waiting on that timer.
 
 No `state:` for the timer reference, no `terminate:` cleanup needed — the link handles it.
 

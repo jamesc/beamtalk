@@ -150,17 +150,18 @@ TestCase subclass: ActorSelfSendHomTest
     self assert: pool pureSort equals: #(4, 3, 2, 1)
     self assert: pool pureIfNone equals: 7
 
-  // BT-3952: the handler takes the field value as a parameter. Reading
-  // `self.total` in a block passed to `fwdIfNoneAfterFold:` is a compile
-  // error (the block would see the value from when it was made), pinned in
-  // tests/repl-protocol/cases/adr0133_escaping_block.btscript.
+  // BT-3952 (retired by ADR 0137): the handler takes the field value as
+  // a parameter. Reading `self.total` in a block passed to
+  // `fwdIfNoneAfterFold:` used to be a compile error; the block now reads
+  // the live field when it runs inside the actor.
   testPureIfNoneAfterFold =>
     pool := SelfSendHomFoldPool spawn
     self assert: pool pureIfNoneAfterFold equals: 4
 
-  // BT-3922: a block that writes `self.total` and is passed to one of these
-  // HOMs is an ADR 0133 compile error (it raised `stateful_block_dispatch`
-  // before), pinned in semantic_analysis/tests/local_threading.rs.
+  // BT-3922 (retired by ADR 0137 for actors): a block that writes
+  // `self.total` and is passed to one of these HOMs used to be an ADR 0133
+  // compile error (it raised `stateful_block_dispatch` before that). It
+  // now compiles and writes the live field when it runs inside the actor.
 
   // BT-3939: a block that rebinds a block-local inside an inner loop. (The
   // pin for the promoted form needed a field-writing caller, an ADR 0133

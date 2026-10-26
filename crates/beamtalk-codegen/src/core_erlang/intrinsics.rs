@@ -228,12 +228,10 @@ impl CoreErlangGenerator {
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        // Check if receiver is a Tier 2 block parameter (zero-arg value)
-        // or a local var this method assigned a Tier 2 block literal to.
+        // Check if receiver is a local var this method assigned a Tier 2
+        // block literal to (zero-arg value).
         if let Expression::Identifier(id) = receiver {
-            if self.tier2_block_params.contains(id.name.as_str())
-                || self.tier2_local_vars.contains(id.name.as_str())
-            {
+            if self.tier2_local_vars.contains(id.name.as_str()) {
                 let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
                 return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
@@ -389,7 +387,7 @@ impl CoreErlangGenerator {
     ///
     /// mirrors `try_generate_block_value_keyword`'s generic
     /// (non-Tier2) fallback path. Deliberately does NOT special-case
-    /// `tier2_block_params`/`tier2_local_vars` receivers here —
+    /// `tier2_local_vars` receivers here —
     /// `generate_block_value_with_arguments_call_runtime_discriminated`
     /// always returns a raw `{Result, NewState}` tuple, and this function is
     /// reached from the generic, any-position `expression_doc` dispatch,
@@ -445,12 +443,10 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         selector_name: &str,
     ) -> Result<Option<Document<'static>>> {
-        // Check if receiver is a Tier 2 block parameter
-        // or a local var this method assigned a Tier 2 block literal to.
+        // Check if receiver is a local var this method assigned a Tier 2
+        // block literal to.
         if let Expression::Identifier(id) = receiver {
-            if self.tier2_block_params.contains(id.name.as_str())
-                || self.tier2_local_vars.contains(id.name.as_str())
-            {
+            if self.tier2_local_vars.contains(id.name.as_str()) {
                 let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
                 return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
