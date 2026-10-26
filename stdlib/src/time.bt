@@ -1,16 +1,39 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// The time unit for `Time monotonic:`, `Time systemTime:` and
+/// `Time convertTime:from:to:` — Erlang's five canonical units.
+type TimeUnit = #second | #millisecond | #microsecond | #nanosecond | #native
+
 /// Time — current time accessors.
 ///
-/// Provides class methods for reading the system clock as an integer
-/// timestamp. All methods are class-side — Time has no instances.
+/// Provides class methods for reading the system and monotonic clocks as
+/// integers, and for converting a time value between units. All methods
+/// are class-side — Time has no instances.
+///
+/// ## Monotonic time vs system time
+///
+/// Use the **monotonic** clock (`monotonic`, `monotonic:`) for intervals,
+/// elapsed times and deadlines: it never goes backwards (immune to NTP
+/// steps and daylight-saving changes) but is not wall-clock time — two
+/// nodes' monotonic clocks cannot be compared. Use the **system** clock
+/// (`systemTime`, `systemTime:`, `nowS`/`nowMs`/`nowUs`) for timestamps
+/// that name a wall-clock instant. The `#native` unit is Erlang's own
+/// clock resolution: pass native values to telemetry untouched rather
+/// than converting by hand (native is not nanoseconds on every platform).
+///
+/// `DateTime monotonicNow` is exactly `Time monotonic: #nanosecond`.
+///
+/// A native-unit interval becomes a `Duration` via conversion:
+/// `Duration milliseconds: (Time convertTime: n from: #native to: #millisecond)`.
 ///
 /// ## Examples
 /// ```beamtalk
 /// Time nowS    // => _
 /// Time nowMs   // => _
 /// Time nowUs   // => _
+/// Time monotonic: #millisecond   // => _
+/// Time convertTime: 1 from: #second to: #millisecond   // => 1000
 /// ```
 sealed typed Object subclass: Time native: beamtalk_time
 
@@ -43,3 +66,68 @@ sealed typed Object subclass: Time native: beamtalk_time
   /// Time nowUs   // => _
   /// ```
   class sealed nowUs -> Integer => self delegate
+
+  /// Monotonic clock in Erlang native units, for measuring intervals.
+  ///
+  /// Never goes backwards; not wall-clock time (see the class header).
+  /// Wraps `erlang:monotonic_time()`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// start := Time monotonic
+  /// // ... do work ...
+  /// elapsed := Time monotonic - start       // native units
+  /// ```
+  class sealed monotonic -> Integer => self delegate
+
+  /// Monotonic clock in the given unit, for measuring intervals.
+  ///
+  /// `unit` must be one of `#second`, `#millisecond`, `#microsecond`,
+  /// `#nanosecond` or `#native` (`#type_error` otherwise).
+  /// Wraps `erlang:monotonic_time/1`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// start := Time monotonic: #millisecond
+  /// // ... do work ...
+  /// elapsed := (Time monotonic: #millisecond) - start   // milliseconds
+  /// ```
+  class sealed monotonic: unit :: TimeUnit -> Integer => self delegate
+
+  /// System clock (wall-clock time since the Unix epoch) in native units.
+  ///
+  /// For timestamps. Wraps `erlang:system_time()`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Time systemTime   // => _
+  /// ```
+  class sealed systemTime -> Integer => self delegate
+
+  /// System clock (wall-clock time since the Unix epoch) in the given unit.
+  ///
+  /// `unit` must be one of `#second`, `#millisecond`, `#microsecond`,
+  /// `#nanosecond` or `#native` (`#type_error` otherwise).
+  /// Wraps `erlang:system_time/1`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Time systemTime: #millisecond   // => _
+  /// ```
+  class sealed systemTime: unit :: TimeUnit -> Integer => self delegate
+
+  /// Convert a time value from one unit to another.
+  ///
+  /// Precision may be lost converting to a coarser unit (1500 ms → 1 s).
+  /// `t` must be an Integer; both units must be one of `#second`,
+  /// `#millisecond`, `#microsecond`, `#nanosecond` or `#native`
+  /// (`#type_error` otherwise). Wraps `erlang:convert_time_unit/3`
+  /// (Elixir's `System.convert_time_unit/3`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Time convertTime: 1 from: #second to: #millisecond        // => 1000
+  /// Time convertTime: 1500 from: #millisecond to: #second     // => 1
+  /// ```
+  class sealed convertTime: t :: Integer from: from :: TimeUnit to: to :: TimeUnit -> Integer =>
+    self delegate

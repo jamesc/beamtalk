@@ -43,3 +43,130 @@ TestCase subclass: TimeTest
     // Sanity check: both values are well above zero
     self assert: (Time nowMs > 1000000000000)
     self assert: (Time nowUs > 1000000000000000)
+
+  // ===== Monotonic clock (BT-4076) =====
+  testMonotonicReturnsInteger =>
+    m := Time monotonic
+    self assert: m class equals: Integer
+
+  testMonotonicEachUnitAnswersInteger =>
+    // No positivity check: the monotonic clock is relative to an
+    // unspecified point, so Erlang may answer a negative value
+    self assert: (Time monotonic: #second) class equals: Integer
+    self assert: (Time monotonic: #millisecond) class equals: Integer
+    self assert: (Time monotonic: #microsecond) class equals: Integer
+    self assert: (Time monotonic: #nanosecond) class equals: Integer
+    self assert: (Time monotonic: #native) class equals: Integer
+
+  testMonotonicIsOrdered =>
+    m1 := Time monotonic
+    m2 := Time monotonic
+    self assert: (m2 >= m1)
+
+  testMonotonicNanosecondMatchesDateTimeMonotonicNow =>
+    // Same clock, same unit — values agree up to scheduling between the reads
+    a := Time monotonic: #nanosecond
+    b := DateTime monotonicNow
+    self assert: ((a - b) abs < 1000000000)
+
+  testMonotonicBadUnitRaisesTypeError =>
+    @expect type
+    self should: [Time monotonic: #fortnight] raise: #type_error
+
+  testMonotonicLegacyAliasRaisesTypeError =>
+    // Erlang's legacy aliases are rejected — only the 5 canonical units
+    @expect type
+    self should: [Time monotonic: #seconds] raise: #type_error
+
+  // ===== System clock (BT-4076) =====
+  testSystemTimeReturnsInteger =>
+    s := Time systemTime
+    self assert: s class equals: Integer
+
+  testSystemTimeIsPositive => self assert: (Time systemTime > 0)
+
+  testSystemTimeEachUnitAnswersPositiveInteger =>
+    self assert: ((Time systemTime: #second) > 0)
+    self assert: ((Time systemTime: #millisecond) > 0)
+    self assert: ((Time systemTime: #microsecond) > 0)
+    self assert: ((Time systemTime: #nanosecond) > 0)
+    self assert: ((Time systemTime: #native) > 0)
+
+  testSystemTimeSecondsMatchNowS =>
+    // Same clock, same unit — agree up to a second boundary between reads
+    self assert: (((Time systemTime: #second) - Time nowS) abs <= 1)
+
+  testSystemTimeBadUnitRaisesTypeError =>
+    @expect type
+    self should: [Time systemTime: #fortnight] raise: #type_error
+
+  // ===== Conversion (BT-4076) =====
+  testConvertTimeSecondsToMilliseconds =>
+    self
+      assert: (Time
+        convertTime: 1
+        from: #second
+        to: #millisecond)
+      equals: 1000
+
+  testConvertTimeMicrosecondsToSeconds =>
+    self
+      assert: (Time
+        convertTime: 1000000
+        from: #microsecond
+        to: #second)
+      equals: 1
+
+  testConvertTimeSecondsToNanoseconds =>
+    self
+      assert: (Time
+        convertTime: 1
+        from: #second
+        to: #nanosecond)
+      equals: 1000000000
+
+  testConvertTimeNativeRoundTripTruncates =>
+    // native -> ms -> native loses precision, so the round trip is <= n
+    n := Time monotonic
+    ms := Time
+      convertTime: n
+      from: #native
+      to: #millisecond
+    back := Time
+      convertTime: ms
+      from: #millisecond
+      to: #native
+    self assert: (back <= n)
+
+  testConvertTimeBadFromRaisesTypeError =>
+    @expect type
+    self
+      should: [
+        Time
+          convertTime: 1
+          from: #fortnight
+          to: #millisecond
+      ]
+      raise: #type_error
+
+  testConvertTimeBadToRaisesTypeError =>
+    @expect type
+    self
+      should: [
+        Time
+          convertTime: 1
+          from: #second
+          to: #fortnight
+      ]
+      raise: #type_error
+
+  testConvertTimeNonIntegerRaisesTypeError =>
+    @expect type
+    self
+      should: [
+        Time
+          convertTime: 1.5
+          from: #second
+          to: #millisecond
+      ]
+      raise: #type_error
