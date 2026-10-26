@@ -18,6 +18,7 @@ language says. Re-run after changing the matrix:
 
 Outputs (checked in):
     stdlib/test/fixtures/closure_matrix_subject.bt
+    stdlib/test/fixtures/closure_matrix_sub.bt
     stdlib/test/actor_closure_matrix_test.bt
 """
 
@@ -25,6 +26,7 @@ import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "stdlib/test/fixtures/closure_matrix_subject.bt"
+FIXTURE_SUB = ROOT / "stdlib/test/fixtures/closure_matrix_sub.bt"
 TEST = ROOT / "stdlib/test/actor_closure_matrix_test.bt"
 
 HEADER = """// Copyright 2026 James Casey
@@ -79,6 +81,16 @@ SHAPES = {
     "SS": ("self.n := self.n + self peek. self.n", m_ss),
     # BT-4122 item 1: writes a captured local AND a field (Tier 2 merge).
     "WL": ("c := c + 1. self.n := self.n + 10. c", m_wl),
+    # BT-4122 item 2: a self-send through an aliased `self`.
+    "AL": ("s := self. s bump. self.n", m_rw),
+    # BT-4122 item 2: an inherited self-send (`yourself`, a no-op).
+    "INH": ("self yourself. self.n", m_r),
+    # BT-4122 item 2: a `super` send (runs on the sub-fixture, whose
+    # `bump` calls `super bump`).
+    "SUP": ("super bump. self.n", m_rw),
+    # BT-4122 item 2: a default-arm self-send (unknown selector, raises
+    # `#does_not_understand`). No model: every uncaught use raises.
+    "DA": ("self noSuchZZZ. self.n", None),
 }
 
 # --- send kinds ------------------------------------------------------------------
@@ -115,15 +127,62 @@ SENDS = {
         "nlr",
         2,
     ),
+    # BT-4122 item 2: the protected body writes, then raises; `on:do:`
+    # rolls the cell back to the pre-region state and the handler runs
+    # against it (writing `+ 50`, which persists).
+    "onDoRaise": (
+        ['[BODY. Error signal: "boom"] on: Error do: [:x | self.n := self.n + 50. self.n]'],
+        "value",
+        1,
+    ),
+    # BT-4122 item 2: the protected body writes, then raises; the cleanup
+    # runs (its writes are wiped by the post-cleanup restore) and the
+    # error propagates.
+    "ensureRaise": (
+        ['[BODY. Error signal: "boom"] ensure: [self.n := self.n + 100]'],
+        "raise",
+        1,
+    ),
 }
+
+# Sends whose protected body runs once and whose outcome the model cannot
+# compute (the rollback erases the shape): (value, n) after the send.
+ROLLBACK_FIXED = {
+    "onDoRaise": (N0 + 50, N0 + 50),
+}
+
+# BT-4122 item 2: shapes that raise instead of answering (no model). Every
+# uncaught use raises `#does_not_understand` with `n` untouched.
+RAISING_SHAPES = {"DA"}
+
+# BT-4122 item 2: `SUP` cells run on the sub-fixture (whose `bump`
+# override calls `super bump`), everything else on the subject.
+SUBJECTS = {"SUP": "ClosureMatrixSub"}
+SUBJECT = "ClosureMatrixSubject"
 
 FINISH = "(self.n * 100)"
 SUM = "(r inject: 0 into: [:s :x | s + x])"
 
 
 def run_send(send, shape):
-    """Run the model: returns (yielded value, state)."""
+    """Run the model: returns (yielded value, state).
+
+    `None` value with kind `"raise"` (or a raising shape outside its
+    catching sends) means the send raises; the test asserts the error
+    tag (`ERROR_TAG`) and the final `n` instead of a value.
+    """
     _, kind, runs = SENDS[send]
+    if send in ROLLBACK_FIXED:
+        value, n = ROLLBACK_FIXED[send]
+        return value, {"n": n, "c": 0}
+    if kind == "raise":
+        return None, {"n": N0, "c": 0}
+    if shape in RAISING_SHAPES:
+        # `DA` raises on first use — except through `on:do:`, which
+        # catches it (the handler answers, `n` untouched).
+        if send in ("onDo", "nlrOnDo"):
+            return -1, {"n": N0, "c": 0}
+        return None, {"n": N0, "c": 0}
     state = {"n": N0, "c": 0}
     model = SHAPES[shape][1]
     values = [model(state) for _ in range(runs)]
@@ -132,6 +191,13 @@ def run_send(send, shape):
     if kind == "value":
         return values[-1], state
     return None, state  # "stmt" and "nlr" yield nothing; an `nlr` method answers `self.n`
+
+
+def error_tag(send, shape):
+    """The `#tag` a raising home cell asserts (BT-4122 item 2)."""
+    if shape in RAISING_SHAPES:
+        return "does_not_understand"
+    return "signal"
 
 
 def literal(value):
@@ -156,13 +222,36 @@ def home_cells():
             rendered = [line.replace("BODY", body) for line in lines]
             pre, expr = rendered[:-1], rendered[-1]
             value, state = run_send(send, shape)
-            positions = ["stmt"] if kind == "stmt" else ["stmt", "assign", "return"]
-            if kind == "nlr":
-                positions = ["early"]
-            # The validator still rejects an inlined `[...] value` that writes a field
-            # or sends to `self` as a message argument (BT-3981, until BT-3947).
-            if kind == "value" and not (send == "litValue" and shape not in ("R", "RB")):
-                positions.append("operand")
+            subject = SUBJECTS.get(shape, SUBJECT)
+            if kind == "raise" and not (
+                shape in RAISING_SHAPES and send == "onDoRaise"
+            ):
+                # A raising send — except `DA` through `onDoRaise`, whose
+                # handler catches the `DA` raise like any other shape's.
+                positions = ["raise"]
+            elif shape in RAISING_SHAPES and send not in (
+                "onDo",
+                "onDoInDo",
+                "nlrOnDo",
+                "onDoRaise",
+            ):
+                # A raising shape outside its catching sends: one error
+                # cell, no value positions.
+                positions = ["raise"]
+            elif shape in RAISING_SHAPES and send == "nlrOnDo":
+                # Caught (no `^` runs — the `DA` raise is a regular
+                # error): value positions, not the `nlr` early one.
+                positions = ["stmt", "assign", "return", "operand"]
+            else:
+                positions = ["stmt"] if kind == "stmt" else ["stmt", "assign", "return"]
+                if kind == "nlr":
+                    positions = ["early"]
+                # The validator still rejects an inlined `[...] value` that writes a field
+                # or sends to `self` as a message argument (BT-3981, until BT-3947).
+                if kind == "value" and not (
+                    send == "litValue" and shape not in ("R", "RB")
+                ):
+                    positions.append("operand")
             for position in positions:
                 name = f"{send}{shape}{position.capitalize()}"
                 code = ([f"base := {BASE}"] if "base" in body else []) + pre
@@ -170,6 +259,7 @@ def home_cells():
                     code = ["c := 0"] + code
                 n = state["n"]
                 finish = n * 100
+                error = None
                 if position == "stmt":
                     code += [expr, FINISH]
                     expected = finish
@@ -187,10 +277,14 @@ def home_cells():
                 elif position == "early":
                     code += [expr, "0"]
                     expected = n
+                elif position == "raise":
+                    code += [expr]
+                    expected = None
+                    error = error_tag(send, shape)
                 else:  # return
                     code += [expr]
                     expected = value
-                cells.append((name, code, expected, n))
+                cells.append((name, code, expected, n, error, subject))
     return cells
 
 
@@ -219,12 +313,27 @@ def away_cells():
                 # a write away raises
                 # the failed call leaves the actor as it was before it
                 cells.append((name, code, None, N0, "actor_state_unreachable"))
+    # BT-4122 item 2: nested capture away — `b` captures a block-valued
+    # local; the inner block reads its home capture away from home. A
+    # read answers from the creation-time capture; a write raises like
+    # any away write.
+    for shape, expected, error in (("R", str(N0), None), ("RW", None, "actor_state_unreachable")):
+        body = SHAPES[shape][0]
+        name = f"awayNestedRun{shape}"
+        code = [f"inner := [{body}]", "b := [inner value]", "self.n := 50", "other run: b"]
+        n = 50 if error is None else N0
+        cells.append((name, code, expected, n, error))
     return cells
 
 
 def method_source(name, code):
     lines = [f"  {name} =>"]
-    lines += [f"    {line}" for line in code]
+    for line in code:
+        # A default-arm cell names an unknown selector: the `dnu` hint is
+        # expected (the cell proves what the default arm does at runtime).
+        if "noSuchZZZ" in line:
+            lines.append("    @expect dnu")
+        lines.append(f"    {line}")
     return "\n".join(lines)
 
 
@@ -246,22 +355,31 @@ def main():
     fixture.append("  twice: aBlock =>")
     fixture.append("    aBlock value")
     fixture.append("    aBlock value")
-    for name, code, _, _ in home:
-        fixture.append("")
-        fixture.append(method_source(name, code))
+    sub = [HEADER]
+    sub.append("ClosureMatrixSubject subclass: ClosureMatrixSub")
+    sub.append("")
+    sub.append("  bump => super bump")
+    for name, code, _, _, _, subject in home:
+        target = sub if subject != SUBJECT else fixture
+        target.append("")
+        target.append(method_source(name, code))
     for name, code, _, _, _ in away:
         fixture.append("")
         # away methods take the runner as a parameter
         fixture.append(method_source(f"{name}: other", code))
     FIXTURE.write_text("\n".join(fixture) + "\n")
+    FIXTURE_SUB.write_text("\n".join(sub) + "\n")
 
     test = [HEADER]
     test.append("TestCase subclass: ActorClosureMatrixTest")
-    for name, _, expected, n in home:
+    for name, _, expected, n, error, subject in home:
         test.append("")
         test.append(f"  test{name[0].upper()}{name[1:]} =>")
-        test.append("    c := ClosureMatrixSubject spawn")
-        test.append(f"    self assert: c {name} equals: {literal(expected)}")
+        test.append(f"    c := {subject} spawn")
+        if error is None:
+            test.append(f"    self assert: c {name} equals: {literal(expected)}")
+        else:
+            test.append(f"    self should: [c {name}] raise: #{error}")
         test.append(f"    self assert: c n equals: {n}")
     for name, _, expected, n, error in away:
         test.append("")
