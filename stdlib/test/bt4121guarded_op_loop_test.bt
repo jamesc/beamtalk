@@ -78,3 +78,13 @@ TestCase subclass: Bt4121GuardedOpLoopTest
     m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
     self assert: (a repeatAddCounting: m times: 3) equals: 2
     self assert: a count equals: 3
+
+  testEarlyReturnKeepsSlowPathWrites =>
+    a := Bt4121TallyActor spawn
+    self assert: (a sumUntil: a items limit: 150) cents equals: 300
+    self assert: a count equals: 2
+
+  testDirectReturnKeepsSlowPathWrites =>
+    a := Bt4121TallyActor spawn
+    self assert: (a sumFirst: a items) cents equals: 100
+    self assert: a count equals: 1

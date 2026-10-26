@@ -102,3 +102,17 @@ Actor subclass: Bt4121TallyActor
     i := n.
     [i > 0] whileTrue: [k := self.count. acc := acc + m. i := i - 1].
     k
+
+  // A conditional `^` out of a bracketed loop lowers through the closure
+  // arm, which reads the live cell the bracket keeps current.
+  sumUntil: items limit: cents =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    items do: [:m | acc := acc + m. (acc cents) > cents ifTrue: [^ acc]].
+    acc
+
+  // A direct `^` out of a bracketed loop carries the live cell, like the
+  // loop's own exit pack — the slow-path writes made before it survive.
+  sumFirst: items =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self.
+    items do: [:m | acc := acc + m. ^ acc].
+    acc

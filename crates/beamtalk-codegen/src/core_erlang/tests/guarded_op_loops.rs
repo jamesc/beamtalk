@@ -210,6 +210,23 @@ fn inner_stateless_loop_in_stateful_body_brackets_itself() {
 }
 
 #[test]
+fn early_return_in_bracketed_loop_carries_live_cell() {
+    // A `^` out of a bracketed loop carries the live cell like the loop's
+    // own exit pack (exit seed, the throw's state, and the pre-throw store
+    // that keeps them), so the slow-path writes made before it survive
+    // instead of being clobbered by a store of the entry state.
+    // (`^` under a conditional lowers through the closure arm, which is
+    // already live; the direct `^` takes the loop-entry arm this covers.)
+    let src = format!(
+        "{ACTOR_PREAMBLE}  run: xs =>\n    acc := 0.\n    xs do: [:m | acc := acc + m. ^ acc].\n    acc\n"
+    );
+    let out = compile(&src);
+    assert_eq!(takes(&out), 3, "takes:\n{out}");
+    assert!(out.contains("'$bt_nlr'"), "nlr throw:\n{out}");
+    assert_eq!(enforce_report(&src), None);
+}
+
+#[test]
 fn guarded_op_gap_fires_loud_without_marker() {
     // Under the no-brackets fault no marker is pushed, so the exemption
     // reports `UnbracketedGuardedOperator` instead of bracketing — the rule
