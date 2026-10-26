@@ -63,13 +63,22 @@ greeting := "Hello, 世界! 🌍"
 message := "Welcome, {name}!"
 emoji := "Status: {status} ✓"
 
-// Escape sequences inside strings:
+// Escape sequences inside strings (ADR 0138):
+//   \r   carriage return (U+000D)
+//   \n   line feed (U+000A)
+//   \t   horizontal tab (U+0009)
+//   \\   backslash
+//   \"   double quote ("" doubling still works too)
+//   \0   NUL (U+0000) — exactly one char, no C-style octal continuation
 //   ""   doubled delimiter → literal double-quote character
-//   \{   backslash preserved → literal \{  (prevents interpolation)
-//   \}   backslash preserved → literal \}
+//   \{   literal { — backslash consumed (prevents interpolation)
+//   \}   literal } — backslash consumed
+// A backslash before anything else is a compile error pointing at the
+// backslash: "\q" → unknown escape '\q' … (use '\\' for a literal backslash).
+// Symbol literals (#'…') have no backslash handling: #'a\nb' is backslash-n.
 quote := """"                    // 1-char string containing "
 dialog := "She said ""hello"""  // → She said "hello"
-// Note: \{ and \} keep the backslash in the string value (current lexer behavior)
+crlf := "\r\n"                   // 1 grapheme — byte-identical to (Character value: 13) asString ++ (Character value: 10) asString
 
 // All strings are <<"UTF-8 binary">> in Erlang
 ```
