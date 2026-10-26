@@ -150,3 +150,69 @@ typed Object subclass: H
     ));
     assert!(!diags.is_empty(), "expected a mismatch, got none");
 }
+
+fn no_dnu_on_nil(src: &str) {
+    let diags = type_diagnostics(src);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("UndefinedObject")),
+        "got: {diags:#?}"
+    );
+}
+
+#[test]
+fn dynamic_true_arm_nil_false_arm_does_not_collapse_to_nil() {
+    no_dnu_on_nil(
+        r"
+typed Object subclass: M
+  untypedThing => 1
+  run: flag :: Boolean -> Integer =>
+    x := flag ifTrue: [self untypedThing] ifFalse: [nil]
+    x bar
+    1
+",
+    );
+}
+
+#[test]
+fn nil_true_arm_dynamic_false_arm_does_not_collapse_to_nil() {
+    no_dnu_on_nil(
+        r"
+typed Object subclass: M
+  untypedThing => 1
+  run: flag :: Boolean -> Integer =>
+    x := flag ifTrue: [nil] ifFalse: [self untypedThing]
+    x bar
+    1
+",
+    );
+}
+
+// PIN-BUG BT-4207 (pre-existing on main, not introduced by BT-4102): a
+// genuinely Dynamic arm joined with a `nil` arm collapses to `Nil`
+// (`merge_method_local_binding`: Known beats Dynamic), so `x bar` warns.
+// When BT-4207 lands, flip these two to `no_dnu_on_nil`.
+#[test]
+fn pin_bug_bt4207_dynamic_param_arm_collapses_to_nil() {
+    let src = r"
+typed Object subclass: M
+  run: flag :: Boolean with: d -> Integer =>
+    x := flag ifTrue: [d foo] ifFalse: [nil]
+    x bar
+    1
+";
+    let diags = type_diagnostics(src);
+    assert!(mentions(&diags, "UndefinedObject"), "got: {diags:#?}");
+}
+
+#[test]
+fn pin_bug_bt4207_dynamic_param_arm_swapped_collapses_to_nil() {
+    let src = r"
+typed Object subclass: M
+  run: flag :: Boolean with: d -> Integer =>
+    x := flag ifTrue: [nil] ifFalse: [d foo]
+    x bar
+    1
+";
+    let diags = type_diagnostics(src);
+    assert!(mentions(&diags, "UndefinedObject"), "got: {diags:#?}");
+}
