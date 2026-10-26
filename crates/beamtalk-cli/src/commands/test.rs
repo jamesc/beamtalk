@@ -603,15 +603,11 @@ fn class_index_for_file(
     file_class_index.extend(fixture_class_index.clone());
 
     let mut file_super_index = base_super;
-    file_super_index.extend(
-        fixture_class_index
-            .iter()
-            .filter_map(|(class_name, _module_name)| {
-                merged_super_index
-                    .get(class_name)
-                    .map(|s| (class_name.clone(), s.clone()))
-            }),
-    );
+    file_super_index.extend(fixture_class_index.keys().filter_map(|class_name| {
+        merged_super_index
+            .get(class_name)
+            .map(|s| (class_name.clone(), s.clone()))
+    }));
 
     (file_class_index, file_super_index)
 }

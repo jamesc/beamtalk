@@ -23,7 +23,7 @@ pub(crate) static COLOR_ENABLED: AtomicBool = AtomicBool::new(true);
 /// - stdout is not a terminal (piped output)
 /// - stderr is not a terminal (error output is piped)
 pub fn init(no_color_flag: bool) {
-    let is_dumb_term = std::env::var("TERM").map(|v| v == "dumb").unwrap_or(false);
+    let is_dumb_term = std::env::var("TERM").is_ok_and(|v| v == "dumb");
     let enabled = !no_color_flag
         && std::env::var_os("NO_COLOR").is_none()
         && !is_dumb_term

@@ -595,13 +595,11 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                 e @ Expression::FieldAccess {
                     receiver, field, ..
                 },
-            ) => {
-                if is_self_reference(receiver)
-                    && vars.contains(field.name.as_str())
-                    && !written_targets.contains(&std::ptr::from_ref(e))
-                {
-                    accesses.reads.insert(field.name.to_string());
-                }
+            ) if is_self_reference(receiver)
+                && vars.contains(field.name.as_str())
+                && !written_targets.contains(&std::ptr::from_ref(e)) =>
+            {
+                accesses.reads.insert(field.name.to_string());
             }
             WalkEvent::Send(send)
                 if send.site == SendSite::Plain

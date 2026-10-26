@@ -36,7 +36,7 @@ fn test_io_timeout() -> Duration {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&secs| secs > 0)
-            .map_or(Duration::from_secs(120), Duration::from_secs)
+            .map_or(Duration::from_mins(2), Duration::from_secs)
     })
 }
 
@@ -2184,6 +2184,6 @@ mod tests {
         // Note: OnceLock makes this a one-shot test per process, so we only
         // verify the default (env var is not set in the test environment).
         let timeout = test_io_timeout();
-        assert_eq!(timeout, Duration::from_secs(120));
+        assert_eq!(timeout, Duration::from_mins(2));
     }
 }

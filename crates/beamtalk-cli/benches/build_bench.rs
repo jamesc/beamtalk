@@ -128,7 +128,7 @@ fn bench_stdlib_cold_build(c: &mut Criterion) {
     // These are slow benchmarks (seconds each), so use a small sample size
     // and longer measurement time.
     group.sample_size(10);
-    group.measurement_time(std::time::Duration::from_secs(120));
+    group.measurement_time(std::time::Duration::from_mins(2));
 
     group.bench_function("cold_build", |b| {
         b.iter_with_setup(
@@ -199,7 +199,7 @@ fn bench_stdlib_incremental_one_file(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("stdlib_build");
     group.sample_size(10);
-    group.measurement_time(std::time::Duration::from_secs(60));
+    group.measurement_time(std::time::Duration::from_mins(1));
 
     group.bench_function("incremental_one_file", |b| {
         b.iter_with_setup(

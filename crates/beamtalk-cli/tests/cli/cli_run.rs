@@ -179,7 +179,7 @@ impl Drop for WorkspaceStopGuard {
         let _ = cli_common::beamtalk()
             .current_dir(&self.project_dir)
             .args(["workspace", "stop"])
-            .timeout(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_mins(1))
             .output();
     }
 }
@@ -235,14 +235,14 @@ fn run_connected_status_lines_go_to_stderr_not_stdout() {
         .current_dir(project.path())
         .arg("repl")
         .write_stdin("exit\n")
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_mins(2))
         .assert()
         .success();
 
     cli_common::beamtalk()
         .current_dir(project.path())
         .args(["run", "Smoke", "run", "--connect"])
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(std::time::Duration::from_mins(1))
         .assert()
         .success()
         // Status lines must NOT leak onto stdout ...
@@ -322,7 +322,7 @@ fn run_service_mode_status_lines_go_to_stderr_not_stdout() {
     cli_common::beamtalk()
         .current_dir(project.path())
         .args(["run", "."])
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_mins(2))
         .assert()
         .success()
         // Status lines must NOT leak onto stdout ...

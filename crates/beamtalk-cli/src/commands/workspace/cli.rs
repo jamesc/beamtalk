@@ -262,8 +262,7 @@ fn run_status(name: Option<&str>) -> Result<()> {
     // Show workspace age (creation time, not node start time)
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     let age_secs = now.saturating_sub(detail.created_at);
     let hours = age_secs / 3600;
     let minutes = (age_secs % 3600) / 60;

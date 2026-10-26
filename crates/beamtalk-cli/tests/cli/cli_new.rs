@@ -70,7 +70,7 @@ fn new_app_run_prints_greeting() {
     cli_common::beamtalk()
         .current_dir(dir.path().join("my_app"))
         .args(["run", "Main", "run"])
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_mins(2))
         .assert()
         .success()
         .stdout(contains("Hello from my_app!"));

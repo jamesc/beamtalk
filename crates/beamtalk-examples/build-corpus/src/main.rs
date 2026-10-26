@@ -368,45 +368,41 @@ fn extract_md_code_blocks(root: &Path, path: &Path, entries: &mut Vec<CorpusEntr
                     current_heading.push_str(&text);
                 }
             }
-            Event::Code(code) => {
-                if in_heading {
-                    current_heading.push_str(&code);
-                }
+            Event::Code(code) if in_heading => {
+                current_heading.push_str(&code);
             }
-            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(lang))) => {
-                if lang.as_ref() == "beamtalk" {
-                    in_beamtalk_block = true;
-                    block_content.clear();
-                }
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(lang)))
+                if lang.as_ref() == "beamtalk" =>
+            {
+                in_beamtalk_block = true;
+                block_content.clear();
             }
-            Event::End(TagEnd::CodeBlock) => {
-                if in_beamtalk_block {
-                    in_beamtalk_block = false;
-                    let code = block_content.trim().to_string();
-                    // Skip very short blocks (< 3 lines) — trivial arithmetic examples
-                    let line_count = code.lines().count();
-                    if line_count >= 3 && parses_cleanly(&code) {
-                        let module = parse_bt(&code);
-                        let mut tags = extract_tags_from_module(&module);
-                        tags.push(stem.to_string());
+            Event::End(TagEnd::CodeBlock) if in_beamtalk_block => {
+                in_beamtalk_block = false;
+                let code = block_content.trim().to_string();
+                // Skip very short blocks (< 3 lines) — trivial arithmetic examples
+                let line_count = code.lines().count();
+                if line_count >= 3 && parses_cleanly(&code) {
+                    let module = parse_bt(&code);
+                    let mut tags = extract_tags_from_module(&module);
+                    tags.push(stem.to_string());
 
-                        let title = if current_heading.is_empty() {
-                            format!("{} block {}", title_from_stem(&stem), block_index)
-                        } else {
-                            format!("{} ({})", current_heading.trim(), stem)
-                        };
+                    let title = if current_heading.is_empty() {
+                        format!("{} block {}", title_from_stem(&stem), block_index)
+                    } else {
+                        format!("{} ({})", current_heading.trim(), stem)
+                    };
 
-                        entries.push(CorpusEntry {
-                            id: make_id(&rel_path, Some(&format!("block-{block_index}"))),
-                            title,
-                            category: category.clone(),
-                            tags,
-                            source: code,
-                            explanation: format!("Code example from {rel_path}"),
-                        });
-                    }
-                    block_index += 1;
+                    entries.push(CorpusEntry {
+                        id: make_id(&rel_path, Some(&format!("block-{block_index}"))),
+                        title,
+                        category: category.clone(),
+                        tags,
+                        source: code,
+                        explanation: format!("Code example from {rel_path}"),
+                    });
                 }
+                block_index += 1;
             }
             _ => {}
         }

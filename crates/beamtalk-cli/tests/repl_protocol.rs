@@ -780,7 +780,7 @@ impl ProcessManager {
             .current_dir(&project_dir)
             .args(["release", "--output"])
             .arg(&output_dir)
-            .timeout(Duration::from_secs(180))
+            .timeout(Duration::from_mins(3))
             .assert()
             .success();
 
