@@ -1490,7 +1490,7 @@ impl TypeChecker {
     ///
     /// Annotations are resolved exactly like method parameters in
     /// [`Self::set_param_types`] — alias and protocol registries, **empty**
-    /// substitution map. Known limitation (shared with method params): an
+    /// substitution map. Known limitation (BT-4210, shared with method params): an
     /// annotation naming a method-local type variable (`[:x :: E | ...]`)
     /// does not see the method's substitution.
     ///
