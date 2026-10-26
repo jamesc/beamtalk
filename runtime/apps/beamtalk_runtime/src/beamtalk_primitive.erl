@@ -245,8 +245,7 @@ print_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
 print_string(X) when is_binary(X) ->
     case is_utf8(X) of
         true ->
-            Escaped = binary:replace(X, <<"\"">>, <<"\"\"">>, [global]),
-            iolist_to_binary([$", Escaped, $"]);
+            iolist_to_binary([$", escape_string_content(X), $"]);
         false ->
             %% Bytes that aren't valid UTF-8 can't be a String, and
             %% embedding them raw produces an invalid-UTF-8 result that later
@@ -1324,6 +1323,35 @@ binary_hex_print_string(Bin) ->
     Hex = binary:encode_hex(Bin, uppercase),
     Spaced = lists:join(<<" ">>, [Pair || <<Pair:2/binary>> <= Hex]),
     iolist_to_binary([<<"<<">>, Spaced, <<">>">>]).
+
+-doc """
+Escape string content per the ADR 0138 shared escape mapping: `\\` doubles,
+`"` doubles (`""`), `{` becomes `\\{`, and CR/LF/TAB/NUL become
+`\\r`/`\\n`/`\\t`/`\\0`. Bare `}` passes through as-is. The caller adds the
+surrounding quotes.
+
+Single-pass over codepoints, so emitted backslashes are never re-processed —
+equivalent to the Beamtalk leg's ordered `replaceAll:` chain (`String
+printString`) and the Rust leg's `string_content` (`unparse/leaf.rs`). The
+input must be valid UTF-8 (the `print_string/1` binary clause guarantees this
+via `is_utf8/1`). Spellings are pinned byte-for-byte by
+`stdlib/test/fixtures/string_escape_corpus.json` (see
+`beamtalk_primitive_tests:escape_corpus_conformance_test/0`).
+""".
+-spec escape_string_content(binary()) -> binary().
+escape_string_content(Bin) ->
+    <<<<(escape_string_char(C))/binary>> || <<C/utf8>> <= Bin>>.
+
+-doc "Map one codepoint to its ADR 0138 printString spelling.".
+-spec escape_string_char(non_neg_integer()) -> binary().
+escape_string_char($") -> <<"\"\"">>;
+escape_string_char(${) -> <<"\\{">>;
+escape_string_char($\\) -> <<"\\\\">>;
+escape_string_char($\r) -> <<"\\r">>;
+escape_string_char($\n) -> <<"\\n">>;
+escape_string_char($\t) -> <<"\\t">>;
+escape_string_char(0) -> <<"\\0">>;
+escape_string_char(C) -> <<C/utf8>>.
 
 -doc """
 Extract the class name atom from a class tag or class object tag.
