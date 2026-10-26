@@ -1767,7 +1767,7 @@
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "// Length in graphemes, not bytes\n\"Hello\" length        // => 5\n\"世界\" length          // => 2 (not 6 bytes)\n\"👨‍👩‍👧‍👦\" length        // => 1 (family emoji is 1 grapheme, 7 codepoints)\n\n// Slicing by grapheme\n\"Hello\" at: 1         // => \"H\"\n\"世界\" at: 1           // => \"世\"\n\n// First / last grapheme\n\"Hello\" first         // => \"H\"\n\"Hello\" last          // => \"o\"\n\"über\" first          // => \"ü\" (one grapheme, two UTF-8 bytes)\n\n// Iteration over graphemes\n\"Hello\" each: [:char | Transcript show: char]\n\n// Case conversion (locale-aware)\n\"HELLO\" lowercase     // => \"hello\"\n\"straße\" uppercase    // => \"STRASSE\" (German ß → SS)",
+      "source": "// Length in graphemes, not bytes\n\"Hello\" length        // => 5\n\"世界\" length          // => 2 (not 6 bytes)\n\"👨‍👩‍👧‍👦\" length        // => 1 (family emoji is 1 grapheme, 7 codepoints)\n\n// Slicing by grapheme\n\"Hello\" at: 1         // => \"H\"\n\"世界\" at: 1           // => \"世\"\n\n// First / last grapheme\n\"Hello\" first         // => \"H\"\n\"Hello\" last          // => \"o\"\n\"über\" first          // => \"ü\" (one grapheme, two UTF-8 bytes)\n\n// Iteration over graphemes\n\"Hello\" each: [:char | Transcript show: char]\n\n// Case conversion (locale-aware)\n\"HELLO\" lowercase     // => \"hello\"\n\"Content-TYPE\" asciiLowercase  // => \"content-type\" (only A-Z fold; non-ASCII untouched)\n\"straße\" uppercase    // => \"STRASSE\" (German ß → SS)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
