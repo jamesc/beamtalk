@@ -1330,7 +1330,9 @@ do_export_traces(Opts) ->
             <<"filters">> => FilterMap,
             <<"total_events">> => Count
         },
-        <<"traces">> => Limited
+        %% BT-4173: trace maps carry tagged Strings for Beamtalk lookup —
+        %% unwrap to raw binaries for the JSON encoder.
+        <<"traces">> => beamtalk_primitive:deep_unwrap_strings(Limited)
     },
     JsonBin = beamtalk_json:prettify_term(Export),
     case file:write_file(Path, JsonBin) of

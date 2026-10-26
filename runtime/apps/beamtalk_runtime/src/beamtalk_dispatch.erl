@@ -203,6 +203,11 @@ shared hierarchy walk (state is meaningless for immutable value types) and
 unwraps the `{reply, Value, _State}` result to a plain value, re-raising any
 structured error.
 """.
+%% The `{error, Wrapped}` clause below is reachable (a method dispatch
+%% returning `{error, WrappedMap}` passes through `Other -> Other`
+%% untouched), but `super/5`'s spec narrows errors to records, so success
+%% typing flags it as dead.
+-dialyzer({no_match, super_value/4}).
 -spec super_value(selector(), args(), bt_self(), class_name()) -> term().
 super_value(Selector, Args, Self, CurrentClass) ->
     case super(Selector, Args, Self, #{}, CurrentClass) of

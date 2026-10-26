@@ -202,9 +202,10 @@ Parameters:
 - Class, Selector, Fun, Owner — as for `register/4`.
 - Source — `binary()` method body, or `undefined` to skip source tracking.
 """.
--spec register(atom(), atom(), function(), atom(), binary() | beamtalk_string:t() | undefined) -> ok.
-%% BT-4173: a String source arrives tagged — unwrap (storage stays raw;
-%% `maybe_store_source/2` tags for its readers).
+-spec register(atom(), atom(), function(), atom(), binary() | beamtalk_string:t() | undefined) ->
+    ok.
+%% BT-4173: a String source arrives tagged — unwrap to raw bytes
+%% (`maybe_store_source/2` re-tags for its readers).
 register(Class, Selector, Fun, Owner, {beamtalk_string, Source}) when
     is_atom(Class),
     is_atom(Selector),
@@ -621,7 +622,7 @@ returning them would force every caller to filter.
 Each tuple is `{Class, Selector, Source}` where Source is the binary
 method body text. Returns `[]` when no extensions have stored source.
 """.
--spec listAllWithSource() -> [{atom(), atom(), binary()}].
+-spec listAllWithSource() -> [{atom(), atom(), beamtalk_string:t()}].
 listAllWithSource() ->
     try
         ets:foldl(
@@ -676,8 +677,10 @@ maybe_store_source(Key, undefined) ->
     ok;
 maybe_store_source(Key, Source) when is_binary(Source) ->
     %% BT-4173: sources are text — store tagged so `getSource/2` and
-    %% `listAllWithSource/0` answer Strings (SystemNavigation binds the
-    %% third tuple element through a typed `String` local).
+    %% `listAllWithSource/0` answer Strings (Beamtalk reads source via
+    %% `(Erlang beamtalk_extensions) getSource:selector:` and calls
+    %% String methods on it). The one raw consumer (ChangeLog audit
+    %% trail) unwraps at its own call site.
     ets:insert(?SOURCES_TABLE, {Key, beamtalk_primitive:string_from_binary(Source)}),
     ok.
 

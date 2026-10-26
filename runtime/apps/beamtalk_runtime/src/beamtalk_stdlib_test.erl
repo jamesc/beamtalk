@@ -259,6 +259,9 @@ format_result(V) when is_atom(V) ->
     atom_to_binary(V, utf8);
 format_result(V) when is_binary(V) ->
     V;
+format_result({beamtalk_string, Bin}) when is_binary(Bin) ->
+    %% BT-4173: a String result displays as its text.
+    Bin;
 format_result(V) when is_function(V) ->
     beamtalk_primitive:block_label(V);
 format_result(V) when is_pid(V) ->
