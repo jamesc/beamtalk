@@ -481,8 +481,10 @@ impl CoreErlangGenerator {
 
     /// Character-typed-receiver dispatch —
     /// `HANDLERS`' first (and only) entry that ever fires on
-    /// `is_character_typed_receiver` (a Character literal, or a `Character
-    /// value:` factory call). Collapses what used to be two separate
+    /// `is_character_typed_receiver` (a Character literal, a `Character
+    /// value:` factory call, an `uppercase`/`lowercase` chain, or a
+    /// statically Character-typed `ifTrue:ifFalse:` conditional). Collapses
+    /// what used to be two separate
     /// `is_character_typed_receiver` checks in `generate_message_send` (one
     /// preempting [`Self::try_generate_protoobject_message`]'s `class` and
     /// [`Self::try_generate_object_message`]'s `respondsTo:`/`perform:`
@@ -574,7 +576,9 @@ impl CoreErlangGenerator {
 
     /// Routes a non-binary message to the Character module's
     /// `dispatch/3`, for any receiver `is_character_typed_receiver` recognizes
-    /// (a Character literal or a `Character value:` factory call).
+    /// (a Character literal, a `Character value:` factory call, an
+    /// `uppercase`/`lowercase` chain, or a statically Character-typed
+    /// `ifTrue:ifFalse:` conditional).
     ///
     /// At the BEAM level, Character values are plain integers, so the default
     /// runtime dispatch path (keyed on `is_integer/1`) sends them to the Integer

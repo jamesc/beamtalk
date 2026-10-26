@@ -106,16 +106,6 @@ fn dead_branch_hint(is_true: bool, selector: WellKnownSelector) -> &'static str 
     }
 }
 
-/// Returns `Some(true)` if `receiver` is the identifier `true`, `Some(false)` if `false`,
-/// or `None` for any other expression.
-fn literal_bool_receiver(receiver: &Expression) -> Option<bool> {
-    match receiver {
-        Expression::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
-        Expression::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
-        _ => None,
-    }
-}
-
 /// Checks a single expression node for literal boolean conditional patterns.
 ///
 /// Called by [`walk_module`] via [`check_literal_boolean_condition`]; the walker
@@ -128,7 +118,7 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
         ..
     } = expr
     {
-        if let Some(is_true) = literal_bool_receiver(receiver) {
+        if let Some(is_true) = receiver.as_literal_bool() {
             if let Some(well_known) = boolean_conditional(selector) {
                 let literal_name = if is_true { "true" } else { "false" };
                 diagnostics.push(
@@ -145,7 +135,7 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
         receiver, messages, ..
     } = expr
     {
-        if let Some(is_true) = literal_bool_receiver(receiver) {
+        if let Some(is_true) = receiver.as_literal_bool() {
             let literal_name = if is_true { "true" } else { "false" };
             for msg in messages {
                 if let Some(well_known) = boolean_conditional(&msg.selector) {
@@ -1404,6 +1394,29 @@ mod tests {
                 .is_some_and(|h| h.contains(WellKnownSelector::IfTrue.as_str())),
             "Expected hint to mention `ifTrue:`, got: {:?}",
             diagnostics[0].hint
+        );
+    }
+
+    /// `(true) ifTrue: [42]` — a parenthesized literal condition warns too
+    /// (`as_literal_bool` sees through parens; BT-4161).
+    #[test]
+    fn parenthesized_literal_true_if_true_warns() {
+        let src = "(true) ifTrue: [42]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for (true) ifTrue:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("always `true`"),
+            "Expected 'always `true`' in message, got: {}",
+            diagnostics[0].message
         );
     }
 

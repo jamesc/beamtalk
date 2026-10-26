@@ -227,6 +227,7 @@
 - Fix: a field write in a `whileTrue:`/`whileFalse:` condition of a value type is now correctly carried across iterations instead of being silently dropped (BT-4002, #4476)
 - Fix: reading a `late` slot whose key is present answers its value, including `nil`, and `late` on a nil-admitting type is a compile error (ADR 0124 amendment, BT-4061) — the read guard used to raise `UninitializedStateError` for a stored `nil` while `hasField:` reported the slot assigned; presence — not value — is now assignment on every surface (direct read, `fieldAt:`, class-side reads), with the guard and `hasField:` sharing one presence helper. Separately, `late state: a :: Object` (and `:: Dynamic`, and any alias or protocol admitting `nil`) is now the B1 compile error ADR 0124 §1 specifies, since `nil` is already a value such a slot can hold. Migration: drop `late` or narrow the type to exclude `nil`.
 - Fix: FFI arity check accepts the multi-arity `erlang` BIFs — `integer_to_binary/2`, `atom_to_binary/2`, `binary_to_atom/2`, `binary_to_list/3` and `spawn/2,4` no longer warn "expected arity 1" (BT-4101)
+- Fix: an `ifTrue:ifFalse:` conditional answering a Character dispatches through Character instead of Integer (BT-4161) — with a literal condition only the taken branch decides, and with a non-constant condition both branches must agree; `(true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) printString` now answers `"$6"` instead of `"54"`. `Character value:` with a computed argument is pinned to match the literal form.
 
 ### Runtime
 

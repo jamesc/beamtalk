@@ -5,7 +5,8 @@ use super::{class_self_send_reflective_primitive, is_class_auto_export_selector}
 use crate::core_erlang::CoreErlangGenerator;
 use crate::core_erlang::expr_shape::is_character_typed_receiver;
 use beamtalk_core::ast::{
-    Expression, Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition, TypeAnnotation,
+    Block, Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector,
+    MethodDefinition, TypeAnnotation,
 };
 use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
 use std::collections::BTreeSet;
@@ -639,6 +640,327 @@ fn is_character_typed_receiver_rejects_non_character_shapes() {
         span: s(),
     };
     assert!(!is_character_typed_receiver(&package_qualified));
+
+    // BT-4161: a cast (`!`) always evaluates to `'ok'`, so even a
+    // Character-typed shape under a cast is not Character-typed.
+    let mut factory_cast = character_value_call(Expression::Literal(Literal::Integer(65), s()));
+    let Expression::MessageSend { is_cast, .. } = &mut factory_cast else {
+        panic!("character_value_call must build a MessageSend");
+    };
+    *is_cast = true;
+    assert!(!is_character_typed_receiver(&factory_cast));
+}
+
+/// Builds `Character value: <arg>`.
+fn character_value_call(arg: Expression) -> Expression {
+    Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Character", s()),
+            package: None,
+            span: s(),
+        }),
+        selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", s())]),
+        arguments: vec![arg],
+        is_cast: false,
+        span: s(),
+    }
+}
+
+/// Builds `[body]` — a zero-parameter block literal answering `body`.
+fn block_answering(body: Expression) -> Expression {
+    Expression::Block(Block {
+        parameters: vec![],
+        body: vec![ExpressionStatement::bare(body)],
+        span: s(),
+    })
+}
+
+/// Builds `<condition> ifTrue: <true_branch> ifFalse: <false_branch>`.
+fn if_true_if_false(condition: Expression, tb: Expression, fb: Expression) -> Expression {
+    Expression::MessageSend {
+        receiver: Box::new(condition),
+        selector: MessageSelector::Keyword(vec![
+            KeywordPart::new("ifTrue:", s()),
+            KeywordPart::new("ifFalse:", s()),
+        ]),
+        arguments: vec![tb, fb],
+        is_cast: false,
+        span: s(),
+    }
+}
+
+fn int_lit(n: i64) -> Expression {
+    Expression::Literal(Literal::Integer(n), s())
+}
+
+fn bool_ident(name: &str) -> Expression {
+    Expression::Identifier(Identifier::new(name, s()))
+}
+
+/// BT-4161: with a literal-`true` condition, only the taken (`ifTrue:`)
+/// branch decides — the untaken branch is never evaluated
+/// (`True>>ifTrue:ifFalse:` answers `trueBlock value`), so its type is
+/// irrelevant, and a Character-typed `ifFalse:` branch must not rescue an
+/// Integer-typed taken branch.
+#[test]
+fn if_true_if_false_literal_true_taken_branch_decides() {
+    let char_branch = block_answering(character_value_call(int_lit(54)));
+    let int_branch = block_answering(int_lit(0));
+    assert!(is_character_typed_receiver(&if_true_if_false(
+        bool_ident("true"),
+        char_branch.clone(),
+        int_branch.clone(),
+    )));
+    assert!(!is_character_typed_receiver(&if_true_if_false(
+        bool_ident("true"),
+        int_branch,
+        char_branch,
+    )));
+}
+
+/// BT-4161: mirror of the above for a literal-`false` condition
+/// (`False>>ifTrue:ifFalse:` answers `falseBlock value`).
+#[test]
+fn if_true_if_false_literal_false_taken_branch_decides() {
+    let char_branch = block_answering(character_value_call(int_lit(54)));
+    let int_branch = block_answering(int_lit(0));
+    assert!(is_character_typed_receiver(&if_true_if_false(
+        bool_ident("false"),
+        int_branch.clone(),
+        char_branch.clone(),
+    )));
+    assert!(!is_character_typed_receiver(&if_true_if_false(
+        bool_ident("false"),
+        char_branch,
+        int_branch,
+    )));
+}
+
+/// BT-4161: with a non-constant condition the taken branch is unknown
+/// statically, so both branches must be Character-typed — the answer is a
+/// branch value either way. A mixed pair stays Integer-dispatched (current
+/// behavior), since routing it to Character would miscompile the
+/// Integer-typed path.
+#[test]
+fn if_true_if_false_non_constant_condition_requires_both_branches() {
+    let cond = Expression::Identifier(Identifier::new("flag", s()));
+    assert!(is_character_typed_receiver(&if_true_if_false(
+        cond.clone(),
+        block_answering(Expression::Literal(Literal::Character('A'), s())),
+        block_answering(character_value_call(int_lit(66))),
+    )));
+    assert!(!is_character_typed_receiver(&if_true_if_false(
+        cond.clone(),
+        block_answering(Expression::Literal(Literal::Character('A'), s())),
+        block_answering(int_lit(0)),
+    )));
+    assert!(!is_character_typed_receiver(&if_true_if_false(
+        cond,
+        block_answering(int_lit(0)),
+        block_answering(Expression::Literal(Literal::Character('A'), s())),
+    )));
+}
+
+/// BT-4161: transparency recurses — a branch body that is itself a
+/// Character-typed conditional (or chain) counts, and only the LAST body
+/// statement decides (earlier statements' values are discarded).
+#[test]
+fn if_true_if_false_recurses_through_nested_branches() {
+    // Nested conditional as the taken branch's answer.
+    let nested = if_true_if_false(
+        bool_ident("false"),
+        block_answering(int_lit(1)),
+        block_answering(Expression::Literal(Literal::Character('B'), s())),
+    );
+    assert!(is_character_typed_receiver(&if_true_if_false(
+        bool_ident("true"),
+        block_answering(nested),
+        block_answering(int_lit(0)),
+    )));
+
+    // Multi-statement branch: the last statement decides.
+    let multi = Expression::Block(Block {
+        parameters: vec![],
+        body: vec![
+            ExpressionStatement::bare(int_lit(99)),
+            ExpressionStatement::bare(Expression::Literal(Literal::Character('C'), s())),
+        ],
+        span: s(),
+    });
+    assert!(is_character_typed_receiver(&if_true_if_false(
+        bool_ident("true"),
+        multi,
+        block_answering(int_lit(0)),
+    )));
+
+    // Parenthesized condition and branch see through, like every other arm.
+    let parenthesized = Expression::Parenthesized {
+        expression: Box::new(if_true_if_false(
+            Expression::Parenthesized {
+                expression: Box::new(bool_ident("true")),
+                span: s(),
+            },
+            Expression::Parenthesized {
+                expression: Box::new(block_answering(character_value_call(int_lit(54)))),
+                span: s(),
+            },
+            block_answering(int_lit(0)),
+        )),
+        span: s(),
+    };
+    assert!(is_character_typed_receiver(&parenthesized));
+}
+
+/// BT-4161: shapes that must NOT be transparent. An empty block answers
+/// `nil`; a non-block branch argument cannot be inspected (whatever its
+/// `value` answers is dynamically typed); a cast (`!`) always evaluates to
+/// `'ok'`; and single-branch `ifTrue:`/`ifFalse:` answer the receiver
+/// boolean on the untaken path, so they stay conservatively unrecognized.
+#[test]
+fn if_true_if_false_rejects_untyped_shapes() {
+    // Empty taken branch answers nil.
+    let empty = Expression::Block(Block {
+        parameters: vec![],
+        body: vec![],
+        span: s(),
+    });
+    assert!(!is_character_typed_receiver(&if_true_if_false(
+        bool_ident("true"),
+        empty,
+        block_answering(int_lit(0)),
+    )));
+
+    // Non-block branch argument: dynamically typed.
+    assert!(!is_character_typed_receiver(&if_true_if_false(
+        bool_ident("true"),
+        Expression::Identifier(Identifier::new("someBlock", s())),
+        block_answering(int_lit(0)),
+    )));
+
+    // A cast evaluates to 'ok', never a Character.
+    let mut cast = if_true_if_false(
+        bool_ident("true"),
+        block_answering(character_value_call(int_lit(54))),
+        block_answering(int_lit(0)),
+    );
+    let Expression::MessageSend { is_cast, .. } = &mut cast else {
+        panic!("if_true_if_false must build a MessageSend");
+    };
+    *is_cast = true;
+    assert!(!is_character_typed_receiver(&cast));
+
+    // Single-branch conditionals are out of scope (boolean self, not a
+    // Character, on the untaken path).
+    let if_true_only = Expression::MessageSend {
+        receiver: Box::new(bool_ident("true")),
+        selector: MessageSelector::Keyword(vec![KeywordPart::new("ifTrue:", s())]),
+        arguments: vec![block_answering(character_value_call(int_lit(54)))],
+        is_cast: false,
+        span: s(),
+    };
+    assert!(!is_character_typed_receiver(&if_true_only));
+}
+
+/// BT-4161: the issue's exact expression parses to a shape the recognizer
+/// accepts — guards against precedence/parenthesization surprises between
+/// the surface syntax and the hand-built ASTs above.
+#[test]
+fn if_true_if_false_issue_expression_parses_to_character_typed_shape() {
+    let source = "(true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) asString";
+    let (module, diags) = parse(lex_with_eof(source));
+    assert!(
+        diags.iter().all(|d| d.severity != Severity::Error),
+        "snippet must parse without errors: {diags:?}"
+    );
+    let Expression::MessageSend { receiver, .. } = &module.expressions[0].expression else {
+        panic!(
+            "expected an outer asString send, got: {:?}",
+            module.expressions[0].expression
+        );
+    };
+    assert!(is_character_typed_receiver(receiver));
+}
+
+/// BT-4161: enforces the invariant the `ifTrue:ifFalse:` transparency arm
+/// of `is_character_typed_receiver` depends on — that
+/// `True>>ifTrue:ifFalse:` answers `trueBlock value` and
+/// `False>>ifTrue:ifFalse:` answers `falseBlock value` (single-statement
+/// bodies evaluating exactly the taken branch). Parses the real
+/// `true.bt`/`false.bt` off disk and fails loudly if a future edit changes
+/// a branch body without updating the recognizer — silent drift here would
+/// misroute a genuinely Integer-typed answer through Character dispatch.
+#[test]
+fn true_false_if_true_if_false_bodies_match_codegen_recognizer() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crates/")
+        .parent()
+        .expect("repo root")
+        .to_path_buf();
+
+    for (file, class_name, taken_param) in [
+        ("stdlib/src/true.bt", "True", "trueBlock"),
+        ("stdlib/src/false.bt", "False", "falseBlock"),
+    ] {
+        let path = repo_root.join(file);
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            eprintln!("skipping: {} not present in this checkout", path.display());
+            return;
+        };
+
+        let (module, diags) = parse(lex_with_eof(&source));
+        assert!(
+            diags.iter().all(|d| d.severity != Severity::Error),
+            "{file} must parse without errors: {diags:?}"
+        );
+
+        let class = module
+            .classes
+            .iter()
+            .find(|c| c.name.name == class_name)
+            .unwrap_or_else(|| panic!("{file} must define the {class_name} class"));
+        let method = class
+            .methods
+            .iter()
+            .find(|m| m.selector.name() == "ifTrue:ifFalse:")
+            .unwrap_or_else(|| panic!("{file} must define {class_name}>>ifTrue:ifFalse:"));
+
+        let [stmt] = method.body.as_slice() else {
+            panic!(
+                "{class_name}>>ifTrue:ifFalse: must be a single statement \
+                 (the recognizer assumes it answers exactly the taken branch's \
+                 value) — update is_character_typed_receiver to match"
+            );
+        };
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = &stmt.expression
+        else {
+            panic!(
+                "{class_name}>>ifTrue:ifFalse: must evaluate a block — update \
+                 is_character_typed_receiver to match"
+            );
+        };
+        assert!(
+            matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == taken_param),
+            "{class_name}>>ifTrue:ifFalse: must answer `{taken_param} value` \
+             (the recognizer routes on the taken branch) — update \
+             is_character_typed_receiver to match"
+        );
+        assert!(
+            matches!(selector, MessageSelector::Unary(name) if name == "value"),
+            "{class_name}>>ifTrue:ifFalse: must send unary `value` — update \
+             is_character_typed_receiver to match"
+        );
+        assert!(
+            arguments.is_empty(),
+            "{class_name}>>ifTrue:ifFalse: must take the branch's plain value — update \
+             is_character_typed_receiver to match"
+        );
+    }
 }
 
 /// Codegen for `(Character value: 10) asString` must emit a
@@ -678,6 +1000,38 @@ fn character_value_factory_receiver_dispatches_to_character_module() {
         "must not fall through to generic runtime dispatch (which would \
          misroute via is_integer/1 to Integer). Got: {output}"
     );
+}
+
+/// BT-4161: codegen for `(true ifTrue: [Character value: 54] ifFalse: [0])
+/// asString` must emit a direct call to `bt@stdlib@character:dispatch/3`.
+/// The conditional's taken branch is statically Character-typed, so without
+/// transparency the send falls through to generic runtime dispatch and is
+/// misrouted to `Integer>>asString`, producing `"54"` instead of `"6"`.
+#[test]
+fn conditional_character_receiver_dispatches_to_character_module() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let receiver = Expression::Parenthesized {
+        expression: Box::new(if_true_if_false(
+            bool_ident("true"),
+            block_answering(character_value_call(int_lit(54))),
+            block_answering(int_lit(0)),
+        )),
+        span: s(),
+    };
+    let selector = MessageSelector::Unary("asString".into());
+    let output = generator
+        .generate_message_send(&receiver, &selector, &[])
+        .unwrap()
+        .to_pretty_string();
+
+    assert!(
+        output.contains("'bt@stdlib@character':'dispatch'"),
+        "expected direct Character dispatch for the outer send, got: {output}"
+    );
+    // No `beamtalk_message_dispatch` absence check here (unlike the factory
+    // test above): the INNER `ifTrue:ifFalse:` send itself still compiles
+    // through generic runtime dispatch — only the OUTER send's routing
+    // changes, from Integer-misrouted to Character-direct.
 }
 
 // ─── generate_field_assignment_open (Closure::Open) × FieldWriteSite ─

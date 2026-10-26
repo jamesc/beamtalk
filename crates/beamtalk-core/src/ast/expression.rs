@@ -486,6 +486,25 @@ impl Expression {
         }
         current
     }
+
+    /// The reserved boolean this expression names, if any: `Some(true)` for
+    /// the identifier `true`, `Some(false)` for `false`, `None` for anything
+    /// else — through any number of `Parenthesized` wrappers.
+    ///
+    /// `true`/`false` are reserved identifiers, not `Literal`s (codegen's
+    /// `generate_identifier` compiles them unconditionally to `'true'`/
+    /// `'false'`, so no binding can shadow them). Single authority for
+    /// "literal boolean" — the literal-condition lint and codegen's
+    /// Character-typed-conditional recognition must call this rather than
+    /// re-matching the identifier names.
+    #[must_use]
+    pub fn as_literal_bool(&self) -> Option<bool> {
+        match self.unwrap_parens() {
+            Self::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
+            Self::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
+            _ => None,
+        }
+    }
 }
 
 /// A literal value.
