@@ -775,8 +775,8 @@ term_to_json_printable_list_unicode_test() ->
 
 term_to_json_nested_list_test() ->
     Result = beamtalk_repl_json:term_to_json([<<"a">>, 1, true]),
-    %% BT-4167: Strings nest quoted, like their top-level display.
-    ?assertEqual([<<"\"a\"">>, 1, true], Result).
+    %% BT-4203: List elements are not pre-quoted (top-level Strings still are).
+    ?assertEqual([<<"a">>, 1, true], Result).
 
 term_to_json_map_with_atom_keys_test() ->
     %% Maps are pre-formatted as Beamtalk syntax strings
