@@ -1639,7 +1639,10 @@ mod tests {
     fn test_while_true_field_plus_local_mutation_uses_full_extract() {
         // whileTrue: with BOTH local var mutation AND field mutation uses
         // full-extract mode — mutated field 'n' is a direct param, no State param.
-        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + 1. self.n := self.n + 1]\n    sum\n";
+        // BT-4121: neither the condition nor the body holds a guarded
+        // operator; one would route the loop to `StateAcc` (a hybrid loop
+        // cannot bracket its slow path).
+        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: go = true\n\n  run =>\n    sum := 0\n    [self.go] whileTrue: [sum := 1. self.n := sum]\n    sum\n";
         let code = codegen(src);
         assert!(
             code.contains("letrec"),
@@ -1679,7 +1682,10 @@ mod tests {
     fn test_while_true_readonly_field_pre_extracted_as_direct_param() {
         // whileTrue: body reads self.step (never written) and writes self.n:
         // self.step is pre-extracted as read-only param, self.n is pre-extracted as mutated param.
-        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
+        // BT-4121: neither the condition nor the body holds a guarded
+        // operator; one would route the loop to `StateAcc` (a hybrid loop
+        // cannot bracket its slow path).
+        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n  state: go = true\n\n  run =>\n    sum := 0\n    [self.go] whileTrue: [sum := self.step. self.n := sum]\n    sum\n";
         let code = codegen(src);
         assert!(
             !code.contains("fun (StateAcc)"),

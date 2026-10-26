@@ -10,27 +10,52 @@
 // actor State to thread; class methods route through the same fresh-map
 // pack prefix as ValueType — see `letrec_direct_params_value_and_class`).
 // Confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS` to emit "using hybrid".
+//
+// BT-4121: a body (or condition) holding a guarded operator routes to
+// `StateAcc` instead — a hybrid loop holds fields in parameters that
+// advance past the entry `State`, so it cannot bracket the operator's slow
+// path. The `*Adding` methods below pin that fallback; the plain methods
+// stay operator-free so they still pin hybrid codegen.
 
 Actor subclass: HybridCtr
   state: n = 0
   state: step :: Integer = 1
+  state: go = true
 
   // to:do: — local `sum` and field `self.n` both mutated in the body.
   sumTo: limit =>
     sum := 0
-    1 to: limit do: [:i | sum := sum + i. self.n := self.n + 1]
+    1 to: limit do: [:i | sum := i. self.n := sum]
     sum
 
   // whileTrue: — same shape via a condition-driven loop.
   countWhile: limit =>
     count := 0
-    [count < limit] whileTrue: [count := count + 1. self.n := self.n + 1]
+    [self.go] whileTrue: [count := 1. self.n := count]
     count
 
   // timesRepeat: — same shape again, plus a read-only field (`self.step`)
   // that is never written: BT-1326 pre-extracts read-only fields as a
   // separate direct param from mutated fields.
   accumulateBy: times =>
+    total := 0
+    times timesRepeat: [total := self.step. self.n := total]
+    total
+
+  // A guarded operator in the body routes the loop to `StateAcc`.
+  sumToAdding: limit =>
+    sum := 0
+    1 to: limit do: [:i | sum := sum + i. self.n := self.n + 1]
+    sum
+
+  // Same, with the operator in the condition as well as the body.
+  countWhileAdding: limit =>
+    count := 0
+    [count < limit] whileTrue: [count := count + 1. self.n := self.n + 1]
+    count
+
+  // Same, over a read-only field operand.
+  accumulateByAdding: times =>
     total := 0
     times timesRepeat: [total := total + self.step. self.n := self.n + 1]
     total
