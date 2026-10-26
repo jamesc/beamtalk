@@ -1639,10 +1639,12 @@ impl CoreErlangGenerator {
     /// uses pattern matching. For actors, extracts the class from the object record.
     ///
     /// ```core-erlang
-    /// % For primitives:
+    /// % For primitives (BT-4170: class is construction type — tagged
+    /// % `String`s vs bare `Binary` binaries, no UTF-8 sniffing):
     /// case Receiver of
     ///   <I> when call 'erlang':'is_integer'(I) -> 'Integer'
-    ///   <S> when call 'erlang':'is_binary'(S) -> 'String'
+    ///   <{'beamtalk_string', _}> when 'true' -> 'String'
+    ///   <S> when call 'erlang':'is_binary'(S) -> 'Binary'
     ///   <'true'> when 'true' -> 'True'
     ///   <'false'> when 'true' -> 'False'
     ///   <'nil'> when 'true' -> 'Nil'

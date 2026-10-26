@@ -32,7 +32,8 @@ use beamtalk_core::ast::MapPatternKey;
 /// Generates a Core Erlang document for a map pattern key.
 ///
 /// Symbol keys emit an atom: `'key'`.
-/// String keys emit a Core Erlang binary literal via the Document pipeline.
+/// String keys emit a tagged `String` literal via the Document pipeline
+/// (BT-4170) — matching how `String`-keyed maps are constructed.
 ///
 /// Shared by `match_lowering::generate_pattern`'s `Pattern::Map` case and
 /// `destructure::generate_pattern_extractions_from_var`'s `Pattern::Map`
@@ -42,7 +43,7 @@ use beamtalk_core::ast::MapPatternKey;
 fn map_pattern_key_doc(key: &MapPatternKey) -> Document<'static> {
     match key {
         MapPatternKey::Symbol(s) => leaf::atom(s.as_str()),
-        MapPatternKey::StringLit(s) => leaf::binary_lit(s.as_str()),
+        MapPatternKey::StringLit(s) => leaf::tagged_string_lit(s.as_str()),
     }
 }
 

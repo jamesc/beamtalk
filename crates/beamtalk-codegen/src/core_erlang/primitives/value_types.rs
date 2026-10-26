@@ -7,7 +7,7 @@
 //!
 //! Contains BIF generators for immutable value types: `Tuple`, `Set`, `Object`.
 
-use super::param;
+use super::{param, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -50,7 +50,9 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
                 ")",
             ])
         }
-        "asString" => Some(Document::Str("call 'beamtalk_tuple':'as_string'(Self)")),
+        "asString" => Some(wrap_string_result(Document::Str(
+            "call 'beamtalk_tuple':'as_string'(Self)",
+        ))),
         "do:" => {
             let p0 = param(params, 0, "_Block");
             Some(docvec![
@@ -165,9 +167,9 @@ pub(crate) fn generate_object_bif(
 /// (Critical Risk #4).
 pub(crate) fn generate_value_bif(selector: &str, _params: &[String]) -> Option<Document<'static>> {
     match selector {
-        "printString" => Some(Document::Str(
+        "printString" => Some(wrap_string_result(Document::Str(
             "call 'beamtalk_object_printer':'structural_from_state'(Self)",
-        )),
+        ))),
         _ => None,
     }
 }
@@ -352,7 +354,7 @@ mod tests {
         let result = doc_to_string(generate_tuple_bif("asString", &[]));
         assert_eq!(
             result,
-            Some("call 'beamtalk_tuple':'as_string'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'(Self))".to_string())
         );
     }
 
@@ -433,7 +435,7 @@ mod tests {
         let result = doc_to_string(generate_value_bif("printString", &[]));
         assert_eq!(
             result,
-            Some("call 'beamtalk_object_printer':'structural_from_state'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_object_printer':'structural_from_state'(Self))".to_string())
         );
     }
 
@@ -564,7 +566,7 @@ mod tests {
         let result = doc_to_string(generate_set_bif("printString", &[]));
         assert_eq!(
             result,
-            Some("call 'beamtalk_primitive':'print_string'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))".to_string())
         );
     }
 

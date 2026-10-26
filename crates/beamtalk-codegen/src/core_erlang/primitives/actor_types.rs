@@ -8,7 +8,7 @@
 //! Contains BIF generators for BEAM process and concurrency types:
 //! `Pid`, `Port`, `Reference`, `Future`, `FileHandle`.
 
-use super::{binary_bif, param};
+use super::{binary_bif, param, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -30,7 +30,7 @@ pub(crate) fn generate_opaque_bif(
         // Strict-inequality completes the comparison set. For opaque
         // identity types (Pid/Port/Reference) `=/=` is equivalent to `/=`.
         "=/=" => binary_bif("=/=", params),
-        "asString" => Some(Document::Str(to_string_fn)),
+        "asString" => Some(wrap_string_result(Document::Str(to_string_fn))),
         "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
         _ => extra_selector(selector, params),
     }
@@ -160,7 +160,7 @@ mod tests {
     fn test_pid_bif_as_string_and_extra() {
         assert_eq!(
             doc_to_string(generate_pid_bif("asString", &[])),
-            Some("call 'beamtalk_opaque_ops':'pid_to_string'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_opaque_ops':'pid_to_string'(Self))".to_string())
         );
         assert_eq!(
             doc_to_string(generate_pid_bif("isAlive", &[])),
@@ -172,7 +172,7 @@ mod tests {
     fn test_port_bif_as_string_and_no_extra() {
         assert_eq!(
             doc_to_string(generate_port_bif("asString", &[])),
-            Some("call 'beamtalk_opaque_ops':'port_to_string'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_opaque_ops':'port_to_string'(Self))".to_string())
         );
         // Port has no extra selectors.
         assert_eq!(doc_to_string(generate_port_bif("isAlive", &[])), None);
@@ -182,7 +182,7 @@ mod tests {
     fn test_reference_bif_as_string_and_extra() {
         assert_eq!(
             doc_to_string(generate_reference_bif("asString", &[])),
-            Some("call 'beamtalk_opaque_ops':'ref_to_string'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_opaque_ops':'ref_to_string'(Self))".to_string())
         );
         assert_eq!(
             doc_to_string(generate_reference_bif("demonitor", &[])),
@@ -294,7 +294,7 @@ mod tests {
         let result = doc_to_string(generate_future_bif("printString", &[]));
         assert_eq!(
             result,
-            Some("call 'beamtalk_primitive':'print_string'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))".to_string())
         );
     }
 
@@ -319,7 +319,7 @@ mod tests {
         let result = doc_to_string(generate_file_handle_bif("printString", &[]));
         assert_eq!(
             result,
-            Some("call 'beamtalk_primitive':'print_string'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))".to_string())
         );
     }
 

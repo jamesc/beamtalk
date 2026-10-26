@@ -8,7 +8,7 @@
 //! Characters are integers (Unicode codepoints) at the BEAM level.
 //! Simple operations use direct BIFs; predicates delegate to `beamtalk_character`.
 
-use super::{generate_comparison_bif, param};
+use super::{generate_comparison_bif, param, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -24,11 +24,13 @@ pub(crate) fn generate_character_bif(
         "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Conversion
         "asInteger" => Some(Document::Str("Self")),
-        "asString" => Some(Document::Str("call 'beamtalk_character':'as_string'(Self)")),
+        "asString" => Some(wrap_string_result(Document::Str(
+            "call 'beamtalk_character':'as_string'(Self)",
+        ))),
         // Display
-        "printString" => Some(Document::Str(
+        "printString" => Some(wrap_string_result(Document::Str(
             "call 'beamtalk_character':'print_string'(Self)",
-        )),
+        ))),
         // Identity
         "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
         // Predicates — delegate to runtime module

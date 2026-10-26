@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::{binary_bif, generate_comparison_bif, power_bif};
+use super::{binary_bif, generate_comparison_bif, power_bif, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -25,7 +25,9 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
         "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Conversion
         "asString" | "printString" => {
-            Some(Document::Str("call 'erlang':'integer_to_binary'(Self)"))
+            Some(wrap_string_result(Document::Str(
+                "call 'erlang':'integer_to_binary'(Self)",
+            )))
         }
         "asFloat" => Some(Document::Str("call 'erlang':'float'(Self)")),
         // Bitwise operations
@@ -214,7 +216,7 @@ mod tests {
         let result = doc_to_string(generate_integer_bif("asString", &[]));
         assert_eq!(
             result,
-            Some("call 'erlang':'integer_to_binary'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))".to_string())
         );
     }
 
@@ -223,7 +225,7 @@ mod tests {
         let result = doc_to_string(generate_integer_bif("printString", &[]));
         assert_eq!(
             result,
-            Some("call 'erlang':'integer_to_binary'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))".to_string())
         );
     }
 

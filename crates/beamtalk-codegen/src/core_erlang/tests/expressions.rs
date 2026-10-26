@@ -48,17 +48,17 @@ fn test_generate_literal_string() {
     let generator = CoreErlangGenerator::new("test");
     let lit = Literal::String("hello".into());
     let doc = generator.generate_literal(&lit).unwrap();
-    // Core Erlang binary syntax: #{segment, ...}#
-    // Each segment is #<charcode>(8,1,'integer',['unsigned'|['big']])
+    // BT-4170: tagged `{'beamtalk_string', #{segment, ...}#}` — each
+    // segment is #<charcode>(8,1,'integer',['unsigned'|['big']])
     assert_eq!(
         doc.to_pretty_string(),
-        "#\
+        "{'beamtalk_string', #\
 {#<104>(8,1,'integer',['unsigned'|['big']]),\
 #<101>(8,1,'integer',['unsigned'|['big']]),\
 #<108>(8,1,'integer',['unsigned'|['big']]),\
 #<108>(8,1,'integer',['unsigned'|['big']]),\
-#<111>(8,1,'integer',['unsigned'|['big']])}#",
-        "String 'hello' should generate correct Core Erlang binary literal"
+#<111>(8,1,'integer',['unsigned'|['big']])}#}",
+        "String 'hello' should generate a tagged String literal"
     );
 }
 
@@ -1157,9 +1157,18 @@ fn test_generate_string_concatenation_operator() {
         output.contains("iolist_to_binary"),
         "Should use iolist_to_binary for string concatenation. Got: {output}",
     );
+    // BT-4173: tagged operands unwrap to bytes; the result re-tags.
     assert!(
-        output.contains("binary_to_list"),
-        "Should convert binaries to lists first. Got: {output}",
+        output.contains("string_to_binary"),
+        "Should unwrap tagged operands. Got: {output}",
+    );
+    assert!(
+        output.contains("string_from_binary"),
+        "Should tag the concatenated result as a String. Got: {output}",
+    );
+    assert!(
+        !output.contains("binary_to_list"),
+        "Binaries are iodata; no binary_to_list needed. Got: {output}",
     );
 }
 

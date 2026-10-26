@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::{binary_bif, generate_comparison_bif};
+use super::{binary_bif, generate_comparison_bif, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -26,9 +26,9 @@ pub(crate) fn generate_float_bif(selector: &str, params: &[String]) -> Option<Do
         "floor" => Some(Document::Str("call 'erlang':'floor'(Self)")),
         "truncated" | "asInteger" => Some(Document::Str("call 'erlang':'trunc'(Self)")),
         // Conversion
-        "asString" | "printString" => Some(Document::Str(
+        "asString" | "printString" => Some(wrap_string_result(Document::Str(
             "call 'erlang':'float_to_binary'(Self, ['short'])",
-        )),
+        ))),
         // Trigonometric — Erlang math module
         "sin" => Some(Document::Str("call 'math':'sin'(Self)")),
         "cos" => Some(Document::Str("call 'math':'cos'(Self)")),

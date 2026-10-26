@@ -49,7 +49,7 @@ impl CoreErlangGenerator {
     /// Maps Beamtalk literals to Core Erlang:
     /// - Integers: `42` → `42`
     /// - Floats: `3.14` → `3.14`
-    /// - Strings: `"hello"` → binary syntax `#{#<104>(8,1,...), #<101>(8,1,...), ...}#`
+    /// - Strings: `"hello"` → tagged `{'beamtalk_string', #{#<104>(8,1,...), ...}#}` (BT-4170)
     /// - Symbols: `#foo` → atom `'foo'`
     /// - Characters: `$a` → integer `97`
     /// - Arrays: `[1, 2, 3]` → list `[1, 2, 3]`
@@ -58,7 +58,7 @@ impl CoreErlangGenerator {
         match lit {
             Literal::Integer(n) => Ok(leaf::int_lit(*n)),
             Literal::Float(f) => Ok(leaf::float_lit(*f)),
-            Literal::String(s) => Ok(leaf::binary_lit(s)),
+            Literal::String(s) => Ok(leaf::tagged_string_lit(s)),
             Literal::Symbol(s) => Ok(leaf::atom(s.to_string())),
             Literal::Character(c) => Ok(leaf::int_lit(i64::from(*c as u32))),
             Literal::List(elements) => {
@@ -86,8 +86,12 @@ impl CoreErlangGenerator {
     /// let _interpExpr1 = Name in
     ///   let _interpRaw2 = call 'beamtalk_message_dispatch':'send'(_interpExpr1, 'displayString', []) in
     ///     let _interpStr3 = call 'beamtalk_primitive':'display_string'(_interpRaw2) in
-    ///       #{#<72>(8,1,...), ..., #<_interpStr3>('all',8,'binary',...), #<33>(8,1,...)}#
+    ///       {'beamtalk_string', #{#<72>(8,1,...), ..., #<_interpStr3>('all',8,'binary',...), #<33>(8,1,...)}#}
     /// ```
+    ///
+    /// BT-4170: the assembled bytes are a `String`, so the construction is
+    /// tagged (`display_string/1` validates or renders each segment, so the
+    /// bytes are valid UTF-8 by construction).
     pub(super) fn generate_string_interpolation(
         &mut self,
         segments: &[StringSegment],
@@ -125,7 +129,7 @@ impl CoreErlangGenerator {
             binary_doc_parts.push(part);
         }
         binary_doc_parts.push(Document::Str("}#"));
-        let binary_doc = Document::Vec(binary_doc_parts);
+        let binary_doc = leaf::tag_string(Document::Vec(binary_doc_parts));
 
         // Wrap with let-bindings
         let mut doc = Document::Vec(Vec::new());
@@ -264,7 +268,7 @@ impl CoreErlangGenerator {
         binary_doc_parts.push(Document::Str("}#"));
 
         let mut value_doc = Document::Vec(inline_prefixes);
-        value_doc = docvec![value_doc, Document::Vec(binary_doc_parts)];
+        value_doc = docvec![value_doc, leaf::tag_string(Document::Vec(binary_doc_parts))];
 
         Ok(threaded_ir::ThreadedValue {
             prelude,
