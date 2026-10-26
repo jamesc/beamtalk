@@ -30,6 +30,19 @@ use beamtalk_core::ast::{
 };
 use beamtalk_core::source_analysis::Span;
 
+/// BT-4121: `maps:get(Field, take())` — a field read against the live cell
+/// for a stateless loop that brackets its guarded operators. Shared by the
+/// bare-identifier and `self.field` read paths so the two cannot drift.
+fn guarded_op_live_field_read_doc(field_name: &str) -> Document<'static> {
+    docvec![
+        "call 'maps':'get'(",
+        leaf::atom(field_name.to_string()),
+        ", ",
+        threaded_ir::cell_take_call(),
+        ")",
+    ]
+}
+
 impl CoreErlangGenerator {
     /// Generates code for a literal value.
     ///
@@ -330,13 +343,7 @@ impl CoreErlangGenerator {
                     // before the hybrid params below (like the `self.field`
                     // path): a bracketing loop's parameters are stale too.
                     if self.guarded_op_take_reads() {
-                        return Ok(docvec![
-                            "call 'maps':'get'(",
-                            leaf::atom(id.name.to_string()),
-                            ", ",
-                            super::threaded_ir::cell_take_call(),
-                            ")",
-                        ]);
+                        return Ok(guarded_op_live_field_read_doc(id.name.as_str()));
                     }
                     // In hybrid mode, check if this is a read-only field
                     // accessed implicitly (bare name without self. prefix).
@@ -721,13 +728,7 @@ impl CoreErlangGenerator {
                             declared_type,
                         ));
                     }
-                    return Ok(docvec![
-                        "call 'maps':'get'(",
-                        leaf::atom(field.name.to_string()),
-                        ", ",
-                        cell,
-                        ")",
-                    ]);
+                    return Ok(guarded_op_live_field_read_doc(field.name.as_str()));
                 }
                 // In hybrid mode, read-only fields are pre-extracted before the letrec.
                 // Use the direct parameter variable instead of generating maps:get every

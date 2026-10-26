@@ -991,10 +991,10 @@ impl CoreErlangGenerator {
             // path is not worth a threaded loop (the block analysis does not
             // count it, see `send_may_run_user_code`): it flags its loop's
             // marker and the loop brackets around it (BT-4121).
-            if self.classify_expr(expr.unwrap_parens()) != UserCodeCall::GuardedOperator {
-                self.record_gap(Self::send_label(expr), span);
-            } else {
+            if self.classify_expr(expr.unwrap_parens()) == UserCodeCall::GuardedOperator {
                 self.note_stateless_guarded_op(Self::send_label(expr), span);
+            } else {
+                self.record_gap(Self::send_label(expr), span);
             }
             return ThreadedValue {
                 prelude: tv.prelude,
@@ -1164,9 +1164,10 @@ impl CoreErlangGenerator {
             // the entry would be stale the moment a param advances. The mode
             // selection routes a hybrid body with a guarded operator to
             // `StateAcc`; reaching here means it missed, which is loud.
-            let (selector, at) = need
-                .map(|n| (n.selector, n.at))
-                .unwrap_or_else(|| ("guarded operator".to_string(), at));
+            let (selector, at) = need.map_or_else(
+                || ("guarded operator".to_string(), at),
+                |n| (n.selector, n.at),
+            );
             self.record_guarded_op_gap(selector, at);
             return GuardedOpCheckout::Nothing;
         }
@@ -1189,9 +1190,10 @@ impl CoreErlangGenerator {
             // loud. The exit packs still seed from the cell, which the
             // outer bracket keeps current.
             if self.synced.guarded_op_loops.borrow().is_empty() {
-                let (selector, at) = need
-                    .map(|n| (n.selector, n.at))
-                    .unwrap_or_else(|| ("guarded operator".to_string(), at));
+                let (selector, at) = need.map_or_else(
+                    || ("guarded operator".to_string(), at),
+                    |n| (n.selector, n.at),
+                );
                 self.record_guarded_op_gap(selector, at);
                 return GuardedOpCheckout::Nothing;
             }
