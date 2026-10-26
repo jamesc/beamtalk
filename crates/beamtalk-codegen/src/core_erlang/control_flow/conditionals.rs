@@ -885,6 +885,21 @@ impl CoreErlangGenerator {
         let scratch = self.conditional_scratch(frame);
         let blocks: Vec<Block> = arms.iter().map(match_arm_block).collect();
         let block_refs: Vec<&Block> = blocks.iter().collect();
+        // BT-4196: the scrutinee compiles FIRST, so its State steps (a field
+        // write, a bracket reload) are in the base State the scratch seed and
+        // the arms thread from, like `ifTrue:`'s receiver and the lookup
+        // producer's receiver/key.
+        let recv_tv = self.compile_match_scrutinee(value)?;
+        let value_doc = self.threaded_value_doc(&recv_tv.value);
+        // ADR 0137: in an actor method the scrutinee's prelude belongs to the
+        // producer's frame (so `verify()` sees its `Bind`s), ahead of the
+        // tuple; otherwise it renders inside the tuple, before the seed.
+        let splice = self.synced_calls_active() && !recv_tv.prelude.is_empty();
+        let (head, inline_prelude): (Vec<ThreadedStmt>, Document<'static>) = if splice {
+            (recv_tv.prelude, Document::Nil)
+        } else {
+            (Vec::new(), self.threaded_prelude_doc(&recv_tv.prelude))
+        };
         let outer_state = self.current_state_var();
         let (seed_doc, base_state) = self.seed_scratch_locals(&block_refs, scratch, &outer_state);
         let arm_frame = self.conditional_arm_frame(&block_refs, true);
@@ -892,9 +907,22 @@ impl CoreErlangGenerator {
             base_state: &base_state,
             arm: arm_frame.as_ref(),
         };
-        let match_doc = self.generate_match_with(value, arms, Some(&threading))?;
-        let tuple_doc = docvec![seed_doc, match_doc];
-        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &block_refs, tail, true)
+        let match_doc = self.generate_match_after_scrutinee(arms, &value_doc, Some(&threading))?;
+        let tuple_doc = docvec![inline_prelude, seed_doc, match_doc];
+        let mut tv = self.conditional_tuple_to_threaded_value(
+            tuple_doc,
+            frame,
+            span,
+            &block_refs,
+            tail,
+            true,
+        )?;
+        if !head.is_empty() {
+            let mut prelude = head;
+            prelude.append(&mut tv.prelude);
+            tv.prelude = prelude;
+        }
+        Ok(tv)
     }
 
     /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
