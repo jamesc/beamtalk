@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for string literal escape sequences from the REPL (ADR 0138, BT-4165).
+//
+// Per-escape values are pinned by stdlib/test/string_escape_test.bt (BUnit)
+// and the printString <-> re-parse legs by the shared conformance corpus
+// (stdlib/test/fixtures/string_escape_corpus.json). This file proves the
+// whole path works from a live REPL turn: lexing, evaluation, printString,
+// and the unknown-escape compile error. Unknown-escape basics ("\q", "\d")
+// live in errors.btscript (BT-4163); the error case here is the realistic
+// Windows-path shape.
+
+// ===========================================================================
+// CRLF LITERAL
+// ===========================================================================
+
+// CRLF is one grapheme (ADR 0138 Grapheme unity)
+"\r\n" size
+// => 1
+
+"a\r\nb" size
+// => 3
+
+// Byte-identical to the Character-built string
+"\r\n" =:= ((Character value: 13) asString ++ (Character value: 10) asString)
+// => true
+
+// ===========================================================================
+// PRINTSTRING ROUND-TRIP
+// ===========================================================================
+
+// printString escapes the newline: single-line, re-parseable spelling
+"a\nb" printString
+// => "a\nb"
+
+// ... which is exactly the canonical spelling (the re-parse leg over the
+// same spelling is pinned by the Rust conformance test on the shared corpus;
+// this asserts the REPL shows that spelling)
+("a\nb" printString) =:= """a\\nb"""
+// => true
+
+// ===========================================================================
+// UNKNOWN ESCAPE IS A COMPILE ERROR
+// ===========================================================================
+
+// A backslash outside the table fails with a pointer and a \\ hint.
+// Complete-but-invalid, so the REPL prints the error rather than showing a
+// continuation prompt.
+"C:\path"
+// => ERROR: unknown escape
