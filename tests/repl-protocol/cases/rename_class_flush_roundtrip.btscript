@@ -99,7 +99,7 @@ Object allSubclasses includes: Bt3271RenameFlushDemo
 // => true
 
 Bt3271RenameFlushDemoUser new makeDemo greet
-// => hi from the rename-flush e2e
+// => "hi from the rename-flush e2e"
 
 // ===========================================================================
 // STEP 2 — renameTo: RE-REGISTERS IN MEMORY AND LOGS A rename-class ENTRY
@@ -113,7 +113,7 @@ Object allSubclasses includes: Bt3271RenameFlushDemoRenamed
 // => true
 
 Bt3271RenameFlushDemoUser new makeDemo greet
-// => hi from the rename-flush e2e
+// => "hi from the rename-flush e2e"
 
 _renameEntry := (Workspace changes select: [:e | e className =:= #Bt3271RenameFlushDemoRenamed]) first
 // => _
@@ -152,7 +152,7 @@ _skippedFirst := _skipped first
 // => _
 
 Erlang maps get: #reason with: _skippedFirst
-// => destructive
+// => "destructive"
 
 File exists: _demoPath
 // => true
@@ -228,7 +228,7 @@ Workspace load: _userPath
 // => ["Bt3271RenameFlushDemoUser"]
 
 Bt3271RenameFlushDemoUser new makeDemo greet
-// => hi from the rename-flush e2e
+// => "hi from the rename-flush e2e"
 
 Bt3271RenameFlushDemoUser new makeDemo class name
 // => Bt3271RenameFlushDemoRenamed

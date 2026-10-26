@@ -1245,7 +1245,8 @@ mod tests {
         let client = ReplClient::connect(port, &cookie, None).await?;
         let resp = client.eval("\"hello\"").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
-        assert_eq!(resp.value_string(), "hello");
+        // BT-4167: Strings display quoted.
+        assert_eq!(resp.value_string(), "\"hello\"");
         client.close().await;
         Ok(())
     }
@@ -1472,9 +1473,9 @@ mod tests {
         let resp = client.eval("42").await.unwrap();
         assert_eq!(resp.value_string(), "42");
 
-        // String value
+        // String value (BT-4167: quoted).
         let resp = client.eval("\"test\"").await.unwrap();
-        assert_eq!(resp.value_string(), "test");
+        assert_eq!(resp.value_string(), "\"test\"");
 
         // Nil value
         let resp = client.eval("nil").await.unwrap();
@@ -1746,7 +1747,8 @@ mod tests {
 
         let resp = client.eval("mcpRemoveMethodTarget greet").await?;
         assert!(!resp.is_error());
-        assert_eq!(resp.value_string(), "hi");
+        // BT-4167: Strings display quoted.
+        assert_eq!(resp.value_string(), "\"hi\"");
 
         // Mirrors `remove_method_expr("McpRemoveMethodTarget", "greet")`.
         let resp = client
@@ -1814,7 +1816,8 @@ mod tests {
             )
             .await?;
         assert!(!resp.is_error(), "ifAbsent: fallback should not error");
-        assert_eq!(resp.value_string(), "not found");
+        // BT-4167: Strings display quoted.
+        assert_eq!(resp.value_string(), "\"not found\"");
 
         // The defined selector still round-trips through the same shape,
         // returning the receiver on success rather than running the fallback.
@@ -2045,7 +2048,8 @@ mod tests {
             "new sayHi should succeed: {:?}",
             resp.error
         );
-        assert_eq!(resp.value_string(), "hi");
+        // BT-4167: Strings display quoted.
+        assert_eq!(resp.value_string(), "\"hi\"");
 
         // The old selector is gone.
         let resp = client.eval("McpRenameMethodTarget new greet").await?;

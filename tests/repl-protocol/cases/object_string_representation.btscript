@@ -18,8 +18,8 @@
 //   - Supervisor:   Supervisor(ClassName, <pid>) / DynamicSupervisor(...)
 //   - Object/class: bare ClassName (no `a`/`an` article)
 //   - Interpolation: "{Point new}" yields the string "Point(x: 0, y: 0)"
-//                    (displayString defaults to printString; the REPL shows a
-//                    top-level String result unquoted)
+//                    (displayString defaults to printString; BT-4167: the
+//                    REPL shows a top-level String result quoted)
 //   - Raw primitive: a raw pid still renders #Pid<...>, distinct from Actor(...)
 
 // @load tests/repl-protocol/fixtures/point.bt
@@ -89,12 +89,12 @@ Counter
 
 // String interpolation pulls `displayString`, which defaults to
 // `printString`, so an embedded Value renders structurally inside the string.
-// (The REPL displays a top-level String result unquoted.)
+// (BT-4167: the REPL displays a top-level String result quoted.)
 "{Point new}"
-// => Point(x: 0, y: 0)
+// => "Point(x: 0, y: 0)"
 
 "point is {Point x: 3 y: 4}"
-// => point is Point(x: 3, y: 4)
+// => "point is Point(x: 3, y: 4)"
 
 // ===========================================================================
 // RAW PRIMITIVE SANITY — a raw pid renders #Pid<...>, distinct from Actor(...)
@@ -109,4 +109,4 @@ c pid class
 // => Pid
 
 c pid printString
-// => #Pid<_>
+// => "#Pid<_>"

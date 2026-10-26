@@ -32,15 +32,15 @@ CounterTest
 
 // Run all test* methods — verify output format (timing varies)
 CounterTest runAll
-// => 2 tests, 2 passed (_)
+// => "2 tests, 2 passed (_)"
 
 // Run a single test method by symbol name
 CounterTest run: #testIncrement
-// => 1 tests, 1 passed (_)
+// => "1 tests, 1 passed (_)"
 
 // Run another single test
 CounterTest run: #testInitialValue
-// => 1 tests, 1 passed (_)
+// => "1 tests, 1 passed (_)"
 
 // === Failure path: mixed pass/fail ===
 
@@ -50,7 +50,7 @@ FailingTest runAll
 
 // Run the passing test individually
 FailingTest run: #testPass
-// => 1 tests, 1 passed (_)
+// => "1 tests, 1 passed (_)"
 
 // Run the failing test individually (output includes failure details)
 FailingTest run: #testFail
@@ -61,26 +61,26 @@ FailingTest run: #testFail
 // LifecycleTest has setUp and tearDown — both tests should pass
 // because setUp sets log to "S" before each test on a fresh instance
 LifecycleTest runAll
-// => 2 tests, 2 passed (_)
+// => "2 tests, 2 passed (_)"
 
 LifecycleTest run: #testFirst
-// => 1 tests, 1 passed (_)
+// => "1 tests, 1 passed (_)"
 
 // === Edge case: unknown method name ===
 
 CounterTest run: #nonExistentTest
-// => Method 'nonExistentTest' not found in CounterTest
+// => "Method 'nonExistentTest' not found in CounterTest"
 
 // === Inherited test methods (BT-3768) ===
 
 // InheritedCounterTest defines no test method; it runs CounterTest's two
 InheritedCounterTest runAll
-// => 2 tests, 2 passed (_)
+// => "2 tests, 2 passed (_)"
 
 InheritedCounterTest run: #testIncrement
-// => 1 tests, 1 passed (_)
+// => "1 tests, 1 passed (_)"
 
 // === Edge case: no test methods ===
 
 EmptyTest runAll
-// => No test methods found in EmptyTest
+// => "No test methods found in EmptyTest"

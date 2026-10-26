@@ -29,17 +29,17 @@
 
 Actor subclass: RemSelParent
   greet => "parent-greet"
-// => RemSelParent
+// => "RemSelParent"
 
 RemSelParent subclass: RemSelChild
   greet => "child-greet"
-// => RemSelChild
+// => "RemSelChild"
 
 rsc := RemSelChild spawn
 // => Actor(RemSelChild, _)
 
 rsc greet
-// => child-greet
+// => "child-greet"
 
 RemSelChild includesSelector: #greet
 // => true
@@ -54,7 +54,7 @@ RemSelChild includesSelector: #greet
 // inherited implementation on its very next message — no restart, no
 // re-spawn.
 rsc greet
-// => parent-greet
+// => "parent-greet"
 
 // ===========================================================================
 // CLASS-SIDE REMOVAL — `Counter class removeSelector:` touches class_methods
@@ -62,20 +62,20 @@ rsc greet
 
 Actor subclass: RemSelClsParent
   class make => "parent-made"
-// => RemSelClsParent
+// => "RemSelClsParent"
 
 RemSelClsParent subclass: RemSelClsChild
   class make => "child-made"
-// => RemSelClsChild
+// => "RemSelClsChild"
 
 RemSelClsChild make
-// => child-made
+// => "child-made"
 
 RemSelClsChild class removeSelector: #make
 // => RemSelClsChild class
 
 RemSelClsChild make
-// => parent-made
+// => "parent-made"
 
 // ===========================================================================
 // removeSelector: RAISES selector_not_found ON AN ABSENT SELECTOR
@@ -86,7 +86,7 @@ RemSelClsChild make
 // => selector_not_found
 
 [RemSelParent removeSelector: #thisSelectorWasNeverDefined] on: Error do: [:e | e hint]
-// => Use includesSelector: or whichClassIncludesSelector: to check first, or removeSelector:ifAbsent: to supply a fallback.
+// => "Use includesSelector: or whichClassIncludesSelector: to check first, or removeSelector:ifAbsent: to supply a fallback."
 
 // #printString is inherited from ProtoObject, not LOCAL to RemSelParent
 // (includesSelector: is false), so removeSelector: still raises.
@@ -101,7 +101,7 @@ RemSelParent includesSelector: #printString
 // ===========================================================================
 
 RemSelParent removeSelector: #thisSelectorWasNeverDefinedEither ifAbsent: ["not found"]
-// => not found
+// => "not found"
 
 RemSelParent includesSelector: #greet
 // => true
@@ -140,16 +140,16 @@ RemSelParent removeSelector: #yetAnotherAbsentSelector ifAbsent: [RemSelParent i
 
 Value subclass: RemSelExtTarget
   field: tag = "none"
-// => RemSelExtTarget
+// => "RemSelExtTarget"
 
 RemSelExtTarget >> shout => "SHOUT"
-// => RemSelExtTarget>>shout
+// => "RemSelExtTarget>>shout"
 
 ext := RemSelExtTarget new
 // => RemSelExtTarget(tag: "none")
 
 ext shout
-// => SHOUT
+// => "SHOUT"
 
 ext respondsTo: #shout
 // => true

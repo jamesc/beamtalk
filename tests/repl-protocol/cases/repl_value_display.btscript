@@ -1,0 +1,67 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4167: REPL displays Characters as codepoints, values bare.
+//
+// Characters display as $X (not the codepoint decimal), Strings display
+// quoted + escaped (ADR 0138 spelling, same as String printString),
+// Binaries display as <<AB CD>> hex (same as Binary printString), and
+// class names stay bare — distinct from quoted Strings.
+
+// ===========================================================================
+// CHARACTERS — $X, distinct from Integers
+// ===========================================================================
+
+$A
+// => $A
+
+65
+// => 65
+
+Character value: 65
+// => $A
+
+x := $A
+// => $A
+
+// printString answers a String, so it displays quoted — distinct from the
+// Character itself.
+$A printString
+// => "$A"
+
+// ===========================================================================
+// STRINGS — quoted + escaped (ADR 0138), distinct from bare values
+// ===========================================================================
+
+"hello"
+// => "hello"
+
+""
+// => ""
+
+// Embedded quotes double, braces escape — same spelling as printString.
+"say ""hi"""
+// => "say ""hi"""
+
+"a\{b"
+// => "a\{b"
+
+// ===========================================================================
+// BINARIES — <<AB CD>> hex, distinct from Strings
+// ===========================================================================
+
+Binary fromBytes: #(255, 0)
+// => <<FF 00>>
+
+// ===========================================================================
+// CLASSES — bare names, distinct from quoted Strings
+// ===========================================================================
+
+Integer
+// => Integer
+
+"Integer"
+// => "Integer"
+
+42 class
+// => Integer

@@ -83,7 +83,7 @@ methodHelpText isNil
 // help: and :help produce similar output (both show class header)
 // :help Integer also shows the class header
 :help Integer
-// => == Integer < Number ==_
+// => "== Integer < Number ==_"
 
 // ===========================================================================
 // WORKSPACE CLASSES — list loaded classes
@@ -110,7 +110,7 @@ Workspace load: "tests/repl-protocol/fixtures/reload_counter.bt"
 
 // After loading, the class is available and has a sourceFile
 ReloadCounter sourceFile
-// => tests/repl-protocol/fixtures/reload_counter.bt
+// => "tests/repl-protocol/fixtures/reload_counter.bt"
 
 // ===========================================================================
 // BEHAVIOUR RELOAD — native equivalent of :reload / reload protocol op

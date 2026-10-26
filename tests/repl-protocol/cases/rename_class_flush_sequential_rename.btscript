@@ -68,7 +68,7 @@ Workspace load: _fooPath
 // => _
 
 Bt3526SeqRenameFoo new greet
-// => hi from the sequential rename e2e
+// => "hi from the sequential rename e2e"
 
 // ===========================================================================
 // STEP 2 — FIRST renameTo:: Foo -> Bar. Before the file has moved, the
@@ -167,7 +167,7 @@ Object allSubclasses includes: Bt3526SeqRenameBaz
 // => true
 
 Bt3526SeqRenameBaz new greet
-// => hi from the sequential rename e2e
+// => "hi from the sequential rename e2e"
 
 // ===========================================================================
 // CLEANUP

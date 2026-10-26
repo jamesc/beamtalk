@@ -16,7 +16,7 @@
 // ===========================================================================
 
 Protocol define: ReplTestable
-// => Protocol ReplTestable defined
+// => "Protocol ReplTestable defined"
 
 // Verify it's registered
 Protocol isProtocol: #ReplTestable
@@ -27,7 +27,7 @@ Protocol isProtocol: #ReplTestable
 // ===========================================================================
 
 Protocol define: ReplContainer(E)
-// => Protocol ReplContainer defined
+// => "Protocol ReplContainer defined"
 
 Protocol isProtocol: #ReplContainer
 // => true

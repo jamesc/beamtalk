@@ -16,4 +16,4 @@ val := 42
 // => _
 
 val match: [42 -> "found"; _ -> "not found"]
-// => found
+// => "found"

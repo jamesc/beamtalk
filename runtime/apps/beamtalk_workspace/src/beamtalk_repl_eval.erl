@@ -308,14 +308,12 @@ handle_type_alias_definition(AliasInfo, Warnings, State) ->
     beamtalk_repl_loader:spawn_alias_change_recheck([Name]),
     %% REPL display-value decision (flagged in the PR description for
     %% maintainer sign-off per CLAUDE.md's REPL-output rule): echo the
-    %% declared name as a plain binary, mirroring the class-declaration
-    %% convention (`Actor subclass: Counter` displays `Counter`) rather
-    %% than the protocol-declaration convention (`Protocol Foo defined`) —
-    %% a `type` declaration introduces a *name*, closer in spirit to a
-    %% class name than to a side-effecting "defined" announcement. Unlike
-    %% a class name, this never needs to become an atom (no BEAM module to
-    %% load under it), so the binary is used directly — `term_to_json`
-    %% (`beamtalk_repl_json.erl`) renders atoms and binaries identically.
+    %% declared name as a plain binary. BT-4167: binaries (Strings) now
+    %% display quoted (`"Direction"`), distinct from bare class names
+    %% (`Counter`) — the alias echo is a String value, not a class
+    %% reference, so quoting is correct. Unlike a class name, this never
+    %% needs to become an atom (no BEAM module to load under it), so the
+    %% binary is used directly.
     {ok, Name, <<>>, Warnings, NewState}.
 
 -doc """
@@ -1699,15 +1697,70 @@ process_eval_result({future_rejected, ErrorReason}, _Expression, CleanBindings, 
 process_eval_result(Result, Expression, CleanBindings, State) ->
     case extract_assignment(Expression) of
         {ok, VarName} ->
+            %% Bindings keep the RAW value (Character-ness is display-only;
+            %% `x := $A` binds 65 so later `x + 1` still works), while the
+            %% returned display value is tagged for `$X` rendering (BT-4167).
             NewBindings = CleanBindings#{VarName => Result},
             %% ADR 0093 §2: a workspace assignment (`x := ...`) is a
             %% BindingChanged system event. Announced after the new binding map is
             %% built; best-effort and fault-isolated (see announce_binding_changed/2).
             announce_binding_changed(VarName, Result),
-            {ok, Result, beamtalk_repl_state:set_bindings(NewBindings, State)};
+            Tagged = maybe_tag_character(Result, Expression),
+            {ok, Tagged, beamtalk_repl_state:set_bindings(NewBindings, State)};
         none ->
-            {ok, Result, beamtalk_repl_state:set_bindings(CleanBindings, State)}
+            Tagged = maybe_tag_character(Result, Expression),
+            {ok, Tagged, beamtalk_repl_state:set_bindings(CleanBindings, State)}
     end.
+
+-doc """
+Tag a Character-typed integer result for distinct REPL display (BT-4167).
+
+When `Result` is an integer in the Unicode scalar range, queries the compiler's
+static type inference (`resolve_completion_type`, same API as the completion
+fallback in `beamtalk_repl_ops_dev`) for `Expression`'s last expression. A
+`Character` answer tags the value as `{beamtalk_character, CP}` so
+`beamtalk_repl_json:term_to_json/1` renders `$X` instead of the codepoint
+decimal — distinct from Integers. Any other type, unknown type, missing
+compiler (release node), or query failure falls back to the raw integer
+(today's display). Non-integers and out-of-range integers skip the query
+entirely.
+
+Lives here (not in `beamtalk_repl_ops_eval`) so both the sync `handle_term`
+path and the async WebSocket eval path (`beamtalk_ws_handler` →
+`beamtalk_repl_shell:eval_async`, which bypasses `handle_term`) share one
+tagging site. Bindings are unaffected: callers store the raw value and tag
+only the returned display value.
+
+Known scope boundaries (matching `class` dispatch, which also uses static
+Character-ness): cross-turn variables (`x := $A` then `x` next turn),
+trace-mode steps, `run-entry` results, and Inspector `evaluate:` show the
+raw codepoint — only the statically Character-typed eval result itself is
+tagged.
+""".
+-spec maybe_tag_character(term(), string()) -> term().
+maybe_tag_character(Result, Expression) when is_integer(Result), is_list(Expression) ->
+    case
+        Result >= 0 andalso Result =< 16#10FFFF andalso
+            not (Result >= 16#D800 andalso Result =< 16#DFFF)
+    of
+        false ->
+            Result;
+        true ->
+            case beamtalk_capability:available(completion_type_inference) of
+                false ->
+                    Result;
+                true ->
+                    CodeBin = unicode:characters_to_binary(Expression),
+                    try beamtalk_compiler:resolve_completion_type(CodeBin) of
+                        {ok, 'Character'} -> {beamtalk_character, Result};
+                        _ -> Result
+                    catch
+                        _:_ -> Result
+                    end
+            end
+    end;
+maybe_tag_character(Result, _Expression) ->
+    Result.
 
 -doc """
 Announce `BindingChanged` on the `SystemAnnouncer` bus after a workspace variable

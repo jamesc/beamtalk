@@ -47,7 +47,7 @@ c getValue
 
 // Call a class method with Beamtalk body (compiles normally)
 NativeCounter description
-// => A native counter backed by Erlang
+// => "A native counter backed by Erlang"
 
 // ===========================================================================
 // ERROR PROPAGATION FROM BACKING GEN_SERVER

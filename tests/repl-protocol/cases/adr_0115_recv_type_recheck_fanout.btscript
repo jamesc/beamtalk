@@ -49,7 +49,7 @@
 // The class whose method is about to change — the ADR 0105 `Counter`.
 Actor subclass: Bt3220RtChanged
   bt3220RtProbe -> Integer => 1
-// => Bt3220RtChanged
+// => "Bt3220RtChanged"
 
 // A hierarchy-UNRELATED class (only Object in common) that happens to
 // implement the identical selector name — the "common selector, unrelated
@@ -61,20 +61,20 @@ Actor subclass: Bt3220RtChanged
 // branch's method either way).
 Actor subclass: Bt3220RtUnrelated
   bt3220RtProbe -> Integer => 2
-// => Bt3220RtUnrelated
+// => "Bt3220RtUnrelated"
 
 // The real dependent: its receiver parameter is typed at the changed class
 // itself (hierarchy-related by definition) — the ADR 0105 `Dashboard`.
 Object subclass: Bt3220RtRealDependent
   refresh: c :: Bt3220RtChanged -> Integer => (c bt3220RtProbe) + 1
-// => Bt3220RtRealDependent
+// => "Bt3220RtRealDependent"
 
 // The false positive: same selector, same shape, but its receiver parameter
 // is typed at the UNRELATED class — not `Bt3220RtChanged`, not one of its
 // ancestors or descendants.
 Object subclass: Bt3220RtFalsePositive
   refresh: u :: Bt3220RtUnrelated -> Integer => (u bt3220RtProbe) + 1
-// => Bt3220RtFalsePositive
+// => "Bt3220RtFalsePositive"
 
 // Sanity: the live behaviour before any edit.
 Bt3220RtChanged spawn bt3220RtProbe

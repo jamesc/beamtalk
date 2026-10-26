@@ -75,4 +75,4 @@ Object classBuilder name: #BT2267SuperChild; superclass: #BT2267SuperBase; class
 // => BT2267SuperChild
 
 BT2267SuperChild greeting
-// => base
+// => "base"

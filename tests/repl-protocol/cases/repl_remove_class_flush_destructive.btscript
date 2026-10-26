@@ -39,10 +39,10 @@
 
 Value subclass: ReplRemoveClassDemo
   greet => "hi"
-// => ReplRemoveClassDemo
+// => "ReplRemoveClassDemo"
 
 ReplRemoveClassDemo new greet
-// => hi
+// => "hi"
 
 Object allSubclasses includes: ReplRemoveClassDemo
 // => true

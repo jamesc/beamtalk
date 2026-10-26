@@ -54,7 +54,7 @@ worker isAlive
 
 // The exit reason is {Exception, Stacktrace}; the exception is the one raised.
 (infoRecorder reason at: 1) message
-// => deliberate handleInfo: error
+// => "deliberate handleInfo: error"
 
 // ===========================================================================
 // `!` CAST ERROR CRASHES THE ACTOR
@@ -82,7 +82,7 @@ runner isAlive
 // => false
 
 (castRecorder reason at: 1) message
-// => deliberate cast error
+// => "deliberate cast error"
 
 // ===========================================================================
 // SUPERVISED SERVER IS RESTARTED WITH A NEW PID

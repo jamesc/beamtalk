@@ -110,7 +110,7 @@ tc := TypedCounter spawn
 // A session-declared type alias, from an earlier turn, joins class/protocol
 // names in the same position.
 type RestartStrategy = #permanent | #transient | #temporary
-// => RestartStrategy
+// => "RestartStrategy"
 
 :complete restartPolicy ::
 // => INCLUDES:RestartStrategy
