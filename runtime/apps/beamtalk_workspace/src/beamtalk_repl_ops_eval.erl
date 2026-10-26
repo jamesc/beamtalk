@@ -64,10 +64,13 @@ handle_term(<<"eval">>, Params, _Msg, SessionPid) ->
                     {error, WrappedReason, Output, Warnings}
             end;
         _ ->
-            CodeBin = maps:get(<<"code">>, Params, <<>>),
             case beamtalk_repl_shell:eval(SessionPid, Code) of
                 {ok, Result, Output, Warnings} ->
-                    {ok, maybe_tag_character(Result, CodeBin), Output, Warnings};
+                    %% BT-4167 Character tagging happens inside
+                    %% `beamtalk_repl_eval:do_eval/3` (shared by the sync
+                    %% `handle_term` path and the async WebSocket eval path),
+                    %% so `Result` here is already tagged when appropriate.
+                    {ok, Result, Output, Warnings};
                 {script_exit, Code2, Output, Warnings} ->
                     %% `Program exit: Code2` ended this connected session.
                     {script_exit, Code2, Output, Warnings};
@@ -76,40 +79,3 @@ handle_term(<<"eval">>, Params, _Msg, SessionPid) ->
                     {error, WrappedReason, Output, Warnings}
             end
     end.
-
--doc """
-Tag a Character-typed integer result for distinct REPL display (BT-4167).
-
-When `Result` is an integer in the Unicode scalar range, queries the compiler's
-static type inference (`resolve_completion_type`, same API as the completion
-fallback in `beamtalk_repl_ops_dev`) for `CodeBin`'s last expression. A
-`Character` answer tags the value as `{beamtalk_character, CP}` so
-`beamtalk_repl_json:term_to_json/1` renders `$X` instead of the codepoint
-decimal — distinct from Integers. Any other type, unknown type, missing
-compiler (release node), or query failure falls back to the raw integer
-(today's display). Non-integers and out-of-range integers skip the query
-entirely.
-""".
--spec maybe_tag_character(term(), binary()) -> term().
-maybe_tag_character(Result, CodeBin) when is_integer(Result), is_binary(CodeBin) ->
-    case
-        Result >= 0 andalso Result =< 16#10FFFF andalso
-            not (Result >= 16#D800 andalso Result =< 16#DFFF)
-    of
-        false ->
-            Result;
-        true ->
-            case beamtalk_capability:available(completion_type_inference) of
-                false ->
-                    Result;
-                true ->
-                    try beamtalk_compiler:resolve_completion_type(CodeBin) of
-                        {ok, 'Character'} -> {beamtalk_character, Result};
-                        _ -> Result
-                    catch
-                        _:_ -> Result
-                    end
-            end
-    end;
-maybe_tag_character(Result, _CodeBin) ->
-    Result.

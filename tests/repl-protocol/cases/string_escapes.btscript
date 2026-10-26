@@ -30,9 +30,12 @@
 // PRINTSTRING ROUND-TRIP
 // ===========================================================================
 
-// printString escapes the newline: single-line, re-parseable spelling
+// printString escapes the newline: single-line, re-parseable spelling.
+// BT-4167: printString answers a String, so the REPL shows it quoted —
+// the already-quoted spelling gains an outer quote pair (with "" doubling
+// and \\ for the backslash).
 "a\nb" printString
-// => "a\nb"
+// => """a\\nb"""
 
 // ... which is exactly the canonical spelling (the re-parse leg over the
 // same spelling is pinned by the Rust conformance test on the shared corpus;
