@@ -9,6 +9,20 @@ TestCase subclass: StringAdvancedMethodsTest
 
   testLowercase => self assert: "HELLO" lowercase equals: "hello"
 
+  testAsciiLowercaseFoldsAZ =>
+    self assert: "Content-TYPE: ABC xyz" asciiLowercase equals: "content-type: abc xyz"
+    self assert: "ABCDEFGHIJKLMNOPQRSTUVWXYZ" asciiLowercase equals: "abcdefghijklmnopqrstuvwxyz"
+
+  testAsciiLowercaseLeavesNonAsciiUntouched =>
+    self assert: "ÉA" asciiLowercase equals: "Éa"
+    self assert: "İA" asciiLowercase equals: "İa"
+    // lowercase is Unicode-wide, asciiLowercase is not
+    self assert: "É" lowercase equals: "é"
+
+  testAsciiLowercaseIdentity =>
+    self assert: "already lower 123" asciiLowercase equals: "already lower 123"
+    self assert: "" asciiLowercase equals: ""
+
   testTrim =>
     // trim both sides
     self assert: "  hello  " trim equals: "hello"

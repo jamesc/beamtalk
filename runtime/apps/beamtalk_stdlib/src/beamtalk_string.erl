@@ -19,6 +19,7 @@ All operations are grapheme-aware and handle UTF-8 correctly.
     first/1,
     last/1,
     capitalize/1,
+    ascii_lowercase/1,
     reverse/1,
     includes/2,
     starts_with/2,
@@ -117,6 +118,24 @@ last(Str) when is_binary(Str) ->
 raise_empty(Selector) ->
     Hint = <<"String is empty; guard with `isEmpty` before indexing">>,
     beamtalk_error:raise(beamtalk_error:new(empty_collection, 'String', Selector, Hint)).
+
+-doc """
+ASCII-only lowercase: only `A`-`Z` fold; every other byte passes through.
+
+UTF-8 multi-byte sequences consist solely of bytes >= 16#80, so non-ASCII
+characters are untouched. Single O(n) pass.
+""".
+-spec ascii_lowercase(binary()) -> binary().
+ascii_lowercase(Str) when is_binary(Str) ->
+    <<
+        <<
+            (if
+                C >= $A, C =< $Z -> C + 32;
+                true -> C
+            end)
+        >>
+     || <<C>> <= Str
+    >>.
 
 -doc "Capitalize the first grapheme, keep rest unchanged.".
 -spec capitalize(binary()) -> binary().
