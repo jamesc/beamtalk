@@ -103,8 +103,8 @@ pub(super) fn char_lit(c: char) -> Document<'static> {
 ///
 /// These spellings are the Rust leg of the ADR 0138 shared escape mapping,
 /// pinned byte-for-byte by `stdlib/test/fixtures/string_escape_corpus.json`
-/// (`super::tests::escape_corpus_conformance`, plus the `printString` BUnit
-/// suite over the same file).
+/// (see `super::tests::escape_corpus_conformance` and the `printString`
+/// `BUnit` suite over the same file).
 #[must_use]
 pub(super) fn string_content(s: impl AsRef<str>) -> Document<'static> {
     let s = s.as_ref();
