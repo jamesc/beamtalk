@@ -69,7 +69,7 @@ Workspace changes isEmpty
 _meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
 // => _
 
-_projectPath := Erlang maps get: #project_path with: _meta
+_projectPath := (Erlang maps get: #project_path with: _meta) asStringUnchecked
 // => _
 
 _projDir := _projectPath ++ "/bt_e2e_rename_method_flush_" ++ (Erlang erlang) unique_integer asString
@@ -89,7 +89,7 @@ _widgetPath := _projDir ++ "/Bt3273Widget.bt"
 
 // A genuine LF byte built via the Erlang FFI (BT-3214: see
 // `rename_class_flush_roundtrip.btscript`'s identical note).
-_nl := (Erlang unicode) characters_to_binary: #(10)
+_nl := "\n"
 // => _
 
 _counterSource := "Value subclass: Bt3273Counter" ++ _nl ++ "  increment -> String => ""incremented""" ++ _nl ++ "  bump -> String => self increment"

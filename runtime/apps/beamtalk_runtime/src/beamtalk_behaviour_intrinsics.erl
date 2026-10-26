@@ -2304,11 +2304,16 @@ Reads `beamtalk_source` module attribute embedded at compile time.
 This is the definitive source-of-truth (survives workspace restarts).
 Returns nil for stdlib/bootstrap/ClassBuilder-created classes.
 """.
--spec classSourceFile(#beamtalk_object{}) -> binary() | 'nil'.
+-spec classSourceFile(#beamtalk_object{}) -> beamtalk_string:t() | 'nil'.
 classSourceFile(Self) ->
     ClassPid = erlang:element(4, Self),
     ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
-    beamtalk_reflection:source_file_from_module(ModuleName).
+    %% BT-4173: the source path is text — answer a String (other
+    %% `source_file_from_module/1` callers keep the raw bytes they need).
+    case beamtalk_reflection:source_file_from_module(ModuleName) of
+        nil -> nil;
+        Path -> beamtalk_primitive:string_from_binary(Path)
+    end.
 
 -doc """
 Recompile from sourceFile and hot-swap the BEAM module.
@@ -2559,6 +2564,9 @@ classPrecheckCompileSource(Self, Selector, Source) ->
 %% `Intent' to derive the error's selector name from — precheck only ever
 %% backs one public selector.
 -spec ensure_precheck_source_binary(term(), atom()) -> binary().
+%% BT-4173: a String body arrives tagged — unwrap to bytes.
+ensure_precheck_source_binary({beamtalk_string, Source}, _ClassName) when is_binary(Source) ->
+    Source;
 ensure_precheck_source_binary(Source, _ClassName) when is_binary(Source) ->
     Source;
 ensure_precheck_source_binary(Source, ClassName) ->
@@ -2588,13 +2596,20 @@ precheck_result_to_dictionary(#{
     cap_note := CapNote,
     checked_owners := CheckedOwners
 }) ->
+    %% BT-4173: finding text answers Strings (scripts bind `at: #message`
+    %% through String methods); counts pass through.
+    S = fun beamtalk_primitive:string_from_binary/1,
+    MaybeS = fun
+        (undefined) -> undefined;
+        (Bin) when is_binary(Bin) -> S(Bin)
+    end,
     #{
         findings => [precheck_finding_to_dictionary(F) || F <- Findings],
         checked => Checked,
         totalCandidates => TotalCandidates,
         notChecked => NotChecked,
-        capNote => CapNote,
-        checkedOwners => CheckedOwners
+        capNote => MaybeS(CapNote),
+        checkedOwners => [S(O) || O <- CheckedOwners]
     }.
 
 -spec precheck_finding_to_dictionary(map()) -> map().
@@ -2611,15 +2626,21 @@ precheck_finding_to_dictionary(#{
     start := Start,
     'end' := End
 }) ->
+    %% BT-4173: text fields answer Strings (see precheck_result_to_dictionary/1).
+    S = fun beamtalk_primitive:string_from_binary/1,
+    MaybeS = fun
+        (undefined) -> undefined;
+        (Bin) when is_binary(Bin) -> S(Bin)
+    end,
     #{
-        owner => Owner,
-        changedClass => ChangedClass,
-        selector => Selector,
+        owner => S(Owner),
+        changedClass => S(ChangedClass),
+        selector => S(Selector),
         classification => Classification,
-        severity => Severity,
-        category => Category,
-        message => Message,
-        note => Note,
+        severity => S(Severity),
+        category => MaybeS(Category),
+        message => S(Message),
+        note => MaybeS(Note),
         sites => Sites,
         start => Start,
         'end' => End
@@ -2630,6 +2651,11 @@ precheck_finding_to_dictionary(#{
 %% message names the actual selector invoked (derived from `Intent') so callers
 %% of `tryCompile:source:' do not see a misleading `compile:source:' message.
 -spec ensure_source_binary(atom(), term(), durable | ephemeral, atom()) -> binary().
+%% BT-4173: a String body arrives tagged — unwrap to bytes.
+ensure_source_binary(_Selector, {beamtalk_string, Source}, _Intent, _ClassName) when
+    is_binary(Source)
+->
+    Source;
 ensure_source_binary(_Selector, Source, _Intent, _ClassName) when is_binary(Source) ->
     Source;
 ensure_source_binary(_Selector, Source, Intent, ClassName) ->

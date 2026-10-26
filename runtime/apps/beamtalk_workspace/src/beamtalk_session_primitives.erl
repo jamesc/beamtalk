@@ -145,11 +145,12 @@ Liveness-checked per ADR 0081 Phase 3: a captured `Session` whose backing shell
 has died raises `session_not_found` rather than returning a stale id, so every
 send to a `Session` value fails consistently once the session is gone.
 """.
--spec id(session() | term()) -> binary().
+-spec id(session() | term()) -> beamtalk_string:t().
 id(Session) ->
     {Id, Pid} = session_id_pid(Session, 'id'),
     ensure_alive(Pid, Id),
-    Id.
+    %% BT-4173: the session id is text — answer a String.
+    beamtalk_primitive:string_from_binary(Id).
 
 -doc """
 Return a `Session` value for every live shell, backing `Workspace sessions`
@@ -561,6 +562,8 @@ raise_id_type_error(Selector, Other) ->
 
 %% Accept binary or string (list of codepoints) ids; return {ok, Binary} | error.
 -spec to_binary_id(term()) -> {ok, binary()} | error.
+%% BT-4173: a String id arrives tagged — unwrap to bytes.
+to_binary_id({beamtalk_string, Id}) when is_binary(Id) -> {ok, Id};
 to_binary_id(Id) when is_binary(Id) -> {ok, Id};
 to_binary_id(Id) when is_list(Id) ->
     try

@@ -149,7 +149,10 @@ handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     beamtalk_actor:restore_propagated_ctx(PropCtx),
     handle_call({Selector, Args}, From, State);
 handle_call(recent, _From, #state{buffer = Buffer} = State) ->
-    {reply, queue:to_list(Buffer), State};
+    %% BT-4173: buffered lines answer Strings (the buffer stays raw bytes
+    %% for push subscribers).
+    Lines = [beamtalk_primitive:string_from_binary(L) || L <- queue:to_list(Buffer)],
+    {reply, Lines, State};
 handle_call(clear, _From, #state{self_ref = SelfRef} = State) ->
     {reply, SelfRef, State#state{buffer = queue:new(), buffer_size = 0}};
 handle_call({'show:', [Value]}, _From, #state{self_ref = SelfRef} = State) ->

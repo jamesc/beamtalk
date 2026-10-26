@@ -202,7 +202,17 @@ Parameters:
 - Class, Selector, Fun, Owner — as for `register/4`.
 - Source — `binary()` method body, or `undefined` to skip source tracking.
 """.
--spec register(atom(), atom(), function(), atom(), binary() | undefined) -> ok.
+-spec register(atom(), atom(), function(), atom(), binary() | beamtalk_string:t() | undefined) -> ok.
+%% BT-4173: a String source arrives tagged — unwrap (storage stays raw;
+%% `maybe_store_source/2` tags for its readers).
+register(Class, Selector, Fun, Owner, {beamtalk_string, Source}) when
+    is_atom(Class),
+    is_atom(Selector),
+    is_function(Fun),
+    is_atom(Owner),
+    is_binary(Source)
+->
+    register(Class, Selector, Fun, Owner, Source);
 register(Class, Selector, Fun, Owner, Source) when
     is_atom(Class),
     is_atom(Selector),

@@ -18,6 +18,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     string_from_binary/1,
     string_to_binary/1,
     deep_unwrap_strings/1,
+    deep_tag_strings/1,
     class_of_object/1,
     class_of_object_by_name/1,
     send/3,
@@ -195,6 +196,34 @@ deep_unwrap_strings(Map) when is_map(Map) ->
      || {K, V} <- maps:to_list(Map)
     ]);
 deep_unwrap_strings(Other) ->
+    Other.
+
+-doc """
+Tag every bare binary in `Term` (keys and values, recursing through lists,
+tuples and maps) as a `String` — the inverse of `deep_unwrap_strings/1`
+(BT-4173). Already-tagged values pass through untouched, as do atoms,
+numbers, booleans, pids and references.
+
+Only for diagnostic/wire-shaped *text* (browse results, trace maps): never
+apply to terms that may carry byte payloads — those would mistag as `String`.
+""".
+-spec deep_tag_strings(term()) -> term().
+deep_tag_strings({beamtalk_string, _} = Tagged) ->
+    Tagged;
+deep_tag_strings(Bin) when is_binary(Bin) ->
+    string_from_binary(Bin);
+deep_tag_strings([H | T]) ->
+    [deep_tag_strings(H) | deep_tag_strings(T)];
+deep_tag_strings([]) ->
+    [];
+deep_tag_strings(Tuple) when is_tuple(Tuple) ->
+    list_to_tuple([deep_tag_strings(E) || E <- tuple_to_list(Tuple)]);
+deep_tag_strings(Map) when is_map(Map) ->
+    maps:from_list([
+        {deep_tag_strings(K), deep_tag_strings(V)}
+     || {K, V} <- maps:to_list(Map)
+    ]);
+deep_tag_strings(Other) ->
     Other.
 
 -doc """

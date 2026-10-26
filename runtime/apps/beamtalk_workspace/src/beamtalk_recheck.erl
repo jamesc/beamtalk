@@ -904,11 +904,18 @@ relevant_image_diagnostic(_Diagnostic) ->
 image_finding(
     OwnerBin, #{message := Message, severity := Severity, start := Start, 'end' := End} = Diagnostic
 ) ->
+    %% BT-4173: image findings surface to Beamtalk (`Workspace recheckImage`)
+    %% — text fields answer Strings.
+    S = fun beamtalk_primitive:string_from_binary/1,
     #{
-        owner => OwnerBin,
-        severity => Severity,
-        category => maps:get(category, Diagnostic, undefined),
-        message => Message,
+        owner => S(OwnerBin),
+        severity => S(Severity),
+        category =>
+            case maps:get(category, Diagnostic, undefined) of
+                undefined -> undefined;
+                Category -> S(Category)
+            end,
+        message => S(Message),
         start => Start,
         'end' => End
     }.
