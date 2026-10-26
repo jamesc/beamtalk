@@ -248,8 +248,13 @@ do_record_dispatch(Pid, Selector, Duration, Outcome, _Mode, Class) ->
     %% Always-on aggregates, keyed by {Class, Selector} only: no per-pid ETS
     %% write, no message to the gen_server, no monitor (BT-4103).
     maybe_add_sample(ensure_class_slot(Class, Selector), Duration, Outcome),
-    %% Per-actor detail only while tracing is enabled.
-    case is_enabled() of
+    %% Per-actor detail only while tracing is enabled, and only for local
+    %% pids (BT-4197): the dead-pid sweep decides liveness with
+    %% `is_process_alive/1`, which raises `badarg` for a remote pid, and a
+    %% remote actor's liveness is not observable without a node round-trip.
+    %% Remote actors still count in the per-class aggregate above; their
+    %% per-actor detail belongs to the node that hosts them.
+    case is_enabled() andalso node(Pid) =:= node() of
         true ->
             maybe_add_sample(ensure_pid_slot(Pid, Selector, Class), Duration, Outcome);
         false ->
@@ -1157,34 +1162,60 @@ what bounds the enabled-only pid table: no monitors are armed, so a dead
 pid's rows linger until this sweep (at most one eviction interval). Each row
 is claimed with `ets:take/2`: a row a caller re-creates for the pid afterwards
 (a late dispatch for a dead actor) stays until the next sweep.
+
+The pids to check come from the rows themselves, not from the keys index
+(BT-4197): a row whose keys entry was lost (a `clear/0` racing a writer) is
+still found and reclaimed. Only local pids are ever checked; a remote pid
+(never recorded, see `record_dispatch/6`) is skipped, and a failure on one pid
+is logged and skipped so a bad row can never crash the gen_server.
 """.
 sweep_dead_pids() ->
     case ets:info(?AGG_PID, size) of
         0 ->
             ok;
         _ ->
-            Pids = lists:usort(
-                ets:foldl(fun({Pid, _Selector}, Acc) -> [Pid | Acc] end, [], ?AGG_PID_KEYS)
+            ByPid = ets:foldl(
+                fun({{Pid, Selector}, _Ref, _Base, _Class}, Acc) ->
+                    maps:update_with(Pid, fun(Ss) -> [Selector | Ss] end, [Selector], Acc)
+                end,
+                #{},
+                ?AGG_PID
             ),
-            lists:foreach(fun sweep_pid_rows/1, Pids)
+            maps:foreach(fun sweep_pid_rows_safe/2, ByPid)
     end.
 
-sweep_pid_rows(Pid) ->
+sweep_pid_rows_safe(Pid, RowSelectors) ->
+    try
+        sweep_pid_rows(Pid, RowSelectors)
+    catch
+        Class:Reason ->
+            ?LOG_WARNING("Trace store sweep skipped a pid", #{
+                pid => Pid, class => Class, reason => Reason
+            }),
+            ok
+    end.
+
+sweep_pid_rows(Pid, RowSelectors) when is_pid(Pid), node(Pid) =:= node() ->
     case erlang:is_process_alive(Pid) of
         true ->
             ok;
         false ->
-            Keys = ets:take(?AGG_PID_KEYS, Pid),
+            %% Selectors come from both indexes: the keys entry may be missing
+            %% (clear/0 race) and the row may be missing (writer crash).
+            Keys = [S || {_, S} <- ets:take(?AGG_PID_KEYS, Pid)],
+            Selectors = lists:usort(Keys ++ RowSelectors),
             lists:foreach(
-                fun({_Pid, Selector}) ->
+                fun(Selector) ->
                     case ets:take(?AGG_PID, {Pid, Selector}) of
                         [{_Key, Ref, SlotBase, _Class}] -> release_slot(Ref, SlotBase);
                         [] -> ok
                     end
                 end,
-                Keys
+                Selectors
             )
-    end.
+    end;
+sweep_pid_rows(_RemoteOrMalformed, _RowSelectors) ->
+    ok.
 
 -doc """
 Drop all per-actor aggregate data: every pid row's slot is claimed with
@@ -1193,8 +1224,11 @@ Drop all per-actor aggregate data: every pid row's slot is claimed with
 as a reuse cache: disabling drops the rows but does not shrink the arrays.
 """.
 drop_pid_data() ->
-    ets:delete_all_objects(?AGG_PID_KEYS),
-    take_all_and_release(?AGG_PID).
+    %% Rows first, then keys (BT-4197). A writer racing this can still leave a
+    %% row whose keys entry was deleted; that is harmless because the sweep
+    %% finds pid rows from ?AGG_PID itself, not from the keys index.
+    take_all_and_release(?AGG_PID),
+    ets:delete_all_objects(?AGG_PID_KEYS).
 
 -doc "Delete the N oldest entries from an ordered_set.".
 delete_oldest_n(_Table, 0) ->
