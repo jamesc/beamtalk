@@ -134,6 +134,7 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 
 // Case conversion (locale-aware)
 "HELLO" lowercase     // => "hello"
+"Content-TYPE" asciiLowercase  // => "content-type" (only A-Z fold; non-ASCII untouched)
 "straße" uppercase    // => "STRASSE" (German ß → SS)
 ```
 

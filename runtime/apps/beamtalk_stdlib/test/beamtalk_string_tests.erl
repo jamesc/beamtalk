@@ -130,6 +130,18 @@ last_empty_string_test() ->
 %%% capitalize/1
 %%% ============================================================================
 
+ascii_lowercase_test() ->
+    ?assertEqual(<<"content-type">>, beamtalk_string:ascii_lowercase(<<"Content-TYPE">>)),
+    ?assertEqual(<<"abc xyz 123">>, beamtalk_string:ascii_lowercase(<<"ABC XYZ 123">>)),
+    ?assertEqual(<<>>, beamtalk_string:ascii_lowercase(<<>>)),
+    ?assertEqual(<<"already">>, beamtalk_string:ascii_lowercase(<<"already">>)).
+
+ascii_lowercase_non_ascii_untouched_test() ->
+    ?assertEqual(
+        unicode:characters_to_binary([$a, 16#C9, $b, 16#130]),
+        beamtalk_string:ascii_lowercase(unicode:characters_to_binary([$A, 16#C9, $B, 16#130]))
+    ).
+
 capitalize_lowercase_test() ->
     ?assertEqual(<<"Hello">>, beamtalk_string:capitalize(<<"hello">>)).
 

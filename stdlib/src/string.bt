@@ -219,6 +219,19 @@ sealed typed Binary subclass: String
   /// ```
   lowercase -> String => @primitive
 
+  /// Convert only the ASCII letters A-Z to lowercase.
+  ///
+  /// Unlike `lowercase`, every other character (including non-ASCII letters
+  /// such as "É" or "İ") passes through unchanged. Use for protocol tokens
+  /// such as HTTP header names. Single O(n) pass.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "Content-TYPE" asciiLowercase    // => "content-type"
+  /// "ÉA" asciiLowercase              // => "Éa"
+  /// ```
+  asciiLowercase -> String => @primitive
+
   /// Capitalize the first character.
   ///
   /// ## Examples
