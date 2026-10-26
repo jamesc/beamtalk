@@ -268,9 +268,12 @@ term_to_json(Value) when is_float(Value) ->
 term_to_json(Value) when is_atom(Value) ->
     atom_to_binary(Value, utf8);
 term_to_json({beamtalk_string, Bin}) when is_binary(Bin) ->
-    %% BT-4170: tagged `String` unwraps to its text (`ensure_utf8/1`
-    %% re-checks, containing even `asStringUnchecked`-smuggled bytes).
-    beamtalk_transcript_stream:ensure_utf8(Bin);
+    %% BT-4167: Strings display quoted + escaped (ADR 0138 spelling via
+    %% print_string), same as the bare-binary clause below. `ensure_utf8/1`
+    %% re-checks first, containing even `asStringUnchecked`-smuggled bytes.
+    beamtalk_runtime_api:print_string(
+        {beamtalk_string, beamtalk_transcript_stream:ensure_utf8(Bin)}
+    );
 term_to_json(Value) when is_binary(Value) ->
     %% BT-4167: Strings display quoted + escaped (ADR 0138 spelling via
     %% print_string), Binaries (non-UTF-8) as <<AB CD>> hex — distinct from

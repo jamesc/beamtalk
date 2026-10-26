@@ -350,8 +350,7 @@ Strings are quoted (developer representation), symbols use the `#` prefix.
 print_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
 print_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
 print_string({beamtalk_string, Bin}) when is_binary(Bin) ->
-    Escaped = binary:replace(Bin, <<"\"">>, <<"\"\"">>, [global]),
-    iolist_to_binary([$", Escaped, $"]);
+    iolist_to_binary([$", escape_string_content(Bin), $"]);
 print_string(X) when is_binary(X) ->
     %% A bare binary is a Binary (BT-4170): render it the way `Binary
     %% printString` does — quoted when the bytes happen to be valid UTF-8,
