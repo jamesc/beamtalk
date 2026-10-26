@@ -93,10 +93,7 @@ fn numeric_loop_keeps_direct_params() {
         "{ACTOR_PREAMBLE}  sum: items =>\n    acc := 0.\n    items do: [:m | acc := acc + 1].\n    acc\n"
     ));
     assert_eq!(takes(&out), 1, "takes:\n{out}");
-    assert!(
-        out.contains("{Acc}"),
-        "tuple-accumulator seed kept:\n{out}"
-    );
+    assert!(out.contains("{Acc}"), "tuple-accumulator seed kept:\n{out}");
     assert_eq!(brackets(&out), 0, "no per-operator bracket:\n{out}");
 }
 
@@ -148,9 +145,12 @@ fn hybrid_loop_with_guarded_op_threads_state() {
         brackets(&out) > 0,
         "operators bracket inside the threaded loop:\n{out}"
     );
-    assert_eq!(enforce_report(
-        "Actor subclass: Probe\n  state: total = 0\n\n  run: n =>\n    i := n.\n    [i > 0] whileTrue: [self.total := self.total + i. i := i - 1].\n    self.total\n",
-    ), None);
+    assert_eq!(
+        enforce_report(
+            "Actor subclass: Probe\n  state: total = 0\n\n  run: n =>\n    i := n.\n    [i > 0] whileTrue: [self.total := self.total + i. i := i - 1].\n    self.total\n",
+        ),
+        None
+    );
 }
 
 #[test]
@@ -182,9 +182,12 @@ fn nested_stateless_loops_share_outer_bracket() {
     ));
     assert_eq!(stores(&out), 2, "stores:\n{out}");
     assert_eq!(takes(&out), 1, "takes:\n{out}");
-    assert_eq!(enforce_report(&format!(
-        "{ACTOR_PREAMBLE}  run: xs with: ys =>\n    acc := 0.\n    xs do: [:x | ys do: [:y | acc := acc + y]].\n    acc\n"
-    )), None);
+    assert_eq!(
+        enforce_report(&format!(
+            "{ACTOR_PREAMBLE}  run: xs with: ys =>\n    acc := 0.\n    xs do: [:x | ys do: [:y | acc := acc + y]].\n    acc\n"
+        )),
+        None
+    );
 }
 
 #[test]

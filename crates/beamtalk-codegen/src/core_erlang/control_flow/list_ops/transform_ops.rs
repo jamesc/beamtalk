@@ -144,8 +144,7 @@ impl CoreErlangGenerator {
             let count_result = self.fresh_temp_var("CountResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),
@@ -367,8 +366,7 @@ impl CoreErlangGenerator {
             let final_list = self.fresh_temp_var("FinalList");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),
@@ -703,8 +701,7 @@ impl CoreErlangGenerator {
             // Extract each updated local var from tuple positions 2..N.
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&result_var, 2, self);
             // Re-pack into StateAcc for outer method-body `maps:get` extraction.
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(result_var.clone()),
@@ -968,8 +965,7 @@ impl CoreErlangGenerator {
             let final_list = self.fresh_temp_var("FinalList");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),
@@ -1208,8 +1204,7 @@ impl CoreErlangGenerator {
             let final_list = self.fresh_temp_var("FinalList");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),
@@ -1453,8 +1448,7 @@ impl CoreErlangGenerator {
             let result_tuple = self.fresh_temp_var("PartResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),
@@ -1724,8 +1718,7 @@ impl CoreErlangGenerator {
             let final_map = self.fresh_temp_var("FinalMap");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),

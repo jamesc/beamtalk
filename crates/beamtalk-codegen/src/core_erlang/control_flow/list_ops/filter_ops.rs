@@ -179,8 +179,7 @@ impl CoreErlangGenerator {
                 self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
             // Re-pack into StateAcc for outer method-body `maps:get` extraction.
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),

@@ -1260,11 +1260,7 @@ impl ThreadingPlan {
         let seed_from_cell = seed_from_cell && !starts_from_fresh_map;
         if self.threaded_locals.is_empty() && !starts_from_fresh_map {
             if seed_from_cell {
-                return docvec![
-                    "{'nil', ",
-                    super::super::threaded_ir::cell_take_call(),
-                    "}",
-                ];
+                return docvec!["{'nil', ", super::super::threaded_ir::cell_take_call(), "}",];
             }
             return docvec!["{'nil', ", leaf::var(self.initial_state_var.clone()), "}",];
         }
@@ -1514,7 +1510,8 @@ impl ThreadingPlan {
         #[cfg(not(test))]
         let force_ambient = false;
         let mut docs: Vec<Document<'static>> = Vec::new();
-        let take_var = if seed_from_cell && !force_ambient && !self.packs_from_fresh_map(generator) {
+        let take_var = if seed_from_cell && !force_ambient && !self.packs_from_fresh_map(generator)
+        {
             let take_var = generator.fresh_temp_var("TakeSt");
             docs.push(docvec![
                 "let ",

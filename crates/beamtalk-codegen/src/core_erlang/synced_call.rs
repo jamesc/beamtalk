@@ -562,8 +562,7 @@ impl CoreErlangGenerator {
             // that touches this actor's fields, so a closure holding one is
             // bracketed like a closure that touches the state syntactically.
             // Read off the same classifier the send emitter exempts.
-            self.block_touches_actor_state(block)
-                || self.block_contains_guarded_operator(block)
+            self.block_touches_actor_state(block) || self.block_contains_guarded_operator(block)
         }) {
             UserCodeCall::Yes
         } else {
@@ -805,14 +804,13 @@ impl CoreErlangGenerator {
                     selector: g.selector.clone(),
                     region: g.region,
                 }));
-                log.borrow_mut().extend(guarded_op_gaps.iter().map(|g| {
-                    SiteRecord {
+                log.borrow_mut()
+                    .extend(guarded_op_gaps.iter().map(|g| SiteRecord {
                         site: g.site.site.clone(),
                         chain: g.site.chain.clone(),
                         selector: format!("guarded-op {}", g.selector),
                         region: g.region,
-                    }
-                }));
+                    }));
             });
             return;
         }
@@ -1108,10 +1106,13 @@ impl CoreErlangGenerator {
         let will_bracket = self.synced_calls_active()
             && (self.block_contains_guarded_operator(body)
                 || condition.is_some_and(|c| self.expr_contains_guarded_operator(c)));
-        self.synced.guarded_op_loops.borrow_mut().push(GuardedOpLoopMarker {
-            will_bracket,
-            need: None,
-        });
+        self.synced
+            .guarded_op_loops
+            .borrow_mut()
+            .push(GuardedOpLoopMarker {
+                will_bracket,
+                need: None,
+            });
     }
 
     /// BT-4121: pops the marker [`Self::push_guarded_op_loop`] pushed, after
@@ -1237,11 +1238,7 @@ impl CoreErlangGenerator {
     /// marker the operator is covered by an enclosing bracket window (a
     /// closure or evaluated-block call the classifier wrapped), and loud
     /// otherwise.
-    pub(in crate::core_erlang) fn note_stateless_guarded_op(
-        &mut self,
-        selector: String,
-        at: Span,
-    ) {
+    pub(in crate::core_erlang) fn note_stateless_guarded_op(&mut self, selector: String, at: Span) {
         let mut stack = self.synced.guarded_op_loops.borrow_mut();
         if let Some(marker) = stack.last_mut() {
             if marker.need.is_none() {

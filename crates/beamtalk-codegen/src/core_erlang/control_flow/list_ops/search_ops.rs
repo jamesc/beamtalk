@@ -258,8 +258,7 @@ impl CoreErlangGenerator {
             let bool_result = self.fresh_temp_var("BoolResult");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),
@@ -682,8 +681,7 @@ impl CoreErlangGenerator {
             let found_flag = self.fresh_temp_var("FoundFlag");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             let if_none_arm = self.generate_if_none_branch_tuple(if_none, &stateacc)?;
             // An explicit fallback: a `case` without one inside a `try` body
             // (a protected body, a handler) trips OTP's `beam_validator`
@@ -910,8 +908,7 @@ impl CoreErlangGenerator {
             let no_match_var = self.fresh_temp_var("DetectNoMatch");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
-            let (repack_doc, stateacc) =
-                plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
                 " in let ",
                 leaf::var(fold_result.clone()),
