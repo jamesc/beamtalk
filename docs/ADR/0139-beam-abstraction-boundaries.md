@@ -79,7 +79,7 @@ REPL:
 => Error: gen_tcp connect: expected (host, port), got 2 args
    "Beamtalk-shaped; no m:f/a"
 
-> #mt19937 seed: 42   "unknown module, typo'd"
+> (Erlang mt19937) seed: 42   "unknown module, typo'd"
 => Unknown FFI module 'mt19937' — did you mean…?  "spans + suggestions, not atoms"
 ```
 
@@ -88,17 +88,18 @@ REPL:
 | Language | Posture | What we take |
 |----------|---------|--------------|
 | **Elixir** | Hides `Elixir.` prefix everywhere; `** (UndefinedFunctionError)` with `Foo.bar/1`; `error_info` pretty-printing | Closest reference: names hidden, VM reachable, errors structured. We adopt the shape. |
-| **Gleam** | Hides everything (`gleam/otp` wraps supervision, no raw processes) | The purity precedent — and the caution: Gleam chose it deliberately for its audience. Rejected here: it would hide the lifecycle this ADR keeps visible, and fight the BEAM-native principle. |
+| **Gleam** | Hides almost everything (`gleam/otp` wraps supervision/actors in supervised, typed APIs; raw `gleam/erlang/process` remains for the few) | The purity precedent — and the caution: Gleam chose it deliberately for its audience. Rejected here: it would hide the lifecycle this ADR keeps visible, and fight the BEAM-native principle. |
 | **Erlang** | Fully raw (`undef`, `badarg`, `{M,F,A}`) | The floor. Rejected as user-facing posture; kept as the `--verbose` substrate. |
 | **Pharo** | No VM concept at all (image model) | Proof that hiding works when the VM is truly an implementation detail — inapplicable while we embrace OTP interop. |
+| **Python** | C extensions must translate failures to Python exceptions (return NULL + set); a raw segfault is the equivalent leak | The membrane precedent outside BEAM: translation at the boundary is the norm, raw passthrough is a bug. Supports the FFI-membrane and tuple-conversion verdicts. |
 
 ## User Impact
 
-- **Newcomer**: errors speak their language from day one; lifecycle defaults mean the first actor program needs no OTP. Discovery: `--verbose` teaches the mapping on demand.
-- **Smalltalk developer**: message-passing stays pure at every surface they touch; supervision is the one new concept, and it arrives with a template, not a manual.
-- **Erlang/BEAM developer**: nothing is taken away — raw MFA, observer, recon all remain one flag away; typed FFI makes Beamtalk→Erlang calls safer than raw `apply`.
-- **Operator**: sensible OOB defaults (restart intensity, shutdowns) with full observability underneath; log output keeps machine-parseable MFA via the JSON formatter.
-- **Tooling developer**: one translator + one error taxonomy to consume instead of N ad-hoc formats; spans on every diagnostic.
+- **Newcomer**: errors speak their language from day one; lifecycle defaults mean the first actor program needs no OTP. Discovery: `--verbose` teaches the mapping on demand. Cost: two output modes to learn ("which error is real?") — mitigated by making display output the default everywhere and documenting `--verbose` once.
+- **Smalltalk developer**: message-passing stays pure at every surface they touch; supervision is the one new concept, and it arrives with a template, not a manual. Cost: supervision/links stay unconcealed by design — the one pill to swallow.
+- **Erlang/BEAM developer**: nothing is taken away — raw MFA, observer, recon all remain one flag away; typed FFI makes Beamtalk→Erlang calls safer than raw `apply`. Cost: display names hide the info they want most — mitigated by `--verbose` plus machine MFA in the JSON formatter.
+- **Operator**: sensible OOB defaults (restart intensity, shutdowns) with full observability underneath; log output keeps machine-parseable MFA via the JSON formatter. Cost: log scrapers migrate per phase (see Migration Path).
+- **Tooling developer**: one translator + one error taxonomy to consume instead of N ad-hoc formats; spans on every diagnostic. Cost: someone must build and own the translator — Phase 1 funds it.
 
 ## Steelman Analysis
 
@@ -148,8 +149,9 @@ BEAM-native principle, both OTP ADRs, and operability.
 
 ### Do nothing
 Keep accreting per-issue fixes (BT-4094, BT-4106, BT-4022 each patched one
-leak). Rejected: nine issues of evidence show the whack-a-mole cost; without
-a policy every fix re-litigates hide-vs-keep.
+leak). Rejected: seven issues of evidence (BT-4094, 4106, 4022, 4144, 4052,
+4046, 4047) show the whack-a-mole cost; without a policy every fix
+re-litigates hide-vs-keep.
 
 ## Consequences
 
@@ -193,7 +195,10 @@ Phased, each phase its own epic (no code in this ADR):
 4. **Lifecycle defaults**: template supervised app; audited OOB defaults;
    vocabulary pass (`stop:` family naming).
 
-Effort: L–XL total, sliced per phase. Each phase lands green independently.
+Effort: L–XL total, sliced per phase. Each phase lands green independently,
+and each phase epic must name its suites: unit tests for the translator/rules,
+corpus/golden updates for changed output, and an E2E btscript where the phase
+touches the REPL or CLI surface (Phase 1 and 2 do).
 
 ## Migration Path
 
