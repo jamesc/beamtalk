@@ -333,7 +333,13 @@ mod tests {
     #[test]
     fn test_string_length() {
         let result = doc_to_string(generate_primitive_bif("String", "length", &[]));
-        assert_eq!(result, Some("call 'string':'length'(call 'beamtalk_primitive':'string_to_binary'(Self))".to_string()));
+        assert_eq!(
+            result,
+            Some(
+                "call 'string':'length'(call 'beamtalk_primitive':'string_to_binary'(Self))"
+                    .to_string()
+            )
+        );
     }
 
     #[test]

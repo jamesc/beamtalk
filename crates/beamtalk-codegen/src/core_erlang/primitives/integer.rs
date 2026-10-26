@@ -24,11 +24,9 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
         // Comparison (ADR 0002: Erlang operators)
         "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Conversion
-        "asString" | "printString" => {
-            Some(wrap_string_result(Document::Str(
-                "call 'erlang':'integer_to_binary'(Self)",
-            )))
-        }
+        "asString" | "printString" => Some(wrap_string_result(Document::Str(
+            "call 'erlang':'integer_to_binary'(Self)",
+        ))),
         "asFloat" => Some(Document::Str("call 'erlang':'float'(Self)")),
         // Bitwise operations
         "bitAnd:" => binary_bif("band", params),
