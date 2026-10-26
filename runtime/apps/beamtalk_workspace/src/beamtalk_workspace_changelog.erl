@@ -2331,7 +2331,10 @@ append_error(Reason) ->
         kind = changelog_write_error,
         class = 'ChangeLog',
         selector = 'append:',
-        message = <<"Failed to persist ChangeLog entry to disk">>,
-        hint = <<"Check that the workspace changes/ directory is writable">>,
+        %% BT-4173: error message/hint are tagged Strings (see beamtalk.hrl).
+        message = beamtalk_primitive:string_from_binary(<<"Failed to persist ChangeLog entry to disk">>),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Check that the workspace changes/ directory is writable">>
+        ),
         details = #{reason => Reason}
     }.

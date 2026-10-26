@@ -1026,11 +1026,11 @@ duration(Self) -> result_duration(Self).
 failures(Self) -> result_failures(Self).
 -spec hasPassed(test_result()) -> boolean().
 hasPassed(Self) -> result_has_passed(Self).
--spec summary(test_result()) -> binary().
+-spec summary(test_result()) -> beamtalk_string:t().
 %% BT-4173: user-facing text answers Strings; the raw builders stay binary
 %% for internal splicing.
 summary(Self) -> beamtalk_primitive:string_from_binary(result_summary(Self)).
--spec printString(test_result()) -> binary().
+-spec printString(test_result()) -> beamtalk_string:t().
 printString(Self) -> beamtalk_primitive:string_from_binary(result_print_string(Self)).
 
 %%====================================================================

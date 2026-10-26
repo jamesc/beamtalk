@@ -563,7 +563,7 @@ sneq(_, _) ->
 toOffset(Self, Off) -> 'toOffset:'(Self, Off).
 
 %% `format:` → strips to `format`, arity 2 — what `self delegate` calls.
--spec format(t(), Pattern :: binary()) -> binary().
+-spec format(t(), Pattern :: binary() | beamtalk_string:t()) -> beamtalk_string:t().
 format(Self, Pattern) -> 'format:'(Self, Pattern).
 
 %% `parse:format:` → strips to `parse`, arity 2 (class method, no self) —

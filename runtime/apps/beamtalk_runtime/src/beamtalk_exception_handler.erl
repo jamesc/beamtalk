@@ -651,14 +651,13 @@ Matches any exception hierarchy class (Exception, Error, RuntimeError, etc.).
 """.
 -spec dispatch(atom(), list(), map()) -> term().
 dispatch('message', [], #{error := Error}) ->
-    %% BT-4170: fields built via the setters are tagged `String`s; a
-    %% hand-built record may still carry raw bytes — wrap those at the
-    %% read boundary so `message`/`hint` always answer text.
-    field_text(Error#beamtalk_error.message);
+    %% BT-4173: the record type guarantees a tagged String (all
+    %% constructors tag; see beamtalk.hrl).
+    Error#beamtalk_error.message;
 dispatch('hint', [], #{error := Error}) ->
     case Error#beamtalk_error.hint of
         undefined -> nil;
-        Hint -> field_text(Hint)
+        Hint -> Hint
     end;
 dispatch('kind', [], #{error := Error}) ->
     Error#beamtalk_error.kind;
@@ -692,26 +691,9 @@ dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
     %% Preserve exception class name from the signaling object
     signal_message(Message, ClassName).
 
--doc """
-Read a message/hint field as a `String` (BT-4170).
-
-Tagged fields pass through; raw bytes from a hand-built record wrap
-unchecked (callers construct them from static text or `~s`-formatted
-atoms — arbitrary bytes must go through a validating boundary first,
-as with `with_message/2`).
-""".
--spec field_text(term()) -> term().
-field_text({beamtalk_string, _} = Str) ->
-    Str;
-field_text(Bin) when is_binary(Bin) ->
-    beamtalk_primitive:string_from_binary(Bin);
-field_text(Other) ->
-    Other.
-
 -doc "Wrap a possibly-undefined hint for `wrap_classified/6` (BT-4170).".
 -spec wrap_hint(binary() | undefined) -> {beamtalk_string, binary()} | undefined.
 wrap_hint(undefined) -> undefined;
-wrap_hint({beamtalk_string, _} = Hint) -> Hint;
 wrap_hint(Hint) when is_binary(Hint) ->
     beamtalk_primitive:string_from_binary(Hint).
 
