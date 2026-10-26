@@ -5,10 +5,27 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::{call_self_p0, generate_comparison_bif, param};
+use super::{call_self_p0, generate_comparison_bif, param, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
+
+/// `call 'beamtalk_primitive':'string_to_binary'(Self)` — unwrap the `String`
+/// receiver to the raw bytes the Erlang `string`/`binary`/`unicode` BIFs take
+/// (BT-4170: a `String` is the tagged term `{beamtalk_string, Bin}`).
+fn unwrap_self() -> Document<'static> {
+    Document::Str("call 'beamtalk_primitive':'string_to_binary'(Self)")
+}
+
+/// `call 'beamtalk_primitive':'string_to_binary'(<var>)` — unwrap a
+/// `String`-typed argument.
+fn unwrap_var(var: &str) -> Document<'static> {
+    docvec![
+        "call 'beamtalk_primitive':'string_to_binary'(",
+        leaf::var(var),
+        ")"
+    ]
+}
 
 /// String primitive implementations.
 pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
@@ -42,33 +59,45 @@ pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<D
 fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = param(params, 0, "_Arg0");
     match selector {
-        "++" | "," => Some(docvec![
-            "call 'erlang':'iolist_to_binary'([Self, ",
-            leaf::var(p0),
+        "++" | "," => Some(wrap_string_result(docvec![
+            "call 'erlang':'iolist_to_binary'([",
+            unwrap_self(),
+            ", ",
+            unwrap_var(p0),
             "])"
-        ]),
-        "length" => Some(Document::Str("call 'string':'length'(Self)")),
+        ])),
+        "length" => Some(docvec!["call 'string':'length'(", unwrap_self(), ")"]),
         "at:" => Some(call_self_p0("beamtalk_string", "at", p0)),
         // Grapheme-aware element accessors; both raise
         // `empty_collection` on `""`, matching `List first`/`last`.
         "first" => Some(Document::Str("call 'beamtalk_string':'first'(Self)")),
         "last" => Some(Document::Str("call 'beamtalk_string':'last'(Self)")),
-        "uppercase" => Some(Document::Str(
-            "call 'unicode':'characters_to_binary'(call 'string':'uppercase'(Self))",
-        )),
-        "lowercase" => Some(Document::Str(
-            "call 'unicode':'characters_to_binary'(call 'string':'lowercase'(Self))",
-        )),
+        "uppercase" => Some(wrap_string_result(docvec![
+            "call 'unicode':'characters_to_binary'(call 'string':'uppercase'(",
+            unwrap_self(),
+            "))"
+        ])),
+        "lowercase" => Some(wrap_string_result(docvec![
+            "call 'unicode':'characters_to_binary'(call 'string':'lowercase'(",
+            unwrap_self(),
+            "))"
+        ])),
         "capitalize" => Some(Document::Str("call 'beamtalk_string':'capitalize'(Self)")),
-        "trim" => Some(Document::Str(
-            "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'both'))",
-        )),
-        "trimLeft" => Some(Document::Str(
-            "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'leading'))",
-        )),
-        "trimRight" => Some(Document::Str(
-            "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'trailing'))",
-        )),
+        "trim" => Some(wrap_string_result(docvec![
+            "call 'unicode':'characters_to_binary'(call 'string':'trim'(",
+            unwrap_self(),
+            ", 'both'))"
+        ])),
+        "trimLeft" => Some(wrap_string_result(docvec![
+            "call 'unicode':'characters_to_binary'(call 'string':'trim'(",
+            unwrap_self(),
+            ", 'leading'))"
+        ])),
+        "trimRight" => Some(wrap_string_result(docvec![
+            "call 'unicode':'characters_to_binary'(call 'string':'trim'(",
+            unwrap_self(),
+            ", 'trailing'))"
+        ])),
         "reverse" => Some(Document::Str("call 'beamtalk_string':'reverse'(Self)")),
         _ => None,
     }
@@ -81,47 +110,54 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
         "startsWith:" => Some(call_self_p0("beamtalk_string", "starts_with", p0)),
         "endsWith:" => Some(call_self_p0("beamtalk_string", "ends_with", p0)),
         "indexOf:" => Some(call_self_p0("beamtalk_string", "index_of", p0)),
-        "split:" => Some(docvec![
-            "call 'binary':'split'(Self, ",
-            leaf::var(p0),
-            ", ['global'])"
-        ]),
+        // BT-4170: routed through `beamtalk_string:split/2`, which unwraps
+        // both sides and wraps each part — a bare `binary:split/3` can
+        // neither take tagged input nor wrap its list result.
+        "split:" => Some(call_self_p0("beamtalk_string", "split", p0)),
         "splitOn:" => Some(call_self_p0("beamtalk_string", "split_on", p0)),
         "repeat:" => Some(call_self_p0("beamtalk_string", "repeat", p0)),
         "lines" => Some(Document::Str("call 'beamtalk_string':'lines'(Self)")),
         "words" => Some(Document::Str("call 'beamtalk_string':'words'(Self)")),
         "replaceAll:with:" => {
             let p1 = param(params, 1, "_Arg1");
-            Some(docvec![
-                "call 'binary':'replace'(Self, ",
-                leaf::var(p0),
+            Some(wrap_string_result(docvec![
+                "call 'binary':'replace'(",
+                unwrap_self(),
                 ", ",
-                leaf::var(p1),
+                unwrap_var(p0),
+                ", ",
+                unwrap_var(p1),
                 ", ['global'])",
-            ])
+            ]))
         }
         "replaceFirst:with:" => {
             let p1 = param(params, 1, "_Arg1");
-            Some(docvec![
-                "call 'binary':'replace'(Self, ",
-                leaf::var(p0),
+            Some(wrap_string_result(docvec![
+                "call 'binary':'replace'(",
+                unwrap_self(),
                 ", ",
-                leaf::var(p1),
-                ", [])"
-            ])
+                unwrap_var(p0),
+                ", ",
+                unwrap_var(p1),
+                ", [])",
+            ]))
         }
         "take:" => Some(call_self_p0("beamtalk_string", "take", p0)),
         "drop:" => Some(call_self_p0("beamtalk_string", "drop", p0)),
-        "padLeft:" => Some(docvec![
-            "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, ",
+        "padLeft:" => Some(wrap_string_result(docvec![
+            "call 'unicode':'characters_to_binary'(call 'string':'pad'(",
+            unwrap_self(),
+            ", ",
             leaf::var(p0),
             ", 'leading'))",
-        ]),
-        "padRight:" => Some(docvec![
-            "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, ",
+        ])),
+        "padRight:" => Some(wrap_string_result(docvec![
+            "call 'unicode':'characters_to_binary'(call 'string':'pad'(",
+            unwrap_self(),
+            ", ",
             leaf::var(p0),
             ", 'trailing'))",
-        ]),
+        ])),
         "padLeft:with:" | "padRight:with:" => {
             let p1 = param(params, 1, "_Arg1");
             let dir = if selector == "padLeft:with:" {
@@ -129,15 +165,17 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
             } else {
                 "'trailing'"
             };
-            Some(docvec![
-                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, ",
+            Some(wrap_string_result(docvec![
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(",
+                unwrap_self(),
+                ", ",
                 leaf::var(p0),
                 ", ",
                 dir,
                 ", ",
-                leaf::var(p1),
+                unwrap_var(p1),
                 "))",
-            ])
+            ]))
         }
         _ => None,
     }
@@ -149,11 +187,17 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
         "isBlank" => Some(Document::Str("call 'beamtalk_string':'is_blank'(Self)")),
         "isDigit" => Some(Document::Str("call 'beamtalk_string':'is_digit'(Self)")),
         "isAlpha" => Some(Document::Str("call 'beamtalk_string':'is_alpha'(Self)")),
-        "asInteger" => Some(Document::Str("call 'erlang':'binary_to_integer'(Self)")),
-        "asFloat" => Some(Document::Str("call 'erlang':'binary_to_float'(Self)")),
-        "asAtom" => Some(Document::Str(
-            "call 'erlang':'binary_to_atom'(Self, 'utf8')",
-        )),
+        "asInteger" => Some(docvec![
+            "call 'erlang':'binary_to_integer'(",
+            unwrap_self(),
+            ")"
+        ]),
+        "asFloat" => Some(docvec!["call 'erlang':'binary_to_float'(", unwrap_self(), ")"]),
+        "asAtom" => Some(docvec![
+            "call 'erlang':'binary_to_atom'(",
+            unwrap_self(),
+            ", 'utf8')"
+        ]),
         "asList" => Some(Document::Str("call 'beamtalk_string':'as_list'(Self)")),
         "each:" => Some(call_self_p0("beamtalk_string", "each", p0)),
         "collect:" => Some(call_self_p0("beamtalk_string", "collect", p0)),
@@ -259,7 +303,7 @@ mod tests {
         let result = doc_to_string(generate_string_bif("++", &["Other".to_string()]));
         assert_eq!(
             result,
-            Some("call 'erlang':'iolist_to_binary'([Self, Other])".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'iolist_to_binary'([call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(Other)]))".to_string())
         );
     }
 
@@ -268,14 +312,14 @@ mod tests {
         let result = doc_to_string(generate_string_bif(",", &["Other".to_string()]));
         assert_eq!(
             result,
-            Some("call 'erlang':'iolist_to_binary'([Self, Other])".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'iolist_to_binary'([call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(Other)]))".to_string())
         );
     }
 
     #[test]
     fn test_length() {
         let result = doc_to_string(generate_string_bif("length", &[]));
-        assert_eq!(result, Some("call 'string':'length'(Self)".to_string()));
+        assert_eq!(result, Some("call 'string':'length'(call 'beamtalk_primitive':'string_to_binary'(Self))".to_string()));
     }
 
     #[test]
@@ -293,7 +337,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'unicode':'characters_to_binary'(call 'string':'uppercase'(Self))"
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'uppercase'(call 'beamtalk_primitive':'string_to_binary'(Self))))"
                     .to_string()
             )
         );
@@ -305,7 +349,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'unicode':'characters_to_binary'(call 'string':'lowercase'(Self))"
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'lowercase'(call 'beamtalk_primitive':'string_to_binary'(Self))))"
                     .to_string()
             )
         );
@@ -326,7 +370,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'both'))"
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'trim'(call 'beamtalk_primitive':'string_to_binary'(Self), 'both')))"
                     .to_string()
             )
         );
@@ -338,7 +382,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'leading'))"
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'trim'(call 'beamtalk_primitive':'string_to_binary'(Self), 'leading')))"
                     .to_string()
             )
         );
@@ -350,7 +394,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'trailing'))"
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'trim'(call 'beamtalk_primitive':'string_to_binary'(Self), 'trailing')))"
                     .to_string()
             )
         );
@@ -408,7 +452,7 @@ mod tests {
         let result = doc_to_string(generate_string_bif("split:", &["Sep".to_string()]));
         assert_eq!(
             result,
-            Some("call 'binary':'split'(Self, Sep, ['global'])".to_string())
+            Some("call 'beamtalk_string':'split'(Self, Sep)".to_string())
         );
     }
 
@@ -456,7 +500,7 @@ mod tests {
         ));
         assert_eq!(
             result,
-            Some("call 'binary':'replace'(Self, P, R, ['global'])".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'binary':'replace'(call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(P), call 'beamtalk_primitive':'string_to_binary'(R), ['global']))".to_string())
         );
     }
 
@@ -468,7 +512,7 @@ mod tests {
         ));
         assert_eq!(
             result,
-            Some("call 'binary':'replace'(Self, P, R, [])".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'binary':'replace'(call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(P), call 'beamtalk_primitive':'string_to_binary'(R), []))".to_string())
         );
     }
 
@@ -496,7 +540,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, N, 'leading'))"
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'leading')))"
                     .to_string()
             )
         );
@@ -508,7 +552,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, N, 'trailing'))"
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'trailing')))"
                     .to_string()
             )
         );
@@ -523,7 +567,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, N, 'leading', Ch))"
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'leading', call 'beamtalk_primitive':'string_to_binary'(Ch))))"
                     .to_string()
             )
         );
@@ -538,7 +582,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, N, 'trailing', Ch))"
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'trailing', call 'beamtalk_primitive':'string_to_binary'(Ch))))"
                     .to_string()
             )
         );
@@ -652,7 +696,7 @@ mod tests {
         let result = doc_to_string(generate_string_bif("asInteger", &[]));
         assert_eq!(
             result,
-            Some("call 'erlang':'binary_to_integer'(Self)".to_string())
+            Some("call 'erlang':'binary_to_integer'(call 'beamtalk_primitive':'string_to_binary'(Self))".to_string())
         );
     }
 
@@ -661,7 +705,7 @@ mod tests {
         let result = doc_to_string(generate_string_bif("asFloat", &[]));
         assert_eq!(
             result,
-            Some("call 'erlang':'binary_to_float'(Self)".to_string())
+            Some("call 'erlang':'binary_to_float'(call 'beamtalk_primitive':'string_to_binary'(Self))".to_string())
         );
     }
 
@@ -670,7 +714,7 @@ mod tests {
         let result = doc_to_string(generate_string_bif("asAtom", &[]));
         assert_eq!(
             result,
-            Some("call 'erlang':'binary_to_atom'(Self, 'utf8')".to_string())
+            Some("call 'erlang':'binary_to_atom'(call 'beamtalk_primitive':'string_to_binary'(Self), 'utf8')".to_string())
         );
     }
 

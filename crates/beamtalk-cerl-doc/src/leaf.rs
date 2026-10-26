@@ -176,6 +176,33 @@ pub fn binary_lit(s: impl AsRef<str>) -> Document<'static> {
     Document::Owned(binary_string_literal(s.as_ref()))
 }
 
+/// `{'beamtalk_string', #{…}#}` — a Beamtalk `String` value (BT-4170).
+///
+/// Class is construction type: a `String` is the tagged term
+/// `{beamtalk_string, Bin}` (see
+/// `beamtalk_primitive:string_from_binary/1`), while a bare `binary()`
+/// is a `Binary`. String literals, string patterns, and interpolated
+/// strings lower through here; byte-level sites (error hints, embedded
+/// sources, REPL source binaries) keep [`binary_lit`].
+///
+/// ```text
+/// tagged_string_lit("hi") => {'beamtalk_string', #{#<104>(…),#<105>(…)}#}
+/// ```
+#[must_use]
+pub fn tagged_string_lit(s: impl AsRef<str>) -> Document<'static> {
+    docvec!["{'beamtalk_string', ", binary_lit(s), "}"]
+}
+
+/// `{'beamtalk_string', <binary>}` — tag an already-built binary document.
+///
+/// Same representation as [`tagged_string_lit`], for sites that assemble
+/// the binary construction themselves (string interpolation splices
+/// literal and expression segments into one enclosing `#{…}#`).
+#[must_use]
+pub fn tag_string(binary: Document<'static>) -> Document<'static> {
+    docvec!["{'beamtalk_string', ", binary, "}"]
+}
+
 /// `#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(…)` — the *unwrapped*
 /// inner byte segments of a Core Erlang binary literal, with **no** surrounding
 /// `#{…}#`.

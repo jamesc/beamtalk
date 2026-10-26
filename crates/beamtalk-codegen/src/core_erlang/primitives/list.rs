@@ -205,13 +205,17 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
         "printString" => Some(super::PRINT_STRING),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
-        "join" => Some(Document::Str("call 'erlang':'iolist_to_binary'(Self)")),
+        // BT-4170: elements are tagged `String`s — join strictly through
+        // `beamtalk_string:join/2` (unwraps, assembles, wraps).
+        "join" => Some(Document::Str(
+            "call 'beamtalk_string':'join'(Self, 'join')",
+        )),
         "join:" => {
             let p0 = param(params, 0, "_Sep");
             Some(docvec![
-                "call 'erlang':'iolist_to_binary'(call 'lists':'join'(",
+                "call 'beamtalk_string':'join'(call 'lists':'join'(",
                 leaf::var(p0.to_string()),
-                ", Self))"
+                ", Self), 'join:')",
             ])
         }
         // Class-side factory: List class withAll: list is identity (list is already a List)
@@ -552,7 +556,7 @@ mod tests {
         let result = doc_to_string(generate_list_bif("printString", &[]));
         assert_eq!(
             result,
-            Some("call 'beamtalk_primitive':'print_string'(Self)".to_string())
+            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))".to_string())
         );
     }
 
@@ -579,7 +583,7 @@ mod tests {
         let result = doc_to_string(generate_list_bif("join", &[]));
         assert_eq!(
             result,
-            Some("call 'erlang':'iolist_to_binary'(Self)".to_string())
+            Some("call 'beamtalk_string':'join'(Self, 'join')".to_string())
         );
     }
 
@@ -588,7 +592,7 @@ mod tests {
         let result = doc_to_string(generate_list_bif("join:", &["Sep".to_string()]));
         assert_eq!(
             result,
-            Some("call 'erlang':'iolist_to_binary'(call 'lists':'join'(Sep, Self))".to_string())
+            Some("call 'beamtalk_string':'join'(call 'lists':'join'(Sep, Self), 'join:')".to_string())
         );
     }
 
