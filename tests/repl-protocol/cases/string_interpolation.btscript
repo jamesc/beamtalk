@@ -60,11 +60,11 @@ greeting := "Howdy"
 // REPL DISPLAY CORRECTNESS
 // ===========================================================================
 
-// Plain string displays without extra quotes
+// Plain string displays quoted (BT-4167)
 "Hello, world!"
 // => "Hello, world!"
 
-// Interpolated string result displays without extra quotes
+// Interpolated string result displays quoted (BT-4167)
 who := "World"
 // => "World"
 
