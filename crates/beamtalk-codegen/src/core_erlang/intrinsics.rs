@@ -3043,54 +3043,48 @@ impl CoreErlangGenerator {
         }
 
         match selector.well_known() {
-            Some(WellKnownSelector::IfTrue) => {
-                if arguments.len() == 1 {
-                    if let Expression::Block(block) = &arguments[0] {
-                        if block.parameters.is_empty()
-                            && !self.conditional_needs_mutation_threading(receiver, &[block])
-                            && !self.pure_blocks_hold_guarded_operator(&[block])
-                        {
-                            return Ok(Some(
-                                self.generate_if_true_pure(receiver, block, arguments)?,
-                            ));
-                        }
-                    }
-                }
-            }
-            Some(WellKnownSelector::IfFalse) => {
-                if arguments.len() == 1 {
-                    if let Expression::Block(block) = &arguments[0] {
-                        if block.parameters.is_empty()
-                            && !self.conditional_needs_mutation_threading(receiver, &[block])
-                            && !self.pure_blocks_hold_guarded_operator(&[block])
-                        {
-                            return Ok(Some(
-                                self.generate_if_false_pure(receiver, block, arguments)?,
-                            ));
-                        }
-                    }
-                }
-            }
-            Some(WellKnownSelector::IfTrueIfFalse) => {
-                if arguments.len() == 2 {
-                    if let (Expression::Block(true_block), Expression::Block(false_block)) =
-                        (&arguments[0], &arguments[1])
+            Some(WellKnownSelector::IfTrue) if arguments.len() == 1 => {
+                if let Expression::Block(block) = &arguments[0] {
+                    if block.parameters.is_empty()
+                        && !self.conditional_needs_mutation_threading(receiver, &[block])
+                        && !self.pure_blocks_hold_guarded_operator(&[block])
                     {
-                        if true_block.parameters.is_empty()
-                            && false_block.parameters.is_empty()
-                            && !self.conditional_needs_mutation_threading(
-                                receiver,
-                                &[true_block, false_block],
-                            )
-                            && !self.pure_blocks_hold_guarded_operator(&[true_block, false_block])
-                        {
-                            return Ok(Some(self.generate_if_true_if_false_pure(
-                                receiver,
-                                true_block,
-                                false_block,
-                                arguments,
-                            )?));
-                        }
+                        return Ok(Some(
+                            self.generate_if_true_pure(receiver, block, arguments)?,
+                        ));
+                    }
+                }
+            }
+            Some(WellKnownSelector::IfFalse) if arguments.len() == 1 => {
+                if let Expression::Block(block) = &arguments[0] {
+                    if block.parameters.is_empty()
+                        && !self.conditional_needs_mutation_threading(receiver, &[block])
+                        && !self.pure_blocks_hold_guarded_operator(&[block])
+                    {
+                        return Ok(Some(
+                            self.generate_if_false_pure(receiver, block, arguments)?,
+                        ));
+                    }
+                }
+            }
+            Some(WellKnownSelector::IfTrueIfFalse) if arguments.len() == 2 => {
+                if let (Expression::Block(true_block), Expression::Block(false_block)) =
+                    (&arguments[0], &arguments[1])
+                {
+                    if true_block.parameters.is_empty()
+                        && false_block.parameters.is_empty()
+                        && !self.conditional_needs_mutation_threading(
+                            receiver,
+                            &[true_block, false_block],
+                        )
+                        && !self.pure_blocks_hold_guarded_operator(&[true_block, false_block])
+                    {
+                        return Ok(Some(self.generate_if_true_if_false_pure(
+                            receiver,
+                            true_block,
+                            false_block,
+                            arguments,
+                        )?));
                     }
                 }
             }
