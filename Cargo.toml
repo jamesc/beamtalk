@@ -64,7 +64,7 @@ strip = "debuginfo"
 version = "0.4.0"
 authors = ["James Casey"]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 license = "Apache-2.0"
 repository = "https://github.com/jamesc/beamtalk"
 
@@ -185,3 +185,7 @@ undocumented_unsafe_blocks = "warn"
 # Allow some pedantic lints that are too noisy
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
+# With rust-version >= 1.88 clippy suggests collapsing nested `if let`s into
+# let-chains at ~160+ sites; that style migration is deferred to its own change
+# so it doesn't conflict with every open PR.
+collapsible_if = "allow"

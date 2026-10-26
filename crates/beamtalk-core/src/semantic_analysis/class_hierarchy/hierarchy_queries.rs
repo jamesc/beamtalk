@@ -29,10 +29,7 @@ impl ClassHierarchy {
         let mut visited = HashSet::new();
         visited.insert(class_name.to_string());
 
-        loop {
-            let Some(info) = self.classes.get(current.as_str()) else {
-                break;
-            };
+        while let Some(info) = self.classes.get(current.as_str()) {
             let Some(ref superclass) = info.superclass else {
                 break;
             };

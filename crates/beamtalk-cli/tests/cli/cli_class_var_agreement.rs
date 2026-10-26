@@ -818,7 +818,7 @@ fn report(
             None => causes.push((cause, 1)),
         }
     }
-    causes.sort_by(|a, b| b.1.cmp(&a.1));
+    causes.sort_by_key(|a| std::cmp::Reverse(a.1));
     for (cause, n) in &causes {
         let _ = writeln!(s, "  {n:>3} x {cause}");
     }

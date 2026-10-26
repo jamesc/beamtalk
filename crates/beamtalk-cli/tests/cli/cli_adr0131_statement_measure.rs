@@ -200,7 +200,7 @@ fn write_package(root: &Path, pkg: &Package) {
 /// turns a `whileTrue:` into an infinite loop would otherwise hang its whole
 /// batch; a timed-out batch is bisected like one that does not compile, down
 /// to the hanging cell.
-const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(240);
+const TIMEOUT: std::time::Duration = std::time::Duration::from_mins(4);
 
 /// The `beamtalk` command of [`cli_common::beamtalk`] as a `std` command (the
 /// harness needs its own process group and a kill it controls; `assert_cmd`'s

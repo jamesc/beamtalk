@@ -962,10 +962,8 @@ pub mod test_support {
                 '(' => stack.push(')'),
                 '[' => stack.push(']'),
                 '{' => stack.push('}'),
-                ')' | ']' | '}' => {
-                    if stack.pop() != Some(ch) {
-                        return false;
-                    }
+                ')' | ']' | '}' if stack.pop() != Some(ch) => {
+                    return false;
                 }
                 _ => {}
             }

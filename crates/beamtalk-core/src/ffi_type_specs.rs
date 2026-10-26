@@ -230,13 +230,11 @@ pub fn find_runtime_dir_with_layout() -> Result<(PathBuf, RuntimeLayout)> {
 /// Check whether a directory contains compiled `.beam` files.
 pub fn has_beam_files(dir: &Path) -> bool {
     dir.is_dir()
-        && std::fs::read_dir(dir)
-            .map(|entries| {
-                entries
-                    .flatten()
-                    .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
-            })
-            .unwrap_or(false)
+        && std::fs::read_dir(dir).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+        })
 }
 // ---------------------------------------------------------------------------
 // Type cache: persists spec extraction results per Erlang module (ADR 0075)

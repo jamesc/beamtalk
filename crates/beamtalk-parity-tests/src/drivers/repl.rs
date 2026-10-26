@@ -75,7 +75,7 @@ impl ReplDriver {
             .send(Message::Text(request.to_string().into()))
             .await
             .map_err(|e| format!("send: {e}"))?;
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(120);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_mins(2);
         loop {
             if tokio::time::Instant::now() >= deadline {
                 return Err("timed out waiting for matching REPL response".to_string());

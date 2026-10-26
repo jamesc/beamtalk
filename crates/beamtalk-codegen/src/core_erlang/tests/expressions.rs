@@ -1449,7 +1449,7 @@ fn test_generate_map_literal_with_atoms() {
         output.contains("'age'"),
         "Output should contain 'age': {output}",
     );
-    assert!(output.contains("30"), "Output should contain 30: {output}",);
+    assert!(output.contains("30"), "Output should contain 30: {output}");
 }
 
 #[test]
