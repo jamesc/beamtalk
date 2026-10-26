@@ -9,7 +9,8 @@ TestCase subclass: FileBinaryIoTest
     File writeBinary: "target/bt-test-tmp/binary_read.dat" contents: "hello"
     result := File readBinary: "target/bt-test-tmp/binary_read.dat"
     self assert: result isOk
-    self assert: result unwrap equals: "hello"
+    // BT-4173: readBinary: answers Binary — convert to compare text.
+    self assert: (result unwrap asStringUnchecked) equals: "hello"
 
   testReadBinaryFileNotFound =>
     result := File readBinary: "target/bt-test-tmp/no_such_file_xyz.bin"
@@ -22,12 +23,12 @@ TestCase subclass: FileBinaryIoTest
 
   testWriteBinarySuccess =>
     self assert: (File writeBinary: "target/bt-test-tmp/binary_write.dat" contents: "binary data") isOk
-    self assert: (File readBinary: "target/bt-test-tmp/binary_write.dat") unwrap equals: "binary data"
+    self assert: ((File readBinary: "target/bt-test-tmp/binary_write.dat") unwrap asStringUnchecked) equals: "binary data"
 
   testWriteBinaryOverwrites =>
     File writeBinary: "target/bt-test-tmp/binary_overwrite.dat" contents: "first"
     File writeBinary: "target/bt-test-tmp/binary_overwrite.dat" contents: "second"
-    self assert: (File readBinary: "target/bt-test-tmp/binary_overwrite.dat") unwrap equals: "second"
+    self assert: ((File readBinary: "target/bt-test-tmp/binary_overwrite.dat") unwrap asStringUnchecked) equals: "second"
 
   testWriteBinaryTypeErrorPath =>
     @expect type
@@ -41,18 +42,18 @@ TestCase subclass: FileBinaryIoTest
 
   testWriteBinaryCreatesSubdirectory =>
     self assert: (File writeBinary: "target/bt-test-tmp/bin-subdir/nested.dat" contents: "nested") isOk
-    self assert: (File readBinary: "target/bt-test-tmp/bin-subdir/nested.dat") unwrap equals: "nested"
+    self assert: ((File readBinary: "target/bt-test-tmp/bin-subdir/nested.dat") unwrap asStringUnchecked) equals: "nested"
 
   testAppendBinaryCreatesFile =>
     // Ensure the file doesn't exist first
     File delete: "target/bt-test-tmp/binary_append_new.dat"
     self assert: (File appendBinary: "target/bt-test-tmp/binary_append_new.dat" contents: "first") isOk
-    self assert: (File readBinary: "target/bt-test-tmp/binary_append_new.dat") unwrap equals: "first"
+    self assert: ((File readBinary: "target/bt-test-tmp/binary_append_new.dat") unwrap asStringUnchecked) equals: "first"
 
   testAppendBinaryAppendsToExisting =>
     File writeBinary: "target/bt-test-tmp/binary_append.dat" contents: "hello"
     File appendBinary: "target/bt-test-tmp/binary_append.dat" contents: " world"
-    self assert: (File readBinary: "target/bt-test-tmp/binary_append.dat") unwrap equals: "hello world"
+    self assert: ((File readBinary: "target/bt-test-tmp/binary_append.dat") unwrap asStringUnchecked) equals: "hello world"
 
   testAppendBinaryTypeErrorPath =>
     @expect type

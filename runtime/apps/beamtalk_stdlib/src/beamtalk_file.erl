@@ -578,8 +578,12 @@ always closed before the call returns, so there is nothing to enumerate.
 """.
 -spec 'openHandles'() -> map().
 'openHandles'() ->
+    %% BT-4173: registry paths are raw bytes — answer them as Strings so
+    %% `.bt` path comparisons (`=:=`) match.
     Entries = [
-        beamtalk_array:from_list([Path, Mode, owner_to_beamtalk(Owner)])
+        beamtalk_array:from_list([
+            beamtalk_primitive:string_from_binary(Path), Mode, owner_to_beamtalk(Owner)
+        ])
      || {Path, Mode, Owner} <- beamtalk_file_handle_registry:open_handles()
     ],
     beamtalk_array:from_list(Entries).

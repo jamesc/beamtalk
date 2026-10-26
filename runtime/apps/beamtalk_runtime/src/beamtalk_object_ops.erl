@@ -128,11 +128,11 @@ dispatch('printString', [], Self, State) ->
     %% ADR 0094: class objects render as a bare class name; value instances
     %% render structurally via the canonical renderer (Critical Risk #4); live
     %% actor/supervisor references render kind-headed (`Actor(ClassName, pid)`).
-    %% See print_string_label/2.
-    {reply, print_string_label(Self, State), State};
+    %% See print_string_label/2. BT-4173: labels answer Strings.
+    {reply, beamtalk_primitive:string_from_binary(print_string_label(Self, State)), State};
 dispatch('displayString', [], Self, State) ->
     %% ADR 0094: displayString delegates to printString — same result.
-    {reply, print_string_label(Self, State), State};
+    {reply, beamtalk_primitive:string_from_binary(print_string_label(Self, State)), State};
 dispatch(inspect, [], Self, State) ->
     %% ADR 0095 Phase 3: `inspect` is repurposed from `-> String` to
     %% `-> Inspector` — it mints an immutable Inspector cursor over the receiver

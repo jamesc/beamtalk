@@ -80,6 +80,7 @@ TestCase subclass: ErlangInteropTest
   // integer_to_binary/2 was rejected ("expected arity 1").
   testMultiArityErlangBifs =>
     // integer_to_binary/2: hex chunk-size encoding (Buccaneer Phase 0)
-    self assert: (Erlang erlang integer_to_binary: 255 with: 16) equals: "FF"
+    // BT-4173: FFI answers Binary — convert to compare with the String.
+    self assert: ((Erlang erlang integer_to_binary: 255 with: 16) asStringUnchecked) equals: "FF"
     // binary_to_integer/2 round-trip
     self assert: (Erlang erlang binary_to_integer: "FF" with: 16) equals: 255

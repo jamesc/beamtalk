@@ -375,7 +375,10 @@ unwrap_text_entry(_) -> error(bad_text).
 %%% ============================================================================
 
 -doc "Write Data + newline to subprocess stdin.".
--spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, #beamtalk_error{}}, map()}.
+-spec handle_writeLine(iodata() | beamtalk_string:t(), map()) -> {reply, nil | {error, #beamtalk_error{}}, map()}.
+%% BT-4173: a String arrives tagged — unwrap to bytes (a tuple is not iodata).
+handle_writeLine({beamtalk_string, Bin}, State) when is_binary(Bin) ->
+    handle_writeLine(Bin, State);
 handle_writeLine(Data, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed, child_exited := ChildExited} =
         State,
@@ -427,7 +430,10 @@ read_line_for(Channel, From, Timeout, State) ->
     case queue:is_empty(Buffer) of
         false ->
             {{value, Line}, Rest} = queue:out(Buffer),
-            {reply, Line, State#{BufKey => Rest}};
+            %% BT-4173: lines answer Strings. Subprocess bytes pass through
+            %% unchecked (`readLine` has no failure channel); Binary-mode
+            %% reads are byte-exact for untrusted output.
+            {reply, beamtalk_primitive:string_from_binary(Line), State#{BufKey => Rest}};
         true when PortClosed ->
             %% EOF — no more data will arrive
             {reply, nil, State};
@@ -526,9 +532,14 @@ maybe_reply_eof(Channel, State) ->
 -spec reply_to_waiter(term(), term()) -> ok.
 reply_to_waiter({timer, From, TimerRef}, Value) ->
     erlang:cancel_timer(TimerRef),
-    gen_server:reply(From, Value);
+    gen_server:reply(From, tag_line(Value));
 reply_to_waiter(From, Value) ->
-    gen_server:reply(From, Value).
+    gen_server:reply(From, tag_line(Value)).
+
+%% BT-4173: line replies answer Strings; nil (EOF) passes through.
+-spec tag_line(binary() | nil) -> beamtalk_string:t() | nil.
+tag_line(nil) -> nil;
+tag_line(Line) when is_binary(Line) -> beamtalk_primitive:string_from_binary(Line).
 
 -doc """
 Build a Stream whose generator calls readLine or readStderrLine via gen_server:call.

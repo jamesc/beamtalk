@@ -247,5 +247,7 @@ format_for_display(Map) when is_map(Map) ->
         undefined ->
             list_to_binary(io_lib:format("~p", [Map]));
         _Class ->
-            beamtalk_primitive:send(Map, 'displayString', [])
+            %% BT-4173: dispatched displayString answers a String — unwrap
+            %% to bytes (this renderer's contract is `-> binary()`).
+            beamtalk_text:to_binary(beamtalk_primitive:send(Map, 'displayString', []))
     end.

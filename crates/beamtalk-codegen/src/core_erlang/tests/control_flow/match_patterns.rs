@@ -190,10 +190,10 @@ fn test_match_nil_pattern_compiles_to_atom_literal() {
 // ADR 0107 Phase A: `Pattern::Type` codegen (`generate_type_pattern`)
 
 #[test]
-fn test_match_type_pattern_string_compiles_to_is_binary_test() {
-    // `s :: String` compiles to a guard-safe `is_binary` case test — the
-    // single-level generalization of `generate_array_match_arm`'s `is_map`
-    // check to an arbitrary primitive BIF.
+fn test_match_type_pattern_string_compiles_to_tag_test() {
+    // BT-4173: `s :: String` compiles to the `{'beamtalk_string', _}`
+    // tag test — a bare binary is a `Binary`, never a `String`, so the
+    // old `is_binary` BIF test is wrong.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: String -> s;\n      _ -> \"none\"\n    ]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -203,8 +203,28 @@ fn test_match_type_pattern_string_compiles_to_is_binary_test() {
     eprintln!("Generated code for String type pattern match:\n{code}");
 
     assert!(
+        code.contains("'beamtalk_string'"),
+        "String type pattern should test the beamtalk_string tag. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'erlang':'is_binary'"),
+        "String type pattern must not test is_binary (bare binaries are Binary). Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_binary_compiles_to_is_binary_test() {
+    // BT-4173: `b :: Binary` is exactly a bare binary — the guard-safe
+    // `is_binary` BIF test the `String` entry used to own.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      b :: Binary -> b;\n      _ -> \"none\"\n    ]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    assert!(
         code.contains("'erlang':'is_binary'"),
-        "String type pattern should test is_binary. Got:\n{code}"
+        "Binary type pattern should test is_binary. Got:\n{code}"
     );
 }
 
@@ -406,6 +426,10 @@ fn test_match_type_pattern_tuple_excludes_actor_reference_shape() {
     assert!(
         code.contains("'beamtalk_supervisor'"),
         "Tuple type pattern should exclude the supervisor-reference tag. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_string'"),
+        "Tuple type pattern should exclude the String tag (BT-4173). Got:\n{code}"
     );
 }
 

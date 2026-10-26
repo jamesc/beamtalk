@@ -1005,12 +1005,17 @@ Return the class documentation string, or nil if none set.
 ADR 0033: Runtime-embedded documentation.
 The class gen_server stores `none` internally; we return `nil` for Beamtalk.
 """.
--spec classDoc(#beamtalk_object{}) -> binary() | 'nil'.
+-spec classDoc(#beamtalk_object{}) -> beamtalk_string:t() | 'nil'.
 classDoc(Self) ->
     ClassPid = erlang:element(4, Self),
     case gen_server:call(ClassPid, get_doc) of
+        %% BT-4173: `doc: nil` stores the atom `nil`; unset is `none`.
         none -> nil;
-        Doc -> Doc
+        nil -> nil;
+        %% Docs store raw (compile-time) or tagged (set_doc) — normalize
+        %% to a String at the read boundary.
+        {beamtalk_string, _} = Tagged -> Tagged;
+        Doc when is_binary(Doc) -> beamtalk_primitive:string_from_binary(Doc)
     end.
 
 -doc """
@@ -1042,14 +1047,19 @@ Completes the documentation API symmetry on Behaviour.
 Returns the doc binary if set, nil if the method does not exist or has no
 documentation. Walks the superclass chain via beamtalk_method_resolver.
 """.
--spec classDocForMethod(#beamtalk_object{}, atom()) -> binary() | 'nil'.
+-spec classDocForMethod(#beamtalk_object{}, atom()) -> beamtalk_string:t() | 'nil'.
 classDocForMethod(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
     case beamtalk_method_resolver:resolve(ClassPid, Selector) of
         nil ->
             nil;
         MethodObj when is_map(MethodObj) ->
-            maps:get('__doc__', MethodObj, nil)
+            %% BT-4173: normalize like classDoc/1 (see above).
+            case maps:get('__doc__', MethodObj, nil) of
+                nil -> nil;
+                {beamtalk_string, _} = Tagged -> Tagged;
+                Doc when is_binary(Doc) -> beamtalk_primitive:string_from_binary(Doc)
+            end
     end.
 
 -doc """

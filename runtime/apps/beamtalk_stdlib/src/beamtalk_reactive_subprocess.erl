@@ -410,14 +410,24 @@ each complete line to the notify actor. Stores the remainder as new pending.
 push_lines(stdout, Data, #{stdout_pending := Pending} = State) ->
     {Lines, Remainder} = beamtalk_subprocess_port:flush_and_collect(Pending, Data),
     lists:foreach(
-        fun(Line) -> cast_notify(State, 'subprocessLine:from:', [Line]) end,
+        %% BT-4173: pushed lines are Strings (bytes pass through unchecked —
+        %% push delivery has no failure channel, as in beamtalk_subprocess).
+        fun(Line) ->
+            cast_notify(State, 'subprocessLine:from:', [
+                beamtalk_primitive:string_from_binary(Line)
+            ])
+        end,
         Lines
     ),
     {noreply, State#{stdout_pending => Remainder}};
 push_lines(stderr, Data, #{stderr_pending := Pending} = State) ->
     {Lines, Remainder} = beamtalk_subprocess_port:flush_and_collect(Pending, Data),
     lists:foreach(
-        fun(Line) -> cast_notify(State, 'subprocessStderrLine:from:', [Line]) end,
+        fun(Line) ->
+            cast_notify(State, 'subprocessStderrLine:from:', [
+                beamtalk_primitive:string_from_binary(Line)
+            ])
+        end,
         Lines
     ),
     {noreply, State#{stderr_pending => Remainder}}.
@@ -431,12 +441,16 @@ Called on subprocess exit: the final output may not end with a newline.
 push_pending(stdout, #{stdout_pending := <<>>} = State) ->
     State;
 push_pending(stdout, #{stdout_pending := Partial} = State) ->
-    cast_notify(State, 'subprocessLine:from:', [Partial]),
+    cast_notify(State, 'subprocessLine:from:', [
+        beamtalk_primitive:string_from_binary(Partial)
+    ]),
     State#{stdout_pending => <<>>};
 push_pending(stderr, #{stderr_pending := <<>>} = State) ->
     State;
 push_pending(stderr, #{stderr_pending := Partial} = State) ->
-    cast_notify(State, 'subprocessStderrLine:from:', [Partial]),
+    cast_notify(State, 'subprocessStderrLine:from:', [
+        beamtalk_primitive:string_from_binary(Partial)
+    ]),
     State#{stderr_pending => <<>>}.
 
 -doc """

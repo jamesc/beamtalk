@@ -20,7 +20,8 @@ TestCase subclass: FileHandleIoTest
       mode: #read
       do: [:h | (h read: 3) unwrap]
     self assert: result isOk
-    self assert: result unwrap equals: "abc"
+    // BT-4173: read: answers Binary — convert to compare text.
+    self assert: (result unwrap asStringUnchecked) equals: "abc"
 
   testOpenModeDoClosesHandle =>
     File writeAll: "target/bt-test-tmp/handle_autoclose.txt" contents: "data"
@@ -65,7 +66,7 @@ TestCase subclass: FileHandleIoTest
       open: "target/bt-test-tmp/handle_append.log"
       mode: #read
       do: [:h | h readAll unwrap]
-    self assert: reread unwrap equals: "first" ++ nl ++ "second" ++ nl ++ "third" ++ nl
+    self assert: (reread unwrap asStringUnchecked) equals: "first" ++ nl ++ "second" ++ nl ++ "third" ++ nl
 
   testAppendCreatesParentDirectories =>
     File deleteAll: "target/bt-test-tmp/handle-nested"
@@ -86,7 +87,7 @@ TestCase subclass: FileHandleIoTest
         (h seek: 4) unwrap
         (h read: 3) unwrap
       ]
-    self assert: result unwrap equals: "456"
+    self assert: (result unwrap asStringUnchecked) equals: "456"
 
   testSeekReturnsNewPosition =>
     File writeAll: "target/bt-test-tmp/handle_seek_pos.txt" contents: "0123456789"
@@ -127,7 +128,7 @@ TestCase subclass: FileHandleIoTest
         (h seek: 7) unwrap
         h readAll unwrap
       ]
-    self assert: result unwrap equals: "body"
+    self assert: (result unwrap asStringUnchecked) equals: "body"
 
   testReadNegativeCountRaisesTypeError =>
     File writeAll: "target/bt-test-tmp/handle_negread.txt" contents: "abc"
@@ -386,7 +387,7 @@ TestCase subclass: FileHandleIoTest
       open: "target/bt-test-tmp/handle_binwrite.dat"
       mode: #append
       do: [:h | h write: payload]
-    self assert: (File readBinary: "target/bt-test-tmp/handle_binwrite.dat") unwrap equals: "x"
+    self assert: ((File readBinary: "target/bt-test-tmp/handle_binwrite.dat") unwrap asStringUnchecked) equals: "x"
 
   // === BT-3018 / ADR 0109: the block runs in the caller's process ===
   // Before the call-site lowering these were the deadlock: the block ran inside

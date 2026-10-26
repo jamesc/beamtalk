@@ -584,7 +584,7 @@ Returns `{ok, Source}` when a source was stored, or `not_found` when no
 source is recorded (either the extension does not exist, or it was
 registered via `register/4` without source).
 """.
--spec getSource(atom(), atom()) -> {ok, binary()} | not_found.
+-spec getSource(atom(), atom()) -> {ok, beamtalk_string:t()} | not_found.
 getSource(Class, Selector) when is_atom(Class), is_atom(Selector) ->
     Key = {Class, Selector},
     try
@@ -665,7 +665,10 @@ maybe_store_source(Key, undefined) ->
     ets:delete(?SOURCES_TABLE, Key),
     ok;
 maybe_store_source(Key, Source) when is_binary(Source) ->
-    ets:insert(?SOURCES_TABLE, {Key, Source}),
+    %% BT-4173: sources are text — store tagged so `getSource/2` and
+    %% `listAllWithSource/0` answer Strings (SystemNavigation binds the
+    %% third tuple element through a typed `String` local).
+    ets:insert(?SOURCES_TABLE, {Key, beamtalk_primitive:string_from_binary(Source)}),
     ok.
 
 -doc """

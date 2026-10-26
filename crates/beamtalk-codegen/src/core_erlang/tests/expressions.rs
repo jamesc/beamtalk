@@ -2163,8 +2163,10 @@ fn test_segmented_binary_arm_hoists_size_expression_under_try() {
 
 #[test]
 fn test_trivial_parenthesized_size_stays_inline() {
-    // Review finding 6: `<<a:(8), rest/binary>>` emits one native case —
-    // no hoist, no chain routing, no split tail.
+    // Review finding 6: `<<a:(8), rest/binary>>` emits no hoist and no
+    // split tail. BT-4173: binary arms route through the chain (per-arm
+    // String-unwrapping needs it), so one native case becomes the
+    // unwrap case plus the arm case.
     let mut generator = CoreErlangGenerator::new("test");
     generator.bind_var("bin", "Bin");
     let pattern = Pattern::Binary {
@@ -2214,10 +2216,9 @@ fn test_trivial_parenthesized_size_stays_inline() {
         !output.contains("_Size"),
         "Trivial parenthesized sizes must not hoist, got: {output}"
     );
-    assert_eq!(
-        output.matches("case ").count(),
-        1,
-        "Expected one native case (no chain routing), got: {output}"
+    assert!(
+        output.contains("'beamtalk_string'"),
+        "Binary arm should unwrap a String scrutinee. Got: {output}"
     );
 }
 

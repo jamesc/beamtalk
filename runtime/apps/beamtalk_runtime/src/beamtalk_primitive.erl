@@ -405,9 +405,13 @@ print_string_map(X) ->
         'Stream' ->
             maps:get(description, X);
         'CompiledMethod' ->
-            beamtalk_compiled_method_ops:dispatch('printString', [], X);
+            %% BT-4173: dispatched printString answers a String — unwrap to
+            %% bytes (this renderer's contract is `-> binary()`).
+            beamtalk_text:to_binary(
+                beamtalk_compiled_method_ops:dispatch('printString', [], X)
+            );
         'ErlangModule' ->
-            beamtalk_erlang_proxy:dispatch('printString', [], X);
+            beamtalk_text:to_binary(beamtalk_erlang_proxy:dispatch('printString', [], X));
         undefined ->
             PlainMap = maps:remove('$beamtalk_class', X),
             Pairs = maps:fold(
@@ -424,11 +428,13 @@ print_string_map(X) ->
         Class ->
             case beamtalk_exception_handler:is_exception_class(Class) of
                 true ->
-                    beamtalk_exception_handler:dispatch('printString', [], X);
+                    beamtalk_text:to_binary(
+                        beamtalk_exception_handler:dispatch('printString', [], X)
+                    );
                 false ->
                     %% Dispatch printString to the value class so user-defined
                     %% printString methods are honoured (e.g. Package>>printString).
-                    send_map(X, 'printString', [])
+                    beamtalk_text:to_binary(send_map(X, 'printString', []))
             end
     end.
 
