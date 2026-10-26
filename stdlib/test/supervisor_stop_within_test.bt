@@ -1,0 +1,114 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4047: Supervisor>>stopWithin: / DynamicSupervisor>>stopWithin: — stop
+// with a wait limit (OTP gen_server:stop/3). A child whose terminate: blocks
+// past the wait gives Result error: #timeout, while the supervisor keeps
+// shutting down in the background and still dies once the child's shutdown
+// finishes. `stop` stays unbounded.
+//
+// Fixtures: stdlib/test/fixtures/bt4047patient_sup.bt
+//           stdlib/test/fixtures/bt4047patient_pool.bt
+//           (children reuse Bt3965SlowStopper from BT-3965, whose terminate:
+//           sleeps ~200 ms)
+
+TestCase subclass: SupervisorStopWithinTest
+
+  setUp =>
+    (Ets exists: #bt4047Shutdown) ifTrue: [(Ets named: #bt4047Shutdown) delete]
+    Ets new: #bt4047Shutdown type: #set
+
+  // Stop anything a failed test left running, so the next test starts clean.
+  tearDown =>
+    #(Bt4047PatientSup, Bt4047PatientPool)
+      do: [:cls |
+        sup := cls current
+        sup isNil ifFalse: [[sup stop] on: Error do: [:_e | nil]]
+      ]
+    (Ets exists: #bt4047Shutdown) ifTrue: [(Ets named: #bt4047Shutdown) delete]
+
+  table => Ets named: #bt4047Shutdown
+
+  // Wait (up to ~5 s) for `sup` to die.
+  waitForDeathOf: sup =>
+    250 timesRepeat: [sup isAlive ifTrue: [Timer sleep: 20]]
+
+  // === Static Supervisor ===
+  testStopWithinTimeoutKeepsShuttingDownInBackground =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    // The child's terminate: sleeps ~200 ms; a 50 ms wait must time out.
+    result := sup stopWithin: 50
+    self assert: result isError
+    self assert: result error kind equals: #timeout
+    // The supervisor outlived the wait: still shutting down in background.
+    self assert: sup isAlive
+    self waitForDeathOf: sup
+    self deny: sup isAlive
+    // terminate: ran to completion inside the 10 s shutdown window.
+    self assert: (self table at: #terminated) equals: #shutdown
+
+  testStopWithinTimeoutChildExitsCleanly =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    child :: Bt3965SlowStopper := (sup which: Bt3965SlowStopper) unwrap
+    t := self table
+    child onExit: [:reason | t at: #exitReason put: reason]
+    result := sup stopWithin: 50
+    self assert: result error kind equals: #timeout
+    100 timesRepeat: [(t at: #exitReason) isNil ifTrue: [Timer sleep: 20]]
+    self assert: (t at: #exitReason) equals: #shutdown
+    self assert: (t at: #terminated) equals: #shutdown
+
+  testStopWithinGenerousWaitStopsCleanly =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    result := sup stopWithin: 10000
+    self assert: (self assertOk: result) equals: nil
+    self deny: sup isAlive
+
+  testStopWithinInfinityStops =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    result := sup stopWithin: #infinity
+    self assert: result isError equals: false
+    self deny: sup isAlive
+
+  testStopWithinZeroWaitTimesOut =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    result := sup stopWithin: 0
+    self assert: result isError
+    self assert: result error kind equals: #timeout
+    self assert: sup isAlive
+    self waitForDeathOf: sup
+    self deny: sup isAlive
+
+  testStopWithinDeadSupervisorGivesStaleHandle =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    sup stop
+    result := sup stopWithin: 100
+    self assert: result isError
+    self assert: result error kind equals: #stale_handle
+
+  testStopWithinRejectsBadTimeout =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    result := sup stopWithin: -1
+    self assert: result isError
+    self assert: result error kind equals: #type_error
+    self assert: sup isAlive
+    sup stop
+
+  // === DynamicSupervisor ===
+  testDynamicStopWithinTimeoutKeepsShuttingDownInBackground =>
+    pool := (Bt4047PatientPool supervise) unwrap
+    (pool startChild: #{#tableName => #bt4047Shutdown}) unwrap
+    result := pool stopWithin: 50
+    self assert: result isError
+    self assert: result error kind equals: #timeout
+    self assert: pool isAlive
+    self waitForDeathOf: pool
+    self deny: pool isAlive
+    self assert: (self table at: #terminated) equals: #shutdown
+
+  testDynamicStopWithinGenerousWaitStopsCleanly =>
+    pool := (Bt4047PatientPool supervise) unwrap
+    (pool startChild: #{#tableName => #bt4047Shutdown}) unwrap
+    result := pool stopWithin: 10000
+    self assert: (self assertOk: result) equals: nil
+    self deny: pool isAlive

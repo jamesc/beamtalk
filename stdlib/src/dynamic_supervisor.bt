@@ -398,3 +398,28 @@ abstract Object subclass: DynamicSupervisor(C)
   /// call. Keeps `stop` pure Beamtalk.
   internal stopResult -> Result(Nil, Error) =>
     (Erlang beamtalk_supervisor) stop: self
+
+  /// Stop this pool and all its children, waiting up to `ms` milliseconds
+  /// (or `#infinity`) for the shutdown to finish (`gen_server:stop/3`).
+  ///
+  /// Answers `Result ok: nil` once the pool has stopped. When the shutdown
+  /// overruns the wait, answers `Result error:` with kind `#timeout` — but
+  /// the pool keeps shutting down in the background: the terminate request
+  /// was already delivered, so polling `isAlive` still observes the death.
+  /// A stopped pool gives `Result error:` with kind `#stale_handle`, an
+  /// unreachable node `#node_down`, and a negative (or non-Integer,
+  /// non-`#infinity`) `ms` `#type_error`. Sealed, like `stop` (BT-3984);
+  /// `stop` stays unbounded.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (pool stopWithin: 5000) unwrap   // => nil, once the pool is down
+  /// (busy stopWithin: 10) error kind // => #timeout (still stopping in the background)
+  /// ```
+  sealed stopWithin: ms :: Timeout -> Result(Nil, Error) =>
+    self stopWithinResult: ms
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
+  /// `stopWithin/2` call. Keeps `stopWithin:` pure Beamtalk.
+  internal stopWithinResult: ms :: Timeout -> Result(Nil, Error) =>
+    (Erlang beamtalk_supervisor) stopWithin: self ms: ms
