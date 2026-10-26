@@ -146,6 +146,17 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// Day component (1-31).
   day -> Integer => self delegate
 
+  /// Day of the week of the wall-clock date: ISO numbering, Monday=1
+  /// through Sunday=7 (matches Erlang `calendar:day_of_the_week/1`).
+  /// Uses the wall-clock fields as given, ignoring `offsetMinutes`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 10 day: 26) weekday  // => 1
+  /// (DateTime year: 2026 month: 10 day: 25) weekday  // => 7
+  /// ```
+  weekday -> Integer => self delegate
+
   /// Hour component (0-23).
   hour -> Integer => self delegate
 
