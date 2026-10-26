@@ -1269,6 +1269,11 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
 
+    // Warn on a `match:` arm whose body is a bare block literal (BT-4028):
+    // the arm answers the Block without running it. Skipped when every arm
+    // is a block literal (an intentional block-valued match).
+    validators::check_match_arm_block(module, &mut result.diagnostics);
+
     // Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 

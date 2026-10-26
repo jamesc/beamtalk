@@ -653,6 +653,11 @@ pub enum DiagnosticCategory {
     /// `_ -> nil` arm. No `@expect` category suppresses this one by design
     /// (the catch-all arm is the fix); `@expect all` still covers it.
     HandleInfoNoCatchAll,
+    /// A `match:` arm whose body is a bare block literal (BT-4028): the arm
+    /// answers the Block as a value and never runs its statements. Skipped
+    /// when every arm of the match is a block literal (an intentional
+    /// block-valued match). Suppressible with `@expect match_arm_block`.
+    MatchArmBlock,
     /// A block literal that reads or writes a class variable of its home
     /// class is used where it will run outside an invocation of that class
     /// (ADR 0130 §5): a reading block handed to an asynchronous send, stored
