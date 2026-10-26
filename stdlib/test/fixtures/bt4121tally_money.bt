@@ -15,12 +15,12 @@ Value subclass: Bt4121TallyMoney
 
   /// Add two money amounts, reporting the sum to the tally actor.
   + other :: Bt4121TallyMoney -> Bt4121TallyMoney =>
-    sum := self.cents + other cents.
-    self.tally noteAdd: sum.
+    sum := self.cents + other cents
+    self.tally noteAdd: sum
     ((Bt4121TallyMoney new) withCents: sum) withTally: self.tally
 
   /// `0 + aMoney` (number-on-the-left): report and wrap, like `+`.
   plusFromNumber: n :: Number -> Bt4121TallyMoney =>
-    sum := n + self.cents.
-    self.tally noteAdd: sum.
+    sum := n + self.cents
+    self.tally noteAdd: sum
     ((Bt4121TallyMoney new) withCents: sum) withTally: self.tally
