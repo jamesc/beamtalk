@@ -713,7 +713,7 @@ x < 5              // => ERROR: UndefinedObject does not understand '<'
 
 This holds however the receiver is typed: an untyped local or parameter, or an `:: Integer | Nil` field that holds `nil`. Only a receiver statically known to be a number, character or string (a literal, a `:: Integer`/`:: String`-style parameter or field, `self` in those classes) compiles to the bare comparison instruction; everything else is checked at run time (one inline type test), so there is no "total order over every value" to fall back on.
 
-The **argument** is not checked at run time: a number, character, string or symbol receiver compared with an argument of a different kind falls back to the BEAM's term order and does not raise, so `5 < nil` answers `true` and `#a < 5` answers `false`. The compiler warns when it can see the mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `'x' < nil`, `#a < 5`); an untyped or generic argument stays silent. Comparison operators have no number-on-the-left coercion (see above).
+The **argument** is not checked at run time: a number, character, string or symbol receiver compared with an argument of a different kind falls back to the BEAM's term order and does not raise, so `5 < nil` answers `true` and `#a < 5` answers `false`. The compiler warns when it can see the mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `$x < nil`, `#a < 5`); an untyped or generic argument stays silent. Comparison operators have no number-on-the-left coercion (see above).
 
 ##### Arithmetic and comparison on fields: annotate numeric state
 
