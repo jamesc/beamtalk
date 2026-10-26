@@ -121,7 +121,8 @@ pub struct CoreErlangGenerator {
     /// into the `{Bool, StateAcc[, Self]}` hand-back tuple, where a bare
     /// `case` breaks erlc's `beam_clean` (`undefined_label`) in complex
     /// nestings. Set and restored synchronously around the tail lowering
-    /// only; never persists across methods.
+    /// only; never persists across methods. The underlying erlc trigger is
+    /// not yet root-caused — see BT-4202.
     pub(in crate::core_erlang) decline_pure_boolean_inline: bool,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per

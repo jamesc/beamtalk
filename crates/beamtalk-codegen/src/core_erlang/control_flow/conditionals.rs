@@ -343,9 +343,10 @@ pub(in crate::core_erlang) enum PureArm<'b> {
     /// The receiver itself (`C`) — the non-taken solo-branch contract
     /// (`False>>ifTrue: => self`, `True>>ifFalse: => self`).
     Receiver,
-    /// A boolean literal atom (`'true'`/`'false'`) — `and:`'s/`or:`'s
-    /// short-circuit arm (`Boolean>>and:`/`or:`, `stdlib/src/boolean.bt`).
-    Literal(&'static str),
+    /// A boolean literal atom — `and:`'s/`or:`'s short-circuit arm
+    /// (`Boolean>>and:`/`or:`, `stdlib/src/boolean.bt`). Stored as a
+    /// `bool` and emitted via `leaf::atom` (typed leaves, ADR 0089).
+    Literal(bool),
 }
 
 /// Where a conditional's scratch map — element 2 of its result tuple, the
@@ -1564,7 +1565,7 @@ impl CoreErlangGenerator {
             receiver,
             "and:",
             PureArm::Inline(block),
-            PureArm::Literal("'false'"),
+            PureArm::Literal(false),
             fallback_args,
         )
     }
@@ -1581,7 +1582,7 @@ impl CoreErlangGenerator {
         self.generate_pure_boolean_case(
             receiver,
             "or:",
-            PureArm::Literal("'true'"),
+            PureArm::Literal(true),
             PureArm::Inline(block),
             fallback_args,
         )
@@ -1610,7 +1611,11 @@ impl CoreErlangGenerator {
     /// today's Tier-1 builder via `expression_doc`, over the original
     /// argument expressions, so they are byte-identical to the closures the
     /// fully-dynamic send would allocate — allocated only when the arm is
-    /// taken.
+    /// taken. Pure-inline is declined while compiling them: they run only
+    /// for non-Boolean receivers, so the optimisation buys nothing there,
+    /// and inlining inside them would duplicate nested blocks exponentially
+    /// (each level compiles its blocks both inline and as fallback
+    /// closures).
     ///
     /// The receiver compiles through [`Self::compile_conditional_receiver`],
     /// the same path the mutation builders use: the gate guarantees an
@@ -1631,10 +1636,15 @@ impl CoreErlangGenerator {
         let cond_var = self.fresh_temp_var("Cond");
         let true_doc = self.pure_arm_doc(true_arm, &cond_var)?;
         let false_doc = self.pure_arm_doc(false_arm, &cond_var)?;
+        // Decline pure-inline inside the fallback closures (same save/restore
+        // shape as `while_loops.rs`): without this, nested pure
+        // conditionals emit 2^n copies of the innermost arm.
+        let prev = std::mem::replace(&mut self.decline_pure_boolean_inline, true);
         let mut closure_docs = Vec::with_capacity(fallback_args.len());
         for arg in fallback_args {
             closure_docs.push(self.expression_doc(arg)?);
         }
+        self.decline_pure_boolean_inline = prev;
         let fallback =
             Self::runtime_send_call(leaf::var(cond_var.clone()), selector_atom, closure_docs);
         let no_match_var = self.fresh_temp_var("CondNoMatch");
@@ -1678,7 +1688,7 @@ impl CoreErlangGenerator {
                 body
             }
             PureArm::Receiver => Ok(leaf::var(cond_var)),
-            PureArm::Literal(atom) => Ok(Document::Str(atom)),
+            PureArm::Literal(value) => Ok(leaf::atom(if value { "true" } else { "false" })),
         }
     }
 

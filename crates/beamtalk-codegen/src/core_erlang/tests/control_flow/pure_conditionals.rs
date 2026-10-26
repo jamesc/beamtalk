@@ -689,3 +689,23 @@ fn guarded_operator_in_value_type_arm_still_inlines() {
     );
     assert_compiles_through_erlc("bt@probe_vt_op_arm", &code);
 }
+
+#[test]
+fn nested_pure_conditionals_grow_linearly() {
+    // BT-4070 review: pure-inline is declined inside fallback closures,
+    // so 6 nested levels emit 6 fallback arms — not 2^6 - 1. (Module
+    // boilerplate holds no `CondNoMatch`, so count over the whole module.)
+    let src = concat!(
+        "Value subclass: Probe\n",
+        "  check: a b: b c: c d: d e: e f: f =>\n",
+        "    a ifTrue: [1] ifFalse: [b ifTrue: [2] ifFalse: [c ifTrue: [3] ifFalse: [",
+        "d ifTrue: [4] ifFalse: [e ifTrue: [5] ifFalse: [f ifTrue: [6] ifFalse: [7]]]]]]\n",
+    );
+    let code = compile(src, "bt@probe_nested_pure");
+    let count = code.matches("CondNoMatch").count();
+    assert_eq!(
+        count, 6,
+        "6 nested levels must emit 6 fallback arms (linear), got {count}. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@probe_nested_pure", &code);
+}
