@@ -164,6 +164,8 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0135](0135-supervisor-instances-and-start-arguments.md) | Supervisor Instances and Start Arguments | Accepted | 2026-10-20 |
 | [0136](0136-tuple-literal-expressions.md) | Tuple Literal Expressions | Implemented | 2026-10-20 |
 | [0137](0137-actor-closures-see-live-state.md) | Actor Closures See the Actor's Live State | Accepted | 2026-10-20 |
+| [0138](0138-string-literal-escape-sequences.md) | String Literal Escape Sequences | Accepted | 2026-10-25 |
+| [0139](0139-beam-abstraction-boundaries.md) | BEAM Abstraction Boundaries — What Leaks and What Doesn't | Accepted | 2026-10-26 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
