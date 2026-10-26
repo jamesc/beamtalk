@@ -88,7 +88,7 @@ impl TypeChecker {
     /// other — including the narrowing-assignment escape hatch (declared
     /// assignable to inferred, e.g. `Dictionary := <Object>`, the
     /// type-erasure pattern the annotation exists for).
-    fn detect_assignment_type_mismatch(
+    pub(in crate::semantic_analysis::type_checker) fn detect_assignment_type_mismatch(
         inferred_ty: &InferredType,
         declared: &InferredType,
         hierarchy: &ClassHierarchy,
@@ -137,12 +137,9 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
-        let inferred_ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
-
-        // If there's a type annotation, use the declared type instead
-        // of the inferred type. Emit a warning if the RHS has a known
-        // (non-Dynamic) type that is incompatible with the annotation.
-        let ty = if let Some(ann) = type_annotation {
+        // Resolve the annotation first so a Block annotation can push its
+        // parameter types into a block-literal RHS (BT-4102 Decision C).
+        let declared_ann = type_annotation.map(|ann| {
             // ADR 0102 §1/§3: thread the protocol registry
             // through so a local `x :: P1 & P2` annotation resolves
             // class ∩ protocol correctly rather than falling to `Never`.
@@ -161,7 +158,7 @@ impl TypeChecker {
             // time, and a disjoint field borrow (this) composes with that
             // sibling borrow in one expression where a method call would not
             // — see `TypeChecker::resolution_context`'s doc.
-            let declared = type_resolver::ResolutionContext::new(
+            type_resolver::ResolutionContext::new(
                 self.alias_registry.as_ref(),
                 &mut self.referenced_aliases,
             )
@@ -169,7 +166,17 @@ impl TypeChecker {
                 ann,
                 &type_resolver::SubstitutionMap::new(),
                 self.protocol_registry.as_ref(),
-            );
+            )
+        });
+        if let Some(declared) = &declared_ann {
+            self.stash_block_pushdown(value, declared);
+        }
+        let inferred_ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
+
+        // If there's a type annotation, use the declared type instead
+        // of the inferred type. Emit a warning if the RHS has a known
+        // (non-Dynamic) type that is incompatible with the annotation.
+        let ty = if let Some(declared) = declared_ann {
             // Detection (is this RHS type actually incompatible
             // with the declared annotation?) stays here; rendering the
             // resulting fact as a diagnostic is `validation.rs`'s job.

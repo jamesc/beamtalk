@@ -1788,7 +1788,7 @@ self run: [:x :: (Integer | String) | x]
 - Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments. When a type annotation is present, the default value is optional (`field: x :: Integer` / `state: x :: Integer`) — the type annotation is the contract, and `nil` is used internally.
 - Local variable annotations (`name :: Type := expr`) declare the binding's type at type-erasure boundaries. See [Local Variable Type Annotations](#local-variable-type-annotations) below.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
-- Block parameter annotations (`[:x :: Integer | ...]`) are parsed and preserved by `beamtalk fmt`; parameter types are still inferred from the enclosing message signature.
+- Block parameter annotations (`[:x :: Integer | ...]`) type the parameter and win over any inferred type (BT-4102); an annotation unrelated to the expected parameter type warns. Without an annotation, parameter types are inferred from the enclosing message signature, from a method's declared `-> Block(P, R)` return type (block literal as the tail expression or a top-level `^`), or from an annotated local (`f :: Block(P, R) := [:x | ...]`). Block literals inside `#{...}`/`#(...)` literals get no push-down; annotate their parameters. Type variables in a block parameter annotation do not see the method's type-parameter substitution (same as method parameters).
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
 ### Local Variable Type Annotations

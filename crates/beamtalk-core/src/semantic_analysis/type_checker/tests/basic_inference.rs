@@ -412,7 +412,15 @@ fn test_block_infers_block_type() {
     let block_expr = Expression::Block(Block::new(vec![], vec![bare(int_lit(42))], span()));
 
     let ty = checker.infer_expr(&block_expr, &hierarchy, &mut env, false);
-    assert_eq!(ty, InferredType::known("Block"));
+    // BT-4102: the block type now carries its body's return type.
+    assert_eq!(
+        ty,
+        InferredType::Known {
+            class_name: "Block".into(),
+            type_args: vec![InferredType::known("Integer")],
+            provenance: TypeProvenance::Inferred(span()),
+        }
+    );
 }
 
 #[test]

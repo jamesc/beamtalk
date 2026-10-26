@@ -433,6 +433,15 @@ pub fn infer_types_and_returns_with_aliases(
 /// - FFI call type inference from `NativeTypeRegistry` (ADR 0075)
 #[derive(Debug)]
 pub struct TypeChecker {
+    /// BT-4102: expected block-parameter types for block literals whose
+    /// expected `Block(P…, R)` type is known from a *declaration* rather than
+    /// a callee signature (a method's declared return type, or an annotated
+    /// local). Keyed by the block literal's span; stashed by
+    /// `check_method_body_inner` / `infer_assignment` and consumed (removed)
+    /// by the `Expression::Block` arm of `infer_expr`. There is no
+    /// expected-type threading through `infer_expr`, so this side channel is
+    /// how a declared type reaches the literal.
+    pub(super) block_param_pushdown: HashMap<Span, Vec<InferredType>>,
     pub(super) diagnostics: Vec<Diagnostic>,
     pub(super) type_map: TypeMap,
     pub(super) method_return_types: HashMap<MethodReturnKey, InferredType>,
@@ -531,6 +540,7 @@ impl TypeChecker {
             native_type_registry: None,
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
+            block_param_pushdown: HashMap::new(),
         }
     }
 
@@ -552,6 +562,7 @@ impl TypeChecker {
             native_type_registry: None,
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
+            block_param_pushdown: HashMap::new(),
         }
     }
 
