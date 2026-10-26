@@ -202,7 +202,18 @@ Parameters:
 - Class, Selector, Fun, Owner — as for `register/4`.
 - Source — `binary()` method body, or `undefined` to skip source tracking.
 """.
--spec register(atom(), atom(), function(), atom(), binary() | undefined) -> ok.
+-spec register(atom(), atom(), function(), atom(), binary() | beamtalk_string:t() | undefined) ->
+    ok.
+%% BT-4173: a String source arrives tagged — unwrap to raw bytes
+%% (`maybe_store_source/2` re-tags for its readers).
+register(Class, Selector, Fun, Owner, {beamtalk_string, Source}) when
+    is_atom(Class),
+    is_atom(Selector),
+    is_function(Fun),
+    is_atom(Owner),
+    is_binary(Source)
+->
+    register(Class, Selector, Fun, Owner, Source);
 register(Class, Selector, Fun, Owner, Source) when
     is_atom(Class),
     is_atom(Selector),
@@ -584,7 +595,7 @@ Returns `{ok, Source}` when a source was stored, or `not_found` when no
 source is recorded (either the extension does not exist, or it was
 registered via `register/4` without source).
 """.
--spec getSource(atom(), atom()) -> {ok, binary()} | not_found.
+-spec getSource(atom(), atom()) -> {ok, beamtalk_string:t()} | not_found.
 getSource(Class, Selector) when is_atom(Class), is_atom(Selector) ->
     Key = {Class, Selector},
     try
@@ -611,7 +622,7 @@ returning them would force every caller to filter.
 Each tuple is `{Class, Selector, Source}` where Source is the binary
 method body text. Returns `[]` when no extensions have stored source.
 """.
--spec listAllWithSource() -> [{atom(), atom(), binary()}].
+-spec listAllWithSource() -> [{atom(), atom(), beamtalk_string:t()}].
 listAllWithSource() ->
     try
         ets:foldl(
@@ -665,7 +676,12 @@ maybe_store_source(Key, undefined) ->
     ets:delete(?SOURCES_TABLE, Key),
     ok;
 maybe_store_source(Key, Source) when is_binary(Source) ->
-    ets:insert(?SOURCES_TABLE, {Key, Source}),
+    %% BT-4173: sources are text — store tagged so `getSource/2` and
+    %% `listAllWithSource/0` answer Strings (Beamtalk reads source via
+    %% `(Erlang beamtalk_extensions) getSource:selector:` and calls
+    %% String methods on it). The one raw consumer (ChangeLog audit
+    %% trail) unwraps at its own call site.
+    ets:insert(?SOURCES_TABLE, {Key, beamtalk_primitive:string_from_binary(Source)}),
     ok.
 
 -doc """

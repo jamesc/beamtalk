@@ -44,7 +44,7 @@ logging_config_test_() ->
             fun enableDebug_invalid_symbol_returns_error/0,
             fun disableDebug_removes_target/0,
             fun disableAllDebug_clears_all/0,
-            fun loggerInfo_returns_binary/0,
+            fun loggerInfo_returns_string/0,
             fun activeDebugTargets_tracks_multiple/0,
             fun enable_disable_cycle_removes_target/0,
             fun enableDebug_domain_target_succeeds/0,
@@ -190,9 +190,8 @@ disableAllDebug_clears_all() ->
     ?assertEqual(nil, beamtalk_logging_config:disableAllDebug()),
     ?assertEqual([], beamtalk_logging_config:activeDebugTargets()).
 
-loggerInfo_returns_binary() ->
-    Info = beamtalk_logging_config:loggerInfo(),
-    ?assert(is_binary(Info)),
+loggerInfo_returns_string() ->
+    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
     ?assertNotEqual(<<>>, Info).
 
 activeDebugTargets_tracks_multiple() ->
@@ -334,8 +333,7 @@ loggerInfo_includes_class_and_actor() ->
     end),
     ActorRef = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Pid},
     beamtalk_logging_config:enableDebug(ActorRef),
-    Info = beamtalk_logging_config:loggerInfo(),
-    ?assert(is_binary(Info)),
+    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
     %% Should mention the class and actor in the output
     ?assertNotEqual(nomatch, binary:match(Info, <<"Widget">>)),
     ?assertNotEqual(nomatch, binary:match(Info, <<"Counter">>)),
@@ -377,7 +375,7 @@ ensure_table_idempotent() ->
     ?assertEqual(ok, beamtalk_logging_config:ensure_table()).
 
 loggerInfo_includes_level_and_format() ->
-    Info = beamtalk_logging_config:loggerInfo(),
+    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
     %% Should contain "Log level:" and "Format:" substrings
     ?assertNotEqual(nomatch, binary:match(Info, <<"Log level:">>)),
     ?assertNotEqual(nomatch, binary:match(Info, <<"Format:">>)),
@@ -479,7 +477,7 @@ mcp_signal_file_with_real_workspace_test_() ->
             TestWsId = iolist_to_binary(
                 io_lib:format("test_mcp_~p", [erlang:unique_integer([positive])])
             ),
-            TmpDir = beamtalk_file:'tempDirectory'(),
+            {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
             ProjectPath = iolist_to_binary([TmpDir, "/test"]),
             {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
                 workspace_id => TestWsId,
@@ -547,7 +545,7 @@ mcp_signal_file_with_real_workspace_test_() ->
                 {"loggerInfo shows mcp with a real signal file path", fun() ->
                     beamtalk_logging_config:disableAllDebug(),
                     beamtalk_logging_config:enableDebug(mcp),
-                    Info = beamtalk_logging_config:loggerInfo(),
+                    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
                     ?assertNotEqual(nomatch, binary:match(Info, <<"mcp">>)),
                     ?assertNotEqual(nomatch, binary:match(Info, <<"signal file">>)),
                     beamtalk_logging_config:disableAllDebug()
@@ -612,8 +610,7 @@ logFormat_set_without_handler_succeeds() ->
 
 loggerInfo_with_file_handler_shows_path() ->
     install_test_file_handler_with_file(),
-    Info = beamtalk_logging_config:loggerInfo(),
-    ?assert(is_binary(Info)),
+    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
     %% Should contain a real file path (not standard_io)
     ?assertNotEqual(nomatch, binary:match(Info, <<"Log file:">>)),
     ?assertEqual(nomatch, binary:match(Info, <<"(standard_io)">>)),
@@ -623,7 +620,7 @@ loggerInfo_with_file_handler_shows_path() ->
 
 loggerInfo_without_handler_shows_standard_io() ->
     _ = logger:remove_handler(beamtalk_file_log),
-    Info = beamtalk_logging_config:loggerInfo(),
+    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
     ?assertNotEqual(nomatch, binary:match(Info, <<"(standard_io)">>)).
 
 %%====================================================================
@@ -633,7 +630,7 @@ loggerInfo_without_handler_shows_standard_io() ->
 loggerInfo_with_subsystem_shows_modules() ->
     beamtalk_logging_config:disableAllDebug(),
     beamtalk_logging_config:enableDebug(compiler),
-    Info = beamtalk_logging_config:loggerInfo(),
+    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
     %% Should list compiler modules
     ?assertNotEqual(nomatch, binary:match(Info, <<"compiler">>)),
     ?assertNotEqual(nomatch, binary:match(Info, <<"beamtalk_compiler_server">>)),
@@ -642,14 +639,14 @@ loggerInfo_with_subsystem_shows_modules() ->
 loggerInfo_with_domain_target_shows_domain() ->
     beamtalk_logging_config:disableAllDebug(),
     beamtalk_logging_config:enableDebug(runtime),
-    Info = beamtalk_logging_config:loggerInfo(),
+    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
     ?assertNotEqual(nomatch, binary:match(Info, <<"runtime">>)),
     ?assertNotEqual(nomatch, binary:match(Info, <<"domain=">>)),
     beamtalk_logging_config:disableAllDebug().
 
 loggerInfo_no_active_targets_shows_none() ->
     beamtalk_logging_config:disableAllDebug(),
-    Info = beamtalk_logging_config:loggerInfo(),
+    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
     ?assertNotEqual(nomatch, binary:match(Info, <<"(none)">>)).
 
 %%====================================================================
@@ -868,7 +865,7 @@ loggerInfo_with_mcp_shows_signal_file() ->
     beamtalk_logging_config:ensure_table(),
     ets:insert(beamtalk_debug_targets, {mcp, subsystem, []}),
     try
-        Info = beamtalk_logging_config:loggerInfo(),
+        {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
         ?assertNotEqual(nomatch, binary:match(Info, <<"signal file">>))
     after
         ets:delete(beamtalk_debug_targets, mcp)
@@ -890,8 +887,7 @@ loggerInfo_handles_no_file_config() ->
     %% Install a handler without a file config so find_log_file falls
     %% through to the default-handler branch.
     _ = logger:remove_handler(beamtalk_file_log),
-    Info = beamtalk_logging_config:loggerInfo(),
-    ?assert(is_binary(Info)),
+    {beamtalk_string, Info} = beamtalk_logging_config:loggerInfo(),
     ?assertNotEqual(nomatch, binary:match(Info, <<"Log file:">>)).
 
 %%====================================================================

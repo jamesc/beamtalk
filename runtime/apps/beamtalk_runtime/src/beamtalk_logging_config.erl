@@ -494,8 +494,13 @@ disableAllDebug() ->
     nil.
 
 -doc "Return a formatted string describing the current logger state.".
--spec loggerInfo() -> binary().
+-spec loggerInfo() -> beamtalk_string:t().
 loggerInfo() ->
+    %% BT-4173: user-facing text answers a String.
+    beamtalk_primitive:string_from_binary(logger_info_bin()).
+
+-spec logger_info_bin() -> binary().
+logger_info_bin() ->
     Level = logLevel(),
     Active = activeDebugTargets(),
     ActiveStr =

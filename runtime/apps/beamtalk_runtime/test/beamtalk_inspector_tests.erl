@@ -316,7 +316,7 @@ improper_list_degrades_to_value_test() ->
     ?assertEqual(value, beamtalk_inspector:kindOf(I)),
     %% Field derivation and rendering must not raise on the improper list.
     ?assertEqual([], beamtalk_inspector:fieldsOf(I)),
-    ?assert(is_binary(beamtalk_inspector:printString(I, 1))).
+    ?assertMatch({beamtalk_string, _}, beamtalk_inspector:printString(I, 1)).
 
 %%====================================================================
 %% #foreign — process_info + guarded state (ADR 0095 §3–§4)
@@ -365,7 +365,7 @@ remote_pid_degrades_to_unavailable_test() ->
     ?assertEqual(status, maps:get(name, StatusF)),
     ?assertEqual(unavailable, maps:get(value, StatusF)),
     %% printString and refresh must not raise on a remote pid either.
-    ?assert(is_binary(beamtalk_inspector:printString(I, 1))),
+    ?assertMatch({beamtalk_string, _}, beamtalk_inspector:printString(I, 1)),
     ?assertEqual(foreign, beamtalk_inspector:kindOf(beamtalk_inspector:refresh(I))).
 
 %% A deterministic pid on a *non-local* node, built via the external term format
@@ -439,7 +439,7 @@ forged_collection_maps_never_crash_test() ->
     ?assertEqual(collection, beamtalk_inspector:kindOf(IA)),
     ?assertEqual(0, beamtalk_inspector:sizeOf(IA)),
     ?assertEqual([], beamtalk_inspector:fieldsOf(IA)),
-    ?assert(is_binary(beamtalk_inspector:printString(IA, 1))),
+    ?assertMatch({beamtalk_string, _}, beamtalk_inspector:printString(IA, 1)),
     Set = #{'$beamtalk_class' => 'Set', elements => not_a_list},
     ?assertEqual(0, beamtalk_inspector:sizeOf(beamtalk_inspector:on(Set))),
     Bag = #{'$beamtalk_class' => 'Bag', counts => not_a_map},
@@ -455,7 +455,7 @@ foreign_charlist_state_renders_as_string_test() ->
     Pid = start_foreign("hello"),
     I = beamtalk_inspector:on(Pid),
     [StateF] = [F || F <- beamtalk_inspector:fieldsOf(I), maps:get(name, F) =:= state],
-    ?assertEqual(<<"hello">>, maps:get(value, StateF)),
+    ?assertEqual({beamtalk_string, <<"hello">>}, maps:get(value, StateF)),
     ?assertEqual(false, maps:get(drillable, StateF)),
     gen_server:stop(Pid).
 
@@ -468,7 +468,7 @@ foreign_state_map_charlist_value_drills_as_string_test() ->
     ?assertEqual(collection, beamtalk_inspector:kindOf(StateCur)),
     Fields = beamtalk_inspector:fieldsOf(StateCur),
     [NameF] = [F || F <- Fields, maps:get(name, F) =:= name],
-    ?assertEqual(<<"bob">>, maps:get(value, NameF)),
+    ?assertEqual({beamtalk_string, <<"bob">>}, maps:get(value, NameF)),
     ?assertEqual(false, maps:get(drillable, NameF)),
     [PortF] = [F || F <- Fields, maps:get(name, F) =:= port],
     ?assertEqual(8080, maps:get(value, PortF)),
@@ -527,7 +527,7 @@ foreign_empty_list_stays_leaf_test() ->
 foreign_nested_charlist_text_tree_renders_as_string_test() ->
     Pid = start_foreign(#{name => "bob"}),
     I = beamtalk_inspector:on(Pid),
-    Out = beamtalk_inspector:printString(I, 3),
+    {beamtalk_string, Out} = beamtalk_inspector:printString(I, 3),
     ?assertNotEqual(nomatch, binary:match(Out, <<"\"bob\""/utf8>>)),
     ?assertEqual(nomatch, binary:match(Out, <<"#(98, 111, 98)">>)),
     gen_server:stop(Pid).
@@ -538,7 +538,7 @@ foreign_nested_charlist_text_tree_renders_as_string_test() ->
 foreign_nested_charlist_in_tuple_text_tree_renders_as_string_test() ->
     Pid = start_foreign(#{result => {ok, "hi"}}),
     I = beamtalk_inspector:on(Pid),
-    Out = beamtalk_inspector:printString(I, 3),
+    {beamtalk_string, Out} = beamtalk_inspector:printString(I, 3),
     ?assertNotEqual(nomatch, binary:match(Out, <<"\"hi\""/utf8>>)),
     ?assertEqual(nomatch, binary:match(Out, <<"#(104, 105)">>)),
     gen_server:stop(Pid).
@@ -549,7 +549,7 @@ foreign_nested_charlist_in_tuple_text_tree_renders_as_string_test() ->
 beamtalk_nested_integer_list_text_tree_not_coerced_test() ->
     Pid = start_actor(#{'$beamtalk_class' => 'Holder', items => [72, 73]}),
     I = beamtalk_inspector:on(Pid),
-    Out = beamtalk_inspector:printString(I, 3),
+    {beamtalk_string, Out} = beamtalk_inspector:printString(I, 3),
     ?assertNotEqual(nomatch, binary:match(Out, <<"#(72, 73)">>)),
     ?assertEqual(nomatch, binary:match(Out, <<"\"HI\""/utf8>>)),
     gen_server:stop(Pid).

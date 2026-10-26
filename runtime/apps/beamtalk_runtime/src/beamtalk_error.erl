@@ -20,6 +20,7 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
     new/3,
     new/4,
     with_message/2,
+    render_text/1,
     with_selector/2,
     with_hint/2,
     with_details/2,
@@ -63,7 +64,9 @@ Example:
 """.
 -spec new(atom(), atom()) -> #beamtalk_error{}.
 new(Kind, Class) ->
-    Message = generate_message(Kind, Class, undefined),
+    %% BT-4170: error messages are `String` values (tagged), so `.bt`
+    %% readers (`e message`) get text that dispatches as text.
+    Message = beamtalk_primitive:string_from_binary(generate_message(Kind, Class, undefined)),
     #beamtalk_error{
         kind = Kind,
         class = Class,
@@ -94,12 +97,23 @@ Example:
   Error = beamtalk_error:with_message(Error0, <<"invalid state">>)
 """.
 -spec with_message(#beamtalk_error{}, term()) -> #beamtalk_error{}.
-with_message(Error, Message) when is_binary(Message) ->
+with_message(Error, {beamtalk_string, _} = Message) ->
     Error#beamtalk_error{message = Message};
+with_message(Error, Message) when is_binary(Message) ->
+    %% BT-4170: raw binaries wrap unchecked — callers pass `~s`-formatted
+    %% ASCII or already-validated text (generate_message/3, repl_errors);
+    %% arbitrary bytes must go through a validating boundary first.
+    Error#beamtalk_error{message = beamtalk_primitive:string_from_binary(Message)};
 with_message(Error, Message) when is_atom(Message) ->
-    Error#beamtalk_error{message = atom_to_binary(Message, utf8)};
+    Error#beamtalk_error{
+        message = beamtalk_primitive:string_from_binary(atom_to_binary(Message, utf8))
+    };
 with_message(Error, Message) ->
-    Error#beamtalk_error{message = iolist_to_binary(io_lib:format("~p", [Message]))}.
+    Error#beamtalk_error{
+        message = beamtalk_primitive:string_from_binary(
+            iolist_to_binary(io_lib:format("~p", [Message]))
+        )
+    }.
 
 -doc """
 Add a selector to an existing error.
@@ -113,7 +127,8 @@ Example:
 """.
 -spec with_selector(#beamtalk_error{}, atom()) -> #beamtalk_error{}.
 with_selector(#beamtalk_error{kind = Kind, class = Class} = Error, Selector) ->
-    Message = generate_message(Kind, Class, Selector),
+    %% BT-4170: see new/2 — messages are tagged `String` values.
+    Message = beamtalk_primitive:string_from_binary(generate_message(Kind, Class, Selector)),
     Error#beamtalk_error{
         selector = Selector,
         message = Message
@@ -131,12 +146,22 @@ Example:
 -spec with_hint(#beamtalk_error{}, term()) -> #beamtalk_error{}.
 with_hint(Error, undefined) ->
     Error;
-with_hint(Error, Hint) when is_binary(Hint) ->
+with_hint(Error, {beamtalk_string, _} = Hint) ->
     Error#beamtalk_error{hint = Hint};
+with_hint(Error, Hint) when is_binary(Hint) ->
+    %% BT-4170: hints are `String` values (tagged); raw binaries wrap
+    %% unchecked — see with_message/2 for the precondition.
+    Error#beamtalk_error{hint = beamtalk_primitive:string_from_binary(Hint)};
 with_hint(Error, Hint) when is_atom(Hint) ->
-    Error#beamtalk_error{hint = atom_to_binary(Hint, utf8)};
+    Error#beamtalk_error{
+        hint = beamtalk_primitive:string_from_binary(atom_to_binary(Hint, utf8))
+    };
 with_hint(Error, Hint) ->
-    Error#beamtalk_error{hint = iolist_to_binary(io_lib:format("~tp", [Hint]))}.
+    Error#beamtalk_error{
+        hint = beamtalk_primitive:string_from_binary(
+            iolist_to_binary(io_lib:format("~tp", [Hint]))
+        )
+    }.
 
 -doc """
 Add additional context details to an error.
@@ -157,7 +182,9 @@ Format an error for user-facing display.
 Returns a formatted error message as a binary, suitable for printing
 or returning to the user. Uses user-facing names (e.g., 'self' not 'Self').
 
-Always returns a binary — safe to pass directly to Beamtalk as a String.
+Always returns a raw binary (Erlang-side rendering, not a `String`
+value): callers that surface it to `.bt` as text must wrap it via
+`beamtalk_primitive:string_from_binary/1`.
 
 Example:
   beamtalk_error:format(Error)
@@ -247,11 +274,24 @@ extract_from_tuple(T, I, Size, Depth) ->
     end.
 
 %% Format message with optional hint.
--spec format_parts(binary(), binary() | undefined) -> binary().
+-spec format_parts(term(), term()) -> binary().
 format_parts(Message, undefined) ->
-    Message;
+    render_text(Message);
 format_parts(Message, Hint) ->
-    iolist_to_binary([Message, <<"\nHint: ">>, Hint]).
+    iolist_to_binary([render_text(Message), <<"\nHint: ">>, render_text(Hint)]).
+
+-doc """
+Render a message/hint field to raw bytes for `format/1`.
+
+BT-4170: fields built via `new/2`/`with_message/2`/`with_hint/2` are
+tagged `String` values and unwrap here; a hand-built record carrying a
+raw binary still renders (defensive — records can be constructed
+literally, bypassing the setters).
+""".
+-spec render_text(term()) -> binary().
+render_text({beamtalk_string, Bin}) when is_binary(Bin) -> Bin;
+render_text(Bin) when is_binary(Bin) -> Bin;
+render_text(Other) -> iolist_to_binary(io_lib:format("~tp", [Other])).
 
 -doc """
 Wrap an error as an Exception object and raise it.
@@ -493,7 +533,9 @@ maybe_enrich_dnu_hint(#beamtalk_error{class = Class, selector = Selector} = Erro
                 SelBin,
                 <<"' to send it to an instance's class">>
             ]),
-            Error#beamtalk_error{hint = Hint};
+            Error#beamtalk_error{
+                hint = beamtalk_primitive:string_from_binary(Hint)
+            };
         false ->
             Error
     catch
@@ -511,7 +553,9 @@ dispatch catch blocks to avoid verbose ~tp output.
 """.
 -spec format_reason(atom(), term()) -> binary().
 format_reason(_ErrClass, #beamtalk_error{kind = Kind, class = Class, message = Msg}) ->
-    iolist_to_binary(io_lib:format("~s (~s:~s)", [Msg, Class, Kind]));
+    %% BT-4170: the message field is a tagged `String` (or raw bytes in a
+    %% hand-built record) — render it before `~s`-formatting.
+    iolist_to_binary(io_lib:format("~s (~s:~s)", [render_text(Msg), Class, Kind]));
 format_reason(_ErrClass, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) ->
     format_reason(error, Err);
 format_reason(ErrClass, Reason) ->

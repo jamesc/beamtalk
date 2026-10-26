@@ -439,12 +439,14 @@ wrap_classified(Kind, Class, Selector, Message, Hint, Details) ->
             true -> undefined;
             false -> Class
         end,
+    %% BT-4170: message/hint fields are tagged `String`s (`~p`-rendered
+    %% and static text is valid UTF-8 by construction).
     GenError = #beamtalk_error{
         kind = Kind,
         class = RecordClass,
         selector = Selector,
-        message = Message,
-        hint = Hint,
+        message = beamtalk_primitive:string_from_binary(Message),
+        hint = wrap_hint(Hint),
         details = Details
     },
     #{'$beamtalk_class' => kind_to_class(Kind), error => GenError}.
@@ -558,8 +560,10 @@ ensure_wrapped(error, undef, Stacktrace) ->
         kind = runtime_error,
         class = undefined,
         selector = undefined,
-        message = Message,
-        hint = <<"Check that the module is loaded and the function exists">>,
+        message = beamtalk_primitive:string_from_binary(Message),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Check that the module is loaded and the function exists">>
+        ),
         details = #{reason => undef}
     },
     Wrapped = #{'$beamtalk_class' => kind_to_class(runtime_error), error => GenError},
@@ -569,7 +573,9 @@ ensure_wrapped(exit, Reason, Stacktrace) ->
         kind = erlang_exit,
         class = undefined,
         selector = undefined,
-        message = iolist_to_binary(io_lib:format("~p", [Reason])),
+        message = beamtalk_primitive:string_from_binary(
+            iolist_to_binary(io_lib:format("~p", [Reason]))
+        ),
         hint = undefined,
         details = #{reason => Reason}
     },
@@ -594,7 +600,9 @@ ensure_wrapped(throw, Reason, Stacktrace) ->
                 kind = erlang_throw,
                 class = undefined,
                 selector = undefined,
-                message = iolist_to_binary(io_lib:format("~p", [Reason])),
+                message = beamtalk_primitive:string_from_binary(
+                    iolist_to_binary(io_lib:format("~p", [Reason]))
+                ),
                 hint = undefined,
                 details = #{reason => Reason}
             },
@@ -643,6 +651,8 @@ Matches any exception hierarchy class (Exception, Error, RuntimeError, etc.).
 """.
 -spec dispatch(atom(), list(), map()) -> term().
 dispatch('message', [], #{error := Error}) ->
+    %% BT-4173: the record type guarantees a tagged String (all
+    %% constructors tag; see beamtalk.hrl).
     Error#beamtalk_error.message;
 dispatch('hint', [], #{error := Error}) ->
     case Error#beamtalk_error.hint of
@@ -663,7 +673,8 @@ dispatch('reason', [], #{error := #beamtalk_error{details = Details}}) ->
 dispatch('reason', [], _) ->
     nil;
 dispatch('printString', [], #{error := Error}) ->
-    beamtalk_error:format(Error);
+    %% BT-4170: `format/1` renders raw bytes; `printString` answers a `String`.
+    beamtalk_primitive:string_from_binary(beamtalk_error:format(Error));
 dispatch('stackTrace', [], #{stacktrace := Frames}) ->
     Frames;
 dispatch('stackTrace', [], _) ->
@@ -679,6 +690,13 @@ dispatch('signal', [], #{'$beamtalk_class' := ClassName}) ->
 dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
     %% Preserve exception class name from the signaling object
     signal_message(Message, ClassName).
+
+-doc "Wrap a possibly-undefined hint for `wrap_classified/6` (BT-4170).".
+-spec wrap_hint(binary() | undefined) -> {beamtalk_string, binary()} | undefined.
+wrap_hint(undefined) ->
+    undefined;
+wrap_hint(Hint) when is_binary(Hint) ->
+    beamtalk_primitive:string_from_binary(Hint).
 
 -doc """
 The raw Erlang term an exception wraps, for `Exception>>reason` (BT-3954).
@@ -743,7 +761,8 @@ Raise a new Error exception with the given message.
 Usage: `Exception signal: 'something went wrong'`
 """.
 -spec signal_message(term()) -> no_return().
-signal_message(Message) when is_binary(Message) ->
+signal_message({beamtalk_string, _} = Message) ->
+    %% BT-4170: a `String` message stores tagged, as-is.
     Error = #beamtalk_error{
         kind = signal,
         class = undefined,
@@ -753,6 +772,8 @@ signal_message(Message) when is_binary(Message) ->
         details = #{}
     },
     beamtalk_error:raise(Error);
+signal_message(Message) when is_binary(Message) ->
+    signal_message(beamtalk_primitive:string_from_binary(Message));
 signal_message(Message) when is_atom(Message) ->
     signal_message(atom_to_binary(Message, utf8));
 signal_message(Message) ->
@@ -766,7 +787,8 @@ Used when signal: is called on a user-defined exception instance.
 The exception class is taken from the signaling object's $beamtalk_class.
 """.
 -spec signal_message(term(), atom()) -> no_return().
-signal_message(Message, ExceptionClass) when is_binary(Message) ->
+signal_message({beamtalk_string, _} = Message, ExceptionClass) ->
+    %% BT-4170: a `String` message stores tagged, as-is.
     Error = #beamtalk_error{
         kind = class_to_kind(ExceptionClass),
         class = ExceptionClass,
@@ -776,6 +798,8 @@ signal_message(Message, ExceptionClass) when is_binary(Message) ->
         details = #{}
     },
     beamtalk_error:raise(Error);
+signal_message(Message, ExceptionClass) when is_binary(Message) ->
+    signal_message(beamtalk_primitive:string_from_binary(Message), ExceptionClass);
 signal_message(Message, ExceptionClass) when is_atom(Message) ->
     signal_message(atom_to_binary(Message, utf8), ExceptionClass);
 signal_message(Message, ExceptionClass) ->
@@ -793,7 +817,7 @@ signal_from_class(ClassName) ->
         kind = class_to_kind(ClassName),
         class = ClassName,
         selector = undefined,
-        message = atom_to_binary(ClassName, utf8),
+        message = beamtalk_primitive:string_from_binary(atom_to_binary(ClassName, utf8)),
         hint = undefined,
         details = #{}
     },
@@ -839,6 +863,7 @@ raises. Unlike `class_signal_message/2`/`class_signal/1`,
 own class plays no role here — this is exported by selector name only, not
 by which `Exception` subclass it was sent to.
 """.
--spec class_signal_kind(atom(), atom(), atom(), binary()) -> no_return().
+-spec class_signal_kind(atom(), atom(), atom(), {beamtalk_string, binary()} | binary()) ->
+    no_return().
 class_signal_kind(Kind, Class, Selector, Hint) ->
     beamtalk_error:raise(beamtalk_error:new(Kind, Class, Selector, Hint)).

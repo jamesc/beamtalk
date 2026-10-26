@@ -111,10 +111,10 @@ dispatch_lines_returns_stream_test() ->
 %%% dispatch/3 — Object protocol selectors
 %%% ============================================================================
 
-dispatch_printString_returns_binary_test() ->
+dispatch_printString_returns_string_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
         Result = beamtalk_file_handle:dispatch('printString', [], Handle),
-        ?assert(is_binary(Result))
+        ?assertMatch({beamtalk_string, _}, Result)
     end).
 
 %%% ============================================================================
@@ -408,7 +408,7 @@ mode_error_hint_names_the_denied_direction_test() ->
     %% The hint should name the mode that grants what the caller was denied,
     %% not blanket-recommend #readWrite in both directions.
     Hint = fun(Result) ->
-        #{'errReason' := #{error := #beamtalk_error{hint = H}}} = Result,
+        #{'errReason' := #{error := #beamtalk_error{hint = {beamtalk_string, H}}}} = Result,
         H
     end,
     %% Match the mode being prescribed (`mode: #read`), not a bare `#read`:

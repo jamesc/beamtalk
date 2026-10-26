@@ -114,9 +114,10 @@ TestCase subclass: CharacterTest
     self assert: (Character value: 10) asString size equals: 1
     self assert: (Character value: 13) asString size equals: 1
     self assert: (Character value: 9) asString size equals: 1
-    self assert: (Character value: 10) asString equals: ((Erlang unicode) characters_to_binary: #(10))
-    self assert: (Character value: 13) asString equals: ((Erlang unicode) characters_to_binary: #(13))
-    self assert: (Character value: 9) asString equals: ((Erlang unicode) characters_to_binary: #(9))
+    // BT-4173: FFI answers Binary — convert to compare with the String.
+    self assert: (Character value: 10) asString equals: (((Erlang unicode) characters_to_binary: #(10)) asStringUnchecked)
+    self assert: (Character value: 13) asString equals: (((Erlang unicode) characters_to_binary: #(13)) asStringUnchecked)
+    self assert: (Character value: 9) asString equals: (((Erlang unicode) characters_to_binary: #(9)) asStringUnchecked)
     self assert: (Character value: 10) equals: $\n
     self assert: (Character value: 9) equals: $\t
 
@@ -125,8 +126,8 @@ TestCase subclass: CharacterTest
   // format), not fall through to Integer's `printString` ("10").
   testCharacterValueFactoryNonPrintablePrintString =>
     self assert: (Character value: 10) printString size equals: 2
-    self assert: (Character value: 10) printString equals: ((Erlang unicode) characters_to_binary: #(36, 10))
-    self assert: (Character value: 9) printString equals: ((Erlang unicode) characters_to_binary: #(36, 9))
+    self assert: (Character value: 10) printString equals: (((Erlang unicode) characters_to_binary: #(36, 10)) asStringUnchecked)
+    self assert: (Character value: 9) printString equals: (((Erlang unicode) characters_to_binary: #(36, 9)) asStringUnchecked)
 
   // BT-3214: `uppercase`/`lowercase` (character.bt: `-> Character`) chained
   // into a further send hits the identical bug as `Character value:` —

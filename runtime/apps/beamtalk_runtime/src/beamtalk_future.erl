@@ -424,8 +424,11 @@ make_timeout_error() ->
         kind = timeout,
         class = 'Future',
         selector = undefined,
-        message = <<"Await timed out">>,
-        hint = <<"Use 'await: duration' for longer timeout, or 'awaitForever' for no timeout">>,
+        %% BT-4173: error message/hint are tagged Strings (see beamtalk.hrl).
+        message = beamtalk_primitive:string_from_binary(<<"Await timed out">>),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Use 'await: duration' for longer timeout, or 'awaitForever' for no timeout">>
+        ),
         details = #{}
     }.
 

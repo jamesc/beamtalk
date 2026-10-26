@@ -49,7 +49,8 @@ v4_version_nibble_is_4_test() ->
 v4_variant_bits_are_rfc_9562_test() ->
     %% The character at position 20 (1-based) of the 36-char canonical string
     %% is the variant nibble; RFC 9562 requires it to be one of 8, 9, a, b.
-    VariantChar = binary:at(beamtalk_uuid:'asString'(beamtalk_uuid:'v4'()), 19),
+    {beamtalk_string, S} = beamtalk_uuid:'asString'(beamtalk_uuid:'v4'()),
+    VariantChar = binary:at(S, 19),
     ?assert(lists:member(VariantChar, "89ab")).
 
 v4_uniqueness_test() ->
@@ -91,11 +92,11 @@ from_string_case_insensitive_test() ->
 
 from_string_canonicalizes_to_lowercase_test() ->
     Uuid = parse(?KNOWN_STR_UPPER),
-    ?assertEqual(?KNOWN_STR, beamtalk_uuid:'asString'(Uuid)).
+    ?assertEqual({beamtalk_string, ?KNOWN_STR}, beamtalk_uuid:'asString'(Uuid)).
 
 from_string_version_4_roundtrip_test() ->
     Uuid = parse(?KNOWN_STR),
-    ?assertEqual(?KNOWN_STR, beamtalk_uuid:'asString'(Uuid)).
+    ?assertEqual({beamtalk_string, ?KNOWN_STR}, beamtalk_uuid:'asString'(Uuid)).
 
 %%% ============================================================================
 %%% 'fromString:'/1 — rejection of malformed inputs
@@ -172,11 +173,12 @@ is_valid_type_error_for_non_binary_test() ->
 
 as_string_length_is_36_test() ->
     Uuid = parse(?KNOWN_STR),
-    ?assertEqual(36, byte_size(beamtalk_uuid:'asString'(Uuid))).
+    {beamtalk_string, S} = beamtalk_uuid:'asString'(Uuid),
+    ?assertEqual(36, byte_size(S)).
 
 as_string_canonical_format_test() ->
     Uuid = parse(?KNOWN_STR),
-    S = beamtalk_uuid:'asString'(Uuid),
+    {beamtalk_string, S} = beamtalk_uuid:'asString'(Uuid),
     %% 8-4-4-4-12 structure with hyphens at positions 9, 14, 19, 24 (1-based).
     ?assertEqual($-, binary:at(S, 8)),
     ?assertEqual($-, binary:at(S, 13)),
@@ -187,7 +189,7 @@ as_string_all_lowercase_test() ->
     %% Parse an uppercase input and verify the output is lowercase.
     Uuid = parse(?KNOWN_STR_UPPER),
     S = beamtalk_uuid:'asString'(Uuid),
-    ?assertEqual(?KNOWN_STR, S).
+    ?assertEqual({beamtalk_string, ?KNOWN_STR}, S).
 
 %%% ============================================================================
 %%% 'asBinary'/1 — raw bytes
@@ -221,7 +223,7 @@ version_of_v7_uuid_is_7_test() ->
 print_string_format_test() ->
     Uuid = parse(?KNOWN_STR),
     ?assertEqual(
-        <<"Uuid(550e8400-e29b-41d4-a716-446655440000)">>,
+        {beamtalk_string, <<"Uuid(550e8400-e29b-41d4-a716-446655440000)">>},
         beamtalk_uuid:'printString'(Uuid)
     ).
 

@@ -176,7 +176,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `printString` | @primitive selector | ✅ | Developer representation |
 | `at:` | @primitive selector | ✅ | 1-based byte access |
 | `byteAt:` | @primitive selector | ✅ | 0-based byte access |
-| `byteSize` | @primitive selector | ✅ | Same as `size` |
+| `byteSize` | — | ❌ | Deleted in BT-4173 — use `size` |
 | `part:size:` | @primitive selector | ✅ | Zero-copy byte-level slice |
 | `concat:` | @primitive selector | ✅ | Byte concatenation |
 | `toBytes` | @primitive selector | ✅ | Byte list |

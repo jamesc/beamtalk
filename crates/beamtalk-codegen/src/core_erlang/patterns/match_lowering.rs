@@ -236,6 +236,14 @@ impl CoreErlangGenerator {
         let has_type_arm = arms
             .iter()
             .any(|arm| matches!(arm.pattern, Pattern::Type { .. }));
+        // BT-4173: a top-level binary arm unwraps a `String` scrutinee to
+        // its bytes before the native binary match (see
+        // `binary_match_scrutinee`) — a per-arm scrutinee rewrite the
+        // single-scrutinee fast path below cannot express, so any binary
+        // arm routes the whole `match:` through the chain.
+        let has_binary_arm = arms
+            .iter()
+            .any(|arm| matches!(arm.pattern, Pattern::Binary { .. }));
 
         // Decide once, for the whole `match:`, whether any arm needs
         // actor state threading (e.g. an arm body that is a state-mutating
@@ -256,61 +264,62 @@ impl CoreErlangGenerator {
             });
         let threading = producer.or(state_threading.as_ref());
 
-        let inner_doc = if has_array_arm || has_type_arm || has_segmented_binary_arm {
-            self.generate_match_chain(&match_var, arms, threading)?
-        } else {
-            // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
-            let mut parts: Vec<Document<'static>> = Vec::new();
-            parts.push(docvec!["case ", leaf::var(match_var.clone()), " of "]);
-            for (i, arm) in arms.iter().enumerate() {
-                if i > 0 {
-                    parts.push(Document::Str(" "));
+        let inner_doc =
+            if has_array_arm || has_type_arm || has_segmented_binary_arm || has_binary_arm {
+                self.generate_match_chain(&match_var, arms, threading)?
+            } else {
+                // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
+                let mut parts: Vec<Document<'static>> = Vec::new();
+                parts.push(docvec!["case ", leaf::var(match_var.clone()), " of "]);
+                for (i, arm) in arms.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::Str(" "));
+                    }
+                    let pattern_doc = self.generate_pattern(&arm.pattern)?;
+                    parts.push(Document::Str("<"));
+                    parts.push(pattern_doc);
+                    parts.push(Document::Str(">"));
+                    self.push_scope();
+                    Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+                        self.bind_var(name, core_var);
+                    });
+                    if let Some(guard) = &arm.guard {
+                        parts.push(Document::Str(" when "));
+                        let guard_doc = self.generate_guard_expression(guard)?;
+                        parts.push(guard_doc);
+                    } else {
+                        parts.push(Document::Str(" when 'true'"));
+                    }
+                    parts.push(Document::Str(" -> "));
+                    let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
+                    parts.push(body_doc);
+                    self.pop_scope();
                 }
-                let pattern_doc = self.generate_pattern(&arm.pattern)?;
-                parts.push(Document::Str("<"));
-                parts.push(pattern_doc);
-                parts.push(Document::Str(">"));
-                self.push_scope();
-                Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
-                    self.bind_var(name, core_var);
+                // BT-3943: no arm may match — raise a structured `#pattern_mismatch`
+                // rather than the compiler's implicit raw `case_clause`
+                // (`internal_error`). Skipped when an unguarded wildcard/variable
+                // arm already makes the `case` exhaustive (the clause would be dead).
+                let exhaustive = arms.iter().any(|arm| {
+                    arm.guard.is_none()
+                        && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
                 });
-                if let Some(guard) = &arm.guard {
-                    parts.push(Document::Str(" when "));
-                    let guard_doc = self.generate_guard_expression(guard)?;
-                    parts.push(guard_doc);
-                } else {
-                    parts.push(Document::Str(" when 'true'"));
+                if !exhaustive {
+                    let no_match_var = self.fresh_temp_var("NoMatch");
+                    let raise = self.pattern_mismatch_raise_doc(
+                        &match_var,
+                        "match:",
+                        "no match: arm matches the value",
+                    );
+                    parts.push(docvec![
+                        " <",
+                        leaf::var(no_match_var),
+                        "> when 'true' -> ",
+                        raise
+                    ]);
                 }
-                parts.push(Document::Str(" -> "));
-                let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
-                parts.push(body_doc);
-                self.pop_scope();
-            }
-            // BT-3943: no arm may match — raise a structured `#pattern_mismatch`
-            // rather than the compiler's implicit raw `case_clause`
-            // (`internal_error`). Skipped when an unguarded wildcard/variable
-            // arm already makes the `case` exhaustive (the clause would be dead).
-            let exhaustive = arms.iter().any(|arm| {
-                arm.guard.is_none()
-                    && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
-            });
-            if !exhaustive {
-                let no_match_var = self.fresh_temp_var("NoMatch");
-                let raise = self.pattern_mismatch_raise_doc(
-                    &match_var,
-                    "match:",
-                    "no match: arm matches the value",
-                );
-                parts.push(docvec![
-                    " <",
-                    leaf::var(no_match_var),
-                    "> when 'true' -> ",
-                    raise
-                ]);
-            }
-            parts.push(Document::Str(" end"));
-            Document::Vec(parts)
-        };
+                parts.push(Document::Str(" end"));
+                Document::Vec(parts)
+            };
 
         Ok(docvec![
             "let ",
@@ -749,6 +758,15 @@ impl CoreErlangGenerator {
         // Compute current arm first — body codegen must not see state advanced by later arms.
         let fallthrough_var = self.fresh_temp_var("NoMatch");
         let pattern_doc = self.generate_pattern(&arm.pattern)?;
+        // BT-4173: a top-level binary arm matches against unwrapped bytes
+        // (a `String` subject matches like the `Binary` it encodes); every
+        // other arm keeps the raw scrutinee.
+        let (scrutinee_prefix, scrutinee_var) = if matches!(arm.pattern, Pattern::Binary { .. }) {
+            let (prefix, var) = self.binary_match_scrutinee(match_var);
+            (prefix, var)
+        } else {
+            (Document::Vec(Vec::new()), match_var.to_string())
+        };
 
         self.push_scope();
         Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
@@ -767,8 +785,9 @@ impl CoreErlangGenerator {
         let rest_doc = self.generate_match_chain(match_var, rest, threading)?;
 
         Ok(docvec![
+            scrutinee_prefix,
             "case ",
-            leaf::var(match_var.to_string()),
+            leaf::var(scrutinee_var),
             " of ",
             "<",
             pattern_doc,
@@ -894,6 +913,39 @@ impl CoreErlangGenerator {
     /// raising size fails the arm instead of crashing (review finding 1).
     /// The arm guard applies at the innermost level (all variables bound);
     /// every level falls through to the later arms.
+    /// BT-4173: binds a fresh scrutinee for a top-level binary arm — a
+    /// `String` subject (`{'beamtalk_string', bytes}`) unwraps to its bytes
+    /// so `<<...>>` keeps matching Strings as UTF-8 binaries (BT-663); a
+    /// bare `Binary` (or any other value) passes through untouched, so
+    /// non-binaries still fail the native binary pattern and fall through.
+    /// `/binary` segments therefore always bind bare binaries (`Binary`).
+    ///
+    /// Returns the `let`-prefix (ending in `in `) plus the fresh variable
+    /// name — the same open-`let`-chain convention
+    /// `interpolation_segment_chain` uses.
+    fn binary_match_scrutinee(&mut self, match_var: &str) -> (Document<'static>, String) {
+        let scrutinee = self.fresh_temp_var("BinMatch");
+        let inner = self.fresh_temp_var("BinInner");
+        let other = self.fresh_temp_var("BinOther");
+        let prefix = docvec![
+            "let ",
+            leaf::var(scrutinee.clone()),
+            " = case ",
+            leaf::var(match_var.to_string()),
+            " of ",
+            "<{'beamtalk_string', ",
+            leaf::var(inner.clone()),
+            "}> when 'true' -> ",
+            leaf::var(inner),
+            " <",
+            leaf::var(other.clone()),
+            "> when 'true' -> ",
+            leaf::var(other),
+            " end in ",
+        ];
+        (prefix, scrutinee)
+    }
+
     fn generate_segmented_binary_arm(
         &mut self,
         match_var: &str,
@@ -925,8 +977,15 @@ impl CoreErlangGenerator {
             "dispatch only routes split or hoisted plans here"
         );
 
-        let levels = self.build_segmented_levels(match_var, arm.pattern.span(), segments, &plan)?;
-        Ok(self.assemble_segmented_levels(levels, guard_part, body_doc, &rest_doc))
+        // BT-4173: match the first chunk against unwrapped bytes so a
+        // `String` subject matches like the `Binary` it encodes.
+        let (scrutinee_prefix, scrutinee) = self.binary_match_scrutinee(match_var);
+        let levels =
+            self.build_segmented_levels(&scrutinee, arm.pattern.span(), segments, &plan)?;
+        Ok(docvec![
+            scrutinee_prefix,
+            self.assemble_segmented_levels(levels, guard_part, body_doc, &rest_doc)
+        ])
     }
 
     /// Emits one [`SegmentedLevel`] per chunk of a split plan (BT-4096).

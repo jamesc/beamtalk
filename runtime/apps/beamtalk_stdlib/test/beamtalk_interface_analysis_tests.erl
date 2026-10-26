@@ -59,22 +59,22 @@ start_compiler_if_was_started(false) ->
 
 erlang_help_dispatch_known_module_test() ->
     Result = beamtalk_interface:dispatch('erlangHelp:', [<<"lists">>], fake_self()),
-    ?assert(is_binary(Result)),
-    ?assertNotEqual(nomatch, binary:match(Result, <<"lists">>)).
+    {beamtalk_string, Raw} = Result,
+    ?assertNotEqual(nomatch, binary:match(Raw, <<"lists">>)).
 
 erlang_help_dispatch_known_module_selector_atom_test() ->
     Result = beamtalk_interface:dispatch(
         'erlangHelp:selector:', [<<"lists">>, reverse], fake_self()
     ),
-    ?assert(is_binary(Result)),
-    ?assertNotEqual(nomatch, binary:match(Result, <<"reverse">>)).
+    {beamtalk_string, Raw} = Result,
+    ?assertNotEqual(nomatch, binary:match(Raw, <<"reverse">>)).
 
 erlang_help_dispatch_known_module_selector_binary_test() ->
     Result = beamtalk_interface:dispatch(
         'erlangHelp:selector:', [<<"lists">>, <<"reverse">>], fake_self()
     ),
-    ?assert(is_binary(Result)),
-    ?assertNotEqual(nomatch, binary:match(Result, <<"reverse">>)).
+    {beamtalk_string, Raw} = Result,
+    ?assertNotEqual(nomatch, binary:match(Raw, <<"reverse">>)).
 
 %%====================================================================
 %% erlangHelp: dispatch — error paths
@@ -123,8 +123,8 @@ erlang_help_selector_dispatch_integer_selector_raises_type_error_test() ->
 
 erlang_help_1_known_module_test() ->
     Result = beamtalk_interface:erlangHelp(<<"lists">>),
-    ?assert(is_binary(Result)),
-    ?assertNotEqual(nomatch, binary:match(Result, <<"lists">>)).
+    {beamtalk_string, Raw} = Result,
+    ?assertNotEqual(nomatch, binary:match(Raw, <<"lists">>)).
 
 erlang_help_1_non_binary_raises_type_error_test() ->
     try
@@ -151,11 +151,11 @@ erlang_help_1_unknown_module_raises_not_found_test() ->
 
 erlang_help_2_atom_selector_test() ->
     Result = beamtalk_interface:erlangHelp(<<"lists">>, reverse),
-    ?assert(is_binary(Result)).
+    ?assertMatch({beamtalk_string, _}, Result).
 
 erlang_help_2_binary_selector_test() ->
     Result = beamtalk_interface:erlangHelp(<<"lists">>, <<"reverse">>),
-    ?assert(is_binary(Result)).
+    ?assertMatch({beamtalk_string, _}, Result).
 
 erlang_help_2_non_binary_module_raises_type_error_test() ->
     try

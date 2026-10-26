@@ -1248,9 +1248,9 @@ object_delegation_nonzero_state_test_() ->
         end,
         fun(Counter) -> gen_server:stop(Counter) end, fun(Counter) ->
             [
-                {"printString returns a binary", fun() ->
+                {"printString returns a String", fun() ->
                     Result = gen_server:call(Counter, {'printString', []}),
-                    ?assert(is_binary(Result))
+                    ?assertMatch({beamtalk_string, _}, Result)
                 end},
                 {"inspect returns an Inspector cursor seeded from actor state",
                     %% ADR 0095 Phase 3: inspect on an actor (inherited from Object
@@ -2752,7 +2752,9 @@ method_badarg_error_test() ->
     ),
     %% Message should contain "Bad argument"
     {error, Err} = Result,
-    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Bad argument">>)),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Bad argument">>)
+    ),
     gen_server:stop(Actor).
 
 method_badarith_error_test() ->
@@ -2764,7 +2766,9 @@ method_badarith_error_test() ->
         {error, #beamtalk_error{kind = type_error, selector = triggerBadarith}}, Result
     ),
     {error, Err} = Result,
-    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Arithmetic error">>)),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Arithmetic error">>)
+    ),
     gen_server:stop(Actor).
 
 method_undef_error_test() ->
@@ -2773,7 +2777,9 @@ method_undef_error_test() ->
     Result = gen_server:call(Actor, {triggerUndef, []}),
     ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = triggerUndef}}, Result),
     {error, Err} = Result,
-    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Undefined function">>)),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Undefined function">>)
+    ),
     gen_server:stop(Actor).
 
 method_function_clause_error_test() ->
@@ -2785,7 +2791,9 @@ method_function_clause_error_test() ->
         {error, #beamtalk_error{kind = internal_error, selector = triggerFunctionClause}}, Result
     ),
     {error, Err} = Result,
-    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"No matching clause">>)),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"No matching clause">>)
+    ),
     gen_server:stop(Actor).
 
 %%% ============================================================================

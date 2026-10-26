@@ -1087,7 +1087,7 @@ crashes mid-call, after the liveness check but before `which_children`, may
 degrade to `{ok, []}` rather than `{error, stale_handle}` — accepted
 best-effort per ADR 0092 §4; the difference is display-only.)
 """.
--spec child_handles(string() | binary()) ->
+-spec child_handles(string() | binary() | beamtalk_string:t()) ->
     {ok, [#{binary() => term()}]} | {error, #beamtalk_error{}}.
 child_handles(SupPidStr) ->
     case parse_pid(SupPidStr) of
@@ -1103,7 +1103,10 @@ child_handles(SupPidStr) ->
 %% Resolve a textual `<0.X.Y>` pid (binary or string) to a live pid, or `error`
 %% for a malformed string. `list_to_pid/1` raises `badarg` on a bad string, so
 %% it is guarded.
--spec parse_pid(string() | binary()) -> {ok, pid()} | error.
+-spec parse_pid(string() | binary() | beamtalk_string:t()) -> {ok, pid()} | error.
+parse_pid({beamtalk_string, PidStr}) when is_binary(PidStr) ->
+    %% BT-4173: pid strings from Beamtalk arrive tagged.
+    parse_pid(binary_to_list(PidStr));
 parse_pid(PidStr) when is_binary(PidStr) ->
     parse_pid(binary_to_list(PidStr));
 parse_pid(PidStr) when is_list(PidStr) ->
@@ -1224,7 +1227,7 @@ restarting_label(_) ->
 maybe_binary(nil) -> null;
 maybe_binary(Atom) when is_atom(Atom) -> atom_to_binary(Atom, utf8).
 
--spec child_handles_dead_error(string() | binary()) -> #beamtalk_error{}.
+-spec child_handles_dead_error(string() | binary() | beamtalk_string:t()) -> #beamtalk_error{}.
 child_handles_dead_error(SupPidStr) ->
     beamtalk_error:new(
         stale_handle,
@@ -1235,7 +1238,7 @@ child_handles_dead_error(SupPidStr) ->
         )
     ).
 
--spec child_handles_bad_pid_error(string() | binary()) -> #beamtalk_error{}.
+-spec child_handles_bad_pid_error(string() | binary() | beamtalk_string:t()) -> #beamtalk_error{}.
 child_handles_bad_pid_error(SupPidStr) ->
     beamtalk_error:new(
         type_error,
@@ -1246,7 +1249,8 @@ child_handles_bad_pid_error(SupPidStr) ->
         )
     ).
 
--spec to_text(string() | binary()) -> binary().
+-spec to_text(string() | binary() | beamtalk_string:t()) -> binary().
+to_text({beamtalk_string, Str}) when is_binary(Str) -> Str;
 to_text(Str) when is_binary(Str) -> Str;
 to_text(Str) when is_list(Str) -> list_to_binary(Str).
 

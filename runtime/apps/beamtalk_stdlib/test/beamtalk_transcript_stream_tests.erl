@@ -41,21 +41,21 @@ show_writes_to_buffer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     _ = gen_server:call(Pid, {'show:', [<<"Hello">>]}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"Hello">>], Result),
+    ?assertEqual([{beamtalk_string, <<"Hello">>}], Result),
     gen_server:stop(Pid).
 
 show_converts_integer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     _ = gen_server:call(Pid, {'show:', [42]}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"42">>], Result),
+    ?assertEqual([{beamtalk_string, <<"42">>}], Result),
     gen_server:stop(Pid).
 
 show_converts_atom_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     _ = gen_server:call(Pid, {'show:', [hello]}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"hello">>], Result),
+    ?assertEqual([{beamtalk_string, <<"hello">>}], Result),
     gen_server:stop(Pid).
 
 %% --- cr writes newline to buffer ---
@@ -64,7 +64,7 @@ cr_writes_newline_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     _ = gen_server:call(Pid, {cr, []}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"\n">>], Result),
+    ?assertEqual([{beamtalk_string, <<"\n">>}], Result),
     gen_server:stop(Pid).
 
 %% --- show: then cr sequence ---
@@ -74,7 +74,7 @@ show_then_cr_test() ->
     _ = gen_server:call(Pid, {'show:', [<<"Hello">>]}),
     _ = gen_server:call(Pid, {cr, []}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"Hello">>, <<"\n">>], Result),
+    ?assertEqual([{beamtalk_string, <<"Hello">>}, {beamtalk_string, <<"\n">>}], Result),
     gen_server:stop(Pid).
 
 %% --- subscribe / unsubscribe lifecycle ---
@@ -139,7 +139,7 @@ dead_subscriber_auto_removed_test() ->
     timer:sleep(50),
     _ = gen_server:call(Pid, {'show:', [<<"after_death">>]}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"after_death">>], Result),
+    ?assertEqual([{beamtalk_string, <<"after_death">>}], Result),
     gen_server:stop(Pid).
 
 %% --- recent returns buffer contents ---
@@ -150,7 +150,9 @@ recent_returns_buffer_test() ->
     _ = gen_server:call(Pid, {'show:', [<<"b">>]}),
     _ = gen_server:call(Pid, {'show:', [<<"c">>]}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Result),
+    ?assertEqual(
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}], Result
+    ),
     gen_server:stop(Pid).
 
 recent_empty_buffer_test() ->
@@ -181,7 +183,9 @@ buffer_overflow_drops_oldest_test() ->
     _ = gen_server:call(Pid, {'show:', [<<"4">>]}),
     _ = gen_server:call(Pid, {'show:', [<<"5">>]}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"3">>, <<"4">>, <<"5">>], Result),
+    ?assertEqual(
+        [{beamtalk_string, <<"3">>}, {beamtalk_string, <<"4">>}, {beamtalk_string, <<"5">>}], Result
+    ),
     gen_server:stop(Pid).
 
 %% --- duplicate subscribe is idempotent ---
@@ -232,7 +236,7 @@ spawn_test() ->
     ?assert(is_pid(Pid)),
     _ = gen_server:call(Pid, {'show:', [<<"spawn_test">>]}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"spawn_test">>], Result),
+    ?assertEqual([{beamtalk_string, <<"spawn_test">>}], Result),
     gen_server:stop(Pid).
 
 spawn_with_max_buffer_test() ->
@@ -261,7 +265,7 @@ subscribe_non_pid_safe_test() ->
     gen_server:cast(Pid, {subscribe, not_a_pid}),
     _ = gen_server:call(Pid, {'show:', [<<"ok">>]}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"ok">>], Result),
+    ?assertEqual([{beamtalk_string, <<"ok">>}], Result),
     gen_server:stop(Pid).
 
 %% --- tuple-format calls (native: selector dispatch) ---
@@ -270,7 +274,7 @@ tuple_format_recent_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     _ = gen_server:call(Pid, {'show:', [<<"data">>]}),
     Result = gen_server:call(Pid, {recent, []}),
-    ?assertEqual([<<"data">>], Result),
+    ?assertEqual([{beamtalk_string, <<"data">>}], Result),
     gen_server:stop(Pid).
 
 tuple_format_clear_test() ->
@@ -294,7 +298,7 @@ show_invalid_charlist_test() ->
     _ = gen_server:call(Pid, {'show:', [[16#110000, 16#FFFFFF]]}),
     [Result] = gen_server:call(Pid, recent),
     %% Should fall back to io_lib:format ~p representation, not crash
-    ?assert(is_binary(Result)),
+    ?assertMatch({beamtalk_string, _}, Result),
     gen_server:stop(Pid).
 
 show_incomplete_charlist_test() ->
@@ -302,7 +306,7 @@ show_incomplete_charlist_test() ->
     %% A list ending with a high surrogate (incomplete sequence)
     _ = gen_server:call(Pid, {'show:', [[65, 66, 16#D800]]}),
     [Result] = gen_server:call(Pid, recent),
-    ?assert(is_binary(Result)),
+    ?assertMatch({beamtalk_string, _}, Result),
     gen_server:stop(Pid).
 
 show_mixed_list_test() ->
@@ -310,7 +314,7 @@ show_mixed_list_test() ->
     %% A list with mixed types (not a charlist at all)
     _ = gen_server:call(Pid, {'show:', [[1, two, <<"three">>]]}),
     [Result] = gen_server:call(Pid, recent),
-    ?assert(is_binary(Result)),
+    ?assertMatch({beamtalk_string, _}, Result),
     gen_server:stop(Pid).
 
 %% --- to_string: non-UTF8 binaries ---
@@ -320,7 +324,7 @@ show_non_utf8_binary_test() ->
     %% 0xFF 0xFE is not valid UTF-8
     _ = gen_server:call(Pid, {'show:', [<<255, 254, 0, 1>>]}),
     [Result] = gen_server:call(Pid, recent),
-    ?assert(is_binary(Result)),
+    ?assertMatch({beamtalk_string, _}, Result),
     %% Must not be the raw invalid binary
     ?assertNotEqual(<<255, 254, 0, 1>>, Result),
     gen_server:stop(Pid).
@@ -330,7 +334,7 @@ show_truncated_utf8_binary_test() ->
     %% Start of a 3-byte UTF-8 sequence but truncated
     _ = gen_server:call(Pid, {'show:', [<<16#E0, 16#A0>>]}),
     [Result] = gen_server:call(Pid, recent),
-    ?assert(is_binary(Result)),
+    ?assertMatch({beamtalk_string, _}, Result),
     gen_server:stop(Pid).
 
 show_valid_utf8_binary_unchanged_test() ->
@@ -338,7 +342,7 @@ show_valid_utf8_binary_unchanged_test() ->
     ValidUtf8 = <<"Hello, 世界!"/utf8>>,
     _ = gen_server:call(Pid, {'show:', [ValidUtf8]}),
     [Result] = gen_server:call(Pid, recent),
-    ?assertEqual(ValidUtf8, Result),
+    ?assertEqual({beamtalk_string, ValidUtf8}, Result),
     gen_server:stop(Pid).
 
 %% --- ensure_utf8/1 directly ---
@@ -377,14 +381,14 @@ sync_show_writes_to_buffer_test() ->
     SelfRef = gen_server:call(Pid, {'show:', [<<"SyncHello">>]}),
     ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"SyncHello">>], Result),
+    ?assertEqual([{beamtalk_string, <<"SyncHello">>}], Result),
     gen_server:stop(Pid).
 
 sync_show_converts_integer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     _ = gen_server:call(Pid, {'show:', [99]}),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"99">>], Result),
+    ?assertEqual([{beamtalk_string, <<"99">>}], Result),
     gen_server:stop(Pid).
 
 sync_cr_writes_newline_test() ->
@@ -392,7 +396,7 @@ sync_cr_writes_newline_test() ->
     SelfRef = gen_server:call(Pid, {cr, []}),
     ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"\n">>], Result),
+    ?assertEqual([{beamtalk_string, <<"\n">>}], Result),
     gen_server:stop(Pid).
 
 sync_subscribe_unsubscribe_test() ->
@@ -424,7 +428,7 @@ sync_show_then_recent_test() ->
     _ = gen_server:call(Pid, {'show:', [<<"first">>]}),
     _ = gen_server:call(Pid, {'show:', [<<"second">>]}),
     Result = gen_server:call(Pid, {recent, []}),
-    ?assertEqual([<<"first">>, <<"second">>], Result),
+    ?assertEqual([{beamtalk_string, <<"first">>}, {beamtalk_string, <<"second">>}], Result),
     gen_server:stop(Pid).
 
 sync_show_then_clear_test() ->
@@ -454,7 +458,7 @@ async_show_resolves_future_test() ->
     ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     %% Text must also appear in the buffer
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"async_hello">>], Result),
+    ?assertEqual([{beamtalk_string, <<"async_hello">>}], Result),
     gen_server:stop(Pid).
 
 async_show_converts_integer_async_test() ->
@@ -464,7 +468,7 @@ async_show_converts_integer_async_test() ->
     gen_server:cast(Pid, {'show:', [99], FuturePid}),
     _ = beamtalk_future:await(Future, 1000),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"99">>], Result),
+    ?assertEqual([{beamtalk_string, <<"99">>}], Result),
     gen_server:stop(Pid).
 
 %% --- async show: notifies subscribers ---
@@ -497,7 +501,7 @@ async_cr_resolves_future_test() ->
     SelfRef = beamtalk_future:await(Future, 1000),
     ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"\n">>], Result),
+    ?assertEqual([{beamtalk_string, <<"\n">>}], Result),
     gen_server:stop(Pid).
 
 %% --- async recent resolves future with buffer list ---
@@ -569,7 +573,7 @@ async_context_strip_delegates_test() ->
     SelfRef = beamtalk_future:await(Future, 1000),
     ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
     Result = gen_server:call(Pid, recent),
-    ?assertEqual([<<"ctx_stripped">>], Result),
+    ?assertEqual([{beamtalk_string, <<"ctx_stripped">>}], Result),
     gen_server:stop(Pid).
 
 %%% ============================================================================
@@ -606,7 +610,7 @@ start_link_named_variant_test() ->
     ?assertEqual(Pid, whereis(Name)),
     _ = gen_server:call(Name, {'show:', [<<"named_test">>]}),
     Result = gen_server:call(Name, recent),
-    ?assertEqual([<<"named_test">>], Result),
+    ?assertEqual([{beamtalk_string, <<"named_test">>}], Result),
     gen_server:stop(Name).
 
 %%% ============================================================================

@@ -33,7 +33,7 @@ shaped and kept in runtime/apps/beamtalk_runtime/test/beamtalk_exec_port_tests.e
 %% Returns the OS temp directory as a list string (cross-platform, no /tmp hardcode).
 -spec tmp_dir() -> string().
 tmp_dir() ->
-    binary_to_list(beamtalk_file:'tempDirectory'()).
+    binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 %% Save the current value of an env var so it can be restored after a test.
 -spec save_env(string()) -> string() | false.

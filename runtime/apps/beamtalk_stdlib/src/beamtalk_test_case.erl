@@ -426,12 +426,14 @@ decode_beam_error({error, Map}) when is_map(Map) ->
         {ok, Inner} -> decode_beam_error(Inner);
         _ -> beamtalk_primitive:print_string(Map)
     end;
+%% BT-4173: error messages are tagged Strings — unwrap to the raw bytes
+%% this decoder's binary() contract promises.
 decode_beam_error(#beamtalk_error{message = Msg}) ->
-    Msg;
+    beamtalk_text:to_binary(Msg);
 decode_beam_error(#{class := 'Exception', error := #beamtalk_error{message = Msg}}) ->
-    Msg;
+    beamtalk_text:to_binary(Msg);
 decode_beam_error(#{'$beamtalk_class' := _, error := #beamtalk_error{message = Msg}}) ->
-    Msg;
+    beamtalk_text:to_binary(Msg);
 decode_beam_error({badkey, Key}) ->
     <<"key ", (beamtalk_primitive:print_string(Key))/binary, " not found in dictionary">>;
 decode_beam_error({badmap, Map}) ->
@@ -847,18 +849,23 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                 %% an unwrapped record directly.
                 error:#beamtalk_error{kind = assertion_failed, message = AssertMsg}:TestST0 ->
                     ST0 = format_stacktrace(TestST0),
-                    FailMsg0 = <<AssertMsg/binary, ST0/binary>>,
+                    FailMsg0 = <<(beamtalk_text:to_binary(AssertMsg))/binary, ST0/binary>>,
                     {fail, MethodName, ensure_test_context(FailMsg0, Module, MethodName, TestST0)};
                 error:#beamtalk_error{message = ErrMsg}:TestST1 ->
                     ST1 = format_stacktrace(TestST1),
-                    FailMsg1 = <<ErrMsg/binary, ST1/binary>>,
+                    FailMsg1 = <<(beamtalk_text:to_binary(ErrMsg))/binary, ST1/binary>>,
                     {fail, MethodName, ensure_test_context(FailMsg1, Module, MethodName, TestST1)};
                 error:undef:TestST ->
                     #{error := #beamtalk_error{message = FailMsg}} =
                         beamtalk_exception_handler:ensure_wrapped(
                             error, undef, TestST
                         ),
-                    {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)};
+                    %% BT-4173: message is a tagged String — unwrap like the
+                    %% sibling clauses (ensure_test_context renders bytes).
+                    {fail, MethodName,
+                        ensure_test_context(
+                            beamtalk_text:to_binary(FailMsg), Module, MethodName, TestST
+                        )};
                 error:TestReason:TestST ->
                     FailMsg = format_test_error(error, TestReason, TestST),
                     {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)};
@@ -891,14 +898,14 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
         %% setUp or new() itself failed
         error:#beamtalk_error{message = SetupErrMsg} ->
             Prefix = <<"setUp failed: ">>,
-            {fail, MethodName, <<Prefix/binary, SetupErrMsg/binary>>};
+            {fail, MethodName, <<Prefix/binary, (beamtalk_text:to_binary(SetupErrMsg))/binary>>};
         error:undef:SetupST ->
             #{error := #beamtalk_error{message = SetupErrMsg}} =
                 beamtalk_exception_handler:ensure_wrapped(
                     error, undef, SetupST
                 ),
             Prefix = <<"setUp failed: ">>,
-            {fail, MethodName, <<Prefix/binary, SetupErrMsg/binary>>};
+            {fail, MethodName, <<Prefix/binary, (beamtalk_text:to_binary(SetupErrMsg))/binary>>};
         SetupClass:SetupReason:SetupST ->
             Inner = format_test_error(SetupClass, SetupReason, SetupST),
             SetupMsg = <<"setUp failed: ", Inner/binary>>,

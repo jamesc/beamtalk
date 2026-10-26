@@ -479,7 +479,9 @@ class_set_doc_and_get_test_() ->
                     Doc = <<"This is a test class">>,
                     RetObj = beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc),
                     ?assertEqual(ClassObj, RetObj),
-                    ?assertEqual(Doc, beamtalk_behaviour_intrinsics:classDoc(ClassObj))
+                    ?assertEqual(
+                        {beamtalk_string, Doc}, beamtalk_behaviour_intrinsics:classDoc(ClassObj)
+                    )
                 after
                     try
                         gen_server:stop(Pid, normal, 5000)
@@ -512,7 +514,7 @@ class_set_method_doc_test_() ->
                     ),
                     ?assertEqual(ClassObj, RetObj),
                     ?assertEqual(
-                        Doc,
+                        {beamtalk_string, Doc},
                         beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'myMethod')
                     )
                 after
@@ -1453,9 +1455,13 @@ class_set_doc_overwrite_test_() ->
                     Doc1 = <<"First doc">>,
                     Doc2 = <<"Updated doc">>,
                     beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc1),
-                    ?assertEqual(Doc1, beamtalk_behaviour_intrinsics:classDoc(ClassObj)),
+                    ?assertEqual(
+                        {beamtalk_string, Doc1}, beamtalk_behaviour_intrinsics:classDoc(ClassObj)
+                    ),
                     beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc2),
-                    ?assertEqual(Doc2, beamtalk_behaviour_intrinsics:classDoc(ClassObj))
+                    ?assertEqual(
+                        {beamtalk_string, Doc2}, beamtalk_behaviour_intrinsics:classDoc(ClassObj)
+                    )
                 after
                     try
                         gen_server:stop(Pid, normal, 5000)
@@ -1513,12 +1519,12 @@ class_set_method_doc_overwrite_test_() ->
                     Doc2 = <<"Updated method doc">>,
                     beamtalk_behaviour_intrinsics:classSetMethodDoc(ClassObj, 'documented', Doc1),
                     ?assertEqual(
-                        Doc1,
+                        {beamtalk_string, Doc1},
                         beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'documented')
                     ),
                     beamtalk_behaviour_intrinsics:classSetMethodDoc(ClassObj, 'documented', Doc2),
                     ?assertEqual(
-                        Doc2,
+                        {beamtalk_string, Doc2},
                         beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'documented')
                     )
                 after
@@ -2745,11 +2751,12 @@ classRenameTo_collision_refused_test_() ->
                         error := #beamtalk_error{
                             kind = class_already_exists,
                             message =
-                                <<
+                                {beamtalk_string, <<
                                     "cannot rename BT3278RenameEUnitSource to "
                                     "BT3278RenameEUnitExisting — BT3278RenameEUnitExisting already exists"/utf8
-                                >>,
-                            hint = <<"remove or rename the existing class first">>
+                                >>},
+                            hint =
+                                {beamtalk_string, <<"remove or rename the existing class first">>}
                         }
                     },
                     beamtalk_behaviour_intrinsics:classRenameTo(

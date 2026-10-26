@@ -3666,7 +3666,8 @@ mod tests {
 
     /// `beamtalk_primitive:is_string_binary_shared_selector/1` hand-lists
     /// the `binary.bt` instance selectors that `string.bt` inherits unchanged
-    /// (byte-level primitives, safe to dispatch without the `is_utf8/1` scan).
+    /// (byte-level primitives, safe to route straight to the Binary module
+    /// without the string-delegation hop).
     /// This test recomputes that set from the real `.bt` sources — Binary's own
     /// instance selectors minus whatever String redefines — and fails if it
     /// drifts from the hardcoded Erlang list, so a future edit to either file
@@ -3718,7 +3719,6 @@ mod tests {
         // lists identical.
         let hardcoded: std::collections::BTreeSet<&str> = [
             "byteAt:",
-            "byteSize",
             "part:size:",
             "concat:",
             "toBytes",

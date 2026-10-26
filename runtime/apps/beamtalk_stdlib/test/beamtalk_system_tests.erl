@@ -22,7 +22,7 @@ pid/0, uniqueId/0, and type error paths.
 
 get_env_set_variable_test() ->
     os:putenv("BT_TEST_ENV_VAR", "hello"),
-    ?assertEqual(<<"hello">>, beamtalk_system:'getEnv:'(<<"BT_TEST_ENV_VAR">>)),
+    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_system:'getEnv:'(<<"BT_TEST_ENV_VAR">>)),
     os:unsetenv("BT_TEST_ENV_VAR").
 
 get_env_unset_variable_returns_nil_test() ->
@@ -42,7 +42,7 @@ get_env_non_binary_name_test() ->
 get_env_default_set_variable_test() ->
     os:putenv("BT_TEST_ENV_VAR2", "world"),
     ?assertEqual(
-        <<"world">>,
+        {beamtalk_string, <<"world">>},
         beamtalk_system:'getEnv:default:'(<<"BT_TEST_ENV_VAR2">>, <<"fallback">>)
     ),
     os:unsetenv("BT_TEST_ENV_VAR2").
@@ -50,7 +50,7 @@ get_env_default_set_variable_test() ->
 get_env_default_unset_returns_default_test() ->
     os:unsetenv("BT_TEST_UNSET_VAR2"),
     ?assertEqual(
-        <<"fallback">>,
+        {beamtalk_string, <<"fallback">>},
         beamtalk_system:'getEnv:default:'(<<"BT_TEST_UNSET_VAR2">>, <<"fallback">>)
     ).
 
@@ -72,13 +72,13 @@ get_env_default_non_binary_default_test() ->
 
 set_env_value_sets_variable_test() ->
     ?assertEqual(true, beamtalk_system:'setEnv:value:'(<<"BT_TEST_SET">>, <<"val1">>)),
-    ?assertEqual(<<"val1">>, beamtalk_system:'getEnv:'(<<"BT_TEST_SET">>)),
+    ?assertEqual({beamtalk_string, <<"val1">>}, beamtalk_system:'getEnv:'(<<"BT_TEST_SET">>)),
     os:unsetenv("BT_TEST_SET").
 
 set_env_value_overwrites_existing_test() ->
     os:putenv("BT_TEST_OVERWRITE", "old"),
     ?assertEqual(true, beamtalk_system:'setEnv:value:'(<<"BT_TEST_OVERWRITE">>, <<"new">>)),
-    ?assertEqual(<<"new">>, beamtalk_system:'getEnv:'(<<"BT_TEST_OVERWRITE">>)),
+    ?assertEqual({beamtalk_string, <<"new">>}, beamtalk_system:'getEnv:'(<<"BT_TEST_OVERWRITE">>)),
     os:unsetenv("BT_TEST_OVERWRITE").
 
 set_env_value_non_binary_name_test() ->
@@ -118,7 +118,7 @@ unset_env_non_binary_name_test() ->
 
 set_env_shim_test() ->
     ?assertEqual(true, beamtalk_system:setEnv(<<"BT_TEST_SHIM_SET">>, <<"val">>)),
-    ?assertEqual(<<"val">>, beamtalk_system:getEnv(<<"BT_TEST_SHIM_SET">>)),
+    ?assertEqual({beamtalk_string, <<"val">>}, beamtalk_system:getEnv(<<"BT_TEST_SHIM_SET">>)),
     os:unsetenv("BT_TEST_SHIM_SET").
 
 unset_env_shim_test() ->
@@ -132,11 +132,11 @@ unset_env_shim_test() ->
 
 os_platform_returns_binary_test() ->
     V = beamtalk_system:osPlatform(),
-    ?assert(is_binary(V)).
+    ?assertMatch({beamtalk_string, _}, V).
 
 os_platform_non_empty_test() ->
     V = beamtalk_system:osPlatform(),
-    ?assert(byte_size(V) > 0).
+    ?assert(byte_size(element(2, V)) > 0).
 
 %%% ============================================================================
 %%% osFamily/0
@@ -144,11 +144,11 @@ os_platform_non_empty_test() ->
 
 os_family_returns_binary_test() ->
     V = beamtalk_system:osFamily(),
-    ?assert(is_binary(V)).
+    ?assertMatch({beamtalk_string, _}, V).
 
 os_family_known_value_test() ->
     V = beamtalk_system:osFamily(),
-    ?assert(V =:= <<"unix">> orelse V =:= <<"win32">>).
+    ?assert(V =:= {beamtalk_string, <<"unix">>} orelse V =:= {beamtalk_string, <<"win32">>}).
 
 %%% ============================================================================
 %%% architecture/0
@@ -156,11 +156,11 @@ os_family_known_value_test() ->
 
 architecture_returns_binary_test() ->
     V = beamtalk_system:architecture(),
-    ?assert(is_binary(V)).
+    ?assertMatch({beamtalk_string, _}, V).
 
 architecture_non_empty_test() ->
     V = beamtalk_system:architecture(),
-    ?assert(byte_size(V) > 0).
+    ?assert(byte_size(element(2, V)) > 0).
 
 %%% ============================================================================
 %%% hostname/0
@@ -168,11 +168,11 @@ architecture_non_empty_test() ->
 
 hostname_returns_binary_test() ->
     V = beamtalk_system:hostname(),
-    ?assert(is_binary(V)).
+    ?assertMatch({beamtalk_string, _}, V).
 
 hostname_non_empty_test() ->
     V = beamtalk_system:hostname(),
-    ?assert(byte_size(V) > 0).
+    ?assert(byte_size(element(2, V)) > 0).
 
 %%% ============================================================================
 %%% erlangVersion/0
@@ -180,11 +180,11 @@ hostname_non_empty_test() ->
 
 erlang_version_returns_binary_test() ->
     V = beamtalk_system:erlangVersion(),
-    ?assert(is_binary(V)).
+    ?assertMatch({beamtalk_string, _}, V).
 
 erlang_version_non_empty_test() ->
     V = beamtalk_system:erlangVersion(),
-    ?assert(byte_size(V) > 0).
+    ?assert(byte_size(element(2, V)) > 0).
 
 %%% ============================================================================
 %%% pid/0
@@ -205,7 +205,9 @@ pid_positive_test() ->
 get_env_shim_set_variable_test() ->
     os:putenv("BT_TEST_ENV_SHIM", "shim_value"),
     try
-        ?assertEqual(<<"shim_value">>, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM">>))
+        ?assertEqual(
+            {beamtalk_string, <<"shim_value">>}, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM">>)
+        )
     after
         os:unsetenv("BT_TEST_ENV_SHIM")
     end.
@@ -217,14 +219,21 @@ get_env_shim_unset_returns_nil_test() ->
 get_env_shim_default_set_variable_test() ->
     os:putenv("BT_TEST_ENV_SHIM2", "value2"),
     try
-        ?assertEqual(<<"value2">>, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM2">>, <<"fallback">>))
+        ?assertEqual(
+            {beamtalk_string, <<"value2">>},
+            beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM2">>, <<"fallback">>)
+        )
     after
         os:unsetenv("BT_TEST_ENV_SHIM2")
     end.
 
 get_env_shim_default_unset_returns_default_test() ->
     os:unsetenv("BT_TEST_UNSET_SHIM2"),
-    ?assertEqual(<<"fallback">>, beamtalk_system:getEnv(<<"BT_TEST_UNSET_SHIM2">>, <<"fallback">>)).
+    %% Unset: the default passes through as given (raw in, raw out).
+    ?assertEqual(
+        {beamtalk_string, <<"fallback">>},
+        beamtalk_system:getEnv(<<"BT_TEST_UNSET_SHIM2">>, <<"fallback">>)
+    ).
 
 %%% ============================================================================
 %%% uniqueId/0

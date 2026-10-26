@@ -200,6 +200,9 @@ Look up one live actor by pid string (`"<0.132.0>"`); `nil` when the string is
 not a pid, the pid is untracked or dead (backs `Node current actorAt:`).
 """.
 -spec object_at(term()) -> tuple() | nil.
+object_at({beamtalk_string, PidStr}) when is_binary(PidStr) ->
+    %% BT-4173: pid strings from Beamtalk arrive tagged.
+    object_at(binary_to_list(PidStr));
 object_at(PidStr) when is_binary(PidStr) ->
     object_at(binary_to_list(PidStr));
 object_at(PidStr) when is_list(PidStr) ->

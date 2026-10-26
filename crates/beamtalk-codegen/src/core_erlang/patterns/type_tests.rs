@@ -30,7 +30,11 @@ enum TypeTest {
     /// A guard-safe boolean-returning BIF (`is_binary`, `is_integer`, `is_float`,
     /// `is_list`, `is_function`, `is_pid`, `is_reference`, `is_port`).
     Bif(&'static str),
-    /// `Tuple` — any tuple except the reserved actor/supervisor 4-tuple tags.
+    /// `String` — exactly the `{'beamtalk_string', bytes}` 2-tuple tag
+    /// (BT-4173; a bare binary is a `Binary`, never a `String`).
+    String,
+    /// `Tuple` — any tuple except the reserved actor/supervisor 4-tuple tags
+    /// and the `String` 2-tuple tag.
     Tuple,
     /// `Symbol` — `is_atom` minus `nil`/`true`/`false`.
     Symbol,
@@ -47,7 +51,12 @@ enum TypeTest {
 /// only on the name (not on `self.class_hierarchy`, unlike the actor/
 /// supervisor/generic-tagged-class fallback — see [`TypeTest`]'s doc).
 static TYPE_TESTS: &[(&str, TypeTest)] = &[
-    ("String", TypeTest::Bif("is_binary")),
+    ("String", TypeTest::String),
+    // BT-4173: `Binary` is exactly a bare binary. Like every other type
+    // pattern here the test is exact, not subclass-aware (see
+    // `testSupervisorClassPatternDiscriminatesSiblingClasses`), so a
+    // `String` (a `Binary` subclass) does not match `b :: Binary`.
+    ("Binary", TypeTest::Bif("is_binary")),
     ("Integer", TypeTest::Bif("is_integer")),
     ("Float", TypeTest::Bif("is_float")),
     ("List", TypeTest::Bif("is_list")),
@@ -73,7 +82,10 @@ impl CoreErlangGenerator {
     /// name, generalizing two existing codegen strategies (no new runtime
     /// mechanism is introduced):
     ///
-    /// - **Guard-safe BIF primitives** (`String` → `is_binary`, `Integer` →
+    /// - **`String`** (BT-4173): exactly the `{'beamtalk_string', bytes}`
+    ///   2-tuple tag ([`Self::wrap_string_test`]) — a bare binary is a
+    ///   `Binary`, never a `String`.
+    /// - **Guard-safe BIF primitives** (`Binary` → `is_binary`, `Integer` →
     ///   `is_integer`, `Float` → `is_float`, `List` → `is_list`): a
     ///   single-level `case call 'erlang':'is_X'(_Match) of <'true'> -> ...
     ///   <'false'> -> rest end` ([`Self::wrap_bif_test`]), generalizing
@@ -258,6 +270,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         match test {
             TypeTest::Bif(bif) => Self::wrap_bif_test(match_var, bif, success, rest),
+            TypeTest::String => self.wrap_string_test(match_var, success, rest),
             TypeTest::Tuple => self.wrap_tuple_test(match_var, success, rest),
             TypeTest::Symbol => Self::wrap_symbol_test(match_var, success, rest),
             TypeTest::Boolean => self.wrap_boolean_test(match_var, success, rest),
@@ -290,6 +303,50 @@ impl CoreErlangGenerator {
             "<'true'> when 'true' -> ",
             success,
             " <'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// Tests whether the scrutinee is exactly a `String` —
+    /// `{'beamtalk_string', bytes}` (BT-4173). Reuses the same guarded
+    /// `is_tuple`/`tuple_size`/`element(1)` idiom
+    /// [`Self::wrap_actor_class_tag_test`] uses (`element/2` raises on an
+    /// out-of-range index, so `tuple_size` is checked first and an
+    /// arbitrary non-tuple falls through to `rest` instead of crashing).
+    /// A bare binary never matches: it is a `Binary`, tested by the
+    /// `is_binary` BIF entry.
+    fn wrap_string_test(
+        &mut self,
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let no_match_tag = self.fresh_temp_var("NoMatch");
+        let v = leaf::var(match_var.to_string());
+        docvec![
+            "case call 'erlang':'is_tuple'(",
+            v.clone(),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            v.clone(),
+            "), 2) of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'element'(1, ",
+            v,
+            ") of ",
+            "<'beamtalk_string'> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match_tag),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
             rest.clone(),
             " end"
         ]
@@ -562,13 +619,14 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// `Tuple` matches any Erlang tuple **except** the reserved 4-tuple
-    /// shapes this compiler uses internally for actor references
+    /// `Tuple` matches any Erlang tuple **except** the reserved shapes
+    /// this compiler/runtime uses internally: actor references
     /// (`{'beamtalk_object', ...}`) and supervisor references
-    /// (`{'beamtalk_supervisor', ...}`) —
-    /// without this exclusion, a live actor/supervisor reference is *also*
-    /// a plain Erlang tuple structurally, so `x :: Tuple` would incorrectly
-    /// match it too. (`Supervisor`/`DynamicSupervisor` subclasses
+    /// (`{'beamtalk_supervisor', ...}`) — both 4-tuples — and `String`
+    /// values (`{'beamtalk_string', bytes}`, BT-4173) — without these
+    /// exclusions, each is *also* a plain Erlang tuple structurally, so
+    /// `x :: Tuple` would incorrectly match it too.
+    /// (`Supervisor`/`DynamicSupervisor` subclasses
     /// are themselves valid type-pattern `class` names, handled by
     /// [`Self::wrap_supervisor_class_tag_test`] above — this exclusion
     /// still applies to an *unrelated* `x :: Tuple` arm that could see one
@@ -581,11 +639,27 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let v = leaf::var(match_var.to_string());
         let not_reserved = self.fresh_temp_var("NotReserved");
+        let not_string = self.fresh_temp_var("NotString");
         docvec![
             "case call 'erlang':'is_tuple'(",
             v.clone(),
             ") of ",
             "<'true'> when 'true' -> ",
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            v.clone(),
+            "), 2) of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'element'(1, ",
+            v.clone(),
+            ") of ",
+            "<'beamtalk_string'> when 'true' -> ",
+            rest.clone(),
+            " <",
+            leaf::var(not_string),
+            "> when 'true' -> ",
+            success.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
             "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
             v.clone(),
             "), 4) of ",
@@ -604,6 +678,7 @@ impl CoreErlangGenerator {
             " end ",
             "<'false'> when 'true' -> ",
             success,
+            " end ",
             " end ",
             "<'false'> when 'true' -> ",
             rest.clone(),

@@ -26,16 +26,16 @@ pid_as_string_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         Pid = self(),
         Result = beamtalk_primitive:send(Pid, 'asString', []),
-        ?assert(is_binary(Result)),
-        ?assertMatch(<<"#Pid<", _/binary>>, Result)
+        ?assertMatch({beamtalk_string, _}, Result),
+        ?assertMatch({beamtalk_string, <<"#Pid<", _/binary>>}, Result)
     end}.
 
 pid_print_string_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         Pid = self(),
         Result = beamtalk_primitive:send(Pid, 'printString', []),
-        ?assert(is_binary(Result)),
-        ?assertMatch(<<"#Pid<", _/binary>>, Result)
+        ?assertMatch({beamtalk_string, _}, Result),
+        ?assertMatch({beamtalk_string, <<"#Pid<", _/binary>>}, Result)
     end}.
 
 pid_print_string_matches_as_string_test_() ->
@@ -140,8 +140,8 @@ port_as_string_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         {ok, Port} = gen_tcp:listen(0, []),
         Result = beamtalk_primitive:send(Port, 'asString', []),
-        ?assert(is_binary(Result)),
-        ?assertMatch(<<"#Port<", _/binary>>, Result),
+        ?assertMatch({beamtalk_string, _}, Result),
+        ?assertMatch({beamtalk_string, <<"#Port<", _/binary>>}, Result),
         gen_tcp:close(Port)
     end}.
 
@@ -149,8 +149,8 @@ port_print_string_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         {ok, Port} = gen_tcp:listen(0, []),
         Result = beamtalk_primitive:send(Port, 'printString', []),
-        ?assert(is_binary(Result)),
-        ?assertMatch(<<"#Port<", _/binary>>, Result),
+        ?assertMatch({beamtalk_string, _}, Result),
+        ?assertMatch({beamtalk_string, <<"#Port<", _/binary>>}, Result),
         gen_tcp:close(Port)
     end}.
 
@@ -213,16 +213,16 @@ reference_as_string_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         Ref = make_ref(),
         Result = beamtalk_primitive:send(Ref, 'asString', []),
-        ?assert(is_binary(Result)),
-        ?assertMatch(<<"#Ref<", _/binary>>, Result)
+        ?assertMatch({beamtalk_string, _}, Result),
+        ?assertMatch({beamtalk_string, <<"#Ref<", _/binary>>}, Result)
     end}.
 
 reference_print_string_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         Ref = make_ref(),
         Result = beamtalk_primitive:send(Ref, 'printString', []),
-        ?assert(is_binary(Result)),
-        ?assertMatch(<<"#Ref<", _/binary>>, Result)
+        ?assertMatch({beamtalk_string, _}, Result),
+        ?assertMatch({beamtalk_string, <<"#Ref<", _/binary>>}, Result)
     end}.
 
 reference_strict_equality_test_() ->
@@ -272,6 +272,8 @@ reference_does_not_understand_test_() ->
 %%% ============================================================================
 
 print_string_pid_test() ->
+    %% print_string/1 itself answers raw bytes; only dispatched
+    %% `printString`/`asString` wrap as a tagged String.
     Result = beamtalk_primitive:print_string(self()),
     ?assert(is_binary(Result)),
     ?assertMatch(<<"#Pid<", _/binary>>, Result).

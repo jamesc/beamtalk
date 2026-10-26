@@ -32,13 +32,13 @@ from_valid_test() ->
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     Regex = maps:get('okValue', R),
     ?assertEqual('Regex', maps:get('$beamtalk_class', Regex)),
-    ?assertEqual(<<"[0-9]+">>, maps:get(source, Regex)),
+    ?assertEqual({beamtalk_string, <<"[0-9]+">>}, maps:get(source, Regex)),
     ?assert(maps:is_key(compiled, Regex)).
 
 from_empty_pattern_test() ->
     R = beamtalk_regex:'from:'(<<"">>),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
-    ?assertEqual(<<"">>, maps:get(source, maps:get('okValue', R))).
+    ?assertEqual({beamtalk_string, <<"">>}, maps:get(source, maps:get('okValue', R))).
 
 from_invalid_pattern_test() ->
     R = beamtalk_regex:'from:'(<<"[unclosed">>),
@@ -64,7 +64,7 @@ from_type_error_test() ->
 from_options_caseless_test() ->
     R = beamtalk_regex:'from:options:'(<<"hello">>, [caseless]),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
-    ?assertEqual(<<"hello">>, maps:get(source, maps:get('okValue', R))).
+    ?assertEqual({beamtalk_string, <<"hello">>}, maps:get(source, maps:get('okValue', R))).
 
 from_options_multiline_test() ->
     R = beamtalk_regex:'from:options:'(<<"^foo">>, [multiline]),
@@ -115,11 +115,11 @@ from_two_alias_type_error_test() ->
 
 source_test() ->
     R = make_regex(<<"\\d+">>),
-    ?assertEqual(<<"\\d+">>, beamtalk_regex:source(R)).
+    ?assertEqual({beamtalk_string, <<"\\d+">>}, beamtalk_regex:source(R)).
 
 print_string_test() ->
     R = make_regex(<<"[a-z]+">>),
-    ?assertEqual(<<"Regex([a-z]+)">>, beamtalk_regex:'printString'(R)).
+    ?assertEqual({beamtalk_string, <<"Regex([a-z]+)">>}, beamtalk_regex:'printString'(R)).
 
 %%% ============================================================================
 %%% matches_regex/2 — String + Pattern or Compiled Regex
@@ -172,14 +172,16 @@ matches_regex_options_type_error_test() ->
 %%% ============================================================================
 
 first_match_string_pattern_found_test() ->
-    ?assertEqual(<<"123">>, beamtalk_regex:first_match(<<"abc123def">>, <<"\\d+">>)).
+    ?assertEqual(
+        {beamtalk_string, <<"123">>}, beamtalk_regex:first_match(<<"abc123def">>, <<"\\d+">>)
+    ).
 
 first_match_string_pattern_not_found_test() ->
     ?assertEqual(nil, beamtalk_regex:first_match(<<"abc">>, <<"\\d+">>)).
 
 first_match_compiled_found_test() ->
     R = make_regex(<<"[a-z]+">>),
-    ?assertEqual(<<"abc">>, beamtalk_regex:first_match(<<"abc123">>, R)).
+    ?assertEqual({beamtalk_string, <<"abc">>}, beamtalk_regex:first_match(<<"abc123">>, R)).
 
 first_match_compiled_not_found_test() ->
     R = make_regex(<<"[a-z]+">>),
@@ -203,7 +205,7 @@ first_match_type_error_test() ->
 
 all_matches_string_pattern_test() ->
     ?assertEqual(
-        [<<"1">>, <<"2">>, <<"3">>],
+        [{beamtalk_string, <<"1">>}, {beamtalk_string, <<"2">>}, {beamtalk_string, <<"3">>}],
         beamtalk_regex:all_matches(<<"a1b2c3">>, <<"\\d">>)
     ).
 
@@ -212,7 +214,10 @@ all_matches_no_match_test() ->
 
 all_matches_compiled_test() ->
     R = make_regex(<<"\\d+">>),
-    ?assertEqual([<<"123">>, <<"456">>], beamtalk_regex:all_matches(<<"123abc456">>, R)).
+    ?assertEqual(
+        [{beamtalk_string, <<"123">>}, {beamtalk_string, <<"456">>}],
+        beamtalk_regex:all_matches(<<"123abc456">>, R)
+    ).
 
 all_matches_invalid_pattern_test() ->
     ?assertError(
@@ -232,16 +237,21 @@ all_matches_type_error_test() ->
 
 replace_regex_string_pattern_test() ->
     ?assertEqual(
-        <<"hXllo">>,
+        {beamtalk_string, <<"hXllo">>},
         beamtalk_regex:replace_regex(<<"hello">>, <<"e">>, <<"X">>)
     ).
 
 replace_regex_compiled_test() ->
     R = make_regex(<<"\\d+">>),
-    ?assertEqual(<<"abc_def">>, beamtalk_regex:replace_regex(<<"abc123def">>, R, <<"_">>)).
+    ?assertEqual(
+        {beamtalk_string, <<"abc_def">>}, beamtalk_regex:replace_regex(<<"abc123def">>, R, <<"_">>)
+    ).
 
 replace_regex_no_match_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_regex:replace_regex(<<"hello">>, <<"\\d+">>, <<"X">>)).
+    ?assertEqual(
+        {beamtalk_string, <<"hello">>},
+        beamtalk_regex:replace_regex(<<"hello">>, <<"\\d+">>, <<"X">>)
+    ).
 
 replace_regex_invalid_pattern_test() ->
     ?assertError(
@@ -261,14 +271,15 @@ replace_regex_type_error_test() ->
 
 replace_all_regex_string_pattern_test() ->
     ?assertEqual(
-        <<"XaX">>,
+        {beamtalk_string, <<"XaX">>},
         beamtalk_regex:replace_all_regex(<<"1a2">>, <<"\\d">>, <<"X">>)
     ).
 
 replace_all_regex_compiled_test() ->
     R = make_regex(<<"[aeiou]">>),
     ?assertEqual(
-        <<"h_ll_ w_rld">>, beamtalk_regex:replace_all_regex(<<"hello world">>, R, <<"_">>)
+        {beamtalk_string, <<"h_ll_ w_rld">>},
+        beamtalk_regex:replace_all_regex(<<"hello world">>, R, <<"_">>)
     ).
 
 replace_all_regex_invalid_pattern_test() ->
@@ -289,21 +300,21 @@ replace_all_regex_type_error_test() ->
 
 split_regex_string_pattern_test() ->
     ?assertEqual(
-        [<<"a">>, <<"b">>, <<"c">>],
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}],
         beamtalk_regex:split_regex(<<"a,b,c">>, <<",">>)
     ).
 
 split_regex_compiled_test() ->
     R = make_regex(<<"\\s+">>),
     ?assertEqual(
-        [<<"hello">>, <<"world">>],
+        [{beamtalk_string, <<"hello">>}, {beamtalk_string, <<"world">>}],
         beamtalk_regex:split_regex(<<"hello   world">>, R)
     ).
 
 split_regex_no_match_test() ->
     %% No delimiters → single element
     Result = beamtalk_regex:split_regex(<<"hello">>, <<",">>),
-    ?assertEqual([<<"hello">>], Result).
+    ?assertEqual([{beamtalk_string, <<"hello">>}], Result).
 
 split_regex_invalid_pattern_test() ->
     ?assertError(

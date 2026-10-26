@@ -172,7 +172,7 @@ registration_test_() ->
                                 kind = abi_mismatch,
                                 class = 'BT3722AbiPending',
                                 details = #{expected := _, found := 0},
-                                hint = <<"Recompile", _/binary>>
+                                hint = {beamtalk_string, <<"Recompile", _/binary>>}
                             }}
                         ],
                         beamtalk_class_registry:drain_pending_load_errors_by_names([
@@ -243,9 +243,14 @@ refusal_error_test_() ->
                     #beamtalk_error{kind = abi_mismatch, class = 'BT3713AbiOldMissing'}, Error
                 ),
                 ?assertNotEqual(
-                    nomatch, binary:match(Error#beamtalk_error.message, atom_to_binary(Mod, utf8))
+                    nomatch,
+                    binary:match(
+                        element(2, Error#beamtalk_error.message), atom_to_binary(Mod, utf8)
+                    )
                 ),
-                ?assertNotEqual(nomatch, binary:match(Error#beamtalk_error.hint, <<"Recompile">>)),
+                ?assertNotEqual(
+                    nomatch, binary:match(element(2, Error#beamtalk_error.hint), <<"Recompile">>)
+                ),
                 ?assertEqual(
                     #{module => Mod, expected => beamtalk_class_var_abi:abi(), found => missing},
                     Error#beamtalk_error.details
@@ -314,11 +319,16 @@ invalid_meta_test_() ->
                     ),
                     ?assertNotEqual(
                         nomatch,
-                        binary:match(Error#beamtalk_error.message, <<"invalid __beamtalk_meta/0">>)
+                        binary:match(
+                            element(2, Error#beamtalk_error.message),
+                            <<"invalid __beamtalk_meta/0">>
+                        )
                     ),
                     ?assertEqual(
                         nomatch,
-                        binary:match(Error#beamtalk_error.message, <<"compiled before">>)
+                        binary:match(
+                            element(2, Error#beamtalk_error.message), <<"compiled before">>
+                        )
                     )
                 end},
             {"a non-map __beamtalk_meta/0 is refused as invalid_meta", fun() ->
@@ -531,7 +541,7 @@ preflight_test_() ->
 
 scratch_dir(Name) ->
     Dir = filename:join(
-        binary_to_list(beamtalk_file:'tempDirectory'()),
+        binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
         Name ++ "_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = filelib:ensure_path(Dir),

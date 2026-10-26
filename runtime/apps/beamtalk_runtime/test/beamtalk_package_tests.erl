@@ -35,20 +35,20 @@ all_returns_list_test() ->
 all_includes_stdlib_test() ->
     setup(),
     Result = beamtalk_package:all(),
-    ?assert(lists:member(<<"stdlib">>, Result)).
+    ?assert(lists:member({beamtalk_string, <<"stdlib">>}, Result)).
 
 all_excludes_non_package_apps_test() ->
     setup(),
     Result = beamtalk_package:all(),
     %% kernel and stdlib (Erlang's) are not Beamtalk packages
-    ?assertNot(lists:member(<<"kernel">>, Result)),
-    ?assertNot(lists:member(<<"stdlib_erlang">>, Result)).
+    ?assertNot(lists:member({beamtalk_string, <<"kernel">>}, Result)),
+    ?assertNot(lists:member({beamtalk_string, <<"stdlib_erlang">>}, Result)).
 
-all_returns_binaries_test() ->
+all_returns_strings_test() ->
     setup(),
     Result = beamtalk_package:all(),
     lists:foreach(
-        fun(Name) -> ?assert(is_binary(Name)) end,
+        fun(Name) -> ?assertMatch({beamtalk_string, _}, Name) end,
         Result
     ).
 
@@ -61,16 +61,16 @@ named_returns_tagged_package_map_test() ->
     Info = beamtalk_package:named(<<"stdlib">>),
     ?assert(is_map(Info)),
     ?assertEqual('Package', maps:get('$beamtalk_class', Info)),
-    ?assertEqual(<<"stdlib">>, maps:get(name, Info)),
-    ?assert(is_binary(maps:get(version, Info))),
+    ?assertEqual({beamtalk_string, <<"stdlib">>}, maps:get(name, Info)),
+    ?assertMatch({beamtalk_string, _}, maps:get(version, Info)),
     ?assert(is_list(maps:get(classes, Info))),
     ?assert(is_list(maps:get(dependencies, Info))),
-    ?assert(is_binary(maps:get(source, Info))).
+    ?assertMatch({beamtalk_string, _}, maps:get(source, Info)).
 
 named_accepts_atom_test() ->
     setup(),
     Info = beamtalk_package:named(stdlib),
-    ?assertEqual(<<"stdlib">>, maps:get(name, Info)).
+    ?assertEqual({beamtalk_string, <<"stdlib">>}, maps:get(name, Info)).
 
 named_classes_contains_known_classes_test() ->
     setup(),
@@ -103,9 +103,9 @@ named_error_includes_hint_with_loaded_packages_test() ->
     catch
         error:#{error := #beamtalk_error{hint = Hint}} ->
             ?assertNotEqual(undefined, Hint),
-            ?assert(is_binary(Hint)),
+            ?assertMatch({beamtalk_string, _}, Hint),
             %% Hint should mention loaded packages
-            ?assertMatch({match, _}, re:run(Hint, <<"stdlib">>))
+            ?assertMatch({match, _}, re:run(element(2, Hint), <<"stdlib">>))
     end.
 
 %%% ============================================================================
@@ -183,11 +183,11 @@ dependencies_returns_empty_for_unknown_package_test() ->
     Result = beamtalk_package:dependencies(<<"nonexistent_package_xyz">>),
     ?assertEqual([], Result).
 
-dependencies_returns_binaries_test() ->
+dependencies_returns_strings_test() ->
     setup(),
     Result = beamtalk_package:dependencies(<<"stdlib">>),
     lists:foreach(
-        fun(Name) -> ?assert(is_binary(Name)) end,
+        fun(Name) -> ?assertMatch({beamtalk_string, _}, Name) end,
         Result
     ).
 
@@ -225,7 +225,7 @@ all_includes_binary_package_test() ->
     App = bt_fake_binpkg_app,
     load_fake_app(App, [{env, [{classes, [#{package => <<"binpkg">>, name => 'FooBin'}]}]}]),
     try
-        ?assert(lists:member(<<"binpkg">>, beamtalk_package:all()))
+        ?assert(lists:member({beamtalk_string, <<"binpkg">>}, beamtalk_package:all()))
     after
         _ = application:unload(App)
     end.
@@ -242,7 +242,7 @@ dependencies_includes_beamtalk_package_deps_test() ->
     ),
     try
         Deps = beamtalk_package:dependencies(<<"mainp">>),
-        ?assert(lists:member(<<"depp">>, Deps))
+        ?assert(lists:member({beamtalk_string, <<"depp">>}, Deps))
     after
         _ = application:unload(Main),
         _ = application:unload(Dep)
@@ -288,7 +288,7 @@ dependencies_includes_types_only_dep_test() ->
     try
         Deps = beamtalk_package:dependencies(<<"main3p">>),
         %% Binary name is the app-atom-derived name, not a classes `package` key.
-        ?assert(lists:member(<<"bt_fake_types_only_dep">>, Deps))
+        ?assert(lists:member({beamtalk_string, <<"bt_fake_types_only_dep">>}, Deps))
     after
         _ = application:unload(Main),
         _ = application:unload(Dep)
@@ -317,13 +317,19 @@ classes_handles_legacy_tuple_entries_test() ->
         _ = application:unload(App)
     end.
 
-%% packageNameFor/1 is the Beamtalk FFI shim and must mirror package_name/1.
+%% packageNameFor/1 is the Beamtalk FFI shim: same name as package_name/1
+%% but answered as a String (nil stays nil).
 package_name_for_delegates_to_package_name_test() ->
     setup(),
-    ?assertEqual(
-        beamtalk_package:package_name('Object'),
-        beamtalk_package:packageNameFor('Object')
-    ).
+    case beamtalk_package:package_name('Object') of
+        nil ->
+            ?assertEqual(nil, beamtalk_package:packageNameFor('Object'));
+        Name ->
+            ?assertEqual(
+                {beamtalk_string, Name},
+                beamtalk_package:packageNameFor('Object')
+            )
+    end.
 
 %%% ============================================================================
 %%% Types-only package tests — a package with zero classes and a
@@ -341,7 +347,9 @@ all_includes_types_only_app_test() ->
         [{env, [{type_aliases, [#{name => 'RestartStrategy', internal => false}]}]}]
     ),
     try
-        ?assert(lists:member(<<"bt_fake_types_only_pkg">>, beamtalk_package:all()))
+        ?assert(
+            lists:member({beamtalk_string, <<"bt_fake_types_only_pkg">>}, beamtalk_package:all())
+        )
     after
         _ = application:unload(App)
     end.
@@ -353,7 +361,7 @@ all_excludes_app_with_no_classes_or_aliases_test() ->
     App = bt_fake_empty_pkg,
     load_fake_app(App, [{env, [{classes, []}, {type_aliases, []}]}]),
     try
-        ?assertNot(lists:member(<<"bt_fake_empty_pkg">>, beamtalk_package:all()))
+        ?assertNot(lists:member({beamtalk_string, <<"bt_fake_empty_pkg">>}, beamtalk_package:all()))
     after
         _ = application:unload(App)
     end.
@@ -387,9 +395,9 @@ named_resolves_types_only_package_test() ->
     ),
     try
         Info = beamtalk_package:named(<<"bt_fake_types_only_pkg3">>),
-        ?assertEqual(<<"bt_fake_types_only_pkg3">>, maps:get(name, Info)),
+        ?assertEqual({beamtalk_string, <<"bt_fake_types_only_pkg3">>}, maps:get(name, Info)),
         ?assertEqual([], maps:get(classes, Info)),
-        ?assertEqual(<<"1.0.0">>, maps:get(version, Info)),
+        ?assertEqual({beamtalk_string, <<"1.0.0">>}, maps:get(version, Info)),
         ?assertEqual([], maps:get(dependencies, Info))
     after
         _ = application:unload(App)

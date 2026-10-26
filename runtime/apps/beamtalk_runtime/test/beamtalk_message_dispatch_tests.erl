@@ -471,7 +471,8 @@ number_coercion_hints_missing_method() ->
                     class = 'CoercionActor',
                     selector = 'timesFromNumber:',
                     hint =
-                        <<"CoercionActor has no 'timesFromNumber:' — implement it to support 'number * CoercionActor' arithmetic"/utf8>>
+                        {beamtalk_string,
+                            <<"CoercionActor has no 'timesFromNumber:' — implement it to support 'number * CoercionActor' arithmetic"/utf8>>}
                 }
             },
             beamtalk_message_dispatch:send_number_coercion(

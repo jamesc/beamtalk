@@ -117,7 +117,7 @@ ensure_structured_error_eval_error_same_tag_different_arity_test() ->
     ),
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
     ?assertMatch(
-        <<"Evaluation error: error:", _/binary>>,
+        {beamtalk_string, <<"Evaluation error: error:", _/binary>>},
         Result#beamtalk_error.message
     ).
 
@@ -133,14 +133,14 @@ ensure_structured_error_compile_error_diagnostic_with_binary_hint_test() ->
     },
     Result = beamtalk_repl_errors:ensure_structured_error({compile_error, [Diag]}),
     ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
-    ?assertEqual(<<"Unused variable `x`">>, Result#beamtalk_error.message),
-    ?assertEqual(<<"Remove or prefix with `_`">>, Result#beamtalk_error.hint).
+    ?assertEqual({beamtalk_string, <<"Unused variable `x`">>}, Result#beamtalk_error.message),
+    ?assertEqual({beamtalk_string, <<"Remove or prefix with `_`">>}, Result#beamtalk_error.hint).
 
 ensure_structured_error_compile_error_diagnostic_without_hint_test() ->
     Diag = #{message => <<"Type mismatch">>, line => 5},
     Result = beamtalk_repl_errors:ensure_structured_error({compile_error, [Diag]}),
     ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
-    ?assertEqual(<<"Type mismatch">>, Result#beamtalk_error.message),
+    ?assertEqual({beamtalk_string, <<"Type mismatch">>}, Result#beamtalk_error.message),
     ?assertEqual(undefined, Result#beamtalk_error.hint).
 
 ensure_structured_error_compile_error_diagnostic_non_binary_hint_test() ->
@@ -155,24 +155,24 @@ ensure_structured_error_compile_error_diagnostic_multiple_entries_test() ->
     First = #{message => <<"first error">>, line => 1},
     Second = #{message => <<"second error">>, line => 2},
     Result = beamtalk_repl_errors:ensure_structured_error({compile_error, [First, Second]}),
-    ?assertEqual(<<"first error">>, Result#beamtalk_error.message).
+    ?assertEqual({beamtalk_string, <<"first error">>}, Result#beamtalk_error.message).
 
 ensure_structured_error_compile_error_binary_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error(
         {compile_error, <<"syntax error near `+`">>}
     ),
     ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
-    ?assertEqual(<<"syntax error near `+`">>, Result#beamtalk_error.message).
+    ?assertEqual({beamtalk_string, <<"syntax error near `+`">>}, Result#beamtalk_error.message).
 
 ensure_structured_error_compile_error_list_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({compile_error, "syntax error"}),
     ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
-    ?assertEqual(<<"syntax error">>, Result#beamtalk_error.message).
+    ?assertEqual({beamtalk_string, <<"syntax error">>}, Result#beamtalk_error.message).
 
 ensure_structured_error_compile_error_other_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({compile_error, bad_module}),
     ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
-    ?assert(is_binary(Result#beamtalk_error.message)).
+    ?assertMatch({beamtalk_string, _}, Result#beamtalk_error.message).
 
 %%% ============================================================================
 %%% ensure_structured_error/1 — remaining known-tuple patterns
@@ -181,22 +181,28 @@ ensure_structured_error_compile_error_other_test() ->
 ensure_structured_error_undefined_variable_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({undefined_variable, <<"counter">>}),
     ?assertMatch(#beamtalk_error{kind = undefined_variable}, Result),
-    ?assert(binary:match(Result#beamtalk_error.message, <<"counter">>) =/= nomatch).
+    ?assert(binary:match(element(2, Result#beamtalk_error.message), <<"counter">>) =/= nomatch).
 
 ensure_structured_error_file_not_found_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({file_not_found, <<"missing.bt">>}),
     ?assertMatch(#beamtalk_error{kind = file_not_found}, Result),
-    ?assert(binary:match(Result#beamtalk_error.message, <<"missing.bt">>) =/= nomatch).
+    ?assert(binary:match(element(2, Result#beamtalk_error.message), <<"missing.bt">>) =/= nomatch).
 
 ensure_structured_error_read_error_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({read_error, enoent}),
     ?assertMatch(#beamtalk_error{kind = io_error}, Result),
-    ?assert(binary:match(Result#beamtalk_error.message, <<"Failed to read file">>) =/= nomatch).
+    ?assert(
+        binary:match(element(2, Result#beamtalk_error.message), <<"Failed to read file">>) =/=
+            nomatch
+    ).
 
 ensure_structured_error_load_error_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({load_error, badfile}),
     ?assertMatch(#beamtalk_error{kind = io_error}, Result),
-    ?assert(binary:match(Result#beamtalk_error.message, <<"Failed to load bytecode">>) =/= nomatch).
+    ?assert(
+        binary:match(element(2, Result#beamtalk_error.message), <<"Failed to load bytecode">>) =/=
+            nomatch
+    ).
 
 ensure_structured_error_registration_error_tuple_test() ->
     %% {ModuleName, Reason} form — ModuleName passed to ~s, use a charlist
@@ -204,39 +210,41 @@ ensure_structured_error_registration_error_tuple_test() ->
         {registration_error, {"Counter", already_started}}
     ),
     ?assertMatch(#beamtalk_error{kind = registration_error}, Result),
-    ?assert(binary:match(Result#beamtalk_error.message, <<"Counter">>) =/= nomatch).
+    ?assert(binary:match(element(2, Result#beamtalk_error.message), <<"Counter">>) =/= nomatch).
 
 ensure_structured_error_registration_error_plain_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({registration_error, noproc}),
     ?assertMatch(#beamtalk_error{kind = registration_error}, Result),
-    ?assert(is_binary(Result#beamtalk_error.message)).
+    ?assertMatch({beamtalk_string, _}, Result#beamtalk_error.message).
 
 ensure_structured_error_parse_error_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({parse_error, <<"unexpected ']'">>}),
     ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
-    ?assert(binary:match(Result#beamtalk_error.message, <<"Parse error">>) =/= nomatch).
+    ?assert(binary:match(element(2, Result#beamtalk_error.message), <<"Parse error">>) =/= nomatch).
 
 ensure_structured_error_invalid_request_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error(
         {invalid_request, <<"missing op field">>}
     ),
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
-    ?assert(binary:match(Result#beamtalk_error.message, <<"Invalid request">>) =/= nomatch).
+    ?assert(
+        binary:match(element(2, Result#beamtalk_error.message), <<"Invalid request">>) =/= nomatch
+    ).
 
 ensure_structured_error_empty_expression_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error(empty_expression),
     ?assertMatch(#beamtalk_error{kind = empty_expression}, Result),
-    ?assertEqual(<<"Empty expression">>, Result#beamtalk_error.message).
+    ?assertEqual({beamtalk_string, <<"Empty expression">>}, Result#beamtalk_error.message).
 
 ensure_structured_error_timeout_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error(timeout),
     ?assertMatch(#beamtalk_error{kind = timeout}, Result),
-    ?assertEqual(<<"Request timed out">>, Result#beamtalk_error.message).
+    ?assertEqual({beamtalk_string, <<"Request timed out">>}, Result#beamtalk_error.message).
 
 ensure_structured_error_fallback_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({some_unknown_error, details}),
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
-    ?assert(is_binary(Result#beamtalk_error.message)).
+    ?assertMatch({beamtalk_string, _}, Result#beamtalk_error.message).
 
 %%% ============================================================================
 %%% ensure_structured_error/2 — passthrough cases
@@ -326,13 +334,13 @@ ensure_structured_error_2_delegates_registration_error_test() ->
 ensure_structured_error_2_fallback_includes_class_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error(something_weird, throw),
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
-    ?assert(binary:match(Result#beamtalk_error.message, <<"throw">>) =/= nomatch).
+    ?assert(binary:match(element(2, Result#beamtalk_error.message), <<"throw">>) =/= nomatch).
 
 ensure_structured_error_2_fallback_different_classes_test() ->
     ResultErr = beamtalk_repl_errors:ensure_structured_error(unknown_reason, error),
     ResultExit = beamtalk_repl_errors:ensure_structured_error(unknown_reason, exit),
-    ?assert(binary:match(ResultErr#beamtalk_error.message, <<"error">>) =/= nomatch),
-    ?assert(binary:match(ResultExit#beamtalk_error.message, <<"exit">>) =/= nomatch).
+    ?assert(binary:match(element(2, ResultErr#beamtalk_error.message), <<"error">>) =/= nomatch),
+    ?assert(binary:match(element(2, ResultExit#beamtalk_error.message), <<"exit">>) =/= nomatch).
 
 %%% ============================================================================
 %%% vocabulary previously only handled by
@@ -343,32 +351,38 @@ ensure_structured_error_2_fallback_different_classes_test() ->
 ensure_structured_error_module_not_found_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({module_not_found, <<"counter">>}),
     ?assertMatch(#beamtalk_error{kind = module_not_found}, Result),
-    ?assertEqual(<<"Module not loaded: counter">>, Result#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Module not loaded: counter">>}, Result#beamtalk_error.message
+    ).
 
 ensure_structured_error_invalid_module_name_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({invalid_module_name, <<"123bad">>}),
     ?assertMatch(#beamtalk_error{kind = invalid_module_name}, Result),
-    ?assertEqual(<<"Invalid module name: 123bad">>, Result#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Invalid module name: 123bad">>}, Result#beamtalk_error.message
+    ).
 
 ensure_structured_error_actors_exist_singular_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({actors_exist, counter, 1}),
     ?assertMatch(#beamtalk_error{kind = actors_exist}, Result),
     ?assertNotEqual(
-        nomatch, binary:match(Result#beamtalk_error.message, <<"1 actor still running">>)
+        nomatch,
+        binary:match(element(2, Result#beamtalk_error.message), <<"1 actor still running">>)
     ).
 
 ensure_structured_error_actors_exist_plural_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({actors_exist, counter, 3}),
     ?assertNotEqual(
-        nomatch, binary:match(Result#beamtalk_error.message, <<"3 actors still running">>)
+        nomatch,
+        binary:match(element(2, Result#beamtalk_error.message), <<"3 actors still running">>)
     ),
-    ?assertNotEqual(nomatch, binary:match(Result#beamtalk_error.message, <<":kill">>)).
+    ?assertNotEqual(nomatch, binary:match(element(2, Result#beamtalk_error.message), <<":kill">>)).
 
 ensure_structured_error_class_not_found_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({class_not_found, 'Foo'}),
     ?assertMatch(#beamtalk_error{kind = class_not_found}, Result),
     ?assertEqual(
-        <<"Unknown class: Foo. Use Workspace classes to see loaded classes.">>,
+        {beamtalk_string, <<"Unknown class: Foo. Use Workspace classes to see loaded classes.">>},
         Result#beamtalk_error.message
     ).
 
@@ -380,7 +394,10 @@ ensure_structured_error_method_not_found_atom_selector_test() ->
         {method_not_found, 'Counter', increment}
     ),
     ?assertMatch(#beamtalk_error{kind = does_not_understand}, Result),
-    ?assertEqual(<<"Counter does not understand 'increment'">>, Result#beamtalk_error.message),
+    ?assertEqual(
+        {beamtalk_string, <<"Counter does not understand 'increment'">>},
+        Result#beamtalk_error.message
+    ),
     ?assertEqual(increment, Result#beamtalk_error.selector).
 
 %% Selector arriving as a binary (no existing atom to attach to the record)
@@ -390,47 +407,61 @@ ensure_structured_error_method_not_found_binary_selector_test() ->
         {method_not_found, 'Counter', <<"increment">>}
     ),
     ?assertMatch(#beamtalk_error{kind = does_not_understand}, Result),
-    ?assertEqual(<<"Counter does not understand 'increment'">>, Result#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Counter does not understand 'increment'">>},
+        Result#beamtalk_error.message
+    ).
 
 ensure_structured_error_unknown_op_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({unknown_op, <<"badop">>}),
     ?assertMatch(#beamtalk_error{kind = unknown_op}, Result),
-    ?assertEqual(<<"Unknown operation: badop">>, Result#beamtalk_error.message).
+    ?assertEqual({beamtalk_string, <<"Unknown operation: badop">>}, Result#beamtalk_error.message).
 
 ensure_structured_error_inspect_failed_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({inspect_failed, "<0.100.0>"}),
     ?assertMatch(#beamtalk_error{kind = inspect_failed}, Result),
-    ?assertEqual(<<"Failed to inspect actor: <0.100.0>">>, Result#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Failed to inspect actor: <0.100.0>">>}, Result#beamtalk_error.message
+    ).
 
 ensure_structured_error_actor_not_alive_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({actor_not_alive, "<0.100.0>"}),
     ?assertMatch(#beamtalk_error{kind = actor_not_alive}, Result),
-    ?assertEqual(<<"Actor is not alive: <0.100.0>">>, Result#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Actor is not alive: <0.100.0>">>}, Result#beamtalk_error.message
+    ).
 
 ensure_structured_error_no_source_file_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({no_source_file, "counter"}),
     ?assertMatch(#beamtalk_error{kind = no_source_file}, Result),
     ?assertNotEqual(
         nomatch,
-        binary:match(Result#beamtalk_error.message, <<"No source file recorded for module">>)
+        binary:match(
+            element(2, Result#beamtalk_error.message), <<"No source file recorded for module">>
+        )
     ).
 
 ensure_structured_error_module_not_loaded_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({module_not_loaded, <<"counter">>}),
     ?assertMatch(#beamtalk_error{kind = module_not_loaded}, Result),
     ?assertNotEqual(
-        nomatch, binary:match(Result#beamtalk_error.message, <<"Module not loaded: counter">>)
+        nomatch,
+        binary:match(element(2, Result#beamtalk_error.message), <<"Module not loaded: counter">>)
     ).
 
 ensure_structured_error_missing_module_name_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({missing_module_name, reload}),
     ?assertMatch(#beamtalk_error{kind = missing_module_name}, Result),
-    ?assertNotEqual(nomatch, binary:match(Result#beamtalk_error.message, <<":reload">>)).
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Result#beamtalk_error.message), <<":reload">>)
+    ).
 
 ensure_structured_error_session_creation_failed_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({session_creation_failed, timeout}),
     ?assertMatch(#beamtalk_error{kind = session_creation_failed}, Result),
-    ?assertEqual(<<"Failed to create session: timeout">>, Result#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Failed to create session: timeout">>}, Result#beamtalk_error.message
+    ).
 
 %% no raw-`~p` fallthrough for known tuples —
 %% {registration_error, ...} was already structured here, but was previously
@@ -441,7 +472,9 @@ ensure_structured_error_registration_error_no_raw_fallthrough_test() ->
         {registration_error, {'Counter', already_registered}}
     ),
     ?assertMatch(#beamtalk_error{kind = registration_error}, Result),
-    ?assertEqual(nomatch, binary:match(Result#beamtalk_error.message, <<"{registration_error">>)).
+    ?assertEqual(
+        nomatch, binary:match(element(2, Result#beamtalk_error.message), <<"{registration_error">>)
+    ).
 
 %% previously this clause silently dropped the exception Class,
 %% diverging from beamtalk_repl_json's separate "Evaluation error: Class:Reason"
@@ -449,7 +482,9 @@ ensure_structured_error_registration_error_no_raw_fallthrough_test() ->
 ensure_structured_error_eval_error_generic_preserves_class_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error({eval_error, error, badarg}),
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
-    ?assertEqual(<<"Evaluation error: error:badarg">>, Result#beamtalk_error.message).
+    ?assertEqual(
+        {beamtalk_string, <<"Evaluation error: error:badarg">>}, Result#beamtalk_error.message
+    ).
 
 %%% ============================================================================
 %%% ensure_structured_error/2 — delegation for the vocabulary above

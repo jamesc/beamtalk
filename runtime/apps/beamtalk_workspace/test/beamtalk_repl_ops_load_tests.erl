@@ -1398,7 +1398,7 @@ parity_setup() ->
         {error, {already_started, _}} -> ok
     end,
     application:ensure_all_started(beamtalk_runtime),
-    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj =
         Tmp ++ "/bt_ops_parity_" ++ integer_to_list(erlang:unique_integer([positive])),
     ok = file:make_dir(Proj),
@@ -1844,7 +1844,7 @@ setup_project_class(ClassName, Src) ->
         {error, {already_started, _}} -> ok
     end,
     application:ensure_all_started(beamtalk_runtime),
-    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj = Tmp ++ "/bt_section_" ++ integer_to_list(erlang:unique_integer([positive])),
     ok = file:make_dir(Proj),
     ok = file:write_file(
@@ -2829,8 +2829,8 @@ sync_project_fails_attach_with_multiple_stale_deps_test() ->
         Result = beamtalk_repl_ops_load:sync_project(Dir, #{}),
         ?assertMatch({error, #beamtalk_error{kind = stale_dependency}}, Result),
         {error, #beamtalk_error{message = Message}} = Result,
-        ?assert(binary:match(Message, <<"dep_one">>) =/= nomatch),
-        ?assert(binary:match(Message, <<"dep_two">>) =/= nomatch)
+        ?assert(binary:match(element(2, Message), <<"dep_one">>) =/= nomatch),
+        ?assert(binary:match(element(2, Message), <<"dep_two">>) =/= nomatch)
     after
         rm_temp_dir(Dir)
     end.

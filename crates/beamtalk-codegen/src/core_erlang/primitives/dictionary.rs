@@ -7,7 +7,7 @@
 //!
 //! Dictionaries are Erlang maps — immutable key-value collections.
 
-use super::{call_p0_self, call_self_p0, param};
+use super::{call_p0_self, call_self_p0, param, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -87,7 +87,9 @@ pub(crate) fn generate_dictionary_bif(
             "includes",
             param(params, 0, "_Element"),
         )),
-        "printString" => Some(Document::Str("call 'beamtalk_map':'print_string'(Self)")),
+        "printString" => Some(wrap_string_result(Document::Str(
+            "call 'beamtalk_map':'print_string'(Self)",
+        ))),
         _ => None,
     }
 }

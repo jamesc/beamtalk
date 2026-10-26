@@ -205,14 +205,22 @@ newClass(Source, Path) ->
 
 %% Both arguments must be Strings. A non-String surfaces a typed error at the
 %% `newClass:at:` boundary rather than a deep crash inside the loader.
+%% BT-4173: String args arrive tagged — normalize first so a bad `path`
+%% is still reported as a `path` error (not `source`) when `source` is tagged.
 -spec validate_new_class_args(term(), term()) ->
     {ok, binary(), binary()} | {error, #beamtalk_error{}}.
-validate_new_class_args(Source, Path) when is_binary(Source), is_binary(Path) ->
-    {ok, Source, Path};
-validate_new_class_args(Source, _Path) when not is_binary(Source) ->
-    {error, new_class_arg_type_error(<<"source">>, Source)};
-validate_new_class_args(_Source, Path) ->
-    {error, new_class_arg_type_error(<<"path">>, Path)}.
+validate_new_class_args(Source, Path) ->
+    S = unwrap_text_arg(Source),
+    P = unwrap_text_arg(Path),
+    case {is_binary(S), is_binary(P)} of
+        {true, true} -> {ok, S, P};
+        {false, _} -> {error, new_class_arg_type_error(<<"source">>, Source)};
+        {true, false} -> {error, new_class_arg_type_error(<<"path">>, Path)}
+    end.
+
+-spec unwrap_text_arg(term()) -> term().
+unwrap_text_arg({beamtalk_string, Bin}) when is_binary(Bin) -> Bin;
+unwrap_text_arg(Other) -> Other.
 
 -spec new_class_arg_type_error(binary(), term()) -> #beamtalk_error{}.
 new_class_arg_type_error(ArgName, Value) ->
@@ -1526,7 +1534,7 @@ Returns a map of `#{PackageName => PackageInfoMap}` for each direct dependency
 of the current workspace package. Returns an empty map if the workspace
 has no package name or no dependencies.
 """.
--spec dependencies() -> #{binary() => map()}.
+-spec dependencies() -> #{beamtalk_string:t() => map()}.
 dependencies() ->
     case beamtalk_workspace_meta:get_package_name() of
         undefined ->
@@ -1806,6 +1814,9 @@ Load a .bt file, compiling and registering the class.
 On success, returns the loaded class object(s) so the REPL displays what was loaded.
 """.
 -spec handle_load(term()) -> term() | {error, #beamtalk_error{}}.
+%% BT-4173: a String path arrives tagged — unwrap to bytes.
+handle_load({beamtalk_string, Path}) when is_binary(Path) ->
+    handle_load(binary_to_list(Path));
 handle_load(Path) when is_binary(Path) ->
     handle_load(binary_to_list(Path));
 handle_load(Path) when is_list(Path) ->

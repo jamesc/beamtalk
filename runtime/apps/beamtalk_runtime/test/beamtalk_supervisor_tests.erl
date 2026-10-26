@@ -1291,7 +1291,9 @@ static_init_config_messaging_self_fails_with_hint_test() ->
             #beamtalk_error{kind = supervisor_start_failed, selector = childSpecs}, Reason
         ),
         #beamtalk_error{hint = Hint} = Reason,
-        ?assertNotEqual(nomatch, binary:match(Hint, <<"do not send messages to `self`">>))
+        ?assertNotEqual(
+            nomatch, binary:match(element(2, Hint), <<"do not send messages to `self`">>)
+        )
     end).
 
 static_init_config_raise_fails_start_with_structured_error_test() ->
@@ -1319,25 +1321,26 @@ static_init_invalid_strategy_and_intensity_fail_with_type_error_test() ->
 start_failed_error_uses_cause_hint_message_or_kind_test() ->
     WithHint = beamtalk_error:new(type_error, 'X', maxChildren, <<"the hint">>),
     NoHint = (beamtalk_error:new(does_not_understand, 'X', childSpecs))#beamtalk_error{
-        message = <<"the message">>, hint = undefined
+        message = {beamtalk_string, <<"the message">>}, hint = undefined
     },
     Bare = (beamtalk_error:new(boom, 'X', childSpecs))#beamtalk_error{
-        message = <<>>, hint = undefined
+        message = {beamtalk_string, <<>>}, hint = undefined
     },
     Hint = fun(Reason) ->
         (beamtalk_supervisor:start_failed_error(supervisor_start_failed, 'Sup', supervise, Reason))#beamtalk_error.hint
     end,
-    ?assertEqual(<<"the hint">>, Hint(WithHint)),
-    ?assertEqual(<<"the message">>, Hint(NoHint)),
-    ?assertEqual(<<"boom">>, Hint(Bare)),
+    ?assertEqual({beamtalk_string, <<"the hint">>}, Hint(WithHint)),
+    ?assertEqual({beamtalk_string, <<"the message">>}, Hint(NoHint)),
+    ?assertEqual({beamtalk_string, <<"boom">>}, Hint(Bare)),
     %% A static parent reports a nested supervisor's init failure wrapped by
     %% OTP; the nested error's hint still reaches the caller.
     ?assertEqual(
-        <<"the hint">>, Hint({shutdown, {failed_to_start_child, 'Inner', WithHint}})
+        {beamtalk_string, <<"the hint">>},
+        Hint({shutdown, {failed_to_start_child, 'Inner', WithHint}})
     ),
     %% ... at any depth (Root -> MidSup -> Pool).
     ?assertEqual(
-        <<"the hint">>,
+        {beamtalk_string, <<"the hint">>},
         Hint(
             {shutdown,
                 {failed_to_start_child, 'Mid',
@@ -1346,7 +1349,7 @@ start_failed_error_uses_cause_hint_message_or_kind_test() ->
     ),
     ?assertNotEqual(
         nomatch,
-        binary:match(Hint({shutdown, {failed_to_start_child, 'Mid', boom}}), <<"boom">>)
+        binary:match(element(2, Hint({shutdown, {failed_to_start_child, 'Mid', boom}})), <<"boom">>)
     ),
     ?assertMatch(
         #beamtalk_error{details = #{cause := WithHint}},
@@ -1364,7 +1367,7 @@ static_init_two_argument_form_rejects_pre_adr_0135_module_test() ->
         end,
     ?assertMatch(#beamtalk_error{kind = supervisor_start_failed}, Reason),
     #beamtalk_error{hint = Hint} = Reason,
-    ?assertNotEqual(nomatch, binary:match(Hint, <<"recompile">>)).
+    ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"recompile">>)).
 
 static_init_config_class_var_write_raises_read_only_test() ->
     %% ADR 0130 §5: configuration still runs in a read-only snapshot region of

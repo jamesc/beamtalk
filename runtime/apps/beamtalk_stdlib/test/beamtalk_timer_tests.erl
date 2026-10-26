@@ -186,13 +186,13 @@ is_active_repeating_stays_active_test() ->
 
 print_string_active_test() ->
     T = beamtalk_timer:'after:do:'(10000, fun() -> ok end),
-    ?assertEqual(<<"Timer(active)">>, beamtalk_timer:'printString'(T)),
+    ?assertEqual({beamtalk_string, <<"Timer(active)">>}, beamtalk_timer:'printString'(T)),
     beamtalk_timer:cancel(T).
 
 print_string_inactive_test() ->
     T = beamtalk_timer:'after:do:'(10000, fun() -> ok end),
     beamtalk_timer:cancel(T),
-    ?assertEqual(<<"Timer(inactive)">>, beamtalk_timer:'printString'(T)).
+    ?assertEqual({beamtalk_string, <<"Timer(inactive)">>}, beamtalk_timer:'printString'(T)).
 
 %%% ============================================================================
 %%% FFI shims
@@ -307,7 +307,7 @@ send_after_to_registered_name_test() ->
 send_after_cancel_before_fire_test() ->
     T = beamtalk_timer:'send:to:after:'(never, self(), 10000),
     ?assert(beamtalk_timer:'isActive'(T)),
-    ?assertEqual(<<"Timer(active)">>, beamtalk_timer:'printString'(T)),
+    ?assertEqual({beamtalk_string, <<"Timer(active)">>}, beamtalk_timer:'printString'(T)),
     ?assert(beamtalk_timer:cancel(T)),
     ?assertNot(beamtalk_timer:'isActive'(T)),
     ?assertNot(beamtalk_timer:cancel(T)),

@@ -1758,7 +1758,7 @@ map_type_remote_type_no_context_resolves_test() ->
 
 make_tmp_dir() ->
     TmpDir = filename:join(
-        binary_to_list(beamtalk_file:'tempDirectory'()),
+        binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
         "bt_spec_reader_test_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = filelib:ensure_dir(filename:join(TmpDir, "x")),

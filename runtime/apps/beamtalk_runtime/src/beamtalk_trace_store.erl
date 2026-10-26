@@ -585,31 +585,31 @@ handle_call({export_traces, Opts}, _From, State) ->
     Result = do_export_traces(Opts),
     {reply, Result, State};
 handle_call(get_stats, _From, State) ->
-    Result = to_binary_keys(do_get_stats(undefined)),
+    Result = to_bt_keys(do_get_stats(undefined)),
     {reply, Result, State};
 handle_call({get_stats, Pid}, _From, State) ->
-    Result = to_binary_keys(do_get_stats(Pid)),
+    Result = to_bt_keys(do_get_stats(Pid)),
     {reply, Result, State};
 handle_call({slow_methods, Limit}, _From, State) ->
-    Result = [to_binary_keys(M) || M <- do_slow_methods(Limit)],
+    Result = [to_bt_keys(M) || M <- do_slow_methods(Limit)],
     {reply, Result, State};
 handle_call({slow_methods, Limit, SortBy}, _From, State) ->
-    Result = [to_binary_keys(M) || M <- do_slow_methods(Limit, SortBy)],
+    Result = [to_bt_keys(M) || M <- do_slow_methods(Limit, SortBy)],
     {reply, Result, State};
 handle_call({hot_methods, Limit}, _From, State) ->
-    Result = [to_binary_keys(M) || M <- do_hot_methods(Limit)],
+    Result = [to_bt_keys(M) || M <- do_hot_methods(Limit)],
     {reply, Result, State};
 handle_call({error_methods, Limit}, _From, State) ->
-    Result = [to_binary_keys(M) || M <- do_error_methods(Limit)],
+    Result = [to_bt_keys(M) || M <- do_error_methods(Limit)],
     {reply, Result, State};
 handle_call({bottlenecks, Limit}, _From, State) ->
-    Result = [to_binary_keys(M) || M <- do_bottlenecks(Limit)],
+    Result = [to_bt_keys(M) || M <- do_bottlenecks(Limit)],
     {reply, Result, State};
 handle_call({actor_health, Pid}, _From, State) ->
-    Result = to_binary_keys(do_actor_health(Pid)),
+    Result = to_bt_keys(do_actor_health(Pid)),
     {reply, Result, State};
 handle_call(system_health, _From, State) ->
-    Result = to_binary_keys(do_system_health(State)),
+    Result = to_bt_keys(do_system_health(State)),
     {reply, Result, State};
 handle_call({max_events, Size}, _From, State) ->
     persistent_term:put(?PT_MAX_EVENTS, Size),
@@ -1330,7 +1330,9 @@ do_export_traces(Opts) ->
             <<"filters">> => FilterMap,
             <<"total_events">> => Count
         },
-        <<"traces">> => Limited
+        %% BT-4173: trace maps carry tagged Strings for Beamtalk lookup —
+        %% unwrap to raw binaries for the JSON encoder.
+        <<"traces">> => beamtalk_primitive:deep_unwrap_strings(Limited)
     },
     JsonBin = beamtalk_json:prettify_term(Export),
     case file:write_file(Path, JsonBin) of
@@ -1365,37 +1367,40 @@ trace_event_to_map({
     Metadata,
     WallClockUs
 }) ->
+    %% BT-4173: keys and display-text values are Strings; numbers stay.
+    S = fun(Bin) -> beamtalk_primitive:string_from_binary(Bin) end,
     Base = #{
-        <<"timestamp_us">> => WallClockUs,
-        <<"actor">> => list_to_binary(pid_to_list(Pid)),
-        <<"class">> => atom_to_binary(Class, utf8),
-        <<"selector">> => atom_to_binary(Selector, utf8),
-        <<"mode">> => atom_to_binary(Mode, utf8),
-        <<"duration_us">> => DurationNs div 1000,
-        <<"outcome">> => atom_to_binary(Outcome, utf8)
+        S(<<"timestamp_us">>) => WallClockUs,
+        S(<<"actor">>) => S(list_to_binary(pid_to_list(Pid))),
+        S(<<"class">>) => S(atom_to_binary(Class, utf8)),
+        S(<<"selector">>) => S(atom_to_binary(Selector, utf8)),
+        S(<<"mode">>) => S(atom_to_binary(Mode, utf8)),
+        S(<<"duration_us">>) => DurationNs div 1000,
+        S(<<"outcome">>) => S(atom_to_binary(Outcome, utf8))
     },
     case maps:size(Metadata) of
         0 -> Base;
         %% Base wins on key collisions (metadata cannot override core fields)
-        _ -> maps:merge(sanitize_metadata(Metadata), Base)
+        _ -> maps:merge(tag_metadata_keys(sanitize_metadata(Metadata)), Base)
     end;
 trace_event_to_map({
     {MonotonicNs, _Unique}, Pid, Class, Selector, Mode, DurationNs, Outcome, Metadata
 }) ->
     %% Legacy format: fall back to monotonic-derived timestamp
+    S = fun(Bin) -> beamtalk_primitive:string_from_binary(Bin) end,
     Base = #{
-        <<"timestamp_us">> => MonotonicNs div 1000,
-        <<"actor">> => list_to_binary(pid_to_list(Pid)),
-        <<"class">> => atom_to_binary(Class, utf8),
-        <<"selector">> => atom_to_binary(Selector, utf8),
-        <<"mode">> => atom_to_binary(Mode, utf8),
-        <<"duration_us">> => DurationNs div 1000,
-        <<"outcome">> => atom_to_binary(Outcome, utf8)
+        S(<<"timestamp_us">>) => MonotonicNs div 1000,
+        S(<<"actor">>) => S(list_to_binary(pid_to_list(Pid))),
+        S(<<"class">>) => S(atom_to_binary(Class, utf8)),
+        S(<<"selector">>) => S(atom_to_binary(Selector, utf8)),
+        S(<<"mode">>) => S(atom_to_binary(Mode, utf8)),
+        S(<<"duration_us">>) => DurationNs div 1000,
+        S(<<"outcome">>) => S(atom_to_binary(Outcome, utf8))
     },
     case maps:size(Metadata) of
         0 -> Base;
         %% Base wins on key collisions (metadata cannot override core fields)
-        _ -> maps:merge(sanitize_metadata(Metadata), Base)
+        _ -> maps:merge(tag_metadata_keys(sanitize_metadata(Metadata)), Base)
     end.
 
 -doc """
@@ -1420,20 +1425,40 @@ sanitize_metadata(Meta) ->
         Meta
     ).
 
+-doc """
+Tag sanitized metadata keys as Strings for Beamtalk lookup. Values pass
+through untouched: a user Binary stays a Binary (only generated display text
+would want tagging, and the two are indistinguishable here).
+""".
+-spec tag_metadata_keys(map()) -> map().
+tag_metadata_keys(Meta) ->
+    maps:from_list([
+        {beamtalk_primitive:string_from_binary(K), V}
+     || {K, V} <- maps:to_list(Meta)
+    ]).
+
 -doc "Convert a single value to a JSON-safe representation.".
 -spec sanitize_value(term()) -> term().
+sanitize_value({beamtalk_string, Bin}) when is_binary(Bin) ->
+    %% BT-4173: unwrap — without this a String falls into the ~p catch-all.
+    Bin;
 sanitize_value(V) when is_binary(V) -> V;
 sanitize_value(V) when is_integer(V) -> V;
 sanitize_value(V) when is_float(V) -> V;
-sanitize_value(true) -> true;
-sanitize_value(false) -> false;
-sanitize_value(null) -> null;
-sanitize_value(undefined) -> null;
+sanitize_value(true) ->
+    true;
+sanitize_value(false) ->
+    false;
+sanitize_value(null) ->
+    null;
+sanitize_value(undefined) ->
+    null;
 sanitize_value(V) when is_atom(V) -> atom_to_binary(V, utf8);
 sanitize_value(V) when is_pid(V) -> list_to_binary(pid_to_list(V));
 sanitize_value(V) when is_list(V) -> [sanitize_value(E) || E <- V];
 sanitize_value(V) when is_map(V) -> sanitize_metadata(V);
-sanitize_value(V) -> iolist_to_binary(io_lib:format("~p", [V])).
+sanitize_value(V) ->
+    iolist_to_binary(io_lib:format("~p", [V])).
 
 -doc """
 Get aggregate stats, optionally filtered by Pid.
@@ -1744,29 +1769,33 @@ do_system_health(State) ->
     }.
 
 -doc """
-Convert atom map keys to binary for user-facing output.
-Nested maps are converted recursively.
+Convert diagnostic maps to user-facing output (BT-4173): text keys and text
+values become Strings, nested maps and lists recurse. Atoms (statuses,
+selectors), numbers, booleans and nil pass through — Beamtalk compares them
+to symbols/numbers. Every binary here is generated display text, never a
+user byte payload, so tagging all of them is safe.
 """.
--spec to_binary_keys(map()) -> map().
-to_binary_keys(Map) when is_map(Map) ->
+-spec to_bt_keys(map()) -> map().
+to_bt_keys(Map) when is_map(Map) ->
     maps:fold(
         fun(K, V, Acc) ->
-            BinKey =
+            RawKey =
                 case K of
                     _ when is_atom(K) -> atom_to_binary(K, utf8);
                     _ when is_binary(K) -> K;
                     _ -> iolist_to_binary(io_lib:format("~p", [K]))
                 end,
-            BinVal =
-                case V of
-                    _ when is_map(V) -> to_binary_keys(V);
-                    _ -> V
-                end,
-            Acc#{BinKey => BinVal}
+            Acc#{beamtalk_primitive:string_from_binary(RawKey) => to_bt_value(V)}
         end,
         #{},
         Map
     ).
+
+-spec to_bt_value(term()) -> term().
+to_bt_value(V) when is_map(V) -> to_bt_keys(V);
+to_bt_value(V) when is_list(V) -> [to_bt_value(E) || E <- V];
+to_bt_value(V) when is_binary(V) -> beamtalk_primitive:string_from_binary(V);
+to_bt_value(V) -> V.
 
 %%====================================================================
 %% Internal: Clear

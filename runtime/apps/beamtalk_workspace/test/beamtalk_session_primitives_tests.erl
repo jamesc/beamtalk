@@ -147,7 +147,9 @@ current_in_eval_returns_session_test_() ->
                 seed_context(Pid, <<"prim-current-1">>),
                 Session = beamtalk_session_primitives:current(),
                 ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
-                ?assertEqual(<<"prim-current-1">>, beamtalk_session_primitives:id(Session)),
+                ?assertEqual(
+                    {beamtalk_string, <<"prim-current-1">>}, beamtalk_session_primitives:id(Session)
+                ),
                 beamtalk_repl_shell:stop(Pid)
             end)
         ]
@@ -164,7 +166,9 @@ with_id_live_returns_session_test_() ->
                 Pid = start_session(<<"prim-withid-1">>),
                 Session = beamtalk_session_primitives:withId(<<"prim-withid-1">>),
                 ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
-                ?assertEqual(<<"prim-withid-1">>, beamtalk_session_primitives:id(Session)),
+                ?assertEqual(
+                    {beamtalk_string, <<"prim-withid-1">>}, beamtalk_session_primitives:id(Session)
+                ),
                 beamtalk_repl_shell:stop(Pid)
             end)
         ]
@@ -626,7 +630,9 @@ live_sessions_lists_live_shells_test_() ->
                     fun(S) -> ?assertMatch(#{'$beamtalk_class' := 'Session'}, S) end, Sessions
                 ),
                 Ids = lists:sort([beamtalk_session_primitives:id(S) || S <- Sessions]),
-                ?assertEqual([<<"live-a">>, <<"live-b">>], Ids),
+                ?assertEqual(
+                    [{beamtalk_string, <<"live-a">>}, {beamtalk_string, <<"live-b">>}], Ids
+                ),
                 %% PIDs carried by the minted values match the live shells.
                 Pids = lists:sort([maps:get(pid, S) || S <- Sessions]),
                 ?assertEqual(lists:sort([Pid1, Pid2]), Pids),

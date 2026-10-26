@@ -1663,7 +1663,7 @@ restore_home(OldHome) -> os:putenv("HOME", OldHome).
 
 %% Cross-platform absolute temp dir (CLAUDE.md: never hardcode /tmp in tests).
 temp_dir() ->
-    unicode:characters_to_list(beamtalk_file:'tempDirectory'()).
+    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 stop(Pid) ->
     case is_process_alive(Pid) of

@@ -17,19 +17,21 @@ Tests string operations: indexing, slicing, searching, casing, and trimming.
 %%% ============================================================================
 
 at_first_char_test() ->
-    ?assertEqual(<<"h">>, beamtalk_string:at(<<"hello">>, 1)).
+    ?assertEqual({beamtalk_string, <<"h">>}, beamtalk_string:at(<<"hello">>, 1)).
 
 at_last_char_test() ->
-    ?assertEqual(<<"o">>, beamtalk_string:at(<<"hello">>, 5)).
+    ?assertEqual({beamtalk_string, <<"o">>}, beamtalk_string:at(<<"hello">>, 5)).
 
 at_middle_char_test() ->
-    ?assertEqual(<<"l">>, beamtalk_string:at(<<"hello">>, 3)).
+    ?assertEqual({beamtalk_string, <<"l">>}, beamtalk_string:at(<<"hello">>, 3)).
 
 at_utf8_grapheme_test() ->
-    ?assertEqual(<<"\x{E9}"/utf8>>, beamtalk_string:at(<<"caf\x{E9}"/utf8>>, 4)).
+    ?assertEqual({beamtalk_string, <<"\x{E9}"/utf8>>}, beamtalk_string:at(<<"caf\x{E9}"/utf8>>, 4)).
 
 at_emoji_test() ->
-    ?assertEqual(<<"\x{1F44B}"/utf8>>, beamtalk_string:at(<<"hi\x{1F44B}"/utf8>>, 3)).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{1F44B}"/utf8>>}, beamtalk_string:at(<<"hi\x{1F44B}"/utf8>>, 3)
+    ).
 
 at_out_of_bounds_test() ->
     ?assertError(
@@ -87,24 +89,26 @@ at_empty_string_zero_index_test() ->
 %%% ============================================================================
 
 first_returns_first_grapheme_test() ->
-    ?assertEqual(<<"h">>, beamtalk_string:first(<<"hello">>)).
+    ?assertEqual({beamtalk_string, <<"h">>}, beamtalk_string:first(<<"hello">>)).
 
 last_returns_last_grapheme_test() ->
-    ?assertEqual(<<"o">>, beamtalk_string:last(<<"hello">>)).
+    ?assertEqual({beamtalk_string, <<"o">>}, beamtalk_string:last(<<"hello">>)).
 
 first_single_character_test() ->
-    ?assertEqual(<<"x">>, beamtalk_string:first(<<"x">>)),
-    ?assertEqual(<<"x">>, beamtalk_string:last(<<"x">>)).
+    ?assertEqual({beamtalk_string, <<"x">>}, beamtalk_string:first(<<"x">>)),
+    ?assertEqual({beamtalk_string, <<"x">>}, beamtalk_string:last(<<"x">>)).
 
 %% Grapheme-aware, not byte-aware: these are multi-byte in UTF-8.
 first_utf8_grapheme_test() ->
-    ?assertEqual(<<"\x{FC}"/utf8>>, beamtalk_string:first(<<"\x{FC}ber"/utf8>>)).
+    ?assertEqual({beamtalk_string, <<"\x{FC}"/utf8>>}, beamtalk_string:first(<<"\x{FC}ber"/utf8>>)).
 
 last_utf8_grapheme_test() ->
-    ?assertEqual(<<"\x{E9}"/utf8>>, beamtalk_string:last(<<"caf\x{E9}"/utf8>>)).
+    ?assertEqual({beamtalk_string, <<"\x{E9}"/utf8>>}, beamtalk_string:last(<<"caf\x{E9}"/utf8>>)).
 
 last_emoji_test() ->
-    ?assertEqual(<<"\x{1F44B}"/utf8>>, beamtalk_string:last(<<"hi\x{1F44B}"/utf8>>)).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{1F44B}"/utf8>>}, beamtalk_string:last(<<"hi\x{1F44B}"/utf8>>)
+    ).
 
 first_empty_string_test() ->
     ?assertError(
@@ -131,47 +135,55 @@ last_empty_string_test() ->
 %%% ============================================================================
 
 ascii_lowercase_test() ->
-    ?assertEqual(<<"content-type">>, beamtalk_string:ascii_lowercase(<<"Content-TYPE">>)),
-    ?assertEqual(<<"abc xyz 123">>, beamtalk_string:ascii_lowercase(<<"ABC XYZ 123">>)),
-    ?assertEqual(<<>>, beamtalk_string:ascii_lowercase(<<>>)),
-    ?assertEqual(<<"already">>, beamtalk_string:ascii_lowercase(<<"already">>)).
+    ?assertEqual(
+        {beamtalk_string, <<"content-type">>}, beamtalk_string:ascii_lowercase(<<"Content-TYPE">>)
+    ),
+    ?assertEqual(
+        {beamtalk_string, <<"abc xyz 123">>}, beamtalk_string:ascii_lowercase(<<"ABC XYZ 123">>)
+    ),
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:ascii_lowercase(<<>>)),
+    ?assertEqual({beamtalk_string, <<"already">>}, beamtalk_string:ascii_lowercase(<<"already">>)).
 
 ascii_lowercase_non_ascii_untouched_test() ->
     ?assertEqual(
-        unicode:characters_to_binary([$a, 16#C9, $b, 16#130]),
+        {beamtalk_string, unicode:characters_to_binary([$a, 16#C9, $b, 16#130])},
         beamtalk_string:ascii_lowercase(unicode:characters_to_binary([$A, 16#C9, $B, 16#130]))
     ).
 
 capitalize_lowercase_test() ->
-    ?assertEqual(<<"Hello">>, beamtalk_string:capitalize(<<"hello">>)).
+    ?assertEqual({beamtalk_string, <<"Hello">>}, beamtalk_string:capitalize(<<"hello">>)).
 
 capitalize_already_upper_test() ->
-    ?assertEqual(<<"Hello">>, beamtalk_string:capitalize(<<"Hello">>)).
+    ?assertEqual({beamtalk_string, <<"Hello">>}, beamtalk_string:capitalize(<<"Hello">>)).
 
 capitalize_empty_test() ->
-    ?assertEqual(<<>>, beamtalk_string:capitalize(<<>>)).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:capitalize(<<>>)).
 
 capitalize_single_char_test() ->
-    ?assertEqual(<<"A">>, beamtalk_string:capitalize(<<"a">>)).
+    ?assertEqual({beamtalk_string, <<"A">>}, beamtalk_string:capitalize(<<"a">>)).
 
 capitalize_utf8_test() ->
-    ?assertEqual(<<"\x{DC}ber"/utf8>>, beamtalk_string:capitalize(<<"\x{FC}ber"/utf8>>)).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{DC}ber"/utf8>>}, beamtalk_string:capitalize(<<"\x{FC}ber"/utf8>>)
+    ).
 
 %%% ============================================================================
 %%% reverse/1
 %%% ============================================================================
 
 reverse_simple_test() ->
-    ?assertEqual(<<"olleh">>, beamtalk_string:reverse(<<"hello">>)).
+    ?assertEqual({beamtalk_string, <<"olleh">>}, beamtalk_string:reverse(<<"hello">>)).
 
 reverse_empty_test() ->
-    ?assertEqual(<<>>, beamtalk_string:reverse(<<>>)).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:reverse(<<>>)).
 
 reverse_single_char_test() ->
-    ?assertEqual(<<"a">>, beamtalk_string:reverse(<<"a">>)).
+    ?assertEqual({beamtalk_string, <<"a">>}, beamtalk_string:reverse(<<"a">>)).
 
 reverse_utf8_test() ->
-    ?assertEqual(<<"\x{E9}fac"/utf8>>, beamtalk_string:reverse(<<"caf\x{E9}"/utf8>>)).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{E9}fac"/utf8>>}, beamtalk_string:reverse(<<"caf\x{E9}"/utf8>>)
+    ).
 
 %%% ============================================================================
 %%% includes/2
@@ -253,25 +265,25 @@ index_of_utf8_test() ->
 
 split_on_comma_test() ->
     ?assertEqual(
-        [<<"a">>, <<"b">>, <<"c">>],
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}],
         beamtalk_string:split_on(<<"a,b,c">>, <<",">>)
     ).
 
 split_on_no_match_test() ->
     ?assertEqual(
-        [<<"hello">>],
+        [{beamtalk_string, <<"hello">>}],
         beamtalk_string:split_on(<<"hello">>, <<",">>)
     ).
 
 split_on_multi_char_test() ->
     ?assertEqual(
-        [<<"a">>, <<"b">>],
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}],
         beamtalk_string:split_on(<<"a::b">>, <<"::">>)
     ).
 
 split_on_empty_pattern_test() ->
     ?assertEqual(
-        [<<"hello">>],
+        [{beamtalk_string, <<"hello">>}],
         beamtalk_string:split_on(<<"hello">>, <<>>)
     ).
 
@@ -280,13 +292,13 @@ split_on_empty_pattern_test() ->
 %%% ============================================================================
 
 repeat_test() ->
-    ?assertEqual(<<"abcabcabc">>, beamtalk_string:repeat(<<"abc">>, 3)).
+    ?assertEqual({beamtalk_string, <<"abcabcabc">>}, beamtalk_string:repeat(<<"abc">>, 3)).
 
 repeat_zero_test() ->
-    ?assertEqual(<<>>, beamtalk_string:repeat(<<"abc">>, 0)).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:repeat(<<"abc">>, 0)).
 
 repeat_one_test() ->
-    ?assertEqual(<<"abc">>, beamtalk_string:repeat(<<"abc">>, 1)).
+    ?assertEqual({beamtalk_string, <<"abc">>}, beamtalk_string:repeat(<<"abc">>, 1)).
 
 %%% ============================================================================
 %%% as_list/1
@@ -294,7 +306,13 @@ repeat_one_test() ->
 
 as_list_simple_test() ->
     ?assertEqual(
-        [<<"h">>, <<"e">>, <<"l">>, <<"l">>, <<"o">>],
+        [
+            {beamtalk_string, <<"h">>},
+            {beamtalk_string, <<"e">>},
+            {beamtalk_string, <<"l">>},
+            {beamtalk_string, <<"l">>},
+            {beamtalk_string, <<"o">>}
+        ],
         beamtalk_string:as_list(<<"hello">>)
     ).
 
@@ -303,7 +321,12 @@ as_list_empty_test() ->
 
 as_list_utf8_test() ->
     ?assertEqual(
-        [<<"c">>, <<"a">>, <<"f">>, <<"\x{E9}"/utf8>>],
+        [
+            {beamtalk_string, <<"c">>},
+            {beamtalk_string, <<"a">>},
+            {beamtalk_string, <<"f">>},
+            {beamtalk_string, <<"\x{E9}"/utf8>>}
+        ],
         beamtalk_string:as_list(<<"caf\x{E9}"/utf8>>)
     ).
 
@@ -319,14 +342,14 @@ each_calls_block_test() ->
     Self = self(),
     beamtalk_string:each(<<"ab">>, fun(G) -> Self ! {Ref, G} end),
     ?assertEqual(
-        <<"a">>,
+        {beamtalk_string, <<"a">>},
         receive
             {Ref, M1} -> M1
         after 100 -> timeout
         end
     ),
     ?assertEqual(
-        <<"b">>,
+        {beamtalk_string, <<"b">>},
         receive
             {Ref, M2} -> M2
         after 100 -> timeout
@@ -339,27 +362,38 @@ each_calls_block_test() ->
 
 collect_uppercase_test() ->
     ?assertEqual(
-        <<"HI">>,
+        {beamtalk_string, <<"HI">>},
         beamtalk_string:collect(
             <<"hi">>,
-            fun(G) -> unicode:characters_to_binary(string:uppercase(G)) end
+            fun({beamtalk_string, G}) ->
+                beamtalk_primitive:string_from_binary(
+                    unicode:characters_to_binary(string:uppercase(G))
+                )
+            end
         )
     ).
 
 collect_identity_test() ->
-    ?assertEqual(<<"abc">>, beamtalk_string:collect(<<"abc">>, fun(X) -> X end)).
+    ?assertEqual({beamtalk_string, <<"abc">>}, beamtalk_string:collect(<<"abc">>, fun(X) -> X end)).
 
 collect_empty_test() ->
-    ?assertEqual(<<>>, beamtalk_string:collect(<<>>, fun(X) -> X end)).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:collect(<<>>, fun(X) -> X end)).
 
 %%% ============================================================================
 %%% select/2
 %%% ============================================================================
 
 select_vowels_test() ->
-    Vowels = [<<"a">>, <<"e">>, <<"i">>, <<"o">>, <<"u">>],
+    %% BT-4173: iteration yields tagged grapheme Strings.
+    Vowels = [
+        {beamtalk_string, <<"a">>},
+        {beamtalk_string, <<"e">>},
+        {beamtalk_string, <<"i">>},
+        {beamtalk_string, <<"o">>},
+        {beamtalk_string, <<"u">>}
+    ],
     ?assertEqual(
-        <<"eoo">>,
+        {beamtalk_string, <<"eoo">>},
         beamtalk_string:select(
             <<"hello world">>,
             fun(G) -> lists:member(G, Vowels) end
@@ -368,13 +402,13 @@ select_vowels_test() ->
 
 select_all_test() ->
     ?assertEqual(
-        <<"hi">>,
+        {beamtalk_string, <<"hi">>},
         beamtalk_string:select(<<"hi">>, fun(_) -> true end)
     ).
 
 select_none_test() ->
     ?assertEqual(
-        <<>>,
+        {beamtalk_string, <<>>},
         beamtalk_string:select(<<"hi">>, fun(_) -> false end)
     ).
 
@@ -383,9 +417,16 @@ select_none_test() ->
 %%% ============================================================================
 
 reject_vowels_test() ->
-    Vowels = [<<"a">>, <<"e">>, <<"i">>, <<"o">>, <<"u">>],
+    %% BT-4173: iteration yields tagged grapheme Strings.
+    Vowels = [
+        {beamtalk_string, <<"a">>},
+        {beamtalk_string, <<"e">>},
+        {beamtalk_string, <<"i">>},
+        {beamtalk_string, <<"o">>},
+        {beamtalk_string, <<"u">>}
+    ],
     ?assertEqual(
-        <<"hll wrld">>,
+        {beamtalk_string, <<"hll wrld">>},
         beamtalk_string:reject(
             <<"hello world">>,
             fun(G) -> lists:member(G, Vowels) end
@@ -394,18 +435,18 @@ reject_vowels_test() ->
 
 reject_none_test() ->
     ?assertEqual(
-        <<"hi">>,
+        {beamtalk_string, <<"hi">>},
         beamtalk_string:reject(<<"hi">>, fun(_) -> false end)
     ).
 
 reject_all_test() ->
     ?assertEqual(
-        <<>>,
+        {beamtalk_string, <<>>},
         beamtalk_string:reject(<<"hi">>, fun(_) -> true end)
     ).
 
 reject_empty_test() ->
-    ?assertEqual(<<>>, beamtalk_string:reject(<<>>, fun(_) -> true end)).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:reject(<<>>, fun(_) -> true end)).
 
 %%% ============================================================================
 %%% lines/1
@@ -413,31 +454,31 @@ reject_empty_test() ->
 
 lines_newline_test() ->
     ?assertEqual(
-        [<<"a">>, <<"b">>, <<"c">>],
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}],
         beamtalk_string:lines(<<"a\nb\nc">>)
     ).
 
 lines_crlf_test() ->
     ?assertEqual(
-        [<<"a">>, <<"b">>],
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}],
         beamtalk_string:lines(<<"a\r\nb">>)
     ).
 
 lines_mixed_test() ->
     ?assertEqual(
-        [<<"a">>, <<"b">>, <<"c">>],
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}],
         beamtalk_string:lines(<<"a\r\nb\nc">>)
     ).
 
 lines_single_test() ->
     ?assertEqual(
-        [<<"hello">>],
+        [{beamtalk_string, <<"hello">>}],
         beamtalk_string:lines(<<"hello">>)
     ).
 
 lines_empty_test() ->
     ?assertEqual(
-        [<<>>],
+        [{beamtalk_string, <<>>}],
         beamtalk_string:lines(<<>>)
     ).
 
@@ -447,25 +488,25 @@ lines_empty_test() ->
 
 words_basic_test() ->
     ?assertEqual(
-        [<<"hello">>, <<"world">>],
+        [{beamtalk_string, <<"hello">>}, {beamtalk_string, <<"world">>}],
         beamtalk_string:words(<<"hello world">>)
     ).
 
 words_extra_spaces_test() ->
     ?assertEqual(
-        [<<"hello">>, <<"world">>],
+        [{beamtalk_string, <<"hello">>}, {beamtalk_string, <<"world">>}],
         beamtalk_string:words(<<"  hello   world  ">>)
     ).
 
 words_tabs_test() ->
     ?assertEqual(
-        [<<"a">>, <<"b">>],
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}],
         beamtalk_string:words(<<"a\tb">>)
     ).
 
 words_single_test() ->
     ?assertEqual(
-        [<<"hello">>],
+        [{beamtalk_string, <<"hello">>}],
         beamtalk_string:words(<<"hello">>)
     ).
 
@@ -480,21 +521,21 @@ words_empty_test() ->
 %%% ============================================================================
 
 take_basic_test() ->
-    ?assertEqual(<<"hel">>, beamtalk_string:take(<<"hello">>, 3)).
+    ?assertEqual({beamtalk_string, <<"hel">>}, beamtalk_string:take(<<"hello">>, 3)).
 
 take_all_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_string:take(<<"hello">>, 10)).
+    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_string:take(<<"hello">>, 10)).
 
 take_zero_test() ->
-    ?assertEqual(<<>>, beamtalk_string:take(<<"hello">>, 0)).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:take(<<"hello">>, 0)).
 
 take_negative_test() ->
-    ?assertEqual(<<>>, beamtalk_string:take(<<"hello">>, -1)).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:take(<<"hello">>, -1)).
 
 take_utf8_test() ->
     Str = unicode:characters_to_binary("h\x{E9}llo"),
     ?assertEqual(
-        unicode:characters_to_binary("h\x{E9}"),
+        {beamtalk_string, unicode:characters_to_binary("h\x{E9}")},
         beamtalk_string:take(Str, 2)
     ).
 
@@ -503,20 +544,20 @@ take_utf8_test() ->
 %%% ============================================================================
 
 drop_basic_test() ->
-    ?assertEqual(<<"llo">>, beamtalk_string:drop(<<"hello">>, 2)).
+    ?assertEqual({beamtalk_string, <<"llo">>}, beamtalk_string:drop(<<"hello">>, 2)).
 
 drop_all_test() ->
-    ?assertEqual(<<>>, beamtalk_string:drop(<<"hello">>, 10)).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:drop(<<"hello">>, 10)).
 
 drop_zero_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_string:drop(<<"hello">>, 0)).
+    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_string:drop(<<"hello">>, 0)).
 
 drop_negative_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_string:drop(<<"hello">>, -1)).
+    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_string:drop(<<"hello">>, -1)).
 
 drop_utf8_test() ->
     Str = unicode:characters_to_binary("h\x{E9}llo"),
-    ?assertEqual(<<"llo">>, beamtalk_string:drop(Str, 2)).
+    ?assertEqual({beamtalk_string, <<"llo">>}, beamtalk_string:drop(Str, 2)).
 
 %%% ============================================================================
 %%% is_blank/1
@@ -577,19 +618,19 @@ is_alpha_empty_test() ->
 %%% ============================================================================
 
 from_code_point_ascii_test() ->
-    ?assertEqual(<<"A">>, beamtalk_string:from_code_point(65)).
+    ?assertEqual({beamtalk_string, <<"A">>}, beamtalk_string:from_code_point(65)).
 
 from_code_point_lowercase_test() ->
-    ?assertEqual(<<"z">>, beamtalk_string:from_code_point(122)).
+    ?assertEqual({beamtalk_string, <<"z">>}, beamtalk_string:from_code_point(122)).
 
 from_code_point_multibyte_test() ->
-    ?assertEqual(<<"\x{20AC}"/utf8>>, beamtalk_string:from_code_point(8364)).
+    ?assertEqual({beamtalk_string, <<"\x{20AC}"/utf8>>}, beamtalk_string:from_code_point(8364)).
 
 from_code_point_emoji_test() ->
-    ?assertEqual(<<"\x{1F600}"/utf8>>, beamtalk_string:from_code_point(128512)).
+    ?assertEqual({beamtalk_string, <<"\x{1F600}"/utf8>>}, beamtalk_string:from_code_point(128512)).
 
 from_code_point_zero_test() ->
-    ?assertEqual(<<0>>, beamtalk_string:from_code_point(0)).
+    ?assertEqual({beamtalk_string, <<0>>}, beamtalk_string:from_code_point(0)).
 
 from_code_point_negative_raises_test() ->
     ?assertError(
@@ -607,16 +648,18 @@ from_code_point_negative_raises_test() ->
 %%% ============================================================================
 
 from_code_points_ascii_list_test() ->
-    ?assertEqual(<<"Hi">>, beamtalk_string:from_code_points([72, 105])).
+    ?assertEqual({beamtalk_string, <<"Hi">>}, beamtalk_string:from_code_points([72, 105])).
 
 from_code_points_braces_test() ->
-    ?assertEqual(<<"{}">>, beamtalk_string:from_code_points([123, 125])).
+    ?assertEqual({beamtalk_string, <<"{}">>}, beamtalk_string:from_code_points([123, 125])).
 
 from_code_points_empty_test() ->
-    ?assertEqual(<<>>, beamtalk_string:from_code_points([])).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:from_code_points([])).
 
 from_code_points_multibyte_test() ->
-    ?assertEqual(<<"\x{20AC}\x{A3}"/utf8>>, beamtalk_string:from_code_points([8364, 163])).
+    ?assertEqual(
+        {beamtalk_string, <<"\x{20AC}\x{A3}"/utf8>>}, beamtalk_string:from_code_points([8364, 163])
+    ).
 
 from_code_point_non_integer_raises_test() ->
     ?assertError(
@@ -684,13 +727,20 @@ from_code_points_surrogate_in_list_raises_test() ->
 %%% ============================================================================
 
 join_basic_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_string:join([<<"he">>, <<"ll">>, <<"o">>])).
+    ?assertEqual(
+        {beamtalk_string, <<"hello">>},
+        beamtalk_string:join([
+            {beamtalk_string, <<"he">>}, {beamtalk_string, <<"ll">>}, {beamtalk_string, <<"o">>}
+        ])
+    ).
 
 join_empty_test() ->
-    ?assertEqual(<<>>, beamtalk_string:join([])).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_string:join([])).
 
 join_single_test() ->
-    ?assertEqual(<<"abc">>, beamtalk_string:join([<<"abc">>])).
+    ?assertEqual(
+        {beamtalk_string, <<"abc">>}, beamtalk_string:join([{beamtalk_string, <<"abc">>}])
+    ).
 
 %%% ============================================================================
 %%% from_iolist/1
@@ -698,31 +748,31 @@ join_single_test() ->
 
 from_iolist_binary_passthrough_test() ->
     %% Binary argument is returned as-is (line 306).
-    ?assertEqual(<<"hello">>, beamtalk_string:from_iolist(<<"hello">>)).
+    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_string:from_iolist(<<"hello">>)).
 
 from_iolist_valid_utf8_bytes_test() ->
     %% [195, 169] = UTF-8 byte sequence for U+00E9 (e-acute).
     %% iolist_to_binary succeeds, unicode:characters_to_binary validates the
     %% bytes -- result is the same binary (lines 308-325).
-    ?assertEqual(<<"\x{E9}"/utf8>>, beamtalk_string:from_iolist([195, 169])).
+    ?assertEqual({beamtalk_string, <<"\x{E9}"/utf8>>}, beamtalk_string:from_iolist([195, 169])).
 
 from_iolist_charlist_ascii_test() ->
     %% [104, 105] = code points for "hi". iolist_to_binary succeeds and the
     %% resulting bytes are valid UTF-8, so the iolist path returns directly.
-    ?assertEqual(<<"hi">>, beamtalk_string:from_iolist([104, 105])).
+    ?assertEqual({beamtalk_string, <<"hi">>}, beamtalk_string:from_iolist([104, 105])).
 
 from_iolist_invalid_utf8_falls_back_to_charlist_test() ->
     %% [233] = 0xE9. iolist_to_binary succeeds (single byte), but <<0xE9>> is
     %% not valid UTF-8 alone (incomplete sequence), so the impl falls back to
     %% treating the original list as a Unicode charlist: codepoint 233 = U+00E9
     %% (lines 325-344).
-    ?assertEqual(<<"\x{E9}"/utf8>>, beamtalk_string:from_iolist([233])).
+    ?assertEqual({beamtalk_string, <<"\x{E9}"/utf8>>}, beamtalk_string:from_iolist([233])).
 
 from_iolist_large_codepoint_charlist_test() ->
     %% [8364] = U+20AC (euro sign). iolist_to_binary/1 raises badarg (8364 > 255), so
     %% the impl falls straight to the charlist path:
     %% unicode:characters_to_binary([8364]) -> U+20AC (lines 349-357).
-    ?assertEqual(<<"\x{20AC}"/utf8>>, beamtalk_string:from_iolist([8364])).
+    ?assertEqual({beamtalk_string, <<"\x{20AC}"/utf8>>}, beamtalk_string:from_iolist([8364])).
 
 from_iolist_invalid_codepoint_raises_test() ->
     %% [16#D800] is a surrogate. iolist_to_binary raises badarg (>255), and the

@@ -79,7 +79,7 @@ Workspace changes isEmpty
 _meta := ((Erlang beamtalk_workspace_meta) get_metadata) unwrap
 // => _
 
-_projectPath := Erlang maps get: #project_path with: _meta
+_projectPath := (Erlang maps get: #project_path with: _meta) asStringUnchecked
 // => _
 
 _projDir := _projectPath ++ "/bt_e2e_remove_class_roundtrip_" ++ (Erlang erlang) unique_integer asString
@@ -105,7 +105,7 @@ _classPath := _projDir ++ "/RemoveClassRoundTripDemo.bt"
 // same way, never to produce source text that must actually *parse*. This
 // test does need a real newline (a valid two-line class body), so it
 // sidesteps the mismatch entirely via `unicode:characters_to_binary/1`.
-_nl := (Erlang unicode) characters_to_binary: #(10)
+_nl := "\n"
 // => _
 
 _classSource := "Value subclass: RemoveClassRoundTripDemo" ++ _nl ++ "  greet => ""hi from the destructive-flush e2e""" ++ _nl

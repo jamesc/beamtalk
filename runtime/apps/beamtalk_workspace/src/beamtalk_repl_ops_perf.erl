@@ -88,8 +88,10 @@ do_handle_term(<<"export-traces">>, Params, _Msg, _SessionPid) ->
             error(#beamtalk_error{
                 kind = io_error,
                 class = 'Tracing',
-                message = ErrMsg,
-                hint = <<"Check file path and permissions.">>,
+                message = beamtalk_primitive:string_from_binary(ErrMsg),
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"Check file path and permissions.">>
+                ),
                 details = #{}
             })
     end.
@@ -149,10 +151,14 @@ build_trace_filter_opts(Params) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
-                message = iolist_to_binary(
-                    io_lib:format("Invalid min_duration_ns: ~p", [BadNs])
+                message = beamtalk_primitive:string_from_binary(
+                    iolist_to_binary(
+                        io_lib:format("Invalid min_duration_ns: ~p", [BadNs])
+                    )
                 ),
-                hint = <<"min_duration_ns must be a non-negative integer (nanoseconds).">>,
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"min_duration_ns must be a non-negative integer (nanoseconds).">>
+                ),
                 details = #{}
             })
     end.
@@ -178,7 +184,10 @@ apply_limit(Traces, _) ->
 Parse a PID string (e.g. <<"<0.123.0>">>) to an Erlang pid.
 Raises a structured beamtalk_error on invalid input.
 """.
--spec parse_pid(binary()) -> pid().
+-spec parse_pid(binary() | beamtalk_string:t()) -> pid().
+parse_pid({beamtalk_string, PidBin}) when is_binary(PidBin) ->
+    %% BT-4173: pid strings from the REPL protocol arrive tagged.
+    parse_pid(PidBin);
 parse_pid(PidBin) when is_binary(PidBin) ->
     try
         list_to_pid(binary_to_list(PidBin))
@@ -187,10 +196,12 @@ parse_pid(PidBin) when is_binary(PidBin) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
-                message = iolist_to_binary(
-                    [<<"Invalid actor PID: ">>, PidBin]
+                message = beamtalk_primitive:string_from_binary(
+                    iolist_to_binary([<<"Invalid actor PID: ">>, PidBin])
                 ),
-                hint = <<"Use list-actors to find valid PIDs, e.g. \"<0.123.0>\"">>,
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"Use list-actors to find valid PIDs, e.g. \"<0.123.0>\"">>
+                ),
                 details = #{}
             })
     end.
@@ -209,10 +220,14 @@ parse_selector(SelectorBin) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
-                message = iolist_to_binary(
-                    [<<"Unknown selector: ">>, SelectorBin]
+                message = beamtalk_primitive:string_from_binary(
+                    iolist_to_binary(
+                        [<<"Unknown selector: ">>, SelectorBin]
+                    )
                 ),
-                hint = <<"The selector must match an existing method name.">>,
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"The selector must match an existing method name.">>
+                ),
                 details = #{}
             })
     end.
@@ -231,10 +246,14 @@ parse_class(ClassBin) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
-                message = iolist_to_binary(
-                    [<<"Unknown class: ">>, ClassBin]
+                message = beamtalk_primitive:string_from_binary(
+                    iolist_to_binary(
+                        [<<"Unknown class: ">>, ClassBin]
+                    )
                 ),
-                hint = <<"The class must match an existing actor class name.">>,
+                hint = beamtalk_primitive:string_from_binary(
+                    <<"The class must match an existing actor class name.">>
+                ),
                 details = #{}
             })
     end.
@@ -255,10 +274,12 @@ parse_outcome(OutcomeBin) ->
     error(#beamtalk_error{
         kind = invalid_argument,
         class = 'Tracing',
-        message = iolist_to_binary(
-            [<<"Invalid outcome: ">>, OutcomeBin]
+        message = beamtalk_primitive:string_from_binary(
+            iolist_to_binary(
+                [<<"Invalid outcome: ">>, OutcomeBin]
+            )
         ),
-        hint = <<"Valid outcomes are: ok, error, timeout.">>,
+        hint = beamtalk_primitive:string_from_binary(<<"Valid outcomes are: ok, error, timeout.">>),
         details = #{}
     }).
 

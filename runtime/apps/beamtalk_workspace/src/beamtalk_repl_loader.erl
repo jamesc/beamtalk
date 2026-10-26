@@ -2125,7 +2125,10 @@ protocol_reload_rejected_error(ProtocolAtoms, Failures) ->
 
 -spec format_fanout_failure(atom(), term()) -> binary().
 format_fanout_failure(ClassAtom, Reason) ->
-    #beamtalk_error{message = Msg} = beamtalk_repl_errors:ensure_structured_error(Reason),
+    #beamtalk_error{message = TaggedMsg} = beamtalk_repl_errors:ensure_structured_error(
+        Reason
+    ),
+    Msg = beamtalk_text:to_binary(TaggedMsg),
     iolist_to_binary([<<"  - ">>, atom_to_binary(ClassAtom, utf8), <<": ">>, Msg]).
 
 %% Structured failure for a (rare) stage-2 install failure — `Who` is either
@@ -2137,7 +2140,10 @@ protocol_reload_install_failed_error(Who, Reason) ->
             protocol -> <<"the protocol module">>;
             ClassAtom -> atom_to_binary(ClassAtom, utf8)
         end,
-    #beamtalk_error{message = ReasonMsg} = beamtalk_repl_errors:ensure_structured_error(Reason),
+    #beamtalk_error{message = TaggedReason} = beamtalk_repl_errors:ensure_structured_error(
+        Reason
+    ),
+    ReasonMsg = beamtalk_text:to_binary(TaggedReason),
     Err0 = beamtalk_error:new(runtime_error, 'Protocol'),
     Err1 = beamtalk_error:with_message(
         Err0,

@@ -1302,9 +1302,12 @@ bad_subscribe_args(AnnouncementClass, SubscriberPid, OnceFlag) ->
         kind = invalid_argument,
         class = 'Announcer',
         selector = 'subscribe',
-        message =
-            <<"subscribe expects an atom class, a pid subscriber, and a boolean once flag">>,
-        hint = <<"check the announcement class and subscriber arguments">>,
+        message = beamtalk_primitive:string_from_binary(
+            <<"subscribe expects an atom class, a pid subscriber, and a boolean once flag">>
+        ),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"check the announcement class and subscriber arguments">>
+        ),
         details = #{
             announcement_class => AnnouncementClass,
             subscriber => SubscriberPid,
@@ -1344,9 +1347,13 @@ The unused argument is the event passed from the Beamtalk FFI dispatch.
         kind = unsupported_operation,
         class = 'SystemAnnouncer',
         selector = 'announceAndWait:',
-        message = <<"announceAndWait: is not available on SystemAnnouncer (async-only bus)">>,
-        hint =
-            <<"Use announce: for the system bus, or use a per-instance Announcer for sync dispatch">>,
+        %% BT-4173: error message/hint are tagged Strings (see beamtalk.hrl).
+        message = beamtalk_primitive:string_from_binary(
+            <<"announceAndWait: is not available on SystemAnnouncer (async-only bus)">>
+        ),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Use announce: for the system bus, or use a per-instance Announcer for sync dispatch">>
+        ),
         details = #{}
     },
     beamtalk_error:raise(Error).

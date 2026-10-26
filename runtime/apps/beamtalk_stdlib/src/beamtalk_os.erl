@@ -33,7 +33,11 @@ and capturing their output as a String.
 %%% ============================================================================
 
 -doc """
-Execute a shell command and return its trimmed stdout as a binary.
+Execute a shell command and return its trimmed stdout as a String.
+
+BT-4170: this is Os's native text boundary — stdout is only text when
+valid UTF-8, anything else raises `parse_error` (use `Subprocess` for
+byte-oriented output).
 
 Runs the command through the platform shell (`/bin/sh -c` on Unix,
 `cmd.exe /c` on Windows) via an Erlang port.
@@ -41,8 +45,11 @@ Blocks until the command exits or the default 30-second timeout fires.
 Raises `#beamtalk_error{kind = timeout}` on timeout,
 `output_too_large` if stdout exceeds 10 MB.
 """.
--spec 'run:'(binary()) -> binary().
+-spec 'run:'(beamtalk_string:t() | binary()) -> beamtalk_string:t().
+%% BT-4173: a bare binary spells the same command (pre-flip calls stay valid).
 'run:'(Cmd) when is_binary(Cmd) ->
+    'run:'({beamtalk_string, Cmd});
+'run:'({beamtalk_string, Cmd}) when is_binary(Cmd) ->
     run_cmd(Cmd, ?DEFAULT_TIMEOUT_MS, 'run:');
 'run:'(_) ->
     raise_type_error('run:', <<"Argument must be a String">>).
@@ -54,20 +61,25 @@ Behaves like `run:` but the caller controls the wall-clock deadline.
 Raises `#beamtalk_error{kind = timeout}` if the command has not exited
 within `TimeoutMs` milliseconds.
 """.
--spec 'run:timeout:'(binary(), Timeout :: pos_integer()) -> binary().
-'run:timeout:'(Cmd, TimeoutMs) when is_binary(Cmd), is_integer(TimeoutMs), TimeoutMs > 0 ->
+-spec 'run:timeout:'(beamtalk_string:t() | binary(), Timeout :: pos_integer()) ->
+    beamtalk_string:t().
+'run:timeout:'(Cmd, TimeoutMs) when is_binary(Cmd) ->
+    'run:timeout:'({beamtalk_string, Cmd}, TimeoutMs);
+'run:timeout:'({beamtalk_string, Cmd}, TimeoutMs) when
+    is_binary(Cmd), is_integer(TimeoutMs), TimeoutMs > 0
+->
     run_cmd(Cmd, TimeoutMs, 'run:timeout:');
-'run:timeout:'(Cmd, _TimeoutMs) when not is_binary(Cmd) ->
-    raise_type_error('run:timeout:', <<"Argument must be a String">>);
+'run:timeout:'({beamtalk_string, _}, _TimeoutMs) ->
+    raise_type_error('run:timeout:', <<"Timeout must be a positive Integer">>);
 'run:timeout:'(_, _) ->
-    raise_type_error('run:timeout:', <<"Timeout must be a positive Integer">>).
+    raise_type_error('run:timeout:', <<"Argument must be a String">>).
 
 -doc "FFI shim for (Erlang beamtalk_os) run: cmd dispatch.".
--spec run(binary()) -> binary().
+-spec run(beamtalk_string:t() | binary()) -> beamtalk_string:t().
 run(Cmd) -> 'run:'(Cmd).
 
 -doc "FFI shim for (Erlang beamtalk_os) run: cmd timeout: ms dispatch.".
--spec run(binary(), Timeout :: pos_integer()) -> binary().
+-spec run(beamtalk_string:t() | binary(), Timeout :: pos_integer()) -> beamtalk_string:t().
 run(Cmd, TimeoutMs) -> 'run:timeout:'(Cmd, TimeoutMs).
 
 %%% ============================================================================
@@ -81,7 +93,7 @@ On Unix, `{spawn, Cmd}` routes through `/bin/sh -c` automatically.
 On Windows we must explicitly route through `cmd.exe /c` so that shell
 builtins (e.g. `ver`) and chaining operators (`&`) work correctly.
 """.
--spec run_cmd(binary(), pos_integer(), atom()) -> binary().
+-spec run_cmd(binary(), pos_integer(), atom()) -> beamtalk_string:t().
 run_cmd(Cmd, TimeoutMs, Selector) ->
     Port = open_shell_port(Cmd),
     Timer = erlang:start_timer(TimeoutMs, self(), os_run_timeout),
@@ -103,7 +115,7 @@ open_shell_port(Cmd) ->
     end.
 
 -doc "Accumulate port output, then trim trailing whitespace on exit.".
--spec collect(port(), binary(), reference(), atom()) -> binary().
+-spec collect(port(), binary(), reference(), atom()) -> beamtalk_string:t().
 collect(Port, Acc, Timer, Selector) ->
     receive
         {Port, {data, Data}} ->
@@ -121,7 +133,21 @@ collect(Port, Acc, Timer, Selector) ->
             %% already been enqueued before cancel_timer/1 ran.
             erlang:cancel_timer(Timer),
             flush_timer(Timer),
-            string:trim(Acc, trailing);
+            %% BT-4170: validate the text boundary — see run:/1.
+            Trimmed = string:trim(Acc, trailing),
+            case beamtalk_binary:check_utf8(Trimmed) of
+                {ok, Valid} ->
+                    beamtalk_primitive:string_from_binary(Valid);
+                {error, Offset} ->
+                    Error0 = beamtalk_error:new(parse_error, 'Os'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_details(Error1, #{offset => Offset}),
+                    Error3 = beamtalk_error:with_hint(
+                        Error2,
+                        <<"Command output is not valid UTF-8; use Subprocess for byte output">>
+                    ),
+                    beamtalk_error:raise(Error3)
+            end;
         {timeout, Timer, os_run_timeout} ->
             port_close(Port),
             flush_port(Port),

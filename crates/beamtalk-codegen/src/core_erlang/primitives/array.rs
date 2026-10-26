@@ -10,7 +10,7 @@
 //! canonical index→value `'data'` map (ADR 0090):
 //!   `#{'$beamtalk_class' => 'Array', 'data' => #{0 => V0, 1 => V1, ...}}`
 
-use super::param;
+use super::{param, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -75,7 +75,9 @@ pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Do
             leaf::var(p0.to_string()),
             ")"
         ]),
-        "printString" => Some(Document::Str("call 'beamtalk_array':'print_string'(Self)")),
+        "printString" => Some(wrap_string_result(Document::Str(
+            "call 'beamtalk_array':'print_string'(Self)",
+        ))),
         _ => None,
     }
 }

@@ -51,21 +51,30 @@ detecting the operating system and architecture, and querying process info.
 %%% ============================================================================
 
 -doc "Read an environment variable. Returns nil if not set.".
--spec 'getEnv:'(binary()) -> binary() | 'nil'.
+-spec 'getEnv:'(beamtalk_string:t() | binary()) -> beamtalk_string:t() | 'nil'.
+%% BT-4173: a tagged String unwraps to the same name bytes.
+'getEnv:'({beamtalk_string, Name}) when is_binary(Name) ->
+    'getEnv:'(Name);
 'getEnv:'(Name) when is_binary(Name) ->
     case os:getenv(binary_to_list(Name)) of
         false -> nil;
-        Value -> list_to_binary(Value)
+        Value -> beamtalk_primitive:string_from_binary(list_to_binary(Value))
     end;
 'getEnv:'(_) ->
     beamtalk_error:raise_type_error('System', 'getEnv:', <<"Argument must be a String">>).
 
 -doc "Read an environment variable with a default fallback.".
--spec 'getEnv:default:'(binary(), Default :: binary()) -> binary().
+-spec 'getEnv:default:'(beamtalk_string:t() | binary(), Default :: beamtalk_string:t() | binary()) ->
+    beamtalk_string:t() | binary().
+'getEnv:default:'({beamtalk_string, Name}, Default) when is_binary(Name) ->
+    'getEnv:default:'(Name, Default);
+'getEnv:default:'(Name, {beamtalk_string, Default}) when is_binary(Name) ->
+    'getEnv:default:'(Name, Default);
 'getEnv:default:'(Name, Default) when is_binary(Name), is_binary(Default) ->
     case os:getenv(binary_to_list(Name)) of
-        false -> Default;
-        Value -> list_to_binary(Value)
+        %% BT-4173: the default was a String at the boundary — re-tag it.
+        false -> beamtalk_primitive:string_from_binary(Default);
+        Value -> beamtalk_primitive:string_from_binary(list_to_binary(Value))
     end;
 'getEnv:default:'(Name, _Default) when not is_binary(Name) ->
     beamtalk_error:raise_type_error(
@@ -77,7 +86,12 @@ detecting the operating system and architecture, and querying process info.
     ).
 
 -doc "Set an environment variable. Returns true.".
--spec 'setEnv:value:'(binary(), Value :: binary()) -> 'true'.
+-spec 'setEnv:value:'(beamtalk_string:t() | binary(), Value :: beamtalk_string:t() | binary()) ->
+    'true'.
+'setEnv:value:'({beamtalk_string, Name}, Value) when is_binary(Name) ->
+    'setEnv:value:'(Name, Value);
+'setEnv:value:'(Name, {beamtalk_string, Value}) when is_binary(Name) ->
+    'setEnv:value:'(Name, Value);
 'setEnv:value:'(Name, Value) when is_binary(Name), is_binary(Value) ->
     os:putenv(binary_to_list(Name), binary_to_list(Value)),
     true;
@@ -91,7 +105,9 @@ detecting the operating system and architecture, and querying process info.
     ).
 
 -doc "Remove an environment variable. Returns true.".
--spec 'unsetEnv:'(binary()) -> 'true'.
+-spec 'unsetEnv:'(beamtalk_string:t() | binary()) -> 'true'.
+'unsetEnv:'({beamtalk_string, Name}) when is_binary(Name) ->
+    'unsetEnv:'(Name);
 'unsetEnv:'(Name) when is_binary(Name) ->
     os:unsetenv(binary_to_list(Name)),
     true;
@@ -102,30 +118,32 @@ detecting the operating system and architecture, and querying process info.
 Return the OS platform name.
 Maps Erlang os:type() to familiar platform strings.
 """.
--spec osPlatform() -> binary().
+-spec osPlatform() -> beamtalk_string:t().
 osPlatform() ->
     {_Family, Name} = os:type(),
-    platform_name(Name).
+    beamtalk_primitive:string_from_binary(platform_name(Name)).
 
 -doc "Return the OS family: unix or win32.".
--spec osFamily() -> binary().
+-spec osFamily() -> beamtalk_string:t().
 osFamily() ->
     {Family, _Name} = os:type(),
-    atom_to_binary(Family, utf8).
+    beamtalk_primitive:string_from_binary(atom_to_binary(Family, utf8)).
 
 -doc "Return the system architecture string.".
--spec architecture() -> binary().
+-spec architecture() -> beamtalk_string:t().
 architecture() ->
-    list_to_binary(erlang:system_info(system_architecture)).
+    beamtalk_primitive:string_from_binary(
+        list_to_binary(erlang:system_info(system_architecture))
+    ).
 
 -doc "Return the machine hostname.".
--spec hostname() -> binary().
+-spec hostname() -> beamtalk_string:t().
 hostname() ->
     %% inet:gethostname/0 spec says it always returns {ok, Hostname},
     %% but we wrap in try for defensive safety.
     try
         {ok, Hostname} = inet:gethostname(),
-        list_to_binary(Hostname)
+        beamtalk_primitive:string_from_binary(list_to_binary(Hostname))
     catch
         Class:Reason ->
             ?LOG_ERROR("Hostname lookup failed", #{
@@ -143,9 +161,11 @@ hostname() ->
     end.
 
 -doc "Return the OTP version string.".
--spec erlangVersion() -> binary().
+-spec erlangVersion() -> beamtalk_string:t().
 erlangVersion() ->
-    list_to_binary(erlang:system_info(otp_release)).
+    beamtalk_primitive:string_from_binary(
+        list_to_binary(erlang:system_info(otp_release))
+    ).
 
 -doc "Return the OS process ID as an integer.".
 -spec pid() -> integer().
@@ -211,16 +231,17 @@ selectors `(Erlang beamtalk_system) getEnv: name` and
 `(Erlang beamtalk_system) getEnv: name default: fallback` dispatch to
 getEnv/1 and getEnv/2 respectively, delegating to the canonical forms.
 """.
--spec getEnv(binary()) -> binary() | 'nil'.
+-spec getEnv(beamtalk_string:t() | binary()) -> beamtalk_string:t() | 'nil'.
 getEnv(Name) -> 'getEnv:'(Name).
 
--spec getEnv(binary(), Default :: binary()) -> binary().
+-spec getEnv(beamtalk_string:t() | binary(), Default :: beamtalk_string:t() | binary()) ->
+    beamtalk_string:t() | binary().
 getEnv(Name, Default) -> 'getEnv:default:'(Name, Default).
 
--spec setEnv(binary(), Value :: binary()) -> 'true'.
+-spec setEnv(beamtalk_string:t() | binary(), Value :: beamtalk_string:t() | binary()) -> 'true'.
 setEnv(Name, Value) -> 'setEnv:value:'(Name, Value).
 
--spec unsetEnv(binary()) -> 'true'.
+-spec unsetEnv(beamtalk_string:t() | binary()) -> 'true'.
 unsetEnv(Name) -> 'unsetEnv:'(Name).
 
 %%% ============================================================================

@@ -15,7 +15,7 @@ Tests expression evaluation, file loading, and compilation.
 %% Helpers
 %%====================================================================
 
-temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
+temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 %%====================================================================
 %% Tests
@@ -84,7 +84,7 @@ do_eval_no_compiler_error_test() ->
 
     %% Error message should mention compiler
     {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
-    ?assert(re:run(Msg, <<"compiler">>, [caseless, {capture, none}]) =:= match).
+    ?assert(re:run(element(2, Msg), <<"compiler">>, [caseless, {capture, none}]) =:= match).
 
 %%% File loading tests
 
@@ -121,7 +121,7 @@ wrap_load_err_message_contains_reason_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     {error, #beamtalk_error{message = Msg}, <<>>, [], _} =
         beamtalk_repl_eval:wrap_load_err(bad_module, [], State),
-    ?assert(binary:match(Msg, <<"bad_module">>) =/= nomatch).
+    ?assert(binary:match(element(2, Msg), <<"bad_module">>) =/= nomatch).
 
 wrap_load_err_preserves_warnings_test() ->
     %% wrap_load_err/3 passes Warnings through to the result tuple.
@@ -1645,8 +1645,12 @@ handle_protocol_definition_register_class_failure_returns_structured_error_test(
     {error, Err, _, _, _} = Result,
     ?assertEqual(registration_error, Err#beamtalk_error.kind),
     %% Verify the error message mentions the module and reason
-    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"registration failed">>)),
-    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"registration_boom">>)),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration failed">>)
+    ),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration_boom">>)
+    ),
     %% Cleanup
     code:purge(ModuleName),
     code:delete(ModuleName).
@@ -1678,7 +1682,9 @@ handle_protocol_definition_register_class_returns_error_tuple_test() ->
     ?assertMatch({error, #beamtalk_error{}, <<>>, [], _}, Result),
     {error, Err, _, _, _} = Result,
     ?assertEqual(registration_error, Err#beamtalk_error.kind),
-    ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"registration_declined">>)),
+    ?assertNotEqual(
+        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration_declined">>)
+    ),
     code:purge(ModuleName),
     code:delete(ModuleName).
 
@@ -2124,12 +2130,12 @@ do_eval_class_definition_over_earlier_turn_alias_is_a_collision_error() ->
     ?assertMatch({error, #beamtalk_error{}, _, _, _}, Result),
     {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
     ?assert(
-        binary:match(Msg, <<"EvalCollisionPoint">>) =/= nomatch,
+        binary:match(element(2, Msg), <<"EvalCollisionPoint">>) =/= nomatch,
         io_lib:format("expected the collision message to name the alias, got: ~p", [Msg])
     ),
     ?assert(
-        binary:match(Msg, <<"namespace">>) =/= nomatch orelse
-            binary:match(Msg, <<"collides">>) =/= nomatch,
+        binary:match(element(2, Msg), <<"namespace">>) =/= nomatch orelse
+            binary:match(element(2, Msg), <<"collides">>) =/= nomatch,
         io_lib:format("expected a namespace-collision message, got: ~p", [Msg])
     ).
 
@@ -2485,7 +2491,7 @@ do_dispatch_unknown_selector() ->
     ),
     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}, <<>>, [], _}, Result),
     {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
-    ?assert(binary:match(Msg, <<"EvalDispatchDnuCls">>) =/= nomatch).
+    ?assert(binary:match(element(2, Msg), <<"EvalDispatchDnuCls">>) =/= nomatch).
 
 %%====================================================================
 %% eval_with_self/2 (ADR 0095 §1): every
@@ -2880,7 +2886,7 @@ do_dispatch_class_not_found_test() ->
         {error, #beamtalk_error{kind = class_not_found}, <<>>, [], _}, Result
     ),
     {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
-    ?assert(binary:match(Msg, <<"NoSuchClassBT2691">>) =/= nomatch).
+    ?assert(binary:match(element(2, Msg), <<"NoSuchClassBT2691">>) =/= nomatch).
 
 %% resolve_entry/2 against the live image: a loaded class + an existing selector
 %% yields `{ok, {class, ClassPid}, SelectorAtom}` (the inputs `class_send/3`
@@ -2934,4 +2940,4 @@ compile_method_stdlib_refused() ->
     ),
     ?assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result),
     {error, #beamtalk_error{message = Msg}} = Result,
-    ?assert(binary:match(Msg, <<"read-only">>) =/= nomatch).
+    ?assert(binary:match(element(2, Msg), <<"read-only">>) =/= nomatch).

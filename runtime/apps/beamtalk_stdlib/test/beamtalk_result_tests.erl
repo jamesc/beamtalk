@@ -282,7 +282,7 @@ unwrap_error_raw_symbol_test() ->
             ?assertEqual('Result', Inner#beamtalk_error.class),
             ?assertEqual('unwrap', Inner#beamtalk_error.selector),
             ?assertEqual(
-                <<"unwrap called on Result error: #not_found">>,
+                {beamtalk_string, <<"unwrap called on Result error: #not_found">>},
                 Inner#beamtalk_error.message
             )
     end.
@@ -295,7 +295,7 @@ unwrap_error_raw_map_test() ->
     catch
         error:Caught ->
             #{error := Inner} = Caught,
-            Msg = Inner#beamtalk_error.message,
+            {beamtalk_string, Msg} = Inner#beamtalk_error.message,
             %% Should use Beamtalk formatting, not raw Erlang ~p
             ?assertNotEqual(nomatch, binary:match(Msg, <<"unwrap called on Result error:">>)),
             %% Must NOT contain Erlang binary syntax
@@ -360,7 +360,8 @@ from_tuple_invalid_raises_type_error_test() ->
             #{error := Inner} = Caught,
             ?assertEqual('Result', Inner#beamtalk_error.class),
             ?assertEqual('fromTuple:', Inner#beamtalk_error.selector),
-            ?assertNotEqual(nomatch, binary:match(Inner#beamtalk_error.message, <<"fromTuple:">>))
+            {beamtalk_string, Msg} = Inner#beamtalk_error.message,
+            ?assertNotEqual(nomatch, binary:match(Msg, <<"fromTuple:">>))
     end.
 
 %%% ============================================================================

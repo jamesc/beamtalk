@@ -43,7 +43,7 @@ xref/registry state.
 %% Shared harness (mirrors beamtalk_behaviour_intrinsics_rename_to_tests.erl)
 %%====================================================================
 
-temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
+temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 start_fixture(Prefix, Files) ->
     %% ADR 0129: workspace-only operations (rename/remove/revert) refuse with
@@ -585,9 +585,14 @@ rename_selector_collision(_Fixture) ->
         } ->
             [
                 ?_assertEqual(selector_already_exists, Kind),
-                ?_assert(binary:match(Message, <<"already defines #bar locally">>) =/= nomatch),
-                ?_assert(binary:match(Message, <<"refusing to overwrite">>) =/= nomatch),
-                ?_assert(binary:match(Hint, <<"removeSelector: #bar">>) =/= nomatch)
+                ?_assert(
+                    binary:match(element(2, Message), <<"already defines #bar locally">>) =/=
+                        nomatch
+                ),
+                ?_assert(
+                    binary:match(element(2, Message), <<"refusing to overwrite">>) =/= nomatch
+                ),
+                ?_assert(binary:match(element(2, Hint), <<"removeSelector: #bar">>) =/= nomatch)
             ]
     end.
 
@@ -643,7 +648,7 @@ rename_selector_target_collision(_Fixture) ->
             [
                 ?_assertEqual(selector_already_exists, Kind),
                 ?_assert(
-                    binary:match(Message, <<"Bt3279TargetCollisionSub">>) =/= nomatch
+                    binary:match(element(2, Message), <<"Bt3279TargetCollisionSub">>) =/= nomatch
                 ),
                 %% Nothing was mutated: the refusal happens before any rewrite.
                 ?_assertEqual(
@@ -710,7 +715,8 @@ rename_selector_inherited_target_collision(_Fixture) ->
             [
                 ?_assertEqual(selector_already_exists, Kind),
                 ?_assert(
-                    binary:match(Message, <<"Bt3279InheritedTCollisionSub">>) =/= nomatch
+                    binary:match(element(2, Message), <<"Bt3279InheritedTCollisionSub">>) =/=
+                        nomatch
                 ),
                 %% Nothing was mutated: the refusal happens before any rewrite.
                 ?_assertEqual(

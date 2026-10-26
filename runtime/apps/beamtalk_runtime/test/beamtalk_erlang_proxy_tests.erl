@@ -28,6 +28,9 @@ bt4153_ok_stub() -> ok.
 
 bt4153_charlist_stub() -> "hi".
 
+%% Post-BT-4173: error message/hint and coerced FFI text are tagged Strings.
+bt_bin({beamtalk_string, B}) -> B.
+
 explicit_undef_stub(_Arg) -> erlang:error(undef).
 
 %% Raises `undef` with an empty stacktrace from inside an exported target.
@@ -94,13 +97,15 @@ dispatch_class_test() ->
 dispatch_print_string_test() ->
     Proxy = beamtalk_erlang_proxy:new(lists),
     ?assertEqual(
-        <<"#ErlangModule<lists>">>, beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
+        {beamtalk_string, <<"#ErlangModule<lists>">>},
+        beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
     ).
 
 dispatch_print_string_erlang_test() ->
     Proxy = beamtalk_erlang_proxy:new(erlang),
     ?assertEqual(
-        <<"#ErlangModule<erlang>">>, beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
+        {beamtalk_string, <<"#ErlangModule<erlang>">>},
+        beamtalk_erlang_proxy:dispatch('printString', [], Proxy)
     ).
 
 %%% ===================================================================
@@ -150,7 +155,7 @@ dispatch_unknown_function_raises_test() ->
             ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             ?assertEqual('nonexistent_function:', Inner#beamtalk_error.selector),
-            ?assert(is_binary(Inner#beamtalk_error.hint))
+            ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.hint)
     end.
 
 dispatch_unknown_module_raises_test() ->
@@ -179,7 +184,10 @@ send_erlang_module_class_test() ->
 
 send_erlang_module_print_string_test() ->
     Proxy = beamtalk_erlang_proxy:new(lists),
-    ?assertEqual(<<"#ErlangModule<lists>">>, beamtalk_primitive:send(Proxy, 'printString', [])).
+    ?assertEqual(
+        {beamtalk_string, <<"#ErlangModule<lists>">>},
+        beamtalk_primitive:send(Proxy, 'printString', [])
+    ).
 
 %%% ===================================================================
 %%% Erlang class-side proxy (construct ErlangModule)
@@ -350,7 +358,7 @@ dispatch_badarg_from_binary_to_atom_preserves_details_test() ->
         error:#{error := Inner} ->
             ?assertEqual(type_error, Inner#beamtalk_error.kind),
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
-            ?assert(is_binary(Inner#beamtalk_error.hint)),
+            ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.hint),
             Details = Inner#beamtalk_error.details,
             ?assertEqual(badarg, maps:get(erlang_error, Details))
     end.
@@ -439,7 +447,7 @@ dispatch_generic_error_maps_to_runtime_error_test() ->
             ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             ?assertEqual('error:', Inner#beamtalk_error.selector),
-            ?assert(is_binary(Inner#beamtalk_error.message)),
+            ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.message),
             Details = Inner#beamtalk_error.details,
             ?assertEqual({custom_reason, 42}, maps:get(reason, Details)),
             %% The generic path also carries the FFI `erlang_error`
@@ -460,8 +468,8 @@ dispatch_badkey_is_readable_key_error_test() ->
         error:#{error := Inner} ->
             ?assertEqual(key_error, Inner#beamtalk_error.kind),
             Msg = Inner#beamtalk_error.message,
-            ?assert(is_binary(Msg)),
-            ?assertNotEqual(nomatch, binary:match(Msg, <<"key not found">>))
+            ?assertMatch({beamtalk_string, _}, Msg),
+            ?assertNotEqual(nomatch, binary:match(bt_bin(Msg), <<"key not found">>))
     end.
 
 %%% ===================================================================
@@ -480,9 +488,9 @@ dispatch_wrong_arity_raises_test() ->
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             ?assertEqual('reverse', Inner#beamtalk_error.selector),
             %% Hint should mention existing arities
-            ?assert(is_binary(Inner#beamtalk_error.hint)),
+            ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.hint),
             Hint = Inner#beamtalk_error.hint,
-            ?assertNotEqual(nomatch, binary:match(Hint, <<"exists but was called with">>))
+            ?assertNotEqual(nomatch, binary:match(bt_bin(Hint), <<"exists but was called with">>))
     end.
 
 dispatch_wrong_arity_keyword_raises_test() ->
@@ -496,7 +504,7 @@ dispatch_wrong_arity_keyword_raises_test() ->
             ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind),
             Hint = Inner#beamtalk_error.hint,
             ?assertNotEqual(
-                nomatch, binary:match(Hint, <<"exists but was called with 3 arguments">>)
+                nomatch, binary:match(bt_bin(Hint), <<"exists but was called with 3 arguments">>)
             )
     end.
 
@@ -518,7 +526,7 @@ dispatch_missing_function_raises_test() ->
             ?assertNotEqual(
                 nomatch,
                 binary:match(
-                    Hint,
+                    bt_bin(Hint),
                     <<"This Erlang function does not exist">>
                 )
             )
@@ -540,7 +548,7 @@ dispatch_unloaded_module_raises_test() ->
             ?assertNotEqual(
                 nomatch,
                 binary:match(
-                    Hint,
+                    bt_bin(Hint),
                     <<"is not loaded. Is it on the code path?">>
                 )
             )
@@ -556,13 +564,13 @@ dispatch_methods_returns_exports_test() ->
     ?assert(is_list(Result)),
     ?assert(length(Result) > 0),
     %% Should contain reverse/1
-    ?assert(lists:member(<<"reverse/1">>, Result)),
+    ?assert(lists:member({beamtalk_string, <<"reverse/1">>}, Result)),
     %% Should contain sort/1
-    ?assert(lists:member(<<"sort/1">>, Result)),
+    ?assert(lists:member({beamtalk_string, <<"sort/1">>}, Result)),
     %% Should NOT contain module_info
     ?assertNot(
         lists:any(
-            fun(S) ->
+            fun({beamtalk_string, S}) ->
                 binary:match(S, <<"module_info">>) =/= nomatch
             end,
             Result
@@ -586,7 +594,7 @@ dispatch_methods_unloaded_module_raises_test() ->
             ?assertNotEqual(
                 nomatch,
                 binary:match(
-                    Hint,
+                    bt_bin(Hint),
                     <<"is not loaded. Is it on the code path?">>
                 )
             )
@@ -629,7 +637,7 @@ dispatch_call_args_wrong_arity_test() ->
         error:#{error := Inner} ->
             ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind),
             Hint = Inner#beamtalk_error.hint,
-            ?assertNotEqual(nomatch, binary:match(Hint, <<"exists but was called with">>))
+            ?assertNotEqual(nomatch, binary:match(bt_bin(Hint), <<"exists but was called with">>))
     end.
 
 dispatch_call_args_non_atom_selector_test() ->
@@ -642,7 +650,7 @@ dispatch_call_args_non_atom_selector_test() ->
         error:#{error := Inner} ->
             ?assertEqual(type_error, Inner#beamtalk_error.kind),
             Hint = Inner#beamtalk_error.hint,
-            ?assertNotEqual(nomatch, binary:match(Hint, <<"must be a Symbol">>))
+            ?assertNotEqual(nomatch, binary:match(bt_bin(Hint), <<"must be a Symbol">>))
     end.
 
 dispatch_call_args_non_tuple_args_test() ->
@@ -655,7 +663,7 @@ dispatch_call_args_non_tuple_args_test() ->
         error:#{error := Inner} ->
             ?assertEqual(type_error, Inner#beamtalk_error.kind),
             Hint = Inner#beamtalk_error.hint,
-            ?assertNotEqual(nomatch, binary:match(Hint, <<"must be a Tuple">>))
+            ?assertNotEqual(nomatch, binary:match(bt_bin(Hint), <<"must be a Tuple">>))
     end.
 
 %%% ===================================================================
@@ -666,14 +674,14 @@ direct_call_basic_test() ->
     %% Direct call to lists:reverse works normally
     ?assertEqual([3, 2, 1], beamtalk_erlang_proxy:direct_call(lists, reverse, [[1, 2, 3]])).
 
-direct_call_os_cmd_coerces_binary_test() ->
+direct_call_os_cmd_coerces_string_test() ->
     %% os:cmd/1 expects a charlist — binary arg should be auto-coerced.
     %% Use string:trim/2 (no Characters arg) to strip all trailing whitespace;
     %% string:trim/3 with "\r\n" does not work in OTP 28 because CRLF is a
     %% single grapheme cluster and [13,10] does not match it.
     Result = beamtalk_erlang_proxy:direct_call(os, cmd, [<<"echo hello">>]),
-    ?assert(is_binary(Result)),
-    ?assertEqual(<<"hello">>, string:trim(Result, trailing)).
+    ?assertMatch({beamtalk_string, _}, Result),
+    ?assertEqual(<<"hello">>, string:trim(bt_bin(Result), trailing)).
 
 direct_call_exit_propagates_test() ->
     %% exit should propagate naturally, NOT be wrapped
@@ -747,11 +755,11 @@ direct_call_coercion_retry_still_fails_test() ->
 
 direct_call_charlist_result_without_badarg_test() ->
     %% Functions that accept non-binary args but return charlists
-    %% should still have their results coerced to binaries.
+    %% should still have their results coerced to Strings.
     %% calendar:system_time_to_rfc3339/1 accepts an integer and returns a charlist.
     Now = erlang:system_time(second),
     Result = beamtalk_erlang_proxy:direct_call(calendar, system_time_to_rfc3339, [Now]),
-    ?assert(is_binary(Result)).
+    ?assertMatch({beamtalk_string, _}, Result).
 
 direct_call_integer_list_not_coerced_test() ->
     %% Ensure lists of integers that aren't valid charlists are NOT coerced.
@@ -768,13 +776,13 @@ direct_call_empty_list_not_coerced_test() ->
 %%% dispatch/3 charlist coercion via validate_and_apply
 %%% ===================================================================
 
-dispatch_os_cmd_coerces_binary_test() ->
+dispatch_os_cmd_coerces_string_test() ->
     %% Verify coercion also works through dispatch path.
-    %% Use string:trim/2 (no Characters arg) — see direct_call_os_cmd_coerces_binary_test.
+    %% Use string:trim/2 (no Characters arg) — see direct_call_os_cmd_coerces_string_test.
     Proxy = beamtalk_erlang_proxy:new(os),
     Result = beamtalk_erlang_proxy:dispatch('cmd:', [<<"echo hello">>], Proxy),
-    ?assert(is_binary(Result)),
-    ?assertEqual(<<"hello">>, string:trim(Result, trailing)).
+    ?assertMatch({beamtalk_string, _}, Result),
+    ?assertEqual(<<"hello">>, string:trim(bt_bin(Result), trailing)).
 
 %%% ===================================================================
 %%% Beamtalk error passthrough
@@ -899,15 +907,15 @@ coerce_result_non_tuple_passthrough_test() ->
     ?assertEqual([1, 2, 3], beamtalk_erlang_proxy:coerce_result([1, 2, 3])),
     ?assertEqual(foo, beamtalk_erlang_proxy:coerce_result(foo)).
 
-coerce_result_ok_charlist_normalized_to_binary_test() ->
-    %% {ok, Charlist} should normalize charlist to binary inside Result
+coerce_result_ok_charlist_normalized_to_string_test() ->
+    %% {ok, Charlist} should normalize charlist to a String inside Result
     Result = beamtalk_erlang_proxy:coerce_result({ok, "hello"}),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(true, maps:get('isOk', Result)),
-    ?assertEqual(<<"hello">>, maps:get('okValue', Result)).
+    ?assertEqual({beamtalk_string, <<"hello">>}, maps:get('okValue', Result)).
 
-coerce_result_error_charlist_normalized_to_binary_test() ->
-    %% {error, Charlist} should normalize charlist to binary inside Result
+coerce_result_error_charlist_normalized_to_string_test() ->
+    %% {error, Charlist} should normalize charlist to a String inside Result
     Result = beamtalk_erlang_proxy:coerce_result({error, "not found"}),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(false, maps:get('isOk', Result)),
@@ -923,14 +931,14 @@ coerce_result_ok_non_charlist_unchanged_test() ->
     ?assertEqual(<<"binary">>, maps:get('okValue', Result2)).
 
 direct_call_ok_tuple_coerced_to_result_test() ->
-    %% file:get_cwd/0 returns {ok, Dir} — should become Result ok: Dir (binary)
+    %% file:get_cwd/0 returns {ok, Dir} — should become Result ok: Dir (String)
     Result = beamtalk_erlang_proxy:direct_call(file, get_cwd, []),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(true, maps:get('isOk', Result)),
-    %% okValue should be a binary string (charlist coerced inside Result)
+    %% okValue should be a String (charlist coerced inside Result)
     OkValue = maps:get('okValue', Result),
     ?assertNotEqual(nil, OkValue),
-    ?assert(is_binary(OkValue)).
+    ?assertMatch({beamtalk_string, _}, OkValue).
 
 direct_call_error_tuple_coerced_to_result_test() ->
     %% file:read_file on nonexistent file returns {error, enoent}
@@ -944,8 +952,8 @@ dispatch_ok_tuple_coerced_to_result_test() ->
     Result = beamtalk_erlang_proxy:dispatch('get_cwd', [], Proxy),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(true, maps:get('isOk', Result)),
-    %% charlist inside Result should be coerced to binary
-    ?assert(is_binary(maps:get('okValue', Result))).
+    %% charlist inside Result should be coerced to a String
+    ?assertMatch({beamtalk_string, _}, maps:get('okValue', Result)).
 
 %%% ===================================================================
 %%% ADR 0101 Part 2 — unified wrap-by-default on the inline-FFI boundary
@@ -1039,7 +1047,7 @@ native_call_ok_tuple_coerced_to_result_test() ->
     Result = beamtalk_erlang_proxy:native_call(file, get_cwd, [], {'File', 'cwd'}),
     ?assertEqual('Result', maps:get('$beamtalk_class', Result)),
     ?assertEqual(true, maps:get('isOk', Result)),
-    ?assert(is_binary(maps:get('okValue', Result))).
+    ?assertMatch({beamtalk_string, _}, maps:get('okValue', Result)).
 
 native_call_error_tuple_coerced_to_result_test() ->
     %% ADR 0076: {error, R} return is coerced to a Result error value
@@ -1185,8 +1193,8 @@ native_call_charlist_coercion_retry_test() ->
     %% native: path also retries binary→charlist on badarg.
     %% os:cmd/1 expects a charlist; a binary self/arg must be coerced.
     Result = beamtalk_erlang_proxy:native_call(os, cmd, [<<"echo hello">>], {'Os', 'cmd:'}),
-    ?assert(is_binary(Result)),
-    ?assertEqual(<<"hello">>, string:trim(Result, trailing)).
+    ?assertMatch({beamtalk_string, _}, Result),
+    ?assertEqual(<<"hello">>, string:trim(bt_bin(Result), trailing)).
 
 %%% ===================================================================
 %%% BT-4021 — lazy export validation
@@ -1212,7 +1220,7 @@ assert_undef_inside_callee_is_runtime_error(Fun) ->
             %% canonical undef classifier names the *nested* missing function.
             ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
             ?assertEqual(
-                <<"Undefined function: completely_bogus_module_xyz:missing/1">>,
+                {beamtalk_string, <<"Undefined function: completely_bogus_module_xyz:missing/1">>},
                 Inner#beamtalk_error.message
             ),
             Details = Inner#beamtalk_error.details,
@@ -1253,7 +1261,7 @@ direct_call_wrong_arity_error_unchanged_test() ->
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             ?assertEqual(reverse, Inner#beamtalk_error.selector),
             ?assertEqual(
-                <<"lists:reverse/1, 2 exists but was called with 3 arguments">>,
+                {beamtalk_string, <<"lists:reverse/1, 2 exists but was called with 3 arguments">>},
                 Inner#beamtalk_error.hint
             ),
             ?assertEqual(
@@ -1277,7 +1285,8 @@ direct_call_missing_function_error_unchanged_test() ->
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             ?assertEqual(nonexistent_xyz, Inner#beamtalk_error.selector),
             ?assertEqual(
-                <<"This Erlang function does not exist. Check spelling and arity.">>,
+                {beamtalk_string,
+                    <<"This Erlang function does not exist. Check spelling and arity.">>},
                 Inner#beamtalk_error.hint
             ),
             ?assertEqual(
@@ -1296,7 +1305,7 @@ direct_call_unloaded_module_error_unchanged_test() ->
             ?assertNotEqual(
                 nomatch,
                 binary:match(
-                    Inner#beamtalk_error.hint, <<"is not loaded. Is it on the code path?">>
+                    bt_bin(Inner#beamtalk_error.hint), <<"is not loaded. Is it on the code path?">>
                 )
             )
     end.
@@ -1406,7 +1415,7 @@ dispatch_call_args_errors_unchanged_test() ->
             ?assertEqual(arity_mismatch, Arity#beamtalk_error.kind),
             ?assertEqual('call:args:', Arity#beamtalk_error.selector),
             ?assertEqual(
-                <<"lists:reverse/1, 2 exists but was called with 0 arguments">>,
+                {beamtalk_string, <<"lists:reverse/1, 2 exists but was called with 0 arguments">>},
                 Arity#beamtalk_error.hint
             )
     end,
@@ -1517,7 +1526,7 @@ direct_call_tracks_hot_reload_and_purge_test() ->
                 ?assertEqual(does_not_understand, Purged#beamtalk_error.kind),
                 ?assertNotEqual(
                     nomatch,
-                    binary:match(Purged#beamtalk_error.hint, <<"is not loaded">>)
+                    binary:match(bt_bin(Purged#beamtalk_error.hint), <<"is not loaded">>)
                 )
         end
     after
@@ -1695,7 +1704,7 @@ is_beamtalk_module_conformance_test() ->
      || M <- Beamtalk
     ],
     [
-        ?assertEqual(<<"hi">>, beamtalk_erlang_proxy:coerce_ffi_result(M, "hi"))
+        ?assertEqual({beamtalk_string, <<"hi">>}, beamtalk_erlang_proxy:coerce_ffi_result(M, "hi"))
      || M <- Stock
     ].
 
@@ -1790,7 +1799,7 @@ coerce_ffi_result_3_absolute_test() ->
     %% Mode-divergent shapes, pinned per mode: a charlist payload converts
     %% under stock but is preserved under beamtalk-nonraw.
     StockOkCharlist = beamtalk_erlang_proxy:coerce_ffi_result(lists, {ok, "hi"}, stock),
-    ?assertEqual(<<"hi">>, maps:get('okValue', StockOkCharlist)),
+    ?assertEqual({beamtalk_string, <<"hi">>}, maps:get('okValue', StockOkCharlist)),
     BtOkCharlist = beamtalk_erlang_proxy:coerce_ffi_result(beamtalk_stream, {ok, "hi"}, beamtalk),
     ?assertEqual("hi", maps:get('okValue', BtOkCharlist)),
     %% Raw-result modules pass even ok/error-tagged results through ...

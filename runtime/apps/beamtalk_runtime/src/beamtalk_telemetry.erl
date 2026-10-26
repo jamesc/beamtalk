@@ -407,6 +407,8 @@ check_block(Block, 3, Sel) ->
     ).
 
 check_handler_id(Id, _Sel) when is_atom(Id); is_binary(Id) -> ok;
+%% BT-4173: a String handler id arrives tagged.
+check_handler_id({beamtalk_string, Id}, _Sel) when is_binary(Id) -> ok;
 check_handler_id(Id, Sel) -> type_error(Sel, <<"handlerId must be a Symbol or a String">>, Id).
 
 %% The runtime's own handler ids (`beamtalk_trace_store`'s) cannot be attached

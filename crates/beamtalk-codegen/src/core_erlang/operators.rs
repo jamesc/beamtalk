@@ -160,10 +160,12 @@ impl CoreErlangGenerator {
         // the bare BIF and dispatch everything else:
         //   * Arithmetic — `is_number`: number→BIF, anything else→dispatch.
         //   * Comparison — `is_number or is_binary` (numbers, characters,
-        //     strings): Erlang `<` is a total order over every term and never
+        //     binaries): Erlang `<` is a total order over every term and never
         //     raises, so a bare BIF on any other receiver would *silently*
         //     term-order it (`nil < 5` → `false`). Every other receiver —
-        //     objects, but also `nil`, symbols, lists, tuples — dispatches, so
+        //     objects, but also `nil`, symbols, lists, tuples (including
+        //     tagged `String`s, BT-4170 — dispatch term-compares them with
+        //     the same outcome, one hop slower) — dispatches, so
         //     it reaches its own `<` or raises `does_not_understand` (BT-3924).
         // `%`/`**`/equality are not message-dispatched here.
         let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
@@ -731,17 +733,20 @@ impl CoreErlangGenerator {
         let right_code = docs.pop().expect("right operand");
         let left_code = docs.pop().expect("left operand");
 
+        // BT-4173: `String` is the tagged term `{beamtalk_string, Bin}`.
+        // Unwrap both operands to bytes, concatenate, and re-tag the result.
+        // (Raw binaries are valid iodata, so no `binary_to_list` is needed.)
         let call_doc = if is_list {
             // List concatenation: erlang:'++'
             docvec!["call 'erlang':'++'(", left_code, ", ", right_code, ")",]
         } else if is_string {
             // String concatenation: iolist_to_binary
             docvec![
-                "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
+                "call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'iolist_to_binary'([call 'beamtalk_primitive':'string_to_binary'(",
                 left_code,
-                "), call 'erlang':'binary_to_list'(",
+                "), call 'beamtalk_primitive':'string_to_binary'(",
                 right_code,
-                ")])",
+                ")]))",
             ]
         } else {
             // Runtime dispatch: check is_list at runtime.
@@ -764,11 +769,11 @@ impl CoreErlangGenerator {
                 ", ",
                 var(right_var.clone()),
                 ") <'false'> when 'true' -> \
-                   call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
+                   call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'iolist_to_binary'([call 'beamtalk_primitive':'string_to_binary'(",
                 var(left_var),
-                "), call 'erlang':'binary_to_list'(",
+                "), call 'beamtalk_primitive':'string_to_binary'(",
                 var(right_var),
-                ")]) end",
+                ")])) end",
             ]
         };
 

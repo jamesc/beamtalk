@@ -189,11 +189,13 @@ Result fromTuple: #(1, 2, 3)         // => raises Exception
         kind = type_error,
         class = 'Result',
         selector = 'fromTuple:',
-        message =
+        message = beamtalk_primitive:string_from_binary(
             <<"fromTuple: expected an {ok, Value} or {error, Reason} tuple, got: ",
-                (beamtalk_primitive:print_string(Other))/binary>>,
-        hint =
-            <<"Pass a two-element tuple tagged with ok or error, e.g. Tuple withAll: #(#ok, 42)">>,
+                (beamtalk_primitive:print_string(Other))/binary>>
+        ),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Pass a two-element tuple tagged with ok or error, e.g. Tuple withAll: #(#ok, 42)">>
+        ),
         details = #{got => Other}
     }).
 
@@ -242,10 +244,13 @@ Result tryDo: [1 / 0]                           // => Result error: <RuntimeErro
         kind = type_error,
         class = 'Result',
         selector = 'tryDo:',
-        message =
+        message = beamtalk_primitive:string_from_binary(
             <<"tryDo: expected a zero-arity block, got: ",
-                (beamtalk_primitive:print_string(Block))/binary>>,
-        hint = <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>,
+                (beamtalk_primitive:print_string(Block))/binary>>
+        ),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>
+        ),
         details = #{got => Block}
     }).
 
@@ -293,10 +298,13 @@ it rather than a copy across the Rust/Erlang line.
         kind = type_error,
         class = 'Result',
         selector = 'tryDo:',
-        message =
+        message = beamtalk_primitive:string_from_binary(
             <<"tryDo: expected a one-argument stateful block, got: ",
-                (beamtalk_primitive:print_string(Block))/binary>>,
-        hint = <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>,
+                (beamtalk_primitive:print_string(Block))/binary>>
+        ),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>
+        ),
         details = #{got => Block}
     }).
 
@@ -334,8 +342,11 @@ beamtalk_result:'unwrapError:'(undefined, file_not_found)
         kind = signal,
         class = 'Result',
         selector = 'unwrap',
-        message = Message,
-        hint = <<"Use valueOr:, valueOrDo:, or ifOk:ifError: to handle the error case">>,
+        %% BT-4173: error message/hint are tagged Strings (see beamtalk.hrl).
+        message = beamtalk_primitive:string_from_binary(Message),
+        hint = beamtalk_primitive:string_from_binary(
+            <<"Use valueOr:, valueOrDo:, or ifOk:ifError: to handle the error case">>
+        ),
         details = #{reason => ErrReason}
     },
     beamtalk_error:raise(GenError).

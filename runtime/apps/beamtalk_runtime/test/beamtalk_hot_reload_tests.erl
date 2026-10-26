@@ -360,7 +360,7 @@ test_field_migration_initialize_class_adds_new_field() ->
     ?assertEqual(7, maps:get(value, NewState)),
     %% New field appears with the plain field default, not the value
     %% `initialize` would have computed — migration must not run initialize.
-    ?assertEqual(<<"default">>, maps:get(label, NewState)).
+    ?assertEqual({beamtalk_string, <<"default">>}, maps:get(label, NewState)).
 
 %% BT-3532: TypedFieldCounter has a typed-no-default field and no
 %% `initialize` method — chain_has_typed_no_default alone (ADR 0078)

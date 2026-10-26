@@ -16,8 +16,9 @@ use beamtalk_cerl_doc::leaf;
 /// Binary primitive implementations (ADR 0086).
 pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
-        // Collection subclass-responsibility (size) and byte-level alias (byteSize)
-        "size" | "byteSize" => Some(Document::Str("call 'erlang':'byte_size'(Self)")),
+        // Collection subclass-responsibility: bytes, not graphemes (BT-4170).
+        // (The old `byteSize` alias is deleted — `size` is byte-level now.)
+        "size" => Some(Document::Str("call 'erlang':'byte_size'(Self)")),
         "do:" => {
             let block = param(params, 0, "_Block");
             Some(docvec![
@@ -86,9 +87,8 @@ pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<D
 
         // Conversion
         "toBytes" => Some(Document::Str("call 'beamtalk_binary':'to_bytes'(Self)")),
-        // BT-4170: pre-flip, valid UTF-8 never reaches this call (String
-        // dispatch handles it); post-flip it does, and .bt-level success
-        // flips from bare String to `Result ok:`.
+        // BT-4170: every `Binary` dispatches here (no sniffing), so
+        // .bt-level success is `Result ok:` uniformly.
         "asString" => Some(Document::Str("call 'beamtalk_binary':'as_string'(Self)")),
         "asStringUnchecked" => Some(Document::Str(
             "call 'beamtalk_binary':'as_string_unchecked'(Self)",
@@ -110,9 +110,9 @@ mod tests {
     }
 
     #[test]
-    fn test_byte_size_alias() {
-        let result = doc_to_string(generate_binary_bif("byteSize", &[]));
-        assert_eq!(result, Some("call 'erlang':'byte_size'(Self)".to_string()));
+    fn test_byte_size_deleted() {
+        // BT-4170: `byteSize` is deleted — `size` is byte-level now.
+        assert!(generate_binary_bif("byteSize", &[]).is_none());
     }
 
     #[test]

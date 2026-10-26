@@ -80,15 +80,16 @@ quote := """"                    // 1-char string containing "
 dialog := "She said ""hello"""  // → She said "hello"
 crlf := "\r\n"                   // 1 grapheme — byte-identical to (Character value: 13) asString ++ (Character value: 10) asString
 
-// All strings are <<"UTF-8 binary">> in Erlang
+// In Erlang, strings are tagged tuples holding UTF-8 binaries:
+//   "hello"  →  {beamtalk_string, <<"hello">>}
 ```
 
 ### Character Encoding
 
 | Beamtalk | Erlang/BEAM | Notes |
 |----------|-------------|-------|
-| `"hello"` | `<<"hello">>` | UTF-8 binary |
-| `"Hi, {name}"` | `<<"Hi, ", Name/binary>>` | Interpolated UTF-8 (ADR 0023) |
+| `"hello"` | `{beamtalk_string, <<"hello">>}` | Tagged UTF-8 binary (BT-4173) |
+| `"Hi, {name}"` | `{beamtalk_string, <<"Hi, ", Name/binary>>}` | Interpolated UTF-8 (ADR 0023) |
 | Grapheme cluster | Via `:string` module | `"👨‍👩‍👧‍👦"` is one grapheme, multiple codepoints |
 | `$a` | `97` (codepoint) | Character literal = Unicode codepoint |
 
@@ -145,8 +146,8 @@ String inherits byte-level methods from Binary. These provide unambiguous byte a
 ```beamtalk
 // Byte access (inherited from Binary)
 "hello" byteAt: 0      // => 104 (byte value, 0-based)
-"hello" byteSize       // => 5 (byte count)
-"café" byteSize        // => 5 (bytes — more than 4 graphemes due to UTF-8)
+"hello" toBytes size   // => 5 (byte count — `size` itself counts graphemes)
+"café" toBytes size    // => 5 (bytes — more than 4 graphemes due to UTF-8)
 
 // Byte-level slicing returns Binary, not String
 "hello" part: 0 size: 3  // => Binary (raw bytes, not String)
@@ -164,8 +165,8 @@ See [Binary — Byte-Level Data](#binary--byte-level-data) for the full Binary A
 
 | Beamtalk | Erlang | Notes |
 |----------|--------|-------|
-| `"string"` | `<<"string">>` | Binary, not charlist |
-| `"世界"` | `<<228,184,150,231,149,140>>` | UTF-8 encoded bytes |
+| `"string"` | `{beamtalk_string, <<"string">>}` | Tagged binary, not charlist |
+| `"世界"` | `{beamtalk_string, <<228,184,150,231,149,140>>}` | UTF-8 encoded bytes |
 | String operations | `:string` module | Grapheme-aware (`:string.length/1`) |
 | `$x` | Integer codepoint | `$a` = 97, `$世` = 19990 |
 | Charlist (legacy) | `[104,101,108,108,111]` | Via Erlang interop |
@@ -7166,21 +7167,25 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 
 Binary is a sealed Collection subclass for byte-level data. String is a subclass of Binary that adds grapheme-aware text operations. The class hierarchy is `Collection > Binary > String` ([ADR 0086](ADR/0086-string-subclass-of-binary.md)).
 
-On BEAM, Beamtalk binaries map directly to Erlang binaries (`binary()`). All strings are binaries at runtime — the type system uses the subclass relationship so that String is accepted wherever Binary is expected (e.g. `File writeBinary:contents:` accepts strings without type warnings).
+On BEAM, a Binary is a bare Erlang `binary()`, while a String is the tagged
+tuple `{beamtalk_string, Bin}` holding UTF-8 bytes (BT-4173). Representation
+is by construction: `Binary fromBytes:` answers a Binary even when the bytes
+happen to be valid UTF-8, and a String literal answers a String. The runtime
+never sniffs bytes to decide — `class` answers the construction type, and
+dispatch follows the class.
 
 ```beamtalk
 // Construction
 bin := Binary fromBytes: #(104, 101, 108, 108, 111)
 bin := Binary fromIolist: #("hello", " ", "world")
 
-// Byte access (1-based, Collection protocol)
+// Byte access (1-based, Collection protocol) — elements are byte Integers
 bin := Binary fromBytes: #(104, 101, 108)
-bin at: 1                    // => "h" (grapheme — runtime dispatches via String)
-bin size                     // => 3
+bin at: 1                    // => 104
+bin size                     // => 3 (byte count)
 
 // Byte access (0-based, Erlang-compatible)
 bin byteAt: 0                // => 104 (byte value)
-bin byteSize                 // => 3 (byte count)
 
 // Zero-copy slicing
 bin := Binary fromBytes: #(1, 2, 3, 4, 5)
@@ -7195,31 +7200,24 @@ a concat: b                  // => Binary (1, 2, 3, 4)
 bin toBytes                   // => #(1, 2, 3, 4, 5)
 Binary fromBytes: #(65, 66)  // => Binary
 
-// UTF-8 decoding (Binary → String)
-(Binary fromBytes: #(104, 101, 108, 108, 111)) asString           // => "hello"
-(Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked  // => "hello"
+// UTF-8 decoding (Binary → String) answers a Result uniformly (BT-4169)
+((Binary fromBytes: #(104, 101, 108, 108, 111)) asString) unwrap  // => "hello"
+(Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked   // => "hello"
 
-// Invalid UTF-8: asString answers `Result error:` with the byte offset;
-// asStringUnchecked keeps the bytes, still dispatched as Binary
+// Invalid UTF-8: asString answers `Result error:` with the byte offset
 ((Binary fromBytes: #(255, 254)) asString) isError                // => true
 ((Binary fromBytes: #(255, 254)) asString) error message          // => "Invalid UTF-8 at byte offset 0"
-(Binary fromBytes: #(255, 254)) asStringUnchecked class           // => Binary
-
-// Narrow before continuing: success answers a bare String (which has
-// no isError), failure a Result (which has no String methods)
-r := (Binary fromBytes: #(255, 254)) asString
-(r class equals: Result) ifTrue: [r isError] ifFalse: [false]      // => true
 
 // Serialization (class methods)
 etf := Binary serialize: #(1, 2, 3)
 Binary deserialize: etf               // => #(1, 2, 3)
 Binary deserializeWithUsed: etf       // => #(value, bytesConsumed)
 
-// Collection protocol — Binary is a collection of bytes
+// Collection protocol — Binary is a collection of byte Integers
 bin := Binary fromBytes: #(65, 66, 67, 68, 69)
-bin collect: [:ch | ch]       // => "ABCDE" (via String species)
-bin select: [:ch | ch /= "C"]  // => "ABDE"
-bin includes: "B"             // => true
+bin collect: [:b | b]         // => Binary (65, 66, 67, 68, 69)
+bin select: [:b | b /= 67]    // => Binary (65, 66, 68, 69)
+bin includes: 66              // => true
 bin isEmpty                   // => false
 ```
 
@@ -7227,62 +7225,55 @@ bin isEmpty                   // => false
 
 | Method | On Binary | On String |
 |--------|-----------|-----------|
-| `at: index` | grapheme (1-based, via String at runtime¹) | grapheme (1-based) |
-| `size` | element count (via String at runtime¹) | grapheme count |
+| `at: index` | byte Integer (1-based) | grapheme String (1-based) |
+| `size` | byte count | grapheme count (alias for `length`) |
 | `byteAt: offset` | byte value (0-based) | inherited — byte value (0-based) |
-| `byteSize` | byte count | inherited — byte count |
-| `do: block` | iterate elements (via String at runtime¹) | iterate graphemes |
+| `do: block` | iterate bytes, answers nil | iterate graphemes |
+| `collect:` / `select:` / `reject:` | byte-level, answer Binary | grapheme-level, answer String |
+| `includes:` / `detect:` / `anySatisfy:` / `allSatisfy:` | byte-level (Integer elements) | grapheme-level (String elements) |
 | `part: offset size: n` | byte-level slice, returns Binary | inherited — byte-level slice, returns Binary |
 | `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
-| `asString` | UTF-8 validation: String, or `Result error:` with offset | no-op, returns self |
+| `asString` | `Result ok:` String, or `Result error:` with offset | no-op, returns self |
 | `asStringUnchecked` | unchecked cast to String | no-op, returns self |
 
-¹ Only when the bytes are valid UTF-8 — see below.
+(`byteSize` was removed in BT-4173 — `size` is the byte count on Binary.)
 
 #### Binary vs String at Runtime
 
-Binary and String are one and the same BEAM `binary()` — a raw binary carries
-no tag saying which class produced it. The runtime therefore uses the only
-signal it has, UTF-8 validity ([BT-2999](https://linear.app/beamtalk/issue/BT-2999)):
-
-| Bytes | `class` | Dynamic dispatch of `size`, `at:`, `do:`, … |
-|-------|---------|---------------------------------------------|
-| valid UTF-8 (`"hello"`, `Binary fromBytes: #(104, 105)`) | `String` | String — grapheme-aware |
-| not valid UTF-8 (crypto output, hashes, compressed data, `Binary fromBytes: #(255, 254)`) | `Binary` | Binary — byte-level |
+A Binary and a String holding the same bytes are different values with
+different classes: `"hi"` is `{beamtalk_string, <<"hi">>}` (class String)
+while `Binary fromBytes: #(104, 105)` is `<<"hi">>` (class Binary), even
+though both render as `"hi"`. `class` answers the construction type, and
+dynamic dispatch of `size`, `at:`, `do:`, and the Collection protocol follows
+the class — byte-level on Binary, grapheme-aware on String:
 
 ```beamtalk
 bytes := Binary fromBytes: #(255, 254, 253)
-bytes class name    // => #Binary
+bytes class name    // => "Binary"
 bytes size          // => 3 (bytes, not graphemes)
 bytes printString   // => "<<FF FE FD>>" (hex — never raw invalid UTF-8)
 
-(Binary fromBytes: #(104, 105)) class name   // => #String  (indistinguishable)
+text := Binary fromBytes: #(104, 105)
+text class name     // => "Binary" (construction type — never sniffed)
+text size           // => 2
+text at: 1          // => 104 (byte Integer, not "h")
 ```
 
-Valid UTF-8 stays genuinely ambiguous: a `Binary` holding text answers `String`
-and gets grapheme semantics. **Do not rely on `class` to tell text from bytes.**
-When the distinction matters, annotate the type (`data :: Binary`) so the
-compiler dispatches statically, or use the unambiguous byte-level selectors
-(`byteSize`, `byteAt:`, `part:size:`) which mean the same thing on both.
+Equality is representation-strict: `"a" =:= (Binary fromBytes: #(97))` is
+false, and so is `==` — a String never equals a Binary. Convert explicitly
+(`asString` / `asStringUnchecked`) before comparing across the two.
 
-Equality is by bytes, not by class: `"a" =:= (Binary fromBytes: #(97))` is
-true, and so is `==`. Byte-safe comparisons never need a conversion first.
-
-Deciding which of the two a bare binary is costs one validating scan of the
-bytes (~32 ns for a short string, ~0.4 ns/byte beyond ~1 KB). It happens only
-when the compiler could not determine the receiver's type. Annotate the type
-in hot loops over large binaries so the sends compile statically and skip the
-check entirely:
+The byte/text distinction also holds at the boundaries: FFI calls and file
+reads answer Binary for bytes (`Erlang file read_file:`, `File readBinary:`),
+while text entry points (string literals, `File readAll:`, JSON string leaves)
+answer String. Native code validates untrusted bytes with UTF-8 checks before
+constructing a String; only `asStringUnchecked` skips validation, and only
+callers that already know the bytes are text may use it.
 
 ```beamtalk
-// Unannotated: every send re-checks `data` — fine for small values,
-// avoidable when `data` is megabytes and the loop runs many times
+// Byte loop over Binary data — elements are Integers throughout
 checksum: data =>
-  (0 to: data byteSize - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
-
-// Annotated: dispatch resolves at compile time, no per-send check
-checksum: data :: Binary =>
-  (0 to: data byteSize - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
+  (0 to: data size - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
 ```
 
 ### Accessing an Empty Collection

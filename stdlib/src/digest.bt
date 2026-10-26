@@ -16,7 +16,7 @@
 /// ```beamtalk
 /// (Digest sha256: "abc") asHex
 /// // => "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-/// (Digest hmacSha256: "message" key: "secret") byteSize
+/// (Digest hmacSha256: "message" key: "secret") size
 /// // => 32
 /// ```
 sealed typed Object subclass: Digest native: beamtalk_digest
@@ -27,7 +27,7 @@ sealed typed Object subclass: Digest native: beamtalk_digest
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Digest sha256: "abc") byteSize   // => 32
+  /// (Digest sha256: "abc") size   // => 32
   /// ```
   class sealed sha256: input :: String | Binary -> Binary => self delegate
 
@@ -35,7 +35,7 @@ sealed typed Object subclass: Digest native: beamtalk_digest
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Digest sha512: "abc") byteSize   // => 64
+  /// (Digest sha512: "abc") size   // => 64
   /// ```
   class sealed sha512: input :: String | Binary -> Binary => self delegate
 
@@ -49,7 +49,7 @@ sealed typed Object subclass: Digest native: beamtalk_digest
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Digest md5: "abc") byteSize      // => 16
+  /// (Digest md5: "abc") size      // => 16
   /// ```
   class sealed md5: input :: String | Binary -> Binary => self delegate
 
@@ -59,7 +59,7 @@ sealed typed Object subclass: Digest native: beamtalk_digest
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Digest hmacSha256: "message" key: "secret") byteSize   // => 32
+  /// (Digest hmacSha256: "message" key: "secret") size   // => 32
   /// ```
   class sealed hmacSha256: input :: String | Binary key: key :: String | Binary -> Binary =>
     self delegate
@@ -68,7 +68,7 @@ sealed typed Object subclass: Digest native: beamtalk_digest
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Digest hmacSha512: "message" key: "secret") byteSize   // => 64
+  /// (Digest hmacSha512: "message" key: "secret") size   // => 64
   /// ```
   class sealed hmacSha512: input :: String | Binary key: key :: String | Binary -> Binary =>
     self delegate

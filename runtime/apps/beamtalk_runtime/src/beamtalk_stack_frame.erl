@@ -212,19 +212,22 @@ dispatch('sourceLocation', [], #{file := File, line := Line}) ->
             nil;
         _ ->
             LineBin = integer_to_binary(Line),
-            <<File/binary, ":", LineBin/binary>>
+            %% BT-4170: text answers are tagged `String` values.
+            beamtalk_primitive:string_from_binary(<<File/binary, ":", LineBin/binary>>)
     end;
 dispatch('moduleName', [], #{module := Module}) ->
     case Module of
         undefined -> nil;
-        _ -> atom_to_binary(Module, utf8)
+        _ -> beamtalk_primitive:string_from_binary(atom_to_binary(Module, utf8))
     end;
 dispatch('line', [], #{line := Line}) ->
     Line;
+dispatch('file', [], #{file := File}) when is_binary(File) ->
+    beamtalk_primitive:string_from_binary(File);
 dispatch('file', [], #{file := File}) ->
     File;
 dispatch('printString', [], Frame) ->
-    format_frame(Frame).
+    beamtalk_primitive:string_from_binary(format_frame(Frame)).
 
 -doc "Check if StackFrame responds to a selector.".
 -spec has_method(atom()) -> boolean().

@@ -1033,7 +1033,8 @@ revert_remove_method_entry_on_eval_defined_class_has_no_source_to_recover_from(#
         ?_assert(
             case RevertResult of
                 {error, #beamtalk_error{message = Msg}} ->
-                    binary:match(Msg, <<"prior body could not be recovered">>) =/= nomatch;
+                    binary:match(element(2, Msg), <<"prior body could not be recovered">>) =/=
+                        nomatch;
                 _ ->
                     false
             end
@@ -1457,4 +1458,4 @@ restore_home(false) -> os:unsetenv("HOME");
 restore_home(OldHome) -> os:putenv("HOME", OldHome).
 
 temp_dir() ->
-    unicode:characters_to_list(beamtalk_file:'tempDirectory'()).
+    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).

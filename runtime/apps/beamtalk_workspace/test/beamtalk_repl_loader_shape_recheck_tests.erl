@@ -24,7 +24,7 @@ counterpart.
 
 -include_lib("eunit/include/eunit.hrl").
 
-temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
+temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 %%====================================================================
 %% Integration fixture: real compiler port + xref + workspace_meta + stores

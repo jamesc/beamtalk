@@ -193,7 +193,11 @@ Write a String or Binary at the current position.
 On a handle opened `#append`, writes always land at end-of-file regardless of
 the current position. Returns `Result ok: nil`.
 """.
--spec write(t(), binary()) -> beamtalk_result:t().
+-spec write(t(), beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
+write(#{'$beamtalk_class' := 'FileHandle'} = Handle, {beamtalk_string, Data}) when
+    is_binary(Data)
+->
+    write(Handle, Data);
 write(#{'$beamtalk_class' := 'FileHandle'} = Handle, Data) when is_binary(Data) ->
     with_writable(Handle, 'write:', fun(Fd) -> file:write(Fd, Data) end);
 write(#{'$beamtalk_class' := 'FileHandle'}, _) ->
@@ -202,7 +206,11 @@ write(_, _) ->
     beamtalk_error:raise_type_error('FileHandle', 'write:', <<"Expected a FileHandle">>).
 
 -doc "Write a String or Binary followed by a newline. Returns `Result ok: nil`.".
--spec writeLine(t(), binary()) -> beamtalk_result:t().
+-spec writeLine(t(), beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
+writeLine(#{'$beamtalk_class' := 'FileHandle'} = Handle, {beamtalk_string, Data}) when
+    is_binary(Data)
+->
+    writeLine(Handle, Data);
 writeLine(#{'$beamtalk_class' := 'FileHandle'} = Handle, Data) when is_binary(Data) ->
     with_writable(Handle, 'writeLine:', fun(Fd) -> file:write(Fd, [Data, $\n]) end);
 writeLine(#{'$beamtalk_class' := 'FileHandle'}, _) ->

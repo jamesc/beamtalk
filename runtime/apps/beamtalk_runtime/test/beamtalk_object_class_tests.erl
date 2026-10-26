@@ -1852,8 +1852,8 @@ test_put_class_method_rejects_n_plus_2() ->
         catch
             error:E -> E
         end,
-    ?assertNotEqual(nomatch, binary:match(Msg, <<"BT3708PcmOld">>)),
-    ?assertEqual(nomatch, binary:match(Msg, <<"undefined">>)).
+    ?assertNotEqual(nomatch, binary:match(element(2, Msg), <<"BT3708PcmOld">>)),
+    ?assertEqual(nomatch, binary:match(element(2, Msg), <<"undefined">>)).
 
 %%====================================================================
 %% Class Process Crash Detection and Recovery
