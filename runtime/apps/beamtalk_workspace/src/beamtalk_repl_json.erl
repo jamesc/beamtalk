@@ -385,6 +385,13 @@ not be pre-quoted by `print_string` (the JSON encoder already quotes it:
 (BT-4167). UTF-8 Binaries are bare; non-UTF-8 Binaries keep the `<<AB CD>>`
 hex form so they stay distinguishable. Nested lists recurse; everything else
 uses the normal rendering.
+
+Accepted tradeoff: a bare String element is indistinguishable from a class or
+Symbol element rendered by `print_string`, so `#(Integer, "Integer")` shows as
+`["Integer","Integer"]`. Bare elements match the pre-#4569 display and the
+learning guide, and were chosen explicitly; pinned in
+`tests/repl-protocol/cases/repl_value_display.btscript` so it is not "fixed"
+back by accident.
 """.
 -spec element_to_json(term()) -> term().
 element_to_json(Value) when is_binary(Value) ->

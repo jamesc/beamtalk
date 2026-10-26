@@ -46,7 +46,7 @@ env:
 jobs:
   # ─── macOS / Windows fast checks ───────────────────────────────────────
   platform-check:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:all-platforms')
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:all-platforms') && (github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'))
     strategy:
       fail-fast: false
       matrix:
@@ -205,7 +205,7 @@ jobs:
   # ci.yml's `test-desktop` is the ubuntu-only leg for PRs touching the desktop
   # paths; both run the composite action .github/actions/test-desktop.
   platform-desktop:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:all-platforms')
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:all-platforms') && (github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'))
     strategy:
       fail-fast: false
       matrix:

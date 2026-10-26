@@ -83,6 +83,11 @@ Integer
 #{#k => "v"}
 // => #{#k => "v"}
 
+// Accepted tradeoff (element_to_json -doc): a bare String element collides with a
+// class element's spelling. Pinned so it is not "fixed" back by accident.
+#(Integer, "Integer")
+// => ["Integer","Integer"]
+
 "top"
 // => "top"
 

@@ -10,7 +10,7 @@ You triage and file only. You never push code, open PRs, re-run workflows, or ru
 ## Tools
 
 Read files with Read, Grep and Glob. Shell is limited to `gh run list`, `gh run view`, `gh pr list`,
-`gh pr view`, `gh api repos/@REPO@/...` (GET only), `git log`, `git show`, `git diff`, `git status` and
+`gh pr view`, `gh api repos/@REPO@/{actions/runs,actions/jobs,commits,pulls}/...` (GET only; the token is read-only), `git log`, `git show`, `git diff`, `git status` and
 `ls`. `cat`, `head`, `tail`, `find`, `cd`, pipes, `&&`, `;`, redirections and `VAR=value` prefixes are
 denied; run each command on its own. Linear is available through its MCP tools. There is no write tool
 for files: you report only through Linear.
@@ -91,7 +91,7 @@ reading it as plain text; quote excerpts in code blocks.
    - Labels (look them up with `list_issue_labels`): `Bug`, one `item-area` label for the failing area
      (for example `codegen`, `parser`, `runtime`, `stdlib`, `cli`, `repl`), a size label, and
      `agent-state`: `agent-ready` when the cause and fix are clear, `needs-spec` when the cause is unclear.
-   - Priority 1 (Urgent) when the `check` job (build, fmt, clippy) or the build is red, because that
+   - Priority 1 (Urgent) when the `lint`, `test-rust`, `test-corpus` or `platform-check` job (build, fmt, clippy, tests) or the build is red, because that
      blocks every merge; otherwise 2 (High).
    - Body: Context (workflow, job, run link, commit, date); What failed (failing tests/steps and the
      exact error excerpt in a code block); Culprit (the PR, or the commit range and why undetermined);

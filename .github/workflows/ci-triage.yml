@@ -133,19 +133,24 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # Trust boundary: the logs are untrusted (merged code can print anything), so the
-      # tool list is read-only: Read/Grep/Glob, `gh run`/`gh pr` reads, `gh api` under
-      # this repo, read-only git, and the Linear issue and comment tools. No Write/Edit,
-      # no cargo or tests, no web, no other shell. The job token is read-only too
-      # (see `permissions`), so a stray `gh api -X POST` cannot change anything.
+      # tool list is read-only: Read/Grep/Glob, `gh run`/`gh pr` reads, `gh api` GETs of
+      # the actions runs/jobs, commits and pulls endpoints, read-only git, and the
+      # Linear issue and comment tools. No Write/Edit, no cargo or tests, no web, no
+      # other shell. The allowlist is a command prefix, so it cannot by itself stop
+      # `gh api <allowed path> -X PATCH`; the guarantee is the token: `github-token`
+      # is the job's read-only github.token, passed explicitly so claude-code-action
+      # never mints its write-capable App token via OIDC (id-token: write is for the
+      # Claude OAuth exchange only). A write attempt gets 403.
       - name: Triage with Claude
         uses: ./.triage-config/.github/actions/claude-triage
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           linear-api-key: ${{ secrets.LINEAR_API_KEY }}
+          github-token: ${{ github.token }}
           prompt: ${{ steps.load_prompt.outputs.prompt }}
           max-turns: "40"
           artifact-name: ci-triage-execution-${{ github.run_id }}
-          allowed-tools: "Read,Grep,Glob,Bash(gh run list:*),Bash(gh run view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh api repos/${{ github.repository }}/:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__list_comments,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
+          allowed-tools: "Read,Grep,Glob,Bash(gh run list:*),Bash(gh run view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh api repos/${{ github.repository }}/actions/runs/:*),Bash(gh api repos/${{ github.repository }}/actions/jobs/:*),Bash(gh api repos/${{ github.repository }}/commits/:*),Bash(gh api repos/${{ github.repository }}/pulls/:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__list_comments,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"
 
       - name: Add to job summary
         if: always()

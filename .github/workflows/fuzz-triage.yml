@@ -145,6 +145,7 @@ jobs:
         with:
           claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           linear-api-key: ${{ secrets.LINEAR_API_KEY }}
+          github-token: ${{ github.token }}
           prompt: ${{ steps.load_prompt.outputs.prompt }}
           artifact-name: fuzz-triage-execution-${{ github.run_id }}
           allowed-tools: "Read,Grep,Glob,Bash(cargo +nightly fuzz:*),Bash(cargo fuzz:*),Bash(cargo test:*),Bash(bash .triage-config/.github/scripts/repro-class-var.sh:*),Bash(cargo build:*),Bash(just test-class-var-corpus:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),mcp__linear__list_issues,mcp__linear__get_issue,mcp__linear__list_comments,mcp__linear__save_issue,mcp__linear__save_comment,mcp__linear__list_issue_labels,mcp__linear__list_issue_statuses,mcp__linear__list_teams"

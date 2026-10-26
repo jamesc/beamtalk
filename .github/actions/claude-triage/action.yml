@@ -13,6 +13,12 @@ inputs:
   linear-api-key:
     description: Linear API key, exposed only to the claude step as LINEAR_API_KEY
     required: true
+  github-token:
+    description: >-
+      Token claude-code-action uses for GitHub. Passing it stops the action minting
+      its own write-capable GitHub App token via OIDC, so the agent's GitHub access
+      is exactly this token (callers pass the job's read-only github.token).
+    required: true
   prompt:
     description: The fully substituted triage prompt
     required: true
@@ -57,6 +63,7 @@ runs:
         LINEAR_API_KEY: ${{ inputs.linear-api-key }}
       with:
         claude_code_oauth_token: ${{ inputs.claude-oauth-token }}
+        github_token: ${{ inputs.github-token }}
         claude_args: >-
           --max-turns ${{ inputs.max-turns }}
           --mcp-config ${{ runner.temp }}/linear-mcp.json

@@ -139,11 +139,11 @@ ci-changed:
 
     # The Rust corpus tier (`test-corpus`, ~10 min on 4 cores) runs only when
     # scripts/ci/corpus-gate.sh says the changed paths can affect it; ci.yml's
-    # Linux `check` job calls the same script, so the path list has one home.
+    # `changes` job calls the same script, so the path list has one home.
     if printf '%s\n' "$changed_files" | scripts/ci/corpus-gate.sh; then
       just test-corpus
     else
-      echo "⏭️  compiler crates untouched — skipping the Rust corpus tier (just test-corpus; CI's Linux check job runs the same gate)"
+      echo "⏭️  compiler crates untouched — skipping the Rust corpus tier (just test-corpus; CI's test-corpus job runs the same gate)"
     fi
 
 # Windows: path-based skip logic below is unix-only for now — run the full suite.
@@ -1136,7 +1136,7 @@ test: test-rust test-stdlib test-bunit test-runtime test-metamorphic
 # frame family so no test runs over a minute (BT-3888): roughly 10 of the
 # suite's 18 minutes on a 4-core runner. They only prove things
 # about the compiler crates they call in-process, so `ci-changed` and CI's
-# Linux `check` job run them only when those crates change; `just ci` always
+# Linux `test-corpus` job runs them only when those crates change; `just ci` always
 # runs both tiers. The set is one nextest filterset, defined once here.
 test-rust: (_test-rust "")
 
