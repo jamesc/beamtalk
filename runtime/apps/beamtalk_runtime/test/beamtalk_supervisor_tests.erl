@@ -1321,10 +1321,10 @@ static_init_invalid_strategy_and_intensity_fail_with_type_error_test() ->
 start_failed_error_uses_cause_hint_message_or_kind_test() ->
     WithHint = beamtalk_error:new(type_error, 'X', maxChildren, <<"the hint">>),
     NoHint = (beamtalk_error:new(does_not_understand, 'X', childSpecs))#beamtalk_error{
-        message = <<"the message">>, hint = undefined
+        message = {beamtalk_string, <<"the message">>}, hint = undefined
     },
     Bare = (beamtalk_error:new(boom, 'X', childSpecs))#beamtalk_error{
-        message = <<>>, hint = undefined
+        message = {beamtalk_string, <<>>}, hint = undefined
     },
     Hint = fun(Reason) ->
         (beamtalk_supervisor:start_failed_error(supervisor_start_failed, 'Sup', supervise, Reason))#beamtalk_error.hint

@@ -121,7 +121,7 @@ pid_extraction_test_() ->
                 ?_test(begin
                     Obj = #beamtalk_object{class = 'Counter', class_mod = counter, pid = self()},
                     Result = beamtalk_tracing:healthFor(Obj),
-                    ?assert(maps:is_key(<<"status">>, Result))
+                    ?assert(maps:is_key({beamtalk_string, <<"status">>}, Result))
                 end)}
         ]
     end}.
@@ -136,27 +136,30 @@ health_test_() ->
             {"healthFor live process returns status",
                 ?_test(begin
                     Result = beamtalk_tracing:healthFor(self()),
-                    ?assert(maps:is_key(<<"pid">>, Result)),
-                    ?assert(maps:is_key(<<"status">>, Result)),
-                    ?assert(maps:is_key(<<"queue_depth">>, Result)),
-                    ?assert(maps:is_key(<<"memory_kb">>, Result)),
-                    ?assertNotEqual(dead, maps:get(<<"status">>, Result))
+                    ?assert(maps:is_key({beamtalk_string, <<"pid">>}, Result)),
+                    ?assert(maps:is_key({beamtalk_string, <<"status">>}, Result)),
+                    ?assert(maps:is_key({beamtalk_string, <<"queue_depth">>}, Result)),
+                    ?assert(maps:is_key({beamtalk_string, <<"memory_kb">>}, Result)),
+                    ?assertNotEqual(dead, maps:get({beamtalk_string, <<"status">>}, Result))
                 end)},
             {"healthFor dead process returns dead status",
                 ?_test(begin
                     Pid = spawn(fun() -> ok end),
                     timer:sleep(50),
                     Result = beamtalk_tracing:healthFor(Pid),
-                    ?assertEqual(dead, maps:get(<<"status">>, Result)),
-                    ?assertEqual(<<"process not alive">>, maps:get(<<"error">>, Result))
+                    ?assertEqual(dead, maps:get({beamtalk_string, <<"status">>}, Result)),
+                    ?assertEqual(
+                        {beamtalk_string, <<"process not alive">>},
+                        maps:get({beamtalk_string, <<"error">>}, Result)
+                    )
                 end)},
             {"systemHealth returns VM info",
                 ?_test(begin
                     Result = beamtalk_tracing:systemHealth(),
-                    ?assert(maps:is_key(<<"scheduler_count">>, Result)),
-                    ?assert(maps:is_key(<<"process_count">>, Result)),
-                    ?assert(maps:is_key(<<"memory">>, Result)),
-                    ?assert(maps:get(<<"scheduler_count">>, Result) > 0)
+                    ?assert(maps:is_key({beamtalk_string, <<"scheduler_count">>}, Result)),
+                    ?assert(maps:is_key({beamtalk_string, <<"process_count">>}, Result)),
+                    ?assert(maps:is_key({beamtalk_string, <<"memory">>}, Result)),
+                    ?assert(maps:get({beamtalk_string, <<"scheduler_count">>}, Result) > 0)
                 end)}
         ]
     end}.
@@ -219,17 +222,17 @@ query_with_data_test_() ->
                     ),
                     %% Always-on class entry while disabled ...
                     Stats = beamtalk_tracing:stats(),
-                    ?assert(maps:is_key(<<"class:Counter">>, Stats)),
-                    ClassStats = maps:get(<<"class:Counter">>, Stats),
-                    Methods = maps:get(<<"methods">>, ClassStats),
-                    ?assert(maps:is_key(<<"increment">>, Methods)),
+                    ?assert(maps:is_key({beamtalk_string, <<"class:Counter">>}, Stats)),
+                    ClassStats = maps:get({beamtalk_string, <<"class:Counter">>}, Stats),
+                    Methods = maps:get({beamtalk_string, <<"methods">>}, ClassStats),
+                    ?assert(maps:is_key({beamtalk_string, <<"increment">>}, Methods)),
                     ?assertEqual(#{}, beamtalk_tracing:statsFor(TestPid)),
                     %% ... plus the per-actor entry once enabled.
                     beamtalk_tracing:enable(),
                     beamtalk_trace_store:record_dispatch(
                         TestPid, increment, 5000, ok, sync, 'Counter'
                     ),
-                    PidKey = list_to_binary(pid_to_list(TestPid)),
+                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
                     PidStats = beamtalk_tracing:statsFor(TestPid),
                     ?assert(maps:is_key(PidKey, PidStats)),
                     beamtalk_tracing:disable()
@@ -244,7 +247,10 @@ query_with_data_test_() ->
                     Traces = beamtalk_tracing:tracesFor(TestPid),
                     ?assert(length(Traces) >= 1),
                     [First | _] = Traces,
-                    ?assertEqual(<<"increment">>, maps:get(<<"selector">>, First)),
+                    ?assertEqual(
+                        {beamtalk_string, <<"increment">>},
+                        maps:get({beamtalk_string, <<"selector">>}, First)
+                    ),
                     beamtalk_tracing:disable()
                 end)},
             {"tracesFor/2 filters by selector",
@@ -261,7 +267,10 @@ query_with_data_test_() ->
                     ?assert(length(Traces) >= 1),
                     lists:foreach(
                         fun(T) ->
-                            ?assertEqual(<<"increment">>, maps:get(<<"selector">>, T))
+                            ?assertEqual(
+                                {beamtalk_string, <<"increment">>},
+                                maps:get({beamtalk_string, <<"selector">>}, T)
+                            )
                         end,
                         Traces
                     ),

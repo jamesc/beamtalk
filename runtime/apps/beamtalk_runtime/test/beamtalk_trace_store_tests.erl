@@ -55,23 +55,33 @@ direct_insert_and_query_test_() ->
 
                 %% Always-on class entry, and no per-actor entry while disabled
                 ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),
-                #{<<"methods">> := #{<<"increment">> := IncStats}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"increment">>} := IncStats
+                    }
+                } =
                     class_entry(<<"Counter">>),
-                ?assertEqual(1, maps:get(<<"calls">>, IncStats)),
-                ?assertEqual(1, maps:get(<<"ok">>, IncStats)),
-                ?assertEqual(0, maps:get(<<"errors">>, IncStats)),
-                ?assertEqual(5000, maps:get(<<"total_duration_ns">>, IncStats)),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, IncStats)),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"ok">>}, IncStats)),
+                ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, IncStats)),
+                ?assertEqual(5000, maps:get({beamtalk_string, <<"total_duration_ns">>}, IncStats)),
 
                 %% Enabled, the per-actor entry appears too
                 beamtalk_trace_store:enable(),
                 beamtalk_trace_store:record_dispatch(
                     TestPid, increment, 7000, ok, sync, 'Counter'
                 ),
-                PidKey = list_to_binary(pid_to_list(TestPid)),
-                #{PidKey := #{<<"methods">> := #{<<"increment">> := PidInc}}} =
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+                #{
+                    PidKey := #{
+                        {beamtalk_string, <<"methods">>} := #{
+                            {beamtalk_string, <<"increment">>} := PidInc
+                        }
+                    }
+                } =
                     beamtalk_trace_store:get_stats(TestPid),
-                ?assertEqual(1, maps:get(<<"calls">>, PidInc)),
-                ?assertEqual(7000, maps:get(<<"total_duration_ns">>, PidInc))
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, PidInc)),
+                ?assertEqual(7000, maps:get({beamtalk_string, <<"total_duration_ns">>}, PidInc))
             end)
         ]
     end}.
@@ -90,10 +100,17 @@ class_in_actor_stats_test_() ->
                         TestPid, increment, 5000, ok, sync, 'EventStore'
                     ),
                     Entry = class_entry(<<"EventStore">>),
-                    ?assertEqual(<<"EventStore">>, maps:get(<<"class">>, Entry)),
+                    ?assertEqual(
+                        {beamtalk_string, <<"EventStore">>},
+                        maps:get({beamtalk_string, <<"class">>}, Entry)
+                    ),
                     ?assertMatch(
-                        #{<<"increment">> := #{<<"calls">> := 1}},
-                        maps:get(<<"methods">>, Entry)
+                        #{
+                            {beamtalk_string, <<"increment">>} := #{
+                                {beamtalk_string, <<"calls">>} := 1
+                            }
+                        },
+                        maps:get({beamtalk_string, <<"methods">>}, Entry)
                     )
                 end)},
             {"unknown class aggregates under class:unknown",
@@ -103,7 +120,10 @@ class_in_actor_stats_test_() ->
                         TestPid, increment, 5000, ok, sync, unknown
                     ),
                     Entry = class_entry(<<"unknown">>),
-                    ?assertEqual(<<"unknown">>, maps:get(<<"class">>, Entry))
+                    ?assertEqual(
+                        {beamtalk_string, <<"unknown">>},
+                        maps:get({beamtalk_string, <<"class">>}, Entry)
+                    )
                 end)},
             {"per-actor entry carries the telemetry class while enabled",
                 ?_test(begin
@@ -112,9 +132,12 @@ class_in_actor_stats_test_() ->
                     beamtalk_trace_store:record_dispatch(
                         TestPid, increment, 5000, ok, sync, 'EventStore'
                     ),
-                    PidKey = list_to_binary(pid_to_list(TestPid)),
+                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
                     #{PidKey := PidStats} = beamtalk_trace_store:get_stats(TestPid),
-                    ?assertEqual(<<"EventStore">>, maps:get(<<"class">>, PidStats))
+                    ?assertEqual(
+                        {beamtalk_string, <<"EventStore">>},
+                        maps:get({beamtalk_string, <<"class">>}, PidStats)
+                    )
                 end)},
             {"class appears in collect_method_stats via slow_methods",
                 ?_test(begin
@@ -124,7 +147,10 @@ class_in_actor_stats_test_() ->
                     ),
                     Result = beamtalk_trace_store:slow_methods(1),
                     [Top | _] = Result,
-                    ?assertEqual(<<"WorkflowEngine">>, maps:get(<<"class">>, Top))
+                    ?assertEqual(
+                        {beamtalk_string, <<"WorkflowEngine">>},
+                        maps:get({beamtalk_string, <<"class">>}, Top)
+                    )
                 end)}
         ]
     end}.
@@ -160,7 +186,10 @@ trace_event_recording_test_() ->
 
                 %% Newest first
                 [First | _] = Traces,
-                ?assertEqual(<<"decrement">>, maps:get(<<"selector">>, First)),
+                ?assertEqual(
+                    {beamtalk_string, <<"decrement">>},
+                    maps:get({beamtalk_string, <<"selector">>}, First)
+                ),
 
                 %% Filter by pid
                 TracesForPid = beamtalk_trace_store:get_traces(TestPid),
@@ -169,7 +198,10 @@ trace_event_recording_test_() ->
                 %% Filter by pid + selector
                 TracesForSel = beamtalk_trace_store:get_traces(TestPid, increment),
                 ?assertEqual(1, length(TracesForSel)),
-                ?assertEqual(<<"increment">>, maps:get(<<"selector">>, hd(TracesForSel)))
+                ?assertEqual(
+                    {beamtalk_string, <<"increment">>},
+                    maps:get({beamtalk_string, <<"selector">>}, hd(TracesForSel))
+                )
             end)
         ]
     end}.
@@ -256,23 +288,30 @@ counters_aggregates_test_() ->
 
                 %% Check aggregated per-actor stats
                 Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = list_to_binary(pid_to_list(TestPid)),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
                 PidStats = maps:get(PidKey, Stats),
-                IncStats = maps:get(<<"increment">>, maps:get(<<"methods">>, PidStats)),
+                IncStats = maps:get(
+                    {beamtalk_string, <<"increment">>},
+                    maps:get({beamtalk_string, <<"methods">>}, PidStats)
+                ),
 
-                ?assertEqual(3, maps:get(<<"calls">>, IncStats)),
-                ?assertEqual(2, maps:get(<<"ok">>, IncStats)),
-                ?assertEqual(1, maps:get(<<"errors">>, IncStats)),
-                ?assertEqual(6000, maps:get(<<"total_duration_ns">>, IncStats)),
-                ?assertEqual(2000, maps:get(<<"avg_duration_ns">>, IncStats)),
-                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, IncStats)),
-                ?assertEqual(3000, maps:get(<<"max_duration_ns">>, IncStats)),
+                ?assertEqual(3, maps:get({beamtalk_string, <<"calls">>}, IncStats)),
+                ?assertEqual(2, maps:get({beamtalk_string, <<"ok">>}, IncStats)),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"errors">>}, IncStats)),
+                ?assertEqual(6000, maps:get({beamtalk_string, <<"total_duration_ns">>}, IncStats)),
+                ?assertEqual(2000, maps:get({beamtalk_string, <<"avg_duration_ns">>}, IncStats)),
+                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, IncStats)),
+                ?assertEqual(3000, maps:get({beamtalk_string, <<"max_duration_ns">>}, IncStats)),
 
                 %% The always-on class entry carries the same totals
-                #{<<"methods">> := #{<<"increment">> := ClassInc}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"increment">>} := ClassInc
+                    }
+                } =
                     class_entry(<<"Counter">>),
-                ?assertEqual(3, maps:get(<<"calls">>, ClassInc)),
-                ?assertEqual(6000, maps:get(<<"total_duration_ns">>, ClassInc))
+                ?assertEqual(3, maps:get({beamtalk_string, <<"calls">>}, ClassInc)),
+                ?assertEqual(6000, maps:get({beamtalk_string, <<"total_duration_ns">>}, ClassInc))
             end)
         ]
     end}.
@@ -353,7 +392,7 @@ slow_methods_test_() ->
                 Result = beamtalk_trace_store:slow_methods(2),
                 ?assertEqual(2, length(Result)),
                 [Slowest | _] = Result,
-                ?assertEqual(slow, maps:get(<<"selector">>, Slowest))
+                ?assertEqual(slow, maps:get({beamtalk_string, <<"selector">>}, Slowest))
             end)
         ]
     end}.
@@ -381,7 +420,7 @@ hot_methods_test_() ->
 
                 Result = beamtalk_trace_store:hot_methods(1),
                 ?assertEqual(1, length(Result)),
-                ?assertEqual(popular, maps:get(<<"selector">>, hd(Result)))
+                ?assertEqual(popular, maps:get({beamtalk_string, <<"selector">>}, hd(Result)))
             end)
         ]
     end}.
@@ -404,7 +443,7 @@ error_methods_test_() ->
 
                 Result = beamtalk_trace_store:error_methods(1),
                 ?assertEqual(1, length(Result)),
-                ?assertEqual(flaky, maps:get(<<"selector">>, hd(Result)))
+                ?assertEqual(flaky, maps:get({beamtalk_string, <<"selector">>}, hd(Result)))
             end)
         ]
     end}.
@@ -420,19 +459,25 @@ actor_health_test_() ->
                 %% Health of a live process
                 TestPid = self(),
                 Health = beamtalk_trace_store:actor_health(TestPid),
-                ?assertEqual(list_to_binary(pid_to_list(TestPid)), maps:get(<<"pid">>, Health)),
-                ?assertNotEqual(dead, maps:get(<<"status">>, Health)),
-                ?assert(is_integer(maps:get(<<"queue_depth">>, Health))),
-                ?assert(is_integer(maps:get(<<"memory_kb">>, Health))),
-                ?assert(is_integer(maps:get(<<"reductions">>, Health)))
+                ?assertEqual(
+                    {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+                    maps:get({beamtalk_string, <<"pid">>}, Health)
+                ),
+                ?assertNotEqual(dead, maps:get({beamtalk_string, <<"status">>}, Health)),
+                ?assert(is_integer(maps:get({beamtalk_string, <<"queue_depth">>}, Health))),
+                ?assert(is_integer(maps:get({beamtalk_string, <<"memory_kb">>}, Health))),
+                ?assert(is_integer(maps:get({beamtalk_string, <<"reductions">>}, Health)))
             end),
             ?_test(begin
                 %% Health of a dead process
                 DeadPid = spawn(fun() -> ok end),
                 timer:sleep(50),
                 Health = beamtalk_trace_store:actor_health(DeadPid),
-                ?assertEqual(dead, maps:get(<<"status">>, Health)),
-                ?assertEqual(<<"process not alive">>, maps:get(<<"error">>, Health))
+                ?assertEqual(dead, maps:get({beamtalk_string, <<"status">>}, Health)),
+                ?assertEqual(
+                    {beamtalk_string, <<"process not alive">>},
+                    maps:get({beamtalk_string, <<"error">>}, Health)
+                )
             end)
         ]
     end}.
@@ -446,13 +491,13 @@ system_health_test_() ->
         [
             ?_test(begin
                 Health = beamtalk_trace_store:system_health(),
-                ?assert(is_integer(maps:get(<<"scheduler_count">>, Health))),
-                ?assert(maps:get(<<"scheduler_count">>, Health) > 0),
-                ?assert(is_integer(maps:get(<<"process_count">>, Health))),
-                ?assert(is_map(maps:get(<<"memory">>, Health))),
-                Memory = maps:get(<<"memory">>, Health),
-                ?assert(is_integer(maps:get(<<"total_mb">>, Memory))),
-                ?assert(is_integer(maps:get(<<"run_queue">>, Health)))
+                ?assert(is_integer(maps:get({beamtalk_string, <<"scheduler_count">>}, Health))),
+                ?assert(maps:get({beamtalk_string, <<"scheduler_count">>}, Health) > 0),
+                ?assert(is_integer(maps:get({beamtalk_string, <<"process_count">>}, Health))),
+                ?assert(is_map(maps:get({beamtalk_string, <<"memory">>}, Health))),
+                Memory = maps:get({beamtalk_string, <<"memory">>}, Health),
+                ?assert(is_integer(maps:get({beamtalk_string, <<"total_mb">>}, Memory))),
+                ?assert(is_integer(maps:get({beamtalk_string, <<"run_queue">>}, Health)))
             end)
         ]
     end}.
@@ -486,11 +531,17 @@ bottlenecks_test_() ->
                     Result = beamtalk_trace_store:bottlenecks(10),
                     ?assert(is_list(Result)),
                     %% Our registered process should be in the list
-                    PidBin = list_to_binary(pid_to_list(Pid)),
-                    Pids = [maps:get(<<"actor">>, R) || R <- Result],
+                    PidBin = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
+                    Pids = [maps:get({beamtalk_string, <<"actor">>}, R) || R <- Result],
                     ?assert(lists:member(PidBin, Pids)),
-                    [Entry] = [R || R <- Result, maps:get(<<"actor">>, R) =:= PidBin],
-                    ?assertEqual(<<"Counter">>, maps:get(<<"class">>, Entry)),
+                    [Entry] = [
+                        R
+                     || R <- Result, maps:get({beamtalk_string, <<"actor">>}, R) =:= PidBin
+                    ],
+                    ?assertEqual(
+                        {beamtalk_string, <<"Counter">>},
+                        maps:get({beamtalk_string, <<"class">>}, Entry)
+                    ),
 
                     %% An unregistered process with dispatches never appears
                     Ghost = spawn(fun() ->
@@ -506,9 +557,12 @@ bottlenecks_test_() ->
                         Ghost, test_method, 100, ok, sync, 'Counter'
                     ),
                     Result2 = beamtalk_trace_store:bottlenecks(1000),
-                    GhostBin = list_to_binary(pid_to_list(Ghost)),
+                    GhostBin = {beamtalk_string, list_to_binary(pid_to_list(Ghost))},
                     ?assertNot(
-                        lists:member(GhostBin, [maps:get(<<"actor">>, R) || R <- Result2])
+                        lists:member(GhostBin, [
+                            maps:get({beamtalk_string, <<"actor">>}, R)
+                         || R <- Result2
+                        ])
                     ),
                     Ghost ! stop
                 after
@@ -538,8 +592,11 @@ bottlenecks_test_() ->
                     ok = beamtalk_object_instances:register('Other', Pid),
                     try
                         Result = beamtalk_trace_store:bottlenecks(1000),
-                        PidBin = list_to_binary(pid_to_list(Pid)),
-                        Matches = [R || R <- Result, maps:get(<<"actor">>, R) =:= PidBin],
+                        PidBin = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
+                        Matches = [
+                            R
+                         || R <- Result, maps:get({beamtalk_string, <<"actor">>}, R) =:= PidBin
+                        ],
                         ?assertEqual(1, length(Matches))
                     after
                         beamtalk_object_instances:unregister('Counter', Pid),
@@ -577,9 +634,13 @@ telemetry_dispatch_stop_handler_test_() ->
                 ),
 
                 %% Verify the always-on class aggregate was recorded
-                #{<<"methods">> := #{<<"increment">> := IncStats}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"increment">>} := IncStats
+                    }
+                } =
                     class_entry(<<"Counter">>),
-                ?assertEqual(1, maps:get(<<"calls">>, IncStats))
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, IncStats))
             end)
         ]
     end}.
@@ -612,9 +673,13 @@ telemetry_dispatch_exception_handler_test_() ->
                 ),
 
                 %% Verify error was recorded in the always-on class entry
-                #{<<"methods">> := #{<<"badmethod">> := MethodStats}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"badmethod">>} := MethodStats
+                    }
+                } =
                     class_entry(<<"Counter">>),
-                ?assertEqual(1, maps:get(<<"errors">>, MethodStats))
+                ?assertEqual(1, maps:get({beamtalk_string, <<"errors">>}, MethodStats))
             end)
         ]
     end}.
@@ -747,13 +812,19 @@ seed_crash_test_data() ->
 -doc "Assert the seeded dispatch aggregate and trace event survived a restart.".
 assert_seeded_data_intact(TestPid) ->
     ?assert(beamtalk_trace_store:is_enabled()),
-    #{<<"methods">> := #{<<"increment">> := Inc}} = class_entry(<<"Counter">>),
-    ?assertEqual(1, maps:get(<<"calls">>, Inc)),
-    ?assertEqual(1000, maps:get(<<"total_duration_ns">>, Inc)),
-    PidKey = list_to_binary(pid_to_list(TestPid)),
-    #{PidKey := #{<<"methods">> := #{<<"increment">> := PidInc}}} =
+    #{{beamtalk_string, <<"methods">>} := #{{beamtalk_string, <<"increment">>} := Inc}} = class_entry(
+        <<"Counter">>
+    ),
+    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, Inc)),
+    ?assertEqual(1000, maps:get({beamtalk_string, <<"total_duration_ns">>}, Inc)),
+    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+    #{
+        PidKey := #{
+            {beamtalk_string, <<"methods">>} := #{{beamtalk_string, <<"increment">>} := PidInc}
+        }
+    } =
         beamtalk_trace_store:get_stats(TestPid),
-    ?assertEqual(1, maps:get(<<"calls">>, PidInc)),
+    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, PidInc)),
     ?assertEqual(1, length(beamtalk_trace_store:get_traces())),
     ok.
 
@@ -777,7 +848,7 @@ vm_measurements_handler_test_() ->
 
                 %% System health should include the VM stats
                 Health = beamtalk_trace_store:system_health(),
-                VmStats = maps:get(<<"vm_stats">>, Health),
+                VmStats = maps:get({beamtalk_string, <<"vm_stats">>}, Health),
                 ?assert(is_map(VmStats))
             end)
         ]
@@ -801,7 +872,7 @@ wall_clock_timestamp_test_() ->
                 After = erlang:system_time(microsecond),
 
                 [Trace] = beamtalk_trace_store:get_traces(),
-                Ts = maps:get(<<"timestamp_us">>, Trace),
+                Ts = maps:get({beamtalk_string, <<"timestamp_us">>}, Trace),
                 %% Wall-clock timestamp should be between Before and After
                 ?assert(Ts >= Before),
                 ?assert(Ts =< After),
@@ -832,7 +903,7 @@ serialized_counter_grow_test_() ->
                     lists:seq(1, 1010)
                 ),
                 %% Verify the atomics grew — stats should have all 1010 methods
-                #{<<"methods">> := Methods} = class_entry(<<"Counter">>),
+                #{{beamtalk_string, <<"methods">>} := Methods} = class_entry(<<"Counter">>),
                 ?assert(maps:size(Methods) >= 1010)
             end)
         ]
@@ -902,9 +973,13 @@ concurrent_hits_during_grow_test_() ->
                     end
                  || G <- Growers
                 ],
-                #{<<"methods">> := #{<<"hammered">> := Hammered}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"hammered">>} := Hammered
+                    }
+                } =
                     class_entry(<<"Racy">>),
-                ?assertEqual(32 * 500, maps:get(<<"calls">>, Hammered))
+                ?assertEqual(32 * 500, maps:get({beamtalk_string, <<"calls">>}, Hammered))
             end)}
     end}.
 
@@ -918,37 +993,45 @@ min_max_duration_test_() ->
             ?_test(begin
                 beamtalk_trace_store:enable(),
                 TestPid = self(),
-                PidKey = list_to_binary(pid_to_list(TestPid)),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
                 PidPing = fun() ->
-                    #{PidKey := #{<<"methods">> := #{<<"ping">> := S}}} =
+                    #{
+                        PidKey := #{
+                            {beamtalk_string, <<"methods">>} := #{
+                                {beamtalk_string, <<"ping">>} := S
+                            }
+                        }
+                    } =
                         beamtalk_trace_store:get_stats(TestPid),
                     S
                 end,
                 ClassPing = fun() ->
-                    #{<<"methods">> := #{<<"ping">> := S}} = class_entry(<<"Counter">>),
+                    #{{beamtalk_string, <<"methods">>} := #{{beamtalk_string, <<"ping">>} := S}} = class_entry(
+                        <<"Counter">>
+                    ),
                     S
                 end,
 
                 %% Single call — min and max should be the same
                 beamtalk_trace_store:record_dispatch(TestPid, ping, 5000, ok, sync, 'Counter'),
-                ?assertEqual(5000, maps:get(<<"min_duration_ns">>, PidPing())),
-                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PidPing())),
-                ?assertEqual(5000, maps:get(<<"min_duration_ns">>, ClassPing())),
-                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, ClassPing())),
+                ?assertEqual(5000, maps:get({beamtalk_string, <<"min_duration_ns">>}, PidPing())),
+                ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, PidPing())),
+                ?assertEqual(5000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassPing())),
+                ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassPing())),
 
                 %% Add a faster call — min should decrease, max stays
                 beamtalk_trace_store:record_dispatch(TestPid, ping, 1000, ok, sync, 'Counter'),
-                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, PidPing())),
-                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, PidPing())),
-                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, ClassPing())),
-                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, ClassPing())),
+                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, PidPing())),
+                ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, PidPing())),
+                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassPing())),
+                ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassPing())),
 
                 %% Add a slower call — max should increase, min stays
                 beamtalk_trace_store:record_dispatch(TestPid, ping, 11000, ok, sync, 'Counter'),
-                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, PidPing())),
-                ?assertEqual(11000, maps:get(<<"max_duration_ns">>, PidPing())),
-                ?assertEqual(1000, maps:get(<<"min_duration_ns">>, ClassPing())),
-                ?assertEqual(11000, maps:get(<<"max_duration_ns">>, ClassPing()))
+                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, PidPing())),
+                ?assertEqual(11000, maps:get({beamtalk_string, <<"max_duration_ns">>}, PidPing())),
+                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassPing())),
+                ?assertEqual(11000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassPing()))
             end)
         ]
     end}.
@@ -1004,21 +1087,27 @@ min_max_concurrent_test_() ->
 
                     %% Verify min and max
                     Stats = beamtalk_trace_store:get_stats(TestPid),
-                    PidKey = list_to_binary(pid_to_list(TestPid)),
+                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
                     PidStats = maps:get(PidKey, Stats),
                     MethodStats = maps:get(
-                        <<"concurrent_method">>,
-                        maps:get(<<"methods">>, PidStats)
+                        {beamtalk_string, <<"concurrent_method">>},
+                        maps:get({beamtalk_string, <<"methods">>}, PidStats)
                     ),
 
                     %% Slot pre-allocated, so all concurrent increments hit the same slot.
                     %% 1 pre-allocation + NumProcesses * CallsPerProcess
                     ExpectedCalls = 1 + NumProcesses * CallsPerProcess,
-                    ?assertEqual(ExpectedCalls, maps:get(<<"calls">>, MethodStats)),
+                    ?assertEqual(
+                        ExpectedCalls, maps:get({beamtalk_string, <<"calls">>}, MethodStats)
+                    ),
                     %% Min should be 100 + (1 * 99) = 199 (lower than pre-alloc 5000)
-                    ?assertEqual(199, maps:get(<<"min_duration_ns">>, MethodStats)),
+                    ?assertEqual(
+                        199, maps:get({beamtalk_string, <<"min_duration_ns">>}, MethodStats)
+                    ),
                     %% Max should be 100 + (100 * 99) = 10000 (higher than pre-alloc 5000)
-                    ?assertEqual(10000, maps:get(<<"max_duration_ns">>, MethodStats))
+                    ?assertEqual(
+                        10000, maps:get({beamtalk_string, <<"max_duration_ns">>}, MethodStats)
+                    )
                 end)}
         ]
     end}.
@@ -1039,14 +1128,18 @@ clear_resets_min_sentinel_test_() ->
                     TestPid, sentinel_check, 5000, ok, sync, 'Counter'
                 ),
                 Stats1 = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = list_to_binary(pid_to_list(TestPid)),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
                 PidStats1 = maps:get(PidKey, Stats1),
                 MethodStats1 = maps:get(
-                    <<"sentinel_check">>,
-                    maps:get(<<"methods">>, PidStats1)
+                    {beamtalk_string, <<"sentinel_check">>},
+                    maps:get({beamtalk_string, <<"methods">>}, PidStats1)
                 ),
-                ?assertEqual(5000, maps:get(<<"min_duration_ns">>, MethodStats1)),
-                ?assertEqual(5000, maps:get(<<"max_duration_ns">>, MethodStats1)),
+                ?assertEqual(
+                    5000, maps:get({beamtalk_string, <<"min_duration_ns">>}, MethodStats1)
+                ),
+                ?assertEqual(
+                    5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, MethodStats1)
+                ),
 
                 %% Clear stats
                 beamtalk_trace_store:clear(),
@@ -1063,15 +1156,23 @@ clear_resets_min_sentinel_test_() ->
                 Stats2 = beamtalk_trace_store:get_stats(TestPid),
                 PidStats2 = maps:get(PidKey, Stats2),
                 MethodStats2 = maps:get(
-                    <<"sentinel_check">>,
-                    maps:get(<<"methods">>, PidStats2)
+                    {beamtalk_string, <<"sentinel_check">>},
+                    maps:get({beamtalk_string, <<"methods">>}, PidStats2)
                 ),
-                ?assertEqual(8000, maps:get(<<"min_duration_ns">>, MethodStats2)),
-                ?assertEqual(8000, maps:get(<<"max_duration_ns">>, MethodStats2)),
-                #{<<"methods">> := #{<<"sentinel_check">> := ClassStats}} =
+                ?assertEqual(
+                    8000, maps:get({beamtalk_string, <<"min_duration_ns">>}, MethodStats2)
+                ),
+                ?assertEqual(
+                    8000, maps:get({beamtalk_string, <<"max_duration_ns">>}, MethodStats2)
+                ),
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"sentinel_check">>} := ClassStats
+                    }
+                } =
                     class_entry(<<"Counter">>),
-                ?assertEqual(8000, maps:get(<<"min_duration_ns">>, ClassStats)),
-                ?assertEqual(8000, maps:get(<<"max_duration_ns">>, ClassStats))
+                ?assertEqual(8000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassStats)),
+                ?assertEqual(8000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassStats))
             end)
         ]
     end}.
@@ -1098,15 +1199,15 @@ slow_methods_sort_by_max_test_() ->
                 %% Actually spiky avg = (1000+20000)/2 = 10500, steady avg = 9000
                 %% So by avg, spiky is first
                 ByAvg = beamtalk_trace_store:slow_methods(2),
-                ?assertEqual(spiky, maps:get(<<"selector">>, hd(ByAvg))),
+                ?assertEqual(spiky, maps:get({beamtalk_string, <<"selector">>}, hd(ByAvg))),
 
                 %% By max, 'spiky' should still be first (max=20000 vs max=9000)
                 ByMax = beamtalk_trace_store:slow_methods(2, max_duration_ns),
-                ?assertEqual(spiky, maps:get(<<"selector">>, hd(ByMax))),
+                ?assertEqual(spiky, maps:get({beamtalk_string, <<"selector">>}, hd(ByMax))),
 
                 %% Verify the second entry is 'steady' when sorted by max
                 [_, Second] = ByMax,
-                ?assertEqual(steady, maps:get(<<"selector">>, Second))
+                ?assertEqual(steady, maps:get({beamtalk_string, <<"selector">>}, Second))
             end)
         ]
     end}.
@@ -1254,13 +1355,21 @@ opts_map_class_filter_test_() ->
                     CounterOnly = beamtalk_trace_store:get_traces(#{class => 'Counter'}),
                     ?assertEqual(2, length(CounterOnly)),
                     lists:foreach(
-                        fun(T) -> ?assertEqual(<<"Counter">>, maps:get(<<"class">>, T)) end,
+                        fun(T) ->
+                            ?assertEqual(
+                                {beamtalk_string, <<"Counter">>},
+                                maps:get({beamtalk_string, <<"class">>}, T)
+                            )
+                        end,
                         CounterOnly
                     ),
 
                     EventStoreOnly = beamtalk_trace_store:get_traces(#{class => 'EventStore'}),
                     ?assertEqual(1, length(EventStoreOnly)),
-                    ?assertEqual(<<"EventStore">>, maps:get(<<"class">>, hd(EventStoreOnly)))
+                    ?assertEqual(
+                        {beamtalk_string, <<"EventStore">>},
+                        maps:get({beamtalk_string, <<"class">>}, hd(EventStoreOnly))
+                    )
                 end)}
         ]
     end}.
@@ -1286,7 +1395,10 @@ opts_map_outcome_filter_test_() ->
 
                     Errors = beamtalk_trace_store:get_traces(#{outcome => error}),
                     ?assertEqual(1, length(Errors)),
-                    ?assertEqual(<<"decrement">>, maps:get(<<"selector">>, hd(Errors))),
+                    ?assertEqual(
+                        {beamtalk_string, <<"decrement">>},
+                        maps:get({beamtalk_string, <<"selector">>}, hd(Errors))
+                    ),
 
                     Oks = beamtalk_trace_store:get_traces(#{outcome => ok}),
                     ?assertEqual(2, length(Oks))
@@ -1320,7 +1432,10 @@ opts_map_min_duration_filter_test_() ->
                     %% Only events >= 10ms
                     VerySlow = beamtalk_trace_store:get_traces(#{min_duration_ns => 10000000}),
                     ?assertEqual(1, length(VerySlow)),
-                    ?assertEqual(<<"slow_op">>, maps:get(<<"selector">>, hd(VerySlow)))
+                    ?assertEqual(
+                        {beamtalk_string, <<"slow_op">>},
+                        maps:get({beamtalk_string, <<"selector">>}, hd(VerySlow))
+                    )
                 end)}
         ]
     end}.
@@ -1350,14 +1465,20 @@ opts_map_combined_filters_test_() ->
                         class => 'Counter', outcome => error
                     }),
                     ?assertEqual(1, length(CounterErrors)),
-                    ?assertEqual(<<"decrement">>, maps:get(<<"selector">>, hd(CounterErrors))),
+                    ?assertEqual(
+                        {beamtalk_string, <<"decrement">>},
+                        maps:get({beamtalk_string, <<"selector">>}, hd(CounterErrors))
+                    ),
 
                     %% EventStore errors only
                     ESErrors = beamtalk_trace_store:get_traces(#{
                         class => 'EventStore', outcome => error
                     }),
                     ?assertEqual(1, length(ESErrors)),
-                    ?assertEqual(<<"put">>, maps:get(<<"selector">>, hd(ESErrors)))
+                    ?assertEqual(
+                        {beamtalk_string, <<"put">>},
+                        maps:get({beamtalk_string, <<"selector">>}, hd(ESErrors))
+                    )
                 end)},
             {"selector without actor filter works independently",
                 ?_test(begin
@@ -1374,7 +1495,10 @@ opts_map_combined_filters_test_() ->
                     %% Selector without actor should work
                     Result = beamtalk_trace_store:get_traces(#{selector => increment}),
                     ?assertEqual(1, length(Result)),
-                    ?assertEqual(<<"increment">>, maps:get(<<"selector">>, hd(Result)))
+                    ?assertEqual(
+                        {beamtalk_string, <<"increment">>},
+                        maps:get({beamtalk_string, <<"selector">>}, hd(Result))
+                    )
                 end)},
             {"all filters combined: class + outcome + min_duration_ns + selector",
                 ?_test(begin
@@ -1399,8 +1523,14 @@ opts_map_combined_filters_test_() ->
                         selector => increment
                     }),
                     ?assertEqual(1, length(Result)),
-                    ?assertEqual(<<"Counter">>, maps:get(<<"class">>, hd(Result))),
-                    ?assertEqual(<<"increment">>, maps:get(<<"selector">>, hd(Result)))
+                    ?assertEqual(
+                        {beamtalk_string, <<"Counter">>},
+                        maps:get({beamtalk_string, <<"class">>}, hd(Result))
+                    ),
+                    ?assertEqual(
+                        {beamtalk_string, <<"increment">>},
+                        maps:get({beamtalk_string, <<"selector">>}, hd(Result))
+                    )
                 end)},
             {"empty opts map returns all traces",
                 ?_test(begin
@@ -1596,19 +1726,28 @@ lifecycle_event_handler_test_() ->
                     ),
                     %% Aggregate should record the lifecycle action as selector
                     Stats = beamtalk_trace_store:get_stats(TestPid),
-                    PidKey = list_to_binary(pid_to_list(TestPid)),
+                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
                     PidStats = maps:get(PidKey, Stats),
-                    Methods = maps:get(<<"methods">>, PidStats),
-                    ?assertMatch(#{<<"start">> := _}, Methods),
-                    StartStats = maps:get(<<"start">>, Methods),
-                    ?assertEqual(1, maps:get(<<"calls">>, StartStats)),
+                    Methods = maps:get({beamtalk_string, <<"methods">>}, PidStats),
+                    ?assertMatch(#{{beamtalk_string, <<"start">>} := _}, Methods),
+                    StartStats = maps:get({beamtalk_string, <<"start">>}, Methods),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, StartStats)),
                     %% Trace event should be recorded with lifecycle mode
                     Traces = beamtalk_trace_store:get_traces(),
                     ?assertEqual(1, length(Traces)),
                     [Trace] = Traces,
-                    ?assertEqual(<<"lifecycle">>, maps:get(<<"mode">>, Trace)),
-                    ?assertEqual(<<"start">>, maps:get(<<"selector">>, Trace)),
-                    ?assertEqual(<<"ok">>, maps:get(<<"outcome">>, Trace))
+                    ?assertEqual(
+                        {beamtalk_string, <<"lifecycle">>},
+                        maps:get({beamtalk_string, <<"mode">>}, Trace)
+                    ),
+                    ?assertEqual(
+                        {beamtalk_string, <<"start">>},
+                        maps:get({beamtalk_string, <<"selector">>}, Trace)
+                    ),
+                    ?assertEqual(
+                        {beamtalk_string, <<"ok">>},
+                        maps:get({beamtalk_string, <<"outcome">>}, Trace)
+                    )
                 end)},
             {"lifecycle stop with normal reason records ok outcome",
                 ?_test(begin
@@ -1624,7 +1763,10 @@ lifecycle_event_handler_test_() ->
                     ),
                     Traces = beamtalk_trace_store:get_traces(),
                     ?assertEqual(1, length(Traces)),
-                    ?assertEqual(<<"ok">>, maps:get(<<"outcome">>, hd(Traces)))
+                    ?assertEqual(
+                        {beamtalk_string, <<"ok">>},
+                        maps:get({beamtalk_string, <<"outcome">>}, hd(Traces))
+                    )
                 end)},
             {"lifecycle stop with crash reason records error outcome",
                 ?_test(begin
@@ -1640,7 +1782,10 @@ lifecycle_event_handler_test_() ->
                     ),
                     Traces = beamtalk_trace_store:get_traces(),
                     ?assertEqual(1, length(Traces)),
-                    ?assertEqual(<<"error">>, maps:get(<<"outcome">>, hd(Traces)))
+                    ?assertEqual(
+                        {beamtalk_string, <<"error">>},
+                        maps:get({beamtalk_string, <<"outcome">>}, hd(Traces))
+                    )
                 end)},
             {"lifecycle stop with shutdown tuple records ok outcome",
                 ?_test(begin
@@ -1656,7 +1801,10 @@ lifecycle_event_handler_test_() ->
                     ),
                     Traces = beamtalk_trace_store:get_traces(),
                     ?assertEqual(1, length(Traces)),
-                    ?assertEqual(<<"ok">>, maps:get(<<"outcome">>, hd(Traces)))
+                    ?assertEqual(
+                        {beamtalk_string, <<"ok">>},
+                        maps:get({beamtalk_string, <<"outcome">>}, hd(Traces))
+                    )
                 end)}
         ]
     end}.
@@ -1695,13 +1843,16 @@ timeout_and_cast_outcome_test_() ->
                         TestPid, slow_method, 50000, timeout, sync, 'Counter'
                     ),
                     Stats = beamtalk_trace_store:get_stats(TestPid),
-                    PidKey = list_to_binary(pid_to_list(TestPid)),
+                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
                     PidStats = maps:get(PidKey, Stats),
-                    MethodStats = maps:get(<<"slow_method">>, maps:get(<<"methods">>, PidStats)),
-                    ?assertEqual(1, maps:get(<<"calls">>, MethodStats)),
-                    ?assertEqual(1, maps:get(<<"timeouts">>, MethodStats)),
-                    ?assertEqual(0, maps:get(<<"ok">>, MethodStats)),
-                    ?assertEqual(0, maps:get(<<"errors">>, MethodStats))
+                    MethodStats = maps:get(
+                        {beamtalk_string, <<"slow_method">>},
+                        maps:get({beamtalk_string, <<"methods">>}, PidStats)
+                    ),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, MethodStats)),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"timeouts">>}, MethodStats)),
+                    ?assertEqual(0, maps:get({beamtalk_string, <<"ok">>}, MethodStats)),
+                    ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, MethodStats))
                 end)},
             {"cast outcome increments ok counter",
                 ?_test(begin
@@ -1711,13 +1862,16 @@ timeout_and_cast_outcome_test_() ->
                         TestPid, async_method, 1000, cast, async, 'Counter'
                     ),
                     Stats = beamtalk_trace_store:get_stats(TestPid),
-                    PidKey = list_to_binary(pid_to_list(TestPid)),
+                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
                     PidStats = maps:get(PidKey, Stats),
-                    MethodStats = maps:get(<<"async_method">>, maps:get(<<"methods">>, PidStats)),
-                    ?assertEqual(1, maps:get(<<"calls">>, MethodStats)),
-                    ?assertEqual(1, maps:get(<<"ok">>, MethodStats)),
-                    ?assertEqual(0, maps:get(<<"errors">>, MethodStats)),
-                    ?assertEqual(0, maps:get(<<"timeouts">>, MethodStats))
+                    MethodStats = maps:get(
+                        {beamtalk_string, <<"async_method">>},
+                        maps:get({beamtalk_string, <<"methods">>}, PidStats)
+                    ),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, MethodStats)),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"ok">>}, MethodStats)),
+                    ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, MethodStats)),
+                    ?assertEqual(0, maps:get({beamtalk_string, <<"timeouts">>}, MethodStats))
                 end)}
         ]
     end}.
@@ -1839,7 +1993,7 @@ unknown_request_test_() ->
 
 -doc "Fetch the `class:Class` entry of `get_stats/0` (the always-on aggregates).".
 class_entry(ClassBin) ->
-    maps:get(<<"class:", ClassBin/binary>>, beamtalk_trace_store:get_stats()).
+    maps:get({beamtalk_string, <<"class:", ClassBin/binary>>}, beamtalk_trace_store:get_stats()).
 
 -doc "Generate a unique temporary export path.".
 tmp_export_path(Tag) ->
@@ -1921,7 +2075,13 @@ actor_churn_stays_flat_test_() ->
                 %% per-{Class, Selector} rows.
                 lists:foreach(fun(I) -> churn_one_actor(I rem 2 =:= 0) end, lists:seq(1, 4)),
                 Baseline = agg_footprint(),
-                #{<<"methods">> := #{<<"getValue">> := #{<<"calls">> := WarmCalls}}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"getValue">>} := #{
+                            {beamtalk_string, <<"calls">>} := WarmCalls
+                        }
+                    }
+                } =
                     class_entry(<<"Counter">>),
 
                 N = 1500,
@@ -1934,10 +2094,14 @@ actor_churn_stays_flat_test_() ->
                 ?assertEqual(0, maps:get(pid, agg_footprint())),
                 ?assertEqual(0, maps:get(pid_keys, agg_footprint())),
                 %% Every dispatch is still counted, in the class entry.
-                #{<<"methods">> := #{<<"getValue">> := GetValue}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"getValue">>} := GetValue
+                    }
+                } =
                     class_entry(<<"Counter">>),
-                ?assertEqual(WarmCalls + N, maps:get(<<"calls">>, GetValue)),
-                ?assertEqual(WarmCalls + N, maps:get(<<"ok">>, GetValue)),
+                ?assertEqual(WarmCalls + N, maps:get({beamtalk_string, <<"calls">>}, GetValue)),
+                ?assertEqual(WarmCalls + N, maps:get({beamtalk_string, <<"ok">>}, GetValue)),
 
                 %% The trace store holds no monitors and arms none on actors.
                 StorePid = whereis(beamtalk_trace_store),
@@ -1977,9 +2141,13 @@ million_actor_churn_stays_flat_test_() ->
                     lists:seq(1, N)
                 ),
                 ?assertEqual(Baseline, agg_footprint()),
-                #{<<"methods">> := #{<<"churned">> := Churned}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"churned">>} := Churned
+                    }
+                } =
                     class_entry(<<"Counter">>),
-                ?assertEqual(N, maps:get(<<"calls">>, Churned))
+                ?assertEqual(N, maps:get({beamtalk_string, <<"calls">>}, Churned))
             end)}
     end}.
 
@@ -2012,14 +2180,20 @@ per_actor_stats_need_tracing_test_() ->
                     %% While all three live, stats holds the class entry plus
                     %% one entry per pid.
                     Stats0 = beamtalk_trace_store:get_stats(),
-                    LiveKey = list_to_binary(pid_to_list(Live)),
+                    LiveKey = {beamtalk_string, list_to_binary(pid_to_list(Live))},
                     ?assertEqual(
                         4, maps:size(Stats0)
                     ),
-                    #{<<"methods">> := #{<<"increment">> := LiveInc}} =
+                    #{
+                        {beamtalk_string, <<"methods">>} := #{
+                            {beamtalk_string, <<"increment">>} := LiveInc
+                        }
+                    } =
                         maps:get(LiveKey, Stats0),
-                    ?assertEqual(1, maps:get(<<"calls">>, LiveInc)),
-                    ?assertEqual(1000, maps:get(<<"total_duration_ns">>, LiveInc)),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, LiveInc)),
+                    ?assertEqual(
+                        1000, maps:get({beamtalk_string, <<"total_duration_ns">>}, LiveInc)
+                    ),
 
                     Dead1 ! stop,
                     Dead2 ! stop,
@@ -2032,40 +2206,52 @@ per_actor_stats_need_tracing_test_() ->
                     ?assertEqual(1, ets:info(beamtalk_agg_pid_keys, size)),
 
                     %% The class entry kept every dispatch across the deaths.
-                    #{<<"methods">> := #{<<"increment">> := Inc}} =
+                    #{
+                        {beamtalk_string, <<"methods">>} := #{
+                            {beamtalk_string, <<"increment">>} := Inc
+                        }
+                    } =
                         class_entry(<<"Counter">>),
-                    ?assertEqual(4, maps:get(<<"calls">>, Inc)),
-                    ?assertEqual(2, maps:get(<<"ok">>, Inc)),
-                    ?assertEqual(1, maps:get(<<"errors">>, Inc)),
-                    ?assertEqual(1, maps:get(<<"timeouts">>, Inc)),
-                    ?assertEqual(7500, maps:get(<<"total_duration_ns">>, Inc)),
-                    ?assertEqual(7500 div 4, maps:get(<<"avg_duration_ns">>, Inc)),
-                    ?assertEqual(500, maps:get(<<"min_duration_ns">>, Inc)),
-                    ?assertEqual(4000, maps:get(<<"max_duration_ns">>, Inc)),
+                    ?assertEqual(4, maps:get({beamtalk_string, <<"calls">>}, Inc)),
+                    ?assertEqual(2, maps:get({beamtalk_string, <<"ok">>}, Inc)),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"errors">>}, Inc)),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"timeouts">>}, Inc)),
+                    ?assertEqual(7500, maps:get({beamtalk_string, <<"total_duration_ns">>}, Inc)),
+                    ?assertEqual(
+                        7500 div 4, maps:get({beamtalk_string, <<"avg_duration_ns">>}, Inc)
+                    ),
+                    ?assertEqual(500, maps:get({beamtalk_string, <<"min_duration_ns">>}, Inc)),
+                    ?assertEqual(4000, maps:get({beamtalk_string, <<"max_duration_ns">>}, Inc)),
 
                     %% The method queries see one class entry with no pid.
                     Hot = beamtalk_trace_store:hot_methods(10),
                     [CounterHot] = [
                         H
-                     || H <- Hot, maps:get(<<"class">>, H) =:= <<"Counter">>
+                     || H <- Hot,
+                        maps:get({beamtalk_string, <<"class">>}, H) =:=
+                            {beamtalk_string, <<"Counter">>}
                     ],
-                    ?assertEqual(4, maps:get(<<"calls">>, CounterHot)),
-                    ?assertNot(maps:is_key(<<"pid">>, CounterHot)),
+                    ?assertEqual(4, maps:get({beamtalk_string, <<"calls">>}, CounterHot)),
+                    ?assertNot(maps:is_key({beamtalk_string, <<"pid">>}, CounterHot)),
                     [TopError | _] = beamtalk_trace_store:error_methods(10),
-                    ?assertNot(maps:is_key(<<"pid">>, TopError)),
+                    ?assertNot(maps:is_key({beamtalk_string, <<"pid">>}, TopError)),
                     [Slowest | _] = beamtalk_trace_store:slow_methods(10, max_duration_ns),
-                    ?assertEqual(4000, maps:get(<<"max_duration_ns">>, Slowest)),
+                    ?assertEqual(4000, maps:get({beamtalk_string, <<"max_duration_ns">>}, Slowest)),
 
                     %% A later death changes nothing in the class entry but
                     %% removes the last pid row.
                     Record(Live, 100, ok),
                     Live ! stop,
                     wait_until(fun() -> beamtalk_trace_store:get_stats(Live) =:= #{} end),
-                    #{<<"methods">> := #{<<"increment">> := Inc2}} =
+                    #{
+                        {beamtalk_string, <<"methods">>} := #{
+                            {beamtalk_string, <<"increment">>} := Inc2
+                        }
+                    } =
                         class_entry(<<"Counter">>),
-                    ?assertEqual(5, maps:get(<<"calls">>, Inc2)),
-                    ?assertEqual(7600, maps:get(<<"total_duration_ns">>, Inc2)),
-                    ?assertEqual(100, maps:get(<<"min_duration_ns">>, Inc2)),
+                    ?assertEqual(5, maps:get({beamtalk_string, <<"calls">>}, Inc2)),
+                    ?assertEqual(7600, maps:get({beamtalk_string, <<"total_duration_ns">>}, Inc2)),
+                    ?assertEqual(100, maps:get({beamtalk_string, <<"min_duration_ns">>}, Inc2)),
                     ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
                     ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size))
                 end)},
@@ -2076,7 +2262,7 @@ per_actor_stats_need_tracing_test_() ->
                     beamtalk_trace_store:enable(),
                     Pid = idle_process(),
                     beamtalk_trace_store:record_dispatch(Pid, increment, 10, ok, sync, 'Counter'),
-                    PidKey = list_to_binary(pid_to_list(Pid)),
+                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
                     ?assertMatch(
                         #{PidKey := _}, beamtalk_trace_store:get_stats(Pid)
                     ),
@@ -2084,9 +2270,13 @@ per_actor_stats_need_tracing_test_() ->
                     ?assertEqual(#{}, beamtalk_trace_store:get_stats(Pid)),
                     ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
                     ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size)),
-                    #{<<"methods">> := #{<<"increment">> := Inc}} =
+                    #{
+                        {beamtalk_string, <<"methods">>} := #{
+                            {beamtalk_string, <<"increment">>} := Inc
+                        }
+                    } =
                         class_entry(<<"Counter">>),
-                    ?assertEqual(1, maps:get(<<"calls">>, Inc)),
+                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, Inc)),
                     Pid ! stop
                 end)},
             {"a stop event does not sweep a live actor; its exit does",
@@ -2115,17 +2305,31 @@ per_actor_stats_need_tracing_test_() ->
                     after 5000 -> ?assert(false)
                     end,
                     %% Still alive: its per-pid stats stay until it exits.
-                    PidKey = list_to_binary(pid_to_list(Pid)),
-                    #{PidKey := #{<<"methods">> := LiveMethods}} =
+                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
+                    #{PidKey := #{{beamtalk_string, <<"methods">>} := LiveMethods}} =
                         beamtalk_trace_store:get_stats(Pid),
-                    ?assertMatch(#{<<"increment">> := #{<<"calls">> := 1}}, LiveMethods),
+                    ?assertMatch(
+                        #{
+                            {beamtalk_string, <<"increment">>} := #{
+                                {beamtalk_string, <<"calls">>} := 1
+                            }
+                        },
+                        LiveMethods
+                    ),
                     Pid ! stop,
                     wait_until(fun() -> beamtalk_trace_store:get_stats(Pid) =:= #{} end),
-                    #{<<"methods">> := Methods} = class_entry(<<"Counter">>),
-                    ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"increment">>, Methods)),
+                    #{{beamtalk_string, <<"methods">>} := Methods} = class_entry(<<"Counter">>),
+                    ?assertMatch(
+                        #{{beamtalk_string, <<"calls">>} := 1},
+                        maps:get({beamtalk_string, <<"increment">>}, Methods)
+                    ),
                     %% The crash shows up as an error on the class `stop`.
                     ?assertMatch(
-                        #{<<"calls">> := 1, <<"errors">> := 1}, maps:get(<<"stop">>, Methods)
+                        #{
+                            {beamtalk_string, <<"calls">>} := 1,
+                            {beamtalk_string, <<"errors">>} := 1
+                        },
+                        maps:get({beamtalk_string, <<"stop">>}, Methods)
                     )
                 end)}
         ]
@@ -2195,10 +2399,19 @@ sweep_reclaims_dead_pid_rows_test_() ->
                     ets:info(beamtalk_agg_pid, size) =:= 0 andalso
                         ets:info(beamtalk_agg_pid_keys, size) =:= 0
                 end),
-                #{<<"methods">> := Methods} = class_entry(<<"Late">>),
-                ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"first">>, Methods)),
-                ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"foo">>, Methods)),
-                ?assertMatch(#{<<"calls">> := 1}, maps:get(<<"bar">>, Methods))
+                #{{beamtalk_string, <<"methods">>} := Methods} = class_entry(<<"Late">>),
+                ?assertMatch(
+                    #{{beamtalk_string, <<"calls">>} := 1},
+                    maps:get({beamtalk_string, <<"first">>}, Methods)
+                ),
+                ?assertMatch(
+                    #{{beamtalk_string, <<"calls">>} := 1},
+                    maps:get({beamtalk_string, <<"foo">>}, Methods)
+                ),
+                ?assertMatch(
+                    #{{beamtalk_string, <<"calls">>} := 1},
+                    maps:get({beamtalk_string, <<"bar">>}, Methods)
+                )
             end)}
     end}.
 
@@ -2236,9 +2449,13 @@ pid_cap_drops_and_recovers_test_() ->
                 ?assertEqual([], ets:lookup(beamtalk_agg_pid, {Ghost, capped_method})),
                 ?assertEqual(#{}, beamtalk_trace_store:get_stats(Ghost)),
                 %% ... but its class aggregates still record.
-                #{<<"methods">> := #{<<"capped_method">> := Capped}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"capped_method">>} := Capped
+                    }
+                } =
                     class_entry(<<"Cap">>),
-                ?assertEqual(1, maps:get(<<"calls">>, Capped)),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, Capped)),
                 %% Once the sweep reclaims dead rows there is room again: a
                 %% new pid is tracked.
                 Ghost ! stop,
@@ -2293,12 +2510,22 @@ concurrent_alloc_during_grow_and_clear_test_() ->
                         ets:info(beamtalk_agg_pid_keys, size) =:= 0
                 end),
                 %% The class entry holds every dispatch exactly once.
-                #{<<"methods">> := #{<<"alpha">> := Alpha, <<"beta">> := Beta}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"alpha">>} := Alpha,
+                        {beamtalk_string, <<"beta">>} := Beta
+                    }
+                } =
                     class_entry(<<"Grow">>),
-                ?assertMatch(#{<<"calls">> := N, <<"ok">> := N}, Alpha),
-                ?assertEqual(10 * N, maps:get(<<"total_duration_ns">>, Alpha)),
-                ?assertMatch(#{<<"calls">> := N, <<"errors">> := N}, Beta),
-                ?assertEqual(30 * N, maps:get(<<"total_duration_ns">>, Beta)),
+                ?assertMatch(
+                    #{{beamtalk_string, <<"calls">>} := N, {beamtalk_string, <<"ok">>} := N}, Alpha
+                ),
+                ?assertEqual(10 * N, maps:get({beamtalk_string, <<"total_duration_ns">>}, Alpha)),
+                ?assertMatch(
+                    #{{beamtalk_string, <<"calls">>} := N, {beamtalk_string, <<"errors">>} := N},
+                    Beta
+                ),
+                ?assertEqual(30 * N, maps:get({beamtalk_string, <<"total_duration_ns">>}, Beta)),
 
                 %% Every slot is accounted for exactly once: on the free list
                 %% or held by a class row, never both. Slots are {Ref, Base}
@@ -2320,15 +2547,24 @@ concurrent_alloc_during_grow_and_clear_test_() ->
                  || {{P, _}, _, B, _} <- ets:tab2list(beamtalk_agg_pid), P =:= Live
                 ],
                 ?assertEqual(3, length(lists:usort(Bases))),
-                #{<<"methods">> := LiveMethods} =
+                #{{beamtalk_string, <<"methods">>} := LiveMethods} =
                     maps:get(
-                        list_to_binary(pid_to_list(Live)), beamtalk_trace_store:get_stats(Live)
+                        {beamtalk_string, list_to_binary(pid_to_list(Live))},
+                        beamtalk_trace_store:get_stats(Live)
                     ),
                 [
                     ?assertMatch(
-                        #{<<"calls">> := 1, <<"total_duration_ns">> := 5}, maps:get(S, LiveMethods)
+                        #{
+                            {beamtalk_string, <<"calls">>} := 1,
+                            {beamtalk_string, <<"total_duration_ns">>} := 5
+                        },
+                        maps:get(S, LiveMethods)
                     )
-                 || S <- [<<"one">>, <<"two">>, <<"three">>]
+                 || S <- [
+                        {beamtalk_string, <<"one">>},
+                        {beamtalk_string, <<"two">>},
+                        {beamtalk_string, <<"three">>}
+                    ]
                 ],
                 Live ! stop
             end)}
@@ -2376,8 +2612,10 @@ upgrade_resets_aggregates_test_() ->
                 ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
                 ?assertEqual(1, length(beamtalk_trace_store:get_traces())),
                 beamtalk_trace_store:record_dispatch(self(), pong, 1, ok, sync, 'Counter'),
-                #{<<"methods">> := #{<<"pong">> := Pong}} = class_entry(<<"Counter">>),
-                ?assertEqual(1, maps:get(<<"calls">>, Pong))
+                #{{beamtalk_string, <<"methods">>} := #{{beamtalk_string, <<"pong">>} := Pong}} = class_entry(
+                    <<"Counter">>
+                ),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, Pong))
             end)}
     end}.
 
@@ -2548,14 +2786,24 @@ free_list_churn_stays_flat_test_() ->
                 %% ... zeroed before reuse: one dispatch reads as one call,
                 %% not one plus the previous owner's two.
                 [Sample | _] = Win2,
-                SampleKey = list_to_binary(pid_to_list(Sample)),
-                #{SampleKey := #{<<"methods">> := #{<<"churned">> := SampleStats}}} =
+                SampleKey = {beamtalk_string, list_to_binary(pid_to_list(Sample))},
+                #{
+                    SampleKey := #{
+                        {beamtalk_string, <<"methods">>} := #{
+                            {beamtalk_string, <<"churned">>} := SampleStats
+                        }
+                    }
+                } =
                     beamtalk_trace_store:get_stats(Sample),
-                ?assertEqual(1, maps:get(<<"calls">>, SampleStats)),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, SampleStats)),
                 %% ... and the class entry holds every dispatch exactly once.
-                #{<<"methods">> := #{<<"churned">> := Churned}} =
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"churned">>} := Churned
+                    }
+                } =
                     class_entry(<<"ChurnFree">>),
-                ?assertEqual(3 * Allocs, maps:get(<<"calls">>, Churned)),
+                ?assertEqual(3 * Allocs, maps:get({beamtalk_string, <<"calls">>}, Churned)),
 
                 %% Window 3 (traced): ~1 free-list take per new actor.
                 [exit(P, kill) || P <- Win2],
@@ -2616,10 +2864,16 @@ free_list_release_reuse_roundtrip_test_() ->
                 %% Zeroed: one dispatch reads as exactly one call.
                 [
                     begin
-                        K = list_to_binary(pid_to_list(P)),
-                        #{K := #{<<"methods">> := #{<<"probed">> := S}}} =
+                        K = {beamtalk_string, list_to_binary(pid_to_list(P))},
+                        #{
+                            K := #{
+                                {beamtalk_string, <<"methods">>} := #{
+                                    {beamtalk_string, <<"probed">>} := S
+                                }
+                            }
+                        } =
                             beamtalk_trace_store:get_stats(P),
-                        ?assertEqual(1, maps:get(<<"calls">>, S))
+                        ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, S))
                     end
                  || P <- Pids2
                 ],

@@ -1079,7 +1079,7 @@ test_actor_default_displaystring_bypass() ->
     },
     State = #{'$beamtalk_class' => 'Counter', value => 0},
     Result = beamtalk_dispatch:lookup('displayString', [], ActorSelf, State, 'Counter'),
-    ?assertMatch({reply, <<"Actor(Counter, ", _/binary>>, _}, Result).
+    ?assertMatch({reply, {beamtalk_string, <<"Actor(Counter, ", _/binary>>}, _}, Result).
 
 %%% ============================================================================
 %%% Additional coverage tests

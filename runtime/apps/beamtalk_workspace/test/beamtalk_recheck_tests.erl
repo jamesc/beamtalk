@@ -1590,7 +1590,10 @@ trigger_image_reports_checked_and_stale_across_the_image_test_() ->
                     ?assert(length(Findings) >= 1),
                     ?assert(
                         lists:all(
-                            fun(F) -> maps:get(owner, F) =:= <<"ReCheckImageBroken">> end, Findings
+                            fun(F) ->
+                                maps:get(owner, F) =:= {beamtalk_string, <<"ReCheckImageBroken">>}
+                            end,
+                            Findings
                         )
                     )
                 end)

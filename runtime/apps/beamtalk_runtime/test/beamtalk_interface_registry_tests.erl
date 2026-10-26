@@ -293,24 +293,23 @@ class_object_for_pid_test_() ->
 help_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
-            {"returns binary for known class by atom", fun() ->
-                Result = beamtalk_interface:dispatch(
+            {"returns a String for known class by atom", fun() ->
+                {beamtalk_string, Text} = beamtalk_interface:dispatch(
                     'help:', ['Counter'], fake_self()
                 ),
-                ?assert(is_binary(Result)),
-                ?assert(byte_size(Result) > 0)
+                ?assert(byte_size(Text) > 0)
             end},
-            {"returns binary for known class by binary name", fun() ->
+            {"returns a String for known class by binary name", fun() ->
                 Result = beamtalk_interface:dispatch(
                     'help:', [<<"Counter">>], fake_self()
                 ),
-                ?assert(is_binary(Result))
+                ?assertMatch({beamtalk_string, _}, Result)
             end},
             {"help output includes class name", fun() ->
-                Result = beamtalk_interface:dispatch(
+                {beamtalk_string, Text} = beamtalk_interface:dispatch(
                     'help:', ['Counter'], fake_self()
                 ),
-                ?assertNotEqual(nomatch, binary:match(Result, <<"Counter">>))
+                ?assertNotEqual(nomatch, binary:match(Text, <<"Counter">>))
             end},
             {"unknown class raises class_not_found", fun() ->
                 try
@@ -343,12 +342,11 @@ help_test_() ->
 help_selector_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
-            {"returns binary for known class and selector", fun() ->
-                Result = beamtalk_interface:dispatch(
+            {"returns a String for known class and selector", fun() ->
+                {beamtalk_string, Text} = beamtalk_interface:dispatch(
                     'help:selector:', ['Counter', increment], fake_self()
                 ),
-                ?assert(is_binary(Result)),
-                ?assertNotEqual(nomatch, binary:match(Result, <<"increment">>))
+                ?assertNotEqual(nomatch, binary:match(Text, <<"increment">>))
             end},
             {"unknown selector raises does_not_understand", fun() ->
                 try
@@ -382,22 +380,26 @@ help_selector_test_() ->
 version_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
-            {"returns a binary", fun() ->
+            {"returns a String", fun() ->
                 Result = beamtalk_interface:dispatch(version, [], fake_self()),
-                ?assert(is_binary(Result))
+                ?assertMatch({beamtalk_string, _}, Result)
             end},
-            {"returns non-empty binary", fun() ->
-                Result = beamtalk_interface:dispatch(version, [], fake_self()),
-                ?assert(byte_size(Result) > 0)
+            {"returns non-empty String", fun() ->
+                {beamtalk_string, Text} = beamtalk_interface:dispatch(
+                    version, [], fake_self()
+                ),
+                ?assert(byte_size(Text) > 0)
             end},
             {"matches application vsn when app is loaded", fun() ->
                 _ = application:load(beamtalk_runtime),
                 Result = beamtalk_interface:dispatch(version, [], fake_self()),
                 case application:get_key(beamtalk_runtime, vsn) of
-                    {ok, Vsn} ->
-                        ?assertEqual(list_to_binary(Vsn), Result);
+                    {ok, Vsn} when is_list(Vsn) ->
+                        ?assertEqual({beamtalk_string, list_to_binary(Vsn)}, Result);
+                    {ok, Vsn} when is_binary(Vsn) ->
+                        ?assertEqual({beamtalk_string, Vsn}, Result);
                     _ ->
-                        ?assertEqual(<<"unknown">>, Result)
+                        ?assertEqual({beamtalk_string, <<"unknown">>}, Result)
                 end
             end}
         ]

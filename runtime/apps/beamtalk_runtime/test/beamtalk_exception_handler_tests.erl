@@ -337,8 +337,8 @@ make_test_exception() ->
         kind = does_not_understand,
         class = 'Integer',
         selector = 'foo',
-        message = <<"Integer does not understand 'foo'">>,
-        hint = <<"Check spelling">>,
+        message = {beamtalk_string, <<"Integer does not understand 'foo'">>},
+        hint = {beamtalk_string, <<"Check spelling">>},
         details = #{extra => data}
     },
     #{'$beamtalk_class' => 'RuntimeError', error => Error}.
