@@ -63,6 +63,21 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```
   class sealed fromBytes: bytes :: List(Integer) -> Binary => self delegate
 
+  /// Build a Binary from an element list (class method).
+  ///
+  /// This is the `species` constructor `collect:`/`select:`/`reject:`
+  /// answer through on a Binary receiver: block results assemble here.
+  /// Elements follow iolist rules — byte Integers (0-255), Binaries,
+  /// Strings (a String is its UTF-8 bytes), or nested lists of those;
+  /// anything else raises `type_error`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Binary withAll: #(104, 105)   // => _
+  /// ```
+  class sealed withAll: elements :: List -> Binary =>
+    Binary fromIolist: elements
+
   /// Deserialize a binary and return both the value and bytes consumed.
   ///
   /// Returns a tuple of (value, bytesConsumed). Useful for parsing
@@ -174,17 +189,6 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```
   byteAt: offset :: Integer -> Integer => @primitive
 
-  /// Return the byte count of this binary.
-  ///
-  /// Alias for `size` on Binary. On String, provides unambiguous byte count
-  /// (since String overrides `size` with grapheme count).
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (Binary fromBytes: #(104, 101, 108)) byteSize   // => 3
-  /// ```
-  byteSize -> Integer => @primitive
-
   // === Slicing and concatenation ===
 
   /// Return a zero-copy slice of this binary.
@@ -216,25 +220,21 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```
   toBytes -> List(Integer) => @primitive
 
-  /// Validate UTF-8 and return the binary as a String.
+  /// Validate UTF-8 and return a Result: `ok:` with the String on
+  /// success, `error:` with a `parse_error` carrying the byte offset of
+  /// the invalid sequence on failure.
   ///
-  /// Success answers the String itself: valid UTF-8 binaries dispatch
-  /// as String, so `String>>asString` (which answers `self`) handles
-  /// them and this method's body only runs for invalid UTF-8 — which
-  /// answers `Result error:` with a `parse_error` carrying the byte
-  /// offset of the invalid sequence. `String>>asString` must keep
-  /// answering a bare String (the `Printable` contract), so a uniform
-  /// `Result` on both sides is not expressible through this selector.
-  /// TODO(BT-4170): when dispatch becomes construction type, valid
-  /// binaries reach this body too and success flips to `Result ok:` —
-  /// update the annotation, docs, and tests then.
+  /// Every Binary dispatches here (class is construction type — no
+  /// UTF-8 sniffing), so success is `Result ok:` uniformly. `String`
+  /// overrides `asString` with `self` (the `Printable` contract: a
+  /// String already *is* text, so no Result wrapper applies).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asString   // => "hello"
-  /// ((Binary fromBytes: #(255, 254)) asString) isError        // => true
+  /// ((Binary fromBytes: #(104, 101, 108, 108, 111)) asString) unwrap   // => "hello"
+  /// ((Binary fromBytes: #(255, 254)) asString) isError                 // => true
   /// ```
-  asString -> String | Result(String, Error) => @primitive
+  asString -> Result(String, Error) => @primitive
 
   /// Return this binary as a String without UTF-8 validation.
   ///
