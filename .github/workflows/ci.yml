@@ -131,7 +131,7 @@ jobs:
           cache-dependency-path: editors/vscode/package-lock.json
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -246,7 +246,7 @@ jobs:
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Rust dependencies (desktop/src-tauri)
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: desktop/src-tauri -> target
 
@@ -294,7 +294,7 @@ jobs:
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -325,7 +325,7 @@ jobs:
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -394,7 +394,7 @@ jobs:
 
       - name: Cache Rust dependencies
         if: steps.filter.outputs.run == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -543,7 +543,7 @@ jobs:
 
       - name: Cache Rust dependencies
         if: steps.filter.outputs.run == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -580,7 +580,7 @@ jobs:
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -651,7 +651,7 @@ jobs:
             ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -737,7 +737,7 @@ jobs:
             ${{ runner.os }}-erlang-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -819,7 +819,7 @@ jobs:
             ${{ runner.os }}-dialyzer-otp${{ matrix.otp }}-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -919,7 +919,7 @@ jobs:
 
       - name: Cache Rust dependencies
         if: steps.filter.outputs.run == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -963,7 +963,7 @@ jobs:
             ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -1034,7 +1034,7 @@ jobs:
             ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
@@ -1099,7 +1099,7 @@ jobs:
             ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
 
