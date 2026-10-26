@@ -168,6 +168,11 @@ jobs:
           echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
           "$TOOLCHAIN_CARGO" --version
 
+      - name: Check Cargo.lock is up to date
+        # The root Cargo.lock is committed; fail if Cargo.toml changed without it.
+        if: runner.os == 'Linux'
+        run: cargo tree --locked --workspace --depth 0 > /dev/null
+
       - name: Build, lint, and fast tests
         # build first so clippy and test-rust reuse its artifacts.
         # Full test-stdlib/test-bunit/test-runtime run only in the Linux-only 'test' job.
