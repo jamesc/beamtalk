@@ -148,3 +148,24 @@ fn no_brackets_fault_operand_tier2_call_is_unbracketed_gap() {
         "merged fun body stays clean:\n{report}"
     );
 }
+
+/// The same block returning non-locally: the `^` bypasses the exit flush.
+const NLR: &str = "  run =>\n    count := 0\n    b := [count := count + 1. self.n := self.n + 100. ^count]\n    b value\n";
+
+#[test]
+fn caret_out_of_merged_fun_carries_take_plus_locals() {
+    let out = compile(&format!("{PREAMBLE}{NLR}"));
+    // The throw bypasses the exit flush, so the `^` carries take()+locals.
+    assert!(
+        out.contains("T2Nlr"),
+        "merged fun ^ carries take() plus locals:\n{out}"
+    );
+    assert!(
+        out.contains("'__local__count'"),
+        "merged fun ^ flushes the captured local:\n{out}"
+    );
+    assert!(
+        !out.contains("FieldReadFromStateAcc"),
+        "no findings on the merged shape:\n{out}"
+    );
+}
