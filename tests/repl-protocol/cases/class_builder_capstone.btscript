@@ -49,7 +49,7 @@ cap := Object classBuilder name: #CapstoneAccount; superclass: Object; methods: 
 // The bound value is the genuine class object: it renders as the class name and
 // answers reflection (BT-2258).
 cap printString
-// => CapstoneAccount
+// => "CapstoneAccount"
 
 cap name
 // => CapstoneAccount
@@ -62,12 +62,12 @@ cap superclass
 // => 0
 
 (cap new) describe
-// => account
+// => "account"
 
 // Class method dispatch through the returned class object (BT-2267), including
 // a `self` class-method send resolving a sibling class method.
 cap greeting
-// => bank
+// => "bank"
 
 cap doubled
 // => 42
@@ -145,16 +145,16 @@ Object classBuilder name: #CapstoneDoc; superclass: Object; classDoc: "A documen
 
 // Class-level :help shows the header and the class-level doc comment.
 :help CapstoneDoc
-// => == CapstoneDoc < Object ==_A documented builder class._
+// => "== CapstoneDoc < Object ==_A documented builder class._"
 
 // Instance-method :help shows the display signature and the doc comment.
 // (Asserted via message-send below; the header form is checked here.)
 :help CapstoneDoc ping
-// => == CapstoneDoc >> ping ==_
+// => "== CapstoneDoc >> ping ==_"
 
 // Class-method :help shows the class-side header for a builder class method.
 :help CapstoneDoc make
-// => == CapstoneDoc >> make ==_
+// => "== CapstoneDoc >> make ==_"
 
 // The instance-method display signature and doc both reach :help text.
 (Beamtalk help: #CapstoneDoc selector: #ping) includesSubstring: "ping -> Integer"
@@ -200,21 +200,21 @@ results isEmpty
 // `ClassName class >> sel => body` and confirm dispatch picks up the new body.
 Object subclass: CapstoneLive
   class greeting => "before"
-// => CapstoneLive
+// => "CapstoneLive"
 
 CapstoneLive greeting
-// => before
+// => "before"
 
 CapstoneLive class >> greeting => "after"
-// => CapstoneLive>>greeting
+// => "CapstoneLive>>greeting"
 
 // Class-side dispatch now resolves the live-edited class method (ADR 0084 path).
 CapstoneLive greeting
-// => after
+// => "after"
 
 // A brand-new class-side selector added via >> is also dispatchable.
 CapstoneLive class >> answer => 42
-// => CapstoneLive>>answer
+// => "CapstoneLive>>answer"
 
 CapstoneLive answer
 // => 42

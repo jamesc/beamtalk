@@ -27,7 +27,7 @@ noInit := E2EInitInheritChildNoInit spawn
 // => Actor(E2EInitInheritChildNoInit, _)
 
 noInit getLabel
-// => parent-initialized
+// => "parent-initialized"
 
 // Parent's other defaulted field is also reachable.
 noInit getCount
@@ -47,10 +47,10 @@ uses := E2EInitInheritChildUses spawn
 // => Actor(E2EInitInheritChildUses, _)
 
 uses getLabel
-// => parent-initialized
+// => "parent-initialized"
 
 uses getCache
-// => cache-parent-initialized
+// => "cache-parent-initialized"
 
 // ===========================================================================
 // 3-LEVEL HIERARCHY — ALL INITIALIZERS RUN PARENT-FIRST
@@ -61,7 +61,7 @@ deep := E2EInitDeepC spawn
 // => Actor(E2EInitDeepC, _)
 
 deep getLog
-// => ABC
+// => "ABC"
 
 // ===========================================================================
 // UNINITIALIZED INHERITED FIELD RAISES UninitializedStateError

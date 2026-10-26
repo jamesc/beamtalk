@@ -156,17 +156,17 @@ fn test_no_dead_code_without_return() {
 #[test]
 fn test_dead_code_in_block() {
     // Block with return followed by expression: [^ 42. 99]
-    let block = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![
+    let block = Expression::Block(Block::new(
+        vec![],
+        vec![
             bare(Expression::Return {
                 value: Box::new(Expression::Literal(Literal::Integer(42), Span::new(0, 4))),
                 span: Span::new(0, 4),
             }),
             bare(Expression::Literal(Literal::Integer(99), Span::new(5, 7))),
         ],
-        span: test_span(),
-    });
+        test_span(),
+    ));
 
     // Put block inside a method body so it's in scope
     let class = ClassDefinition {
@@ -405,13 +405,13 @@ fn test_super_in_class_scope_gives_error() {
 #[test]
 fn test_block_param_shadows_outer_variable() {
     // [:x | [:x | x + 1]] — inner x shadows outer x
-    let inner_block = Expression::Block(Block {
-        parameters: vec![BlockParameter {
+    let inner_block = Expression::Block(Block::new(
+        vec![BlockParameter {
             name: "x".into(),
             type_annotation: None,
             span: Span::new(10, 11),
         }],
-        body: vec![bare(Expression::MessageSend {
+        vec![bare(Expression::MessageSend {
             receiver: Box::new(Expression::Identifier(Identifier::new(
                 "x",
                 Span::new(14, 15),
@@ -421,18 +421,18 @@ fn test_block_param_shadows_outer_variable() {
             is_cast: false,
             span: Span::new(14, 19),
         })],
-        span: Span::new(8, 20),
-    });
+        Span::new(8, 20),
+    ));
 
-    let outer_block = Expression::Block(Block {
-        parameters: vec![BlockParameter {
+    let outer_block = Expression::Block(Block::new(
+        vec![BlockParameter {
             name: "x".into(),
             type_annotation: None,
             span: Span::new(1, 2),
         }],
-        body: vec![bare(inner_block)],
-        span: Span::new(0, 21),
-    });
+        vec![bare(inner_block)],
+        Span::new(0, 21),
+    ));
 
     // Put in method body
     let class = ClassDefinition {
@@ -499,28 +499,28 @@ fn test_block_param_shadows_outer_variable() {
 #[test]
 fn test_underscore_prefixed_no_shadow_warning() {
     // [:_x | [:_x | _x + 1]] — underscore-prefixed, no warning
-    let inner_block = Expression::Block(Block {
-        parameters: vec![BlockParameter {
+    let inner_block = Expression::Block(Block::new(
+        vec![BlockParameter {
             name: "_x".into(),
             type_annotation: None,
             span: Span::new(10, 12),
         }],
-        body: vec![bare(Expression::Identifier(Identifier::new(
+        vec![bare(Expression::Identifier(Identifier::new(
             "_x",
             Span::new(15, 17),
         )))],
-        span: Span::new(8, 18),
-    });
+        Span::new(8, 18),
+    ));
 
-    let outer_block = Expression::Block(Block {
-        parameters: vec![BlockParameter {
+    let outer_block = Expression::Block(Block::new(
+        vec![BlockParameter {
             name: "_x".into(),
             type_annotation: None,
             span: Span::new(1, 3),
         }],
-        body: vec![bare(inner_block)],
-        span: Span::new(0, 19),
-    });
+        vec![bare(inner_block)],
+        Span::new(0, 19),
+    ));
 
     let class = ClassDefinition {
         name: Identifier::new("Foo", test_span()),
@@ -584,28 +584,28 @@ fn test_underscore_prefixed_no_shadow_warning() {
 #[test]
 fn test_no_shadow_warning_different_names() {
     // [:x | [:y | y + 1]] — different names, no shadowing
-    let inner_block = Expression::Block(Block {
-        parameters: vec![BlockParameter {
+    let inner_block = Expression::Block(Block::new(
+        vec![BlockParameter {
             name: "y".into(),
             type_annotation: None,
             span: Span::new(10, 11),
         }],
-        body: vec![bare(Expression::Identifier(Identifier::new(
+        vec![bare(Expression::Identifier(Identifier::new(
             "y",
             Span::new(14, 15),
         )))],
-        span: Span::new(8, 16),
-    });
+        Span::new(8, 16),
+    ));
 
-    let outer_block = Expression::Block(Block {
-        parameters: vec![BlockParameter {
+    let outer_block = Expression::Block(Block::new(
+        vec![BlockParameter {
             name: "x".into(),
             type_annotation: None,
             span: Span::new(1, 2),
         }],
-        body: vec![bare(inner_block)],
-        span: Span::new(0, 17),
-    });
+        vec![bare(inner_block)],
+        Span::new(0, 17),
+    ));
 
     let class = ClassDefinition {
         name: Identifier::new("Foo", test_span()),

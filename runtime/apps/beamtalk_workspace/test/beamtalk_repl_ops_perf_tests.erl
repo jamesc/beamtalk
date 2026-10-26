@@ -72,7 +72,8 @@ enable_tracing_test_() ->
                 ),
                 Decoded = decode_response(Result),
                 ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
-                ?assertEqual(<<"Tracing enabled">>, maps:get(<<"value">>, Decoded))
+                %% BT-4167: String messages display quoted.
+                ?assertEqual(<<"\"Tracing enabled\"">>, maps:get(<<"value">>, Decoded))
             end},
             {"enable-tracing actually enables", fun() ->
                 beamtalk_trace_store:disable(),
@@ -242,7 +243,8 @@ disable_tracing_test_() ->
                 ),
                 Decoded = decode_response(Result),
                 ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
-                ?assertEqual(<<"Tracing disabled">>, maps:get(<<"value">>, Decoded))
+                %% BT-4167: String messages display quoted.
+                ?assertEqual(<<"\"Tracing disabled\"">>, maps:get(<<"value">>, Decoded))
             end},
             {"disable-tracing actually disables the trace store", fun() ->
                 beamtalk_tracing:enable(),

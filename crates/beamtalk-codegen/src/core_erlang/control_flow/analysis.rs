@@ -822,7 +822,7 @@ impl CoreErlangGenerator {
                 for arg in arguments {
                     if let Expression::Block(block) = arg {
                         let analysis = facts
-                            .block_profile(&block.span)
+                            .block_profile(block.id)
                             .cloned()
                             .unwrap_or_else(|| block_analysis::analyze_block(block));
                         if analysis.local_writes.iter().any(|v| threaded.contains(v)) {
@@ -927,7 +927,7 @@ impl CoreErlangGenerator {
         };
 
         let analysis = facts
-            .block_profile(&body_block.span)
+            .block_profile(body_block.id)
             .cloned()
             .unwrap_or_else(|| block_analysis::analyze_block(body_block));
 
@@ -948,7 +948,7 @@ impl CoreErlangGenerator {
         if matches!(sel.as_str(), "whileTrue:" | "whileFalse:") {
             if let Expression::Block(cond) = receiver.as_ref() {
                 let cond_analysis = facts
-                    .block_profile(&cond.span)
+                    .block_profile(cond.id)
                     .cloned()
                     .unwrap_or_else(|| block_analysis::analyze_block(cond));
                 let cond_params: std::collections::HashSet<String> =
@@ -985,7 +985,7 @@ impl CoreErlangGenerator {
                 continue;
             }
             let handler_analysis = facts
-                .block_profile(&packed.span)
+                .block_profile(packed.id)
                 .cloned()
                 .unwrap_or_else(|| block_analysis::analyze_block(packed));
             let handler_params: std::collections::HashSet<String> = packed
@@ -1017,7 +1017,7 @@ impl CoreErlangGenerator {
         facts: &beamtalk_core::semantic_analysis::SemanticFacts,
     ) -> std::collections::HashSet<String> {
         let analysis = facts
-            .block_profile(&block.span)
+            .block_profile(block.id)
             .cloned()
             .unwrap_or_else(|| block_analysis::analyze_block(block));
         let block_params: std::collections::HashSet<&str> =
@@ -1140,7 +1140,7 @@ impl CoreErlangGenerator {
         };
 
         let analysis = facts
-            .block_profile(&body_block.span)
+            .block_profile(body_block.id)
             .cloned()
             .unwrap_or_else(|| block_analysis::analyze_block(body_block));
 

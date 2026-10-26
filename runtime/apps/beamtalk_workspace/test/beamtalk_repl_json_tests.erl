@@ -43,7 +43,9 @@ format_response_binary_test() ->
     Result = beamtalk_repl_json:format_response(<<"hello">>),
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(<<"hello">>, maps:get(<<"value">>, Decoded)).
+    %% BT-4167: Strings display quoted (ADR 0138 spelling), distinct from
+    %% bare class names and Integers.
+    ?assertEqual(<<"\"hello\"">>, maps:get(<<"value">>, Decoded)).
 
 format_response_atom_test() ->
     Result = beamtalk_repl_json:format_response(nil),
@@ -260,7 +262,53 @@ term_to_json_atom_test() ->
     ?assertEqual(<<"ok">>, beamtalk_repl_json:term_to_json(ok)).
 
 term_to_json_binary_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_repl_json:term_to_json(<<"hello">>)).
+    %% BT-4167: Strings display quoted (ADR 0138 spelling).
+    ?assertEqual(<<"\"hello\"">>, beamtalk_repl_json:term_to_json(<<"hello">>)).
+
+term_to_json_binary_escapes_test() ->
+    %% BT-4167: quoted Strings escape per the shared ADR 0138 mapping
+    %% ("" doubling, \{, \\, \r, \n, \t, \0) — same spelling as
+    %% String printString and Rust unparse_literal_display.
+    ?assertEqual(
+        <<"\"say \"\"hi\"\"\"">>,
+        beamtalk_repl_json:term_to_json(<<"say \"hi\"">>)
+    ),
+    ?assertEqual(
+        <<"\"a\\{b\"">>,
+        beamtalk_repl_json:term_to_json(<<"a{b">>)
+    ),
+    ?assertEqual(
+        <<"\"a\\\\b\"">>,
+        beamtalk_repl_json:term_to_json(<<"a\\b">>)
+    ),
+    ?assertEqual(
+        <<"\"a\\nb\"">>,
+        beamtalk_repl_json:term_to_json(<<"a\nb">>)
+    ).
+
+term_to_json_binary_non_utf8_test() ->
+    %% BT-4167: Binaries (non-UTF-8) display as <<AB CD>> hex, distinct
+    %% from quoted Strings — same spelling as Binary printString.
+    %% Empty binary is valid UTF-8, so it prints as quoted empty.
+    ?assertEqual(<<"\"\"">>, beamtalk_repl_json:term_to_json(<<>>)),
+    ?assertEqual(<<"<<FF 00>>">>, beamtalk_repl_json:term_to_json(<<255, 0>>)).
+
+term_to_json_character_tag_test() ->
+    %% BT-4167: tagged Character results display as $X, distinct from Integers.
+    ?assertEqual(<<"$A">>, beamtalk_repl_json:term_to_json({beamtalk_character, 65})),
+    ?assertEqual(<<"$a">>, beamtalk_repl_json:term_to_json({beamtalk_character, 97})).
+
+term_to_json_character_tag_invalid_test() ->
+    %% BT-4167: invalid scalars fall back to Integer display, never crash.
+    ?assertEqual(
+        <<"55296">>, beamtalk_repl_json:term_to_json({beamtalk_character, 16#D800})
+    ),
+    ?assertEqual(
+        <<"-1">>, beamtalk_repl_json:term_to_json({beamtalk_character, -1})
+    ),
+    ?assertEqual(
+        <<"1114112">>, beamtalk_repl_json:term_to_json({beamtalk_character, 16#110000})
+    ).
 
 term_to_json_empty_list_test() ->
     ?assertEqual([], beamtalk_repl_json:term_to_json([])).
@@ -714,7 +762,8 @@ term_to_json_printable_list_unicode_test() ->
 
 term_to_json_nested_list_test() ->
     Result = beamtalk_repl_json:term_to_json([<<"a">>, 1, true]),
-    ?assertEqual([<<"a">>, 1, true], Result).
+    %% BT-4167: Strings nest quoted, like their top-level display.
+    ?assertEqual([<<"\"a\"">>, 1, true], Result).
 
 term_to_json_map_with_atom_keys_test() ->
     %% Maps are pre-formatted as Beamtalk syntax strings

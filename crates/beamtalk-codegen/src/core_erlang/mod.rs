@@ -382,7 +382,24 @@ impl CoreErlangGenerator {
                     // variables are written in place, so a `^` unwinding out
                     // of a class method has nothing to hand back beside the
                     // value, and the slot is `nil`.
-                    let state_doc = if self.in_class_method() {
+                    let state_doc = if let Some(merged) = self.tier2_merged_fun.clone() {
+                        // BT-4122: a `^` out of a merged Tier 2 fun carries
+                        // the cell merged with the fun's current locals — the
+                        // throw bypasses the exit flush, so without this the
+                        // fun's local writes would be lost.
+                        let take_var = self.fresh_temp_var("T2Nlr");
+                        let (flush_doc, final_acc) =
+                            self.tier2_flush_locals_doc(&take_var, &merged.captured);
+                        docvec![
+                            "let ",
+                            leaf::var(take_var),
+                            " = ",
+                            threaded_ir::cell_take_call(),
+                            " in ",
+                            flush_doc,
+                            leaf::var(final_acc),
+                        ]
+                    } else if self.in_class_method() {
                         leaf::atom("nil")
                     } else if self.in_cell_closure() {
                         // ADR 0137 §3: an actor closure holds no threaded
@@ -418,7 +435,10 @@ impl CoreErlangGenerator {
                     // ADR 0137 §5: a `^` stores the current version to the cell
                     // before the throw, so a closure that runs while it unwinds (an
                     // `ensure:` cleanup) sees every write made before it.
-                    let throw_doc = if self.synced_calls_active() {
+                    // BT-4122: a merged Tier 2 fun stores its merged map too
+                    // (it holds no versions, so the active check misses it).
+                    let throw_doc = if self.synced_calls_active() || self.tier2_merged_fun.is_some()
+                    {
                         docvec![
                             "let _ = ",
                             threaded_ir::cell_put_call(state_doc),

@@ -3,6 +3,7 @@
 
 // BT-4049: process primitives — `Pid>>send:`, `Reference new`,
 // `Actor>>processLabel:` / `processLabel`.
+// BT-4077: `Pid current`, `Pid>>monitor`, `Block>>fork`.
 //
 // Fixtures: stdlib/test/fixtures/handle_info_counter.bt
 //           stdlib/test/fixtures/process_label_actor.bt
@@ -101,3 +102,81 @@ TestCase subclass: ProcessPrimitivesTest
     actor processLabel: #worker
     self assert: ((Erlang proc_lib) get_label: actor pid) equals: #worker
     actor stop
+
+  // === Pid current (BT-4077) ===
+  testPidCurrentAnswersAPid =>
+    pid := Pid current
+    self assert: pid class equals: Pid
+    self assert: pid isAlive
+    self assert: pid =:= pid
+
+  testPidCurrentInsideActorEqualsSelfPid =>
+    actor := ProcessLabelActor spawn
+    who := actor whoAmI
+    self assert: who =:= actor pid
+    actor stop
+
+  // === Pid>>monitor (BT-4077) ===
+  testPidMonitorAnswersAReference =>
+    server := HandleInfoCounter spawn
+    ref := server pid monitor
+    self assert: ref class equals: Reference
+    ref demonitor
+    server stop
+
+  testPidMonitorDeliversDownToHandleInfo =>
+    watcher := HandleInfoCounter spawn
+    victim := HandleInfoCounter spawn
+    ref := watcher watch: victim pid
+    pid := victim pid
+    victim stop
+    50 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]
+    msg := watcher getLastMsg
+    self assert: (msg at: 1) equals: #DOWN
+    self assert: (msg at: 2) =:= ref
+    self assert: (msg at: 3) equals: #process
+    self assert: (msg at: 4) =:= pid
+    self assert: (msg at: 5) equals: #normal
+    watcher stop
+
+  // === Block>>fork (BT-4077) ===
+  testForkRunsBlockAndExitsNormally =>
+    table := Ets new: #forkRan type: #set
+    pid := [table at: #ran put: true] fork
+    self assert: pid class equals: Pid
+    self deny: pid =:= Pid current
+    50 timesRepeat: [(table at: #ran) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #ran) equals: true
+    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    self deny: pid isAlive
+    table delete
+
+  testForkedRaiseCrashesOnlyTheWorker =>
+    pid := [1 / 0] fork
+    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    self deny: pid isAlive
+    // The worker is unlinked: the caller carries on.
+    self assert: Pid current isAlive
+
+  testForkedNonLocalReturnExitsWithForkReason =>
+    // The block waits on an Ets gate so the monitor below is established
+    // before the `^` fires; otherwise the DOWN could carry `noproc`.
+    table := Ets new: #forkNlrGate type: #set
+    watcher := HandleInfoCounter spawn
+    pid := [
+      50 timesRepeat: [(table at: #go) isNil ifTrue: [Timer sleep: 10]]
+      ^42
+    ] fork
+    ref := watcher watch: pid
+    table at: #go put: true
+    50 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]
+    msg := watcher getLastMsg
+    self assert: (msg at: 1) equals: #DOWN
+    self assert: (msg at: 2) =:= ref
+    self assert: (msg at: 4) =:= pid
+    self assert: (msg at: 5) equals: {#fork_non_local_return, 42}
+    table delete
+    watcher stop
+
+  testForkNonZeroArgBlockRaisesTypeError =>
+    self should: [[:x | x] fork] raise: #type_error

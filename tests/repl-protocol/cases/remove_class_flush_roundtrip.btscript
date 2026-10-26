@@ -127,7 +127,7 @@ Object allSubclasses includes: RemoveClassRoundTripDemo
 // => true
 
 RemoveClassRoundTripDemo new greet
-// => hi from the destructive-flush e2e
+// => "hi from the destructive-flush e2e"
 
 // ===========================================================================
 // STEP 2 — removeFromSystem LOGS A DURABLE remove-class ENTRY
@@ -184,7 +184,7 @@ _skippedFirst := _skipped first
 // => _
 
 Erlang maps get: #reason with: _skippedFirst
-// => destructive
+// => "destructive"
 
 File exists: _classPath
 // => true

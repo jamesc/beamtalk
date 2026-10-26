@@ -1057,8 +1057,9 @@ tcp_clone_uniqueness_test(Port) ->
     V2 = maps:get(<<"value">>, Resp2),
     ?assertNotEqual(V1, V2),
     %% Verify session ID format: "session_<timestamp>_<random>"
-    ?assert(binary:match(V1, <<"session_">>) =:= {0, 8}),
-    ?assert(binary:match(V2, <<"session_">>) =:= {0, 8}).
+    %% BT-4167: session IDs are Strings, so they display quoted.
+    ?assert(binary:match(V1, <<"\"session_">>) =:= {0, 9}),
+    ?assert(binary:match(V2, <<"\"session_">>) =:= {0, 9}).
 
 %%% ===========================================================================
 %%% Coverage tests for internal helper functions

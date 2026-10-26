@@ -373,17 +373,18 @@ impl CoreErlangGenerator {
         inject_body.extend(inlined_body(&element_block.body));
         inject_body.push(ident("false", span));
 
-        // The fold's block is not the user's element block, whose span it would
-        // otherwise share: the block profile lookup (`block_profile_or_analyze`) is
-        // keyed by span, and the user's block holds no separator write.
-        let fold_block_span = Span::new(span.start(), span.end().saturating_add(1));
+        // The fold's block keeps the user's span (diagnostics point at user
+        // source): the block profile lookup (`block_profile_or_analyze`) is
+        // keyed by node identity, so the fold's profile is analyzed on the
+        // fly and never aliases the user's block, which holds no separator
+        // write (BT-4122).
         let inject_send = inject_into(
             receiver.clone(),
             ident("true", span),
             block_expr(
                 &[first_name.as_str(), elem_name.as_str()],
                 inject_body,
-                fold_block_span,
+                span,
             ),
             span,
         );

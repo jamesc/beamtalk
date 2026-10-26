@@ -25,13 +25,13 @@
 Shape subclass: Triangle
   field: base = 1.0
   class withBase: b => self new: #{#base => b}
-// => Triangle
+// => "Triangle"
 
 Triangle >> base => self.base
-// => Triangle>>base
+// => "Triangle>>base"
 
 Triangle >> area => self.base * self.base / 2.0
-// => Triangle>>area
+// => "Triangle>>area"
 
 // ===========================================================================
 // VERIFY VALUE-OBJECT BEHAVIOUR
@@ -59,7 +59,7 @@ t base
 // so that the next inline compile can resolve Triangle→Shape→Object as value-object.
 Triangle subclass: RightTriangle
   field: hypotenuse = 0.0
-// => RightTriangle
+// => "RightTriangle"
 
 rt := RightTriangle new: #{#base => 3.0, #hypotenuse => 5.0}
 // => _

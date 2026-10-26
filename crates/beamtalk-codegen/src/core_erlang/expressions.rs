@@ -419,6 +419,7 @@ impl CoreErlangGenerator {
                         // ADR 0137 §3: an actor closure reads a bare field through the cell.
                         Ok(self.cell_field_read_doc(id.name.as_str()))
                     } else {
+                        self.note_tier2_fun_body_field_read(id.name.as_str(), id.span);
                         Ok(docvec![
                             "call 'maps':'get'(",
                             leaf::atom(id.name.to_string()),
@@ -767,6 +768,7 @@ impl CoreErlangGenerator {
                     }
                     return Ok(self.cell_field_read_doc(field.name.as_str()));
                 }
+                self.note_tier2_fun_body_field_read(field.name.as_str(), field.span);
                 let state_var = match self.context {
                     super::CodeGenContext::ValueType => self.current_self_var(),
                     super::CodeGenContext::Actor => self.current_field_read_state_var(),

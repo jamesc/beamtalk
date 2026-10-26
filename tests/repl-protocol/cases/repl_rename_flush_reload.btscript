@@ -102,13 +102,13 @@ Workspace load: _userPath
 // => _
 
 Bt3277Widget new greet
-// => hi
+// => "hi"
 
 Bt3277Widget new shout
-// => HI
+// => "HI"
 
 Bt3277WidgetUser new makeWidget greet
-// => hi
+// => "hi"
 
 // ===========================================================================
 // STEP 2 — :rename-method RENAMES greet TO sayHi (REPL meta-command, not the
@@ -121,12 +121,12 @@ Bt3277WidgetUser new makeWidget greet
 // => _
 
 Bt3277Widget new sayHi
-// => hi
+// => "hi"
 
 // The self-send inside `shout` was auto-rewritten too (a confirmed
 // same-class self-send, ADR 0114's structurally-safe tier).
 Bt3277Widget new shout
-// => HI
+// => "HI"
 
 // The old selector no longer resolves in memory.
 [Bt3277Widget new greet] on: Error do: [:e | e kind]
@@ -171,12 +171,12 @@ Object allSubclasses includes: Bt3277Doohickey
 // => true
 
 Bt3277Doohickey new sayHi
-// => hi
+// => "hi"
 
 // The cross-file referencing class already resolves to the renamed class in
 // memory (`referencesTo:`'s confirmed site, rewritten immediately).
 Bt3277WidgetUser new makeWidget sayHi
-// => hi
+// => "hi"
 
 // The old class name no longer resolves.
 Bt3277Widget
@@ -240,13 +240,13 @@ Workspace load: _userPath
 // => _
 
 Bt3277Doohickey new sayHi
-// => hi
+// => "hi"
 
 Bt3277Doohickey new shout
-// => HI
+// => "HI"
 
 Bt3277WidgetUser new makeWidget sayHi
-// => hi
+// => "hi"
 
 // The renamed method's old selector is a genuine does_not_understand, not a
 // dangling sender, even after a full reload from the rewritten disk source.

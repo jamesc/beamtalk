@@ -25,6 +25,18 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::source_analysis::Span;
+
+/// A merged Tier 2 `fun` being lowered (BT-4122): the locals its body
+/// threads through its `StateAcc` parameter/return. Its fields go
+/// straight to the cell. (A Tier 2 call inside the fun cannot happen:
+/// a use inside a nested block is never a safe use, so no Tier 2 local
+/// is promotable there.)
+#[derive(Clone)]
+pub(in crate::core_erlang) struct Tier2MergedFun {
+    /// Captured locals the fun threads (its `captured_vars`).
+    pub(in crate::core_erlang) captured: Vec<String>,
+}
 
 /// Classification of how a block body expression should be handled.
 /// Produced by [`CoreErlangGenerator::classify_block_expr`] and consumed
@@ -78,11 +90,30 @@ impl CoreErlangGenerator {
         Self::captured_mutations_from_analysis(&analyze_block(block))
     }
 
+    /// Whether a Tier 2 `fun` for a block with this analysis takes the
+    /// merged shape (BT-4122): a cell-mode body for fields, `StateAcc` for
+    /// locals only. Actor instance methods only — anywhere else (and under
+    /// the legacy fault) Tier 2 keeps threading everything through
+    /// `StateAcc`, which is self-consistent there.
+    pub(super) fn tier2_merged_for_analysis(
+        &self,
+        analysis: &super::block_analysis::BlockMutationAnalysis,
+    ) -> bool {
+        #[cfg(test)]
+        let fault_legacy = super::synced_call::FAULT_LEGACY_TIER2.with(std::cell::Cell::get);
+        #[cfg(not(test))]
+        let fault_legacy = false;
+        if fault_legacy {
+            return false;
+        }
+        self.synced_calls_scope() && analysis.may_write_actor_state()
+    }
+
     /// Same check as [`Self::captured_mutations_for_block`], but from an already-computed
     /// analysis — lets callers that need more than one fact off a single `analyze_block`
     /// pass (e.g. [`Self::generate_block`], which also checks `field_writes`) avoid
     /// re-walking the block's AST.
-    fn captured_mutations_from_analysis(
+    pub(super) fn captured_mutations_from_analysis(
         analysis: &crate::core_erlang::block_analysis::BlockMutationAnalysis,
     ) -> Vec<String> {
         beamtalk_core::semantic_analysis::block_facts::captured_local_mutations_from_analysis(
@@ -195,6 +226,12 @@ impl CoreErlangGenerator {
 
         // Blocks with captured local mutations use Tier 2 stateful calling convention.
         if !captured_mutations.is_empty() {
+            // BT-4122: a may-write block lowers merged (cell mode for
+            // fields); the actor closure is already pushed by
+            // `generate_block`, so the merged builder reuses it.
+            if self.tier2_merged_for_analysis(&analysis) {
+                return self.generate_block_merged_fun(block, &captured_mutations);
+            }
             return self.generate_block_stateful_fun(block, &captured_mutations);
         }
 
@@ -282,17 +319,74 @@ impl CoreErlangGenerator {
         block: &Block,
         captured_vars: &[String],
     ) -> Result<Document<'static>> {
-        // Not an actor closure in cell mode (ADR 0137 §3): a Tier 2 `fun` takes
-        // the caller's `State` as its `StateAcc` argument and answers it back
-        // (`{Result, NewStateAcc}`), the convention of a compiled method, so it
-        // threads fields and locals through that map like one.
+        // BT-4122 (ADR 0137 Tier 2 merge): a Tier 2 `fun` that may write the
+        // actor's fields lowers merged — a cell-mode body for fields with
+        // the captured locals unpacked from `StateAcc` on entry and flushed
+        // back on exit — instead of threading fields through `StateAcc`.
+        // Anywhere else a Tier 2 `fun` takes the caller's `State` as its
+        // `StateAcc` argument and answers it back (`{Result, NewStateAcc}`),
+        // the convention of a compiled method, threading fields and locals
+        // through that map like one.
+        let analysis = super::block_analysis::analyze_block(block);
+        if self.tier2_merged_for_analysis(&analysis) {
+            return self.with_class_var_capture(block, |this| {
+                this.with_actor_closure(|this| this.generate_block_merged_fun(block, captured_vars))
+            });
+        }
         self.with_class_var_capture(block, |this| {
             this.generate_block_stateful_fun(block, captured_vars)
         })
     }
 
+    /// One `let` unpacking a captured local from the Tier 2 `StateAcc`
+    /// parameter (falling back to the creation-site value), binding its
+    /// Core var. Shared by the legacy and merged Tier 2 funs (BT-4122).
+    fn tier2_entry_unpack_doc(&mut self, var_name: &str) -> Document<'static> {
+        let core_var = Self::to_core_erlang_var(var_name);
+        let key = Self::local_state_key(var_name);
+        // Look up the outer binding BEFORE rebinding so the fallback refers to the
+        // value at block-definition time (not the newly introduced inner binding).
+        // If no outer binding exists (e.g. REPL mode where vars come from state dict),
+        // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
+        let outer_binding = self.lookup_var(var_name).cloned();
+        self.bind_var(var_name, &core_var);
+        if let Some(outer_var) = outer_binding {
+            docvec![
+                "let ",
+                leaf::var(core_var),
+                " = call 'maps':'get'(",
+                leaf::atom(key),
+                ", StateAcc, ",
+                leaf::var(outer_var),
+                ") in "
+            ]
+        } else {
+            docvec![
+                "let ",
+                leaf::var(core_var),
+                " = call 'maps':'get'(",
+                leaf::atom(key),
+                ", StateAcc) in "
+            ]
+        }
+    }
+
     /// [`Self::generate_block_stateful`] without the capture binding.
     fn generate_block_stateful_fun(
+        &mut self,
+        block: &Block,
+        captured_vars: &[String],
+    ) -> Result<Document<'static>> {
+        // BT-4122: mark the body so field access lowerings can report the
+        // `FieldReadFromStateAcc` fun-body arm. Save/restore: Tier 2 nests.
+        let saved = std::mem::replace(&mut self.in_tier2_stateful_body, true);
+        let out = self.generate_block_stateful_fun_inner(block, captured_vars);
+        self.in_tier2_stateful_body = saved;
+        out
+    }
+
+    /// [`Self::generate_block_stateful_fun`] without the body mark.
+    fn generate_block_stateful_fun_inner(
         &mut self,
         block: &Block,
         captured_vars: &[String],
@@ -333,33 +427,7 @@ impl CoreErlangGenerator {
             // remains callable even when StateAcc was not pre-seeded with the local state keys
             // (e.g. when called through the runtime arity normalization wrapper).
             for var_name in captured_vars {
-                let core_var = Self::to_core_erlang_var(var_name);
-                let key = Self::local_state_key(var_name);
-                // Look up the outer binding BEFORE rebinding so the fallback refers to the
-                // value at block-definition time (not the newly introduced inner binding).
-                // If no outer binding exists (e.g. REPL mode where vars come from state dict),
-                // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
-                let outer_binding = this.lookup_var(var_name).cloned();
-                this.bind_var(var_name, &core_var);
-                let unpack_doc = if let Some(outer_var) = outer_binding {
-                    docvec![
-                        "let ",
-                        leaf::var(core_var),
-                        " = call 'maps':'get'(",
-                        leaf::atom(key),
-                        ", StateAcc, ",
-                        leaf::var(outer_var),
-                        ") in "
-                    ]
-                } else {
-                    docvec![
-                        "let ",
-                        leaf::var(core_var),
-                        " = call 'maps':'get'(",
-                        leaf::atom(key),
-                        ", StateAcc) in "
-                    ]
-                };
+                let unpack_doc = this.tier2_entry_unpack_doc(var_name);
                 stmts.push(ThreadedStmt::Statement(unpack_doc, block.span));
             }
 
@@ -418,6 +486,155 @@ impl CoreErlangGenerator {
         let (body_doc, _branch_final) = result?;
 
         Ok(docvec![header, body_doc])
+    }
+
+    /// Builds a merged Tier 2 `fun` (BT-4122, ADR 0137 Tier 2 merge): the
+    /// same `(params, StateAcc) -> {Result, StateAcc}` protocol as the
+    /// legacy one, but the body lowers Tier-1-style — fields through the
+    /// cell — with the captured locals unpacked from `StateAcc` on entry
+    /// and flushed back on exit. The actor closure must already be pushed
+    /// (by `generate_block`, or by `generate_block_stateful` for the
+    /// prescan path) — see [`Tier2MergedFun`].
+    fn generate_block_merged_fun(
+        &mut self,
+        block: &Block,
+        captured_vars: &[String],
+    ) -> Result<Document<'static>> {
+        self.with_closed_fun_scope(|this| {
+            // Track block nesting so self-cast sends route through the mailbox
+            this.block_depth += 1;
+            // Tier 2 marks (save/restore: Tier 2 nests — no `?`
+            // between, so the error path restores too, like the legacy
+            // builder below).
+            let saved_body = std::mem::replace(&mut this.in_tier2_stateful_body, true);
+            let saved_merged = this.tier2_merged_fun.replace(Tier2MergedFun {
+                captured: captured_vars.to_vec(),
+            });
+            let result = this.generate_block_merged_fun_inner(block, captured_vars);
+            this.tier2_merged_fun = saved_merged;
+            this.in_tier2_stateful_body = saved_body;
+            this.block_depth -= 1;
+            result
+        })
+    }
+
+    /// [`Self::generate_block_merged_fun`] without the scope and marks.
+    fn generate_block_merged_fun_inner(
+        &mut self,
+        block: &Block,
+        captured_vars: &[String],
+    ) -> Result<Document<'static>> {
+        // Parameters (mirrors Tier 1), plus the `StateAcc` accumulator map.
+        let mut param_parts: Vec<Document<'static>> = Vec::new();
+        for (i, param) in block.parameters.iter().enumerate() {
+            if i > 0 {
+                param_parts.push(Document::Str(", "));
+            }
+            let var_name = self.fresh_var(&param.name);
+            param_parts.push(leaf::var(var_name));
+        }
+        if !block.parameters.is_empty() {
+            param_parts.push(Document::Str(", "));
+        }
+        param_parts.push(Document::Str("StateAcc"));
+        let header = docvec!["fun (", Document::Vec(param_parts), ") -> "];
+
+        // Entry: unpack the captured locals from `StateAcc`.
+        let mut prefix: Vec<Document<'static>> = Vec::with_capacity(captured_vars.len());
+        for var_name in captured_vars {
+            prefix.push(self.tier2_entry_unpack_doc(var_name));
+        }
+
+        // Body, Tier-1-style: fields through the cell, locals as Core vars.
+        let body_doc = self.generate_block_body(block)?;
+
+        // Exit: the body wrote fields straight to the cell, so the
+        // threaded accumulator holds stale fields — take the live cell,
+        // flush the current Core-var values into it, store the merged map
+        // back (the operand bracket's `take()` reads it there), and answer
+        // it. Both callers — the statement unpacker (element 2) and the
+        // operand bracket (the cell) — see one complete state. (Mirrors the
+        // `^` flush in `mod.rs`, which throws past this exit.)
+        let take_var = self.fresh_temp_var("T2Cell");
+        let (flush_doc, final_acc) = self.tier2_flush_locals_doc(&take_var, captured_vars);
+        let result_var = self.fresh_temp_var("T2Res");
+        let fun_doc = docvec![
+            header,
+            Document::Vec(prefix),
+            "let ",
+            leaf::var(result_var.clone()),
+            " = ",
+            body_doc,
+            " in let ",
+            leaf::var(take_var.clone()),
+            " = ",
+            threaded_ir::cell_take_call(),
+            " in ",
+            flush_doc,
+            "let _ = ",
+            threaded_ir::cell_put_call(leaf::var(final_acc.clone())),
+            " in ",
+            "{",
+            leaf::var(result_var),
+            ", ",
+            leaf::var(final_acc),
+            "}",
+        ];
+
+        // No capture binding here (mirrors Tier 1): the body references
+        // the pushed closure's capture directly, and `with_actor_closure`
+        // binds `ASCapture` itself when nested.
+        Ok(fun_doc)
+    }
+
+    /// The `FieldReadFromStateAcc` fun-body read arm (BT-4122): a Tier 2
+    /// `fun` reads this field through its `StateAcc`. Merged bodies never
+    /// reach here (their pushed actor closure routes reads through the
+    /// cell first), so a hit is a legacy `fun`, which drops field writes
+    /// in positions that discard its return — loud, forcing the merged
+    /// shape.
+    pub(super) fn note_tier2_fun_body_field_read(&mut self, name: &str, span: Span) {
+        if self.in_tier2_stateful_body && self.synced_calls_scope() {
+            self.record_tier2_stateacc_gap(
+                format!("{name} (tier2 fun body reads field via StateAcc)"),
+                span,
+            );
+        }
+    }
+
+    /// Opaque `let`s putting `captured` locals' current Core-var values
+    /// into the map `base_var`, answering the lets and the final variable.
+    /// The merged Tier 2 `fun`'s exit flush (and its `^` flush) share this:
+    /// fresh temps throughout, so no `State` version is minted or consumed.
+    pub(super) fn tier2_flush_locals_doc(
+        &mut self,
+        base_var: &str,
+        captured: &[String],
+    ) -> (Document<'static>, String) {
+        let mut acc = base_var.to_string();
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for var_name in captured {
+            // The entry unpack bound every captured local; nested scopes
+            // rebind by shadowing, so the innermost binding is the live value.
+            let core_var = self
+                .lookup_var(var_name)
+                .cloned()
+                .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+            let next = self.fresh_temp_var("T2Acc");
+            parts.push(docvec![
+                "let ",
+                leaf::var(next.clone()),
+                " = call 'maps':'put'(",
+                leaf::atom(Self::local_state_key(var_name)),
+                ", ",
+                leaf::var(core_var),
+                ", ",
+                leaf::var(acc.clone()),
+                ") in ",
+            ]);
+            acc = next;
+        }
+        (Document::Vec(parts), acc)
     }
 
     /// Generates a block literal handed to an Erlang call site (an FFI

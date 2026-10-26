@@ -14,6 +14,7 @@
 /// [2 + 3] value                // => 5
 /// [:x | x * 2] value: 3       // => 6
 /// [true] whileTrue: [Transcript show: "loop"]
+/// [self stop] fork             // => Pid; the block runs in a separate process
 /// ```
 sealed typed Object subclass: Block
 
@@ -111,3 +112,33 @@ sealed typed Object subclass: Block
   /// ```
   valueWithArguments: args :: List -> Object =>
     @intrinsic blockValueWithArguments
+
+  // === Concurrency ===
+
+  /// Run this zero-argument block in a fresh, unlinked process and answer
+  /// that process's `Pid` (`erlang:spawn/1`).
+  ///
+  /// The send returns immediately; the block runs concurrently. A block
+  /// that takes arguments raises a `type_error`.
+  ///
+  /// The block runs in a separate process, so it cannot touch an actor's
+  /// state (like the block in `Timer after:do:`): it sees the values its
+  /// captured variables had when the block was created, `self`-sends become
+  /// ordinary messages, an actor field write raises
+  /// `actor_state_unreachable`, and a class-variable write raises
+  /// `class_state_unreachable`. A block that assigns a captured local
+  /// cannot be forked at all — that is a compile error where the assignment
+  /// sits.
+  ///
+  /// A `^` inside a forked block has no home method to return to, so the
+  /// worker exits with reason `{#fork_non_local_return, value}` instead of
+  /// hanging. Any other exception crashes the worker with its original
+  /// reason while the unlinked caller carries on. Observe either outcome by
+  /// monitoring the answered pid (`Pid>>monitor`); there is deliberately no
+  /// `forkLinked` — compose `fork` + `monitor` instead.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pid := [self stop] fork   // => Pid; the block runs in a new process
+  /// ```
+  fork -> Pid => (Erlang beamtalk_process_ops) fork: self

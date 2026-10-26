@@ -37,7 +37,7 @@ Erlang beamtalk_object_class start: #CollisionTestClass with: ci
 
 // The class is still functional after the reload
 CollisionTestClass new greet
-// => hello
+// => "hello"
 
 // ===========================================================================
 // SAME-MODULE HOT-RELOAD — NO COLLISION
@@ -49,4 +49,4 @@ CollisionTestClass new greet
 // => Loaded: CollisionTestClass
 
 CollisionTestClass new greet
-// => hello
+// => "hello"

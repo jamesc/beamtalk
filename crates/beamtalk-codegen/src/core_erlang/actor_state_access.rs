@@ -77,7 +77,7 @@ pub(in crate::core_erlang) mod actor_state_helper {
     pub const TAKE: (&str, u32) = ("take", 0);
     pub const STORE: (&str, u32) = ("store", 1);
     pub const SNAPSHOT: (&str, u32) = ("snapshot", 0);
-    pub const RESTORE: (&str, u32) = ("restore", 1);
+    pub const RESTORE: (&str, u32) = ("restore", 2);
     pub const CALL_FOREIGN: (&str, u32) = ("call_foreign", 3);
     pub const REFRESH: (&str, u32) = ("refresh", 2);
     pub const CAPTURE: (&str, u32) = ("capture", 2);
@@ -302,7 +302,9 @@ impl CoreErlangGenerator {
     }
 
     /// The catch half of the cell obligation: put the cell back to the region's
-    /// pre-region state before the handler runs.
+    /// pre-region state before the handler runs. The snapshot arm passes
+    /// `Self` so `restore/2` only rolls back at home (BT-4122): away from
+    /// home the cell holds another actor's state and is left alone.
     pub(in crate::core_erlang) fn cell_boundary_restore_doc(
         boundary: &CellBoundary,
     ) -> Document<'static> {
@@ -318,7 +320,7 @@ impl CoreErlangGenerator {
                 "do ",
                 actor_state_call(
                     actor_state_helper::RESTORE,
-                    vec![leaf::var(snapshot.name().to_string())]
+                    vec![leaf::var("Self"), leaf::var(snapshot.name().to_string())]
                 ),
                 " "
             ],

@@ -266,7 +266,7 @@ impl CoreErlangGenerator {
         block: &Block,
     ) -> block_analysis::BlockMutationAnalysis {
         self.semantic_facts
-            .block_profile(&block.span)
+            .block_profile(block.id)
             .cloned()
             .unwrap_or_else(|| block_analysis::analyze_block(block))
     }

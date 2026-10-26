@@ -15,8 +15,25 @@
 /// pid class              // => Pid
 /// pid printString        // => "#Pid<0.123.0>"
 /// pid isAlive            // => true or false
+/// Pid current            // => the calling process
 /// ```
 sealed typed Object subclass: Pid
+
+  // === Current Process ===
+
+  /// The calling process (`erlang:self/0`).
+  ///
+  /// Inside an actor method this is the actor's own process — the same pid
+  /// as `self pid`. It covers the places where there is no `self pid`: a
+  /// Value method called from an actor, or plain concurrent code. There is
+  /// no `Process` class; this one method does not justify minting one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Pid current              // => Pid
+  /// Pid current isAlive      // => true
+  /// ```
+  class sealed current -> Pid => (Erlang beamtalk_process_ops) current
 
   /// Convert the pid to a readable string representation.
   ///
@@ -94,6 +111,25 @@ sealed typed Object subclass: Pid
   /// ```
   sealed send: msg :: Object -> Nil =>
     (Erlang beamtalk_process_ops) send: self msg: msg
+
+  // === Monitoring ===
+
+  /// Monitor this process (`erlang:monitor(process, Pid)`).
+  ///
+  /// Answers a `Reference`; when the process exits, the monitoring process
+  /// receives `{#DOWN, ref, #process, pid, reason}`, which a Server handles
+  /// in `handleInfo:`. This is the same underlying call as
+  /// `Actor>>monitor`, so the `DOWN` shape is uniform and one `handleInfo:`
+  /// clause covers both. Monitoring a dead pid still delivers `DOWN`
+  /// (reason `#noproc`). Cancel with `Reference>>demonitor`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ref := workerPid monitor
+  /// ref class              // => Reference
+  /// ref demonitor          // cancel the monitor
+  /// ```
+  sealed monitor -> Reference => (Erlang beamtalk_process_ops) monitor: self
 
   // === Process Control ===
 
