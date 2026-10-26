@@ -703,6 +703,7 @@ impl CoreErlangGenerator {
             load: None,
             span,
             tier2_local_rebinds: Vec::new(),
+            on_private_scratch: false,
         }
     }
 
@@ -760,6 +761,7 @@ impl CoreErlangGenerator {
             load: None,
             span,
             tier2_local_rebinds: Vec::new(),
+            on_private_scratch: false,
         };
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
         super::threaded_ir::render(&[node], &mut ctx)
@@ -1128,6 +1130,7 @@ impl CoreErlangGenerator {
             load: Some(load),
             span,
             tier2_local_rebinds,
+            on_private_scratch: self.in_private_scratch,
         });
         ThreadedValue {
             prelude,
@@ -1140,7 +1143,8 @@ impl CoreErlangGenerator {
     /// pre-extracted parameters and a tuple-accumulator fold carries only locals.
     pub(in crate::core_erlang) fn loop_holds_no_whole_state(&self) -> bool {
         use super::threaded_ir::{RebindFrameKind, ThreadingMode};
-        (self.loop_mode.in_direct_params_loop && !self.loop_mode.in_hybrid_loop)
+        self.in_private_scratch
+            || (self.loop_mode.in_direct_params_loop && !self.loop_mode.in_hybrid_loop)
             || !self.loop_mode.hybrid_readonly_field_params.is_empty()
             || !self.loop_mode.hybrid_mutated_fields.is_empty()
             // A loop frame whose parameters or accumulator carry only locals.

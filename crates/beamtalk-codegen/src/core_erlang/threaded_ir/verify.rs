@@ -467,6 +467,18 @@ pub(in crate::core_erlang) enum VerifyError {
         region: UserCodeRegion,
         at: Span,
     },
+
+    /// BT-4194 (ADR 0137): a [`ThreadedStmt::SyncedCall`] built in a frame
+    /// whose `StateAcc` is a private scratch map, not the actor's whole
+    /// `State`: a direct-params or tuple-accumulator loop frame, or an arm
+    /// frame nested in one (seeded fresh from the loop's locals). The
+    /// bracket's `store` would overwrite the cell with that scratch map and
+    /// its `load` hand it back as the `State`, losing the loop-level
+    /// bracket's snapshot: a loop that holds no whole `State` brackets at the
+    /// loop (`note_stateless_guarded_op`), never at a site inside it. Carried
+    /// by [`ThreadedStmt::SyncedCall::on_private_scratch`], since a node is
+    /// verified without its ancestor frames.
+    SyncedCallOnPrivateScratch { at: Span },
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the
@@ -1386,9 +1398,17 @@ impl VerifyWalk<'_> {
             // ADR 0137: the bracket reads `store` and binds `load` in the
             // frame it sits in, exactly as the `Bind` it steps like.
             ThreadedStmt::SyncedCall {
-                store, load, span, ..
+                store,
+                load,
+                span,
+                on_private_scratch,
+                ..
             } => {
                 self.check_use(store, *span);
+                if *on_private_scratch {
+                    self.errors
+                        .push(VerifyError::SyncedCallOnPrivateScratch { at: *span });
+                }
                 if let Some(load) = load {
                     self.check_class_method_family(load, *span);
                     let enclosing = self.frame_stack.last().copied().unwrap_or(FrameId::ROOT);
