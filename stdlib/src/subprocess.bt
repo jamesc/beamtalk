@@ -80,7 +80,7 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   ///
   /// ## Examples
   /// ```beamtalk
-  /// agent writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
+  /// agent writeLine: "\{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
   /// ```
   writeLine: data :: String -> Nil => self delegate
 

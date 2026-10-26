@@ -90,7 +90,7 @@ typed Actor subclass: ReactiveSubprocess native: beamtalk_reactive_subprocess
   ///
   /// ## Examples
   /// ```beamtalk
-  /// proc writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
+  /// proc writeLine: "\{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
   /// ```
   writeLine: data :: String -> Nil => self delegate
 

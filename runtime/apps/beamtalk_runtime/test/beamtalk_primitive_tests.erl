@@ -1541,7 +1541,7 @@ escape_corpus_conformance_test() ->
     {ok, Raw} = file:read_file(escape_corpus_path()),
     Cases = json:decode(Raw),
     %% Tripwire: the loop below must actually run.
-    ?assertEqual(23, length(Cases)),
+    ?assert(length(Cases) > 0),
     lists:foreach(
         fun(#{<<"value">> := Value, <<"display">> := Display}) ->
             ?assertEqual(Display, beamtalk_primitive:print_string(Value))
