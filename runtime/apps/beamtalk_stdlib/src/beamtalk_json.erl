@@ -48,15 +48,18 @@ instance method returning a JSON-representable value.
 -doc """
 Parse a JSON string into a Beamtalk value.
 
-JSON objects become Dictionaries (maps with binary keys), arrays become
-Lists, strings become Strings, numbers become Integer or Float,
-true/false stay as atoms, null becomes nil.
+JSON objects become Dictionaries (maps with tagged-`String` keys),
+arrays become Lists, strings become Strings, numbers become Integer or
+Float, true/false stay as atoms, null becomes nil.
 
 Returns `Result ok: value` on success, `Result error:` on invalid JSON.
 Type error (non-String argument) still raises.
 """.
--spec 'parse:'(binary()) -> beamtalk_result:t().
+-spec 'parse:'(beamtalk_string:t() | binary()) -> beamtalk_result:t().
+%% BT-4173: a bare binary spells the same text (pre-flip calls stay valid).
 'parse:'(JsonStr) when is_binary(JsonStr) ->
+    'parse:'({beamtalk_string, JsonStr});
+'parse:'({beamtalk_string, JsonStr}) when is_binary(JsonStr) ->
     try
         Value = json:decode(JsonStr),
         normalize_ok(Value)
@@ -88,19 +91,23 @@ JSON strings, Integer/Float become numbers, true/false become JSON
 booleans, nil becomes null. Custom objects that implement `asJson`
 are converted via that hook.
 """.
--spec 'generate:'(term()) -> binary().
+-spec 'generate:'(term()) -> beamtalk_string:t().
 'generate:'(Value) ->
-    encode_with_errors('generate:', fun() ->
-        iolist_to_binary(json:encode(prepare_for_encode(Value)))
-    end).
+    beamtalk_primitive:string_from_binary(
+        encode_with_errors('generate:', fun() ->
+            iolist_to_binary(json:encode(prepare_for_encode(Value)))
+        end)
+    ).
 
 -doc "Generate a pretty-printed JSON string with indentation.".
--spec 'prettyPrint:'(term()) -> binary().
+-spec 'prettyPrint:'(term()) -> beamtalk_string:t().
 'prettyPrint:'(Value) ->
-    encode_with_errors('prettyPrint:', fun() ->
-        Prepared = prepare_for_encode(Value),
-        prettify(iolist_to_binary(json:encode(Prepared)))
-    end).
+    beamtalk_primitive:string_from_binary(
+        encode_with_errors('prettyPrint:', fun() ->
+            Prepared = prepare_for_encode(Value),
+            prettify(iolist_to_binary(json:encode(Prepared)))
+        end)
+    ).
 
 -doc """
 Run an encode pipeline for `Selector`, mapping its failures to a `Json`
@@ -138,17 +145,17 @@ encode_with_errors(Selector, Encode) ->
 %%% ============================================================================
 
 -doc "FFI alias for parse:/1 — called via (Erlang beamtalk_json) parse: str.".
--spec parse(binary()) -> term().
+-spec parse(beamtalk_string:t()) -> term().
 parse(X) -> 'parse:'(X).
 
 -doc "FFI alias for generate:/1 — called via (Erlang beamtalk_json) generate: val.".
--spec generate(term()) -> binary().
+-spec generate(term()) -> beamtalk_string:t().
 generate(X) -> 'generate:'(X).
 
 -doc """
 FFI alias for prettyPrint:/1 — called via (Erlang beamtalk_json) prettyPrint: val.
 """.
--spec prettyPrint(term()) -> binary().
+-spec prettyPrint(term()) -> beamtalk_string:t().
 prettyPrint(X) -> 'prettyPrint:'(X).
 
 -doc """
@@ -187,11 +194,12 @@ json:decode returns `null` as the atom `null`; Beamtalk uses `nil`.
 
 BT-4171: this is Json's native text boundary — string leaves and object
 keys are constructed as validated Strings via
-`beamtalk_binary:check_utf8/1`, raising a `Json` `parse_error` (which
-`normalize_ok/1` answers as `Result error:`) on invalid UTF-8 instead of
-passing raw binaries through. OTP's decoder already rejects invalid UTF-8
-input, so the failure arm is defense-in-depth and the explicit seam the
-BT-4170 dispatch flip will build on.
+`beamtalk_binary:check_utf8/1` + `beamtalk_primitive:string_from_binary/1`,
+raising a `Json` `parse_error` (which `normalize_ok/1` answers as `Result
+error:`) on invalid UTF-8 instead of passing raw binaries through. OTP's
+decoder already rejects invalid UTF-8 input, so the failure arm is
+defense-in-depth. BT-4173 flipped the seam to construct the tagged
+representation.
 """.
 -spec normalize_decoded(term()) -> term().
 normalize_decoded(null) ->
@@ -217,7 +225,7 @@ through untouched (the decoder only produces binary keys).
 validate_string(Bin, Where) when is_binary(Bin) ->
     case beamtalk_binary:check_utf8(Bin) of
         {ok, Valid} ->
-            Valid;
+            beamtalk_primitive:string_from_binary(Valid);
         {error, Offset} ->
             Error0 = beamtalk_error:new(parse_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
@@ -280,6 +288,9 @@ prepare_for_encode(false, _Seen) ->
     false;
 prepare_for_encode(V, _Seen) when is_integer(V) -> V;
 prepare_for_encode(V, _Seen) when is_float(V) -> V;
+prepare_for_encode({beamtalk_string, Raw}, _Seen) when is_binary(Raw) ->
+    %% BT-4170: `json:encode/1` takes raw bytes — unwrap the tag.
+    Raw;
 prepare_for_encode(V, _Seen) when is_binary(V) -> V;
 prepare_for_encode(V, _Seen) when is_atom(V) ->
     %% Convert atoms (symbols) to strings for JSON compatibility
@@ -305,11 +316,22 @@ prepare_for_encode(Other, Seen) ->
 
 -doc """
 Encode a map's entries as a JSON object, stripping the `$beamtalk_class` tag.
+
+BT-4170: keys unwrap like values — a tagged `String` key would otherwise
+reach `json:encode/1` as a tuple. Non-tagged keys pass through untouched.
 """.
 -spec encode_map_fields(map(), [term()]) -> map().
 encode_map_fields(Map, Seen) ->
     Cleaned = maps:remove('$beamtalk_class', Map),
-    maps:map(fun(_K, V) -> prepare_for_encode(V, Seen) end, Cleaned).
+    maps:from_list([
+        {prepare_key(K), prepare_for_encode(V, Seen)}
+     || {K, V} <- maps:to_list(Cleaned)
+    ]).
+
+-doc "Unwrap a tagged `String` map key to raw bytes (BT-4170).".
+-spec prepare_key(term()) -> term().
+prepare_key({beamtalk_string, Raw}) when is_binary(Raw) -> Raw;
+prepare_key(K) -> K.
 
 -doc """
 Dispatch the `asJson` conversion hook on a custom object.

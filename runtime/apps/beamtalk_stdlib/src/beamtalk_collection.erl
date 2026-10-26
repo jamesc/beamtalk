@@ -199,7 +199,8 @@ The stateful (mutation-threading) list-op codegen folds over `to_list/1` of the
 receiver and produces a raw Erlang list. This helper wraps that list back into
 the receiver's representation:
 
-- String receiver (binary) → binary (`iolist_to_binary/1`)
+- String receiver (tagged) → `String`: elements unwrap, join, wrap
+- Binary receiver (bare binary) → `Binary` (`iolist_to_binary/1`)
 - Array receiver → `Array` (`beamtalk_array:from_list/1`)
 - Set receiver → `Set` (`beamtalk_set:from_list/1`, deduplicating) — the
   species `Set>>collect:`/`select:` answer on the pure path (BT-3615)
@@ -208,8 +209,20 @@ the receiver's representation:
 Called from compiler-generated Core Erlang (`list_ops`).
 """.
 -spec from_list_like(term(), list()) -> term().
+from_list_like({beamtalk_string, _}, List) ->
+    %% BT-4170: a stateful `collect:`/`select:` over a `String` folds
+    %% grapheme `String`s; unwrap each before joining, then wrap the
+    %% result — mirroring the pure path (`String withAll:`).
+    beamtalk_primitive:string_from_binary(
+        erlang:iolist_to_binary([
+            beamtalk_primitive:string_to_binary(E) || E <- List
+        ])
+    );
 from_list_like(Recv, List) when is_binary(Recv) ->
-    erlang:iolist_to_binary(List);
+    %% BT-4170: elements may be byte integers or `String`s (a `collect:`
+    %% block answering text); unwrap the tags, then assemble bytes —
+    %% mirroring the pure path (`Binary withAll:`).
+    erlang:iolist_to_binary(beamtalk_primitive:deep_unwrap_strings(List));
 from_list_like(#{'$beamtalk_class' := 'Array'}, List) ->
     beamtalk_array:from_list(List);
 from_list_like(#{'$beamtalk_class' := 'Set'}, List) ->

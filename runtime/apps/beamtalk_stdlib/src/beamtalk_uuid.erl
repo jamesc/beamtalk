@@ -93,7 +93,10 @@ Parse the canonical `8-4-4-4-12` hyphenated hex string form.
 Accepts upper- or lower-case hex digits. Returns `Result ok: uuid` on
 success, `Result error:` if `Str` isn't a syntactically valid Uuid string.
 """.
--spec 'fromString:'(binary()) -> beamtalk_result:t().
+-spec 'fromString:'(binary() | beamtalk_string:t()) -> beamtalk_result:t().
+%% BT-4173: strings arrive tagged from Beamtalk — unwrap to bytes.
+'fromString:'({beamtalk_string, Str}) when is_binary(Str) ->
+    'fromString:'(Str);
 'fromString:'(Str) when is_binary(Str) ->
     case parse_uuid_string(Str) of
         {ok, Bytes} ->
@@ -119,7 +122,9 @@ True if `Str` is a syntactically valid canonical Uuid string.
 Checks format only (hex digits and hyphen placement) — does not require the
 version/variant bits to be one this class would generate.
 """.
--spec 'isValid:'(binary()) -> boolean().
+-spec 'isValid:'(binary() | beamtalk_string:t()) -> boolean().
+'isValid:'({beamtalk_string, Str}) when is_binary(Str) ->
+    'isValid:'(Str);
 'isValid:'(Str) when is_binary(Str) ->
     case parse_uuid_string(Str) of
         {ok, _Bytes} -> true;
@@ -133,11 +138,13 @@ version/variant bits to be one this class would generate.
 %%% ============================================================================
 
 -doc "Canonical lowercase hyphenated string form.".
--spec 'asString'(t()) -> binary().
+-spec 'asString'(t()) -> beamtalk_string:t().
 'asString'(#{'$beamtalk_class' := 'Uuid', bytes := Bytes}) ->
     Hex = binary:encode_hex(Bytes, lowercase),
     <<A:8/binary, B:4/binary, C:4/binary, D:4/binary, E:12/binary>> = Hex,
-    <<A/binary, $-, B/binary, $-, C/binary, $-, D/binary, $-, E/binary>>.
+    beamtalk_primitive:string_from_binary(
+        <<A/binary, $-, B/binary, $-, C/binary, $-, D/binary, $-, E/binary>>
+    ).
 
 -doc "Raw 16-byte binary representation.".
 -spec 'asBinary'(t()) -> <<_:128>>.
@@ -150,9 +157,10 @@ version(#{'$beamtalk_class' := 'Uuid', bytes := <<_:48, Version:4, _:76>>}) ->
     Version.
 
 -doc "Human-readable representation: Uuid(...).".
--spec 'printString'(t()) -> binary().
+-spec 'printString'(t()) -> beamtalk_string:t().
 'printString'(Self) ->
-    iolist_to_binary([<<"Uuid(">>, 'asString'(Self), <<")">>]).
+    {beamtalk_string, Inner} = 'asString'(Self),
+    beamtalk_primitive:string_from_binary(iolist_to_binary([<<"Uuid(">>, Inner, <<")">>])).
 
 %%% ============================================================================
 %%% Instance Methods — Comparison

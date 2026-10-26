@@ -74,10 +74,15 @@ Dispatch a builtin selector on a CompiledMethod map, returning
 %% selector => returns the method's selector atom
 builtin_dispatch('selector', [], #{'__selector__' := Sel}) ->
     {ok, Sel};
-%% source => returns the method's source code binary
+%% source => returns the method's source code as a String
+%% (.bt sources are UTF-8 by definition, so the wrap is sound unchecked)
+builtin_dispatch('source', [], #{'__source__' := Src}) when is_binary(Src) ->
+    {ok, beamtalk_primitive:string_from_binary(Src)};
 builtin_dispatch('source', [], #{'__source__' := Src}) ->
     {ok, Src};
 %% doc => returns the method's documentation string (or nil)
+builtin_dispatch('doc', [], #{'__doc__' := Doc}) when is_binary(Doc) ->
+    {ok, beamtalk_primitive:string_from_binary(Doc)};
 builtin_dispatch('doc', [], #{'__doc__' := Doc}) ->
     {ok, Doc};
 %% argumentCount => returns the method's arity
@@ -93,7 +98,9 @@ builtin_dispatch('class', [], _Value) ->
 builtin_dispatch('printString', [], #{
     '__selector__' := Sel
 }) ->
-    {ok, iolist_to_binary(io_lib:format("CompiledMethod(~s)", [Sel]))};
+    {ok, beamtalk_primitive:string_from_binary(
+        iolist_to_binary(io_lib:format("CompiledMethod(~s)", [Sel]))
+    )};
 %% asString => same as printString
 builtin_dispatch('asString', [], Value) ->
     builtin_dispatch('printString', [], Value);

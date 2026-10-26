@@ -292,7 +292,9 @@ Symbol from Beamtalk and a String both work. Returns a list of 1-based line
 numbers (relative to the supplied source); returns `[]` if no senders are
 found or the source cannot be parsed.
 """.
--spec findSendersIn(binary(), atom() | binary()) -> [pos_integer()].
+-spec findSendersIn(binary() | beamtalk_string:t(), atom() | binary() | beamtalk_string:t()) -> [pos_integer()].
+findSendersIn({beamtalk_string, B}, Sel) when is_binary(B) -> findSendersIn(B, Sel);
+findSendersIn(Src, {beamtalk_string, B}) when is_binary(B) -> findSendersIn(Src, B);
 findSendersIn(Source, Selector) when
     is_binary(Source), (is_atom(Selector) orelse is_binary(Selector))
 ->
@@ -347,7 +349,8 @@ parsed, or the compiler port is unavailable. The degrade-on-error behaviour
 mirrors `findSendersIn/2`: a transient port failure on one method's source must
 not abort the whole `unimplementedSelectors` walk.
 """.
--spec allSendsIn(binary()) -> [{atom(), pos_integer(), atom()}].
+-spec allSendsIn(binary() | beamtalk_string:t()) -> [{atom(), pos_integer(), atom()}].
+allSendsIn({beamtalk_string, B}) when is_binary(B) -> allSendsIn(B);
 allSendsIn(Source) when is_binary(Source) ->
     case beamtalk_compiler:find_all_sends_in_source(Source) of
         {ok, Sends} ->
@@ -396,6 +399,7 @@ mirrors `allSendsIn/1': a transient port failure on one method's source must not
 abort the whole `announcementsSentBy:' walk.
 """.
 -spec announceSitesIn(binary()) -> [{pos_integer(), binary()}].
+announceSitesIn({beamtalk_string, B}) when is_binary(B) -> announceSitesIn(B);
 announceSitesIn(Source) when is_binary(Source) ->
     case beamtalk_compiler:find_announce_sites_in_source(Source) of
         {ok, Sites} ->
@@ -434,6 +438,8 @@ numbers (relative to the supplied source); returns `[]' if no references are
 found or the source cannot be parsed.
 """.
 -spec findReferencesToIn(binary(), atom() | binary()) -> [pos_integer()].
+findReferencesToIn({beamtalk_string, B}, C) when is_binary(B) -> findReferencesToIn(B, C);
+findReferencesToIn(S, {beamtalk_string, B}) when is_binary(B) -> findReferencesToIn(S, B);
 findReferencesToIn(Source, ClassName) when
     is_binary(Source), (is_atom(ClassName) orelse is_binary(ClassName))
 ->
@@ -511,6 +517,8 @@ logged and degraded to `[]` rather than aborting the caller's whole iteration.
 """.
 -spec find_field_access(binary(), atom() | binary(), readers | writers, atom()) ->
     [pos_integer()].
+find_field_access({beamtalk_string, B}, F, K, S) when is_binary(B) -> find_field_access(B, F, K, S);
+find_field_access(Src, {beamtalk_string, B}, K, S) when is_binary(B) -> find_field_access(Src, B, K, S);
 find_field_access(Source, Field, Kind, Selector) when
     is_binary(Source), (is_atom(Field) orelse is_binary(Field))
 ->
@@ -564,6 +572,9 @@ logged and degraded to `[]` rather than aborting the caller's whole iteration.
 """.
 -spec ffiSitesIn(binary(), atom() | binary(), atom() | binary(), non_neg_integer() | any) ->
     [pos_integer()].
+ffiSitesIn({beamtalk_string, B}, M, F, A) when is_binary(B) -> ffiSitesIn(B, M, F, A);
+ffiSitesIn(S, {beamtalk_string, B}, F, A) when is_binary(B) -> ffiSitesIn(S, B, F, A);
+ffiSitesIn(S, M, {beamtalk_string, B}, A) when is_binary(B) -> ffiSitesIn(S, M, B, A);
 ffiSitesIn(Source, Module, Function, Arity) when
     is_binary(Source),
     (is_atom(Module) orelse is_binary(Module)),
@@ -626,10 +637,12 @@ log_compiler_diagnostics(Diagnostics, Selector) ->
             Msg = maps:get(message, D, <<>>),
             %% Lowercase before matching so capitalised variants (e.g. "Timed out")
             %% are still classified as port-unavailability (error, not warning).
+            %% BT-4173: decoded diagnostics may carry tagged Strings.
             MsgLc =
-                case is_binary(Msg) of
-                    true -> string:lowercase(Msg);
-                    false -> <<>>
+                case Msg of
+                    {beamtalk_string, MsgBin} -> string:lowercase(MsgBin);
+                    RawBin when is_binary(RawBin) -> string:lowercase(RawBin);
+                    _ -> <<>>
                 end,
             binary:match(MsgLc, <<"not available">>) =/= nomatch orelse
                 binary:match(MsgLc, <<"timed out">>) =/= nomatch

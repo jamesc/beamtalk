@@ -2655,7 +2655,11 @@ available) and the actual class name inside the dispatch loop.
 -spec delegate_error(atom()) -> #beamtalk_error{}.
 delegate_error(ClassName) ->
     Error = beamtalk_error:new(signal, ClassName, delegate),
-    Error#beamtalk_error{message = <<"delegate called on a non-native Actor">>}.
+    Error#beamtalk_error{
+        message = beamtalk_primitive:string_from_binary(
+            <<"delegate called on a non-native Actor">>
+        )
+    }.
 
 -doc """
 Emit an actor lifecycle telemetry event (`[beamtalk, actor, lifecycle, _]`)

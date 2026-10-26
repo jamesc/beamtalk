@@ -264,16 +264,24 @@ and validates types. Returns {ok, CleanConfig} or {error, Reason}.
 """.
 -spec validate_config(map()) -> {ok, config()} | {error, term()}.
 validate_config(Config) when is_map(Config) ->
-    case maps:get(executable, Config, undefined) of
+    %% BT-4173: paths arrive tagged from Beamtalk — unwrap to bytes.
+    case text_bytes(maps:get(executable, Config, undefined)) of
+        {ok, Executable} ->
+            validate_config_args(Config, Executable);
         undefined ->
             {error, {missing_key, executable}};
-        Executable when not is_binary(Executable) ->
-            {error, {type_error, executable, expected_binary}};
-        Executable ->
-            validate_config_args(Config, Executable)
+        error ->
+            {error, {type_error, executable, expected_binary}}
     end;
 validate_config(_Other) ->
     {error, {type_error, config, expected_map}}.
+
+%% Unwrap one text value to bytes; `undefined` and junk stay distinct so
+%% callers can tell "missing" from "wrong type".
+text_bytes(undefined) -> undefined;
+text_bytes({beamtalk_string, B}) when is_binary(B) -> {ok, B};
+text_bytes(B) when is_binary(B) -> {ok, B};
+text_bytes(_) -> error.
 
 -doc "Validate and coerce the args field.".
 -spec validate_config_args(map(), binary()) -> {ok, config()} | {error, term()}.
@@ -281,15 +289,27 @@ validate_config_args(Config, Executable) ->
     RawArgs = maps:get(args, Config, []),
     case coerce_args(RawArgs) of
         {ok, ArgsList} ->
-            case lists:all(fun erlang:is_binary/1, ArgsList) of
-                true ->
-                    validate_config_env(Config, Executable, ArgsList);
-                false ->
+            case normalize_text_list(ArgsList) of
+                {ok, BinArgs} ->
+                    validate_config_env(Config, Executable, BinArgs);
+                error ->
                     {error, {type_error, args, expected_binary_elements}}
             end;
         {error, _} = Err ->
             Err
     end.
+
+normalize_text_list(List) ->
+    normalize_text_list(List, []).
+
+normalize_text_list([], Acc) ->
+    {ok, lists:reverse(Acc)};
+normalize_text_list([{beamtalk_string, B} | T], Acc) when is_binary(B) ->
+    normalize_text_list(T, [B | Acc]);
+normalize_text_list([B | T], Acc) when is_binary(B) ->
+    normalize_text_list(T, [B | Acc]);
+normalize_text_list(_, _) ->
+    error.
 
 -doc "Validate and clean the env field.".
 -spec validate_config_env(map(), binary(), [binary()]) -> {ok, config()} | {error, term()}.
@@ -300,9 +320,9 @@ validate_config_env(Config, Executable, ArgsList) ->
             maybe_add_dir(Config, Base);
         Env when is_map(Env) ->
             CleanEnv = maps:without(['$beamtalk_class'], Env),
-            case validate_binary_env(CleanEnv) of
-                ok ->
-                    maybe_add_dir(Config, Base#{env => CleanEnv});
+            case normalize_text_env(CleanEnv) of
+                {ok, BinEnv} ->
+                    maybe_add_dir(Config, Base#{env => BinEnv});
                 {error, _} = Err ->
                     Err
             end;
@@ -313,12 +333,12 @@ validate_config_env(Config, Executable, ArgsList) ->
 -doc "Optionally add the dir field.".
 -spec maybe_add_dir(map(), config()) -> {ok, config()} | {error, term()}.
 maybe_add_dir(Config, Base) ->
-    case maps:get(dir, Config, undefined) of
+    case text_bytes(maps:get(dir, Config, undefined)) of
         undefined ->
             {ok, Base};
-        Dir when is_binary(Dir) ->
+        {ok, Dir} ->
             {ok, Base#{dir => Dir}};
-        _Other ->
+        error ->
             {error, {type_error, dir, expected_binary}}
     end.
 
@@ -333,18 +353,20 @@ coerce_args(List) when is_list(List) ->
 coerce_args(_Other) ->
     {error, {type_error, args, expected_list_or_array}}.
 
--doc "Validate that all keys and values in env are binaries.".
--spec validate_binary_env(map()) -> ok | {error, term()}.
-validate_binary_env(Env) ->
-    AllBinary = maps:fold(
-        fun(K, V, Acc) -> Acc andalso is_binary(K) andalso is_binary(V) end,
-        true,
-        Env
-    ),
-    case AllBinary of
-        true -> ok;
-        false -> {error, {type_error, env, expected_binary_keys_and_values}}
+-doc "Validate env keys/values are text and unwrap each to bytes.".
+-spec normalize_text_env(map()) -> {ok, map()} | {error, term()}.
+normalize_text_env(Env) ->
+    try
+        {ok, maps:from_list([
+            {unwrap_text_entry(K), unwrap_text_entry(V)} || {K, V} <- maps:to_list(Env)
+        ])}
+    catch
+        error:bad_text -> {error, {type_error, env, expected_binary_keys_and_values}}
     end.
+
+unwrap_text_entry({beamtalk_string, B}) when is_binary(B) -> B;
+unwrap_text_entry(B) when is_binary(B) -> B;
+unwrap_text_entry(_) -> error(bad_text).
 
 %%% ============================================================================
 %%% Internal handlers

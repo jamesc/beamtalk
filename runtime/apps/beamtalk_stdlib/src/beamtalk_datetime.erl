@@ -177,7 +177,10 @@ DateTime fromString: "2026-07-25T14:30:00+02:00"
 // => DateTime(2026-07-25T14:30:00+02:00)
 ```
 """.
--spec 'fromString:'(binary()) -> t().
+-spec 'fromString:'(binary() | beamtalk_string:t()) -> t().
+%% BT-4173: strings arrive tagged from Beamtalk — unwrap to bytes.
+'fromString:'({beamtalk_string, Str}) when is_binary(Str) ->
+    'fromString:'(Str);
 'fromString:'(Str) when is_binary(Str) ->
     case parse_iso8601(Str) of
         {ok, Y, Mo, D, H, Mi, S, Off} ->
@@ -214,7 +217,11 @@ DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
 // => false
 ```
 """.
--spec 'parse:format:'(binary(), binary()) -> beamtalk_result:t().
+-spec 'parse:format:'(binary() | beamtalk_string:t(), binary() | beamtalk_string:t()) -> beamtalk_result:t().
+'parse:format:'({beamtalk_string, Str}, Pattern) when is_binary(Str) ->
+    'parse:format:'(Str, Pattern);
+'parse:format:'(Str, {beamtalk_string, Pattern}) when is_binary(Pattern) ->
+    'parse:format:'(Str, Pattern);
 'parse:format:'(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
     case parse_with_pattern(Str, Pattern) of
         {ok, Y, Mo, D, H, Mi, S} ->
@@ -275,7 +282,7 @@ second(#{second := V}) -> V.
     GregSec - ?EPOCH_GREGORIAN - (Off * 60).
 
 -doc "Format as ISO 8601 string, with a `Z` suffix for UTC or a `+hh:mm`/`-hh:mm` offset suffix.".
--spec 'asString'(t()) -> binary().
+-spec 'asString'(t()) -> beamtalk_string:t().
 'asString'(
     #{
         year := Y,
@@ -291,7 +298,7 @@ second(#{second := V}) -> V.
         "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0B",
         [Y, Mo, D, H, Mi, S]
     ),
-    iolist_to_binary([DatePart, format_offset_suffix(Off)]).
+    beamtalk_primitive:string_from_binary(iolist_to_binary([DatePart, format_offset_suffix(Off)])).
 
 -doc "Convert to the equivalent UTC (offsetMinutes 0) DateTime, same instant.".
 -spec 'toUtc'(t()) -> t().
@@ -317,9 +324,10 @@ offsetMinutes change.
     raise_type_error('toOffset:', <<"Argument must be an Integer (offset minutes)">>).
 
 -doc "Human-readable representation.".
--spec 'printString'(t()) -> binary().
+-spec 'printString'(t()) -> beamtalk_string:t().
 'printString'(Self) ->
-    iolist_to_binary([<<"DateTime(">>, 'asString'(Self), <<")">>]).
+    {beamtalk_string, Inner} = 'asString'(Self),
+    beamtalk_primitive:string_from_binary(iolist_to_binary([<<"DateTime(">>, Inner, <<")">>])).
 
 -doc """
 Format the wall-clock fields using a documented pattern language (a small
@@ -346,10 +354,14 @@ numeric tokens (e.g. `M/d`, not `Md`) — without one, an unpadded field's
 // => "2026-07-25 14:30:00"
 ```
 """.
--spec 'format:'(t(), Pattern :: binary()) -> binary().
+-spec 'format:'(t(), Pattern :: binary() | beamtalk_string:t()) -> beamtalk_string:t().
+'format:'(Self, {beamtalk_string, Pattern}) when is_binary(Pattern) ->
+    'format:'(Self, Pattern);
 'format:'(Self, Pattern) when is_binary(Pattern) ->
     Tokens = tokenize_pattern(Pattern),
-    iolist_to_binary([render_pattern_token(Token, Self) || Token <- Tokens]);
+    beamtalk_primitive:string_from_binary(
+        iolist_to_binary([render_pattern_token(Token, Self) || Token <- Tokens])
+    );
 'format:'(_, _) ->
     raise_type_error('format:', <<"Argument must be a String pattern">>).
 

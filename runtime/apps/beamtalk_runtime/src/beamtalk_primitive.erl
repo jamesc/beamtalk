@@ -15,6 +15,9 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 """.
 -export([
     class_of/1,
+    string_from_binary/1,
+    string_to_binary/1,
+    deep_unwrap_strings/1,
     class_of_object/1,
     class_of_object_by_name/1,
     send/3,
@@ -46,10 +49,10 @@ True if `X` is a Beamtalk object (as opposed to a primitive term).
 
 Returns `true` for value-type / tagged-collection instances (maps carrying the
 `'$beamtalk_class'` key), live actor and class objects (`#beamtalk_object{}`),
-and actor process refs (pids). Primitives — numbers, atoms, binaries
-(strings), characters (integers), lists, and plain (untagged) maps — return
-`false`. Used, for example, to tell a `Dictionary` (an untagged map) from a
-value-type instance (a tagged map).
+and actor process refs (pids). Primitives — numbers, atoms, binaries,
+tagged `String` terms, characters (integers), lists, and plain (untagged)
+maps — return `false`. Used, for example, to tell a `Dictionary` (an
+untagged map) from a value-type instance (a tagged map).
 
 The comparison-operator codegen guard does *not* use this: it inlines a
 primitive-comparable test (`is_number` or `is_binary` → bare BIF, everything
@@ -78,20 +81,21 @@ is_object(_) ->
 -doc """
 Determine the Beamtalk class of any value.
 
-Bare binaries: `String` is a subclass of `Binary` and both share the
-single BEAM `binary()` representation, so a raw binary carries no runtime tag
-saying which one it is. Valid UTF-8 answers `String` (the ambiguous but
-overwhelmingly common case); a binary that is *not* valid UTF-8 cannot be a
-`String` at all, so it answers `Binary`.
+Class is construction type (BT-4170): a `String` is the tagged term
+`{beamtalk_string, Bin}` (see `string_from_binary/1`), while a bare BEAM
+`binary()` is always a `Binary` — no UTF-8 sniffing. A raw binary carries
+no text/bytes tag, so bytes are the default: text must be constructed
+through a validating boundary (`asString`, `check_utf8/1` +
+`string_from_binary/1`, `coerce_charlist_result/1`) before it dispatches
+as `String`.
 """.
 -spec class_of(term()) -> atom().
 class_of(X) when is_integer(X) -> 'Integer';
 class_of(X) when is_float(X) -> 'Float';
+class_of({beamtalk_string, _}) ->
+    'String';
 class_of(X) when is_binary(X) ->
-    case is_utf8(X) of
-        true -> 'String';
-        false -> 'Binary'
-    end;
+    'Binary';
 class_of(true) ->
     'True';
 class_of(false) ->
@@ -118,6 +122,80 @@ class_of(X) when is_port(X) -> 'Port';
 class_of(X) when is_reference(X) -> 'Reference';
 class_of(_) ->
     'Object'.
+
+-doc """
+Construct a `String` value from a binary (BT-4170).
+
+This is the single authority for the `String` runtime representation:
+the tagged term `{beamtalk_string, Bin}`. A bare `binary()` is a
+`Binary`, so every native text boundary (Json/Yaml/HTTP/File leaves,
+`coerce_charlist_result/1`, `asString` success) routes validated text
+through here instead of passing raw binaries through.
+
+TRUSTED: the bytes are wrapped as-is, with no UTF-8 validation (many
+call sites — string BIF results, charlist conversions — already hold
+validated text, so re-validating would double the scans). Callers must
+establish validity first, e.g. via `beamtalk_binary:check_utf8/1` or
+`is_utf8/1`. Wrapping invalid bytes builds a `String` whose grapheme
+operations fail later, far from the boundary that lied.
+""".
+-spec string_from_binary(binary()) -> {beamtalk_string, binary()}.
+string_from_binary(Bin) when is_binary(Bin) ->
+    {beamtalk_string, Bin};
+string_from_binary(_) ->
+    beamtalk_error:raise_type_error(
+        'String', string_from_binary, <<"Expected a binary to wrap as String">>
+    ).
+
+-doc """
+Unwrap a `String` value to its raw bytes (BT-4170).
+
+Strict: only the `{beamtalk_string, Bin}` representation is accepted. A
+bare binary is a `Binary`, not a `String` (downcasting needs `asString`),
+so it raises `type_error` rather than passing through — passing it
+through would silently treat bytes as text.
+""".
+-spec string_to_binary({beamtalk_string, binary()}) -> binary().
+string_to_binary({beamtalk_string, Bin}) when is_binary(Bin) ->
+    Bin;
+string_to_binary(X) when is_binary(X) ->
+    beamtalk_error:raise_type_error(
+        'String',
+        string_to_binary,
+        <<"Expected a String; bare binaries are Binary — convert with asString">>
+    );
+string_to_binary(_) ->
+    beamtalk_error:raise_type_error(
+        'String', string_to_binary, <<"Expected a String">>
+    ).
+
+-doc """
+Deep-unwrap tagged `String` terms anywhere inside a term (BT-4170).
+
+Recurses into lists (including improper tails), tuples and maps (keys
+and values), unwrapping every `{beamtalk_string, Bin}` to its raw
+bytes. Funs, pids, ports, references and corrupt tags pass through
+untouched. Shared by the stock-mode FFI retry path (nested `String`
+args) and both `fromIolist:` implementations (`String` elements in
+iodata — tuples and maps cannot occur there, so those arms simply
+never fire for them).
+""".
+-spec deep_unwrap_strings(term()) -> term().
+deep_unwrap_strings({beamtalk_string, Bin}) when is_binary(Bin) ->
+    Bin;
+deep_unwrap_strings([H | T]) ->
+    [deep_unwrap_strings(H) | deep_unwrap_strings(T)];
+deep_unwrap_strings([]) ->
+    [];
+deep_unwrap_strings(Tuple) when is_tuple(Tuple) ->
+    list_to_tuple([deep_unwrap_strings(E) || E <- tuple_to_list(Tuple)]);
+deep_unwrap_strings(Map) when is_map(Map) ->
+    maps:from_list([
+        {deep_unwrap_strings(K), deep_unwrap_strings(V)}
+     || {K, V} <- maps:to_list(Map)
+    ]);
+deep_unwrap_strings(Other) ->
+    Other.
 
 -doc """
 Return the class of any value as a first-class class object.
@@ -242,15 +320,21 @@ Strings are quoted (developer representation), symbols use the `#` prefix.
 -spec print_string(term()) -> binary().
 print_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
 print_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
+print_string({beamtalk_string, Bin}) when is_binary(Bin) ->
+    Escaped = binary:replace(Bin, <<"\"">>, <<"\"\"">>, [global]),
+    iolist_to_binary([$", Escaped, $"]);
 print_string(X) when is_binary(X) ->
+    %% A bare binary is a Binary (BT-4170): render it the way `Binary
+    %% printString` does — quoted when the bytes happen to be valid UTF-8,
+    %% hex otherwise. The content check stays (rendering is inherently
+    %% content-based); dispatch no longer consults it.
     case is_utf8(X) of
         true ->
             iolist_to_binary([$", escape_string_content(X), $"]);
         false ->
-            %% Bytes that aren't valid UTF-8 can't be a String, and
-            %% embedding them raw produces an invalid-UTF-8 result that later
-            %% blows up anything expecting text (json:encode/1, logger, …).
-            %% Render them the way `Binary printString` does instead.
+            %% Embedding non-UTF-8 bytes raw produces an invalid-UTF-8
+            %% result that later blows up anything expecting text
+            %% (json:encode/1, logger, …).
             binary_hex_print_string(X)
     end;
 print_string(true) ->
@@ -358,6 +442,12 @@ the `#` prefix. This is the user-facing representation suitable for
 -spec display_string(term()) -> binary().
 display_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
 display_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
+display_string({beamtalk_string, Bin}) when is_binary(Bin) ->
+    %% Trusted: a String holds valid UTF-8 by construction (boundaries
+    %% validate; only asStringUnchecked can smuggle invalid bytes in, and
+    %% that is explicitly the caller's responsibility). Downstream
+    %% rendering barriers (term_to_json, test error_text) re-check.
+    Bin;
 display_string(X) when is_binary(X) ->
     case unicode:characters_to_binary(X) of
         Utf8 when is_binary(Utf8) -> Utf8;
@@ -727,19 +817,17 @@ Map a runtime value to its stdlib dispatch module, selector-aware.
 
 Overload of `module_for_value/1` for the dynamic-dispatch call sites that
 already have the selector in hand (`dispatch_via_module/3`,
-`responds_via_module/2`). For a bare binary whose selector is in
+`responds_via_module/2`). For a binary or String whose selector is in
 `is_string_binary_shared_selector/1` *and* has no `String` extension
-registered (ADR 0066), skips the O(byte_size) `is_utf8/1` validating scan
-entirely — String and Binary agree on that selector's behaviour regardless
-of which one the value "really" is, so either module answers identically.
-Falls back to `module_for_value/1` (and its UTF-8 scan) for every other
-selector, and for a shared selector that a `String` extension has
-overridden — an unconditional fast path would let a String-only extension
-fire on a genuinely non-UTF-8 receiver that `class_of/1` still reports as
-`Binary` (caught in review).
+registered (ADR 0066), routes straight to `'bt@stdlib@binary'`: String
+and Binary agree on that selector's behaviour regardless of which one
+the value is, so either module answers identically. Falls back to
+`module_for_value/1` for every other selector, and for a shared
+selector that a `String` extension has overridden — an unconditional
+fast path would skip a String-only extension on a `String` receiver.
 
 Routes straight to `'bt@stdlib@binary'` rather than `'bt@stdlib@string'`:
-all 9 shared selectors are locally defined on `Binary`, and ADR
+all 8 shared selectors are locally defined on `Binary`, and ADR
 0066 extensions cannot override a class-body-defined method, so `Binary`
 itself can never have a competing extension for one of them — only
 `String`'s extension registry needs checking (done above), and going
@@ -749,28 +837,35 @@ extension registry itself before delegating to `'bt@stdlib@binary'` anyway.
 """.
 -spec module_for_value(term(), atom()) -> atom() | undefined.
 module_for_value(X, Selector) when is_binary(X) ->
+    binary_or_string_module(X, Selector);
+module_for_value({beamtalk_string, _} = X, Selector) ->
+    binary_or_string_module(X, Selector);
+module_for_value(X, _Selector) ->
+    module_for_value(X).
+
+-doc "Shared-selector fast path behind both `module_for_value/2` binary arms.".
+-spec binary_or_string_module(term(), atom()) -> atom().
+binary_or_string_module(X, Selector) ->
     case
         is_string_binary_shared_selector(Selector) andalso
             not beamtalk_extensions:has('String', Selector)
     of
         true -> 'bt@stdlib@binary';
         false -> module_for_value(X)
-    end;
-module_for_value(X, _Selector) ->
-    module_for_value(X).
+    end.
 
 -doc """
 True for selectors where `String` and `Binary` behave identically.
 
 Derived from `binary.bt`'s own instance methods that `string.bt` does *not*
 redefine — per ADR 0086's method override table, these are the byte-level
-primitives String inherits unchanged (`byteAt:`, `byteSize`, `part:size:`,
-`concat:`, `toBytes`, `asStringUnchecked`, `asBase64`, `asBase64Url`,
-`asHex`). Every other Binary-defined selector (`size`, `at:`, `do:`,
+primitives String inherits unchanged (`byteAt:`, `part:size:`, `concat:`,
+`toBytes`, `asStringUnchecked`, `asBase64`, `asBase64Url`, `asHex`).
+Every other Binary-defined selector (`size`, `at:`, `do:`,
 `printString`, `asString`) is overridden by `String` with grapheme-aware
 behaviour, and every String-only selector (`uppercase`, `split:`, …) simply
-doesn't exist on `Binary` — both cases need the real `is_utf8/1` answer to
-dispatch (or reject) correctly.
+doesn't exist on `Binary` — both cases dispatch on the representation tag
+(`module_for_value/1`) instead of taking this fast path.
 
 Kept in sync with the two source files by
 `build_stdlib.rs`'s `test_binary_string_shared_selectors_stay_in_sync`,
@@ -794,14 +889,13 @@ necessary precondition: since these selectors are locally defined on
 `Binary`, ADR 0066 forbids a competing `Binary` extension for any of them,
 but a `String` extension is legal (they're absent from `string.bt`) and
 would make the selector no longer "identical either way" — it would run
-String-only logic against a receiver `class_of/1` still reports as
-`Binary`. Callers must additionally check `beamtalk_extensions:has/2` for a
-`String` override (see `module_for_value/2`, the only caller — call this
-function directly elsewhere only if you replicate that check too).
+String-only logic against a `Binary` receiver. Callers must additionally
+check `beamtalk_extensions:has/2` for a `String` override (see
+`module_for_value/2`, the only caller — call this function directly
+elsewhere only if you replicate that check too).
 """.
 -spec is_string_binary_shared_selector(atom()) -> boolean().
 is_string_binary_shared_selector('byteAt:') -> true;
-is_string_binary_shared_selector(byteSize) -> true;
 is_string_binary_shared_selector('part:size:') -> true;
 is_string_binary_shared_selector('concat:') -> true;
 is_string_binary_shared_selector(toBytes) -> true;
@@ -814,16 +908,15 @@ is_string_binary_shared_selector(_) -> false.
 -doc "Map a runtime value to its stdlib dispatch module.".
 -spec module_for_value(term()) -> atom() | undefined.
 module_for_value(X) when is_integer(X) -> 'bt@stdlib@integer';
+module_for_value({beamtalk_string, _}) ->
+    'bt@stdlib@string';
 module_for_value(X) when is_binary(X) ->
-    %% Keep dynamic dispatch consistent with class_of/1 — a binary
-    %% that isn't valid UTF-8 is a Binary, so grapheme-aware String methods
-    %% (`size`, `at:`, `do:`, …) would only fail on it. Callers that
-    %% already know the selector should prefer module_for_value/2, which
-    %% skips this scan for selectors where String and Binary agree.
-    case is_utf8(X) of
-        true -> 'bt@stdlib@string';
-        false -> 'bt@stdlib@binary'
-    end;
+    %% Keep dynamic dispatch consistent with class_of/1 — class is
+    %% construction type (BT-4170), so a bare binary is always a Binary.
+    %% Callers that already know the selector should prefer
+    %% module_for_value/2, which skips the string-delegation hop for
+    %% selectors where String and Binary agree.
+    'bt@stdlib@binary';
 module_for_value(true) ->
     'bt@stdlib@true';
 module_for_value(false) ->
@@ -1281,32 +1374,17 @@ static_class_module_name(Class) ->
 -doc """
 Whether a binary holds valid UTF-8 text.
 
-`String` and `Binary` share the single BEAM `binary()` representation, so this
-is the only signal available at runtime: invalid UTF-8 definitively rules out
-`String`, while valid UTF-8 leaves the two indistinguishable and is treated as
-`String`.
+Since BT-4170 this is a *validator*, not a dispatch signal: class is
+construction type (`{beamtalk_string, Bin}` vs bare `binary()`), so
+dispatch never scans bytes. Native text boundaries (Json/Yaml/HTTP/File,
+`coerce_charlist_result/1`, `asString`) still call this (or
+`beamtalk_binary:check_utf8/1`, which also reports the failing offset) to
+decide whether bytes may be constructed into a `String`.
 
 Cost is a single O(byte_size) validating scan with no copy — `characters_to_binary/3`
 hands back the *same* binary when it is already valid UTF-8, and bails at the
 first bad byte when it is not. Measured on OTP 28: ~32 ns for a short string,
 ~415 ns for 1 KB, ~0.4 ns/byte thereafter.
-
-It runs only on the **dynamic**-dispatch path; statically typed sends compile
-straight to BIFs and never reach here. That matters for hot loops: repeatedly
-sending to the *same* multi-megabyte binary through dynamic dispatch re-scans
-it every send (~0.4 ms per send at 1 MB), so an N-iteration loop is O(N x size).
-Annotate such a receiver `:: Binary` or `:: String` to compile the sends
-statically and skip this entirely. Note the grapheme-aware String selectors
-(`size`, `at:`, `do:`) were already O(size) per call before this check existed.
-
-For the O(1) byte-level selectors that gain a per-send scan
-(`byteSize`, `byteAt:`, `part:size:`, `concat:`, `toBytes`,
-`asStringUnchecked`, `asBase64`, `asBase64Url`, `asHex`), `send/3` and
-`responds_to/2` skip this scan entirely via
-`module_for_value/2`/`is_string_binary_shared_selector/1` — those selectors
-behave identically whether the receiver "really" is a String or a Binary, so
-there is no need to tell them apart. Every other selector still pays the
-scan here.
 """.
 -spec is_utf8(binary()) -> boolean().
 is_utf8(Bin) when is_binary(Bin) ->

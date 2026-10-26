@@ -98,7 +98,10 @@ are not supported (calendar-dependent). Fractional seconds are supported
 up to millisecond precision, but require a leading digit before the
 decimal point (`PT0.5S`, not `PT.5S`).
 """.
--spec 'fromString:'(binary()) -> t().
+-spec 'fromString:'(binary() | beamtalk_string:t()) -> t().
+%% BT-4173: strings arrive tagged from Beamtalk — unwrap to bytes.
+'fromString:'({beamtalk_string, Str}) when is_binary(Str) ->
+    'fromString:'(Str);
 'fromString:'(Str) when is_binary(Str) ->
     case parse_iso8601(Str) of
         {ok, Ms} ->
@@ -164,9 +167,9 @@ Format as an ISO 8601 duration string, e.g. `PT1H30M`, `P1DT2H`, `PT0.250S`.
 Zero is `PT0S`; negative durations get a leading `-`. Round-trips through
 `fromString:`.
 """.
--spec 'asString'(t()) -> binary().
+-spec 'asString'(t()) -> beamtalk_string:t().
 'asString'(#{'$beamtalk_class' := 'Duration', millis := 0}) ->
-    <<"PT0S">>;
+    beamtalk_primitive:string_from_binary(<<"PT0S">>);
 'asString'(#{'$beamtalk_class' := 'Duration', millis := Ms}) ->
     Sign =
         case Ms < 0 of
@@ -190,16 +193,16 @@ Zero is `PT0S`; negative durations get a leading `-`. Round-trips through
             {[], []} -> [];
             _ -> [<<"T">>, TimePart0, SecondsPart]
         end,
-    iolist_to_binary([Sign, <<"P">>, DatePart, TimePart]).
+    beamtalk_primitive:string_from_binary(iolist_to_binary([Sign, <<"P">>, DatePart, TimePart])).
 
 -doc """
 Human-readable representation, e.g. `1h 30m`, `1d 2h`, `1s 500ms`, `0ms`.
 
 Zero components are omitted; negative durations get a leading `-`.
 """.
--spec 'printString'(t()) -> binary().
+-spec 'printString'(t()) -> beamtalk_string:t().
 'printString'(#{'$beamtalk_class' := 'Duration', millis := 0}) ->
-    <<"0ms">>;
+    beamtalk_primitive:string_from_binary(<<"0ms">>);
 'printString'(#{'$beamtalk_class' := 'Duration', millis := Ms}) ->
     Sign =
         case Ms < 0 of
@@ -215,7 +218,7 @@ Zero components are omitted; negative durations get a leading `-`.
         {MsRem, <<"ms">>}
     ],
     Parts = [[integer_to_binary(V), U] || {V, U} <- Units, V =/= 0],
-    iolist_to_binary([Sign, lists:join(<<" ">>, Parts)]).
+    beamtalk_primitive:string_from_binary(iolist_to_binary([Sign, lists:join(<<" ">>, Parts)])).
 
 %%% ============================================================================
 %%% Instance Methods — Arithmetic

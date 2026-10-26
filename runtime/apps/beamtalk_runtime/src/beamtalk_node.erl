@@ -188,9 +188,12 @@ ping(#{'$beamtalk_class' := 'Node', name := Name}) ->
     end.
 
 -doc "Human-readable representation: `Node(name@host)` (ADR 0126 §2).".
--spec printString(t()) -> binary().
+-spec printString(t()) -> beamtalk_string:t().
 printString(#{'$beamtalk_class' := 'Node', name := Name}) ->
-    iolist_to_binary([<<"Node(">>, atom_to_binary(Name, utf8), <<")">>]).
+    %% BT-4173: printString answers a String.
+    beamtalk_primitive:string_from_binary(
+        iolist_to_binary([<<"Node(">>, atom_to_binary(Name, utf8), <<")">>])
+    ).
 
 -doc """
 `self`'s shape manifest (ADR 0126 §5.3/Phase 4): `className -> #{version,

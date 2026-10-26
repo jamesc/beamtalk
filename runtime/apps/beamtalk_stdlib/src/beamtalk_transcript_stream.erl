@@ -378,8 +378,14 @@ remove_subscriber(Pid, #state{subscribers = Subs} = State) ->
 Ensure a binary is valid UTF-8. Returns the binary unchanged if valid,
 or a ~p (io_lib:format("~p", ...)) representation if it contains invalid
 or incomplete UTF-8 data.
+
+BT-4170: a tagged `String` unwraps first (validating the bytes — only
+`asStringUnchecked` can smuggle invalid bytes into one, and the `~p`
+fallback below contains even that).
 """.
--spec ensure_utf8(binary()) -> binary().
+-spec ensure_utf8(binary() | beamtalk_string:t()) -> binary().
+ensure_utf8({beamtalk_string, Bin}) when is_binary(Bin) ->
+    ensure_utf8(Bin);
 ensure_utf8(Bin) ->
     case unicode:characters_to_binary(Bin) of
         Utf8 when is_binary(Utf8) -> Utf8;

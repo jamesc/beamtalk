@@ -33,6 +33,9 @@ other while keeping both DRY.
     bt_array_to_list/3,
     ensure_binary_args/3,
     ensure_binary_env/3,
+    normalize_args/3,
+    normalize_env/3,
+    unwrap_text/1,
     open/0,
     spawn_child/4,
     spawn_child/5,
@@ -110,10 +113,10 @@ bt_array_to_list(Class, _Other, Selector) ->
     Err = beamtalk_error:new(type_error, Class, Selector),
     beamtalk_error:raise(Err).
 
--doc "Raise type_error if any element of Args is not a binary.".
+-doc "Raise type_error if any element of Args is not text (binary or String).".
 -spec ensure_binary_args(atom(), list(), atom()) -> ok.
 ensure_binary_args(Class, Args, Selector) when is_list(Args) ->
-    case lists:all(fun erlang:is_binary/1, Args) of
+    case lists:all(fun is_text/1, Args) of
         true ->
             ok;
         false ->
@@ -121,16 +124,36 @@ ensure_binary_args(Class, Args, Selector) when is_list(Args) ->
             beamtalk_error:raise(Err)
     end.
 
--doc "Raise type_error if any key or value in Env is not a binary.".
+-doc "Raise type_error if any key or value in Env is not text (binary or String).".
 -spec ensure_binary_env(atom(), map(), atom()) -> ok.
 ensure_binary_env(Class, Env, Selector) when is_map(Env) ->
-    case lists:all(fun({K, V}) -> is_binary(K) andalso is_binary(V) end, maps:to_list(Env)) of
+    case lists:all(fun({K, V}) -> is_text(K) andalso is_text(V) end, maps:to_list(Env)) of
         true ->
             ok;
         false ->
             Err = beamtalk_error:new(type_error, Class, Selector),
             beamtalk_error:raise(Err)
     end.
+
+-doc "Validate text args and unwrap each to its bytes for the exec port.".
+-spec normalize_args(atom(), list(), atom()) -> [binary()].
+normalize_args(Class, Args, Selector) when is_list(Args) ->
+    ok = ensure_binary_args(Class, Args, Selector),
+    [unwrap_text(A) || A <- Args].
+
+-doc "Validate a text env map and unwrap keys/values to bytes.".
+-spec normalize_env(atom(), map(), atom()) -> #{binary() => binary()}.
+normalize_env(Class, Env, Selector) when is_map(Env) ->
+    ok = ensure_binary_env(Class, Env, Selector),
+    maps:from_list([{unwrap_text(K), unwrap_text(V)} || {K, V} <- maps:to_list(Env)]).
+
+-doc "Unwrap one text value (tagged String or bare binary) to bytes.".
+-spec unwrap_text(beamtalk_string:t() | binary()) -> binary().
+unwrap_text({beamtalk_string, B}) when is_binary(B) -> B;
+unwrap_text(B) when is_binary(B) -> B.
+
+is_text({beamtalk_string, B}) -> is_binary(B);
+is_text(B) -> is_binary(B).
 
 %%% ============================================================================
 %%% Exec port wrappers

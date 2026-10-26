@@ -128,7 +128,8 @@ check_class_info_abi(ClassName, ClassInfo) ->
 refuse_abi(ClassName, Module, Error) ->
     ?LOG_ERROR(
         "Refused ~p: ~ts",
-        [Module, Error#beamtalk_error.message],
+        %% BT-4170: the message field is a tagged `String` — render it.
+        [Module, beamtalk_error:render_text(Error#beamtalk_error.message)],
         #{class => ClassName, module => Module, domain => [beamtalk, runtime]}
     ),
     record_abi_refusal(Module, Error),

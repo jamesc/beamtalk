@@ -613,7 +613,8 @@ is_proper_list(_) -> false.
 -spec coerce_foreign_value(term(), provenance()) -> term().
 coerce_foreign_value(Value, foreign) ->
     case is_printable_charlist(Value) of
-        true -> unicode:characters_to_binary(Value);
+        %% BT-4173: a reinterpreted foreign string is a String, not a Binary.
+        true -> beamtalk_primitive:string_from_binary(unicode:characters_to_binary(Value));
         false -> Value
     end;
 coerce_foreign_value(Value, _Prov) ->
@@ -1071,8 +1072,9 @@ eval_value(Self, Source) ->
             {error, eval_failed_error(Reason)}
     end.
 
-%% Normalise an evaluate: argument (a Beamtalk String is a binary) to a string.
--spec to_source(binary() | string()) -> string().
+%% Normalise an evaluate: argument (a Beamtalk String) to a string.
+-spec to_source(binary() | beamtalk_string:t() | string()) -> string().
+to_source({beamtalk_string, Src}) when is_binary(Src) -> unicode:characters_to_list(Src);
 to_source(Src) when is_binary(Src) -> unicode:characters_to_list(Src);
 to_source(Src) when is_list(Src) -> Src.
 
@@ -1094,9 +1096,10 @@ inline (not recursed into), so its charlists are reinterpreted as `String`s unde
 foreign provenance — the same provenance scoping the navigable `at:` path uses
 Native sub-trees are never reinterpreted.
 """.
--spec printString(inspector(), integer()) -> binary().
+-spec printString(inspector(), integer()) -> beamtalk_string:t().
 printString(Cursor, Depth) ->
-    iolist_to_binary(render(Cursor, Depth, 0, #{})).
+    %% BT-4173: the rendered tree is text — answer a String, not a Binary.
+    beamtalk_primitive:string_from_binary(iolist_to_binary(render(Cursor, Depth, 0, #{}))).
 
 %% Render a cursor's tree. `Indent` is the nesting level (2 spaces each); `Seen`
 %% is the set of actor pids on the **current ancestor path** (the cycle guard).
@@ -1292,9 +1295,12 @@ value_string(Value, _Prov) ->
 %% drilling it level by level. Scoped to the foreign summary path, so native
 %% printing stays intact.
 -spec deep_coerce_foreign(term()) -> term().
+deep_coerce_foreign({beamtalk_string, _} = Tagged) ->
+    %% BT-4173: already a String — do not walk into the tag tuple.
+    Tagged;
 deep_coerce_foreign(Value) ->
     case is_printable_charlist(Value) of
-        true -> unicode:characters_to_binary(Value);
+        true -> beamtalk_primitive:string_from_binary(unicode:characters_to_binary(Value));
         false -> deep_coerce_compound(Value)
     end.
 
@@ -1382,10 +1388,13 @@ child_count(_Cursor, Fields) ->
 field_dictionary(#{
     name := Name, label := Label, value := Value, kind := Kind, drillable := Drillable
 }) ->
+    %% BT-4173: label/value are display text — tag them as Strings so the
+    %% wire form compares equal to String literals. `name` stays a raw
+    %% navigation key.
     #{
         name => Name,
-        label => Label,
-        value => value_string(Value),
+        label => beamtalk_primitive:string_from_binary(Label),
+        value => beamtalk_primitive:string_from_binary(value_string(Value)),
         kind => Kind,
         drillable => Drillable
     }.
