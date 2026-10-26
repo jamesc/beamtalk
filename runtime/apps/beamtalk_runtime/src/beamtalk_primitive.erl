@@ -31,6 +31,12 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     is_utf8/1
 ]).
 
+%% BT-4200: the conformance test pins the routing arms against the shared
+%% fixture the compiler's sealed-dispatch exclusion set is checked against.
+-ifdef(TEST).
+-export([tagged_map_dispatch/1]).
+-endif.
+
 -include("beamtalk.hrl").
 
 %% Compiled stdlib modules are generated from Core Erlang, not .erl source.

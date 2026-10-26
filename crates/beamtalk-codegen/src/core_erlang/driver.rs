@@ -101,6 +101,11 @@ pub fn generate_module_with_warnings(
     generator.set_stdlib_mode(options.stdlib_mode);
     generator.protocol_sources = options.protocol_sources;
     generator.set_class_module_index(options.class_module_index);
+    // BT-4200: the unit's own class lives in the unit's own module, whatever
+    // the (possibly stale) index says.
+    if let Some(class) = module.classes.first() {
+        generator.register_own_class_module(&class.name.name);
+    }
     generator.source_path = options.source_path;
     // ADR 0098 Phase 3: bake the producing-toolchain identity into `__beamtalk_meta`.
     generator.beamtalk_version = options.beamtalk_version.map(EcoString::from);

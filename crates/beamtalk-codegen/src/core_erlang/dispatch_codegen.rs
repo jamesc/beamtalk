@@ -139,6 +139,12 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
 ///   native proxy instead of a compiled module (`tagged_map_dispatch/1`'s
 ///   `'ErlangModule'` arm) — excluding it is correctness, not just speed.
 ///
+/// BT-4200: this list is enforced against the runtime, not just documented —
+/// the `typed_sealed` conformance test requires it to equal the shared fixture
+/// `runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`,
+/// and the `EUnit` `beamtalk_tagged_map_routing_conformance_tests` requires the
+/// runtime to route each fixture class as the fixture says.
+///
 /// Deliberately NOT here: `Future` (runtime-only, no compiled module — ruled
 /// out by the builtin/generated check in [`CoreErlangGenerator::typed_sealed_value_target`])
 /// and the `Exception` family (dynamically routed via
@@ -166,6 +172,13 @@ pub(in crate::core_erlang) const NON_TAGGED_MAP_CLASSES: &[&str] = &[
     "Metaclass",
     "ErlangModule",
 ];
+
+/// BT-4200: the root of the exception family, which the runtime routes to
+/// `bt@stdlib@exception:dispatch` (`beamtalk_primitive:tagged_map_dispatch/1`,
+/// via `is_exception_class/1`) instead of the instance's own class module. The
+/// `typed_sealed` conformance test pins this against the shared fixture
+/// `runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`.
+pub(in crate::core_erlang) const EXCEPTION_ROOT_CLASS: &str = "Exception";
 
 /// BT-4069: a send receiver's statically-known sealed dispatch target — the
 /// class tag to guard on plus the module to direct-call. Resolved by
@@ -661,7 +674,10 @@ impl CoreErlangGenerator {
     ///   condition 5 (only bare REPL *expressions* leave `type_map` empty;
     ///   inline class definitions and compiled methods populate it). The
     ///   remote `Mod:dispatch/3` call is late-bound, so hot reload needs no
-    ///   invalidation.
+    ///   invalidation — provided the module *name* is unchanged. A class
+    ///   redefined into a different module is handled by pinning the unit's
+    ///   own class to its emitted module (`register_own_class_module`,
+    ///   BT-4200) and by deciding module-lessness from the live index first.
     ///
     /// Known limitation (review A3, BT-4149; shared with `class sealed` direct calls):
     /// the target module is pinned at compile time, so if it is removed
@@ -697,7 +713,23 @@ impl CoreErlangGenerator {
         if !info.is_sealed {
             return None;
         }
-        if info.is_module_less {
+        // BT-4200: one consistent source for the module-less gate. The live
+        // class-module index (REPL: `build_class_module_index/0`, read from
+        // the running class processes) is fresher than `info.is_module_less`,
+        // which comes from compiler-server metadata that a `ClassBuilder`
+        // re-registration over an existing compiled class never refreshes
+        // (`update_class` finds no `__beamtalk_meta/0` to re-notify with). A
+        // module-less class registers its own class name as its module; a
+        // compiled one is always `bt@`-prefixed. So when the index has an
+        // entry, it decides; metadata is only the fallback for a class the
+        // index does not know.
+        let indexed_module = self
+            .class_module_registry()
+            .module_for_class(&self.own_package_id(), class_name);
+        let module_less = indexed_module.map_or(info.is_module_less, |module| {
+            module.as_str() == class_name.as_str()
+        });
+        if module_less {
             return None;
         }
         if !matches!(
@@ -706,11 +738,11 @@ impl CoreErlangGenerator {
         ) {
             return None;
         }
-        if class_name.as_str() == "Exception"
+        if class_name.as_str() == EXCEPTION_ROOT_CLASS
             || hierarchy
                 .superclass_chain(class_name)
                 .iter()
-                .any(|ancestor| ancestor.as_str() == "Exception")
+                .any(|ancestor| ancestor.as_str() == EXCEPTION_ROOT_CLASS)
         {
             return None;
         }
