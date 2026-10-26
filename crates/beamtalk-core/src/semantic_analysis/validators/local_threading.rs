@@ -921,6 +921,32 @@ fn lowered_chain(position: Position) -> bool {
 }
 
 /// What the coarse rows say about a statement, before the measured carve-outs.
+/// BT-3950: whether a construct of `family` in an actor method, with enclosing
+/// block roles `containers` (outermost first), is the BT-4194 shape: a block
+/// `value` send directly in a fold body with a `whileTrue:` loop outside it
+/// on the same threading chain. The scan stops at the nearest [`Container::Other`]:
+/// a closure runs in a frame of its own, so a loop outside it is not on the
+/// fold's chain; and only [`LoopBody`] counts, since a counted loop outside
+/// threads fine (measured right). The check is position-agnostic, so it also
+/// fires in operand and assign-value positions — but no measured operand cell
+/// matches (the operand matrix nests under `arm`/`iter`/`top` only, never a
+/// loop; verified by neutering this predicate: zero operand verdict flips),
+/// so nothing there needs pinning.
+fn is_actor_nested_fold_value(
+    family: LocalThreadingFamily,
+    context: MethodContext,
+    containers: &[Container],
+) -> bool {
+    family == LocalThreadingFamily::BlockValue
+        && context == Actor
+        && containers
+            .iter()
+            .rev()
+            .take_while(|c| **c != Container::Other)
+            .any(|c| *c == LoopBody)
+        && matches!(containers.last(), Some(DoBody | ListOpBody))
+}
+
 fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
     if lowered_in(kind, context) && lowered_chain(position) {
         return true;
@@ -2677,25 +2703,16 @@ impl<'d> Walker<'d> {
         }
         let ctx = self.loop_body_context();
         let actor_value_site = frame_site && is_actor_fold_value_site(expr, &ctx);
-        // BT-3950: a block `value` send directly in a fold body (`do:`,
-        // `collect:`) with a `whileTrue:` loop anywhere outside it in an actor
-        // method is not threaded back since BT-4121 (BT-4194): the write is
-        // lost and the method silently answers wrong (`actor iterLoop/collLoop
-        // local value`, measured wrong). It falls through to the §1 diagnostic
-        // below instead of being accepted. No DENY_SET row can name the
-        // producer-accepted shapes (the producer return runs before the table
-        // is consulted) nor the deny-path ones. A counted loop outside
-        // (`timesRepeat:`, `to:do:`) threads fine (measured right), so only
-        // `LoopBody` counts. The `dlocal` twins answer right and are
-        // unavoidably rejected too (same chain, `KNOWN_OVER_REJECTED`);
-        // BT-4194 deletes this carve-out when the lowering is fixed.
-        let actor_nested_fold_value = construct.family == LocalThreadingFamily::BlockValue
-            && self.context == Actor
-            && self.containers.contains(&Container::LoopBody)
-            && matches!(
-                self.containers.last(),
-                Some(Container::DoBody | Container::ListOpBody)
-            );
+        // BT-3950: the BT-4194 shape ([`is_actor_nested_fold_value`]) is not
+        // threaded back: the write is lost and the method silently answers
+        // wrong. It falls through to the §1 diagnostic below instead of being
+        // accepted. No DENY_SET row can name the producer-accepted shapes (the
+        // producer return runs before the table is consulted) nor the
+        // deny-path ones. The `dlocal` twins answer right and are unavoidably
+        // rejected too (same chain, `KNOWN_OVER_REJECTED`); BT-4194 deletes
+        // this carve-out when the lowering is fixed.
+        let actor_nested_fold_value =
+            is_actor_nested_fold_value(construct.family, self.context, &self.containers);
         if !actor_nested_fold_value && frame_site && is_loop_body_producer_site(expr, &ctx) {
             if is_lookup {
                 self.lookup_producers.insert(expr.unwrap_parens().span());
@@ -3616,6 +3633,51 @@ mod tests {
         for row in DENY_SET {
             assert!(!row.kinds.is_empty() && !row.contexts.is_empty());
         }
+    }
+
+    /// BT-3950: the carve-out matches a fold directly nested in a `whileTrue:`
+    /// loop on the same chain, wherever the loop sits — but not across a
+    /// closure boundary, not under a counted loop, and not in other contexts
+    /// or for other families.
+    #[test]
+    fn actor_nested_fold_value_matches_one_chain() {
+        use LocalThreadingFamily::BlockValue as Value;
+        let yes = [
+            vec![LoopBody, DoBody],
+            vec![LoopBody, ListOpBody],
+            vec![Arm, LoopBody, DoBody],
+            vec![DoBody, LoopBody, DoBody],
+            vec![Container::Other, LoopBody, DoBody],
+        ];
+        for chain in &yes {
+            assert!(
+                is_actor_nested_fold_value(Value, Actor, chain),
+                "{chain:?} must match"
+            );
+        }
+        let no = [
+            vec![LoopBody, Container::Other, DoBody],
+            vec![CountedLoopBody, DoBody],
+            vec![DoBody],
+            vec![LoopBody, Arm],
+            vec![],
+        ];
+        for chain in &no {
+            assert!(
+                !is_actor_nested_fold_value(Value, Actor, chain),
+                "{chain:?} must not match"
+            );
+        }
+        assert!(!is_actor_nested_fold_value(
+            Value,
+            Class,
+            &[LoopBody, DoBody]
+        ));
+        assert!(!is_actor_nested_fold_value(
+            LocalThreadingFamily::Fold,
+            Actor,
+            &[LoopBody, DoBody]
+        ));
     }
 
     /// BT-3841 review: `is_allowed` reads `RIGHT_STATEMENTS` before the depth

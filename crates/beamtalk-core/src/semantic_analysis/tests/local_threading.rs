@@ -4629,7 +4629,9 @@ fn evaluated_block_nested_in_a_bt3948_site_is_reported_once() {
 /// top level: under an arm (deny path, no `DENY_SET` row names it) and under
 /// another fold (producer path, the same lost write as the matrix pair). A
 /// counted loop outside threads fine (measured right), so that shape stays
-/// accepted.
+/// accepted. (A closure between the loop and the fold needs three blocks, so
+/// the depth gate rejects it regardless; the carve-out's own scan is pinned
+/// by `actor_nested_fold_value_matches_one_chain`.)
 #[test]
 fn actor_fold_value_nested_in_loop_is_rejected_wherever_the_loop_sits() {
     let value_rejected = |body: &str| {
