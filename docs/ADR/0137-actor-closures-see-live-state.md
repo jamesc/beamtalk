@@ -110,7 +110,7 @@ class's process, so the block is away.
 
 An `actor-state-abroad` lint, modelled on `class-state-abroad`, warns at a
 block literal that reads or writes a field, or sends to `self`, and is passed
-to `Timer`, to a send whose receiver is statically another actor, or to a
+to `Timer`, written as the receiver of `fork` (`[...] fork`), to a send whose receiver is statically another actor, or to a
 class method that is not direct-called (the lint reads the same
 `direct_class_methods` set codegen uses). A write there raises, a read sees a
 stale value, and a synchronous self-send can deadlock if the actor is
