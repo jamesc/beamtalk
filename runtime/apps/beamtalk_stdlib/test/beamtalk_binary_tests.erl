@@ -627,7 +627,7 @@ print_string_adr0138_mapping_test() ->
 print_string_matches_primitive_test_() ->
     [
         ?_assertEqual(beamtalk_primitive:print_string(S), beamtalk_binary:print_string(S))
-     || S <- [<<"">>, <<"{x}">>, <<"q\"\\">>, <<"\r\n\t\0">>, <<"héllo ✓">>]
+     || S <- [<<"">>, <<"{x}">>, <<"q\"\\">>, <<"\r\n\t\0">>, <<"héllo ✓"/utf8>>]
     ].
 
 print_string_type_error_test() ->
