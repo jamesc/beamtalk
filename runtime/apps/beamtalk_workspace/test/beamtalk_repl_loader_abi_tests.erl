@@ -185,7 +185,7 @@ stale_abi_reload_test_() ->
                         {error, #beamtalk_error{
                             kind = abi_mismatch,
                             class = 'BT3773StaleAbi',
-                            hint = <<"Recompile", _/binary>>
+                            hint = {beamtalk_string, <<"Recompile", _/binary>>}
                         }},
                         Result
                     ),

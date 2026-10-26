@@ -56,7 +56,7 @@ named_malformed_test_() ->
 
 named_malformed_carries_hint_test() ->
     #{errReason := #{error := Error}} = beamtalk_node:named(nohost),
-    ?assertEqual(<<"expected name@host">>, Error#beamtalk_error.hint),
+    ?assertEqual({beamtalk_string, <<"expected name@host">>}, Error#beamtalk_error.hint),
     ?assertEqual(#{name => nohost}, Error#beamtalk_error.details).
 
 named_non_symbol_raises_type_error_test() ->
@@ -115,7 +115,7 @@ policy_refuses_off_host_without_tls_test() ->
     {error, Error} = beamtalk_node:connect_policy(?OFF_HOST_NODE, false),
     ?assertEqual(insecure_distribution, Error#beamtalk_error.kind),
     ?assertEqual(
-        <<"configure TLS distribution (ADR 0091) or use a tunnel">>,
+        {beamtalk_string, <<"configure TLS distribution (ADR 0091) or use a tunnel">>},
         Error#beamtalk_error.hint
     ),
     ?assertEqual(?OFF_HOST_NODE, maps:get(node, Error#beamtalk_error.details)).

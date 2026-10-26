@@ -46,13 +46,13 @@ dispatch_selector_test() ->
 
 dispatch_source_test() ->
     ?assertEqual(
-        <<"greet: name => 'Hello, ' ++ name">>,
+        {beamtalk_string, <<"greet: name => 'Hello, ' ++ name">>},
         beamtalk_compiled_method_ops:dispatch('source', [], test_method())
     ).
 
 dispatch_doc_returns_docstring_test() ->
     ?assertEqual(
-        <<"Greets the given name.">>,
+        {beamtalk_string, <<"Greets the given name.">>},
         beamtalk_compiled_method_ops:dispatch('doc', [], test_method())
     ).
 
@@ -70,7 +70,7 @@ dispatch_class_test() ->
 
 dispatch_print_string_test() ->
     Result = beamtalk_compiled_method_ops:dispatch('printString', [], test_method()),
-    ?assertEqual(<<"CompiledMethod(greet:)">>, Result).
+    ?assertEqual({beamtalk_string, <<"CompiledMethod(greet:)">>}, Result).
 
 dispatch_as_string_matches_print_string_test() ->
     PS = beamtalk_compiled_method_ops:dispatch('printString', [], test_method()),

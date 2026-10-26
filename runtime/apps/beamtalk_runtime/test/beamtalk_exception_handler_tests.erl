@@ -308,7 +308,7 @@ hierarchy_test_() ->
                 error:#{error := Inner} ->
                     ?assertEqual('RuntimeError', Inner#beamtalk_error.class),
                     ?assertEqual(signal, Inner#beamtalk_error.kind),
-                    ?assertEqual(<<"test msg">>, Inner#beamtalk_error.message)
+                    ?assertEqual({beamtalk_string, <<"test msg">>}, Inner#beamtalk_error.message)
             end
         end}
     ]}.
@@ -324,7 +324,7 @@ signal_from_class_test_() ->
             error:#{error := Inner} ->
                 ?assertEqual('MyCustomError', Inner#beamtalk_error.class),
                 ?assertEqual(signal, Inner#beamtalk_error.kind),
-                ?assertEqual(<<"MyCustomError">>, Inner#beamtalk_error.message)
+                ?assertEqual({beamtalk_string, <<"MyCustomError">>}, Inner#beamtalk_error.message)
         end
     end}.
 
@@ -346,14 +346,14 @@ make_test_exception() ->
 dispatch_message_test() ->
     Ex = make_test_exception(),
     ?assertEqual(
-        <<"Integer does not understand 'foo'">>,
+        {beamtalk_string, <<"Integer does not understand 'foo'">>},
         beamtalk_exception_handler:dispatch('message', [], Ex)
     ).
 
 dispatch_hint_test() ->
     Ex = make_test_exception(),
     ?assertEqual(
-        <<"Check spelling">>,
+        {beamtalk_string, <<"Check spelling">>},
         beamtalk_exception_handler:dispatch('hint', [], Ex)
     ).
 
@@ -456,7 +456,7 @@ dispatch_reason_exit_test() ->
 dispatch_print_string_test() ->
     Ex = make_test_exception(),
     Result = beamtalk_exception_handler:dispatch('printString', [], Ex),
-    ?assert(is_binary(Result) orelse is_list(Result)).
+    ?assertMatch({beamtalk_string, _}, Result).
 
 dispatch_stack_trace_with_frames_test() ->
     Ex = (make_test_exception())#{stacktrace => [frame1, frame2]},
@@ -497,7 +497,7 @@ dispatch_signal_colon_raises_test() ->
     catch
         error:#{error := Inner} ->
             ?assertEqual(signal, Inner#beamtalk_error.kind),
-            ?assertEqual(<<"custom msg">>, Inner#beamtalk_error.message),
+            ?assertEqual({beamtalk_string, <<"custom msg">>}, Inner#beamtalk_error.message),
             ?assertEqual('RuntimeError', Inner#beamtalk_error.class)
     end.
 
@@ -594,7 +594,7 @@ ensure_wrapped_3_beamtalk_error_wraps_correctly_test() ->
 ensure_wrapped_3_exit_preserves_message_test() ->
     Result = beamtalk_exception_handler:ensure_wrapped(exit, "shutdown", []),
     #{error := Inner} = Result,
-    ?assert(is_binary(Inner#beamtalk_error.message)).
+    ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.message).
 
 ensure_wrapped_3_undef_shows_mfa_test() ->
     ST = [{some_mod, some_fun, 2, [{file, "test.erl"}, {line, 10}]}],
@@ -603,14 +603,14 @@ ensure_wrapped_3_undef_shows_mfa_test() ->
     #{error := Inner} = Result,
     ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
     ?assertEqual(
-        <<"Undefined function: some_mod:some_fun/2">>,
+        {beamtalk_string, <<"Undefined function: some_mod:some_fun/2">>},
         Inner#beamtalk_error.message
     ).
 
 ensure_wrapped_3_undef_empty_stacktrace_test() ->
     Result = beamtalk_exception_handler:ensure_wrapped(error, undef, []),
     #{error := Inner} = Result,
-    ?assertEqual(<<"Undefined function">>, Inner#beamtalk_error.message).
+    ?assertEqual({beamtalk_string, <<"Undefined function">>}, Inner#beamtalk_error.message).
 
 %%% ===================================================================
 %%% class_to_kind/1 tests — pure, no class system needed
@@ -687,8 +687,8 @@ wrap_raw_badarity_test() ->
     #{error := Inner} = Result,
     ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind),
     ?assertEqual('Block', Inner#beamtalk_error.class),
-    ?assert(is_binary(Inner#beamtalk_error.message)),
-    ?assert(is_binary(Inner#beamtalk_error.hint)),
+    ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.message),
+    ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.hint),
     #{expected_args := 1, actual_args := 3} = Inner#beamtalk_error.details.
 
 %%% ===================================================================
@@ -710,7 +710,7 @@ classify(Reason, Context) ->
 wrap_raw_badarith_is_type_error_test() ->
     Inner = classify(badarith),
     ?assertEqual(type_error, Inner#beamtalk_error.kind),
-    ?assert(is_binary(Inner#beamtalk_error.hint)).
+    ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.hint).
 
 wrap_raw_badarith_class_is_type_error_test() ->
     #{'$beamtalk_class' := Class} = beamtalk_exception_handler:wrap_raw(badarith),
@@ -732,7 +732,7 @@ wrap_raw_badarg_no_context_is_argument_error_test() ->
     Inner = classify(badarg),
     ?assertEqual(argument_error, Inner#beamtalk_error.kind),
     %% Without a breadcrumb the message is unlocated.
-    ?assertEqual(<<"invalid argument">>, Inner#beamtalk_error.message).
+    ?assertEqual({beamtalk_string, <<"invalid argument">>}, Inner#beamtalk_error.message).
 
 %%% --- Bucket B: internal bugs (loud, not dressed up as user errors) ---
 
@@ -847,7 +847,7 @@ wrap_raw_badarith_with_breadcrumb_is_located_test() ->
     %% Message names the originating Class>>selector.
     ?assertEqual(
         match,
-        re:run(Inner#beamtalk_error.message, "Tuple>>sum", [{capture, none}])
+        re:run(element(2, Inner#beamtalk_error.message), "Tuple>>sum", [{capture, none}])
     ).
 
 wrap_raw_badarg_with_selector_only_is_located_test() ->
@@ -855,7 +855,7 @@ wrap_raw_badarg_with_selector_only_is_located_test() ->
     ?assertEqual('at:', Inner#beamtalk_error.selector),
     ?assertEqual(
         match,
-        re:run(Inner#beamtalk_error.message, "'at:'", [{capture, none}])
+        re:run(element(2, Inner#beamtalk_error.message), "'at:'", [{capture, none}])
     ).
 
 %%% --- ensure_wrapped/4: context-aware idempotent wrapper ---
@@ -931,7 +931,7 @@ signal_message_binary_test() ->
     catch
         error:#{error := Inner} ->
             ?assertEqual(signal, Inner#beamtalk_error.kind),
-            ?assertEqual(<<"error msg">>, Inner#beamtalk_error.message)
+            ?assertEqual({beamtalk_string, <<"error msg">>}, Inner#beamtalk_error.message)
     end.
 
 signal_message_atom_test() ->
@@ -940,7 +940,7 @@ signal_message_atom_test() ->
         ?assert(false)
     catch
         error:#{error := Inner} ->
-            ?assertEqual(<<"some_atom">>, Inner#beamtalk_error.message)
+            ?assertEqual({beamtalk_string, <<"some_atom">>}, Inner#beamtalk_error.message)
     end.
 
 signal_message_other_test() ->
@@ -949,7 +949,7 @@ signal_message_other_test() ->
         ?assert(false)
     catch
         error:#{error := Inner} ->
-            ?assert(is_binary(Inner#beamtalk_error.message))
+            ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.message)
     end.
 
 %%% ===================================================================
@@ -983,7 +983,7 @@ class_signal_message_with_beamtalk_object_test() ->
         error:#{error := Inner} ->
             ?assertEqual('MyCustomError', Inner#beamtalk_error.class),
             ?assertEqual(signal, Inner#beamtalk_error.kind),
-            ?assertEqual(<<"test msg">>, Inner#beamtalk_error.message)
+            ?assertEqual({beamtalk_string, <<"test msg">>}, Inner#beamtalk_error.message)
     end.
 
 class_signal_message_without_class_suffix_test() ->
@@ -999,7 +999,7 @@ class_signal_message_without_class_suffix_test() ->
     catch
         error:#{error := Inner} ->
             ?assertEqual('Exception', Inner#beamtalk_error.class),
-            ?assertEqual(<<"oops">>, Inner#beamtalk_error.message)
+            ?assertEqual({beamtalk_string, <<"oops">>}, Inner#beamtalk_error.message)
     end.
 
 class_signal_message_fallback_test() ->
@@ -1010,7 +1010,7 @@ class_signal_message_fallback_test() ->
     catch
         error:#{error := Inner} ->
             ?assertEqual('Exception', Inner#beamtalk_error.class),
-            ?assertEqual(<<"fallback">>, Inner#beamtalk_error.message)
+            ?assertEqual({beamtalk_string, <<"fallback">>}, Inner#beamtalk_error.message)
     end.
 
 class_signal_with_beamtalk_object_test() ->
@@ -1026,7 +1026,7 @@ class_signal_with_beamtalk_object_test() ->
         error:#{error := Inner} ->
             ?assertEqual('RuntimeError', Inner#beamtalk_error.class),
             ?assertEqual(signal, Inner#beamtalk_error.kind),
-            ?assertEqual(<<"RuntimeError">>, Inner#beamtalk_error.message)
+            ?assertEqual({beamtalk_string, <<"RuntimeError">>}, Inner#beamtalk_error.message)
     end.
 
 class_signal_fallback_test() ->
@@ -1036,7 +1036,7 @@ class_signal_fallback_test() ->
     catch
         error:#{error := Inner} ->
             ?assertEqual('Exception', Inner#beamtalk_error.class),
-            ?assertEqual(<<"Exception">>, Inner#beamtalk_error.message)
+            ?assertEqual({beamtalk_string, <<"Exception">>}, Inner#beamtalk_error.message)
     end.
 
 %%% ===================================================================
@@ -1057,7 +1057,7 @@ class_signal_kind_sets_kind_class_selector_hint_test() ->
             ?assertEqual(index_out_of_bounds, Inner#beamtalk_error.kind),
             ?assertEqual('ListZipper', Inner#beamtalk_error.class),
             ?assertEqual('left', Inner#beamtalk_error.selector),
-            ?assertEqual(<<"already at the start of the sequence">>, Inner#beamtalk_error.hint)
+            ?assertEqual({beamtalk_string, <<"already at the start of the sequence">>}, Inner#beamtalk_error.hint)
     end.
 
 class_signal_kind_supports_any_named_kind_test() ->
@@ -1071,7 +1071,7 @@ class_signal_kind_supports_any_named_kind_test() ->
             ?assertEqual(empty_collection, Inner#beamtalk_error.kind),
             ?assertEqual('Deque', Inner#beamtalk_error.class),
             ?assertEqual('peek', Inner#beamtalk_error.selector),
-            ?assertEqual(<<"custom hint">>, Inner#beamtalk_error.hint)
+            ?assertEqual({beamtalk_string, <<"custom hint">>}, Inner#beamtalk_error.hint)
     end.
 
 -doc "Setup class system for hierarchy tests".

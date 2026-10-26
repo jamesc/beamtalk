@@ -103,9 +103,9 @@ named_error_includes_hint_with_loaded_packages_test() ->
     catch
         error:#{error := #beamtalk_error{hint = Hint}} ->
             ?assertNotEqual(undefined, Hint),
-            ?assert(is_binary(Hint)),
+            ?assertMatch({beamtalk_string, _}, Hint),
             %% Hint should mention loaded packages
-            ?assertMatch({match, _}, re:run(Hint, <<"stdlib">>))
+            ?assertMatch({match, _}, re:run(element(2, Hint), <<"stdlib">>))
     end.
 
 %%% ============================================================================

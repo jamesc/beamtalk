@@ -155,7 +155,7 @@ tcp_start_workspace(Retries) ->
     {ok, Port} = inet:port(LSock),
     gen_tcp:close(LSock),
     timer:sleep(50),
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     Config = #{
         mode => workspace,
         workspace_id => <<"tcp_test_ws">>,
@@ -2042,7 +2042,7 @@ ensure_structured_error_compile_error_structured_with_hint_test() ->
         ]}
     ),
     ?assertEqual(compile_error, Err#beamtalk_error.kind),
-    ?assertEqual(<<"prefix with _x">>, Err#beamtalk_error.hint).
+    ?assertEqual({beamtalk_string, <<"prefix with _x">>}, Err#beamtalk_error.hint).
 
 ensure_structured_error_compile_error_list_test() ->
     Err = beamtalk_repl_server:ensure_structured_error({compile_error, "some msg"}),
@@ -2110,7 +2110,7 @@ ensure_structured_error_2_compile_error_test() ->
 ensure_structured_error_2_unknown_test() ->
     Err = beamtalk_repl_server:ensure_structured_error(some_reason, error),
     ?assertEqual(internal_error, Err#beamtalk_error.kind),
-    ?assert(binary:match(Err#beamtalk_error.message, <<"error:">>) =/= nomatch).
+    ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"error:">>) =/= nomatch).
 
 ensure_structured_error_2_eval_error_test() ->
     Inner = beamtalk_error:new(does_not_understand, 'Counter'),
@@ -2158,12 +2158,12 @@ ensure_structured_error_beamtalk_object_test() ->
 make_class_not_found_error_atom_test() ->
     Err = beamtalk_repl_server:make_class_not_found_error('Counter'),
     ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-    ?assert(binary:match(Err#beamtalk_error.message, <<"Counter">>) =/= nomatch).
+    ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"Counter">>) =/= nomatch).
 
 make_class_not_found_error_binary_test() ->
     Err = beamtalk_repl_server:make_class_not_found_error(<<"MyClass">>),
     ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-    ?assert(binary:match(Err#beamtalk_error.message, <<"MyClass">>) =/= nomatch).
+    ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"MyClass">>) =/= nomatch).
 
 %%% format_name/1 tests
 
@@ -2572,7 +2572,7 @@ http_ws_no_upgrade_test(Port) ->
 %% Cross-platform temp directory as a list path.
 wpf_temp_dir() ->
     application:ensure_all_started(beamtalk_stdlib),
-    binary_to_list(beamtalk_file:'tempDirectory'()).
+    binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 write_port_file_undefined_workspace_test() ->
     %% An undefined workspace id is a no-op (no HOME lookup, no file write).

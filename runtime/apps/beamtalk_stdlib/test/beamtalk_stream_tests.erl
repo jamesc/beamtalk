@@ -255,7 +255,7 @@ file_lines_take_closes_handle_test() ->
         LinesResult = beamtalk_file:'lines:'(list_to_binary(TmpFile)),
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Stream} = LinesResult,
         Result = beamtalk_stream:take(Stream, 1),
-        ?assertEqual([<<"line1">>], Result),
+        ?assertEqual([{beamtalk_string, <<"line1">>}], Result),
         timer:sleep(10),
         ok
     after
@@ -302,8 +302,21 @@ on_list_test() ->
 
 %% on: creates a stream from a string (grapheme clusters)
 on_string_test() ->
-    Stream = beamtalk_stream:on(<<"hello">>),
-    ?assertEqual([<<"h">>, <<"e">>, <<"l">>, <<"l">>, <<"o">>], beamtalk_stream:as_list(Stream)).
+    %% BT-4173: a tagged String streams grapheme Strings ...
+    Stream = beamtalk_stream:on({beamtalk_string, <<"hello">>}),
+    ?assertEqual(
+        [
+            {beamtalk_string, <<"h">>},
+            {beamtalk_string, <<"e">>},
+            {beamtalk_string, <<"l">>},
+            {beamtalk_string, <<"l">>},
+            {beamtalk_string, <<"o">>}
+        ],
+        beamtalk_stream:as_list(Stream)
+    ),
+    %% ... while a bare Binary streams byte Integers.
+    BinStream = beamtalk_stream:on(<<"hello">>),
+    ?assertEqual([104, 101, 108, 108, 111], beamtalk_stream:as_list(BinStream)).
 
 %% on: creates a stream from a Set
 on_set_test() ->

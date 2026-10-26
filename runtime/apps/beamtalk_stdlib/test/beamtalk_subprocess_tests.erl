@@ -422,7 +422,7 @@ validate_config_non_binary_dir_test() ->
 dir_sets_working_directory_test() ->
     case os:type() of
         {unix, _} ->
-            TmpDir = beamtalk_file:'tempDirectory'(),
+            {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
             {ShExe, ShArgs} = shell_cmd(<<"pwd">>),
             {ok, Pid} = beamtalk_subprocess:start(#{
                 executable => ShExe,
@@ -440,7 +440,7 @@ dir_sets_working_directory_test() ->
 dir_with_env_sets_both_test() ->
     case os:type() of
         {unix, _} ->
-            TmpDir = beamtalk_file:'tempDirectory'(),
+            {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
             {ShExe, ShArgs} = shell_cmd(<<"echo $BT_TEST_DIR; pwd">>),
             {ok, Pid} = beamtalk_subprocess:start(#{
                 executable => ShExe,

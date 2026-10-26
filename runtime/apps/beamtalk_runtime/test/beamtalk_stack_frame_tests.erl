@@ -109,7 +109,7 @@ dispatch_arguments_test() ->
 
 dispatch_source_location_test() ->
     Result = beamtalk_stack_frame:dispatch('sourceLocation', [], make_test_frame()),
-    ?assertEqual(<<"src/beamtalk_integer.erl:42">>, Result).
+    ?assertEqual({beamtalk_string, <<"src/beamtalk_integer.erl:42">>}, Result).
 
 dispatch_source_location_nil_file_test() ->
     ?assertEqual(nil, beamtalk_stack_frame:dispatch('sourceLocation', [], make_nil_frame())).
@@ -120,7 +120,7 @@ dispatch_source_location_nil_line_test() ->
 
 dispatch_module_name_test() ->
     Result = beamtalk_stack_frame:dispatch('moduleName', [], make_test_frame()),
-    ?assertEqual(<<"beamtalk_integer">>, Result).
+    ?assertEqual({beamtalk_string, <<"beamtalk_integer">>}, Result).
 
 dispatch_module_name_undefined_test() ->
     ?assertEqual(nil, beamtalk_stack_frame:dispatch('moduleName', [], make_nil_frame())).
@@ -133,7 +133,8 @@ dispatch_line_nil_test() ->
 
 dispatch_file_test() ->
     ?assertEqual(
-        <<"src/beamtalk_integer.erl">>, beamtalk_stack_frame:dispatch('file', [], make_test_frame())
+        {beamtalk_string, <<"src/beamtalk_integer.erl">>},
+        beamtalk_stack_frame:dispatch('file', [], make_test_frame())
     ).
 
 dispatch_file_nil_test() ->
@@ -141,8 +142,8 @@ dispatch_file_nil_test() ->
 
 dispatch_print_string_test() ->
     Result = beamtalk_stack_frame:dispatch('printString', [], make_test_frame()),
-    ?assert(is_binary(Result)),
-    ?assertNotEqual(<<>>, Result).
+    ?assertMatch({beamtalk_string, _}, Result),
+    ?assertNotEqual({beamtalk_string, <<>>}, Result).
 
 %% dispatch/3 has no catch-all clause. Unknown selectors are handled by the
 %% compiled bt@stdlib@stack_frame module via Object inheritance (dispatched
@@ -172,27 +173,27 @@ has_method_unknown_test() -> ?assertNot(beamtalk_stack_frame:has_method('nonExis
 
 format_frame_with_full_location_test() ->
     Result = beamtalk_stack_frame:dispatch('printString', [], make_test_frame()),
-    ?assertEqual(<<"Integer>>+/2 (src/beamtalk_integer.erl:42)">>, Result).
+    ?assertEqual({beamtalk_string, <<"Integer>>+/2 (src/beamtalk_integer.erl:42)">>}, Result).
 
 format_frame_nil_class_test() ->
     Frame = (make_test_frame())#{class_name => nil},
     Result = beamtalk_stack_frame:dispatch('printString', [], Frame),
-    ?assertEqual(<<"?>>+/2 (src/beamtalk_integer.erl:42)">>, Result).
+    ?assertEqual({beamtalk_string, <<"?>>+/2 (src/beamtalk_integer.erl:42)">>}, Result).
 
 format_frame_undefined_function_test() ->
     Frame = (make_test_frame())#{function => undefined, class_name => nil},
     Result = beamtalk_stack_frame:dispatch('printString', [], Frame),
-    ?assertEqual(<<"?>>?/2 (src/beamtalk_integer.erl:42)">>, Result).
+    ?assertEqual({beamtalk_string, <<"?>>?/2 (src/beamtalk_integer.erl:42)">>}, Result).
 
 format_frame_no_location_test() ->
     Frame = (make_test_frame())#{file => nil, line => nil},
     Result = beamtalk_stack_frame:dispatch('printString', [], Frame),
-    ?assertEqual(<<"Integer>>+/2">>, Result).
+    ?assertEqual({beamtalk_string, <<"Integer>>+/2">>}, Result).
 
 format_frame_file_no_line_test() ->
     Frame = (make_test_frame())#{line => nil},
     Result = beamtalk_stack_frame:dispatch('printString', [], Frame),
-    ?assertEqual(<<"Integer>>+/2 (src/beamtalk_integer.erl)">>, Result).
+    ?assertEqual({beamtalk_string, <<"Integer>>+/2 (src/beamtalk_integer.erl)">>}, Result).
 
 %%% ===================================================================
 %%% module_to_class/1 tests

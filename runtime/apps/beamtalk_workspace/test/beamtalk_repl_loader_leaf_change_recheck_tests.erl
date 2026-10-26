@@ -23,7 +23,7 @@ an xref-filtered candidate set — see that function's doc).
 
 -include_lib("eunit/include/eunit.hrl").
 
-temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
+temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 %%====================================================================
 %% Pure helpers — superclasses_losing_leaf_status/1, was_leaf_class/1

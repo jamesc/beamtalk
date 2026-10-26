@@ -11,7 +11,7 @@
 %% Helpers
 %%====================================================================
 
-temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
+temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 %%====================================================================
 %% is_stdlib_path/1
@@ -619,8 +619,8 @@ declared_class_name_multiple_classes_is_error_test() ->
     {error, Err} = beamtalk_repl_loader:declared_class_name(Classes),
     ?assertEqual(multiple_classes_declared, Err#beamtalk_error.kind),
     Msg = Err#beamtalk_error.message,
-    ?assertNotEqual(nomatch, binary:match(Msg, <<"Foo">>)),
-    ?assertNotEqual(nomatch, binary:match(Msg, <<"Bar">>)).
+    ?assertNotEqual(nomatch, binary:match(element(2, Msg), <<"Foo">>)),
+    ?assertNotEqual(nomatch, binary:match(element(2, Msg), <<"Bar">>)).
 
 %%====================================================================
 %% validate_new_class/3 (ADR 0082 Phase 1)
@@ -641,8 +641,8 @@ validate_new_class_name_mismatch_is_error_test() ->
     ?assertEqual(class_name_mismatch, Err#beamtalk_error.kind),
     ?assertEqual('newClass:at:', Err#beamtalk_error.selector),
     Msg = Err#beamtalk_error.message,
-    ?assertNotEqual(nomatch, binary:match(Msg, <<"Greeter">>)),
-    ?assertNotEqual(nomatch, binary:match(Msg, <<"welcomer">>)).
+    ?assertNotEqual(nomatch, binary:match(element(2, Msg), <<"Greeter">>)),
+    ?assertNotEqual(nomatch, binary:match(element(2, Msg), <<"welcomer">>)).
 
 validate_new_class_already_loaded_is_error_test() ->
     %% (d) a class of that name is already loaded → error even when the basename
@@ -665,7 +665,7 @@ validate_new_class_name_mismatch_takes_precedence_over_loaded_test() ->
 %% path must be reported as target_exists; otherwise newClass:at: would log a
 %% durable ChangeEntry that later fails to flush with eisdir.
 validate_target_path_existing_directory_is_target_exists_test() ->
-    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Dir =
         Tmp ++ "/bt_new_class_dir_test_" ++
             integer_to_list(erlang:unique_integer([positive])),
@@ -714,7 +714,7 @@ loader_setup() ->
         {error, {already_started, _}} -> ok
     end,
     application:ensure_all_started(beamtalk_runtime),
-    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj = Tmp ++ "/bt_loader_proj_" ++ integer_to_list(erlang:unique_integer([positive])),
     ok = file:make_dir(Proj),
     %% A recorded root package (BT-3651: the launcher-set `root_package` env
@@ -1426,7 +1426,7 @@ t_new_class_target_exists(_Proj) ->
 
 t_new_class_outside_project() ->
     %% A path outside the workspace project_path is rejected before compiling.
-    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Path =
         Tmp ++ "/bt_outside_" ++ integer_to_list(erlang:unique_integer([positive])) ++
             "/Outsider.bt",
@@ -1652,7 +1652,7 @@ t_protocol_reload_rejected_names_failing_user(Proj) ->
     {error, Err} = Result,
     ?assert(is_record(Err, beamtalk_error)),
     Msg = Err#beamtalk_error.message,
-    ?assertNotEqual(nomatch, binary:match(Msg, list_to_binary(UserName))),
+    ?assertNotEqual(nomatch, binary:match(element(2, Msg), list_to_binary(UserName))),
 
     %% All-or-nothing: the user's flattened `greet` is untouched by the
     %% rejected reload — the protocol edit never installed anywhere.
@@ -1718,7 +1718,7 @@ t_protocol_reload_refuses_stdlib(Proj) ->
     {error, Err} = Result,
     ?assert(is_record(Err, beamtalk_error)),
     Msg = Err#beamtalk_error.message,
-    ?assertNotEqual(nomatch, binary:match(Msg, <<"read-only">>)).
+    ?assertNotEqual(nomatch, binary:match(element(2, Msg), <<"read-only">>)).
 
 %% Claude BeamTalk Review finding on BT-3593's PR: `rollback_one_install/2`'s
 %% class branch must merge `beamtalk_workspace_meta:all_protocol_sources/0`
@@ -1850,7 +1850,7 @@ t_protocol_reload_fanout_bare_structured_error(Proj) ->
         Result = beamtalk_repl_loader:reload_class_file(PPath),
         ?assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result),
         {error, #beamtalk_error{message = Msg}} = Result,
-        ?assert(binary:match(Msg, <<"abi_mismatch">>) =/= nomatch),
+        ?assert(binary:match(element(2, Msg), <<"abi_mismatch">>) =/= nomatch),
         ?assertEqual(FooBefore, stored_method_source(UAtom, foo))
     after
         meck:unload(beamtalk_repl_loader)

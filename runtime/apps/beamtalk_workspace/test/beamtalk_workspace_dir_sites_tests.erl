@@ -36,7 +36,7 @@ with_env(Env, Fun) ->
 tmp_home() ->
     application:ensure_all_started(beamtalk_stdlib),
     Dir = filename:join(
-        binary_to_list(beamtalk_file:'tempDirectory'()),
+        binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
         "bt3680_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = filelib:ensure_dir(filename:join(Dir, "placeholder")),

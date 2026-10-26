@@ -492,7 +492,7 @@ find_bt_modules_skips_invalid_names_test() ->
 %% Test helpers for temp directories
 %%====================================================================
 
-get_temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
+get_temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 make_temp_beam_dir(FileNames) ->
     Dir = filename:join(

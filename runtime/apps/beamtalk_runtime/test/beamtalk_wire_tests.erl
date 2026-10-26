@@ -386,7 +386,7 @@ test_wire_version_unsupported_error() ->
         #beamtalk_error{kind = wire_version_unsupported, class = 'SomeClass'},
         Err
     ),
-    ?assertMatch(#beamtalk_error{hint = Hint} when is_binary(Hint), Err).
+    ?assertMatch(#beamtalk_error{hint = {beamtalk_string, Hint}} when is_binary(Hint), Err).
 
 %%====================================================================
 %% Plain tuple and empty list passthrough
@@ -444,8 +444,8 @@ test_not_serialisable_hint_has_index_path() ->
     %% HandleScoped at list[0] → path [{index, 0}] → hint contains "[0]".
     Item = #{'$beamtalk_class' => 'ShapeHandleBox'},
     {error, #beamtalk_error{hint = Hint}} = beamtalk_wire:encode([Item]),
-    ?assert(is_binary(Hint)),
-    ?assert(binary:match(Hint, <<"[0]">>) =/= nomatch).
+    ?assertMatch({beamtalk_string, _}, Hint),
+    ?assert(binary:match(element(2, Hint), <<"[0]">>) =/= nomatch).
 
 test_not_serialisable_hint_has_field_path() ->
     %% HandleScoped as the value of a non-internal field in a builtin
@@ -455,16 +455,16 @@ test_not_serialisable_hint_has_field_path() ->
         data => #{'$beamtalk_class' => 'ShapeHandleBox'}
     },
     {error, #beamtalk_error{hint = Hint}} = beamtalk_wire:encode(Array),
-    ?assert(is_binary(Hint)),
-    ?assert(binary:match(Hint, <<".data">>) =/= nomatch).
+    ?assertMatch({beamtalk_string, _}, Hint),
+    ?assert(binary:match(element(2, Hint), <<".data">>) =/= nomatch).
 
 test_not_serialisable_hint_has_key_path() ->
     %% HandleScoped as a value in an untagged map (Dictionary) →
     %% path [{key, my_key}] → hint contains "{my_key}".
     Dict = #{my_key => #{'$beamtalk_class' => 'ShapeHandleBox'}},
     {error, #beamtalk_error{hint = Hint}} = beamtalk_wire:encode(Dict),
-    ?assert(is_binary(Hint)),
-    ?assert(binary:match(Hint, <<"{my_key}">>) =/= nomatch).
+    ?assertMatch({beamtalk_string, _}, Hint),
+    ?assert(binary:match(element(2, Hint), <<"{my_key}">>) =/= nomatch).
 
 test_not_serialisable_hint_has_nlr_value_path() ->
     %% HandleScoped as the Value slot of an NLR 3-tuple →
@@ -472,5 +472,5 @@ test_not_serialisable_hint_has_nlr_value_path() ->
     Token = make_ref(),
     Nlr = {'$bt_nlr', Token, #{'$beamtalk_class' => 'ShapeHandleBox'}},
     {error, #beamtalk_error{hint = Hint}} = beamtalk_wire:encode(Nlr),
-    ?assert(is_binary(Hint)),
-    ?assert(binary:match(Hint, <<".<nlr value>">>) =/= nomatch).
+    ?assertMatch({beamtalk_string, _}, Hint),
+    ?assert(binary:match(element(2, Hint), <<".<nlr value>">>) =/= nomatch).

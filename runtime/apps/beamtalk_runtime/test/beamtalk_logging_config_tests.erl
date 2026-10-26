@@ -479,7 +479,7 @@ mcp_signal_file_with_real_workspace_test_() ->
             TestWsId = iolist_to_binary(
                 io_lib:format("test_mcp_~p", [erlang:unique_integer([positive])])
             ),
-            TmpDir = beamtalk_file:'tempDirectory'(),
+            {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
             ProjectPath = iolist_to_binary([TmpDir, "/test"]),
             {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
                 workspace_id => TestWsId,

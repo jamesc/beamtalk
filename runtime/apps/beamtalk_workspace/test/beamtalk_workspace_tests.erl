@@ -15,7 +15,7 @@ Tests the workspace API (status/0).
 %%====================================================================
 
 test_metadata() ->
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     #{
         workspace_id => <<"test-ws-123">>,
         project_path => <<TmpDir/binary, "/test-project">>,

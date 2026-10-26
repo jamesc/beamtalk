@@ -339,7 +339,7 @@ test_abstract_error_structure() ->
         },
         Error
     ),
-    ?assert(is_binary(Error#beamtalk_error.hint)).
+    ?assertMatch({beamtalk_string, _}, Error#beamtalk_error.hint).
 
 %%====================================================================
 %% abstract_class_error with different selectors
@@ -355,7 +355,7 @@ test_abstract_error_spawn_with() ->
         },
         Error
     ),
-    ?assert(is_binary(Error#beamtalk_error.hint)).
+    ?assertMatch({beamtalk_string, _}, Error#beamtalk_error.hint).
 
 test_abstract_error_new() ->
     Error = beamtalk_class_instantiation:abstract_class_error('Shape', new),
@@ -720,11 +720,12 @@ test_check_init_args_unknown_key() ->
                 Error
             ),
             ?assertEqual(
-                <<"Unknown field `bogus` for class `Conf`">>,
+                {beamtalk_string, <<"Unknown field `bogus` for class `Conf`">>},
                 Error#beamtalk_error.message
             ),
             ?assertEqual(
-                <<"Declared fields: handler, port">>, Error#beamtalk_error.hint
+                {beamtalk_string, <<"Declared fields: handler, port">>},
+                Error#beamtalk_error.hint
             )
     end.
 
