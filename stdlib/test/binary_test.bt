@@ -126,8 +126,7 @@ TestCase subclass: BinaryTest
   // Collection protocol: includes:
   // Byte-level on Binary: compares byte Integers.
   // ═══════════════════════════════════════════════════════════════════
-  testIncludesByte =>
-    self assert: (self.bin includes: 66)
+  testIncludesByte => self assert: (self.bin includes: 66)
 
   testIncludesByteNotFound => self deny: (self.bin includes: 90)
 
