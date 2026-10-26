@@ -745,3 +745,30 @@ fn fallback_closure_warnings_are_not_duplicated() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn dedup_append_keeps_lowering_specific_findings() {
+    // BT-4070 review: `dedup_append_codegen_warnings` drops exact repeats
+    // of already-recorded diagnostics but keeps lowering-specific ones —
+    // e.g. an `InternalVerifier` finding raised only while lowering the
+    // fallback closure must survive (a wholesale `truncate` would discard
+    // it, losing the release-mode miscompile signal).
+    use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+    let mut generator = crate::core_erlang::CoreErlangGenerator::new("bt@probe_dedup");
+    let span = Span::new(0, 0);
+    let reported = Diagnostic::warning("non-literal callable", span);
+    generator.add_codegen_warning(reported.clone());
+    let verifier_finding = Diagnostic::warning("internal: synthetic", span)
+        .with_category(DiagnosticCategory::InternalVerifier);
+    generator.dedup_append_codegen_warnings(vec![reported, verifier_finding.clone()]);
+    let kept = generator.take_codegen_warnings();
+    assert_eq!(
+        kept.len(),
+        2,
+        "expected the repeat dropped and the new finding kept, got {kept:?}"
+    );
+    assert!(
+        kept.contains(&verifier_finding),
+        "lowering-specific finding must survive dedup, got {kept:?}"
+    );
+}

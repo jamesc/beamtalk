@@ -562,6 +562,21 @@ impl CoreErlangGenerator {
         self.codegen_warnings.push(diag);
     }
 
+    /// Re-appends diagnostics raised while lowering a second copy of
+    /// already-reported AST, keeping only those not already recorded
+    /// (`Diagnostic: PartialEq`). BT-4070: pure-conditional fallback
+    /// closures lower the same blocks the inline arms already reported,
+    /// so exact repeats are dropped — but lowering-specific findings
+    /// (e.g. an `InternalVerifier` diagnostic from the Tier-1 closure
+    /// path) survive. A wholesale `truncate` would silently discard those.
+    pub(in crate::core_erlang) fn dedup_append_codegen_warnings(&mut self, new: Vec<Diagnostic>) {
+        for diag in new {
+            if !self.codegen_warnings.contains(&diag) {
+                self.codegen_warnings.push(diag);
+            }
+        }
+    }
+
     /// Drains the diagnostics recorded so far. For drivers that build their own
     /// generator (the REPL assembler, BT-3778) and forward only the `ThreadedIr`
     /// verifier ones via [`GeneratedModule::into_code_and_verifier_diagnostics`].

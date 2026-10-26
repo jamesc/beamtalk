@@ -1615,10 +1615,11 @@ impl CoreErlangGenerator {
     /// for non-Boolean receivers, so the optimisation buys nothing there,
     /// and inlining inside them would duplicate nested blocks exponentially
     /// (each level compiles its blocks both inline and as fallback
-    /// closures). Codegen warnings are snapshot-truncated across the
-    /// fallback loop for the same reason — the fallback lowers the same
-    /// AST the inline arm already reported, and `add_codegen_warning`
-    /// does not dedup.
+    /// closures). Codegen warnings are deduplicated across the fallback
+    /// loop for the same reason — the fallback lowers the same AST the
+    /// inline arm already reported, and `add_codegen_warning` does not
+    /// dedup — while lowering-specific findings are kept (see
+    /// `dedup_append_codegen_warnings`).
     ///
     /// The receiver compiles through [`Self::compile_conditional_receiver`],
     /// the same path the mutation builders use: the gate guarantees an
@@ -1643,8 +1644,9 @@ impl CoreErlangGenerator {
         // save/restore shape as `while_loops.rs` — bind the result,
         // restore, then `?`, so an error never leaks the flag): without
         // this, nested pure conditionals emit 2^n copies of the innermost
-        // arm. Warnings are snapshot-truncated across the loop: the
-        // fallback lowers the same AST the inline arm already reported.
+        // arm. Warnings are deduplicated across the loop: the fallback
+        // lowers the same AST the inline arm already reported, so exact
+        // repeats are dropped — but lowering-specific findings survive.
         let prev = std::mem::replace(&mut self.decline_pure_boolean_inline, true);
         let warn_len = self.codegen_warnings.len();
         let closures: Result<Vec<_>> = fallback_args
@@ -1652,7 +1654,8 @@ impl CoreErlangGenerator {
             .map(|a| self.expression_doc(a))
             .collect();
         self.decline_pure_boolean_inline = prev;
-        self.codegen_warnings.truncate(warn_len);
+        let new_warnings = self.codegen_warnings.split_off(warn_len);
+        self.dedup_append_codegen_warnings(new_warnings);
         let closure_docs = closures?;
         let fallback =
             Self::runtime_send_call(leaf::var(cond_var.clone()), selector_atom, closure_docs);
