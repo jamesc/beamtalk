@@ -2555,9 +2555,21 @@ impl TypeChecker {
                 // metaclass tower). Model the metatype as `Class` for the
                 // assignability walk.
                 let class_name_ty: EcoString = "Class".into();
-                if !Self::is_assignable_to(&class_name_ty, &declared_type, hierarchy) {
+                // BT-4043: ... and to a slot declared exactly its own
+                // metatype (`M class` value into an `M class` slot). The
+                // tower model above cannot see that match — a nominal
+                // `X class` declared type is an unknown class to
+                // `is_assignable_to`, which has no unknown-class escape
+                // hatch — so without this exact-spelling check a matching
+                // value falsely warns "declared as X class, got X class".
+                // (Locals never warned: both sides resolve to `Meta{X}`
+                // and compare equal in `detect_assignment_type_mismatch`.)
+                let value_display: EcoString = format!("{meta_class} class").into();
+                let exact_metatype_match = value_display == declared_type;
+                if !exact_metatype_match
+                    && !Self::is_assignable_to(&class_name_ty, &declared_type, hierarchy)
+                {
                     let declared_display = declared_display.clone();
-                    let value_display: EcoString = format!("{meta_class} class").into();
                     self.diagnostics.push(
                         Diagnostic::warning(
                             format!(

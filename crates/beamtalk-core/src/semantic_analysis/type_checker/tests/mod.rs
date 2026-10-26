@@ -36,6 +36,7 @@ mod bt3604_known_remote_diagnostics;
 mod bt4023_ffi_result_exception;
 mod bt4032_dynamic_state_default;
 mod bt4040_interval_element_type;
+mod bt4043_metaclass_slot_assignment;
 mod bt4044_perform_explicit_dynamic;
 mod bt4107_compound_nil_guard_narrowing;
 mod cast_and_sync_send;
