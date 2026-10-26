@@ -572,6 +572,20 @@ impl ClassHierarchy {
     /// - keyword constructors ignore `ClassSelf` and resolve own-first, so
     ///   only the class's own synthesis record matters.
     ///
+    /// Abstractness is checked here, at the *caller's* compile time only
+    /// (BT-4200). The emitted `call '<mod>':'new'()` skips the `gen_server`
+    /// `{new, _}` abstract rejection, so a caller compiled while the class was
+    /// concrete still instantiates it after only the class's file is reloaded
+    /// as `abstract`. This is deliberate: the callee cannot reject it itself,
+    /// because a Value subclass's generated `new/0` chains through its
+    /// superclass module's `new/0` to collect inherited field defaults (and
+    /// `beamtalk_class_instantiation:ancestor_compiled_defaults/1` calls it
+    /// too), so an abstract class's `new/0` must stay a plain map builder.
+    /// Recompiling the callers (the normal build / REPL redefinition flow
+    /// recompiles dependents) restores the rejection; an abstract class's
+    /// instance is a plain tagged map either way, so no invariant beyond the
+    /// abstract-instantiation diagnostic is at stake.
+    ///
     /// Unknown classes, unknown ancestors, cycles, chains deeper than the
     /// runtime's cap, and parse-incomplete surfaces (where a missing user
     /// `new` would be misread as "synthesized") all fail closed.
