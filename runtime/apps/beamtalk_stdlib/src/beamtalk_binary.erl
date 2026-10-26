@@ -37,7 +37,7 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 | `concat/2`            | Concatenate two binaries                       |
 | `to_bytes/1`          | Binary → list of byte integers                 |
 | `from_bytes/1`        | Byte list → binary                             |
-| `as_string/1`         | Validate UTF-8, return {ok,Bin}|{error,...}     |
+| `as_string/1`         | Validate UTF-8, return Result ok:/error:        |
 | `as_string_unchecked/1` | Return binary as-is (no validation)           |
 | `print_string/1`      | Printable representation                       |
 | `deserialize_with_used/1` | binary_to_term with byte count             |
@@ -328,17 +328,29 @@ from_bytes(Bytes) when is_list(Bytes) ->
 from_bytes(_) ->
     raise_type_error(from_bytes, <<"Argument must be a list of integers 0-255">>).
 
--doc "Validate UTF-8 and return {ok, Binary} or {error, {invalid_utf8, Offset}}.".
--spec as_string(binary()) -> {ok, binary()} | {error, {invalid_utf8, non_neg_integer()}}.
+-doc """
+Validate UTF-8 and return a real Result (BT-4169).
+
+Success answers `Result ok:` with the String; failure answers `Result
+error:` with a structured `parse_error` (class `Binary`, selector
+`asString`) whose message and `details` (`#{offset => N}`) carry the byte
+offset of the invalid sequence — the same `parse_error` kind the
+`fromBase64:`/`fromHex:` decoders use for malformed input.
+
+Calling context matters: via a Beamtalk send, valid UTF-8 never reaches
+this function (it dispatches to `String>>asString`); direct Erlang
+callers always get a `Result`.
+TODO(BT-4170): the dispatch flip routes `Binary`-built valid binaries
+here too, flipping `.bt`-level success from bare `String` to `Result
+ok:` — update the annotation, docs, and tests then.
+""".
+-spec as_string(binary()) -> beamtalk_result:t().
 as_string(Bin) when is_binary(Bin) ->
-    case unicode:characters_to_binary(Bin, utf8) of
-        Bin2 when is_binary(Bin2) ->
-            {ok, Bin2};
-        {error, _Good, _Bad} ->
-            %% Find the offset where invalid UTF-8 starts
-            {error, {invalid_utf8, find_invalid_utf8_offset(Bin, 0)}};
-        {incomplete, _Good, _Bad} ->
-            {error, {invalid_utf8, find_invalid_utf8_offset(Bin, 0)}}
+    case check_utf8(Bin) of
+        {ok, Valid} ->
+            beamtalk_result:from_tagged_tuple({ok, Valid});
+        {error, Offset} ->
+            beamtalk_result:from_tagged_tuple({error, invalid_utf8_error(Offset)})
     end;
 as_string(_) ->
     raise_type_error(as_string, <<"Receiver must be a Binary">>).
@@ -377,7 +389,7 @@ Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding
 -doc "Printable representation: hex for non-UTF-8, quoted for valid UTF-8.".
 -spec print_string(binary()) -> binary().
 print_string(Bin) when is_binary(Bin) ->
-    case as_string(Bin) of
+    case check_utf8(Bin) of
         {ok, _} ->
             Escaped = binary:replace(
                 binary:replace(Bin, <<"\\">>, <<"\\\\">>, [global]),
@@ -417,6 +429,35 @@ deserialize_with_used(_) ->
 -spec raise_type_error(atom(), binary()) -> no_return().
 raise_type_error(Selector, Hint) ->
     beamtalk_error:raise_type_error('Binary', Selector, Hint).
+
+-doc """
+Validate UTF-8, returning the binary on success or the byte offset of the
+first invalid byte on failure. Shared core of `as_string/1` (which wraps
+the outcome in a Result) and `print_string/1` (which picks a rendering).
+""".
+-spec check_utf8(binary()) -> {ok, binary()} | {error, non_neg_integer()}.
+check_utf8(Bin) ->
+    case unicode:characters_to_binary(Bin, utf8) of
+        Bin2 when is_binary(Bin2) ->
+            {ok, Bin2};
+        {error, _Good, _Bad} ->
+            {error, find_invalid_utf8_offset(Bin, 0)};
+        {incomplete, _Good, _Bad} ->
+            {error, find_invalid_utf8_offset(Bin, 0)}
+    end.
+
+-doc "Build the structured parse_error for an invalid-UTF-8 byte offset.".
+-spec invalid_utf8_error(non_neg_integer()) -> beamtalk_error:error().
+invalid_utf8_error(Offset) ->
+    Error0 = beamtalk_error:new(parse_error, 'Binary'),
+    Error1 = beamtalk_error:with_selector(Error0, asString),
+    Error2 = beamtalk_error:with_message(
+        Error1, iolist_to_binary(io_lib:format("Invalid UTF-8 at byte offset ~B", [Offset]))
+    ),
+    Error3 = beamtalk_error:with_hint(
+        Error2, <<"Use asStringUnchecked to skip validation">>
+    ),
+    beamtalk_error:with_details(Error3, #{offset => Offset}).
 
 -doc "Find offset of first invalid UTF-8 byte.".
 find_invalid_utf8_offset(<<>>, Offset) ->

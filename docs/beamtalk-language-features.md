@@ -7195,10 +7195,16 @@ Binary fromBytes: #(65, 66)  // => Binary
 (Binary fromBytes: #(104, 101, 108, 108, 111)) asString           // => "hello"
 (Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked  // => "hello"
 
-// Invalid UTF-8: asString answers an error tuple with the byte offset;
+// Invalid UTF-8: asString answers `Result error:` with the byte offset;
 // asStringUnchecked keeps the bytes, still dispatched as Binary
-(Binary fromBytes: #(255, 254)) asString                          // => {#error, {#invalid_utf8, 0}}
+((Binary fromBytes: #(255, 254)) asString) isError                // => true
+((Binary fromBytes: #(255, 254)) asString) error message          // => "Invalid UTF-8 at byte offset 0"
 (Binary fromBytes: #(255, 254)) asStringUnchecked class           // => Binary
+
+// Narrow before continuing: success answers a bare String (which has
+// no isError), failure a Result (which has no String methods)
+r := (Binary fromBytes: #(255, 254)) asString
+(r class equals: Result) ifTrue: [r isError] ifFalse: [false]      // => true
 
 // Serialization (class methods)
 etf := Binary serialize: #(1, 2, 3)
@@ -7224,7 +7230,7 @@ bin isEmpty                   // => false
 | `do: block` | iterate elements (via String at runtime¹) | iterate graphemes |
 | `part: offset size: n` | byte-level slice, returns Binary | inherited — byte-level slice, returns Binary |
 | `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
-| `asString` | UTF-8 validation, returns String | no-op, returns self |
+| `asString` | UTF-8 validation: String, or `Result error:` with offset | no-op, returns self |
 | `asStringUnchecked` | unchecked cast to String | no-op, returns self |
 
 ¹ Only when the bytes are valid UTF-8 — see below.
