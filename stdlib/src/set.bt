@@ -66,7 +66,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// (Set new add: 1) includes: 1   // => true
   /// (Set new add: 1) includes: 2   // => false
   /// ```
-  includes: element :: E -> Boolean => @primitive
+  includes: element :: Object -> Boolean => @primitive
 
   /// Return a new set with the element added.
   ///

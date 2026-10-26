@@ -122,7 +122,7 @@ sealed typed Collection(E) subclass: List(E)
   /// #(1, 2, 3) includes: 2   // => true
   /// #(1, 2, 3) includes: 9   // => false
   /// ```
-  includes: item :: E -> Boolean => @primitive
+  includes: item :: Object -> Boolean => @primitive
 
   // === Sorting and reordering ===
 

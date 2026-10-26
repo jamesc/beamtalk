@@ -1520,9 +1520,8 @@ impl TypeChecker {
                     // We model the metatype's own type as `Class` for the
                     // hierarchy walk, so e.g. `:: Behaviour` accepts it but
                     // `:: Integer` does not.
-                    let class_name_ty: EcoString = "Class".into();
                     let compat =
-                        Self::is_type_compatible(&class_name_ty, &expected_structural, hierarchy);
+                        Self::metatype_assignable_to(meta_class, &expected_structural, hierarchy);
                     if !compat {
                         let param_pos = i + 1;
                         let actual_display: EcoString = format!("{meta_class} class").into();
@@ -2467,6 +2466,12 @@ impl TypeChecker {
         let (declared_type, alias_deps) =
             Self::resolve_alias_structural(&declared_type, self.alias_registry.as_ref());
         self.referenced_aliases.extend(alias_deps);
+        // BT-4199: an explicit `:: Dynamic` annotation opts the slot out of
+        // checking (ADR 0077), same as `check_state_defaults`;
+        // `is_assignable_to` has no Dynamic escape of its own.
+        if declared_type.as_str() == "Dynamic" {
+            return;
+        }
         match value_ty {
             InferredType::Known {
                 class_name: value_type,
@@ -2554,21 +2559,8 @@ impl TypeChecker {
                 // declared `:: Class` / `:: Behaviour` / `:: Object` (the
                 // metaclass tower). Model the metatype as `Class` for the
                 // assignability walk.
-                let class_name_ty: EcoString = "Class".into();
-                // BT-4043: ... and to a slot declared exactly its own
-                // metatype (`M class` value into an `M class` slot). The
-                // tower model above cannot see that match — a nominal
-                // `X class` declared type is an unknown class to
-                // `is_assignable_to`, which has no unknown-class escape
-                // hatch — so without this exact-spelling check a matching
-                // value falsely warns "declared as X class, got X class".
-                // (Locals never warned: both sides resolve to `Meta{X}`
-                // and compare equal in `detect_assignment_type_mismatch`.)
                 let value_display: EcoString = format!("{meta_class} class").into();
-                let exact_metatype_match = value_display == declared_type;
-                if !exact_metatype_match
-                    && !Self::is_assignable_to(&class_name_ty, &declared_type, hierarchy)
-                {
+                if !Self::metatype_assignable_to(meta_class, &declared_type, hierarchy) {
                     let declared_display = declared_display.clone();
                     self.diagnostics.push(
                         Diagnostic::warning(
@@ -3316,6 +3308,26 @@ impl TypeChecker {
                 _ => {}
             }
         }
+    }
+
+    /// Whether a class object `C class` (`Meta{C}`) may flow into a slot or
+    /// parameter declared `declared_type` (BT-4199).
+    ///
+    /// A declared `X class` is covariant: `C class` is accepted iff `C` is `X`
+    /// or a subclass of it. Otherwise the metatype is modelled as `Class` for
+    /// the metaclass-tower walk (ADR 0083): `Class` / `Behaviour` / `Object`
+    /// accept it, `Integer` does not.
+    pub(super) fn metatype_assignable_to(
+        meta_class: &EcoString,
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        if let Some(declared_base) = declared_type.strip_suffix(" class") {
+            let declared_base: EcoString = declared_base.into();
+            return Self::is_assignable_to(meta_class, &declared_base, hierarchy);
+        }
+        let class_name_ty: EcoString = "Class".into();
+        Self::is_type_compatible(&class_name_ty, declared_type, hierarchy)
     }
 
     /// Returns true if `value_type` is assignable to `declared_type`.

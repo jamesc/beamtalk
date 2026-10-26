@@ -133,7 +133,7 @@ sealed typed Collection(V) subclass: Dictionary(K, V)
   /// #{#a => 1, #b => 2} includes: 1     // => true
   /// #{#a => 1} includes: 3              // => false
   /// ```
-  includes: value :: V -> Boolean => @primitive
+  includes: value :: Object -> Boolean => @primitive
 
   // === Enumerating ===
 

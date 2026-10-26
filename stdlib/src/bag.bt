@@ -59,7 +59,7 @@ typed Collection(E) subclass: Bag(E)
   /// (Bag withAll: #(1, 2)) includes: 1   // => true
   /// (Bag withAll: #(1, 2)) includes: 3   // => false
   /// ```
-  includes: element :: E -> Boolean => (self occurrencesOf: element) > 0
+  includes: element :: Object -> Boolean => (self occurrencesOf: element) > 0
 
   // === Adding & Removing ===
 
