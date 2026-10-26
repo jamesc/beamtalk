@@ -120,16 +120,16 @@ Workspace load: _widgetPath
 // => ["Bt3273Widget"]
 
 Bt3273Counter new increment
-// => incremented
+// => "incremented"
 
 Bt3273Counter new bump
-// => incremented
+// => "incremented"
 
 Bt3273SubCounter new bumpTwice
-// => incremented
+// => "incremented"
 
 Bt3273Widget new poke: Bt3273Counter new
-// => incremented
+// => "incremented"
 
 // ===========================================================================
 // STEP 2 — renameSelector:to: RE-REGISTERS THE CONFIRMED SITES IN MEMORY AND
@@ -140,13 +140,13 @@ Bt3273Counter renameSelector: #increment to: #incrementBy
 // => Bt3273Counter
 
 Bt3273Counter new incrementBy
-// => incremented
+// => "incremented"
 
 Bt3273Counter new bump
-// => incremented
+// => "incremented"
 
 Bt3273SubCounter new bumpTwice
-// => incremented
+// => "incremented"
 
 _renameEntry := (Workspace changes select: [:e | e className =:= #Bt3273Counter]) first
 // => _
@@ -182,7 +182,7 @@ _skipped size
 // => 1
 
 (Erlang maps get: #reason with: _skipped first)
-// => destructive
+// => "destructive"
 
 // ===========================================================================
 // STEP 4 — Workspace flush: aClass confirmDestructive: true REWRITES EVERY
@@ -262,13 +262,13 @@ Workspace load: _widgetPath
 // => ["Bt3273Widget"]
 
 Bt3273Counter new incrementBy
-// => incremented
+// => "incremented"
 
 Bt3273Counter new bump
-// => incremented
+// => "incremented"
 
 Bt3273SubCounter new bumpTwice
-// => incremented
+// => "incremented"
 
 // The old selector no longer resolves on the renamed class — a genuine
 // does_not_understand, not a silently-dangling sender.

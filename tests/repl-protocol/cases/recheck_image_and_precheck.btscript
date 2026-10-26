@@ -56,14 +56,14 @@ Workspace recheckImage isKindOf: Dictionary
 
 Actor subclass: RecheckPrecheckCounter
   size -> Integer => 42
-// => RecheckPrecheckCounter
+// => "RecheckPrecheckCounter"
 
 // A dependent whose own return type assumes `size` still answers an
 // Integer — the real caller the pre-save advisory should flag once `size`'s
 // pending edit changes its return type to String.
 Object subclass: RecheckPrecheckDashboard
   refresh: c :: RecheckPrecheckCounter -> Integer => (c size) + 1
-// => RecheckPrecheckDashboard
+// => "RecheckPrecheckDashboard"
 
 // Sanity: the live behaviour before any precheck.
 RecheckPrecheckCounter spawn size

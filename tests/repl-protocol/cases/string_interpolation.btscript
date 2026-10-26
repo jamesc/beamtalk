@@ -13,24 +13,24 @@
 
 // Variable assigned in one REPL turn is available for interpolation later
 name := "Alice"
-// => Alice
+// => "Alice"
 
 "Hello, {name}!"
-// => Hello, Alice!
+// => "Hello, Alice!"
 
 // Reassign and verify interpolation picks up the new value
 name := "Bob"
-// => Bob
+// => "Bob"
 
 "Hello, {name}!"
-// => Hello, Bob!
+// => "Hello, Bob!"
 
 // Two variables from separate turns both available simultaneously
 greeting := "Howdy"
-// => Howdy
+// => "Howdy"
 
 "{greeting}, {name}!"
-// => Howdy, Bob!
+// => "Howdy, Bob!"
 
 // ===========================================================================
 // ERROR: UNDEFINED VARIABLE IN INTERPOLATION
@@ -62,15 +62,16 @@ greeting := "Howdy"
 
 // Plain string displays without extra quotes
 "Hello, world!"
-// => Hello, world!
+// => "Hello, world!"
 
 // Interpolated string result displays without extra quotes
 who := "World"
-// => World
+// => "World"
 
 "Hello, {who}!"
-// => Hello, World!
+// => "Hello, World!"
 
 // Empty string
+// BT-4167: quoted empty is visible; bare empty was indistinguishable from no output.
 ""
-// =>
+// => ""

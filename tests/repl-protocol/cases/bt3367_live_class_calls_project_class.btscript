@@ -18,7 +18,7 @@ Bt3367SealedResult ok: "x" details: "y"
 // project-loaded class above.
 Value subclass: Bt3367DiagCheck
   runIt => Bt3367SealedResult ok: "x" details: "y"
-// => Bt3367DiagCheck
+// => "Bt3367DiagCheck"
 
 // Must succeed the same way the top-level call did, not raise "invalid argument".
 (Bt3367DiagCheck new) runIt

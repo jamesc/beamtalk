@@ -11,15 +11,15 @@
 
 // :help with a known class — should show class header with superclass
 :help Integer
-// => == Integer < Number ==_
+// => "== Integer < Number ==_"
 
 // :help with a known method — should show method signature and doc
 :help Integer +
-// => == Integer >> + ==_
+// => "== Integer >> + ==_"
 
 // :help with an inherited method — should show inheritance info
 :help Integer isPositive
-// => == Integer >> isPositive ==_(inherited from Number)_
+// => "== Integer >> isPositive ==_(inherited from Number)_"
 
 // :help with an unknown class — should show helpful error
 // BT-2091: error message comes from Beamtalk help: (Beamtalk).
@@ -36,11 +36,11 @@
 // BT-2091: After migrating to Beamtalk help:, Metaclass renders with its
 // superclass `Class` rather than as a bare top-level metaclass.
 :help Metaclass
-// => == Metaclass < Class ==_
+// => "== Metaclass < Class ==_"
 
 // :help Metaclass with a known class-side method (BT-618)
 :help Metaclass spawn
-// => == Metaclass >> spawn ==_
+// => "== Metaclass >> spawn ==_"
 
 // :help Metaclass with unknown method — should show error (BT-618)
 // BT-3084: DNU message now rendered only by beamtalk_error:generate_message/3
@@ -54,15 +54,15 @@
 
 // :help with a user-defined class method should show typed signature and doc (BT-1634)
 :help HelpTestWidget create:
-// => == HelpTestWidget >> create: ==_  create: name :: String -> HelpTestWidget__Create a new widget with the given name.
+// => "== HelpTestWidget >> create: ==_  create: name :: String -> HelpTestWidget__Create a new widget with the given name."
 
 // :help with an inherited class method should show signature, inheritance, and doc (BT-1634)
 :help HelpTestSubWidget create:
-// => == HelpTestSubWidget >> create: ==_(inherited from HelpTestWidget)_  create: name :: String -> HelpTestWidget__Create a new widget with the given name.
+// => "== HelpTestSubWidget >> create: ==_(inherited from HelpTestWidget)_  create: name :: String -> HelpTestWidget__Create a new widget with the given name."
 
 // BT-1659: :help with a package-qualified class name
 :help stdlib@Integer
-// => == Integer < Number ==_
+// => "== Integer < Number ==_"
 
 // BT-1659: :help with unknown package-qualified class — should show error
 // BT-2091: Beamtalk help: passes the class portion; the package prefix `xyzzy@`
@@ -75,4 +75,4 @@
 // `[protocol]`; the migration target `Beamtalk help:` prints just the
 // class header. The protocol provenance annotation is a follow-up.
 :help Printable
-// => == Printable < Protocol ==_
+// => "== Printable < Protocol ==_"

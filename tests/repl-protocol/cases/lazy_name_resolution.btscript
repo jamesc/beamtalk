@@ -139,15 +139,15 @@ Beamtalk version
 
 // The current session knows which client surface opened it.
 Session current kind
-// => repl
+// => "repl"
 
 // printString surfaces kind + id: `Session(repl: <id>)` (id is dynamic).
 Session current printString
-// => Session(repl: _)
+// => "Session(repl: _)"
 
 // info exposes the full debug metadata as a Dictionary (includes the kind).
 (Session current info) at: #kind
-// => repl
+// => "repl"
 
 // `Workspace sessions` lists Session values, each rendering with its kind.
 Workspace sessions printString

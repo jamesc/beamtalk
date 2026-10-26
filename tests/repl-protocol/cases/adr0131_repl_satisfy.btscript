@@ -11,13 +11,13 @@ t := 0
 // => 0
 
 (#(1, 2) anySatisfy: [:x | t := t + x. false]) printString
-// => false
+// => "false"
 
 t
 // => 3
 
 (#(1, 2) allSatisfy: [:x | t := t + x. true]) printString
-// => true
+// => "true"
 
 t
 // => 6
@@ -32,13 +32,13 @@ t
 // => 12
 
 (#(1, 2) anySatisfy: [:x | t := t + x. true]) printString
-// => true
+// => "true"
 
 t
 // => 13
 
 (#(1, 2) allSatisfy: [:x | t := t + x. false]) printString
-// => false
+// => "false"
 
 t
 // => 14

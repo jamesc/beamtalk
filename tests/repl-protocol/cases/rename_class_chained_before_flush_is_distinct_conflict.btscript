@@ -63,7 +63,7 @@ Workspace load: _fooPath
 // => _
 
 Bt3283ChainFoo new greet
-// => hi from the chained rename e2e
+// => "hi from the chained rename e2e"
 
 // ===========================================================================
 // STEP 2 — FIRST renameTo:: Foo -> Bar. In-memory rename only — no flush yet.
@@ -109,7 +109,7 @@ _conflictFirst := _conflicts first
 // => _
 
 Erlang maps get: #reason with: _conflictFirst
-// => same_class_rename_chain_needs_flush
+// => "same_class_rename_chain_needs_flush"
 
 // No partial writes: the original file is untouched, and neither renamed
 // path was ever created.
