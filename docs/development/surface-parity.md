@@ -579,6 +579,36 @@ is surface-specific.
   class-variable write from a supervisor factory or `performLocally:` raises
   `class_state_read_only` on every surface.
 
+### `actor-state-abroad` lint (ADR 0137, BT-4011)
+
+A block literal written in an actor's instance method that reads or writes a
+`state:` field, probes with `hasField:`, or makes a synchronous `self` send,
+and is passed to `Timer`, to a send whose receiver is statically another
+actor, or to a class-side method that is not direct-called, gets an
+`actor-state-abroad` lint at the block: a write there raises
+`actor_state_unreachable`, a read sees the values captured at creation, and a
+synchronous self-send can deadlock if the actor is waiting on the callee. It
+is computed by `beamtalk-lint` (`ActorStateAbroadPass`, via
+`run_lint_passes`), so only the surfaces that run lint passes report it (CLI
+`lint`, MCP `lint`/`diagnostic_summary`); `build`/`check`/`test`, REPL load
+and the LSP never see it. No operation is surface-specific.
+
+- Severity `Lint`; site-level `@expect lint` until the sequenced
+  `beamtalk-core` change adds category `ActorStateAbroad` with
+  `[diagnostics]` key `actor-state-abroad` and `@expect actor_state_abroad`.
+- The rule is lexical and per-instance-method: it does not follow a block
+  through a variable, a field, a parameter or an instance method, and it
+  checks actor classes only (value types and plain objects have no actor
+  cell). Unlike `class-state-abroad`, there is no stored/returned rule, and a
+  send to the actor's own class's class-side method is abroad.
+- Known gaps (false negatives; the lint is a hint, not a guarantee): a block
+  handed to a `Future` or `parallelCollect:`, a `super` send or reflective
+  `fieldAt:` access inside the block, a block passed as a `spawnWith:`
+  argument, and a standalone definition for a class outside the module.
+- The runtime error the lint predicts, `actor_state_unreachable` (ADR 0137),
+  is an ordinary `#beamtalk_error{}` value and reaches every surface through
+  its existing error path; none is surface-specific.
+
 ### `handleinfo-no-catch-all` diagnostic (ADR 0134, BT-3959)
 
 A `Server` subclass's `handleInfo:` method with a top-level
