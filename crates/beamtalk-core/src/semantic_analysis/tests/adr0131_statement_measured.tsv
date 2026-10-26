@@ -5443,7 +5443,7 @@ actor	iterLoop	local	ifNil	right
 actor	iterLoop	local	and	right
 actor	iterLoop	local	onDo	right
 actor	iterLoop	local	ensure	right
-actor	iterLoop	local	value	wrong
+actor	iterLoop	local	value	right
 actor	iterLoop	local	ewi	right
 actor	iterLoop	local	dsb	right
 actor	iterLoop	local	kv	right
@@ -5481,7 +5481,7 @@ actor	collLoop	local	ifNil	right
 actor	collLoop	local	and	right
 actor	collLoop	local	onDo	right
 actor	collLoop	local	ensure	right
-actor	collLoop	local	value	wrong
+actor	collLoop	local	value	right
 actor	collLoop	local	ewi	right
 actor	collLoop	local	dsb	right
 actor	collLoop	local	kv	right

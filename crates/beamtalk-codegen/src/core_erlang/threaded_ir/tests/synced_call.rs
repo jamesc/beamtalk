@@ -22,6 +22,7 @@ fn synced(store: VersionedVar, load: Option<VersionedVar>) -> ThreadedStmt {
         load,
         span: span(),
         tier2_local_rebinds: Vec::new(),
+        on_private_scratch: false,
     }
 }
 
@@ -49,6 +50,7 @@ fn a_store_only_synced_call_renders_the_statement_verbatim_after_the_store() {
         load: None,
         span: span(),
         tier2_local_rebinds: Vec::new(),
+        on_private_scratch: false,
     }];
     assert_eq!(
         lower_and_render(&ir).to_pretty_string(),
@@ -104,6 +106,7 @@ fn a_store_only_synced_call_consumes_nothing() {
             load: None,
             span: span(),
             tier2_local_rebinds: Vec::new(),
+            on_private_scratch: false,
         },
         ThreadedStmt::Bind {
             target: state(2, frame),
@@ -160,5 +163,33 @@ fn a_synced_call_in_a_loop_body_names_the_state_accumulator() {
         text.contains("'store'(StateAcc) in")
             && text.contains("let StateAcc1 = call 'beamtalk_actor_state':'take'()"),
         "{text}"
+    );
+}
+
+/// BT-4194: a bracket built on a private scratch map (an arm frame nested in a
+/// tuple-acc or direct-params loop) would store that map over the cell.
+#[test]
+fn a_synced_call_on_a_private_scratch_is_reported() {
+    let frame = FrameId::ROOT;
+    let ir = [ThreadedStmt::SyncedCall {
+        store: state(0, frame),
+        call: call_doc(),
+        result: Some("_Synced1".to_string()),
+        load: Some(state(1, frame)),
+        span: span(),
+        tier2_local_rebinds: Vec::new(),
+        on_private_scratch: true,
+    }];
+    let errors = verify(&ir);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, VerifyError::SyncedCallOnPrivateScratch { .. })),
+        "{errors:?}"
+    );
+    // The well-formed twin is clean.
+    assert_eq!(
+        verify(&[synced(state(0, frame), Some(state(1, frame)))]),
+        vec![]
     );
 }

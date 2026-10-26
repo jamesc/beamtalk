@@ -321,6 +321,13 @@ pub struct CoreErlangGenerator {
     /// is never registered: it is `RebindFrame::implicit_root`.
     pub(in crate::core_erlang) rebind_frames:
         std::collections::HashMap<super::threaded_ir::FrameId, super::threaded_ir::RebindFrame>,
+    /// Whether the body being lowered runs inside a frame whose `StateAcc`
+    /// scratch map is not the actor's whole `State`: a direct-params or
+    /// tuple-acc loop frame, or an arm frame nested in one (its scratch map
+    /// is seeded fresh from the loop's locals, BT-4194). Maintained by
+    /// `with_rebind_frame`, the one place frames are entered; read by
+    /// `loop_holds_no_whole_state`.
+    pub(in crate::core_erlang) in_private_scratch: bool,
     /// Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     pub(in crate::core_erlang) source_path: Option<String>,
@@ -532,6 +539,7 @@ impl CoreErlangGenerator {
             fold_self_slot_consumer: None,
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),
+            in_private_scratch: false,
             source_path: None,
             tier2_local_vars: std::collections::HashSet::new(),
             tier2_local_var_captured_mutations: std::collections::HashMap::new(),
