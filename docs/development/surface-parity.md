@@ -593,9 +593,8 @@ is computed by `beamtalk-lint` (`ActorStateAbroadPass`, via
 `lint`, MCP `lint`/`diagnostic_summary`); `build`/`check`/`test`, REPL load
 and the LSP never see it. No operation is surface-specific.
 
-- Severity `Lint`; site-level `@expect lint` until the sequenced
-  `beamtalk-core` change adds category `ActorStateAbroad` with
-  `[diagnostics]` key `actor-state-abroad` and `@expect actor_state_abroad`.
+- Severity `Lint` with category `ActorStateAbroad`: site-level `@expect
+  actor_state_abroad`, `[diagnostics]` key `actor-state-abroad`.
 - The rule is lexical and per-instance-method: it does not follow a block
   through a variable, a field, a parameter or an instance method, and it
   checks actor classes only (value types and plain objects have no actor

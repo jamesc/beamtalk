@@ -195,6 +195,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::UnguardedLateRead => "UnguardedLateRead",
         DiagnosticCategory::HandleInfoNoCatchAll => "HandleInfoNoCatchAll",
         DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
+        DiagnosticCategory::ActorStateAbroad => "ActorStateAbroad",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
         DiagnosticCategory::UnmigratedLocalThreading => "UnmigratedLocalThreading",
         DiagnosticCategory::InternalVerifier => "InternalVerifier",
@@ -422,6 +423,7 @@ mod tests {
                 "HandleInfoNoCatchAll",
             ),
             (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
+            (DiagnosticCategory::ActorStateAbroad, "ActorStateAbroad"),
             (
                 DiagnosticCategory::Tier2BlockNoReturnChannel,
                 "Tier2BlockNoReturnChannel",

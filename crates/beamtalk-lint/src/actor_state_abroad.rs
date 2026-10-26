@@ -70,12 +70,9 @@
 //! class, or an actor behind `unwrap`/`value`; and a standalone definition
 //! for a class outside this module.
 //!
-//! **Category.** These diagnostics carry `DiagnosticCategory::Lint`
-//! (site-level `@expect lint`) until the sequenced `beamtalk-core` change
-//! adds `DiagnosticCategory::ActorStateAbroad` with `@expect
-//! actor_state_abroad` (BT-4011 follow-up): the switch is one
-//! `.with_category(...)` call in each diagnostic builder below, plus a
-//! suppression test mirroring `dead_block_assignment`'s.
+//! **Category.** These diagnostics carry
+//! `DiagnosticCategory::ActorStateAbroad`: site-level `@expect
+//! actor_state_abroad`, `[diagnostics]` key `actor-state-abroad`.
 
 use std::collections::HashSet;
 
@@ -89,7 +86,7 @@ use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::semantic_analysis::block_facts::{
     ClassVarAccesses, HasFieldProbe, class_var_accesses,
 };
-use beamtalk_core::source_analysis::Diagnostic;
+use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 
 /// Lint pass that warns where a block touching actor state runs away from
 /// home (see the module docs).
@@ -713,6 +710,7 @@ fn writes_diagnostic(
         "Return the value from the block and write the field from the calling method, \
          or send {class} an async cast (`!`) that makes the write (ADR 0137)"
     ))
+    .with_category(DiagnosticCategory::ActorStateAbroad)
 }
 
 fn reads_diagnostic(
@@ -771,6 +769,7 @@ fn reads_diagnostic(
         block.span,
     )
     .with_hint(hint)
+    .with_category(DiagnosticCategory::ActorStateAbroad)
 }
 
 fn self_send_diagnostic(
@@ -794,6 +793,7 @@ fn self_send_diagnostic(
         block.span,
     )
     .with_hint(hint)
+    .with_category(DiagnosticCategory::ActorStateAbroad)
 }
 
 #[cfg(test)]
@@ -1614,5 +1614,41 @@ Actor subclass: Counter
         // non-actor and is skipped.
         let d = abroad("Ghost >> m => Timer after: 1 do: [self.n := 1]\n");
         assert!(d.is_empty(), "{d:?}");
+    }
+
+    // ── @expect actor_state_abroad suppression ─────────────────────────────
+
+    /// `@expect actor_state_abroad` suppresses the actor-state-abroad lint.
+    #[test]
+    fn expect_actor_state_abroad_suppresses_lint() {
+        let src = "Actor subclass: Counter\n  state: n = 0\n\n  bump => self.n := self.n + 1\n\n  startLate =>\n    @expect actor_state_abroad\n    Timer after: 100 do: [self.n := self.n + 1]\n";
+        let tokens = lex_with_eof(src);
+        let (module, _) = parse(tokens);
+        let mut diags = Vec::new();
+        crate::LintPass::check(&super::ActorStateAbroadPass, &module, &mut diags);
+        // Apply @expect directives
+        beamtalk_core::compilation::diagnostics_policy::apply_expect_directives(
+            &module, &mut diags,
+        );
+        let lint_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Lint)
+            .collect();
+        assert!(
+            lint_diags.is_empty(),
+            "@expect actor_state_abroad should suppress lint, got: {lint_diags:?}"
+        );
+    }
+
+    /// Lint has `ActorStateAbroad` category for `@expect` matching.
+    #[test]
+    fn lint_has_actor_state_abroad_category() {
+        let diags = only("  startLate => Timer after: 100 do: [self.n := self.n + 1]\n");
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].category,
+            Some(beamtalk_core::source_analysis::DiagnosticCategory::ActorStateAbroad),
+            "Expected ActorStateAbroad category on lint diagnostic"
+        );
     }
 }
