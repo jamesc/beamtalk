@@ -9,5 +9,4 @@
 
 Actor subclass: Bt4070ProbeProxy
 
-  doesNotUnderstand: _selector args: _arguments =>
-    #bt4070Intercepted
+  doesNotUnderstand: _selector args: _arguments => #bt4070Intercepted

@@ -29,13 +29,13 @@ TestCase subclass: Bt4070PureConditionalInlineTest
   checkOr: cond => cond or: [false]
 
   checkCounted: cond counter: counter =>
-    cond ifTrue: [
-      counter increment
-      42
-    ]
+    cond
+      ifTrue: [
+        counter increment
+        42
+      ]
 
-  testTrueIfTrueAnswersBlock =>
-    self assert: (self checkIfTrue: true) equals: 1
+  testTrueIfTrueAnswersBlock => self assert: (self checkIfTrue: true) equals: 1
 
   testFalseIfTrueAnswersReceiver =>
     result := self checkIfTrue: false
@@ -54,8 +54,7 @@ TestCase subclass: Bt4070PureConditionalInlineTest
     self assert: (self checkIfTrueIfFalse: true) equals: 1
     self assert: (self checkIfTrueIfFalse: false) equals: 2
 
-  testAndAnswersBlockOnTrue =>
-    self assert: (self checkAnd: true)
+  testAndAnswersBlockOnTrue => self assert: (self checkAnd: true)
 
   testAndShortCircuitsFalse =>
     result := self checkAnd: false
@@ -77,11 +76,15 @@ TestCase subclass: Bt4070PureConditionalInlineTest
 
   testProxyForwardsIfTrueToDnu =>
     proxy := Bt4070ProbeProxy spawn
-    [self assert: (self checkIfTrue: proxy) equals: #bt4070Intercepted] ensure: [proxy stop]
+    [
+      self assert: (self checkIfTrue: proxy) equals: #bt4070Intercepted
+    ] ensure: [proxy stop]
 
   testProxyForwardsIfTrueIfFalseToDnu =>
     proxy := Bt4070ProbeProxy spawn
-    [self assert: (self checkIfTrueIfFalse: proxy) equals: #bt4070Intercepted] ensure: [proxy stop]
+    [
+      self assert: (self checkIfTrueIfFalse: proxy) equals: #bt4070Intercepted
+    ] ensure: [proxy stop]
 
   testCustomIfTruePreserved =>
     custom := Bt4070CustomIfTrue new
