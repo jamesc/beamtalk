@@ -136,9 +136,8 @@ impl CoreErlangGenerator {
     ///
     /// Captured mutations = variables written inside the block that were also
     /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
-    /// Field writes (`self.x := ...`) and self-sends are handled separately:
-    /// - Field writes are threaded via `gen_server` State at the method level (for Tier 2).
-    /// - Self-sends are pre-scanned via `generate_tier2_self_send_open`.
+    /// Field writes (`self.x := ...`) in an actor closure go through the
+    /// actor-state cell (ADR 0137); self-sends in one are ordinary messages.
     ///
     /// ADR 0130 §5: a block literal that reads a class variable binds its
     /// creation-time capture around the `fun` ([`Self::with_class_var_capture`]).
@@ -218,7 +217,6 @@ impl CoreErlangGenerator {
         let body_result = self.with_closed_fun_scope(|this| {
             // Track block nesting so self-cast sends route through the mailbox
             this.block_depth += 1;
-            let outer_drops_state = std::mem::replace(&mut this.closure_drops_state, true);
 
             let mut param_parts: Vec<Document<'static>> = Vec::new();
             for (i, param) in block.parameters.iter().enumerate() {
@@ -232,7 +230,6 @@ impl CoreErlangGenerator {
 
             // Generate block body as Document; restore block_depth even on error.
             let body = this.generate_block_body(block);
-            this.closure_drops_state = outer_drops_state;
             this.block_depth -= 1;
             body.map(|body| (header, body))
         });
@@ -307,8 +304,6 @@ impl CoreErlangGenerator {
         // this block is an operand of does not cover the body's own sends, so they
         // are checked against the body's brackets (ADR 0137).
         let outer_window_depth = std::mem::replace(&mut self.synced.window_depth, 0);
-        // A Tier 2 `fun` returns `{Result, StateAccN}`: it carries State back.
-        let outer_drops_state = std::mem::replace(&mut self.closure_drops_state, false);
 
         // Bind block parameters
         let mut param_parts: Vec<Document<'static>> = Vec::new();
@@ -412,7 +407,6 @@ impl CoreErlangGenerator {
             ))
         });
         // Ensure block_depth and scope are restored even on error.
-        self.closure_drops_state = outer_drops_state;
         self.synced.window_depth = outer_window_depth;
         self.block_depth -= 1;
         self.pop_scope();

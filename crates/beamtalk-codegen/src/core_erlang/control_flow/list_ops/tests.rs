@@ -1426,18 +1426,20 @@ fn test_every_list_op_callable_goes_through_the_shared_wrapper() {
             );
         }
         // Each wrapper destructures a Tier 2 reply (anything else is the
-        // wrong-arity error), and in an actor compares the reply's map with
-        // its seed (the state guard): one of each per site.
+        // wrong-arity error): one reply-shape check per site.
         assert_eq!(
             code.matches("of <{_WRes").count(),
             expected_sites,
             "{class}: every wrapper should check the reply shape. Got:\n{code}"
         );
-        let guards = code.matches("case call 'erlang':'=:='(_WSt").count();
-        let expected_guards = if class == "Actor" { expected_sites } else { 0 };
+        // ADR 0137 Phase 3 (BT-4010): the actor state guard (comparing the
+        // reply's map with the live `State` seed) is deleted. The wrapper
+        // seeds every Tier 2 arm with a fresh empty map and drops the
+        // returned map, in every context.
         assert_eq!(
-            guards, expected_guards,
-            "{class}: every actor wrapper should guard actor state. Got:\n{code}"
+            code.matches("case call 'erlang':'=:='(_WSt").count(),
+            0,
+            "{class}: no wrapper should guard actor state. Got:\n{code}"
         );
     }
 }
@@ -1488,7 +1490,7 @@ fn test_actor_non_literal_callable_uses_the_plain_list_op() {
             if class == "Actor" {
                 assert!(
                     code.contains("'stateful_block_dispatch'"),
-                    "{class} `{body}` should guard actor state changes. Got:\n{code}"
+                    "{class} `{body}` should raise the wrong-arity error. Got:\n{code}"
                 );
             }
         }
@@ -2898,20 +2900,13 @@ fn test_nested_sort_with_mutations_uses_distinct_state_keys() {
 
 #[test]
 fn test_sort_comparator_tier2_local_assign_unpacks_tuple() {
-    // `lower_local_var_assignment_bind`'s Tier 2 path.
+    // `lower_local_var_assignment_bind`'s tuple-unpacking path.
     //
-    // `scan_class_for_tier2_blocks` finds `self sortWith:using:` called from `run`
-    // with a literal block that captures and writes `count`
-    // (local_writes ∩ captured_reads = {count} → has_captured_mutations = true),
-    // registering `transform` (argument index 1) in `tier2_block_params` for the
-    // `sortWith:using:` method.
-    //
-    // Inside `sortWith:using:`, the comparator has `result := transform value: a`:
-    //   - is_local_var_assignment → true (Assignment with Identifier target)
-    //   - is_tier2_value_call(transform value: a) → true (selector `value:`, receiver
-    //     `transform` is in tier2_block_params)
-    // → its Tier 2 branch emits element(1, ...) to extract the value and element(2, ...) to extract the
-    //   new StateAcc from the {Result, NewState} tuple.
+    // Inside `sortWith:using:`, the comparator assigns `result := transform
+    // value: a` where `transform` is a block parameter of the method. The
+    // assignment unpacks the call's {Result, NewState} tuple (element(1, ...)
+    // for the value, element(2, ...) for the new state) and threads `result`
+    // under its `__local__` key.
     let src = concat!(
         "Actor subclass: TierTwoSortLocal\n",
         "  state: x = 0\n\n",

@@ -29,11 +29,11 @@
 //! `ifTrue:`/`ifFalse:` (see `try_generate_boolean_protocol`'s `and:`/`or:`
 //! arms in `beamtalk-codegen`), so they need the same state-threading
 //! classification here — both as a state-threading keyword selector (so
-//! `check_actor_field_mutation_in_closure`/`DispatchKind::ControlFlow`
-//! treat a mutation inside their block argument as safe) and as a
-//! conditional selector (so `control_flow_has_mutations`/
-//! `classify_body_expr` route the enclosing statement through the same
-//! `{Result, NewState}` unpacking as `ifTrue:`/`ifFalse:`).
+//! a mutation inside their block argument counts as control-flow
+//! threading) and as a conditional selector (so
+//! `control_flow_has_mutations`/`classify_body_expr` route the enclosing
+//! statement through the same `{Result, NewState}` unpacking as
+//! `ifTrue:`/`ifFalse:`).
 
 use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 
@@ -369,9 +369,7 @@ pub fn is_state_threaded_block_receiver(selector: &str) -> bool {
 /// argument count).
 ///
 /// Introduced for the ADR 0128 opaque-callable fold, which ADR 0133 removed
-/// (BT-3908). Its remaining readers are [`is_opaque_callable_hom_send`] and
-/// `semantic_analysis::block_facts`'s `callee_threads_block_param` (the
-/// field-writing self-send callee rule, BT-3922).
+/// (BT-3908). Its remaining reader is the `SendUserCode` classification below.
 #[must_use]
 pub fn opaque_fold_callable_arg<'a>(
     selector: &str,
@@ -386,39 +384,6 @@ pub fn opaque_fold_callable_arg<'a>(
         | ("inject:into:", [_, callable]) => Some(callable),
         _ => None,
     }
-}
-
-/// `true` if `expr` (paren-unwrapped) is a collection-HOM send
-/// ([`opaque_fold_callable_arg`]) whose callable argument is NOT a block
-/// literal — an opaque callable (a parameter, a local, any other
-/// expression).
-///
-/// Purely syntactic. Codegen no longer reads it: since ADR 0133 (BT-3908)
-/// such a send compiles to the plain list op in every context. Its only
-/// reader is `semantic_analysis::block_facts`'s `callee_threads_block_param`
-/// (the field-writing self-send callee rule, which BT-3922 replaces with the
-/// escaping-block diagnostic). A bare-`self` receiver is excluded (a
-/// `SelfSend`), as are a `super` receiver and a cast (`!`) send.
-#[must_use]
-pub fn is_opaque_callable_hom_send(expr: &Expression) -> bool {
-    let Expression::MessageSend {
-        receiver,
-        selector: MessageSelector::Keyword(parts),
-        arguments,
-        is_cast: false,
-        ..
-    } = expr.unwrap_parens()
-    else {
-        return false;
-    };
-    if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
-        || matches!(receiver.as_ref(), Expression::Super(_))
-    {
-        return false;
-    }
-    let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-    opaque_fold_callable_arg(&sel, arguments)
-        .is_some_and(|callable| !matches!(callable.unwrap_parens(), Expression::Block(_)))
 }
 
 /// ADR 0131 Phase 2 (BT-3749): the loops and folds whose `{Value, StateAcc}`
@@ -937,35 +902,6 @@ mod tests {
             panic!("not a message send");
         };
         assert!(opaque_fold_callable_arg(&selector.name(), &arguments).is_none());
-    }
-
-    #[test]
-    fn is_opaque_callable_hom_send_requires_non_literal_non_self() {
-        assert!(is_opaque_callable_hom_send(&parse_expr("items do: blk")));
-        assert!(is_opaque_callable_hom_send(&parse_expr(
-            "items inject: 0 into: blk"
-        )));
-        assert!(is_opaque_callable_hom_send(&parse_expr(
-            "(items detect: blk ifNone: [0])"
-        )));
-        // A literal block (even parenthesized) is analysed statically instead.
-        assert!(!is_opaque_callable_hom_send(&parse_expr(
-            "items do: [:x | x]"
-        )));
-        assert!(!is_opaque_callable_hom_send(&parse_expr(
-            "items do: ([:x | x])"
-        )));
-        // `inject:into:`'s callable is the SECOND argument.
-        assert!(!is_opaque_callable_hom_send(&parse_expr(
-            "items inject: seed into: [:a :b | a]"
-        )));
-        // A bare-`self` receiver is a self-send, not the list-op fold.
-        assert!(!is_opaque_callable_hom_send(&parse_expr("self do: blk")));
-        assert!(!is_opaque_callable_hom_send(&parse_expr("super do: blk")));
-        // Not a covered selector.
-        assert!(!is_opaque_callable_hom_send(&parse_expr(
-            "items reject: blk"
-        )));
     }
 
     #[test]

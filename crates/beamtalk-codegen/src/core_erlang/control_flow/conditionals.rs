@@ -3050,7 +3050,7 @@ impl CoreErlangGenerator {
                     }
                 }
                 // C12 — catch-all pure statements (EarlyReturn, SuperSend,
-                // ErrorSend, Tier2SelfSend, Pure).
+                // ErrorSend, Pure).
                 //
                 // ADR 0118 phase 2a/2b: before compiling,
                 // thread ahead (as real `Bind`s pushed into `stmts`) every

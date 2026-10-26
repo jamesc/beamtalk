@@ -84,8 +84,6 @@ pub(in crate::core_erlang) enum BodyExprKind {
     ErrorSend,
     /// Tier 2 `value:` call — returns `{Result, NewState}`.
     Tier2ValueCall,
-    /// Tier 2 self-send with stateful block arguments.
-    Tier2SelfSend(Vec<(usize, Vec<String>)>),
     /// Control flow with field mutations — returns `{Result, State}`.
     ControlFlowWithMutations,
     /// `self userMethod` — dispatching self-send via `safe_dispatch`.
@@ -101,9 +99,6 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
         indent_level: isize,
     ) -> Result<Document<'static>> {
-        // Pre-scan for Tier 2 block parameters before generating method bodies
-        self.scan_class_for_tier2_blocks(class);
-
         let mut docs = Vec::new();
         for method in &class.methods {
             // Only generate dispatch for primary methods for now
@@ -123,8 +118,6 @@ impl CoreErlangGenerator {
         let selector_name = method.selector.name();
         let (mut frame, param_vars) = MethodFrame::enter(self, method, MethodBoundary::Actor);
 
-        // Populate tier2_block_params for this method from pre-scanned info.
-        frame.tier2_block_params.clear();
         // Reset the same-method local-var tracking. The real (re-)population
         // happens inside lower_body_exprs_with_reply via
         // prescan_tier2_local_vars — this clear here is belt-and-suspenders
@@ -132,16 +125,6 @@ impl CoreErlangGenerator {
         // and the body being generated.
         frame.tier2_local_vars.clear();
         frame.tier2_local_var_captured_mutations.clear();
-        let selector_name_for_t2 = selector_name.to_string();
-        if let Some(positions) = frame.tier2_method_info.get(&selector_name_for_t2).cloned() {
-            for pos in &positions {
-                if *pos < method.parameters.len() {
-                    frame
-                        .tier2_block_params
-                        .insert(method.parameters[*pos].name.name.to_string());
-                }
-            }
-        }
 
         // Detect whether any block argument in this method body contains ^.
         // If so, set up a non-local return token so ^ inside blocks can throw to escape
@@ -374,12 +357,12 @@ impl CoreErlangGenerator {
     /// Only a direct top-level method-body `var value:` statement is
     /// provably safe.
     ///
-    /// This runs as a full pre-scan (like `tier2_block_params`'s class-level
-    /// scan) rather than incrementally during codegen, specifically so that a
-    /// block which *escapes* this method unsafely (returned, stored elsewhere,
-    /// passed as an argument) is never promoted — it must keep hitting the
-    /// `generate_block`/`validate_stored_closure` compile-time diagnostic,
-    /// since no known call site would thread state through it correctly.
+    /// This runs as a full pre-scan rather than incrementally during codegen,
+    /// specifically so that a block which *escapes* this method unsafely
+    /// (returned, stored elsewhere, passed as an argument) is never promoted —
+    /// it must keep hitting the `generate_block`/`validate_stored_closure`
+    /// compile-time diagnostic, since no known call site would thread state
+    /// through it correctly.
     fn prescan_tier2_local_vars(&mut self, body: &[&Expression]) {
         for (i, expr) in body.iter().enumerate() {
             let Expression::Assignment { target, value, .. } = expr else {
@@ -560,11 +543,6 @@ impl CoreErlangGenerator {
             return BodyExprKind::Tier2ValueCall;
         }
 
-        // Tier 2 self-send with block args
-        if let Some(tier2_args) = self.detect_tier2_self_send(expr) {
-            return BodyExprKind::Tier2SelfSend(tier2_args);
-        }
-
         // Control flow with field mutations
         if self.control_flow_has_mutations(expr) {
             return BodyExprKind::ControlFlowWithMutations;
@@ -675,8 +653,7 @@ impl CoreErlangGenerator {
     /// call production ran before this migration (byte-identity: only the
     /// container changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
     /// Version steps hidden inside shared multi-module helpers
-    /// (`emit_super_send_open`,
-    /// `generate_tier2_self_send_open`, `generate_field_assignment_open`,
+    /// (`emit_super_send_open`, `generate_field_assignment_open`,
     /// `generate_self_field_at_put_open`) remain inside their `Statement`s —
     /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
     ///
@@ -825,14 +802,6 @@ impl CoreErlangGenerator {
                             let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
                             stmts.extend(tv.prelude);
                             let reply = self.threaded_value_reply_doc(&tv.value);
-                            stmts.push(ThreadedStmt::Statement(reply, span));
-                        }
-                        BodyExprKind::Tier2SelfSend(ref tier2_args) => {
-                            let tier2_args = tier2_args.clone();
-                            let (doc, dispatch_var) =
-                                self.generate_tier2_self_send_open(value, &tier2_args)?;
-                            stmts.push(ThreadedStmt::Statement(doc, span));
-                            let reply = self.dispatch_reply_doc(&dispatch_var);
                             stmts.push(ThreadedStmt::Statement(reply, span));
                         }
                         BodyExprKind::ControlFlowWithMutations => {
@@ -1485,36 +1454,6 @@ impl CoreErlangGenerator {
                             let core_var = self
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                            // BT-3615: `r := self hom: [:x | n := n + x]` — a
-                            // self-send carrying a Tier 2 block argument needs
-                            // the SAME pack-captured-locals / extract-after
-                            // wrapping the bare-statement `Tier2SelfSend` arm
-                            // below gets (`generate_tier2_self_send_open`);
-                            // the plain dispatch path would neither seed
-                            // `__local__n` into `State` nor read it back, so
-                            // the block's captured-local writes were silently
-                            // dropped whenever the call's result was assigned.
-                            if let Some(tier2_args) = self.detect_tier2_self_send(value) {
-                                let (doc, dispatch_var) =
-                                    self.generate_tier2_self_send_open(value, &tier2_args)?;
-                                stmts.push(ThreadedStmt::Statement(doc, span));
-                                self.bind_var(var_name, &core_var);
-                                stmts.push(ThreadedStmt::Statement(
-                                    docvec![
-                                        "let ",
-                                        leaf::var(core_var),
-                                        " = call 'erlang':'element'(1, ",
-                                        leaf::var(dispatch_var),
-                                        ") in "
-                                    ],
-                                    span,
-                                ));
-                                if is_last {
-                                    let reply = self.local_assign_reply_doc(expr)?;
-                                    stmts.push(ThreadedStmt::Statement(reply, span));
-                                }
-                                continue;
-                            }
                             // ADR 0118 phase 1a: `v := self log: (self nextId)`
                             // — the producer's `Statement` + real `Bind`
                             // (its arguments sequenced first), then the
@@ -1767,15 +1706,6 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
-                BodyExprKind::Tier2SelfSend(ref tier2_args) => {
-                    let (doc, dispatch_var) =
-                        self.generate_tier2_self_send_open(expr, tier2_args)?;
-                    stmts.push(ThreadedStmt::Statement(doc, span));
-                    if is_last {
-                        let reply = self.dispatch_reply_doc(&dispatch_var);
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
-                }
                 BodyExprKind::ControlFlowWithMutations => {
                     if is_last {
                         // Route the last-position actor control-flow
@@ -2013,25 +1943,9 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// Emit the last-position reply for a dispatch open call (Tier 2 self-send
-    /// or dispatching self-send).  Uses `current_state_var` and the
-    /// explicitly-passed `dispatch_var`.
-    fn dispatch_reply_doc(&mut self, dispatch_var: &str) -> Document<'static> {
-        let final_state = self.current_state_var();
-        docvec![
-            "{'reply', call 'erlang':'element'(1, ",
-            leaf::var(dispatch_var.to_string()),
-            "), ",
-            leaf::var(final_state),
-            "}",
-        ]
-    }
-
     /// ADR 0118 phase 1a: the last-position reply for a spliced
     /// [`threaded_ir::ThreadedValue`] — `{'reply', <value>, StateN}` where
-    /// `StateN` is the state after the value's prelude. Byte-identical to
-    /// [`Self::dispatch_reply_doc`] for a self-send (whose value IS
-    /// `element(1, _SD)`), which stays for the Tier 2 self-send arm.
+    /// `StateN` is the state after the value's prelude.
     fn threaded_value_reply_doc(&mut self, value: &threaded_ir::ValueRef) -> Document<'static> {
         let value_doc = self.threaded_value_doc(value);
         let final_state = self.current_state_var();
@@ -3082,13 +2996,10 @@ impl CoreErlangGenerator {
                 return false;
             }
             if selector.is_block_invocation() {
-                // Tier 2 block parameter (variable holding a stateful block)
-                // Or a local variable this method itself assigned a Tier 2
+                // A local variable this method itself assigned a Tier 2
                 // block literal to earlier in its own body (tier2_local_vars).
                 if let Expression::Identifier(id) = receiver.as_ref() {
-                    if self.tier2_block_params.contains(id.name.as_str())
-                        || self.tier2_local_vars.contains(id.name.as_str())
-                    {
+                    if self.tier2_local_vars.contains(id.name.as_str()) {
                         return true;
                     }
                 }
@@ -3143,9 +3054,7 @@ impl CoreErlangGenerator {
                 });
             if all_safe_value_sends {
                 if let Expression::Identifier(id) = underlying_receiver {
-                    if self.tier2_block_params.contains(id.name.as_str())
-                        || self.tier2_local_vars.contains(id.name.as_str())
-                    {
+                    if self.tier2_local_vars.contains(id.name.as_str()) {
                         return true;
                     }
                 }
@@ -3206,7 +3115,7 @@ impl CoreErlangGenerator {
     /// send that `is_tier2_value_call` proved needs Tier 2 tuple-unpacking
     /// treatment.
     ///
-    /// A `tier2_block_params`/`tier2_local_vars` identifier receiver goes
+    /// A `tier2_local_vars` identifier receiver goes
     /// through `generate_block_value_call_stateful` directly, so the raw
     /// `{Result, NewState}` tuple reaches the caller, which unpacks it; an
     /// arbitrary sub-expression reached via plain `expression_doc` would not
@@ -3224,7 +3133,7 @@ impl CoreErlangGenerator {
     /// (`generate_block_value_call_stateful`) — `is_tier2_value_call` only
     /// ever proves a `valueWithArguments:` send needs Tier 2 handling at
     /// all, never which arity branch statically applies, so every match
-    /// (`tier2_block_params`, `tier2_local_vars`) routes through the
+    /// (`tier2_local_vars`) routes through the
     /// runtime-discriminated codegen here, unconditionally.
     ///
     /// A block stored in a field is not a `Tier2ValueCall`: a block that
@@ -3257,7 +3166,7 @@ impl CoreErlangGenerator {
                     receiver, args_expr,
                 );
             }
-            // `tier2_local_vars`/`tier2_block_params` receivers must
+            // `tier2_local_vars` receivers must
             // also bypass `expression_doc` below — since `try_generate_block_value_unary`/
             // `try_generate_block_value_keyword` now intercept this same
             // receiver shape from the generic sub-expression dispatch and
@@ -3268,9 +3177,7 @@ impl CoreErlangGenerator {
             // tuple its callers (`BodyExprKind::Tier2ValueCall` handling in
             // this file, `conditionals.rs`, `control_flow/mod.rs`) unpack.
             if let Expression::Identifier(id) = receiver.as_ref() {
-                if self.tier2_block_params.contains(id.name.as_str())
-                    || self.tier2_local_vars.contains(id.name.as_str())
-                {
+                if self.tier2_local_vars.contains(id.name.as_str()) {
                     return self.generate_block_value_call_stateful(receiver, arguments);
                 }
             }
@@ -3295,8 +3202,8 @@ impl CoreErlangGenerator {
     /// sends on a receiver that may hold a Tier 2 block.
     ///
     /// The receiver is evaluated once per message rather than hoisted into a
-    /// single shared binding — harmless here since a `tier2_block_params`/
-    /// `tier2_local_vars` receiver is always a pure variable read, never an
+    /// single shared binding — harmless here since a `tier2_local_vars`
+    /// receiver is always a pure variable read, never an
     /// expression with side effects. Each message is
     /// generated with the *current* threaded state (via
     /// `generate_block_value_call_stateful`, which reads

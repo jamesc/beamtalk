@@ -514,7 +514,7 @@ impl CoreErlangGenerator {
     ///   unchanged — no extra wrapping needed.
     /// - Any other arm body — including the remaining `is_tier2_value_call`
     ///   shapes this function doesn't special-case (`self.<field> value`, a
-    ///   named `tier2_local_vars`/`tier2_block_params` identifier receiver,
+    ///   named `tier2_local_vars` identifier receiver,
     ///   or a `Cascade` of safe `value:` sends, e.g. `blk value: a; value:
     ///   b`), for which `expression_doc` already unwraps/discards that
     ///   call's own state via `close_tier2_value_subexpr_doc` (a
@@ -581,7 +581,7 @@ impl CoreErlangGenerator {
                     ]);
                 }
                 // Any other is_tier2_value_call receiver (self.<field> value,
-                // a named tier2_local_vars/tier2_block_params identifier, or
+                // a named tier2_local_vars identifier, or
                 // a Cascade of safe value: sends) isn't a literal block, so
                 // there's no block to inline here — fall through to
                 // expression_doc below, which already unwraps/discards that

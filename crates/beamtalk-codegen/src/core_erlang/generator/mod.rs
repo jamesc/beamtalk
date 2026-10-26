@@ -165,10 +165,6 @@ pub struct CoreErlangGenerator {
     /// `safe_dispatch` directly, because the block may execute in a different
     /// process (e.g. Timer callback, cross-actor callback).
     pub(in crate::core_erlang) block_depth: usize,
-    /// BT-3936: whether the innermost enclosing closure (`block_depth > 0`) is a
-    /// Tier 1 `fun`, which cannot hand the actor `State` back. A Tier 2 `fun`
-    /// returns `{Result, StateAccN}`, so it does carry it (false).
-    pub(in crate::core_erlang) closure_drops_state: bool,
     /// ADR 0137 Phase 2a (BT-4020): the cell bracket's mode and bookkeeping
     /// (`synced_call.rs`). Inert outside an actor instance method.
     pub(in crate::core_erlang) synced: super::synced_call::SyncedCallState,
@@ -319,12 +315,6 @@ pub struct CoreErlangGenerator {
     /// Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     pub(in crate::core_erlang) source_path: Option<String>,
-    /// Tier 2 block parameters for the current method being compiled.
-    ///
-    /// When a method parameter name is in this set, `value:` / `value:value:` calls
-    /// on that parameter use the stateful Tier 2 protocol:
-    /// `apply _Fun(Args..., State) → {Result, NewState}`.
-    pub(in crate::core_erlang) tier2_block_params: std::collections::HashSet<String>,
     /// Local variables in the current method/block body known to hold
     /// a Tier 2 block value — i.e. a `var := [block]` assignment where the
     /// block literal has captured-local or field mutations, *and* every later
@@ -350,12 +340,6 @@ pub struct CoreErlangGenerator {
     /// block literal receiver.
     pub(in crate::core_erlang) tier2_local_var_captured_mutations:
         std::collections::HashMap<String, Vec<String>>,
-    /// Pre-scanned Tier 2 block info for the current class.
-    ///
-    /// Maps method selector → list of parameter indices that receive Tier 2 blocks
-    /// from self-sends within the same class. Populated by `scan_class_for_tier2_blocks`
-    /// before method body generation.
-    pub(in crate::core_erlang) tier2_method_info: std::collections::HashMap<String, Vec<usize>>,
     /// Diagnostic warnings emitted during code generation.
     ///
     /// Collected during generation and returned to callers via
@@ -500,7 +484,6 @@ impl CoreErlangGenerator {
             loop_mode: LoopMode::new(),
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             block_depth: 0,
-            closure_drops_state: false,
             synced: super::synced_call::SyncedCallState::new(),
             class_var_capture: None,
             actor_closure: None,
@@ -521,10 +504,8 @@ impl CoreErlangGenerator {
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),
             source_path: None,
-            tier2_block_params: std::collections::HashSet::new(),
             tier2_local_vars: std::collections::HashSet::new(),
             tier2_local_var_captured_mutations: std::collections::HashMap::new(),
-            tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
             semantic_facts: beamtalk_core::semantic_analysis::SemanticFacts::default(),
             codegen_diagnostics_enabled: std::env::var("BEAMTALK_CODEGEN_DIAGNOSTICS")

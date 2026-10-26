@@ -104,7 +104,6 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// opaque [`ThreadedStmt::Statement`]s) whose opaque statements may have
 /// advanced the `State` version counter invisibly: a `super` send or
 /// Tier-2 helper (`emit_super_send_open`,
-/// `generate_tier2_self_send_open`,
 /// `generate_field_assignment_open`, …) calls `next_state_var` inside its
 /// own shared, multi-module `Document` builder, so the version step it
 /// produces has no `Bind` node in this body's IR.

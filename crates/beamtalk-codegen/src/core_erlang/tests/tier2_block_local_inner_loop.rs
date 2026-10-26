@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-3939: a Tier 2 block body (a block literal an actor self-send promotes,
-//! `detect_tier2_self_send`) is an arm frame (`BranchArm`, ADR 0131 §2) whose
+//! BT-3939: a Tier 2 block body (a block literal with captured-local
+//! mutations) is an arm frame (`BranchArm`, ADR 0131 §2) whose
 //! loop and fold statements are local-threading producers. Before the fix the
 //! body registered no producer sites, so `xs do: [:y | n := n + y]` was lowered
 //! inside an opaque `let _ = ( ... )`: the fold's rebind of the block-local `n`

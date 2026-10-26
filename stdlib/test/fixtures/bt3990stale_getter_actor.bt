@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3990 (fixed by ADR 0137): a getter self-send in a block passed to a
+// self-send read the actor's creation-time state. The block now reads the
+// live field when it runs inside the actor.
+
+Actor subclass: Bt3990StaleGetterActor
+  state: total = 0
+  state: saved = nil
+
+  peek => self.total
+
+  bump => self.total := self.total + 1
+
+  bumpThen: block =>
+    self.total := self.total + 1
+    block value
+
+  applyTwice: block =>
+    block value
+    block value
+
+  // The BT-3990 repro: the getter block runs after the field changed.
+  staleGetter => self bumpThen: [self peek]
+
+  // Stored variant: the getter block runs in a later message.
+  armGetter => self.saved := [self peek]
+
+  runGetter =>
+    self bump
+    self.saved value
+
+  // Nested variant: the getter block passes through two self-sends.
+  nestedGetter => self bumpThen: [self applyTwice: [self peek]]

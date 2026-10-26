@@ -670,12 +670,10 @@ const DENY_SET: &[Denied] = &[
     deny(Some(Arm), Some(true), Some(true), Some(true), None, None, &[Repl], ALL_BUT_CONDITIONALS),
     deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(false), &[Repl], &[CountedLoop, Do, ListOp, Satisfy, Exception]),
     deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(true), &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(CountedLoopBody), Some(true), None, None, Some(true), None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(false), &[Actor], &[Loop, KeyedDo, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(true), &[Actor], &[Loop, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(CountedLoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(CountedLoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(DoBody), Some(true), None, None, Some(true), None, &[Actor], &[Loop, KeyedDo, Satisfy, Enumeration, BlockValue]),
     deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(false), &[Actor], ALL_BUT_CONDITIONALS_AND_HANDLERS),
     deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(true), &[Actor], &[BlockValue]),
     deny(Some(DoBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
@@ -700,7 +698,6 @@ const DENY_SET: &[Denied] = &[
     deny(Some(ListOpBody), Some(true), None, None, None, Some(false), &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS_AND_HANDLERS),
     deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[Class], &[KeyedDo, DetectIfNone, BlockValue]),
     deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[ValueType], &[KeyedDo, BlockValue]),
-    deny(Some(LoopBody), Some(true), None, None, Some(true), None, &[Actor], ALL_BUT_CONDITIONALS),
     deny(Some(LoopBody), Some(true), None, Some(false), Some(false), None, &[Actor], &[Loop, Do, KeyedDo, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
     deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
     deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(true), &[Actor], &[KeyedDo, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
@@ -717,9 +714,6 @@ const DENY_SET: &[Denied] = &[
     deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Repl], &[IfTrue, IfNil, AndOr, Exception]),
     deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Repl], ALL),
     deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[ValueType], &[Do, KeyedDo, BlockValue]),
-    // A self-send or field write in the outermost block (`stateful`).
-    deny(Some(LoopBody), Some(true), None, None, Some(true), None, &[Class, ValueType], &[Loop, CountedLoop, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, Exception, BlockValue]),
-    deny(Some(CountedLoopBody), Some(true), None, None, Some(true), None, &[Class, ValueType], &[Loop, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, BlockValue]),
 ];
 
 /// A statement shape (a construct kind at a [`Position::Statement`] or
