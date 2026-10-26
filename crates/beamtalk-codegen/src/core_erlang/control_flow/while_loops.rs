@@ -271,8 +271,12 @@ impl CoreErlangGenerator {
         // the `StateAcc` threading, so its operators bracket normally.
         // (Direct loops cover their conditions through the loop-level
         // bracket instead, and hybrid loops with one route here.)
+        // Actor methods only: where the cell protocol is off (REPL, class
+        // and value-type methods) no bracket applies, so the condition
+        // keeps the pre-BT-4121 answer — in particular the BT-4015
+        // `ConditionWritesNotCarried` fault keeps defeating it.
         let cond_effects = super::condition_has_state_effects(self, condition, Some(body))
-            || self.expr_contains_guarded_operator(condition);
+            || (self.synced_calls_active() && self.expr_contains_guarded_operator(condition));
 
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
