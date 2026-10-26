@@ -62,7 +62,7 @@ fn build_flush_file_escapes_quotes_and_braces() {
     // Beamtalk string escape rules match `beamtalk-mcp`.
     let expr =
         build_command_expression(CMD_FLUSH_FILE, &[serde_json::json!("a\\b\"c{d")]).expect("ok");
-    assert_eq!(expr, "Workspace flush: #{ #file => \"a\\\\b\\\"c\\{d\" }");
+    assert_eq!(expr, "Workspace flush: #{ #file => \"a\\\\b\"\"c\\{d\" }");
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn build_precheck_method_emits_precheck_compile_source_expression() {
     .expect("ok");
     assert_eq!(
         expr,
-        "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\""
+        "Counter precheckCompile: #getCount source: \"getCount => \"\"nope\"\"\""
     );
 }
 
@@ -176,7 +176,7 @@ fn build_precheck_method_accepts_leading_hash_selector() {
     .expect("ok");
     assert_eq!(
         expr,
-        "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\""
+        "Counter precheckCompile: #getCount source: \"getCount => \"\"nope\"\"\""
     );
 }
 

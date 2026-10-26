@@ -256,18 +256,29 @@ pub fn format_source(source: &str) -> Option<String> {
 /// Escapes an arbitrary string for embedding inside a Beamtalk double-quoted
 /// string literal.
 ///
-/// Beamtalk strings share `\\` and `"` escaping with most languages, and also
-/// treat `{` as the start of an interpolation sequence (ADR 0023), so a
-/// literal `{` must be written as `\{`.
+/// This is the one convention for tool-generated code (tool expressions, MCP
+/// editing/evaluate surfaces, LSP commands): embedded quotes double (`""`),
+/// matching the unparser's `string_content` leaf helper and `String
+/// printString` (ADR 0138 "One mapping, every direction"), so generated
+/// expressions are `fmt`-stable — `fmt` canonicalizes every embedded quote to
+/// `""` doubling, and `\"` would not survive a format pass. Beamtalk strings
+/// also treat `{` as the start of an interpolation sequence (ADR 0023), so a
+/// literal `{` must be written as `\{`; a bare `}` needs no escape.
 ///
 /// The escape order is significant: `\\` must be processed first so a caller-
 /// supplied `\{` is rendered as `\\\{` (escaped backslash `\\` then escaped
 /// brace `\{`) rather than `\\{` (escaped backslash followed by an unescaped
 /// `{` that would start interpolation).
+///
+/// Control characters (CR/LF/TAB/NUL) deliberately pass through verbatim —
+/// Beamtalk strings are multi-line, and generated expressions embed multi-line
+/// sources readably. They still round-trip: raw controls re-lex to themselves.
+/// This is the one intentional divergence from `string_content` and
+/// `printString`, which use the `\r` `\n` `\t` `\0` spellings.
 #[must_use]
 pub fn escape_string_literal(s: &str) -> String {
     s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
+        .replace('"', "\"\"")
         .replace('{', "\\{")
 }
 

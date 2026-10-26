@@ -16,7 +16,9 @@ fn escape_string_literal_plain_string_unchanged() {
 
 #[test]
 fn escape_string_literal_escapes_double_quote() {
-    assert_eq!(escape_string_literal("a\"b"), "a\\\"b");
+    // ADR 0138: generated code uses "" doubling (not \"), matching the
+    // unparser leaf and String printString, so it is fmt-stable.
+    assert_eq!(escape_string_literal("a\"b"), "a\"\"b");
 }
 
 #[test]
@@ -41,7 +43,7 @@ fn escape_string_literal_backslash_before_brace_both_escaped() {
 fn escape_string_literal_mixed_backslash_quote_brace() {
     // Verifies all three escape rules fire correctly in one input and that
     // replacement order does not corrupt any of them.
-    assert_eq!(escape_string_literal("\\\"\\{"), "\\\\\\\"\\\\\\{");
+    assert_eq!(escape_string_literal("\\\"\\{"), "\\\\\"\"\\\\\\{");
 }
 
 // --- reindent_method_source ---
