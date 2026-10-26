@@ -717,6 +717,11 @@ module, a raw tuple, and a list.
 
 ## Selector-aware UTF-8 scan skip — dynamic dispatch on large binaries (BT-3033)
 
+> Historical: BT-4173 replaced the representation (tagged `{beamtalk_string,
+> Bin}` Strings vs bare-`binary()` Binaries), so dispatch classifies by
+> representation in O(1) and the scan below no longer exists. Kept for the
+> archaeology of what it measured.
+
 BT-2999 made `module_for_value/1` classify a bare binary by `is_utf8/1`
 (String vs Binary) on every dynamic send, replacing an O(1) `is_binary` guard
 with an O(byte_size) validating scan. That cost only bites for **large,
