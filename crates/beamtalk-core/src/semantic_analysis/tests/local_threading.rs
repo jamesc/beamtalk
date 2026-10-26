@@ -4623,3 +4623,39 @@ fn evaluated_block_nested_in_a_bt3948_site_is_reported_once() {
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages[0].contains("BT-3948"), "{messages:?}");
 }
+
+/// BT-3950: the `actor_nested_fold_value` carve-out fires for a fold body
+/// nested in a `whileTrue:` loop wherever the loop sits, not just at method
+/// top level: under an arm (deny path, no `DENY_SET` row names it) and under
+/// another fold (producer path, the same lost write as the matrix pair). A
+/// counted loop outside threads fine (measured right), so that shape stays
+/// accepted.
+#[test]
+fn actor_fold_value_nested_in_loop_is_rejected_wherever_the_loop_sits() {
+    let value_rejected = |body: &str| {
+        adr0131_diagnostics(&in_actor(body)).iter().any(|d| {
+            d.message
+                .as_str()
+                .contains("`value` writes outer local `u`")
+        })
+    };
+    // Under an arm (containers [Arm, LoopBody, DoBody]).
+    assert!(
+        value_rejected(
+            "t =:= 0 ifTrue: [m := 0. [m < 2] whileTrue: [m := m + 1. #(1, 2) do: [:z | u := 0. [u := u + 1] value. t := u]]]\nt"
+        ),
+        "the arm-nested fold value must be rejected"
+    );
+    // Under another fold (containers [DoBody, LoopBody, DoBody]).
+    assert!(
+        value_rejected(
+            "#(3, 4) do: [:y | m := 0. [m < 2] whileTrue: [m := m + 1. #(1, 2) do: [:z | u := 0. [u := u + 1] value. t := u]]]\nt"
+        ),
+        "the fold-nested fold value must be rejected"
+    );
+    // A counted loop outside threads fine: stays accepted.
+    let diags = adr0131_diagnostics(&in_actor(
+        "2 timesRepeat: [#(1, 2) do: [:z | u := 0. [u := u + 1] value. t := u]]\nt",
+    ));
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}

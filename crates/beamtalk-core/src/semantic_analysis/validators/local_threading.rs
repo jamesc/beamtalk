@@ -2678,20 +2678,20 @@ impl<'d> Walker<'d> {
         let ctx = self.loop_body_context();
         let actor_value_site = frame_site && is_actor_fold_value_site(expr, &ctx);
         // BT-3950: a block `value` send directly in a fold body (`do:`,
-        // `collect:`) nested in a `whileTrue:` loop in an actor method is not
-        // threaded back since BT-4121 (BT-4194): the write is lost and the
-        // method silently answers wrong (`actor iterLoop/collLoop local value`,
-        // measured wrong). It is not a producer there, so it falls through to
-        // the §1 diagnostic below instead of being accepted. No DENY_SET row
-        // can name it: the producer return above runs before the table is
-        // consulted. The `dlocal` twins answer right and are unavoidably
-        // rejected too (same chain, `KNOWN_OVER_REJECTED`); BT-4194 deletes
-        // this carve-out when the lowering is fixed.
+        // `collect:`) with a `whileTrue:` loop anywhere outside it in an actor
+        // method is not threaded back since BT-4121 (BT-4194): the write is
+        // lost and the method silently answers wrong (`actor iterLoop/collLoop
+        // local value`, measured wrong). It falls through to the §1 diagnostic
+        // below instead of being accepted. No DENY_SET row can name the
+        // producer-accepted shapes (the producer return runs before the table
+        // is consulted) nor the deny-path ones. A counted loop outside
+        // (`timesRepeat:`, `to:do:`) threads fine (measured right), so only
+        // `LoopBody` counts. The `dlocal` twins answer right and are
+        // unavoidably rejected too (same chain, `KNOWN_OVER_REJECTED`);
+        // BT-4194 deletes this carve-out when the lowering is fixed.
         let actor_nested_fold_value = construct.family == LocalThreadingFamily::BlockValue
             && self.context == Actor
-            && frame_site
-            && self.depth > 1
-            && matches!(self.containers.first(), Some(Container::LoopBody))
+            && self.containers.contains(&Container::LoopBody)
             && matches!(
                 self.containers.last(),
                 Some(Container::DoBody | Container::ListOpBody)
