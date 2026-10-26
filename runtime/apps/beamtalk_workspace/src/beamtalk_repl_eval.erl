@@ -1730,6 +1730,12 @@ path and the async WebSocket eval path (`beamtalk_ws_handler` →
 `beamtalk_repl_shell:eval_async`, which bypasses `handle_term`) share one
 tagging site. Bindings are unaffected: callers store the raw value and tag
 only the returned display value.
+
+Known scope boundaries (matching `class` dispatch, which also uses static
+Character-ness): cross-turn variables (`x := $A` then `x` next turn),
+trace-mode steps, `run-entry` results, and Inspector `evaluate:` show the
+raw codepoint — only the statically Character-typed eval result itself is
+tagged.
 """.
 -spec maybe_tag_character(term(), string()) -> term().
 maybe_tag_character(Result, Expression) when is_integer(Result), is_list(Expression) ->
