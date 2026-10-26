@@ -31,3 +31,12 @@ TestCase subclass: StringPrintStringEscapeTest
   testPrintStringPlainAndEmpty =>
     self assert: "hello" printString equals: """hello"""
     self assert: "" printString equals: """"""
+
+  testNestedPrintStringMatchesTopLevel =>
+    // BT-4176: nested values (`#()` elements, inspector fields, error
+    // messages) render through `beamtalk_primitive:print_string/1`, which
+    // must use the same ADR 0138 mapping as top-level `printString`.
+    value := "a\nb\{c}d\\e"
+    display := value printString
+    self assert: display equals: "\"a\\nb\\\{c}d\\\\e\""
+    self assert: #(value) printString equals: "#(" ++ display ++ ")"

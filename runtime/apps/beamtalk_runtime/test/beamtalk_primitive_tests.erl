@@ -1484,6 +1484,86 @@ print_string_string_with_embedded_quotes_test() ->
 print_string_empty_string_test() ->
     ?assertEqual(<<"\"\"">>, beamtalk_primitive:print_string(<<>>)).
 
+%%% ============================================================================
+%%% print_string/1 — ADR 0138 escape mapping (BT-4176)
+%%% ============================================================================
+
+print_string_escapes_backslash_test() ->
+    ?assertEqual(<<"\"a\\\\b\"">>, beamtalk_primitive:print_string(<<"a\\b">>)),
+    ?assertEqual(<<"\"\\\\\"">>, beamtalk_primitive:print_string(<<"\\">>)).
+
+print_string_escapes_braces_test() ->
+    %% `{` escapes (or the spelling re-parses as interpolation); bare `}` is safe.
+    ?assertEqual(<<"\"a\\{b\"">>, beamtalk_primitive:print_string(<<"a{b">>)),
+    ?assertEqual(<<"\"a}b\"">>, beamtalk_primitive:print_string(<<"a}b">>)),
+    ?assertEqual(<<"\"\\{x}\"">>, beamtalk_primitive:print_string(<<"{x}">>)).
+
+print_string_escapes_controls_test() ->
+    ?assertEqual(<<"\"a\\rb\"">>, beamtalk_primitive:print_string(<<"a\rb">>)),
+    ?assertEqual(<<"\"a\\nb\"">>, beamtalk_primitive:print_string(<<"a\nb">>)),
+    ?assertEqual(<<"\"a\\tb\"">>, beamtalk_primitive:print_string(<<"a\tb">>)),
+    ?assertEqual(<<"\"a\\0b\"">>, beamtalk_primitive:print_string(<<$a, 0, $b>>)),
+    ?assertEqual(<<"\"\\r\\n\"">>, beamtalk_primitive:print_string(<<"\r\n">>)).
+
+print_string_escapes_combined_test() ->
+    %% Backslash doubles before brace/quote escaping; `\0` takes no octal tail.
+    ?assertEqual(<<"\"\\\\\\{x}\"">>, beamtalk_primitive:print_string(<<"\\{x}">>)),
+    ?assertEqual(<<"\"a\\\\\"\"b\"">>, beamtalk_primitive:print_string(<<"a\\\"b">>)),
+    ?assertEqual(
+        <<"\"\\r\\n\\t\\\\\"\"\\{}\"">>,
+        beamtalk_primitive:print_string(<<"\r\n\t\\\"{}">>)
+    ),
+    ?assertEqual(<<"\"\\01\"">>, beamtalk_primitive:print_string(<<0, $1>>)).
+
+print_string_nested_escapes_match_top_level_test() ->
+    %% Nested values (inspector/`#()`/error output) render through the same
+    %% binary clause, so their spellings match top-level `printString`.
+    Value = <<"a\nb{c}d\\e">>,
+    Escaped = beamtalk_primitive:print_string(Value),
+    ?assertEqual(<<"\"a\\nb\\{c}d\\\\e\"">>, Escaped),
+    ?assertEqual(
+        <<"#(", Escaped/binary, ")">>,
+        beamtalk_primitive:print_string([Value])
+    ),
+    ?assertEqual(
+        <<"{", Escaped/binary, "}">>,
+        beamtalk_primitive:print_string({Value})
+    ),
+    ?assertEqual(
+        <<"#{#k => ", Escaped/binary, "}">>,
+        beamtalk_primitive:print_string(#{k => Value})
+    ).
+
+escape_corpus_conformance_test() ->
+    %% BT-4176: the Erlang leg of the ADR 0138 shared escape mapping —
+    %% `print_string/1` must render every corpus value byte-identically to its
+    %% `display` spelling. Neither side keeps a second copy of the table.
+    {ok, Raw} = file:read_file(escape_corpus_path()),
+    Cases = json:decode(Raw),
+    %% Tripwire: the loop below must actually run.
+    ?assertEqual(23, length(Cases)),
+    lists:foreach(
+        fun(#{<<"value">> := Value, <<"display">> := Display}) ->
+            ?assertEqual(Display, beamtalk_primitive:print_string(Value))
+        end,
+        Cases
+    ).
+
+escape_corpus_path() ->
+    BeamDir = filename:dirname(code:which(?MODULE)),
+    find_ancestor_file(
+        BeamDir, ["stdlib", "test", "fixtures", "string_escape_corpus.json"], 12
+    ).
+
+find_ancestor_file(_Dir, _RelPath, 0) ->
+    error(escape_corpus_not_found);
+find_ancestor_file(Dir, RelPath, N) ->
+    Candidate = filename:join([Dir | RelPath]),
+    case filelib:is_regular(Candidate) of
+        true -> Candidate;
+        false -> find_ancestor_file(filename:dirname(Dir), RelPath, N - 1)
+    end.
+
 print_string_pid_uses_opaque_ops_test() ->
     Result = beamtalk_primitive:print_string(self()),
     ?assert(is_binary(Result)),
