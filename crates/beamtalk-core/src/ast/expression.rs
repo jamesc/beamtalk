@@ -52,6 +52,9 @@ pub enum ExpectCategory {
     /// Suppress sendability advisories — scoped handle crossing a process
     /// boundary or undeclared handle-wrapping class (ADR 0103).
     Sendability,
+    /// Suppress match-arm-block warnings — a `match:` arm whose body is a
+    /// bare block literal answers the Block without running it (BT-4028).
+    MatchArmBlock,
     /// Suppress class-state-abroad warnings — a block literal that touches
     /// its home class's variables used where it runs outside an invocation of
     /// that class (ADR 0130 §5).
@@ -91,6 +94,7 @@ impl ExpectCategory {
             "type_annotation" => Some(Self::TypeAnnotation),
             "inheritance" => Some(Self::Inheritance),
             "sendability" => Some(Self::Sendability),
+            "match_arm_block" => Some(Self::MatchArmBlock),
             "class_state_abroad" => Some(Self::ClassStateAbroad),
             "actor_state_abroad" => Some(Self::ActorStateAbroad),
             "stored_closure" => Some(Self::StoredClosure),
@@ -118,6 +122,7 @@ impl ExpectCategory {
             Self::TypeAnnotation => "type_annotation",
             Self::Inheritance => "inheritance",
             Self::Sendability => "sendability",
+            Self::MatchArmBlock => "match_arm_block",
             Self::ClassStateAbroad => "class_state_abroad",
             Self::ActorStateAbroad => "actor_state_abroad",
             Self::StoredClosure => "stored_closure",
@@ -145,6 +150,7 @@ impl ExpectCategory {
             "type_annotation",
             "inheritance",
             "sendability",
+            "match_arm_block",
             "class_state_abroad",
             "actor_state_abroad",
             "all",
