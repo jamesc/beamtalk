@@ -713,7 +713,7 @@ x < 5              // => ERROR: UndefinedObject does not understand '<'
 
 This holds however the receiver is typed: an untyped local or parameter, or an `:: Integer | Nil` field that holds `nil`. Only a receiver statically known to be a number, character or string (a literal, a `:: Integer`/`:: String`-style parameter or field, `self` in those classes) compiles to the bare comparison instruction; everything else is checked at run time (one inline type test), so there is no "total order over every value" to fall back on.
 
-The **argument** is not checked at run time: a number, character, string or symbol receiver compared with an argument of a different kind falls back to the BEAM's term order and does not raise, so `5 < nil` answers `true` and `#a < 5` answers `false`. The compiler warns when it can see the mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `'x' < nil`, `#a < 5`); an untyped or generic argument stays silent. Comparison operators have no number-on-the-left coercion (see above).
+The **argument** is not checked at run time: a number, character, string or symbol receiver compared with an argument of a different kind falls back to the BEAM's term order and does not raise, so `5 < nil` answers `true` and `#a < 5` answers `false`. The compiler warns when it can see the mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `$x < nil`, `#a < 5`); an untyped or generic argument stays silent. Comparison operators have no number-on-the-left coercion (see above).
 
 ##### Arithmetic and comparison on fields: annotate numeric state
 
@@ -4793,7 +4793,7 @@ the next workspace restart.
 #### Creating a brand-new class file
 
 ```beamtalk
-> Workspace newClass: "Object subclass: Greeter\n  greet => 'hello'" at: "src/greeter.bt"
+> Workspace newClass: "Object subclass: Greeter\n  greet => ""hello""" at: "src/greeter.bt"
 => [Greeter]                        // compiled and installed in memory
 > Workspace flush
 => _                                // writes src/greeter.bt
@@ -7195,10 +7195,16 @@ Binary fromBytes: #(65, 66)  // => Binary
 (Binary fromBytes: #(104, 101, 108, 108, 111)) asString           // => "hello"
 (Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked  // => "hello"
 
-// Invalid UTF-8: asString answers an error tuple with the byte offset;
+// Invalid UTF-8: asString answers `Result error:` with the byte offset;
 // asStringUnchecked keeps the bytes, still dispatched as Binary
-(Binary fromBytes: #(255, 254)) asString                          // => {#error, {#invalid_utf8, 0}}
+((Binary fromBytes: #(255, 254)) asString) isError                // => true
+((Binary fromBytes: #(255, 254)) asString) error message          // => "Invalid UTF-8 at byte offset 0"
 (Binary fromBytes: #(255, 254)) asStringUnchecked class           // => Binary
+
+// Narrow before continuing: success answers a bare String (which has
+// no isError), failure a Result (which has no String methods)
+r := (Binary fromBytes: #(255, 254)) asString
+(r class equals: Result) ifTrue: [r isError] ifFalse: [false]      // => true
 
 // Serialization (class methods)
 etf := Binary serialize: #(1, 2, 3)
@@ -7224,7 +7230,7 @@ bin isEmpty                   // => false
 | `do: block` | iterate elements (via String at runtime¹) | iterate graphemes |
 | `part: offset size: n` | byte-level slice, returns Binary | inherited — byte-level slice, returns Binary |
 | `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
-| `asString` | UTF-8 validation, returns String | no-op, returns self |
+| `asString` | UTF-8 validation: String, or `Result error:` with offset | no-op, returns self |
 | `asStringUnchecked` | unchecked cast to String | no-op, returns self |
 
 ¹ Only when the bytes are valid UTF-8 — see below.
