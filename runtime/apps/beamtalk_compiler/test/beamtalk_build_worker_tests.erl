@@ -304,7 +304,7 @@ handle_read_specs_crash_caught_test() ->
 
 setup_temp_dir() ->
     TmpDir = filename:join([
-        binary_to_list(beamtalk_file:'tempDirectory'()),
+        binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
         "beamtalk_build_worker_test_" ++
             integer_to_list(erlang:unique_integer([positive]))
     ]),

@@ -42,7 +42,7 @@ selector_returns_method_name_test() ->
 source_returns_source_code_test() ->
     Method = test_method(),
     ?assertEqual(
-        <<"increment => self.value := self.value + 1">>,
+        {beamtalk_string, <<"increment => self.value := self.value + 1">>},
         beamtalk_compiled_method_ops:dispatch('source', [], Method)
     ).
 
@@ -70,7 +70,7 @@ class_returns_compiled_method_test() ->
 print_string_test() ->
     Method = test_method(),
     Result = beamtalk_compiled_method_ops:dispatch('printString', [], Method),
-    ?assertEqual(<<"CompiledMethod(increment)">>, Result).
+    ?assertEqual({beamtalk_string, <<"CompiledMethod(increment)">>}, Result).
 
 as_string_same_as_print_string_test() ->
     Method = test_method(),
@@ -81,7 +81,7 @@ as_string_same_as_print_string_test() ->
 print_string_keyword_selector_test() ->
     Method = test_method_with_args(),
     Result = beamtalk_compiled_method_ops:dispatch('printString', [], Method),
-    ?assertEqual(<<"CompiledMethod(add:)">>, Result).
+    ?assertEqual({beamtalk_string, <<"CompiledMethod(add:)">>}, Result).
 
 %%====================================================================
 %% respondsTo: tests
@@ -158,7 +158,7 @@ unknown_selector_error_has_hint_test() ->
         ?assert(false)
     catch
         error:#{'$beamtalk_class' := _, error := #beamtalk_error{hint = Hint}} ->
-            ?assert(is_binary(Hint)),
+            ?assertMatch({beamtalk_string, _}, Hint),
             %% Hint should mention available selectors
-            ?assertNotEqual(nomatch, binary:match(Hint, <<"selector">>))
+            ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"selector">>))
     end.

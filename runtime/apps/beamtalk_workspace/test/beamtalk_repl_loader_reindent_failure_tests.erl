@@ -37,7 +37,7 @@ no other test in the same `rebar3 eunit` run ever sees a faulted compiler.
 %% to append — covers both `reindent_failed` call sites with one fixture.
 %%====================================================================
 
-temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
+temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 setup() ->
     application:ensure_all_started(compiler),

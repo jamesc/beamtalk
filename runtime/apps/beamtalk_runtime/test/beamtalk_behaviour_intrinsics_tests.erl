@@ -2745,11 +2745,13 @@ classRenameTo_collision_refused_test_() ->
                         error := #beamtalk_error{
                             kind = class_already_exists,
                             message =
-                                <<
+                                {beamtalk_string, <<
                                     "cannot rename BT3278RenameEUnitSource to "
                                     "BT3278RenameEUnitExisting — BT3278RenameEUnitExisting already exists"/utf8
-                                >>,
-                            hint = <<"remove or rename the existing class first">>
+                                >>},
+                            hint =
+                                {beamtalk_string,
+                                    <<"remove or rename the existing class first">>}
                         }
                     },
                     beamtalk_behaviour_intrinsics:classRenameTo(

@@ -1531,4 +1531,4 @@ loaded_modules_dropped_when_module_not_loaded_test() ->
 
 %% Cross-platform absolute temp dir (CLAUDE.md: never hardcode /tmp in tests).
 temp_dir_meta() ->
-    unicode:characters_to_list(beamtalk_file:'tempDirectory'()).
+    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).

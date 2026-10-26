@@ -27,18 +27,18 @@ Tests cover:
 
 run_returns_trimmed_stdout_test() ->
     %% `echo hello` works on both Unix (/bin/echo on PATH) and Windows (cmd builtin).
-    ?assertEqual(<<"hello">>, beamtalk_os:'run:'(<<"echo hello">>)).
+    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_os:'run:'(<<"echo hello">>)).
 
 run_trims_trailing_newline_test() ->
     case os:type() of
         {unix, _} ->
             Result = beamtalk_os:'run:'(<<"printf 'line1\nline2\n'">>),
-            ?assertEqual(<<"line1\nline2">>, Result);
+            ?assertEqual({beamtalk_string, <<"line1\nline2">>}, Result);
         {win32, _} ->
             %% cmd echo emits \r\n; string:trim(trailing) strips the final \r\n
             %% but internal \r survive since trim only strips from the end.
             Result = beamtalk_os:'run:'(<<"echo line1& echo line2">>),
-            ?assertEqual(<<"line1\r\nline2">>, Result)
+            ?assertEqual({beamtalk_string, <<"line1\r\nline2">>}, Result)
     end.
 
 run_empty_output_test() ->
@@ -47,7 +47,7 @@ run_empty_output_test() ->
             {unix, _} -> <<"true">>;
             {win32, _} -> <<"ver >nul">>
         end,
-    ?assertEqual(<<>>, beamtalk_os:'run:'(Cmd)).
+    ?assertEqual({beamtalk_string, <<>>}, beamtalk_os:'run:'(Cmd)).
 
 %%% ============================================================================
 %%% run: — type error
@@ -70,10 +70,10 @@ run_type_error_atom_test() ->
 %%% ============================================================================
 
 run_timeout_returns_stdout_test() ->
-    ?assertEqual(<<"hi">>, beamtalk_os:'run:timeout:'(<<"echo hi">>, 5000)).
+    ?assertEqual({beamtalk_string, <<"hi">>}, beamtalk_os:'run:timeout:'(<<"echo hi">>, 5000)).
 
 run_timeout_ffi_shim_test() ->
-    ?assertEqual(<<"hi">>, beamtalk_os:run(<<"echo hi">>, 5000)).
+    ?assertEqual({beamtalk_string, <<"hi">>}, beamtalk_os:run(<<"echo hi">>, 5000)).
 
 %%% ============================================================================
 %%% run:timeout: — type errors

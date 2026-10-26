@@ -520,7 +520,7 @@ test_module_not_loaded() ->
         ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result),
         %% The hint must name the receiver class.
         {error, #beamtalk_error{hint = Hint}} = Result,
-        ?assert(binary:match(Hint, atom_to_binary(ClassName, utf8)) =/= nomatch)
+        ?assert(binary:match(element(2, Hint), atom_to_binary(ClassName, utf8)) =/= nomatch)
     after
         (try
             gen_server:stop(Pid, normal, 5000)
@@ -542,7 +542,7 @@ test_method_not_found() ->
         %% The hint must name the selector.
         {error, #beamtalk_error{hint = Hint}} = Result,
         ?assert(
-            binary:match(Hint, atom_to_binary(?TEST_SELECTOR, utf8)) =/= nomatch
+            binary:match(element(2, Hint), atom_to_binary(?TEST_SELECTOR, utf8)) =/= nomatch
         )
     after
         (try
@@ -1062,8 +1062,8 @@ test_undef_local_module_not_loaded() ->
     ?assertMatch({reply, {error, #beamtalk_error{kind = class_not_found}}, _}, Result),
     {reply, {error, #beamtalk_error{hint = Hint}}, _} = Result,
     %% Hint should mention the class name but NOT "inherits" (local method).
-    ?assert(binary:match(Hint, atom_to_binary(ClassName, utf8)) =/= nomatch),
-    ?assertEqual(nomatch, binary:match(Hint, <<"inherits">>)).
+    ?assert(binary:match(element(2, Hint), atom_to_binary(ClassName, utf8)) =/= nomatch),
+    ?assertEqual(nomatch, binary:match(element(2, Hint), <<"inherits">>)).
 
 %% Local class method, module loaded but function absent → does_not_understand.
 test_undef_local_method_not_found() ->
@@ -1076,8 +1076,8 @@ test_undef_local_method_not_found() ->
     ?assertMatch({reply, {error, #beamtalk_error{kind = does_not_understand}}, _}, Result),
     {reply, {error, #beamtalk_error{hint = Hint}}, _} = Result,
     %% Hint should name the selector and NOT mention "inherited".
-    ?assert(binary:match(Hint, <<"absentLocalMethod">>) =/= nomatch),
-    ?assertEqual(nomatch, binary:match(Hint, <<"inherited">>)).
+    ?assert(binary:match(element(2, Hint), <<"absentLocalMethod">>) =/= nomatch),
+    ?assertEqual(nomatch, binary:match(element(2, Hint), <<"inherited">>)).
 
 %% Inherited method, defining class module not loaded → class_not_found with inheritance hint.
 test_undef_inherited_module_not_loaded() ->
@@ -1101,7 +1101,7 @@ test_undef_inherited_module_not_loaded() ->
         Result = gen_server:call(ChildPid, {class_method_call, inheritedSelector, []}),
         ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result),
         {error, #beamtalk_error{hint = Hint}} = Result,
-        ?assert(binary:match(Hint, <<"inherits">>) =/= nomatch)
+        ?assert(binary:match(element(2, Hint), <<"inherits">>) =/= nomatch)
     after
         catch gen_server:stop(ChildPid, normal, 5000),
         catch gen_server:stop(ParentPid, normal, 5000)
@@ -1130,7 +1130,7 @@ test_undef_inherited_method_not_found() ->
         Result = gen_server:call(ChildPid, {class_method_call, inheritedAbsentSel, []}),
         ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
         {error, #beamtalk_error{hint = Hint}} = Result,
-        ?assert(binary:match(Hint, <<"inherited">>) =/= nomatch)
+        ?assert(binary:match(element(2, Hint), <<"inherited">>) =/= nomatch)
     after
         catch gen_server:stop(ChildPid, normal, 5000),
         catch gen_server:stop(ParentPid, normal, 5000)
@@ -1557,9 +1557,9 @@ test_send_dead_pid_structured_error() ->
     catch
         error:#{error := #beamtalk_error{kind = Kind, hint = Hint}} ->
             ?assertEqual(class_not_found, Kind),
-            ?assert(is_binary(Hint)),
+            ?assertMatch({beamtalk_string, _}, Hint),
             %% Hint should mention pid not found or not running.
-            ?assert(binary:match(Hint, <<"not">>) =/= nomatch)
+            ?assert(binary:match(element(2, Hint), <<"not">>) =/= nomatch)
     end.
 
 %%% ============================================================================
@@ -1626,7 +1626,7 @@ test_fallthrough_print_string() ->
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertNotEqual(undefined, CounterPid),
     Result = beamtalk_class_dispatch:class_send(CounterPid, printString, []),
-    ?assert(is_binary(Result)).
+    ?assertMatch({beamtalk_string, _}, Result).
 
 %%% ============================================================================
 %%% Additional dispatch-pipeline coverage

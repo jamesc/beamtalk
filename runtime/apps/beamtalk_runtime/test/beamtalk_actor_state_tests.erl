@@ -170,7 +170,7 @@ unreachable_error_shape_test() ->
         error:#{error := #beamtalk_error{kind = K, class = C, hint = H, details = D}} ->
             ?assertEqual(actor_state_unreachable, K),
             ?assertEqual('ActorStateTestClass', C),
-            ?assert(is_binary(H)),
+            ?assertMatch({beamtalk_string, _}, H),
             ?assertEqual(#{field => x}, D)
     end.
 

@@ -32,16 +32,29 @@ class_of_float_test() ->
     ?assertEqual('Float', beamtalk_primitive:class_of(1.0e10)).
 
 class_of_string_test() ->
-    ?assertEqual('String', beamtalk_primitive:class_of(<<>>)),
-    ?assertEqual('String', beamtalk_primitive:class_of(<<"hello">>)),
-    ?assertEqual('String', beamtalk_primitive:class_of(<<"with spaces">>)),
-    ?assertEqual('String', beamtalk_primitive:class_of(<<"Unicode: 你好"/utf8>>)).
+    %% BT-4173: class_of/1 answers the construction type. A String is the
+    %% tagged term; a bare binary is always Binary, whatever its bytes.
+    ?assertEqual('String', beamtalk_primitive:class_of({beamtalk_string, <<>>})),
+    ?assertEqual('String', beamtalk_primitive:class_of({beamtalk_string, <<"hello">>})),
+    ?assertEqual(
+        'String', beamtalk_primitive:class_of({beamtalk_string, <<"with spaces">>})
+    ),
+    ?assertEqual(
+        'String', beamtalk_primitive:class_of({beamtalk_string, <<"Unicode: 你好"/utf8>>})
+    ).
 
 class_of_non_utf8_binary_is_binary_test() ->
     %% Bytes that can't be valid UTF-8 can't be a String either.
     ?assertEqual('Binary', beamtalk_primitive:class_of(<<255, 254, 253>>)),
     ?assertEqual('Binary', beamtalk_primitive:class_of(<<"prefix", 16#C3>>)),
     ?assertEqual('Binary', beamtalk_primitive:class_of(crypto:strong_rand_bytes(64))).
+
+class_of_binary_test() ->
+    %% BT-4173: bare binaries classify as Binary even when valid UTF-8 —
+    %% no sniffing. (Non-UTF-8 binaries are covered above.)
+    ?assertEqual('Binary', beamtalk_primitive:class_of(<<>>)),
+    ?assertEqual('Binary', beamtalk_primitive:class_of(<<"hello">>)),
+    ?assertEqual('Binary', beamtalk_primitive:class_of(<<"café"/utf8>>)).
 
 is_utf8_test() ->
     ?assert(beamtalk_primitive:is_utf8(<<>>)),
@@ -52,10 +65,10 @@ is_utf8_test() ->
     ?assertNot(beamtalk_primitive:is_utf8(<<16#E4, 16#BD>>)).
 
 %%% ============================================================================
-%%% Selector-aware UTF-8 scan skip — send/3 and responds_to/2 on a
-%%% non-UTF-8 binary must still answer correctly for the "shared" selectors
-%%% (String and Binary agree), even though the scan that would normally prove
-%%% the receiver is Binary is skipped for them.
+%%% BT-4173: construction-type dispatch — send/3 and responds_to/2 route by
+%%% the receiver's representation (tagged String vs bare Binary), never by
+%%% sniffing bytes. `byteSize` is deleted; `size` is byte-level on Binary
+%%% and grapheme-level on String.
 %%% ============================================================================
 
 send_shared_selector_on_non_utf8_binary_test_() ->
@@ -64,38 +77,59 @@ send_shared_selector_on_non_utf8_binary_test_() ->
         ?assertNot(beamtalk_primitive:is_utf8(Bin)),
         ?assertEqual('Binary', beamtalk_primitive:class_of(Bin)),
         ?assertEqual(255, beamtalk_primitive:send(Bin, 'byteAt:', [0])),
-        ?assertEqual(5, beamtalk_primitive:send(Bin, byteSize, [])),
+        ?assertEqual(5, beamtalk_primitive:send(Bin, size, [])),
         ?assertEqual([255, 254, 253, 0, 200], beamtalk_primitive:send(Bin, toBytes, []))
     end}.
 
 send_shared_selector_on_valid_utf8_binary_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Same selectors, valid-UTF-8 receiver — must agree with the
-        %% byte-level answer regardless of the "String" classification.
+        %% Valid UTF-8 bytes in a bare binary still route as Binary.
         Bin = <<"hello">>,
-        ?assertEqual('String', beamtalk_primitive:class_of(Bin)),
+        ?assertEqual('Binary', beamtalk_primitive:class_of(Bin)),
         ?assertEqual(104, beamtalk_primitive:send(Bin, 'byteAt:', [0])),
-        ?assertEqual(5, beamtalk_primitive:send(Bin, byteSize, []))
+        ?assertEqual(5, beamtalk_primitive:send(Bin, size, [])),
+        %% The same bytes constructed as a String route as String.
+        Str = {beamtalk_string, <<"hello">>},
+        ?assertEqual('String', beamtalk_primitive:class_of(Str)),
+        ?assertEqual(5, beamtalk_primitive:send(Str, size, [])),
+        ?assertEqual(
+            {beamtalk_string, <<"h">>}, beamtalk_primitive:send(Str, 'at:', [1])
+        )
     end}.
 
 responds_to_shared_selector_on_non_utf8_binary_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         Bin = crypto:strong_rand_bytes(64),
         ?assert(beamtalk_primitive:responds_to(Bin, 'byteAt:')),
-        ?assert(beamtalk_primitive:responds_to(Bin, byteSize)),
-        ?assert(beamtalk_primitive:responds_to(Bin, 'part:size:'))
+        ?assert(beamtalk_primitive:responds_to(Bin, size)),
+        ?assert(beamtalk_primitive:responds_to(Bin, 'part:size:')),
+        %% BT-4173: byteSize is deleted — neither class answers it.
+        ?assertNot(beamtalk_primitive:responds_to(Bin, byteSize)),
+        ?assertNot(
+            beamtalk_primitive:responds_to({beamtalk_string, <<"hi">>}, byteSize)
+        )
     end}.
 
 send_non_shared_selector_still_classifies_correctly_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% `size`/`at:`/`do:` genuinely differ between String and Binary, so
-        %% these must still route by the real is_utf8/1 answer.
+        %% `size`/`at:` route by construction type: byte-level on a bare
+        %% binary, grapheme-level on a tagged String.
         NonUtf8 = <<255, 254, 253, 0, 200>>,
         ?assertEqual(5, beamtalk_primitive:send(NonUtf8, size, [])),
         ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'at:', [1])),
-        Utf8 = <<"café"/utf8>>,
-        ?assertEqual(4, beamtalk_primitive:send(Utf8, size, [])),
-        ?assertEqual(<<"c"/utf8>>, beamtalk_primitive:send(Utf8, 'at:', [1]))
+        %% Valid-UTF-8 bytes in a bare binary are still byte-level.
+        Utf8Bin = <<"café"/utf8>>,
+        ?assertEqual(5, beamtalk_primitive:send(Utf8Bin, size, [])),
+        %% First byte is `c` (99); é is the last char (bytes 195, 169).
+        ?assertEqual(99, beamtalk_primitive:send(Utf8Bin, 'at:', [1])),
+        ?assertEqual(195, beamtalk_primitive:send(Utf8Bin, 'at:', [4])),
+        %% The same bytes as a String are grapheme-level.
+        Utf8Str = {beamtalk_string, <<"café"/utf8>>},
+        ?assertEqual(4, beamtalk_primitive:send(Utf8Str, size, [])),
+        ?assertEqual(
+            {beamtalk_string, <<"c"/utf8>>},
+            beamtalk_primitive:send(Utf8Str, 'at:', [1])
+        )
     end}.
 
 send_string_only_selector_dnu_on_non_utf8_binary_test_() ->
@@ -117,12 +151,11 @@ send_string_only_selector_dnu_on_non_utf8_binary_test_() ->
     end}.
 
 %% ADR 0066: extending a sealed primitive (`String >> byteAt: => ...`) is
-%% legal today for any selector `string.bt` doesn't locally define — which
-%% includes every shared selector. `'bt@stdlib@string':dispatch/3` checks the
-%% extension registry *before* delegating to `'bt@stdlib@binary'`, so the
-%% fast path must not route a genuinely non-UTF-8 binary through it when a
-%% String extension shadows the selector — that would let String-only logic
-%% run against raw bytes `class_of/1` still reports as Binary.
+%% legal today for any selector `string.bt` doesn't locally define.
+%% `'bt@stdlib@string':dispatch/3` checks the extension registry *before*
+%% delegating to `'bt@stdlib@binary'`, so a bare binary must never route
+%% through it when a String extension shadows the selector — that would let
+%% String-only logic run against bytes `class_of/1` reports as Binary.
 send_shared_selector_with_string_extension_test_() ->
     {setup,
         fun() ->
@@ -132,15 +165,21 @@ send_shared_selector_with_string_extension_test_() ->
         end,
         fun(_) -> beamtalk_extensions:unregister('String', 'byteAt:') end, fun() ->
             %% A genuine Binary must still hit Binary's own byteAt: primitive
-            %% — the String extension must not fire for it.
+            %% — the String extension must not fire for it, even when the
+            %% bytes are valid UTF-8 (BT-4173: no sniffing).
             NonUtf8 = <<255, 254, 253, 0, 200>>,
             ?assertEqual('Binary', beamtalk_primitive:class_of(NonUtf8)),
             ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'byteAt:', [0])),
-            %% A genuine String (valid UTF-8) is correctly still subject to
+            Utf8Bin = <<"hello">>,
+            ?assertEqual('Binary', beamtalk_primitive:class_of(Utf8Bin)),
+            ?assertEqual(104, beamtalk_primitive:send(Utf8Bin, 'byteAt:', [0])),
+            %% A genuine (tagged) String is correctly still subject to
             %% the extension it was registered on.
-            Utf8 = <<"hello">>,
-            ?assertEqual('String', beamtalk_primitive:class_of(Utf8)),
-            ?assertEqual(string_extension_fired, beamtalk_primitive:send(Utf8, 'byteAt:', [0]))
+            Utf8Str = {beamtalk_string, <<"hello">>},
+            ?assertEqual('String', beamtalk_primitive:class_of(Utf8Str)),
+            ?assertEqual(
+                string_extension_fired, beamtalk_primitive:send(Utf8Str, 'byteAt:', [0])
+            )
         end}.
 
 class_of_boolean_test() ->
@@ -240,9 +279,19 @@ send_to_integer_test() ->
     ?assertEqual('Integer', beamtalk_primitive:send(42, 'class', [])).
 
 send_to_string_test() ->
-    %% String dispatch
-    ?assertEqual(<<"helloworld">>, beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])),
-    ?assertEqual('String', beamtalk_primitive:send(<<"hello">>, 'class', [])).
+    %% String dispatch (BT-4173: tagged receiver, tagged result)
+    Str = {beamtalk_string, <<"hello">>},
+    ?assertEqual(
+        {beamtalk_string, <<"helloworld">>},
+        beamtalk_primitive:send(Str, '++', [{beamtalk_string, <<"world">>}])
+    ),
+    ?assertEqual('String', beamtalk_primitive:send(Str, 'class', [])),
+    %% A bare binary is Binary: `++` is String-only, so it DNU.
+    ?assertError(
+        #{error := #beamtalk_error{kind = does_not_understand, class = 'Binary'}},
+        beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])
+    ),
+    ?assertEqual('Binary', beamtalk_primitive:send(<<"hello">>, 'class', [])).
 
 send_to_float_test() ->
     %% Float dispatch
@@ -305,11 +354,17 @@ responds_to_integer_test_() ->
 
 responds_to_string_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% String class
-        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, '++')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'length')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'class')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, 'unknownMethod'))
+        %% String class (BT-4173: tagged receiver)
+        Str = {beamtalk_string, <<"hello">>},
+        ?assertEqual(true, beamtalk_primitive:responds_to(Str, '++')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(Str, 'length')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(Str, 'class')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(Str, 'unknownMethod')),
+        %% A bare binary answers Binary's selectors, not String-only ones.
+        ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, '++')),
+        ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, 'length')),
+        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, size)),
+        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'class'))
     end}.
 
 responds_to_boolean_test_() ->
@@ -384,7 +439,9 @@ class_of_special_atoms_test() ->
     ?assertEqual('Symbol', beamtalk_primitive:class_of(error)).
 
 class_of_empty_collections_test() ->
-    ?assertEqual('String', beamtalk_primitive:class_of(<<>>)),
+    %% BT-4173: an empty bare binary is Binary; only the tagged term is String.
+    ?assertEqual('Binary', beamtalk_primitive:class_of(<<>>)),
+    ?assertEqual('String', beamtalk_primitive:class_of({beamtalk_string, <<>>})),
     ?assertEqual('List', beamtalk_primitive:class_of([])),
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{})),
     ?assertEqual('Tuple', beamtalk_primitive:class_of({})).
@@ -535,9 +592,11 @@ perform_on_string_test() ->
     %% Test perform: on string primitive
     %% "hello" perform: #'++' withArgs: [" world"]  => "hello" ++ " world"
     Result = 'bt@stdlib@string':dispatch(
-        'perform:withArguments:', ['++', [<<" world">>]], <<"hello">>
+        'perform:withArguments:',
+        ['++', [{beamtalk_string, <<" world">>}]],
+        {beamtalk_string, <<"hello">>}
     ),
-    ?assertEqual(<<"hello world">>, Result).
+    ?assertEqual({beamtalk_string, <<"hello world">>}, Result).
 
 perform_on_boolean_test() ->
     %% Test perform: on boolean primitive
@@ -1275,7 +1334,10 @@ send_symbol_equality_test_() ->
 
 send_symbol_print_string_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(<<"#hello">>, beamtalk_primitive:send(hello, 'printString', []))
+        ?assertEqual(
+            {beamtalk_string, <<"#hello">>},
+            beamtalk_primitive:send(hello, 'printString', [])
+        )
     end}.
 
 %%% ============================================================================
@@ -1370,6 +1432,19 @@ send_dnu_unknown_method_on_integer_test() ->
     ).
 
 send_dnu_unknown_method_on_string_test() ->
+    %% BT-4173: a bare binary DNU as Binary ...
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = does_not_understand,
+                class = 'Binary',
+                selector = 'nonExistentMethod'
+            }
+        },
+        beamtalk_primitive:send(<<"hello">>, 'nonExistentMethod', [])
+    ),
+    %% ... while a tagged String DNU as String.
     ?assertError(
         #{
             '$beamtalk_class' := _,
@@ -1379,7 +1454,7 @@ send_dnu_unknown_method_on_string_test() ->
                 selector = 'nonExistentMethod'
             }
         },
-        beamtalk_primitive:send(<<"hello">>, 'nonExistentMethod', [])
+        beamtalk_primitive:send({beamtalk_string, <<"hello">>}, 'nonExistentMethod', [])
     ).
 
 send_dnu_unknown_method_on_boolean_test_() ->

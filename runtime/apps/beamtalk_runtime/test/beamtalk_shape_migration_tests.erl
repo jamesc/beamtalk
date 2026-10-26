@@ -183,7 +183,7 @@ test_migrate_gap_step_then_single_reconcile() ->
             beamtalk_shape_migration:migrate('ShapeChainCart', 1, #{itemCount => 2}),
         ?assertEqual(3, ToVersion),
         ?assertEqual(20, maps:get(total, NewFields)),
-        ?assertEqual(<<"none">>, maps:get(tag, NewFields))
+        ?assertEqual({beamtalk_string, <<"none">>}, maps:get(tag, NewFields))
     end).
 
 test_migrate_downgrade_runs_reconcile_only() ->
@@ -197,7 +197,7 @@ test_migrate_downgrade_runs_reconcile_only() ->
         ?assertEqual(7, maps:get(itemCount, NewFields)),
         %% total/tag were never chained — reconcile defaults them.
         ?assertEqual(0, maps:get(total, NewFields)),
-        ?assertEqual(<<"none">>, maps:get(tag, NewFields))
+        ?assertEqual({beamtalk_string, <<"none">>}, maps:get(tag, NewFields))
     end).
 
 test_migrate_idempotent_when_current() ->
@@ -286,13 +286,13 @@ test_migrate_typed_late_field_absent_stays_absent() ->
     {ok, NewFields, ToVersion} = beamtalk_shape_migration:migrate('TypedLateSlotActor', 1, #{}),
     ?assertEqual(1, ToVersion),
     ?assertNot(maps:is_key(proc, NewFields)),
-    ?assertEqual(<<"unset">>, maps:get(label, NewFields)).
+    ?assertEqual({beamtalk_string, <<"unset">>}, maps:get(label, NewFields)).
 
 test_migrate_untyped_late_field_absent_stays_absent() ->
     {ok, NewFields, ToVersion} = beamtalk_shape_migration:migrate('UntypedLateSlotActor', 1, #{}),
     ?assertEqual(1, ToVersion),
     ?assertNot(maps:is_key(proc, NewFields)),
-    ?assertEqual(<<"unset">>, maps:get(label, NewFields)).
+    ?assertEqual({beamtalk_string, <<"unset">>}, maps:get(label, NewFields)).
 
 %% A `late` slot that *was* assigned before this migration ran is kept as-is
 %% — the "present -> kept" branch never even consults KindsMap.
@@ -301,7 +301,7 @@ test_migrate_late_field_present_is_kept() ->
         'TypedLateSlotActor', 1, #{proc => <<"/bin/bash">>}
     ),
     ?assertEqual(<<"/bin/bash">>, maps:get(proc, NewFields)),
-    ?assertEqual(<<"unset">>, maps:get(label, NewFields)).
+    ?assertEqual({beamtalk_string, <<"unset">>}, maps:get(label, NewFields)).
 
 %% Regression guard for the acceptance-criteria invariant: a declared-but-
 %% never-assigned `late` slot still shows up in `allFieldNames`/the keep
@@ -360,9 +360,14 @@ assert_late_reconcile_outcome(<<"kept">>, FieldName, Case, Result, Why) ->
     );
 assert_late_reconcile_outcome(<<"default">>, FieldName, Case, Result, Why) ->
     {ok, NewFields, _ToVersion} = Result,
-    ?assertEqual(
-        maps:get(<<"default_value">>, Case), maps:get(FieldName, NewFields), {Why, FieldName}
-    );
+    %% BT-4173: String defaults reconcile as tagged Strings; the shared
+    %% corpus still spells them as plain JSON strings.
+    Expected =
+        case maps:get(<<"default_value">>, Case) of
+            DefaultBin when is_binary(DefaultBin) -> {beamtalk_string, DefaultBin};
+            DefaultOther -> DefaultOther
+        end,
+    ?assertEqual(Expected, maps:get(FieldName, NewFields), {Why, FieldName});
 assert_late_reconcile_outcome(<<"nil">>, FieldName, _Case, Result, Why) ->
     {ok, NewFields, _ToVersion} = Result,
     ?assertEqual(nil, maps:get(FieldName, NewFields), {Why, FieldName});
@@ -400,7 +405,7 @@ test_migrate_warns_when_class_method_outside_shape_migrations_table() ->
             %% is a gap from the chain's point of view — reconcile defaults
             %% `tag`, it does not run the stray method.
             ?assertEqual(20, maps:get(total, NewFields)),
-            ?assertEqual(<<"none">>, maps:get(tag, NewFields)),
+            ?assertEqual({beamtalk_string, <<"none">>}, maps:get(tag, NewFields)),
             ?assert(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 5))
         end)
     after

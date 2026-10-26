@@ -855,7 +855,7 @@ make_temp_dir() ->
     Unique = lists:flatten(
         io_lib:format("repo_~p_~s", [erlang:unique_integer([positive]), os:getpid()])
     ),
-    Dir = filename:join(binary_to_list(beamtalk_file:'tempDirectory'()), Unique),
+    Dir = filename:join(binary_to_list(element(2, beamtalk_file:'tempDirectory'())), Unique),
     ok = filelib:ensure_dir(filename:join(Dir, "x")),
     Dir.
 

@@ -698,7 +698,7 @@ skip_test_ffi_with_atom_test() ->
     ?assertError(
         #{
             '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = bunit_skip, message = <<"unix_only">>}
+            error := #beamtalk_error{kind = bunit_skip, message = {beamtalk_string, <<"unix_only">>}}
         },
         beamtalk_test_case:skipTest(unix_only)
     ).

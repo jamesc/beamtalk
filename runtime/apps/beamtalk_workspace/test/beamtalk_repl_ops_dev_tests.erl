@@ -184,14 +184,14 @@ make_class_not_found_error_atom_test() ->
     Err = beamtalk_repl_ops_dev:make_class_not_found_error('NoSuchClass'),
     ?assertEqual(class_not_found, Err#beamtalk_error.kind),
     ?assertEqual('REPL', Err#beamtalk_error.class),
-    ?assert(is_binary(Err#beamtalk_error.message)),
-    ?assert(binary:match(Err#beamtalk_error.message, <<"NoSuchClass">>) =/= nomatch).
+    ?assertMatch({beamtalk_string, _}, Err#beamtalk_error.message),
+    ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"NoSuchClass">>) =/= nomatch).
 
 make_class_not_found_error_binary_test() ->
     Err = beamtalk_repl_ops_dev:make_class_not_found_error(<<"UnknownBin">>),
     ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-    ?assert(binary:match(Err#beamtalk_error.message, <<"UnknownBin">>) =/= nomatch),
-    ?assert(is_binary(Err#beamtalk_error.hint)).
+    ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"UnknownBin">>) =/= nomatch),
+    ?assertMatch({beamtalk_string, _}, Err#beamtalk_error.hint).
 
 %%====================================================================
 %% list_class_methods_for_ws/1 -- unknown class

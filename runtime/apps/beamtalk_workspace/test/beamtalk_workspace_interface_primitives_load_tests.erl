@@ -582,4 +582,4 @@ restore_home(false) -> os:unsetenv("HOME");
 restore_home(OldHome) -> os:putenv("HOME", OldHome).
 
 temp_dir() ->
-    unicode:characters_to_list(beamtalk_file:'tempDirectory'()).
+    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).

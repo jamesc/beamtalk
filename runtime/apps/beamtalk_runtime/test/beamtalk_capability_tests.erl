@@ -153,7 +153,7 @@ run_mode_no_compiler_refusal_shape_test() ->
     ?assertEqual(run_mode_no_compiler, Err#beamtalk_error.kind),
     ?assertEqual('Workspace', Err#beamtalk_error.class),
     ?assertMatch(
-        {0, _}, binary:match(Err#beamtalk_error.message, <<"Workspace load: cannot be compiled.">>)
+        {0, _}, binary:match(element(2, Err#beamtalk_error.message), <<"Workspace load: cannot be compiled.">>)
     ),
     ?assertEqual(#{mode => run, operation => 'load:'}, Err#beamtalk_error.details).
 
@@ -167,11 +167,11 @@ compiler_refusal_names_mode_and_alternative_test() ->
     ?assertEqual('Counter', Err#beamtalk_error.class),
     Message = Err#beamtalk_error.message,
     Hint = Err#beamtalk_error.hint,
-    ?assertMatch({0, _}, binary:match(Message, <<"Counter >> increment cannot be compiled.">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"running an OTP release">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"ships no compiler and no">>)),
-    ?assertNotEqual(nomatch, binary:match(Hint, <<"`beamtalk release`, and deploy">>)),
-    ?assertNotEqual(nomatch, binary:match(Hint, <<"[release] include-compiler = true">>)),
+    ?assertMatch({0, _}, binary:match(element(2, Message), <<"Counter >> increment cannot be compiled.">>)),
+    ?assertNotEqual(nomatch, binary:match(element(2, Message), <<"running an OTP release">>)),
+    ?assertNotEqual(nomatch, binary:match(element(2, Message), <<"ships no compiler and no">>)),
+    ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"`beamtalk release`, and deploy">>)),
+    ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"[release] include-compiler = true">>)),
     ?assertEqual(
         #{mode => release, operation => 'compile:source:'}, Err#beamtalk_error.details
     ).
@@ -183,12 +183,12 @@ workspace_refusal_names_mode_and_alternative_test() ->
     ?assertEqual(release_mode_no_workspace, Err#beamtalk_error.kind),
     Message = Err#beamtalk_error.message,
     Hint = Err#beamtalk_error.hint,
-    ?assertMatch({0, _}, binary:match(Message, <<"Workspace flush cannot change the workspace.">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"running an OTP release">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"no working tree">>)),
-    ?assertNotEqual(nomatch, binary:match(Hint, <<"`beamtalk release`, and deploy">>)),
+    ?assertMatch({0, _}, binary:match(element(2, Message), <<"Workspace flush cannot change the workspace.">>)),
+    ?assertNotEqual(nomatch, binary:match(element(2, Message), <<"running an OTP release">>)),
+    ?assertNotEqual(nomatch, binary:match(element(2, Message), <<"no working tree">>)),
+    ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"`beamtalk release`, and deploy">>)),
     %% Names why include-compiler is not the alternative here.
-    ?assertNotEqual(nomatch, binary:match(Hint, <<"does not re-enable workspace">>)).
+    ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"does not re-enable workspace">>)).
 
 protocol_op_default_subject_test() ->
     with_capabilities(?RELEASE, fun() ->
@@ -197,7 +197,8 @@ protocol_op_default_subject_test() ->
         ?assertMatch(
             {0, _},
             binary:match(
-                Err#beamtalk_error.message, <<"The 'load-source' operation cannot be compiled.">>
+                element(2, Err#beamtalk_error.message),
+                <<"The 'load-source' operation cannot be compiled.">>
             )
         )
     end).
@@ -208,7 +209,7 @@ lazy_subject_only_evaluated_on_refusal_test() ->
     {error, Err} = beamtalk_capability:check(
         reload, 'Counter', fun() -> <<"Counter reload">> end, ?RELEASE
     ),
-    ?assertMatch({0, _}, binary:match(Err#beamtalk_error.message, <<"Counter reload">>)).
+    ?assertMatch({0, _}, binary:match(element(2, Err#beamtalk_error.message), <<"Counter reload">>)).
 
 %%% Node capabilities
 
@@ -240,14 +241,14 @@ require_workspace_raises_when_never_recorded_test() ->
                 #beamtalk_error{kind = no_workspace, class = 'Workspace', selector = 'load:'}, Err
             ),
             ?assertEqual(
-                <<"Workspace>>load: needs a running workspace; none is running on this node">>,
+                {beamtalk_string, <<"Workspace>>load: needs a running workspace; none is running on this node">>},
                 Err#beamtalk_error.message
             ),
             ?assertNotEqual(
-                nomatch, binary:match(Err#beamtalk_error.hint, <<"not under beamtalk test">>)
+                nomatch, binary:match(element(2, Err#beamtalk_error.hint), <<"not under beamtalk test">>)
             ),
             ?assertNotEqual(
-                nomatch, binary:match(Err#beamtalk_error.hint, <<"Beamtalk classNamed:">>)
+                nomatch, binary:match(element(2, Err#beamtalk_error.hint), <<"Beamtalk classNamed:">>)
             )
     end.
 

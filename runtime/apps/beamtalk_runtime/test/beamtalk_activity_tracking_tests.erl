@@ -21,7 +21,7 @@ their respective test modules.
 %%====================================================================
 
 test_project_path() ->
-    iolist_to_binary([beamtalk_file:'tempDirectory'(), "/bt-activity-test"]).
+    iolist_to_binary([element(2, beamtalk_file:'tempDirectory'()), "/bt-activity-test"]).
 
 %% Stop any pre-existing beamtalk_workspace_meta process to ensure
 %% a clean slate for each test.

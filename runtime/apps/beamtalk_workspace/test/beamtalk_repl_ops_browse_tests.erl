@@ -2342,7 +2342,7 @@ stop_meta(Pid) when is_pid(Pid) ->
 make_project_dir(Pkg) ->
     Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
     Dir = filename:join(
-        beamtalk_file:'tempDirectory'(), "bt2640_proj_" ++ Uniq
+        element(2, beamtalk_file:'tempDirectory'()), "bt2640_proj_" ++ Uniq
     ),
     ok = filelib:ensure_dir(filename:join(Dir, "x")),
     Toml = <<"[package]\nname = \"", Pkg/binary, "\"\n">>,

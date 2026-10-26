@@ -150,7 +150,7 @@ teardown(_) ->
     end,
     ok.
 
-temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
+temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 widget_class_object() ->
     beamtalk_class_registry:class_object_from_pid(

@@ -160,7 +160,7 @@ ffi_shim_listDirectory_test() ->
         R = beamtalk_file:listDirectory(<<"_bt_shim_listdir">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Entries} = R,
-        ?assertEqual([<<"x.txt">>], Entries)
+        ?assertEqual([{beamtalk_string, <<"x.txt">>}], Entries)
     end).
 
 ffi_shim_rename_test() ->
@@ -182,7 +182,7 @@ ffi_shim_absolutePath_test() ->
     R = beamtalk_file:absolutePath(<<"some/path">>),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     #{'okValue' := AbsPath} = R,
-    ?assert(is_binary(AbsPath)).
+    ?assertMatch({beamtalk_string, _}, AbsPath).
 
 %%% ============================================================================
 %%% handle_has_method/1
@@ -216,7 +216,7 @@ exists_atom_returns_false_test() ->
     ?assertNot(beamtalk_file:'exists:'(foo)).
 
 exists_tmp_directory_via_tempDirectory_test() ->
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     %% tempDirectory returns a real directory, but exists: checks regular files
     ?assertNot(beamtalk_file:'exists:'(TmpDir)).
 
@@ -227,7 +227,7 @@ exists_tmp_directory_via_tempDirectory_test() ->
 readAll_success_test() ->
     with_temp_file("_bt_test_read.txt", <<"hello">>, fun() ->
         ?assertMatch(
-            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := <<"hello">>},
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, <<"hello">>}},
             beamtalk_file:'readAll:'(<<"_bt_test_read.txt">>)
         )
     end).
@@ -277,7 +277,7 @@ readAll_absolute_path_test() ->
             R = beamtalk_file:'readAll:'(<<"/etc/hostname">>),
             %% May succeed or fail (file_not_found) depending on OS, but never invalid_path
             case R of
-                #{'isOk' := true, 'okValue' := V} -> ?assert(is_binary(V));
+                #{'isOk' := true, 'okValue' := V} -> ?assertMatch({beamtalk_string, _}, V);
                 #{'isOk' := false} -> ok
             end;
         _ ->
@@ -387,7 +387,7 @@ writeAll_type_error_non_string_contents_test() ->
 
 writeAll_absolute_path_via_temp_test() ->
     %% Write and read back a file using an absolute path in the temp directory
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     TmpFile = <<TmpDir/binary, "/_bt_eunit_abs_write.txt">>,
     try
         ?assertMatch(
@@ -395,7 +395,7 @@ writeAll_absolute_path_via_temp_test() ->
             beamtalk_file:'writeAll:contents:'(TmpFile, <<"abs-path-data">>)
         ),
         ?assertMatch(
-            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := <<"abs-path-data">>},
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, <<"abs-path-data">>}},
             beamtalk_file:'readAll:'(TmpFile)
         )
     after
@@ -705,7 +705,7 @@ lines_success_test() ->
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
-        ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Result)
+        ?assertEqual([{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}], Result)
     end).
 
 lines_file_not_found_test() ->
@@ -748,7 +748,7 @@ lines_no_trailing_newline_test() ->
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
-        ?assertEqual([<<"first">>, <<"second">>], Result)
+        ?assertEqual([{beamtalk_string, <<"first">>}, {beamtalk_string, <<"second">>}], Result)
     end).
 
 lines_windows_crlf_test() ->
@@ -757,7 +757,7 @@ lines_windows_crlf_test() ->
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
-        ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Result)
+        ?assertEqual([{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}], Result)
     end).
 
 lines_single_line_test() ->
@@ -766,7 +766,7 @@ lines_single_line_test() ->
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
-        ?assertEqual([<<"only">>], Result)
+        ?assertEqual([{beamtalk_string, <<"only">>}], Result)
     end).
 
 %%% ============================================================================
@@ -783,7 +783,7 @@ open_do_success_test() ->
             #{
                 '$beamtalk_class' := 'Result',
                 'isOk' := true,
-                'okValue' := [<<"line1">>, <<"line2">>]
+                'okValue' := [{beamtalk_string, <<"line1">>}, {beamtalk_string, <<"line2">>}]
             },
             R
         )
@@ -924,7 +924,7 @@ isDirectory_on_missing_path_test() ->
     ?assertNot(beamtalk_file:'isDirectory:'(<<"_bt_eunit_no_such_dir_xyz">>)).
 
 isDirectory_absolute_path_test() ->
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     ?assert(beamtalk_file:'isDirectory:'(TmpDir)).
 
 isDirectory_type_error_returns_false_test() ->
@@ -948,7 +948,7 @@ isFile_on_missing_path_test() ->
     ?assertNot(beamtalk_file:'isFile:'(<<"_bt_eunit_no_such_file_xyz.txt">>)).
 
 isFile_absolute_path_test() ->
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     ?assertNot(beamtalk_file:'isFile:'(TmpDir)).
 
 isFile_type_error_returns_false_test() ->
@@ -1068,7 +1068,7 @@ listDirectory_success_test() ->
         R = beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Entries} = R,
-        ?assertEqual([<<"a.txt">>, <<"b.txt">>], lists:sort(Entries))
+        ?assertEqual([{beamtalk_string, <<"a.txt">>}, {beamtalk_string, <<"b.txt">>}], lists:sort(Entries))
     end).
 
 listDirectory_empty_dir_test() ->
@@ -1320,17 +1320,17 @@ absolutePath_success_test() ->
     R = beamtalk_file:'absolutePath:'(Input),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     #{'okValue' := Result} = R,
-    ?assert(is_binary(Result)),
+    ?assertMatch({beamtalk_string, _}, Result),
     %% Absolute path is strictly longer than the relative input
-    ?assert(byte_size(Result) > byte_size(Input)),
+    ?assert(byte_size(element(2, Result)) > byte_size(Input)),
     %% Must contain the original relative component
-    ?assertNotEqual(nomatch, binary:match(Result, Input)).
+    ?assertNotEqual(nomatch, binary:match(element(2, Result), Input)).
 
 absolutePath_absolute_input_test() ->
     %% absolutePath: on an already-absolute path returns it unchanged
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     R = beamtalk_file:'absolutePath:'(TmpDir),
-    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := TmpDir}, R).
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, TmpDir}}, R).
 
 absolutePath_type_error_test() ->
     ?assertError(
@@ -1408,13 +1408,13 @@ ffi_shim_lastModified_test() ->
 %%% ============================================================================
 
 cwd_returns_binary_test() ->
-    ?assert(is_binary(beamtalk_file:'cwd'())).
+    ?assertMatch({beamtalk_string, _}, beamtalk_file:'cwd'()).
 
 cwd_non_empty_test() ->
-    ?assert(byte_size(beamtalk_file:'cwd'()) > 0).
+    ?assert(byte_size(element(2, beamtalk_file:'cwd'())) > 0).
 
 cwd_is_absolute_test() ->
-    Cwd = beamtalk_file:'cwd'(),
+    {beamtalk_string, Cwd} = beamtalk_file:'cwd'(),
     %% On Unix the cwd starts with /; on Windows it starts with a drive letter
     IsAbsolute =
         case Cwd of
@@ -1429,20 +1429,20 @@ cwd_matches_erlang_get_cwd_test() ->
     %% Verify beamtalk_file:'cwd'() returns the same value as file:get_cwd/0
     {ok, CwdList} = file:get_cwd(),
     CwdBin = unicode:characters_to_binary(CwdList),
-    ?assertEqual(CwdBin, beamtalk_file:'cwd'()).
+    ?assertEqual({beamtalk_string, CwdBin}, beamtalk_file:'cwd'()).
 
 %%% ============================================================================
 %%% tempDirectory/0
 %%% ============================================================================
 
 tempDirectory_returns_binary_test() ->
-    ?assert(is_binary(beamtalk_file:'tempDirectory'())).
+    ?assertMatch({beamtalk_string, _}, beamtalk_file:'tempDirectory'()).
 
 tempDirectory_non_empty_test() ->
-    ?assert(byte_size(beamtalk_file:'tempDirectory'()) > 0).
+    ?assert(byte_size(element(2, beamtalk_file:'tempDirectory'())) > 0).
 
 tempDirectory_is_a_directory_test() ->
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     ?assert(beamtalk_file:'isDirectory:'(TmpDir)).
 
 %%% ============================================================================
@@ -1452,7 +1452,7 @@ tempDirectory_is_a_directory_test() ->
 readAll_empty_file_test() ->
     with_temp_file("_bt_test_read_empty.txt", <<>>, fun() ->
         ?assertMatch(
-            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := <<>>},
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, <<>>}},
             beamtalk_file:'readAll:'(<<"_bt_test_read_empty.txt">>)
         )
     end).
@@ -1704,7 +1704,7 @@ listDirectory_includes_subdirectories_test() ->
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Entries} = R,
         Sorted = lists:sort(Entries),
-        ?assertEqual([<<"file.txt">>, <<"subdir">>], Sorted)
+        ?assertEqual([{beamtalk_string, <<"file.txt">>}, {beamtalk_string, <<"subdir">>}], Sorted)
     end).
 
 %%% ============================================================================
@@ -1865,8 +1865,8 @@ lines_large_file_test() ->
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
         ?assertEqual(1000, length(Result)),
-        ?assertEqual(<<"1">>, hd(Result)),
-        ?assertEqual(<<"1000">>, lists:last(Result))
+        ?assertEqual({beamtalk_string, <<"1">>}, hd(Result)),
+        ?assertEqual({beamtalk_string, <<"1000">>}, lists:last(Result))
     end).
 
 %%% ============================================================================
@@ -1879,14 +1879,14 @@ absolutePath_dot_relative_test() ->
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     #{'okValue' := AbsPath} = R,
     Cwd = beamtalk_file:'cwd'(),
-    ?assertNotEqual(nomatch, binary:match(AbsPath, Cwd)).
+    ?assertNotEqual(nomatch, binary:match(element(2, AbsPath), element(2, Cwd))).
 
 absolutePath_empty_string_test() ->
     %% Empty string should resolve to cwd
     R = beamtalk_file:'absolutePath:'(<<>>),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     #{'okValue' := AbsPath} = R,
-    ?assert(byte_size(AbsPath) > 0).
+    ?assert(byte_size(element(2, AbsPath)) > 0).
 
 %%% ============================================================================
 %%% FFI shim: handleLines
@@ -1902,7 +1902,7 @@ ffi_shim_handleLines_test() ->
             #{
                 '$beamtalk_class' := 'Result',
                 'isOk' := true,
-                'okValue' := [<<"a">>, <<"b">>]
+                'okValue' := [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}]
             },
             R
         )
@@ -2001,7 +2001,7 @@ readAll_writeAll_unicode_roundtrip_test() ->
             beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), Content)
         ),
         ?assertMatch(
-            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Content},
+            #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, Content}},
             beamtalk_file:'readAll:'(list_to_binary(FileName))
         )
     after
@@ -2025,7 +2025,7 @@ open_do_handle_lines_success_test() ->
             #{
                 '$beamtalk_class' := 'Result',
                 'isOk' := true,
-                'okValue' := [<<"x">>, <<"y">>, <<"z">>]
+                'okValue' := [{beamtalk_string, <<"x">>}, {beamtalk_string, <<"y">>}, {beamtalk_string, <<"z">>}]
             },
             R
         )
@@ -2270,7 +2270,7 @@ lines_empty_trailing_newline_only_test() ->
         #{okValue := Stream} = R,
         Lines = beamtalk_stream:as_list(Stream),
         %% Expect a single empty line
-        ?assertEqual([<<>>], Lines)
+        ?assertEqual([{beamtalk_string, <<>>}], Lines)
     end).
 
 lines_bare_cr_in_middle_test() ->
@@ -2279,7 +2279,7 @@ lines_bare_cr_in_middle_test() ->
         R = beamtalk_file:'lines:'(<<"_bt_eunit_lines_bare_cr.txt">>),
         #{okValue := Stream} = R,
         Lines = beamtalk_stream:as_list(Stream),
-        ?assertEqual([<<"ab\rcd">>, <<"ef">>], Lines)
+        ?assertEqual([{beamtalk_string, <<"ab\rcd">>}, {beamtalk_string, <<"ef">>}], Lines)
     end).
 
 %%% ----------------------------------------------------------------------------
@@ -2291,7 +2291,7 @@ temp_directory_respects_TMPDIR_test() ->
     OrigTmpdir = os:getenv("TMPDIR"),
     try
         os:putenv("TMPDIR", "/custom/tmp/path"),
-        ?assertEqual(<<"/custom/tmp/path">>, beamtalk_file:'tempDirectory'())
+        ?assertEqual({beamtalk_string, <<"/custom/tmp/path">>}, beamtalk_file:'tempDirectory'())
     after
         case OrigTmpdir of
             false -> os:unsetenv("TMPDIR");
@@ -2310,7 +2310,7 @@ temp_directory_strips_trailing_slash_test() ->
     OrigTmpdir = os:getenv("TMPDIR"),
     try
         os:putenv("TMPDIR", "/custom/tmp/path/"),
-        ?assertEqual(<<"/custom/tmp/path">>, beamtalk_file:'tempDirectory'())
+        ?assertEqual({beamtalk_string, <<"/custom/tmp/path">>}, beamtalk_file:'tempDirectory'())
     after
         case OrigTmpdir of
             false -> os:unsetenv("TMPDIR");
@@ -2325,7 +2325,7 @@ temp_directory_preserves_unix_root_test() ->
     OrigTmpdir = os:getenv("TMPDIR"),
     try
         os:putenv("TMPDIR", "/"),
-        ?assertEqual(<<"/">>, beamtalk_file:'tempDirectory'())
+        ?assertEqual({beamtalk_string, <<"/">>}, beamtalk_file:'tempDirectory'())
     after
         case OrigTmpdir of
             false -> os:unsetenv("TMPDIR");
@@ -2341,7 +2341,7 @@ temp_directory_preserves_windows_drive_root_test() ->
     OrigTmpdir = os:getenv("TMPDIR"),
     try
         os:putenv("TMPDIR", "C:\\"),
-        ?assertEqual(<<"C:\\">>, beamtalk_file:'tempDirectory'())
+        ?assertEqual({beamtalk_string, <<"C:\\">>}, beamtalk_file:'tempDirectory'())
     after
         case OrigTmpdir of
             false -> os:unsetenv("TMPDIR");
@@ -2356,7 +2356,7 @@ temp_directory_falls_back_to_TMP_test() ->
     try
         os:unsetenv("TMPDIR"),
         os:putenv("TMP", "/tmp-fallback"),
-        ?assertEqual(<<"/tmp-fallback">>, beamtalk_file:'tempDirectory'())
+        ?assertEqual({beamtalk_string, <<"/tmp-fallback">>}, beamtalk_file:'tempDirectory'())
     after
         case OrigTmp of
             false -> os:unsetenv("TMP");
@@ -2377,7 +2377,7 @@ temp_directory_falls_back_to_TEMP_test() ->
         os:unsetenv("TMPDIR"),
         os:unsetenv("TMP"),
         os:putenv("TEMP", "/temp-fallback"),
-        ?assertEqual(<<"/temp-fallback">>, beamtalk_file:'tempDirectory'())
+        ?assertEqual({beamtalk_string, <<"/temp-fallback">>}, beamtalk_file:'tempDirectory'())
     after
         case OrigTemp of
             false -> os:unsetenv("TEMP");
@@ -2403,7 +2403,7 @@ temp_directory_platform_default_test() ->
         os:unsetenv("TMPDIR"),
         os:unsetenv("TMP"),
         os:unsetenv("TEMP"),
-        Result = beamtalk_file:'tempDirectory'(),
+        {beamtalk_string, Result} = beamtalk_file:'tempDirectory'(),
         ?assert(is_binary(Result)),
         ?assert(byte_size(Result) > 0)
     after
@@ -2641,7 +2641,7 @@ open_mode_rejects_directory_test() ->
                         kind = io_error,
                         class = 'File',
                         selector = 'open:mode:',
-                        message = <<"FileHandle path is not a regular file">>
+                        message = {beamtalk_string, <<"FileHandle path is not a regular file">>}
                     }
                 }
             },

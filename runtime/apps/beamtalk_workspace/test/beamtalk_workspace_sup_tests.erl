@@ -23,7 +23,7 @@ Tests workspace supervisor behavior, child specifications, and startup.
 %%% Test helpers
 
 test_project_path() ->
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     <<TmpDir/binary, "/bt-sup-test">>.
 
 test_config() ->

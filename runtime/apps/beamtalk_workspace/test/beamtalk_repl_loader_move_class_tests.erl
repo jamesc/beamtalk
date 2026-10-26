@@ -44,7 +44,7 @@ gadget_source() ->
 %% Integration fixture: real compiler port + workspace_meta, real files
 %%====================================================================
 
-temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
+temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 setup() ->
     application:ensure_all_started(compiler),

@@ -46,7 +46,7 @@ release_dir_and_vsn_is_not_a_release_without_boot_var_test() ->
 %%====================================================================
 
 read_provenance_decodes_and_atomizes_keys_test() ->
-    TmpDir = binary_to_list(beamtalk_file:'tempDirectory'()),
+    TmpDir = binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
     ReleaseRoot = filename:join(TmpDir, "bt_release_tests_provenance"),
     ReleasesDir = filename:join([ReleaseRoot, "releases", "1.4.0"]),
     ok = filelib:ensure_dir(filename:join(ReleasesDir, "beamtalk-provenance.json")),
@@ -71,12 +71,12 @@ read_provenance_decodes_and_atomizes_keys_test() ->
     end.
 
 read_provenance_missing_file_is_release_nil_test() ->
-    TmpDir = binary_to_list(beamtalk_file:'tempDirectory'()),
+    TmpDir = binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Dir = filename:join(TmpDir, "bt_release_tests_missing"),
     ?assertEqual(#{release => nil}, beamtalk_release:read_provenance(Dir, "9.9.9")).
 
 read_provenance_malformed_json_is_release_nil_test() ->
-    TmpDir = binary_to_list(beamtalk_file:'tempDirectory'()),
+    TmpDir = binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
     ReleaseRoot = filename:join(TmpDir, "bt_release_tests_malformed"),
     ReleasesDir = filename:join([ReleaseRoot, "releases", "1.0.0"]),
     ok = filelib:ensure_dir(filename:join(ReleasesDir, "beamtalk-provenance.json")),

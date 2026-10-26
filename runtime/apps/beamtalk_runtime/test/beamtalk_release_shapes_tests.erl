@@ -124,7 +124,7 @@ class_field_shape_returns_flattened_fields_for_registered_subclass_test() ->
 
 write_shapes_json_writes_a_parseable_manifest_test() ->
     Dir = fixtures_dir(),
-    TmpDir = beamtalk_file:'tempDirectory'(),
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     OutPath = filename:join(
         TmpDir, "beamtalk_release_shapes_tests_shapes.json"
     ),
