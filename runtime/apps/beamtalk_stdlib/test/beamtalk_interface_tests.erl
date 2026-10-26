@@ -237,8 +237,8 @@ ffi_sites_in_rejects_bad_args_test() ->
 %%% takes the <<"unknown">> fallback. Either way it must return a binary.
 %%% ============================================================================
 
-version_returns_binary_test() ->
-    ?assert(is_binary(beamtalk_interface:version())).
+version_returns_string_test() ->
+    ?assertMatch({beamtalk_string, _}, beamtalk_interface:version()).
 
 version_matches_app_vsn_when_loaded_test() ->
     %% Load (not start) the runtime app so application:get_key/2 returns {ok, Vsn},
@@ -246,20 +246,20 @@ version_matches_app_vsn_when_loaded_test() ->
     _ = application:load(beamtalk_runtime),
     Result = beamtalk_interface:version(),
     case application:get_key(beamtalk_runtime, vsn) of
-        {ok, Vsn} -> ?assertEqual(list_to_binary(Vsn), Result);
-        _ -> ?assertEqual(<<"unknown">>, Result)
+        {ok, Vsn} -> ?assertEqual({beamtalk_string, list_to_binary(Vsn)}, Result);
+        _ -> ?assertEqual({beamtalk_string, <<"unknown">>}, Result)
     end.
 
 dispatch_version_matches_app_vsn_when_loaded_test() ->
     _ = application:load(beamtalk_runtime),
     Result = beamtalk_interface:dispatch(version, [], fake_self()),
     case application:get_key(beamtalk_runtime, vsn) of
-        {ok, Vsn} -> ?assertEqual(list_to_binary(Vsn), Result);
-        _ -> ?assertEqual(<<"unknown">>, Result)
+        {ok, Vsn} -> ?assertEqual({beamtalk_string, list_to_binary(Vsn)}, Result);
+        _ -> ?assertEqual({beamtalk_string, <<"unknown">>}, Result)
     end.
 
-dispatch_version_returns_binary_test() ->
-    ?assert(is_binary(beamtalk_interface:dispatch(version, [], fake_self()))).
+dispatch_version_returns_string_test() ->
+    ?assertMatch({beamtalk_string, _}, beamtalk_interface:dispatch(version, [], fake_self())).
 
 dispatch_unknown_selector_raises_dnu_test() ->
     ?assertError(
@@ -395,13 +395,11 @@ live_registry_test_() ->
                 )
             end},
             {"help: on a known class returns its formatted help", fun() ->
-                H = beamtalk_interface:help('Integer'),
-                ?assert(is_binary(H)),
+                {beamtalk_string, H} = beamtalk_interface:help('Integer'),
                 ?assertNotEqual(nomatch, binary:match(H, <<"Integer">>))
             end},
             {"help: by binary class name works", fun() ->
-                H = beamtalk_interface:help(<<"Integer">>),
-                ?assert(is_binary(H))
+                {beamtalk_string, H} = beamtalk_interface:help(<<"Integer">>)
             end},
             {"help: unknown class raises class_not_found", fun() ->
                 ?assertError(
@@ -410,14 +408,12 @@ live_registry_test_() ->
                 )
             end},
             {"help:selector: on an own method returns its signature", fun() ->
-                H = beamtalk_interface:help('Integer', '+'),
-                ?assert(is_binary(H)),
+                {beamtalk_string, H} = beamtalk_interface:help('Integer', '+'),
                 ?assertNotEqual(nomatch, binary:match(H, <<"Integer">>)),
                 ?assertNotEqual(nomatch, binary:match(H, <<"+">>))
             end},
             {"help:selector: with a binary selector works", fun() ->
-                H = beamtalk_interface:help('Integer', <<"+">>),
-                ?assert(is_binary(H))
+                {beamtalk_string, H} = beamtalk_interface:help('Integer', <<"+">>)
             end},
             {"help:selector: unknown selector raises does_not_understand", fun() ->
                 ?assertError(
@@ -432,8 +428,7 @@ live_registry_test_() ->
                 )
             end},
             {"help:selector: on Metaclass new returns metaclass doc", fun() ->
-                H = beamtalk_interface:help('Metaclass', new),
-                ?assert(is_binary(H)),
+                {beamtalk_string, H} = beamtalk_interface:help('Metaclass', new),
                 ?assertNotEqual(nomatch, binary:match(H, <<"Metaclass">>))
             end},
             {"help:selector: on Metaclass unknown selector raises dnu", fun() ->
@@ -443,21 +438,24 @@ live_registry_test_() ->
                 )
             end},
             {"dispatch help: routes to handle_help", fun() ->
-                H = beamtalk_interface:dispatch('help:', ['Integer'], fake_self()),
-                ?assert(is_binary(H))
+                {beamtalk_string, H} = beamtalk_interface:dispatch(
+                    'help:', ['Integer'], fake_self()
+                )
             end},
             {"dispatch help:selector: routes to handle_help_selector", fun() ->
-                H = beamtalk_interface:dispatch(
+                {beamtalk_string, H} = beamtalk_interface:dispatch(
                     'help:selector:', ['Integer', '+'], fake_self()
-                ),
-                ?assert(is_binary(H))
+                )
             end},
             {"dispatch erlangHelp: routes through", fun() ->
-                H = beamtalk_interface:dispatch('erlangHelp:', [<<"lists">>], fake_self()),
-                ?assert(is_binary(H))
+                {beamtalk_string, H} = beamtalk_interface:dispatch(
+                    'erlangHelp:', [<<"lists">>], fake_self()
+                )
             end},
             {"erlangHelp: on a known module returns docs", fun() ->
-                ?assert(is_binary(beamtalk_interface:erlangHelp(<<"lists">>)))
+                ?assertMatch(
+                    {beamtalk_string, _}, beamtalk_interface:erlangHelp(<<"lists">>)
+                )
             end},
             {"erlangHelp: unknown module raises not_found", fun() ->
                 ?assertError(
@@ -472,10 +470,16 @@ live_registry_test_() ->
                 )
             end},
             {"erlangHelp:selector: on a known function returns docs", fun() ->
-                ?assert(is_binary(beamtalk_interface:erlangHelp(<<"lists">>, <<"reverse">>)))
+                ?assertMatch(
+                    {beamtalk_string, _},
+                    beamtalk_interface:erlangHelp(<<"lists">>, <<"reverse">>)
+                )
             end},
             {"erlangHelp:selector: with an atom selector works", fun() ->
-                ?assert(is_binary(beamtalk_interface:erlangHelp(<<"lists">>, reverse)))
+                ?assertMatch(
+                    {beamtalk_string, _},
+                    beamtalk_interface:erlangHelp(<<"lists">>, reverse)
+                )
             end},
             {"erlangHelp:selector: unknown function raises not_found", fun() ->
                 ?assertError(
@@ -511,31 +515,28 @@ live_registry_test_() ->
                 )
             end},
             {"dispatch erlangHelp:selector: routes through", fun() ->
-                R = beamtalk_interface:dispatch(
+                {beamtalk_string, R} = beamtalk_interface:dispatch(
                     'erlangHelp:selector:', [<<"lists">>, <<"reverse">>], fake_self()
-                ),
-                ?assert(is_binary(R))
+                )
             end},
             {"help: on the root class renders a header without '<'", fun() ->
                 %% ProtoObject is the hierarchy root (superclass none) — exercises
                 %% the header branch that omits the '< Super' part
                 %% (format_class_help line 991).
-                H = beamtalk_interface:help('ProtoObject'),
-                ?assert(is_binary(H)),
+                {beamtalk_string, H} = beamtalk_interface:help('ProtoObject'),
                 ?assertNotEqual(nomatch, binary:match(H, <<"== ProtoObject ==">>))
             end},
             {"help: on a subclass lists inherited methods", fun() ->
                 %% Integer < Number < Object: the help output groups inherited
                 %% methods by their defining class (collect_flattened_methods +
                 %% group_by_class + InheritedParts).
-                H = beamtalk_interface:help('Integer'),
+                {beamtalk_string, H} = beamtalk_interface:help('Integer'),
                 ?assertNotEqual(nomatch, binary:match(H, <<"Inherited from">>))
             end},
             {"help:selector: on an inherited method notes inheritance", fun() ->
                 %% asString is defined on Object; asking Integer about it walks
                 %% find_defining_class and emits an "(inherited from ...)" note.
-                H = beamtalk_interface:help('Integer', asString),
-                ?assert(is_binary(H))
+                {beamtalk_string, H} = beamtalk_interface:help('Integer', asString)
             end},
             {"findClass non-class binary returns nil", fun() ->
                 %% A binary that is not a class name and not a metaclass tag.
@@ -545,8 +546,7 @@ live_registry_test_() ->
                 %% Passing the class object itself exercises the
                 %% resolve_class_name(#beamtalk_object{pid=...}) clause.
                 ClassObj = beamtalk_interface:classNamed('Integer'),
-                H = beamtalk_interface:help(ClassObj),
-                ?assert(is_binary(H))
+                {beamtalk_string, H} = beamtalk_interface:help(ClassObj)
             end},
             {"help: with a non-class argument raises type_error", fun() ->
                 ?assertError(
@@ -556,14 +556,12 @@ live_registry_test_() ->
             end},
             {"help: on an abstract class shows the [abstract] modifier", fun() ->
                 %% Number is abstract — exercises the {false, true} modifier branch.
-                H = beamtalk_interface:help('Number'),
-                ?assert(is_binary(H)),
+                {beamtalk_string, H} = beamtalk_interface:help('Number'),
                 ?assertNotEqual(nomatch, binary:match(H, <<"[abstract]">>))
             end},
             {"help: on a sealed class shows the [sealed] modifier", fun() ->
                 %% Symbol is sealed — exercises the {true, false} modifier branch.
-                H = beamtalk_interface:help('Symbol'),
-                ?assert(is_binary(H)),
+                {beamtalk_string, H} = beamtalk_interface:help('Symbol'),
                 ?assertNotEqual(nomatch, binary:match(H, <<"[sealed]">>))
             end},
             {"dispatch help:selector: unknown class raises class_not_found", fun() ->
@@ -588,8 +586,7 @@ live_registry_test_() ->
                 %% instance-side resolve returns nil, so resolve_help_method
                 %% falls through to the {class_method, Selector} branch and
                 %% find_defining_class_method walks the class-side tables.
-                H = beamtalk_interface:help('Integer', new),
-                ?assert(is_binary(H)),
+                {beamtalk_string, H} = beamtalk_interface:help('Integer', new),
                 ?assertNotEqual(nomatch, binary:match(H, <<"new">>))
             end}
         ]

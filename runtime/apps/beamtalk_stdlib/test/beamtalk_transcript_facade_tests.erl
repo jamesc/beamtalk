@@ -201,7 +201,10 @@ routes_to_stream() ->
         ?assertEqual(nil, beamtalk_transcript_facade:show(<<"to stream">>)),
         ?assertEqual(nil, beamtalk_transcript_facade:cr()),
         ok = no_event(),
-        ?assertEqual([<<"to stream">>, <<"\n">>], gen_server:call(Pid, recent))
+        ?assertEqual(
+            [{beamtalk_string, <<"to stream">>}, {beamtalk_string, <<"\n">>}],
+            gen_server:call(Pid, recent)
+        )
     after
         unlink(Pid),
         gen_server:stop(Pid)
@@ -211,7 +214,10 @@ recent_and_clear_use_stream() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link({local, 'Transcript'}, 100),
     try
         beamtalk_transcript_facade:showCr(<<"a">>),
-        ?assertEqual([<<"a">>, <<"\n">>], beamtalk_transcript_facade:recent()),
+        ?assertEqual(
+            [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"\n">>}],
+            beamtalk_transcript_facade:recent()
+        ),
         ?assertEqual(nil, beamtalk_transcript_facade:clear()),
         ?assertEqual([], beamtalk_transcript_facade:recent()),
         ok = no_event()

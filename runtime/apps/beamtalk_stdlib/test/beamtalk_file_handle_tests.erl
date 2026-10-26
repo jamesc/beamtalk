@@ -111,10 +111,10 @@ dispatch_lines_returns_stream_test() ->
 %%% dispatch/3 — Object protocol selectors
 %%% ============================================================================
 
-dispatch_printString_returns_binary_test() ->
+dispatch_printString_returns_string_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
         Result = beamtalk_file_handle:dispatch('printString', [], Handle),
-        ?assert(is_binary(Result))
+        ?assertMatch({beamtalk_string, _}, Result)
     end).
 
 %%% ============================================================================

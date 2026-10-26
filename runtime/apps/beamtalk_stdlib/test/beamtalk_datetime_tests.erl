@@ -178,16 +178,16 @@ as_timestamp_roundtrip_test() ->
 
 as_string_test() ->
     DT = make_dt(2024, 6, 5, 9, 5, 3),
-    ?assertEqual(<<"2024-06-05T09:05:03Z">>, beamtalk_datetime:'asString'(DT)).
+    ?assertEqual({beamtalk_string, <<"2024-06-05T09:05:03Z">>}, beamtalk_datetime:'asString'(DT)).
 
 as_string_padding_test() ->
     DT = make_dt(2024, 12, 31, 23, 59, 59),
-    ?assertEqual(<<"2024-12-31T23:59:59Z">>, beamtalk_datetime:'asString'(DT)).
+    ?assertEqual({beamtalk_string, <<"2024-12-31T23:59:59Z">>}, beamtalk_datetime:'asString'(DT)).
 
 print_string_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
     Result = beamtalk_datetime:'printString'(DT),
-    ?assertMatch(<<"DateTime(", _/binary>>, Result).
+    ?assertMatch({beamtalk_string, <<"DateTime(", _/binary>>}, Result).
 
 %%% ============================================================================
 %%% Arithmetic

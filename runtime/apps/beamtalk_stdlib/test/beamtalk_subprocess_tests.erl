@@ -119,7 +119,7 @@ writeLine_writes_line_and_returns_nil_test() ->
     ?assertEqual(nil, Result),
     %% Verify data reached the subprocess by reading it back
     Line = gen_server:call(Pid, {readLine, []}, 5000),
-    ?assertEqual(<<"hello">>, Line),
+    ?assertEqual({beamtalk_string, <<"hello">>}, Line),
     gen_server:call(Pid, {close, []}),
     gen_server:stop(Pid).
 
@@ -149,7 +149,7 @@ readLine_blocks_until_data_arrives_test() ->
         after 5000 ->
             error(timeout_waiting_for_readline)
         end,
-    ?assertEqual(<<"world">>, Line),
+    ?assertEqual({beamtalk_string, <<"world">>}, Line),
     gen_server:call(Pid, {close, []}),
     gen_server:stop(Pid).
 
@@ -165,7 +165,7 @@ readLine_returns_nil_at_eof_test() ->
     }),
     %% First readLine should deliver the line from echo
     Line = gen_server:call(Pid, {readLine, []}, 5000),
-    ?assertEqual(<<"goodbye">>, Line),
+    ?assertEqual({beamtalk_string, <<"goodbye">>}, Line),
     %% Second readLine: subprocess exited, buffer drained — must return nil
     Eof = gen_server:call(Pid, {readLine, []}, 5000),
     ?assertEqual(nil, Eof),
@@ -183,7 +183,7 @@ readLine_flushes_partial_line_on_exit_test() ->
     }),
     %% readLine should return the partial line, not nil
     Line = gen_server:call(Pid, {readLine, []}, 5000),
-    ?assertEqual(<<"hello">>, Line),
+    ?assertEqual({beamtalk_string, <<"hello">>}, Line),
     %% Second readLine: EOF
     Eof = gen_server:call(Pid, {readLine, []}, 5000),
     ?assertEqual(nil, Eof),
@@ -279,7 +279,7 @@ readStderrLine_returns_nil_at_eof_test() ->
         args => ShArgs
     }),
     Line = gen_server:call(Pid, {readStderrLine, []}, 5000),
-    ?assertEqual(<<"err">>, Line),
+    ?assertEqual({beamtalk_string, <<"err">>}, Line),
     %% Second call: process exited, buffer drained — must return nil
     Eof = gen_server:call(Pid, {readStderrLine, []}, 5000),
     ?assertEqual(nil, Eof),
@@ -312,10 +312,10 @@ stdout_and_stderr_are_independent_test() ->
     }),
     %% Read from stdout — should get "out", not "err"
     StdoutLine = gen_server:call(Pid, {readLine, []}, 5000),
-    ?assertEqual(<<"out">>, StdoutLine),
+    ?assertEqual({beamtalk_string, <<"out">>}, StdoutLine),
     %% Read from stderr — should get "err", not "out"
     StderrLine = gen_server:call(Pid, {readStderrLine, []}, 5000),
-    ?assertEqual(<<"err">>, StderrLine),
+    ?assertEqual({beamtalk_string, <<"err">>}, StderrLine),
     %% Both channels now at EOF
     ?assertEqual(nil, gen_server:call(Pid, {readLine, []}, 5000)),
     ?assertEqual(nil, gen_server:call(Pid, {readStderrLine, []}, 5000)),
@@ -333,7 +333,14 @@ lines_stream_yields_correct_sequence_test() ->
     }),
     Stream = gen_server:call(Pid, {lines, []}),
     Lines = beamtalk_stream:as_list(Stream),
-    ?assertEqual([<<"alpha">>, <<"beta">>, <<"gamma">>], Lines),
+    ?assertEqual(
+        [
+            {beamtalk_string, <<"alpha">>},
+            {beamtalk_string, <<"beta">>},
+            {beamtalk_string, <<"gamma">>}
+        ],
+        Lines
+    ),
     gen_server:stop(Pid).
 
 %%% ============================================================================
@@ -361,7 +368,7 @@ fast_exit_stderr_data_not_lost_test_() ->
                     }),
                     Line = gen_server:call(Pid, {readStderrLine, []}, 5000),
                     gen_server:stop(Pid),
-                    ?_assertEqual(<<"err">>, Line)
+                    ?_assertEqual({beamtalk_string, <<"err">>}, Line)
                 end
              || _ <- lists:seq(1, 50)
             ]
@@ -379,7 +386,9 @@ stderrLines_stream_yields_correct_sequence_test() ->
     }),
     Stream = gen_server:call(Pid, {stderrLines, []}),
     Lines = beamtalk_stream:as_list(Stream),
-    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Lines),
+    ?assertEqual(
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}], Lines
+    ),
     gen_server:stop(Pid).
 
 %%% ============================================================================
@@ -431,7 +440,8 @@ dir_sets_working_directory_test() ->
             }),
             Line = gen_server:call(Pid, {readLine, []}, 5000),
             ?assertNotEqual(nil, Line),
-            ?assert(binary:match(Line, TmpDir) =/= nomatch),
+            {beamtalk_string, RawLine} = Line,
+            ?assert(binary:match(RawLine, TmpDir) =/= nomatch),
             gen_server:stop(Pid);
         {win32, _} ->
             ok
@@ -449,10 +459,11 @@ dir_with_env_sets_both_test() ->
                 dir => TmpDir
             }),
             EnvLine = gen_server:call(Pid, {readLine, []}, 5000),
-            ?assertEqual(<<"hello_dir">>, EnvLine),
+            ?assertEqual({beamtalk_string, <<"hello_dir">>}, EnvLine),
             DirLine = gen_server:call(Pid, {readLine, []}, 5000),
             ?assertNotEqual(nil, DirLine),
-            ?assert(binary:match(DirLine, TmpDir) =/= nomatch),
+            {beamtalk_string, RawDirLine} = DirLine,
+            ?assert(binary:match(RawDirLine, TmpDir) =/= nomatch),
             gen_server:stop(Pid);
         {win32, _} ->
             ok
@@ -471,5 +482,5 @@ validate_config_beamtalk_array_coercion_test() ->
         args => BtArray
     }),
     Line = gen_server:call(Pid, {readLine, []}, 5000),
-    ?assertEqual(<<"hello">>, Line),
+    ?assertEqual({beamtalk_string, <<"hello">>}, Line),
     gen_server:stop(Pid).

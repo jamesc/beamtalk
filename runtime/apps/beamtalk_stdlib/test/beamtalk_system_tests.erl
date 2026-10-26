@@ -50,7 +50,7 @@ get_env_default_set_variable_test() ->
 get_env_default_unset_returns_default_test() ->
     os:unsetenv("BT_TEST_UNSET_VAR2"),
     ?assertEqual(
-        <<"fallback">>,
+        {beamtalk_string, <<"fallback">>},
         beamtalk_system:'getEnv:default:'(<<"BT_TEST_UNSET_VAR2">>, <<"fallback">>)
     ).
 
@@ -230,7 +230,10 @@ get_env_shim_default_set_variable_test() ->
 get_env_shim_default_unset_returns_default_test() ->
     os:unsetenv("BT_TEST_UNSET_SHIM2"),
     %% Unset: the default passes through as given (raw in, raw out).
-    ?assertEqual(<<"fallback">>, beamtalk_system:getEnv(<<"BT_TEST_UNSET_SHIM2">>, <<"fallback">>)).
+    ?assertEqual(
+        {beamtalk_string, <<"fallback">>},
+        beamtalk_system:getEnv(<<"BT_TEST_UNSET_SHIM2">>, <<"fallback">>)
+    ).
 
 %%% ============================================================================
 %%% uniqueId/0

@@ -123,12 +123,12 @@ exit_non_integer_raises_type_error_test_() ->
 %% commandName/0
 %%====================================================================
 
-%% When `program_name` is set as a binary it is returned directly (line 52).
-commandName_returns_binary_when_set_as_binary_test() ->
+%% When `program_name` is set as a binary it is returned as a String (line 52).
+commandName_returns_string_when_set_as_binary_test() ->
     Prev = application:get_env(beamtalk_runtime, program_name),
     application:set_env(beamtalk_runtime, program_name, <<"my_app">>),
     try
-        ?assertEqual(<<"my_app">>, beamtalk_program:commandName())
+        ?assertEqual({beamtalk_string, <<"my_app">>}, beamtalk_program:commandName())
     after
         case Prev of
             undefined -> application:unset_env(beamtalk_runtime, program_name);
@@ -137,12 +137,12 @@ commandName_returns_binary_when_set_as_binary_test() ->
     end.
 
 %% When `program_name` is set as a charlist it is converted via
-%% `list_to_binary/1` before being returned (line 53).
-commandName_returns_binary_when_set_as_list_test() ->
+%% `list_to_binary/1` and returned as a String (line 53).
+commandName_returns_string_when_set_as_list_test() ->
     Prev = application:get_env(beamtalk_runtime, program_name),
     application:set_env(beamtalk_runtime, program_name, "my_escript"),
     try
-        ?assertEqual(<<"my_escript">>, beamtalk_program:commandName())
+        ?assertEqual({beamtalk_string, <<"my_escript">>}, beamtalk_program:commandName())
     after
         case Prev of
             undefined -> application:unset_env(beamtalk_runtime, program_name);

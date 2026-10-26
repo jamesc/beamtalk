@@ -657,7 +657,7 @@ ffi_as_list_shim_test() ->
 %% printString/1 shim delegates to print_string
 ffi_print_string_shim_test() ->
     Stream = beamtalk_stream:on([1]),
-    ?assert(is_binary(beamtalk_stream:printString(Stream))).
+    ?assertMatch({beamtalk_string, _}, beamtalk_stream:printString(Stream)).
 
 %%% ============================================================================
 %%% Test Helpers

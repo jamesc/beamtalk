@@ -197,7 +197,14 @@ stdout_lines_pushed_to_notify_test() ->
     gen_server:stop(Pid),
     LineEvents = [E || {'subprocessLine:from:', _} = E <- Events],
     Lines = [hd(Args) || {'subprocessLine:from:', Args} <- LineEvents],
-    ?assertEqual([<<"alpha">>, <<"beta">>, <<"gamma">>], Lines).
+    ?assertEqual(
+        [
+            {beamtalk_string, <<"alpha">>},
+            {beamtalk_string, <<"beta">>},
+            {beamtalk_string, <<"gamma">>}
+        ],
+        Lines
+    ).
 
 %%% ============================================================================
 %%% stderr lines pushed to notify actor
@@ -216,7 +223,9 @@ stderr_lines_pushed_to_notify_test() ->
     gen_server:stop(Pid),
     StderrEvents = [E || {'subprocessStderrLine:from:', _} = E <- Events],
     Lines = [hd(Args) || {'subprocessStderrLine:from:', Args} <- StderrEvents],
-    ?assertEqual([<<"x">>, <<"y">>, <<"z">>], Lines).
+    ?assertEqual(
+        [{beamtalk_string, <<"x">>}, {beamtalk_string, <<"y">>}, {beamtalk_string, <<"z">>}], Lines
+    ).
 
 %%% ============================================================================
 %%% exit notification is cast after data
@@ -270,7 +279,7 @@ partial_line_flushed_on_exit_test() ->
     gen_server:stop(Pid),
     LineEvents = [E || {'subprocessLine:from:', _} = E <- Events],
     Lines = [hd(Args) || {'subprocessLine:from:', Args} <- LineEvents],
-    ?assertEqual([<<"hello">>], Lines).
+    ?assertEqual([{beamtalk_string, <<"hello">>}], Lines).
 
 %%% ============================================================================
 %%% writeLine: writes data to stdin and returns nil
@@ -287,13 +296,13 @@ writeLine_writes_and_returns_nil_test() ->
     Result = gen_server:call(Pid, {'writeLine:', [<<"ping">>]}),
     ?assertEqual(nil, Result),
     %% cat echoes back; poll until the line arrives
-    Events = wait_for_line(Collector, <<"ping">>),
+    Events = wait_for_line(Collector, {beamtalk_string, <<"ping">>}),
     Collector ! stop,
     gen_server:call(Pid, {close, []}),
     gen_server:stop(Pid),
     LineEvents = [E || {'subprocessLine:from:', _} = E <- Events],
     Lines = [hd(Args) || {'subprocessLine:from:', Args} <- LineEvents],
-    ?assert(lists:member(<<"ping">>, Lines)).
+    ?assert(lists:member({beamtalk_string, <<"ping">>}, Lines)).
 
 %%% ============================================================================
 %%% writeLine: after close returns port_closed error
@@ -381,8 +390,8 @@ stdout_and_stderr_independent_test() ->
     gen_server:stop(Pid),
     StdoutLines = [hd(A) || {'subprocessLine:from:', A} <- Events],
     StderrLines = [hd(A) || {'subprocessStderrLine:from:', A} <- Events],
-    ?assertEqual([<<"out">>], StdoutLines),
-    ?assertEqual([<<"err">>], StderrLines).
+    ?assertEqual([{beamtalk_string, <<"out">>}], StdoutLines),
+    ?assertEqual([{beamtalk_string, <<"err">>}], StderrLines).
 
 %%% ============================================================================
 %%% beamtalk_subprocess_port: split_lines

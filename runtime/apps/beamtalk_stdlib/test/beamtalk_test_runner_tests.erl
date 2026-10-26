@@ -491,7 +491,9 @@ shim_has_passed_false_test() ->
 
 shim_summary_test() ->
     Result = make_result(3, 3, 0, 0, 1.5, []),
-    ?assertEqual(<<"3 tests, 3 passed (1.5s)">>, beamtalk_test_runner:summary(Result)).
+    ?assertEqual(
+        {beamtalk_string, <<"3 tests, 3 passed (1.5s)">>}, beamtalk_test_runner:summary(Result)
+    ).
 
 shim_print_string_test() ->
     Result = make_result(2, 2, 0, 0, 1.0, [
@@ -499,7 +501,8 @@ shim_print_string_test() ->
         #{name => testB, class => 'T', status => pass}
     ]),
     ?assertEqual(
-        <<"TestResult(2 tests, 2 passed (1.0s))">>, beamtalk_test_runner:printString(Result)
+        {beamtalk_string, <<"TestResult(2 tests, 2 passed (1.0s))">>},
+        beamtalk_test_runner:printString(Result)
     ).
 
 %%% ============================================================================

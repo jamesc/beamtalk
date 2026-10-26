@@ -156,25 +156,32 @@ comparison_type_error_test() ->
 %%% ============================================================================
 
 print_string_zero_test() ->
-    ?assertEqual(<<"0ms">>, beamtalk_duration:'printString'(ms(0))).
+    ?assertEqual({beamtalk_string, <<"0ms">>}, beamtalk_duration:'printString'(ms(0))).
 
 print_string_ms_test() ->
-    ?assertEqual(<<"1s 500ms">>, beamtalk_duration:'printString'(ms(1500))).
+    ?assertEqual({beamtalk_string, <<"1s 500ms">>}, beamtalk_duration:'printString'(ms(1500))).
 
 print_string_hm_test() ->
-    ?assertEqual(<<"1h 30m">>, beamtalk_duration:'printString'(beamtalk_duration:'minutes:'(90))).
+    ?assertEqual(
+        {beamtalk_string, <<"1h 30m">>},
+        beamtalk_duration:'printString'(beamtalk_duration:'minutes:'(90))
+    ).
 
 print_string_hms_test() ->
     ?assertEqual(
-        <<"1h 30m 15s">>, beamtalk_duration:'printString'(beamtalk_duration:'seconds:'(5415))
+        {beamtalk_string, <<"1h 30m 15s">>},
+        beamtalk_duration:'printString'(beamtalk_duration:'seconds:'(5415))
     ).
 
 print_string_full_test() ->
-    ?assertEqual(<<"1d 1h 1m 1s 250ms">>, beamtalk_duration:'printString'(ms(90061250))).
+    ?assertEqual(
+        {beamtalk_string, <<"1d 1h 1m 1s 250ms">>}, beamtalk_duration:'printString'(ms(90061250))
+    ).
 
 print_string_negative_test() ->
     ?assertEqual(
-        <<"-1h 30m">>, beamtalk_duration:'printString'(beamtalk_duration:'minutes:'(-90))
+        {beamtalk_string, <<"-1h 30m">>},
+        beamtalk_duration:'printString'(beamtalk_duration:'minutes:'(-90))
     ).
 
 %%% ============================================================================
@@ -182,25 +189,38 @@ print_string_negative_test() ->
 %%% ============================================================================
 
 as_string_zero_test() ->
-    ?assertEqual(<<"PT0S">>, beamtalk_duration:'asString'(ms(0))).
+    ?assertEqual({beamtalk_string, <<"PT0S">>}, beamtalk_duration:'asString'(ms(0))).
 
 as_string_hm_test() ->
-    ?assertEqual(<<"PT1H30M">>, beamtalk_duration:'asString'(beamtalk_duration:'minutes:'(90))).
+    ?assertEqual(
+        {beamtalk_string, <<"PT1H30M">>},
+        beamtalk_duration:'asString'(beamtalk_duration:'minutes:'(90))
+    ).
 
 as_string_days_test() ->
-    ?assertEqual(<<"P1DT2H">>, beamtalk_duration:'asString'(beamtalk_duration:'hours:'(26))).
+    ?assertEqual(
+        {beamtalk_string, <<"P1DT2H">>},
+        beamtalk_duration:'asString'(beamtalk_duration:'hours:'(26))
+    ).
 
 as_string_days_only_test() ->
-    ?assertEqual(<<"P2D">>, beamtalk_duration:'asString'(beamtalk_duration:'days:'(2))).
+    ?assertEqual(
+        {beamtalk_string, <<"P2D">>}, beamtalk_duration:'asString'(beamtalk_duration:'days:'(2))
+    ).
 
 as_string_fractional_test() ->
-    ?assertEqual(<<"PT0.250S">>, beamtalk_duration:'asString'(ms(250))).
+    ?assertEqual({beamtalk_string, <<"PT0.250S">>}, beamtalk_duration:'asString'(ms(250))).
 
 as_string_full_test() ->
-    ?assertEqual(<<"P1DT1H1M1.250S">>, beamtalk_duration:'asString'(ms(90061250))).
+    ?assertEqual(
+        {beamtalk_string, <<"P1DT1H1M1.250S">>}, beamtalk_duration:'asString'(ms(90061250))
+    ).
 
 as_string_negative_test() ->
-    ?assertEqual(<<"-PT1H30M">>, beamtalk_duration:'asString'(beamtalk_duration:'minutes:'(-90))).
+    ?assertEqual(
+        {beamtalk_string, <<"-PT1H30M">>},
+        beamtalk_duration:'asString'(beamtalk_duration:'minutes:'(-90))
+    ).
 
 %%% ============================================================================
 %%% fromString: parsing and round-trip
