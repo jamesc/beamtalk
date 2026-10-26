@@ -59,7 +59,7 @@ Type error (non-String argument) still raises.
 'parse:'(JsonStr) when is_binary(JsonStr) ->
     try
         Value = json:decode(JsonStr),
-        beamtalk_result:from_tagged_tuple({ok, normalize_decoded(Value)})
+        normalize_ok(Value)
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
@@ -165,18 +165,69 @@ prettify_term(Term) ->
 %%% ============================================================================
 
 -doc """
+Normalize a decoded JSON value into `Result ok:`, mapping
+normalization-time `beamtalk_error` raises (invalid UTF-8 in a decoded
+string — see `normalize_decoded/1`) to `Result error:` like any other
+malformed input. The outer `parse:/1` catch keeps its re-raise arm for
+decoder failures; this inner layer owns boundary-validation failures.
+""".
+-spec normalize_ok(term()) -> beamtalk_result:t().
+normalize_ok(Value) ->
+    try
+        beamtalk_result:from_tagged_tuple({ok, normalize_decoded(Value)})
+    catch
+        error:#{error := #beamtalk_error{} = BErr}:_ ->
+            beamtalk_result:from_tagged_tuple({error, BErr})
+    end.
+
+-doc """
 Normalize JSON decoded values to Beamtalk conventions.
 
 json:decode returns `null` as the atom `null`; Beamtalk uses `nil`.
+
+BT-4171: this is Json's native text boundary — string leaves and object
+keys are constructed as validated Strings via
+`beamtalk_binary:check_utf8/1`, raising a `Json` `parse_error` (which
+`normalize_ok/1` answers as `Result error:`) on invalid UTF-8 instead of
+passing raw binaries through. OTP's decoder already rejects invalid UTF-8
+input, so the failure arm is defense-in-depth and the explicit seam the
+BT-4170 dispatch flip will build on.
 """.
 -spec normalize_decoded(term()) -> term().
 normalize_decoded(null) ->
     nil;
 normalize_decoded(Map) when is_map(Map) ->
-    maps:map(fun(_K, V) -> normalize_decoded(V) end, Map);
+    maps:from_list([
+        {validate_string(K, key), normalize_decoded(V)}
+     || {K, V} <- maps:to_list(Map)
+    ]);
 normalize_decoded(List) when is_list(List) ->
     [normalize_decoded(E) || E <- List];
+normalize_decoded(Bin) when is_binary(Bin) ->
+    validate_string(Bin, value);
 normalize_decoded(Other) ->
+    Other.
+
+-doc """
+Validate one decoded string (leaf or key) as UTF-8, raising a `Json`
+`parse_error` naming `parse:` on invalid bytes. Non-binary keys pass
+through untouched (the decoder only produces binary keys).
+""".
+-spec validate_string(term(), key | value) -> term().
+validate_string(Bin, Where) when is_binary(Bin) ->
+    case beamtalk_binary:check_utf8(Bin) of
+        {ok, Valid} ->
+            Valid;
+        {error, Offset} ->
+            Error0 = beamtalk_error:new(parse_error, 'Json'),
+            Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
+            Error2 = beamtalk_error:with_details(Error1, #{offset => Offset, where => Where}),
+            Error3 = beamtalk_error:with_hint(
+                Error2, <<"JSON strings must be valid UTF-8">>
+            ),
+            beamtalk_error:raise(Error3)
+    end;
+validate_string(Other, _Where) ->
     Other.
 
 -doc """

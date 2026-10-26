@@ -67,6 +67,9 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 -export([as_string/1, as_string_unchecked/1, print_string/1]).
 -export([deserialize_with_used/1]).
 
+%% Shared UTF-8 validator for native text boundaries (BT-4171)
+-export([check_utf8/1]).
+
 %% Instance methods — encoding
 -export(['asBase64:'/1, 'asBase64Url:'/1, 'asHex:'/1]).
 -export([asBase64/1, asBase64Url/1, asHex/1]).
@@ -434,6 +437,13 @@ raise_type_error(Selector, Hint) ->
 Validate UTF-8, returning the binary on success or the byte offset of the
 first invalid byte on failure. Shared core of `as_string/1` (which wraps
 the outcome in a Result) and `print_string/1` (which picks a rendering).
+
+Also the shared validator for native text boundaries (BT-4171): Json
+leaf/key construction routes text through here instead of duplicating
+validation logic, so the boundary constructs a validated String rather
+than a binary that merely sniffs as text. Out-of-repo natives (Yaml, HTTP)
+use `beamtalk_primitive:is_utf8/1` — same check, already released — until
+they can depend on this export.
 """.
 -spec check_utf8(binary()) -> {ok, binary()} | {error, non_neg_integer()}.
 check_utf8(Bin) ->

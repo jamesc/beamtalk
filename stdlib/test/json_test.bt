@@ -113,6 +113,18 @@ TestCase subclass: JsonTest
       "a" => 1
     })) unwrap at: "a") equals: 1
 
+  testParsedStringsAnswerString =>
+    // BT-4171: the native text boundary constructs validated Strings —
+    // leaves and keys answer String, not Binary.
+    leaf := (Json parse: (Json generate: "café")) unwrap
+    self assert: leaf class equals: String
+    self assert: leaf equals: "café"
+    dict := (Json parse: (Json generate: #{"k" => "v"})) unwrap
+    @expect type
+    self assert: (dict at: "k") class equals: String
+    @expect type
+    self assert: (dict keys at: 1) class equals: String
+
   // =========================================================================
   // asJson HOOK (BT-2818)
   // Fixtures: json_user.bt (JsonUser), json_team.bt (JsonTeam)
