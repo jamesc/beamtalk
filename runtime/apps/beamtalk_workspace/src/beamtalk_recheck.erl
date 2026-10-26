@@ -274,10 +274,10 @@ covering all three "never actually re-verified" cases.
 %% diagnostic already carries its own `start`/`end` span; there is no xref
 %% call-site to translate against, unlike `finding()`'s `sites`).
 -type image_finding() :: #{
-    owner := binary(),
-    severity := binary(),
-    category := binary() | undefined,
-    message := binary(),
+    owner := beamtalk_string:t(),
+    severity := beamtalk_string:t(),
+    category := beamtalk_string:t() | undefined,
+    message := beamtalk_string:t(),
     start := non_neg_integer(),
     'end' := non_neg_integer()
 }.

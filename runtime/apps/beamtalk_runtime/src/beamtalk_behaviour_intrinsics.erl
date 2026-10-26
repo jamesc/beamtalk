@@ -1433,8 +1433,10 @@ extension_owner(EtsClass, Selector) ->
 
 -spec extension_prev_source(atom(), atom()) -> binary() | undefined.
 extension_prev_source(EtsClass, Selector) ->
+    %% BT-4173: getSource/2 answers a String; the ChangeLog entry
+    %% persists raw bytes — unwrap at this call site.
     case beamtalk_extensions:getSource(EtsClass, Selector) of
-        {ok, Source} -> Source;
+        {ok, {beamtalk_string, Source}} -> Source;
         not_found -> undefined
     end.
 

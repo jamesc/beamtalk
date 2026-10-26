@@ -96,8 +96,8 @@ dispatch('erlangHelp:', [ModuleArg], _Self) ->
 dispatch('erlangHelp:selector:', [ModuleArg, SelectorArg], _Self) ->
     beamtalk_primitive:string_from_binary(handle_erlang_help(ModuleArg, SelectorArg));
 dispatch(version, [], _Self) ->
-    %% BT-4173: the version is text — answer a String.
-    beamtalk_primitive:string_from_binary(version());
+    %% `version/0` already answers a String — return it directly.
+    version();
 dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'Beamtalk'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
@@ -279,7 +279,8 @@ version() ->
     %% BT-4173: the version is text — answer a String.
     beamtalk_primitive:string_from_binary(
         case application:get_key(beamtalk_runtime, vsn) of
-            {ok, Vsn} -> list_to_binary(Vsn);
+            {ok, Vsn} when is_list(Vsn) -> list_to_binary(Vsn);
+            {ok, Vsn} when is_binary(Vsn) -> Vsn;
             _ -> <<"unknown">>
         end
     ).
@@ -1261,7 +1262,8 @@ format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
 
     DocPart =
         case maps:get('__doc__', MethodObj, nil) of
-            nil -> <<>>;
+            nil ->
+                <<>>;
             {beamtalk_string, TaggedDoc} when is_binary(TaggedDoc) ->
                 iolist_to_binary([<<"\n\n">>, TaggedDoc]);
             DocBin when is_binary(DocBin) -> iolist_to_binary([<<"\n\n">>, DocBin])

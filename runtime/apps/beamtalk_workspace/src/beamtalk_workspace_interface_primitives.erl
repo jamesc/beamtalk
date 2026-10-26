@@ -1534,7 +1534,7 @@ Returns a map of `#{PackageName => PackageInfoMap}` for each direct dependency
 of the current workspace package. Returns an empty map if the workspace
 has no package name or no dependencies.
 """.
--spec dependencies() -> #{binary() => map()}.
+-spec dependencies() -> #{beamtalk_string:t() => map()}.
 dependencies() ->
     case beamtalk_workspace_meta:get_package_name() of
         undefined ->

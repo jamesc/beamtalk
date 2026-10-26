@@ -138,7 +138,9 @@ Term-returning handler for the browse ops (ADR 0096). Returns
 `{value, JsonValue}` on success or `{error, #beamtalk_error{}}` on a validation
 failure (unknown class, bad side, missing selector).
 """.
--spec handle_term(binary() | beamtalk_string:t(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
+-spec handle_term(
+    binary() | beamtalk_string:t(), map(), beamtalk_repl_protocol:protocol_msg(), pid()
+) ->
     beamtalk_repl_ops:op_result().
 %% BT-4173: direct FFI callers pass a tagged op name and tagged param text —
 %% unwrap to the raw wire shape the clauses below match on, then tag the
@@ -1076,7 +1078,9 @@ native_module_editable_target(Module) when is_atom(Module) ->
 browse_native_modules() ->
     Packages =
         try
-            beamtalk_package:all()
+            %% BT-4173: all/0 answers Strings — rows are JSON-shaped
+            %% maps, so unwrap to the raw name bytes here.
+            [P || {beamtalk_string, P} <- beamtalk_package:all()]
         catch
             _:_ -> []
         end,
@@ -1295,7 +1299,9 @@ backing_source_file(Backing) ->
 browse_type_aliases() ->
     Packages =
         try
-            beamtalk_package:all()
+            %% BT-4173: all/0 answers Strings — rows are JSON-shaped
+            %% maps, so unwrap to the raw name bytes here.
+            [P || {beamtalk_string, P} <- beamtalk_package:all()]
         catch
             _:_ -> []
         end,
