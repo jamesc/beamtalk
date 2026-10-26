@@ -375,7 +375,8 @@ unwrap_text_entry(_) -> error(bad_text).
 %%% ============================================================================
 
 -doc "Write Data + newline to subprocess stdin.".
--spec handle_writeLine(iodata() | beamtalk_string:t(), map()) -> {reply, nil | {error, #beamtalk_error{}}, map()}.
+-spec handle_writeLine(iodata() | beamtalk_string:t(), map()) ->
+    {reply, nil | {error, #beamtalk_error{}}, map()}.
 %% BT-4173: a String arrives tagged — unwrap to bytes (a tuple is not iodata).
 handle_writeLine({beamtalk_string, Bin}, State) when is_binary(Bin) ->
     handle_writeLine(Bin, State);
