@@ -196,6 +196,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::HandleInfoNoCatchAll => "HandleInfoNoCatchAll",
         DiagnosticCategory::MatchArmBlock => "MatchArmBlock",
         DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
+        DiagnosticCategory::ClassProcessFfi => "ClassProcessFfi",
         DiagnosticCategory::ActorStateAbroad => "ActorStateAbroad",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
         DiagnosticCategory::UnmigratedLocalThreading => "UnmigratedLocalThreading",
@@ -425,6 +426,7 @@ mod tests {
             ),
             (DiagnosticCategory::MatchArmBlock, "MatchArmBlock"),
             (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
+            (DiagnosticCategory::ClassProcessFfi, "ClassProcessFfi"),
             (DiagnosticCategory::ActorStateAbroad, "ActorStateAbroad"),
             (
                 DiagnosticCategory::Tier2BlockNoReturnChannel,

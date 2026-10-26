@@ -397,8 +397,18 @@ impl ClassInfo {
     pub fn is_direct_call_eligible(&self, method: &MethodInfo) -> bool {
         self.is_sealed
             && self.class_variables.is_empty()
-            && !DIRECT_CALL_EXCLUDED_SELECTORS.contains(&method.selector.as_str())
+            && !Self::is_direct_call_excluded_selector(&method.selector)
             && method.is_sealed
+    }
+
+    /// Whether `selector` is a process-state constructor (`new`, `new:`,
+    /// `startLink`, `startLink:`) that is never direct-called, whatever the
+    /// class declares. The single copy of the exclusion list: the
+    /// `class-process-ffi` lint asks it too, so it never suggests sealing a
+    /// method that sealing cannot help.
+    #[must_use]
+    pub fn is_direct_call_excluded_selector(selector: &str) -> bool {
+        DIRECT_CALL_EXCLUDED_SELECTORS.contains(&selector)
     }
 
     /// Build a `ClassInfo` from a parsed `ClassDefinition` AST node.

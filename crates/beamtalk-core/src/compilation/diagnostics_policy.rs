@@ -153,6 +153,7 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     ("unguarded-late-read", DiagnosticCategory::UnguardedLateRead),
     ("match-arm-block", DiagnosticCategory::MatchArmBlock),
     ("class-state-abroad", DiagnosticCategory::ClassStateAbroad),
+    ("class-process-ffi", DiagnosticCategory::ClassProcessFfi),
     ("actor-state-abroad", DiagnosticCategory::ActorStateAbroad),
     (
         "handleinfo-no-catch-all",
@@ -596,6 +597,7 @@ fn expect_category_unchecked(
         | ExpectCategory::Sendability
         | ExpectCategory::MatchArmBlock
         | ExpectCategory::ClassStateAbroad
+        | ExpectCategory::ClassProcessFfi
         // Deprecated, parse-only (ADR 0130): nothing produces it, so it is
         // never "unchecked" — it is reported stale like any unmatched directive.
         | ExpectCategory::StoredClosure => false,
@@ -906,6 +908,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     Some(DiagnosticCategory::ClassStateAbroad)
                 )
                 | (
+                    ExpectCategory::ClassProcessFfi,
+                    Some(DiagnosticCategory::ClassProcessFfi)
+                )
+                | (
                     ExpectCategory::ActorStateAbroad,
                     Some(DiagnosticCategory::ActorStateAbroad)
                 )
@@ -1096,6 +1102,7 @@ definite-assignment = "error"
 unguarded-late-read = "error"
 match-arm-block = "off"
 class-state-abroad = "off"
+class-process-ffi = "off"
 actor-state-abroad = "off"
 handleinfo-no-catch-all = "error"
 "#;
