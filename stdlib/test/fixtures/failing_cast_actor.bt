@@ -26,3 +26,8 @@ Actor subclass: FailingCastActor
   stopThenExplode =>
     self stopWith: #shutdown
     self error: "deliberate cast error after stop"
+
+  // Catches an exit and re-raises it unchanged with `pass`: from a cast the
+  // actor stops with the original `normal` reason (BT-4057).
+  exitNormalPass =>
+    [(Erlang erlang) exit: #normal] on: Exception do: [:e | e pass]

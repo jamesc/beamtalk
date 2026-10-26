@@ -1077,6 +1077,130 @@ class_signal_kind_supports_any_named_kind_test() ->
             ?assertEqual({beamtalk_string, <<"custom hint">>}, Inner#beamtalk_error.hint)
     end.
 
+%%% Exception>>pass (BT-4057)
+
+%% Run Fun in a spawned process and return how it ended: {Class, Reason, Stack}.
+run_caught(Fun) ->
+    Self = self(),
+    Ref = make_ref(),
+    spawn(fun() ->
+        Result =
+            try
+                Fun(),
+                returned
+            catch
+                Class:Reason:Stack -> {Class, Reason, Stack}
+            end,
+        Self ! {Ref, Result}
+    end),
+    receive
+        {Ref, R} -> R
+    after 2000 -> timeout
+    end.
+
+pass_re_raises_exit_with_original_reason_test() ->
+    Ex = beamtalk_exception_handler:ensure_wrapped(exit, normal, []),
+    ?assertMatch(#{erlang_class := exit}, Ex),
+    ?assertMatch(
+        {exit, normal, []},
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end)
+    ).
+
+pass_re_raises_throw_with_original_reason_test() ->
+    Ex = beamtalk_exception_handler:ensure_wrapped(throw, oops, []),
+    ?assertMatch(
+        {throw, oops, []},
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end)
+    ).
+
+pass_re_raises_error_as_same_map_test() ->
+    Ex = beamtalk_exception_handler:ensure_wrapped(error, badarg, []),
+    ?assertMatch(
+        {error, Ex, []},
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end)
+    ).
+
+pass_rebuilds_stacktrace_from_frames_test() ->
+    Frame = #{
+        '$beamtalk_class' => 'StackFrame',
+        module => lists,
+        function => map,
+        arity => 2,
+        file => <<"lists.erl">>,
+        line => 12,
+        class_name => nil
+    },
+    Bad = #{'$beamtalk_class' => 'StackFrame', module => undefined, function => undefined},
+    Ex0 = beamtalk_exception_handler:ensure_wrapped(exit, normal, []),
+    Ex = Ex0#{stacktrace => [Frame, Bad]},
+    {exit, normal, Stack} =
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end),
+    ?assertEqual([{lists, map, 2, [{file, "lists.erl"}, {line, 12}]}], Stack).
+
+pass_without_erlang_class_behaves_like_signal_test() ->
+    Ex = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
+    ?assertMatch(
+        {error, #{'$beamtalk_class' := _}, _},
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end)
+    ).
+
+%% Audit of the rule "pass re-raises exactly what was caught" (BT-4057): where the
+%% wrapped exception substitutes for the caught term, pass re-raises it as an error.
+pass_exit_of_beamtalk_error_raises_error_test() ->
+    Err = beamtalk_error:new(type_error, 'String'),
+    Ex = beamtalk_exception_handler:ensure_wrapped(exit, Err, []),
+    ?assertMatch(
+        {error, #{'$beamtalk_class' := _, error := Err}, []},
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end)
+    ).
+
+pass_throw_of_wrapped_map_raises_error_test() ->
+    Inner = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
+    Ex = beamtalk_exception_handler:ensure_wrapped(throw, Inner, []),
+    {error, Raised, []} =
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end),
+    ?assertMatch(#{'$beamtalk_class' := _, error := _}, Raised).
+
+pass_rejected_future_throw_raises_error_test() ->
+    Err = beamtalk_error:new(type_error, 'String'),
+    Ex = beamtalk_exception_handler:ensure_wrapped(throw, {future_rejected, Err}, []),
+    ?assertMatch(#{erlang_class := error}, Ex),
+    ?assertMatch(
+        {error, #{error := Err}, []},
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end)
+    ).
+
+pass_rejected_future_wrapped_throw_raises_error_test() ->
+    Inner = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
+    Ex1 = beamtalk_exception_handler:ensure_wrapped(throw, {future_rejected, Inner}, []),
+    Ex2 = beamtalk_exception_handler:ensure_wrapped(
+        throw, {future_rejected, {error, Inner}}, []
+    ),
+    [
+        ?assertMatch(
+            {error, #{'$beamtalk_class' := _}, []},
+            run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end)
+        )
+     || Ex <- [Ex1, Ex2]
+    ].
+
+pass_exit_nil_reason_keeps_exit_test() ->
+    Ex = beamtalk_exception_handler:ensure_wrapped(exit, nil, []),
+    ?assertMatch(
+        {exit, nil, []},
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end)
+    ).
+
+pass_context_clause_records_error_class_test() ->
+    Ex = beamtalk_exception_handler:ensure_wrapped(exit, normal, [], #{selector => foo}),
+    ?assertMatch(#{erlang_class := exit}, Ex),
+    Wrapped = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
+    Ex2 = beamtalk_exception_handler:ensure_wrapped(exit, Wrapped, [], #{selector => foo}),
+    ?assertMatch(#{erlang_class := error}, Ex2).
+
+has_method_pass_test() ->
+    ?assert(beamtalk_exception_handler:has_method('pass')).
+
 -doc "Setup class system for hierarchy tests".
 setup_class_system() ->
     case whereis(pg) of

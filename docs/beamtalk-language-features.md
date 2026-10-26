@@ -1233,6 +1233,14 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => nil
 ```
 
+**Re-raising unchanged: `pass` vs `signal` (BT-4057).** `e signal` on a caught exception raises a fresh `error` with a new stacktrace, so a caught `ExitError` or `ThrowError` comes back out as an error. `e pass` re-raises with the original Erlang class (`error`, `exit` or `throw`), reason and call sites, so an outer handler (or the process) sees the original failure: `exit: #normal` still ends the process normally. The stacktrace is rebuilt from the frames `e stackTrace` shows, so argument values are absent, as they are there. On an exception that was never caught (`Exception new pass`), `pass` behaves like `signal`.
+
+```beamtalk
+[(Erlang erlang) exit: #shutdown] on: Exception do: [:e | e pass]  // exits with #shutdown
+```
+
+In an actor's `!` cast, `handleInfo:` or `continueWith:` step, an `exit` with reason `#normal` or `#shutdown` stops the actor with that raw reason (so `onExit:` receives `#normal`, not an `{Exception, Stacktrace}` tuple); every other failure crashes with `{Exception, Stacktrace}` as described in ADR 0134. `{shutdown, Term}` is deliberately excluded and still crashes the actor. Known limitation: hand-written Erlang (runtime-path) actors still normalise every failure to an error.
+
 For an FFI Result `r`, `r error` is an Exception (the type checker infers `Result(T, Exception)`, see "Inferred type of an FFI Result" above) and `r error reason` is the raw Erlang term. Comparing the Exception itself to a Symbol, as in `r error =:= #closed`, is always false, so the compiler warns: ``comparing an Exception to a Symbol with `=:=` is always false; use `r error reason` ``, with the hint ``did you mean `r error reason =:= #closed`?``. The warning covers `=:=`, `==`, `=/=` and `/=` (the negated forms are always true) in either operand order, for any `Exception`-typed expression compared with a Symbol literal. For an `Error`-typed value the hint also suggests `kind`, since a structured Beamtalk error usually records no raw `reason`. Silence a deliberate comparison with `@expect type`.
 
 A `native:` method's wrapped error carries the Beamtalk `Class`/selector (e.g. `Type error in 'take:' on Stream`), whereas inline `(Erlang …)` FFI carries the Erlang-facing `ErlangModule` context (e.g. `Type error in 'atom_to_list' on ErlangModule`) — a documented limitation, since the proxy knows the MFA but not the calling class.
