@@ -264,3 +264,123 @@ fn test_self_perform_with_timeout_lowers_to_send4() {
         "Got:\n{code}"
     );
 }
+
+const INSTALL_CALL_FROM: &str = "call 'beamtalk_actor':'install_call_from'(From)";
+const UNINSTALL_CALL_FROM: &str = "call 'beamtalk_actor':'uninstall_call_from'()";
+const ENCODE_TAGGED: &str =
+    "call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result)";
+
+/// BT-4090: `handle_call` exposes the caller's `From` to `self deferReply`
+/// around dispatch: installed before `safe_dispatch`, removed right after it
+/// (on the success and error paths alike, since the result is bound first).
+#[test]
+fn test_handle_call_installs_and_uninstalls_call_from_around_dispatch() {
+    let code = generate(
+        concat!(
+            "Server subclass: Parker\n",
+            "  state: value = 0\n\n",
+            "  wait => self deferReply\n",
+        ),
+        "parker",
+    );
+    let call = extract_core_fn(&code, "'handle_call'/3 = fun").expect("handle_call/3");
+    let install = call
+        .find(INSTALL_CALL_FROM)
+        .unwrap_or_else(|| panic!("handle_call must install From. Got:\n{call}"));
+    let dispatch = call
+        .find("'safe_dispatch'(Selector, Args, State)")
+        .expect("dispatch");
+    let uninstall = call
+        .find(UNINSTALL_CALL_FROM)
+        .unwrap_or_else(|| panic!("handle_call must uninstall From. Got:\n{call}"));
+    let result_case = call.find("case _DispatchResult of").expect("result case");
+    assert!(
+        install < dispatch && dispatch < uninstall && uninstall < result_case,
+        "install < dispatch < uninstall < result case. Got:\n{call}"
+    );
+}
+
+/// BT-4090: the deferred check runs before the wire-encode, so a deferred
+/// call is answered `{noreply, CleanNewState}` without encoding the ignored
+/// return value; only the success arm consults it.
+#[test]
+fn test_handle_call_success_arm_checks_deferred_before_encode() {
+    let code = generate(
+        concat!(
+            "Server subclass: Parker\n",
+            "  state: value = 0\n\n",
+            "  wait => self deferReply\n",
+        ),
+        "parker",
+    );
+    let call = extract_core_fn(&code, "'handle_call'/3 = fun").expect("handle_call/3");
+    let deferred = call
+        .find("case _CallDeferred of")
+        .unwrap_or_else(|| panic!("success arm must branch on _CallDeferred. Got:\n{call}"));
+    let noreply = call
+        .find("{'noreply', CleanNewState}")
+        .expect("deferred arm must answer noreply with the clean state");
+    let encode = call.find(ENCODE_TAGGED).expect("encode_reply_for_tagged");
+    assert!(
+        deferred < noreply && noreply < encode,
+        "deferred check and noreply must precede the encode. Got:\n{call}"
+    );
+}
+
+/// BT-4090: the error arm ignores the deferred flag, so a method that raises
+/// after deferring replies the error to its caller instead of hanging it.
+#[test]
+fn test_handle_call_error_arm_discards_deferred_flag() {
+    let code = generate(
+        concat!(
+            "Server subclass: Parker\n",
+            "  state: value = 0\n\n",
+            "  wait => self deferReply\n",
+        ),
+        "parker",
+    );
+    let call = extract_core_fn(&code, "'handle_call'/3 = fun").expect("handle_call/3");
+    let err_arm = call
+        .find("<{'error', Error, ErrState}> when 'true' ->")
+        .expect("handle_call error arm");
+    // The 3-tuple and 2-tuple clauses each carry a full dispatch case; look
+    // only at this clause's error arm.
+    let tail = call[err_arm..]
+        .split("<{Selector, Args}>")
+        .next()
+        .expect("error arm tail");
+    assert!(
+        !tail.contains("_CallDeferred"),
+        "the error arm must not consult the deferred flag. Got:\n{tail}"
+    );
+    assert!(
+        tail.contains("{'reply', {'error', "),
+        "the error arm must reply. Got:\n{tail}"
+    );
+}
+
+/// BT-4090: only `handle_call` installs the call cell — cast, info and
+/// continuation dispatches have no caller to defer.
+#[test]
+fn test_only_handle_call_installs_call_from() {
+    let code = generate(
+        concat!(
+            "Server subclass: Parker\n",
+            "  state: value = 0\n\n",
+            "  handleInfo: msg => self.value := 1\n",
+            "  bump => self continueWith: #bump\n",
+        ),
+        "parker",
+    );
+    for header in [
+        "'handle_cast'/2 = fun",
+        "'handle_info'/2 = fun",
+        "'handle_continue'/2 = fun",
+    ] {
+        let body = extract_core_fn(&code, header).expect(header);
+        assert!(
+            !body.contains(INSTALL_CALL_FROM),
+            "{header} must not install From"
+        );
+    }
+}

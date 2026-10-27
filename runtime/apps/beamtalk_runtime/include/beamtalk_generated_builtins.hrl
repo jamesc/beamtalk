@@ -89,6 +89,7 @@
     'ReactiveSubprocess',
     'Reference',
     'Regex',
+    'ReplyTo',
     'Result',
     'RetryPolicy',
     'RuntimeError',

@@ -791,6 +791,45 @@ Object subclass: Actor
   sealed continueWith: selector :: Symbol withArguments: args :: List -> Symbol =>
     @intrinsic "actorContinueWithArgs"
 
+  /// Take the reply token of the sync call being handled and return without
+  /// answering it: the caller stays blocked until the token is answered
+  /// (OTP `{noreply, State}` + `gen_server:reply/2`).
+  ///
+  /// Only valid as `self deferReply` inside a method that was sent
+  /// synchronously (helpers it calls included). The method's own return
+  /// value is ignored — it is not even encoded. Answer the returned
+  /// `ReplyTo` with `reply:` or `replyError:` from any later method of this
+  /// actor (`handleInfo:`, another sync method, a `continueWith:` step);
+  /// store it in state until then. Many callers can be parked at once and
+  /// answered in any order.
+  ///
+  /// Sent from another process, from a cast, `handleInfo:` or a
+  /// continuation, or with no call in flight, raises `invalid_defer`. A
+  /// method that raises after deferring answers its caller with that error
+  /// instead. If the actor stops (`stopWith:`, `kill`, a crash) with callers
+  /// parked, they raise `actor_dead`; `terminate:` may still `reply:` to
+  /// rescue them. Replying to a caller that has timed out or died is a
+  /// silent no-op.
+  ///
+  /// The type checker skips the return-type check of a method whose body
+  /// sends `self deferReply` (a *conditional* deferral also skips it for the
+  /// non-deferred path).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Server subclass: Connection
+  ///   state: waiting :: Dictionary(Integer, ReplyTo) = #{}
+  ///
+  ///   readData: streamId :: Integer -> Binary =>
+  ///     self.waiting := self.waiting at: streamId put: self deferReply
+  ///     nil   // ignored: the caller is answered later
+  ///
+  ///   onDataFrame: streamId :: Integer data: data :: Binary =>
+  ///     (self.waiting at: streamId) reply: data
+  ///     self.waiting := self.waiting removeKey: streamId
+  /// ```
+  sealed deferReply -> ReplyTo => (Erlang beamtalk_actor) takeDeferredCall: self
+
   /// Label this actor's process with `term` (`proc_lib:set_label/1`).
   ///
   /// The label shows up in observer, `erlang:process_info/2` and crash

@@ -234,18 +234,25 @@ module 'boundary_deeply_nested' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
                 case call 'beamtalk_actor':'mailbox_continuation_check'(Selector, Args) of
                     <'ok'> when 'true' ->
                         let _OldState = call 'beamtalk_actor_state':'install'(State) in
+                        let _CallFromInstalled = call 'beamtalk_actor':'install_call_from'(From) in
                         let _DispatchResult = call 'boundary_deeply_nested':'safe_dispatch'(Selector, Args, State) in
                         let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
+                        let _CallDeferred = call 'beamtalk_actor':'uninstall_call_from'() in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
                                 let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
                                 let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
-                                case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of
-                                    <{'error', EncErr}> when 'true' ->
-                                        {'reply', {'error', EncErr}, CleanNewState}
-                                    <{'ok', EncodedResult}> when 'true' ->
-                                        {'reply', {'ok', EncodedResult}, CleanNewState}
+                                case _CallDeferred of
+                                    <'true'> when 'true' ->
+                                        {'noreply', CleanNewState}
+                                    <_NotDeferred> when 'true' ->
+                                        case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of
+                                            <{'error', EncErr}> when 'true' ->
+                                                {'reply', {'error', EncErr}, CleanNewState}
+                                            <{'ok', EncodedResult}> when 'true' ->
+                                                {'reply', {'ok', EncodedResult}, CleanNewState}
+                                        end
                                 end
                             <{'error', Error, ErrState}> when 'true' ->
                                 let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
@@ -264,18 +271,25 @@ module 'boundary_deeply_nested' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
                 case call 'beamtalk_actor':'mailbox_continuation_check'(Selector, Args) of
                     <'ok'> when 'true' ->
                         let _OldState = call 'beamtalk_actor_state':'install'(State) in
+                        let _CallFromInstalled = call 'beamtalk_actor':'install_call_from'(From) in
                         let _DispatchResult = call 'boundary_deeply_nested':'safe_dispatch'(Selector, Args, State) in
                         let _RestoreOk = call 'beamtalk_actor_state':'uninstall'(_OldState) in
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
+                        let _CallDeferred = call 'beamtalk_actor':'uninstall_call_from'() in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
                                 let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
                                 let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
-                                case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of
-                                    <{'error', EncErr}> when 'true' ->
-                                        {'reply', {'error', EncErr}, CleanNewState}
-                                    <{'ok', EncodedResult}> when 'true' ->
-                                        {'reply', {'ok', EncodedResult}, CleanNewState}
+                                case _CallDeferred of
+                                    <'true'> when 'true' ->
+                                        {'noreply', CleanNewState}
+                                    <_NotDeferred> when 'true' ->
+                                        case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of
+                                            <{'error', EncErr}> when 'true' ->
+                                                {'reply', {'error', EncErr}, CleanNewState}
+                                            <{'ok', EncodedResult}> when 'true' ->
+                                                {'reply', {'ok', EncodedResult}, CleanNewState}
+                                        end
                                 end
                             <{'error', Error, ErrState}> when 'true' ->
                                 let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in

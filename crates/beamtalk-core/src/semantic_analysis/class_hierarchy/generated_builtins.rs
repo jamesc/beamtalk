@@ -96,6 +96,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ReactiveSubprocess"
             | "Reference"
             | "Regex"
+            | "ReplyTo"
             | "Result"
             | "RetryPolicy"
             | "RuntimeError"
@@ -185,6 +186,7 @@ fn class_info_Actor() -> ClassInfo {
                 MethodInfo { selector: "stopWith:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![Some(DeclaredType::simple("Object")), Some(DeclaredType::simple("Timeout"))], doc: Some("Stop this actor with a chosen exit reason, waiting up to `timeout`\nmilliseconds (or `#infinity`) for it to terminate (`gen_server:stop/3`).\n\nSame semantics as `stopWith:`; raises an error if the actor has not\nterminated within `timeout`. Sent to `self`, the timeout is ignored —\nthe stop is deferred until the current message has been handled.\n\n## Examples\n```beamtalk\nworker stopWith: #shutdown timeout: 1000   // => #ok\n```".into()), origin: None },
                 MethodInfo { selector: "continueWith:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![Some(DeclaredType::simple("Symbol"))], doc: Some("Run `selector` on this actor after the current message has been\nhandled, before any other queued message (OTP `handle_continue/2`).\n\nOnly valid as `self continueWith: #sel` inside one of the actor's own\nmethods (including `initialize`, `handleInfo:` and helpers they call).\n`selector` must be a unary Symbol. The step runs after the current\nmethod returns — a sync caller gets its reply first — and before the\nnext message in the mailbox. Several requests run in request order; a\ncontinuation that requests more queues them after the ones already\nwaiting. An error in a continuation crashes the actor, like an error in\na `!` cast (ADR 0134): `terminate:` and `onExit:` see it.\n\nA pending `stopWith:` in the same method wins: the actor stops and no\nqueued continuation runs. If a sync method fails with an error, its\ncontinuations are dropped. Continuations requested by `initialize` run\nafter `spawn` returns and do not count against its 5-second\ninitialization timeout; an error in one crashes the running actor\nrather than failing the spawn. A continuation that keeps re-requesting itself\nstarves the mailbox, as in OTP. Sent from another process, raises\n`invalid_continuation`.\n\n## Examples\n```beamtalk\nself continueWith: #handleConnection   // => #ok\n```".into()), origin: None },
                 MethodInfo { selector: "continueWith:withArguments:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![Some(DeclaredType::simple("Symbol")), Some(DeclaredType::simple("List"))], doc: Some("Run `selector` with `args` on this actor after the current message has\nbeen handled, before any other queued message (OTP `handle_continue/2`).\n\nSame semantics as `continueWith:`; `args size` must equal the\nselector's arity, or this raises at the call site.\n\n## Examples\n```beamtalk\nself continueWith: #flushIfFull: withArguments: #(100)   // => #ok\n```".into()), origin: None },
+                MethodInfo { selector: "deferReply".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("ReplyTo")), param_types: vec![], doc: Some("Take the reply token of the sync call being handled and return without\nanswering it: the caller stays blocked until the token is answered\n(OTP `{noreply, State}` + `gen_server:reply/2`).\n\nOnly valid as `self deferReply` inside a method that was sent\nsynchronously (helpers it calls included). The method's own return\nvalue is ignored — it is not even encoded. Answer the returned\n`ReplyTo` with `reply:` or `replyError:` from any later method of this\nactor (`handleInfo:`, another sync method, a `continueWith:` step);\nstore it in state until then. Many callers can be parked at once and\nanswered in any order.\n\nSent from another process, from a cast, `handleInfo:` or a\ncontinuation, or with no call in flight, raises `invalid_defer`. A\nmethod that raises after deferring answers its caller with that error\ninstead. If the actor stops (`stopWith:`, `kill`, a crash) with callers\nparked, they raise `actor_dead`; `terminate:` may still `reply:` to\nrescue them. Replying to a caller that has timed out or died is a\nsilent no-op.\n\nThe type checker skips the return-type check of a method whose body\nsends `self deferReply` (a *conditional* deferral also skips it for the\nnon-deferred path).\n\n## Examples\n```beamtalk\nServer subclass: Connection\n  state: waiting :: Dictionary(Integer, ReplyTo) = #{}\n\n  readData: streamId :: Integer -> Binary =>\n    self.waiting := self.waiting at: streamId put: self deferReply\n    nil   // ignored: the caller is answered later\n\n  onDataFrame: streamId :: Integer data: data :: Binary =>\n    (self.waiting at: streamId) reply: data\n    self.waiting := self.waiting removeKey: streamId\n```".into()), origin: None },
                 MethodInfo { selector: "processLabel:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Label this actor's process with `term` (`proc_lib:set_label/1`).\n\nThe label shows up in observer, `erlang:process_info/2` and crash\nreports, which helps tell many processes of the same class apart (for\nexample one actor per connection). The method runs in the actor's own\nprocess, so it labels the actor whether it is sent from inside\n(`self processLabel: ...`) or from another process. Requires OTP 27+,\nwhich is Beamtalk's supported floor (`otp-support.toml`). Named\n`processLabel:` rather than `label:` so it never collides with user\nstate or methods. Always returns `nil`. Sent to a `withTimeout:`\nproxy it labels the proxy's own process, not the wrapped actor.\n\n## Examples\n```beamtalk\nself processLabel: {#catalina_connection, peer}   // => nil\n```".into()), origin: None },
                 MethodInfo { selector: "processLabel".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![], doc: Some("The label set by `processLabel:`, or `nil` if none was set\n(`proc_lib:get_label/1`). Erlang reports \"no label\" as the atom\n`undefined`, so a label of `#undefined` also reads back as `nil`.\n\n## Examples\n```beamtalk\nself processLabel                    // => nil\nself processLabel: #worker\nself processLabel                    // => #worker\n```".into()), origin: None },
                 MethodInfo { selector: "kill".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![], doc: Some("Forcefully kill this actor (exit(Pid, kill)).\n\nUnlike `stop`, kill cannot be trapped by the actor process.\n\n## Examples\n```beamtalk\ncounter kill   // => ok\n```".into()), origin: None },
@@ -3685,6 +3687,43 @@ fn class_info_Regex() -> ClassInfo {
 #[allow(clippy::too_many_lines)] // auto-generated: one literal per method
 #[inline(never)] // keep each class's literal temporaries in their own frame
 #[rustfmt::skip] // preserve compact generated layout
+fn class_info_ReplyTo() -> ClassInfo {
+    ClassInfo {
+            name: "ReplyTo".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            is_module_less: false,
+            auto_ctors: None,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![
+                MethodInfo { selector: "reply:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ReplyTo".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Answer the parked caller with `value`: its sync send returns `value`.\n\nWire-encoded when the caller is on another node, like an ordinary reply.\nA caller that timed out or died, or was already answered, is ignored.\n\n## Examples\n```beamtalk\nreplyTo reply: 42   // answers #ok\n```".into()), origin: None },
+                MethodInfo { selector: "replyError:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ReplyTo".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Symbol")), param_types: vec![Some(DeclaredType::simple("Error"))], doc: Some("Answer the parked caller with `error`: its sync send raises it, like a\nfailed sync call.\n\nSame no-op rules as `reply:` for a caller that timed out, died, or was\nalready answered.\n\n## Examples\n```beamtalk\nreplyTo replyError: anError   // answers #ok\n```".into()), origin: None },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
 fn class_info_Result() -> ClassInfo {
     ClassInfo {
             name: "Result".into(),
@@ -5814,6 +5853,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("ReactiveSubprocess".into(), class_info_ReactiveSubprocess());
     classes.insert("Reference".into(), class_info_Reference());
     classes.insert("Regex".into(), class_info_Regex());
+    classes.insert("ReplyTo".into(), class_info_ReplyTo());
     classes.insert("Result".into(), class_info_Result());
     classes.insert("RetryPolicy".into(), class_info_RetryPolicy());
     classes.insert("RuntimeError".into(), class_info_RuntimeError());

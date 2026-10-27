@@ -891,3 +891,55 @@ fn test_cascade_block_param_propagation_still_works_with_arg_check() {
         "correctly-typed cascaded block arg should not warn, got: {arg_warnings:?}"
     );
 }
+
+/// BT-4090: a method whose body sends `self deferReply` returns a filler the
+/// caller never sees, so its declared return type is not checked against the
+/// body (the same syntactic skip as `@primitive`).
+#[test]
+fn test_return_type_skip_defer_reply_methods() {
+    let defer = msg_send(
+        var("self"),
+        MessageSelector::Unary("deferReply".into()),
+        vec![],
+    );
+    let class_def = ClassDefinition::with_modifiers(
+        ident("Conn"),
+        Some(ident("Object")),
+        ClassModifiers::default(),
+        vec![],
+        vec![
+            // Declared Integer, body ends in a String filler: skipped.
+            MethodDefinition::with_return_type(
+                MessageSelector::Unary("readData".into()),
+                vec![],
+                vec![bare(defer), bare(str_lit("filler"))],
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            ),
+            // Control: same body without deferReply still warns.
+            MethodDefinition::with_return_type(
+                MessageSelector::Unary("plain".into()),
+                vec![],
+                vec![bare(str_lit("filler"))],
+                TypeAnnotation::Simple(ident("Integer")),
+                span(),
+            ),
+        ],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![class_def]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let return_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect();
+    assert_eq!(
+        return_warnings.len(),
+        1,
+        "only the non-deferring method should warn, got: {return_warnings:?}"
+    );
+    assert!(return_warnings[0].message.contains("plain"));
+}

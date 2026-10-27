@@ -1,0 +1,106 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4090 fixture: a Server whose sync methods park their caller with
+// `self deferReply` and answer it later (from handleInfo:, another sync
+// method, a continueWith: step, or terminate:). Misuse probes record the
+// error kind they hit in the Ets table named by `tableName`. See
+// stdlib/test/server_deferred_reply_test.bt.
+
+Server subclass: DeferredReplyServer
+  state: waiting = #{}
+  state: tableName = nil
+  state: rescueOnTerminate = false
+  state: pendingKey = nil
+
+  // === Parking ===
+  wait: key =>
+    self.waiting := self.waiting at: key put: self deferReply
+    #ignored
+
+  waitingCount => self.waiting size
+
+  // A raise after deferring answers the caller with that error.
+  waitThenFail: key =>
+    self.waiting := self.waiting at: key put: self deferReply
+    self error: "failed after deferring"
+
+  // An unencodable filler must not hang the parked caller.
+  waitReturningBlock: key =>
+    self.waiting := self.waiting at: key put: self deferReply
+    [:x | x]
+
+  // A helper called from a sync method may defer the outer caller.
+  waitViaHelper: key => self park: key
+
+  park: key =>
+    self.waiting := self.waiting at: key put: self deferReply
+    #ignored
+
+  // === Answering ===
+  release: key with: value =>
+    replyTo := self.waiting at: key
+    self.waiting := self.waiting removeKey: key
+    replyTo reply: value
+
+  releaseTwice: key first: first second: second =>
+    replyTo := self.waiting at: key
+    self.waiting := self.waiting removeKey: key
+    replyTo reply: first
+    replyTo reply: second
+
+  releaseError: key =>
+    replyTo := self.waiting at: key
+    self.waiting := self.waiting removeKey: key
+    replyTo replyError: self makeError
+
+  makeError => [Error signal: "denied"] on: Error do: [:e | e]
+
+  // Release from handleInfo: with a `{#release, key, value}` tuple; a
+  // `{#probe}` tuple probes deferReply from handleInfo:.
+  handleInfo: msg =>
+    (msg at: 1) == #release ifTrue: [
+      self release: (msg at: 2) with: (msg at: 3)
+    ] ifFalse: [(msg at: 1) == #probe ifTrue: [self probeDefer: #handleInfo]]
+
+  // === defer + continueWith: ===
+  waitThenContinue: key =>
+    self.waiting := self.waiting at: key put: self deferReply
+    self.pendingKey := key
+    self continueWith: #answerPending
+    #ignored
+
+  answerPending => self release: self.pendingKey with: #fromContinuation
+
+  // === Misuse probes: in-process deferReply outside a call in flight ===
+  probeCast => self probeDefer: #cast
+
+  probeContinuation => self continueWith: #continuationProbe
+
+  continuationProbe => self probeDefer: #continuation
+
+  probeDefer: label =>
+    [self deferReply] on: Error do: [:e | self tableAt: label put: e kind]
+
+  // An actor's own perform: of deferReply is an in-process send.
+  performDefer: key =>
+    self.waiting := self.waiting at: key put: (self perform: #deferReply)
+    #ignored
+
+  // === Stop interaction ===
+  stopAfterDeferring: key =>
+    self.waiting := self.waiting at: key put: self deferReply
+    self stopWith: #shutdown
+    #ignored
+
+  enableRescue => self.rescueOnTerminate := true
+
+  terminate: _reason =>
+    self.rescueOnTerminate ifTrue: [
+      self.waiting values do: [:r | r reply: #rescued]
+    ]
+
+  tableAt: key put: value =>
+    self.tableName isNil ifFalse: [
+      (Ets named: self.tableName) at: key put: value
+    ]

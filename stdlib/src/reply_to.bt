@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ReplyTo — a parked sync caller, answered later (BT-4090).
+///
+/// Returned by `Actor>>deferReply`. It is the OTP `From` of the sync call
+/// being handled, wrapped as a value: store it in state (a field, a
+/// `Dictionary` keyed by request id, a `List`) and answer it from any later
+/// method of the same actor — `handleInfo:`, another sync method, a
+/// `continueWith:` step — with `reply:` or `replyError:`. Each calls
+/// `gen_server:reply/2`, so the caller unblocks at that moment.
+///
+/// Answering a caller that has already timed out or died is a silent no-op
+/// (OTP drops the reply), and so is a second answer to the same caller: the
+/// first one wins. If the actor stops while callers are parked, they raise
+/// `actor_dead` as for any sync call to a dead actor.
+///
+/// `ReplyTo` is a `sealed typed Object subclass`: a runtime-minted handle
+/// (ADR 0067: an `Object` subclass declares no `field:` slots), like
+/// `Inspector`. It is only meaningful in the actor that took it.
+///
+/// See `Actor>>deferReply` for a complete example.
+sealed typed Object subclass: ReplyTo
+
+  /// Answer the parked caller with `value`: its sync send returns `value`.
+  ///
+  /// Wire-encoded when the caller is on another node, like an ordinary reply.
+  /// A caller that timed out or died, or was already answered, is ignored.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// replyTo reply: 42   // answers #ok
+  /// ```
+  reply: value :: Object -> Symbol =>
+    (Erlang beamtalk_actor) replyToDeferred: self with: value
+    #ok
+
+  /// Answer the parked caller with `error`: its sync send raises it, like a
+  /// failed sync call.
+  ///
+  /// Same no-op rules as `reply:` for a caller that timed out, died, or was
+  /// already answered.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// replyTo replyError: anError   // answers #ok
+  /// ```
+  replyError: error :: Error -> Symbol =>
+    (Erlang beamtalk_actor) replyErrorToDeferred: self with: error
+    #ok

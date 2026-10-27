@@ -110,6 +110,11 @@ compiled_actor_wire_test_() ->
                     "a legitimate {error, X}-shaped Tuple return value is not "
                     "confused with a genuine encode failure",
                     fun() -> error_shaped_tuple_returns_normally(PeerNode) end
+                },
+                {
+                    "BT-4090: a deferred reply to a remote caller is wire-encoded "
+                    "exactly like the handle_call arms",
+                    fun() -> deferred_reply_to_remote_caller_is_wire_encoded(PeerNode) end
                 }
             ]
         end}}.
@@ -227,6 +232,40 @@ remote_code_mismatch_badfun_compiled(PeerNode) ->
         rpc:call(PeerNode, code, delete, [ModName]),
         rpc:call(PeerNode, code, purge, [ModName]),
         rpc:call(PeerNode, gen_server, stop, [Pid])
+    end.
+
+%%====================================================================
+%% BT-4090: ReplyTo replies mirror the handle_call arms for a remote From
+%%====================================================================
+
+deferred_reply_to_remote_caller_is_wire_encoded(PeerNode) ->
+    %% A process on the peer that never reads its mailbox: the deferred
+    %% reply lands there and is inspected via process_info/2.
+    Remote = spawn(PeerNode, timer, sleep, [infinity]),
+    Tag = make_ref(),
+    Handle = #{'$beamtalk_class' => 'ReplyTo', from => {Remote, Tag}},
+    try
+        ok = beamtalk_actor:replyToDeferred(Handle, 42),
+        ok = beamtalk_actor:replyErrorToDeferred(Handle, boom),
+        {ok, EncValue} = beamtalk_wire:encode(42),
+        EncError = beamtalk_actor:encode_reply_for({Remote, Tag}, 'replyError:', boom),
+        Messages = remote_messages(PeerNode, Remote, 2, 50),
+        ?assertEqual(
+            [{Tag, {ok, EncValue}}, {Tag, {error, EncError}}],
+            Messages
+        )
+    after
+        exit(Remote, kill)
+    end.
+
+remote_messages(PeerNode, Pid, Count, Retries) ->
+    {messages, Msgs} = rpc:call(PeerNode, erlang, process_info, [Pid, messages]),
+    case length(Msgs) >= Count orelse Retries =:= 0 of
+        true ->
+            Msgs;
+        false ->
+            timer:sleep(20),
+            remote_messages(PeerNode, Pid, Count, Retries - 1)
     end.
 
 %%====================================================================

@@ -3161,6 +3161,8 @@ c increment             // => 2
 c getValue              // => 2
 ```
 
+The method's return value is the reply. A sync method can instead **defer** its reply with `self deferReply` (OTP `{noreply, State}` + `gen_server:reply/2`) and answer the caller later; see [Deferred Replies](#deferred-replies-deferreply).
+
 ### REPL and Compiled Code
 
 Actor sends behave identically in REPL and compiled code — both return values directly:
@@ -3621,11 +3623,38 @@ Both methods are defined on `Actor` and answer `#ok`.
 - **Starvation:** the continue chain runs before every other message, including system messages such as supervisor shutdown. A continuation that re-requests itself forever starves the mailbox, as in OTP.
 - **Only on `self`:** `actor continueWith: #x` sent from another process (sync, async or `!`) raises `invalid_continuation` in the caller.
 
+### Deferred Replies (`deferReply`)
+
+`self deferReply` takes the reply token of the sync call being handled and returns a `ReplyTo`. The method returns without answering: the caller stays blocked until the token is answered with `reply:` or `replyError:`, from any later method of the same actor (`handleInfo:`, another sync method, a `continueWith:` step). It is OTP's `{noreply, State}` with the `From` kept for `gen_server:reply/2`, and it is how a Server implements a blocking read or a flow-control wait without a `receive`.
+
+```beamtalk
+Server subclass: Connection
+  state: waiting :: Dictionary(Integer, ReplyTo) = #{}
+
+  readData: streamId :: Integer -> Binary =>
+    self.waiting := self.waiting at: streamId put: self deferReply
+    nil   // ignored: the caller is answered later
+
+  onDataFrame: streamId :: Integer data: data :: Binary =>
+    (self.waiting at: streamId) reply: data
+    self.waiting := self.waiting removeKey: streamId
+```
+
+- **A value:** `ReplyTo` can be stored in state (a field, a `Dictionary`, a `List`). Many callers can be parked at once and answered in any order. `reply: value` makes the caller's send return `value`; `replyError: anError` makes it raise. Both answer `#ok`.
+- **Return value ignored:** after deferring, the method's return value is neither encoded nor delivered. A `typed` class needs no `@expect`: the checker skips the return-type check of a method whose body sends `self deferReply` (a conditional deferral also skips it for the non-deferred path).
+- **Raise after deferring:** the caller gets that error instead of hanging, and the method's state change is rolled back as for any failed sync call.
+- **Silent no-ops:** replying to a caller that already timed out or died, or a second reply to the same caller (the first wins), does nothing.
+- **Stopping:** if the actor stops (`stopWith:`, `kill`, a crash) with callers parked, they raise `actor_dead`. `terminate:` may still `reply:` to rescue them.
+- **`continueWith:`:** composes; defer in the method and reply from the step.
+- **Only on `self`, in a call:** `actor deferReply` from another process (sync, async, `!` or `perform:`) raises `invalid_defer`, as does `self deferReply` from a cast, `handleInfo:`, a continuation, or any code with no sync call in flight. A helper that a sync method calls may defer the outer caller.
+- **Cost:** one process-dictionary put/erase per sync call; nothing otherwise.
+
 ### BEAM Mapping
 
 | Beamtalk | BEAM |
 |----------|------|
 | `Server subclass:` | gen_server with `handle_info/2` dispatch |
+| `self deferReply` / `replyTo reply:` | `{noreply, State}` / `gen_server:reply(From, _)` |
 | `handleInfo: msg` | `handle_info(Msg, State)` callback |
 | `self continueWith: #sel` | `{noreply, State, {continue, _}}` + `handle_continue/2` |
 | `Actor subclass:` | gen_server with `handle_info/2` ignore stub |
