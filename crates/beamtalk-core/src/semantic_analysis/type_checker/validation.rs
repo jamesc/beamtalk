@@ -3396,10 +3396,13 @@ impl TypeChecker {
         members.iter().any(|member| {
             let member = member.trim();
             if let Some(declared_base) = member.strip_suffix(" class") {
+                if super::is_generic_type_param(declared_base.trim()) {
+                    return true;
+                }
                 let declared_base: EcoString = declared_base.into();
                 return Self::is_assignable_to(meta_class, &declared_base, hierarchy);
             }
-            // A type-parameter member (`T | Nil`) cannot be judged until the
+            // A type-parameter member (`T | Nil`, `T class`) cannot be judged until the
             // class is instantiated: accept, as `is_type_compatible` does.
             if super::is_generic_type_param(member) {
                 return true;

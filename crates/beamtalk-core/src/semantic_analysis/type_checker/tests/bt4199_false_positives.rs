@@ -226,3 +226,16 @@ typed Actor subclass: Holder(T)
     );
     assert_eq!(mismatches(&diags), 0, "got: {diags:#?}");
 }
+
+#[test]
+fn bt4206_metaclass_into_type_param_metaclass_is_not_judged() {
+    let diags = type_diagnostics(
+        r"
+typed Actor subclass: Holder(T)
+  state: kind :: T class | Nil = Integer
+  setKind -> Object =>
+    self.kind := String
+",
+    );
+    assert_eq!(mismatches(&diags), 0, "got: {diags:#?}");
+}
