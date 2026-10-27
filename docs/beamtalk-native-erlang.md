@@ -94,6 +94,22 @@ sealed Object subclass: System
     (Erlang beamtalk_system) osPlatform
 ```
 
+### Strings at the FFI boundary
+
+A Beamtalk `String` is a tagged term, `{beamtalk_string, <<"…">>}` (BT-4173), not a bare binary. When you call a stock OTP or third-party module, the boundary unwraps each **top-level** `String` argument to its raw UTF-8 binary, so `Erlang string length: "héllo"` and `Erlang binary split: "a,b" with: ","` work as they would in Erlang. Calls to Beamtalk-owned modules (`beamtalk_*`, `bt@*`) receive their arguments untouched.
+
+`String`s **nested** inside a list, tuple or map argument stay tagged. The unwrap is shallow on purpose: a stock function that only stores or reshuffles its data (`lists:reverse/1`, `lists:sort/1`, `maps:merge/2`, `ets:insert/2`) hands the same terms back, so the `String`s come back as `String`s. A deep unwrap would turn them into `Binary` values, and it would rewrite every nested term (including Beamtalk objects with `String` fields) on every call.
+
+If a nested `String` makes the callee raise `badarg`, the call is retried once with every nested `String` unwrapped and binaries converted to charlists. A callee that **compares** a top-level argument against nested elements doesn't raise. It just answers as if nothing matched, because a raw binary never equals a tagged `String`:
+
+```beamtalk
+Erlang lists member: "a" with: #("a")                  // => false (raw <<"a">> vs a tagged "a")
+Erlang lists keyfind: "a" with: 1 with: #({"a", 1})    // => false
+Erlang maps get: "k" with: #{"k" => 1}                 // raises RuntimeError: key not found: <<"k">>
+```
+
+For lookups like these, use the Beamtalk-side operations (`includes:`, `detect:`, `at:`), which compare `String`s by value. If an Erlang API must see raw binaries throughout, convert them in a native module you write.
+
 FFI is the right choice when:
 - You need to call a handful of Erlang functions
 - The Erlang module is stateless or manages its own state externally

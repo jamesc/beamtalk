@@ -1662,6 +1662,39 @@ export_traces_atom_metadata_test_() ->
                     ?assertEqual(<<"test">>, maps:get(<<"name">>, Trace)),
                     ?assertEqual(true, maps:get(<<"flag">>, Trace)),
                     file:delete(TmpFile)
+                end)},
+            {"String metadata values stay Strings; export unwraps them (BT-4223)",
+                ?_test(begin
+                    beamtalk_trace_store:clear(),
+                    beamtalk_trace_store:enable(),
+                    TestPid = self(),
+                    Alice = {beamtalk_string, <<"alice">>},
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid,
+                        'Counter',
+                        increment,
+                        sync,
+                        0,
+                        ok,
+                        #{user => Alice, raw => <<1, 2>>, tags => [Alice]},
+                        stop
+                    ),
+                    [Ev] = beamtalk_trace_store:get_traces(),
+                    %% A recorded String reads back as that String, not a Binary.
+                    ?assertEqual(Alice, maps:get({beamtalk_string, <<"user">>}, Ev)),
+                    ?assertEqual([Alice], maps:get({beamtalk_string, <<"tags">>}, Ev)),
+                    %% A user Binary stays a Binary.
+                    ?assertEqual(<<1, 2>>, maps:get({beamtalk_string, <<"raw">>}, Ev)),
+                    TmpFile = tmp_export_path("string_meta"),
+                    ?assertMatch(
+                        {ok, #{count := 1}},
+                        beamtalk_trace_store:export_traces(#{path => TmpFile})
+                    ),
+                    {ok, Bin} = file:read_file(TmpFile),
+                    [Trace] = maps:get(<<"traces">>, json:decode(Bin)),
+                    ?assertEqual(<<"alice">>, maps:get(<<"user">>, Trace)),
+                    ?assertEqual([<<"alice">>], maps:get(<<"tags">>, Trace)),
+                    file:delete(TmpFile)
                 end)}
         ]
     end}.
