@@ -8,83 +8,73 @@
 // fixtures/bt4121tally_actor.bt.
 
 TestCase subclass: Bt4121GuardedOpLoopTest
+  field: a = nil
+
+  setUp =>
+    self.a := Bt4121TallyActor spawn
+    self
 
   testDoLoopLoadsSlowPathWrites =>
-    a := Bt4121TallyActor spawn
-    self assert: (a sum: a items) equals: 600
-    self assert: a count equals: 3
+    self assert: (self.a sum: self.a items) equals: 600
+    self assert: self.a count equals: 3
 
   testDoLoopSeesPreLoopWrite =>
-    a := Bt4121TallyActor spawn
-    self assert: (a sumSeeded: a items) equals: 103
+    self assert: (self.a sumSeeded: self.a items) equals: 103
 
   testDoLoopFromNumberCoercion =>
-    a := Bt4121TallyActor spawn
-    self assert: (a sumFromNumber: a items) equals: 3
-    self assert: a total equals: 600
+    self assert: (self.a sumFromNumber: self.a items) equals: 3
+    self assert: self.a total equals: 600
 
   testNonCarriedDoBracketsClosureCall =>
-    a := Bt4121TallyActor spawn
-    a pokeAll: a items
-    self assert: a count equals: 3
+    self.a pokeAll: self.a items
+    self assert: self.a count equals: 3
 
   testWhileLoopLoadsSlowPathWrites =>
-    a := Bt4121TallyActor spawn
-    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
-    self assert: (a repeatAdd: m times: 3) equals: 300
-    self assert: a count equals: 3
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self assert: (self.a repeatAdd: m times: 3) equals: 300
+    self assert: self.a count equals: 3
 
   testToDoLoopLoadsSlowPathWrites =>
-    a := Bt4121TallyActor spawn
-    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
-    self assert: (a repeatAddTo: m times: 3) equals: 300
-    self assert: a count equals: 3
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self assert: (self.a repeatAddTo: m times: 3) equals: 300
+    self assert: self.a count equals: 3
 
   testTimesRepeatLoadsSlowPathWrites =>
-    a := Bt4121TallyActor spawn
-    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
-    self assert: (a repeatAddTimes: m times: 3) equals: 300
-    self assert: a count equals: 3
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self assert: (self.a repeatAddTimes: m times: 3) equals: 300
+    self assert: self.a count equals: 3
 
   testCollectLoadsSlowPathWrites =>
-    a := Bt4121TallyActor spawn
-    self assert: (a collectSums: a items) size equals: 3
-    self assert: a count equals: 3
+    self assert: (self.a collectSums: self.a items) size equals: 3
+    self assert: self.a count equals: 3
 
   testInjectStaysBracketed =>
-    a := Bt4121TallyActor spawn
-    self assert: (a injectSums: a items) cents equals: 600
-    self assert: a count equals: 3
+    self assert: (self.a injectSums: self.a items) cents equals: 600
+    self assert: self.a count equals: 3
 
   testNonCarriedTimesRepeatBracketsClosureCall =>
-    a := Bt4121TallyActor spawn
-    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
-    a pokeTimes: m count: 3
-    self assert: a count equals: 3
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self.a pokeTimes: m count: 3
+    self assert: self.a count equals: 3
 
   testEvaluatedBlockBracketsClosureCall =>
-    a := Bt4121TallyActor spawn
-    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
-    a applyValue: m
-    self assert: a count equals: 1
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self.a applyValue: m
+    self assert: self.a count equals: 1
 
   testDoLoopFieldReadSeesSlowPathWrites =>
-    a := Bt4121TallyActor spawn
-    self assert: (a readCountWhileAdding: a items) equals: 2
-    self assert: a count equals: 3
+    self assert: (self.a readCountWhileAdding: self.a items) equals: 2
+    self assert: self.a count equals: 3
 
   testWhileLoopFieldReadSeesSlowPathWrites =>
-    a := Bt4121TallyActor spawn
-    m := ((Bt4121TallyMoney new) withCents: 100) withTally: a
-    self assert: (a repeatAddCounting: m times: 3) equals: 2
-    self assert: a count equals: 3
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self assert: (self.a repeatAddCounting: m times: 3) equals: 2
+    self assert: self.a count equals: 3
 
   testEarlyReturnKeepsSlowPathWrites =>
-    a := Bt4121TallyActor spawn
-    self assert: (a sumUntil: a items limit: 150) cents equals: 300
-    self assert: a count equals: 2
+    self assert: (self.a sumUntil: self.a items limit: 150) cents equals: 300
+    self assert: self.a count equals: 2
 
   testDirectReturnKeepsSlowPathWrites =>
-    a := Bt4121TallyActor spawn
-    self assert: (a sumFirst: a items) cents equals: 100
-    self assert: a count equals: 1
+    self assert: (self.a sumFirst: self.a items) cents equals: 100
+    self assert: self.a count equals: 1
