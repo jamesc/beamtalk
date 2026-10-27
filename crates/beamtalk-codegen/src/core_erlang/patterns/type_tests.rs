@@ -56,6 +56,11 @@ static TYPE_TESTS: &[(&str, TypeTest)] = &[
     // pattern here the test is exact, not subclass-aware (see
     // `testSupervisorClassPatternDiscriminatesSiblingClasses`), so a
     // `String` (a `Binary` subclass) does not match `b :: Binary`.
+    // Unreachable today: `match_validators` rejects `:: Binary` as a
+    // non-leaf class. BT-4228 tracks allowing it, and requires the test to
+    // become subclass-aware (bare binary OR the String tag) so it agrees
+    // with `isKindOf: Binary` — do not relax the validator against this
+    // exact-match entry as-is.
     ("Binary", TypeTest::Bif("is_binary")),
     ("Integer", TypeTest::Bif("is_integer")),
     ("Float", TypeTest::Bif("is_float")),
