@@ -1218,3 +1218,22 @@ setup_class_system() ->
 -doc "Teardown class system".
 teardown_class_system(_) ->
     ok.
+
+%%% BT-4159: class_signal_message_reason/3
+
+class_signal_message_reason_records_reason_test() ->
+    ClassSelf = #beamtalk_object{
+        class = 'MyErr class', class_mod = 'bt@stdlib@my_err', pid = self()
+    },
+    try
+        beamtalk_exception_handler:class_signal_message_reason(
+            <<"closed">>, {tls, closed}, ClassSelf
+        ),
+        ?assert(false)
+    catch
+        error:#{error := Inner} = Wrapped ->
+            ?assertEqual({tls, closed}, beamtalk_exception_handler:dispatch('reason', [], Wrapped)),
+            ?assertEqual('MyErr', Inner#beamtalk_error.class),
+            Formatted = beamtalk_error:format(Inner),
+            ?assertNotEqual(nomatch, binary:match(Formatted, <<"Reason: {tls,closed}">>))
+    end.

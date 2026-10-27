@@ -1233,6 +1233,13 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => nil
 ```
 
+**Carrying a reason: `signal:reason:` (BT-4159).** Beamtalk exceptions have no instance fields, so to attach machine-readable data when signalling, use the class-side `signal: message reason: term`. The term can be any value; `reason` answers it in `on:do:` (type `Object | Nil`, so narrow with `isKindOf:` or match), it survives propagation across processes, and uncaught reports print it as a `Reason:` line. There is no separate `error:reason:`; `Error signal: msg reason: term` is the equivalent.
+
+```beamtalk
+[Error signal: "closed" reason: #econnreset] on: Error do: [:e | e reason]
+// => #econnreset
+```
+
 **Re-raising unchanged: `pass` vs `signal` (BT-4057).** `e signal` on a caught exception raises a fresh `error` with a new stacktrace, so a caught `ExitError` or `ThrowError` comes back out as an error. `e pass` re-raises with the original Erlang class (`error`, `exit` or `throw`), reason and call sites, so an outer handler (or the process) sees the original failure: `exit: #normal` still ends the process normally. The stacktrace is rebuilt from the frames `e stackTrace` shows, so argument values are absent, as they are there. On an exception that was never caught (`Exception new pass`), `pass` behaves like `signal`.
 
 ```beamtalk

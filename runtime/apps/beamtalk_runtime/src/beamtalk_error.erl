@@ -194,6 +194,11 @@ Example:
 format(#beamtalk_error{kind = does_not_understand} = Error) ->
     Enriched = maybe_enrich_dnu_hint(Error),
     format_parts(Enriched#beamtalk_error.message, Enriched#beamtalk_error.hint);
+format(#beamtalk_error{message = Message, hint = Hint, details = #{signal_reason := Reason}}) ->
+    %% BT-4159: `signal:reason:` — show the reason in uncaught reports.
+    iolist_to_binary([
+        format_parts(Message, Hint), <<"\nReason: ">>, io_lib:format("~0tp", [Reason])
+    ]);
 format(#beamtalk_error{message = Message, hint = Hint}) ->
     format_parts(Message, Hint).
 

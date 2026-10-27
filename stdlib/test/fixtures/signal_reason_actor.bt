@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4159: an actor whose method signals with a reason, so a test can check
+// the reason term survives crossing the actor process boundary.
+
+Actor subclass: SignalReasonActor
+
+  failWithReason => Error signal: "boom" reason: {#code, 42}
