@@ -2503,7 +2503,10 @@ file_error_unclassified_is_io_error_with_default_hint_test() ->
     ?assertMatch(
         #beamtalk_error{kind = io_error, details = #{path := <<"p">>, reason := enospc}}, E
     ),
-    ?assertNotEqual(undefined, E#beamtalk_error.hint).
+    ?assertEqual(
+        beamtalk_primitive:string_from_binary(<<"Could not create directory">>),
+        E#beamtalk_error.hint
+    ).
 
 file_error_no_default_hint_test() ->
     E = beamtalk_file:file_error('lines:', #{path => <<"p">>}, eio, [], undefined),

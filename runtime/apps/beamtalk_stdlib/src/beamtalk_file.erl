@@ -777,10 +777,7 @@ file_error(Selector, Details, Reason, Classified, DefaultHint) ->
     Error0 = beamtalk_error:new(Kind, 'File'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_details(Error1, Details#{reason => Reason}),
-    case Hint of
-        undefined -> Error2;
-        _ -> beamtalk_error:with_hint(Error2, Hint)
-    end.
+    beamtalk_error:with_hint(Error2, Hint).
 
 -doc "`file_error/5` as a `Result error:`.".
 -spec file_error_result(
