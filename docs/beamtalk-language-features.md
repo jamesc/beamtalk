@@ -1240,6 +1240,15 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => #econnreset
 ```
 
+**Structured details (`Exception>>details`, BT-4174).** Natives that know more than the message says record it as structured details: `details` answers a `Dictionary` keyed by Symbol (empty when nothing was recorded), so read the value with `at:` instead of parsing the English `message`. For example, `Binary asString` on invalid UTF-8 answers `Result error:` holding a `parse_error` whose `#offset` is the byte offset of the first invalid sequence. A nested Beamtalk error stored in the details answers as an Exception and an absent (Erlang `undefined`) value as `nil`. Other values are the recorded terms as-is, without the FFI boundary coercions `reason` gets: text a native records as raw bytes, such as a File error's `#path`, answers a `Binary` (send it `asString` for a `String`).
+
+```beamtalk
+(Binary fromBytes: #(104, 101, 255)) asString error details at: #offset
+// => 2
+[Error signal: "boom"] on: Error do: [:e | e details]
+// => #{}
+```
+
 **Re-raising unchanged: `pass` vs `signal` (BT-4057).** `e signal` on a caught exception raises a fresh `error` with a new stacktrace, so a caught `ExitError` or `ThrowError` comes back out as an error. `e pass` re-raises with the original Erlang class (`error`, `exit` or `throw`), reason and call sites, so an outer handler (or the process) sees the original failure: `exit: #normal` still ends the process normally. The stacktrace is rebuilt from the frames `e stackTrace` shows, so argument values are absent, as they are there. On an exception that was never caught (`Exception new pass`), `pass` behaves like `signal`.
 
 ```beamtalk

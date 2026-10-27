@@ -39,6 +39,9 @@ TestCase subclass: FileIoTest
     result := File readAll: "target/bt-test-tmp/no_such_file_xyz.txt"
     self assert: result isError
     self assert: (result error printString includesSubstring: "file not found")
+    // BT-4174: details answers the recorded path as-is (a Binary)
+    self assert: (result error details at: #path) equals: (Binary fromBytes: "target/bt-test-tmp/no_such_file_xyz.txt" toBytes)
+    self assert: (result error details at: #path) class equals: Binary
     // readAll: non-string path
     @expect type
     self should: [File readAll: 42] raise: #type_error

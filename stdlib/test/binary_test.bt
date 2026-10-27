@@ -391,9 +391,7 @@ TestCase subclass: BinaryTest
     result := (Binary fromBytes: #(104, 101, 108, 108, 111, 255)) asString
     self assert: result isError
     self assert: (result error kind) equals: #parse_error
-    // Pin the exact message: the offset is only reachable from Beamtalk
-    // via message parsing until Exception exposes details (BT-4169 review)
-    self assert: (result error message) equals: "Invalid UTF-8 at byte offset 5"
+    self assert: (result error details at: #offset) equals: 5
 
   testAsStringInvalidUtf8UnwrapRaises =>
     result := (Binary fromBytes: #(255, 254)) asString

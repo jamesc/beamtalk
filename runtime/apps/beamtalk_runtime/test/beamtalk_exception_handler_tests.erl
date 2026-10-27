@@ -453,6 +453,43 @@ dispatch_reason_exit_test() ->
     Ex = beamtalk_exception_handler:ensure_wrapped(exit, shutdown, []),
     ?assertEqual(shutdown, beamtalk_exception_handler:dispatch('reason', [], Ex)).
 
+%% BT-4174: details exposes the structured details map.
+dispatch_details_empty_when_absent_test() ->
+    Ex = beamtalk_exception_handler:wrap(beamtalk_error:new(signal, 'Error')),
+    ?assertEqual(#{}, beamtalk_exception_handler:dispatch('details', [], Ex)).
+
+dispatch_details_returns_map_test() ->
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(parse_error, 'Binary', asString), #{offset => 5}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual(#{offset => 5}, beamtalk_exception_handler:dispatch('details', [], Ex)).
+
+dispatch_details_wraps_nested_error_test() ->
+    Inner = beamtalk_error:new(signal, 'Error'),
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(runtime_error, 'Foo', bar), #{cause => Inner}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    #{cause := Wrapped} = beamtalk_exception_handler:dispatch('details', [], Ex),
+    ?assertEqual(beamtalk_exception_handler:wrap(Inner), Wrapped).
+
+dispatch_details_undefined_is_nil_raw_binary_kept_test() ->
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(io_error, 'File', 'readAll:'),
+        #{new_path => undefined, path => <<"a.txt">>}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual(
+        #{new_path => nil, path => <<"a.txt">>},
+        beamtalk_exception_handler:dispatch('details', [], Ex)
+    ).
+
+dispatch_details_no_error_field_test() ->
+    ?assertEqual(
+        #{}, beamtalk_exception_handler:dispatch('details', [], #{'$beamtalk_class' => 'Error'})
+    ).
+
 dispatch_print_string_test() ->
     Ex = make_test_exception(),
     Result = beamtalk_exception_handler:dispatch('printString', [], Ex),
@@ -521,6 +558,7 @@ has_method_kind_test() -> ?assert(beamtalk_exception_handler:has_method('kind'))
 has_method_selector_test() -> ?assert(beamtalk_exception_handler:has_method('selector')).
 has_method_error_class_test() -> ?assert(beamtalk_exception_handler:has_method('errorClass')).
 has_method_reason_test() -> ?assert(beamtalk_exception_handler:has_method('reason')).
+has_method_details_test() -> ?assert(beamtalk_exception_handler:has_method('details')).
 has_method_print_string_test() -> ?assert(beamtalk_exception_handler:has_method('printString')).
 has_method_stack_trace_test() -> ?assert(beamtalk_exception_handler:has_method('stackTrace')).
 has_method_class_test() -> ?assert(beamtalk_exception_handler:has_method('class')).

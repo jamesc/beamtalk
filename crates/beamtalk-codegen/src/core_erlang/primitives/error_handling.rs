@@ -22,8 +22,8 @@ pub(crate) fn generate_exception_bif(
     params: &[String],
 ) -> Option<Document<'static>> {
     match selector {
-        "message" | "hint" | "kind" | "selector" | "errorClass" | "reason" | "printString"
-        | "signal" | "pass" | "stackTrace" => Some(docvec![
+        "message" | "hint" | "kind" | "selector" | "errorClass" | "reason" | "details"
+        | "printString" | "signal" | "pass" | "stackTrace" => Some(docvec![
             "call 'beamtalk_exception_handler':'dispatch'(",
             leaf::atom(selector.to_owned()),
             ", [], Self)",
