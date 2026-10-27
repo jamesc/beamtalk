@@ -682,6 +682,11 @@ dispatch('reason', [], #{error := #beamtalk_error{details = Details}}) ->
     raw_reason(Details);
 dispatch('reason', [], _) ->
     nil;
+dispatch('details', [], #{error := #beamtalk_error{details = Details}}) ->
+    %% BT-4174: a nested raw record answers as an Exception object.
+    maps:map(fun(_Key, Value) -> wrap_detail(Value) end, Details);
+dispatch('details', [], _) ->
+    #{};
 dispatch('printString', [], #{error := Error}) ->
     %% BT-4170: `format/1` renders raw bytes; `printString` answers a `String`.
     beamtalk_primitive:string_from_binary(beamtalk_error:format(Error));
@@ -804,6 +809,19 @@ raw_reason_from(Details, [Key | Rest]) ->
         _ -> raw_reason_from(Details, Rest)
     end.
 
+-doc """
+Present one `details` value to Beamtalk, for `Exception>>details` (BT-4174).
+
+A nested raw `#beamtalk_error{}` answers as an Exception object and Erlang's
+`undefined` as `nil`, as `hint`/`selector` do. Every other value is the
+recorded term as-is: a raw binary stays a `Binary` (only its producer knows
+whether it is text).
+""".
+-spec wrap_detail(term()) -> term().
+wrap_detail(#beamtalk_error{} = Error) -> wrap(Error);
+wrap_detail(undefined) -> nil;
+wrap_detail(Value) -> Value.
+
 -doc "Check if Exception responds to a selector.".
 -spec has_method(atom()) -> boolean().
 has_method('message') -> true;
@@ -812,6 +830,7 @@ has_method('kind') -> true;
 has_method('selector') -> true;
 has_method('errorClass') -> true;
 has_method('reason') -> true;
+has_method('details') -> true;
 has_method('printString') -> true;
 has_method('stackTrace') -> true;
 has_method('class') -> true;
