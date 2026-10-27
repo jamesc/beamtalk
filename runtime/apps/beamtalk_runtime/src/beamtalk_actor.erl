@@ -5015,11 +5015,7 @@ timed out or died, or a second reply to the same caller, is a silent no-op
 """.
 -spec replyToDeferred(reply_to(), term()) -> ok.
 replyToDeferred(#{'$beamtalk_class' := 'ReplyTo', from := From}, Value) ->
-    Reply =
-        case encode_reply_for_tagged(From, 'reply:', Value) of
-            {ok, Encoded} -> {ok, Encoded};
-            {error, EncErr} -> {error, EncErr}
-        end,
+    Reply = encode_reply_for_tagged(From, 'reply:', Value),
     gen_server:reply(From, Reply),
     ok.
 
@@ -5032,10 +5028,10 @@ Same silent no-op rules as `replyToDeferred/2`. Answers `ok`.
 -spec replyErrorToDeferred(reply_to(), term()) -> ok.
 replyErrorToDeferred(#{'$beamtalk_class' := 'ReplyTo', from := From}, Error) ->
     Reply =
-        case encode_reply_for(From, 'replyError:', Error) of
+        case encode_reply_for_tagged(From, 'replyError:', Error) of
+            {ok, EncodedError} -> {error, EncodedError};
             %% Keep the flat `{error, EncErr}` shape, as the handle_call error arm does.
-            {error, EncErr} -> {error, EncErr};
-            EncodedError -> {error, EncodedError}
+            {error, EncErr} -> {error, EncErr}
         end,
     gen_server:reply(From, Reply),
     ok.
