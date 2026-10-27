@@ -1275,3 +1275,20 @@ class_signal_message_reason_records_reason_test() ->
             Formatted = beamtalk_error:format(Inner),
             ?assertNotEqual(nomatch, binary:match(Formatted, <<"Reason: {tls,closed}">>))
     end.
+
+class_signal_message_reason_string_and_details_test() ->
+    ClassSelf = #beamtalk_object{
+        class = 'MyErr class', class_mod = 'bt@stdlib@my_err', pid = self()
+    },
+    try
+        beamtalk_exception_handler:class_signal_message_reason(
+            <<"x">>, {beamtalk_string, <<"disk full">>}, ClassSelf
+        ),
+        ?assert(false)
+    catch
+        error:#{error := Inner} = Wrapped ->
+            ?assertEqual(#{}, beamtalk_exception_handler:dispatch('details', [], Wrapped)),
+            ?assertNotEqual(
+                nomatch, binary:match(beamtalk_error:format(Inner), <<"Reason: \"disk full\"">>)
+            )
+    end.

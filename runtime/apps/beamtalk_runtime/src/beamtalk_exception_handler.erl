@@ -685,7 +685,8 @@ dispatch('reason', [], _) ->
     nil;
 dispatch('details', [], #{error := #beamtalk_error{details = Details}}) ->
     %% BT-4174: a nested raw record answers as an Exception object.
-    maps:map(fun(_Key, Value) -> wrap_detail(Value) end, Details);
+    %% BT-4159: `signal_reason` is surfaced by `reason`, not `details`.
+    maps:map(fun(_Key, Value) -> wrap_detail(Value) end, maps:remove(signal_reason, Details));
 dispatch('details', [], _) ->
     #{};
 dispatch('printString', [], #{error := Error}) ->
@@ -797,8 +798,12 @@ not a raw Erlang term, so it answers `nil`, as does an exception with no
 recorded term.
 """.
 -spec raw_reason(map()) -> term().
+raw_reason(#{signal_reason := Reason}) ->
+    %% BT-4159: the caller-supplied term, answered as-is (a raw record, or an
+    %% Exception passed as the reason, comes back as an Exception).
+    wrap_detail(Reason);
 raw_reason(Details) ->
-    raw_reason_from(Details, [signal_reason, reason, erlang_error, original_reason]).
+    raw_reason_from(Details, [reason, erlang_error, original_reason]).
 
 -spec raw_reason_from(map(), [atom()]) -> term().
 raw_reason_from(_Details, []) ->

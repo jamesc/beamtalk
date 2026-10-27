@@ -197,7 +197,7 @@ format(#beamtalk_error{kind = does_not_understand} = Error) ->
 format(#beamtalk_error{message = Message, hint = Hint, details = #{signal_reason := Reason}}) ->
     %% BT-4159: `signal:reason:` — show the reason in uncaught reports.
     iolist_to_binary([
-        format_parts(Message, Hint), <<"\nReason: ">>, io_lib:format("~0tp", [Reason])
+        format_parts(Message, Hint), <<"\nReason: ">>, format_reason_term(Reason)
     ]);
 format(#beamtalk_error{message = Message, hint = Hint}) ->
     format_parts(Message, Hint).
@@ -277,6 +277,14 @@ extract_from_tuple(T, I, Size, Depth) ->
         undefined -> extract_from_tuple(T, I + 1, Size, Depth);
         Found -> Found
     end.
+
+%% BT-4159: render a `signal:reason:` term. Strings print quoted; everything
+%% else uses `~0tp` (pure formatting; never messages an actor).
+-spec format_reason_term(term()) -> iodata().
+format_reason_term({beamtalk_string, _} = Str) ->
+    beamtalk_primitive:print_string(Str);
+format_reason_term(Reason) ->
+    io_lib:format("~0tp", [Reason]).
 
 %% Format message with optional hint.
 -spec format_parts(term(), term()) -> binary().

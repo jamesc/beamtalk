@@ -99,3 +99,24 @@ TestCase subclass: ExceptionReasonTest
     result := [actor failWithReason] on: Error do: [:e | e reason]
     actor stop
     self assert: result equals: {#code, 42}
+
+  testSignalReasonNotLeakedIntoDetails =>
+    result := [
+      Error signal: "x" reason: #econnreset
+    ] on: Error do: [:e | e details]
+    self assert: result equals: #{}
+
+  testSignalReasonExceptionAsReason =>
+    result := [
+      [
+        Error signal: "inner"
+      ] on: Error do: [:inner | Error signal: "wrapped" reason: inner]
+    ] on: Error do: [:e | e reason]
+    self assert: (result isKindOf: Error)
+    self assert: result message equals: "inner"
+
+  testSignalReasonStringReason =>
+    result := [
+      Error signal: "x" reason: "disk full"
+    ] on: Error do: [:e | e reason]
+    self assert: result equals: "disk full"
