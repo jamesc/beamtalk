@@ -3383,7 +3383,8 @@ impl TypeChecker {
     /// `Behaviour` / `Object` accept it, `Integer` does not — judged by
     /// `tower`: [`Self::is_assignable_to`] for a slot (a field or a state
     /// default, which has no unknown-class escape), [`Self::is_type_compatible`]
-    /// for an argument, as for every other argument type.
+    /// for an argument, as for every other argument type. A type-parameter
+    /// member accepts it.
     pub(super) fn metatype_assignable_to(
         meta_class: &EcoString,
         declared_type: &EcoString,
@@ -3397,6 +3398,11 @@ impl TypeChecker {
             if let Some(declared_base) = member.strip_suffix(" class") {
                 let declared_base: EcoString = declared_base.into();
                 return Self::is_assignable_to(meta_class, &declared_base, hierarchy);
+            }
+            // A type-parameter member (`T | Nil`) cannot be judged until the
+            // class is instantiated: accept, as `is_type_compatible` does.
+            if super::is_generic_type_param(member) {
+                return true;
             }
             let member: EcoString = if union {
                 Self::resolve_type_keyword_static(member)

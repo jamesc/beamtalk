@@ -213,3 +213,16 @@ typed Object subclass: N
     );
     assert!(diags.is_empty(), "got: {diags:#?}");
 }
+
+#[test]
+fn bt4206_metaclass_into_type_param_union_is_not_judged() {
+    let diags = type_diagnostics(
+        r"
+typed Actor subclass: Holder(T)
+  state: kind :: T | Nil = Integer
+  setKind -> Object =>
+    self.kind := String
+",
+    );
+    assert_eq!(mismatches(&diags), 0, "got: {diags:#?}");
+}
