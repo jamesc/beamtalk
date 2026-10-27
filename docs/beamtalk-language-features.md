@@ -95,7 +95,7 @@ crlf := "\r\n"                   // 1 grapheme — byte-identical to (Character 
 
 ### Character Methods
 
-Character-typed receivers dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values. This applies to character literals (`$A`), the `Character value:` class factory, chained `uppercase`/`lowercase` sends, and `ifTrue:ifFalse:` conditionals whose outcome is statically Character — all statically Character-typed forms. A conditional is transparent when a literal condition takes the known branch, or when both branches agree (a non-constant condition with mixed branches stays Integer-dispatched):
+Character-typed receivers dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values. This applies to character literals (`$A`), the `Character value:` class factory, chained `uppercase`/`lowercase` sends, `ifTrue:ifFalse:` conditionals whose outcome is statically Character, and single-block `ifTrue:`/`ifFalse:`/`and:`/`or:` sends whose literal receiver takes a Character-answering block — all statically Character-typed forms. A two-branch conditional is transparent when a literal condition takes the known branch, or when both branches agree (a non-constant condition with mixed branches stays Integer-dispatched). A single-block send is transparent only when its receiver is the literal that runs the block (`true ifTrue:`, `false ifFalse:`, `true and:`, `false or:`): on the other path it answers a Boolean (`false ifTrue: [$A]` answers `false`, not `nil`), so a non-constant receiver stays Integer-dispatched:
 
 ```beamtalk
 $A asInteger              // => 65
@@ -109,6 +109,8 @@ Character value: 65       // => $A
 (Character value: 10) asString   // => "\n" (LF, not "10")
 $a uppercase asString            // => "A"
 (true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) asString  // => "6"
+(true and: [$A]) printString     // => "$A"
+(false ifTrue: [$A]) class       // => False
 ```
 
 ### String Operations (Grapheme-Aware)
