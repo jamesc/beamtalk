@@ -76,7 +76,9 @@ impl CoreErlangGenerator {
 /// `lowercase` (applied recursively, since their own receiver must itself
 /// be Character-typed — e.g. `$a uppercase lowercase`) — plus an
 /// `ifTrue:ifFalse:` conditional whose outcome is statically Character (see
-/// [`conditional_result_is_character_typed`]).
+/// [`conditional_result_is_character_typed`]) and a constant-taken
+/// single-branch `ifTrue:`/`ifFalse:`/`and:`/`or:` whose block answers a
+/// Character (see [`single_branch_result_is_character_typed`]).
 ///
 /// This distinction matters because Character values are bare integers at
 /// the BEAM level (`Character` is declared `Integer subclass:`), so the
@@ -128,9 +130,12 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
                     Some(WellKnownSelector::IfTrueIfFalse)
                 )
                 && conditional_result_is_character_typed(receiver, &arguments[0], &arguments[1]);
+            let is_character_typed_single_branch = arguments.len() == 1
+                && single_branch_result_is_character_typed(receiver, selector, &arguments[0]);
             is_value_factory_call
                 || is_character_returning_unary_send
                 || is_character_typed_conditional
+                || is_character_typed_single_branch
         }
         _ => false,
     }
@@ -155,10 +160,8 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
 /// conditionals and factory calls compose). Anything else (an empty block,
 /// which answers `nil`; a non-block argument, whose `value` is dynamically
 /// typed) fails closed to `false`, preserving today's Integer dispatch.
-/// Single-branch `ifTrue:`/`ifFalse:` are deliberately not recognized: on
-/// the untaken path they answer the receiver boolean (`True>>ifFalse:` and
-/// `False>>ifTrue:` answer `self`), so only a constant-taken single-branch
-/// send would ever qualify — that sliver is out of scope for BT-4161.
+/// Single-branch sends are handled separately by
+/// [`single_branch_result_is_character_typed`].
 fn conditional_result_is_character_typed(
     condition: &Expression,
     true_branch: &Expression,
@@ -171,6 +174,47 @@ fn conditional_result_is_character_typed(
         Some(false) => false_typed,
         None => true_typed && false_typed,
     }
+}
+
+/// True if a single-block boolean send — `ifTrue:`, `ifFalse:`, `and:` or
+/// `or:` — with this receiver and block argument statically answers a
+/// Character (BT-4181).
+///
+/// Each of these answers its block's value only on its *taken* path; on the
+/// untaken path it answers a Boolean, never `nil` or a Character:
+/// `True>>ifFalse:` and `False>>ifTrue:` answer `self`, `False>>and:`
+/// answers `false` and `True>>or:` answers `true` (`Boolean>>and:`/`or:`
+/// delegate to `ifTrue:ifFalse:` with a `[false]`/`[true]` literal arm). So
+/// the send qualifies only when its receiver is the literal Boolean that
+/// takes the block — `true ifTrue:`, `false ifFalse:`, `true and:`,
+/// `false or:` — and the block answers a Character (per
+/// [`branch_value_is_character_typed`]). A non-constant receiver, or a
+/// constant one that skips the block, fails closed to `false`.
+///
+/// The taken-path rule depends on the stdlib bodies `True>>ifTrue:`,
+/// `False>>ifFalse:` (`<block> value`) and `Boolean>>and:`/`or:`, pinned by
+/// `single_branch_boolean_bodies_match_codegen_recognizer`, which must stay
+/// in sync with this function. The pure-inline codegen
+/// (`generate_if_true_pure` and friends) answers the same inlined block
+/// value on the taken path.
+fn single_branch_result_is_character_typed(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    branch: &Expression,
+) -> bool {
+    let MessageSelector::Keyword(parts) = selector else {
+        return false;
+    };
+    let [part] = parts.as_slice() else {
+        return false;
+    };
+    let taking_receiver = match part.keyword.as_str() {
+        "ifTrue:" | "and:" => true,
+        "ifFalse:" | "or:" => false,
+        _ => return false,
+    };
+    receiver.unwrap_parens().as_literal_bool() == Some(taking_receiver)
+        && branch_value_is_character_typed(branch)
 }
 
 /// True if a conditional branch argument — a block literal — answers a
