@@ -61,6 +61,19 @@ TestCase subclass: ErrorMethodTest
       42 error: 99
     ] on: Exception do: [:e | e errorClass]) equals: #Integer
 
+  // BT-4191: errorClass answers a Symbol, matching its `-> Symbol` declaration.
+  testErrorClassIsSymbol =>
+    @expect dnu
+    cls := [42 unknownMsg] on: Exception do: [:e | e errorClass]
+    self assert: cls class equals: Symbol
+    self assert: cls equals: #Integer
+    self assert: ([
+      Error signal: "boom"
+    ] on: Error do: [:e | e errorClass]) class equals: Symbol
+    // asString still answers the class name as a String
+    self assert: cls asString equals: "Integer"
+    self assert: cls asString class equals: String
+
   testExceptionDisplayString =>
     // displayString on an Exception delegates to printString
     self assert: ([
