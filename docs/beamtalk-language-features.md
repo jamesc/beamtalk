@@ -832,7 +832,7 @@ self.total := self.total * factor
 
 **Note:** `self.field` compiles to direct map access, not a message send. For external access to another actor's state, use message sends.
 
-**Parenthesized assignment:** Field assignments can be used as expressions when wrapped in parentheses — `(self.x := 5)` returns the assigned value:
+**Parenthesized assignment:** A field assignment used as an operand (the receiver or argument of a send, an element of a literal, an assigned value) must be wrapped in parentheses. There, `(self.x := 5)` answers the assigned value:
 
 ```beamtalk
 // Assignment as expression (returns 6)
@@ -843,6 +843,21 @@ self.x := 5
 self.y := self.x + 1
 self.y
 ```
+
+Parentheses only matter in operand position. Around a whole statement they change nothing. In a value-type method, a trailing field assignment answers the updated `self` whether or not it is parenthesised: `(self.x := 5)` and `self.x := 5` as the last statement both answer the updated `self`. To answer the assigned value, write it explicitly (BT-4092):
+
+```beamtalk
+// Value-type method answering the updated self (with or without parentheses)
+withX5 =>
+  self.x := 5
+
+// Value-type method answering 5
+setXTo5 =>
+  self.x := 5
+  5
+```
+
+Before BT-4092, a parenthesised trailing field assignment answered the assigned value. For one release, the compiler warns on that form (category `deprecation`) so code written for the old meaning can be found.
 
 **Limitation:** In an actor instance method a block reads and writes the actor's fields live, wherever it is made and run (see [Actor Blocks See Live State](#actor-blocks-see-live-state)), and in a class method a block may assign class variables wherever it is written (they live in the class process, [ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md)). In a value-type method, field assignments (`self.x :=`) in stored closures are still a compile error — they require control-flow context for state threading. A closure that assigns an outer local may not be stored at all: a block may assign a captured variable only where it is written directly as the argument of a control-flow construct or a compiler-known collection message (`do:`, `inject:into:`, `on:do:`, ...), and a block that is stored, returned, placed in a collection literal or passed to any other method is rejected at the assignment ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), see [What Works and What Doesn't](#what-works-and-what-doesnt)). Have the block answer the new value and assign it where the block is called.
 
@@ -8147,7 +8162,7 @@ TestCase subclass: IntegrationTest
 
 **Key points:**
 - Declare test instance variables with `field:` (not `state:`) since TestCase is a Value subclass
-- `self.field := value` in the LAST statement of `setUp` returns the updated self — this is a special case for value-type field assignment (BT-833/BT-900), not the general rule that a bare assignment evaluates to the assigned value
+- `self.field := value` in the LAST statement of `setUp` returns the updated self — this is a special case for value-type field assignment (BT-833/BT-900), not the general rule that an assignment evaluates to the assigned value. It holds with or without parentheses: `(self.field := value)` as the last statement also returns the updated self (BT-4092)
 - Each test method receives the setUp'd value as `self` — mutations to actor references work normally, but `self` itself is immutable
 
 **Any statement after the last `self.field := value` silently drops that field** (BT-3391) — `setUp`'s return value is always its last expression's value, and only a trailing field assignment (or bare `self`) evaluates to the updated self. Adding one more line after your last assignment — a `super setUp` call, a log line, an unrelated local — makes `setUp` return THAT statement's value instead, and every field set above it reads back as its default in every test method, with no compile or runtime error:

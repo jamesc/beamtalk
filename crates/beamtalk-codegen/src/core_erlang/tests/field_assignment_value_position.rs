@@ -1168,39 +1168,60 @@ fn parenthesised_non_last_statements_lower_exactly_like_their_bare_form() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// BT-3838 item 1: a parenthesised LAST value-type statement keeps its written form.
+/// BT-3838 item 1, BT-4092: a parenthesised LAST value-type statement means exactly its bare
+/// form.
 ///
-/// BT-3830 unwraps parentheses only on a non-last statement, because the last statement is the
-/// method's value: a bare last field assignment answers the updated `Self`, a parenthesised one
-/// answers the assignment's value (and `(t := t + 1)` answers `t + 1`). Both stay as written
-/// there, so this pins that they still compile with no verifier diagnostic, with and without a
-/// preceding `#(1) do: [:e | ^ e]` (a non-local return, whose tail returns
-/// `{Result, FinalSelf}`), and that a field write in them survives.
+/// The last statement is the method's value. A trailing field assignment answers the updated
+/// `Self` whether or not it is parenthesised (BT-4092 removed the exception where `(self.m := 5)`
+/// answered `5`), so the field cases must generate Core Erlang identical to their bare form. Every
+/// case must compile with no verifier diagnostic, with and without a preceding
+/// `#(1) do: [:e | ^ e]` (a non-local return, whose tail returns `{Result, FinalSelf}`), and a
+/// field write in it must survive.
 #[test]
 fn parenthesised_last_statements_compile_with_and_without_a_non_local_return() {
-    let lasts = [
-        "(self.m := 5)",
-        "(t := t + 1)",
-        "(self.m := self.m + 1)",
-        "([t < 3] whileTrue: [t := t + 1])",
-        "(c ifTrue: [self.m := 1] ifFalse: [0])",
+    // `(form, must lower identically to its bare form)`.
+    let lasts: &[(&str, bool)] = &[
+        ("self.m := 5", true),
+        ("t := t + 1", false),
+        ("self.m := self.m + 1", true),
+        ("[t < 3] whileTrue: [t := t + 1]", false),
+        ("c ifTrue: [self.m := 1] ifFalse: [0]", false),
     ];
     let prefixes = ["", "#(1) do: [:e | ^ e].\n    "];
+    // The generated function for `probe{k}`, so source offsets elsewhere in the module do not
+    // make two spellings differ.
+    let lower = |k: usize, prefix: &str, last: &str| -> Result<Option<String>, String> {
+        let src = format!(
+            "{VT_HEADER}\n  probe{k} =>\n    t := 0.\n    c := self.n >= 0.\n    {prefix}{last}\n"
+        );
+        match vt_outcome(&src) {
+            VtOutcome::Compiles(code) => {
+                written_fields_survive(&src, k, &code).map_err(|why| format!("{why}\n{src}"))?;
+                Ok(Some(
+                    code.split_once(&format!("'probe{k}'/1 = fun"))
+                        .map_or("", |(_, rest)| rest.split("\n'").next().unwrap_or(rest))
+                        .to_string(),
+                ))
+            }
+            VtOutcome::RejectedCleanly => Ok(None),
+            VtOutcome::Fails(why) => Err(format!("{why}\n{src}")),
+        }
+    };
     let mut problems = Vec::new();
     let mut k = 0;
     for prefix in prefixes {
-        for last in lasts {
-            let src = format!(
-                "{VT_HEADER}\n  probe{k} =>\n    t := 0.\n    c := self.n >= 0.\n    {prefix}{last}\n"
-            );
-            match vt_outcome(&src) {
-                VtOutcome::Compiles(code) => {
-                    if let Err(why) = written_fields_survive(&src, k, &code) {
-                        problems.push(format!("{why}\n{src}"));
-                    }
-                }
-                VtOutcome::RejectedCleanly => {}
-                VtOutcome::Fails(why) => problems.push(format!("{why}\n{src}")),
+        for &(last, identical) in lasts {
+            let paren = lower(k, prefix, &format!("({last})"));
+            match &paren {
+                Err(why) => problems.push(why.clone()),
+                Ok(paren_code) if identical => match lower(k, prefix, last) {
+                    Ok(bare_code) if bare_code == *paren_code && bare_code.is_some() => {}
+                    bare => problems.push(format!(
+                        "`({last})` (prefix {prefix:?}) does not lower like its bare form:\n \
+                         bare: {bare:?}\n paren: {paren:?}"
+                    )),
+                },
+                Ok(_) => {}
             }
             k += 1;
         }

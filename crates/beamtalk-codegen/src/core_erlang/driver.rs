@@ -16,7 +16,7 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::{
     CodeGenError, CodegenOptions, DirectCallClassInfo, GeneratedModule, Result,
 };
-use beamtalk_core::ast::{ClassKind, Module};
+use beamtalk_core::ast::Module;
 use ecow::EcoString;
 
 /// Generates Core Erlang code from a Beamtalk module.
@@ -627,7 +627,8 @@ impl CoreErlangGenerator {
     ///
     /// # Implementation Note
     ///
-    /// Delegates to `ClassHierarchy::resolve_class_kind`, the single authority for
+    /// Delegates to `ClassHierarchy::compiles_as_actor` (shared with semantic analysis),
+    /// which reads `ClassHierarchy::resolve_class_kind`, the single authority for
     /// actor/value classification (see its doc comment for the walk + default-to-`Object`
     /// policy on a fully-known chain), avoiding a second, independent walk that
     /// consults a hand-maintained list of "known value roots" (`Object`, `Exception`,
@@ -656,20 +657,11 @@ impl CoreErlangGenerator {
         module: &Module,
         hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
     ) -> bool {
-        let Some(class) = module.classes.first() else {
-            return true;
-        };
-        // Concrete Supervisor/DynamicSupervisor subclasses use supervisor codegen,
-        // routed through generate_actor_module which delegates to supervisor_codegen.
-        // Abstract base classes (Supervisor, DynamicSupervisor themselves) remain value types.
-        if class.supervisor_kind.is_some() && !class.is_abstract {
-            return true;
-        }
-        let name = class.name.name.as_str();
-        match hierarchy.resolve_class_kind(name) {
-            ClassKind::Actor => true,
-            ClassKind::Value => false,
-            ClassKind::Object => hierarchy.has_cross_file_parent(name),
-        }
+        // The routing rule itself lives in `ClassHierarchy::compiles_as_actor` so
+        // semantic checks scoped to value-type methods read the same rule (BT-4092).
+        module
+            .classes
+            .first()
+            .is_none_or(|class| hierarchy.compiles_as_actor(class))
     }
 }
