@@ -535,11 +535,15 @@ Maps exit → erlang_exit kind, throw → erlang_throw kind so that
 ExitError/ThrowError classes are used instead of RuntimeError.
 """.
 -spec ensure_wrapped(atom(), term(), list()) -> map().
+%% `erlang_class` records how `pass` re-raises (BT-4057). Rule: it is `exit`/`throw`
+%% only when the wrapped exception's `details.reason` IS the caught term (the
+%% generic exit/throw clauses below); every branch that substitutes a Beamtalk
+%% exception for the caught term re-raises that exception as an `error`.
 ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace) ->
-    Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+    Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error};
 ensure_wrapped(_Type, #beamtalk_error{} = Error, Stacktrace) ->
     Wrapped = wrap(Error),
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error};
 ensure_wrapped(error, undef, Stacktrace) ->
     Message =
         case Stacktrace of
@@ -567,7 +571,7 @@ ensure_wrapped(error, undef, Stacktrace) ->
         details = #{reason => undef}
     },
     Wrapped = #{'$beamtalk_class' => kind_to_class(runtime_error), error => GenError},
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error};
 ensure_wrapped(exit, Reason, Stacktrace) ->
     Error = #beamtalk_error{
         kind = erlang_exit,
@@ -580,7 +584,7 @@ ensure_wrapped(exit, Reason, Stacktrace) ->
         details = #{reason => Reason}
     },
     Wrapped = wrap(Error),
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => exit};
 ensure_wrapped(throw, Reason, Stacktrace) ->
     %% Unwrap future_rejected errors (thrown from beamtalk_future:await/*)
     %% Future rejects with {future_rejected, ActualError} where ActualError may be:
@@ -590,12 +594,16 @@ ensure_wrapped(throw, Reason, Stacktrace) ->
     %% We need to unwrap it so the actual error can be caught properly
     case Reason of
         {future_rejected, #beamtalk_error{} = InnerError} ->
-            Wrapped = wrap(InnerError);
+            Wrapped = wrap(InnerError),
+            CaughtType = error;
         {future_rejected, #{error := #beamtalk_error{}} = AlreadyWrapped} ->
-            Wrapped = AlreadyWrapped;
+            Wrapped = AlreadyWrapped,
+            CaughtType = error;
         {future_rejected, {error, #{error := #beamtalk_error{}} = AlreadyWrapped}} ->
-            Wrapped = AlreadyWrapped;
+            Wrapped = AlreadyWrapped,
+            CaughtType = error;
         _ ->
+            CaughtType = throw,
             Error = #beamtalk_error{
                 kind = erlang_throw,
                 class = undefined,
@@ -608,10 +616,10 @@ ensure_wrapped(throw, Reason, Stacktrace) ->
             },
             Wrapped = wrap(Error)
     end,
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => CaughtType};
 ensure_wrapped(_Type, Other, Stacktrace) ->
     Wrapped = wrap(Other),
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error}.
 
 -doc """
 Idempotent exception wrapper with a dispatch breadcrumb.
@@ -627,7 +635,8 @@ more specific inner one. `undef`, `exit`, `throw`, and `#beamtalk_error{}` keep
 their existing ensure_wrapped/3 handling.
 """.
 -spec ensure_wrapped(atom(), term(), list(), map()) -> map().
-ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace, _Context) ->
+ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already0, Stacktrace, _Context) ->
+    Already = Already0#{erlang_class => error},
     %% Innermost classification already applied — preserve it and any stacktrace it
     %% already carries. Backfill from this frame only when absent, so stacktrace
     %% capture never regresses versus ensure_wrapped/3 (which always attached one).
@@ -639,7 +648,7 @@ ensure_wrapped(error, Reason, Stacktrace, Context) when
     map_size(Context) > 0, Reason =/= undef, not is_record(Reason, beamtalk_error)
 ->
     Wrapped = wrap_raw(Reason, Context),
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error};
 ensure_wrapped(Type, Reason, Stacktrace, _Context) ->
     ensure_wrapped(Type, Reason, Stacktrace).
 
@@ -682,11 +691,15 @@ dispatch('stackTrace', [], _) ->
     [];
 dispatch('class', [], #{'$beamtalk_class' := Class}) ->
     Class;
-dispatch('signal', [], #{error := Error}) ->
-    beamtalk_error:raise(Error);
-dispatch('signal', [], #{'$beamtalk_class' := ClassName}) ->
-    %% New exception instance (no error field yet) — create and raise
-    signal_from_class(ClassName);
+dispatch('signal', [], Self) ->
+    signal_instance(Self);
+dispatch('pass', [], #{erlang_class := Class, stacktrace := Frames0} = Self) ->
+    pass(Class, Frames0, Self);
+dispatch('pass', [], #{erlang_class := Class} = Self) ->
+    pass(Class, [], Self);
+dispatch('pass', [], Self) ->
+    %% Never caught (e.g. a fresh `Exception new`) — behaves exactly like signal.
+    signal_instance(Self);
 dispatch('signal:', [Message], #{'$beamtalk_class' := ClassName}) ->
     %% Preserve exception class name from the signaling object
     signal_message(Message, ClassName).
@@ -697,6 +710,66 @@ wrap_hint(undefined) ->
     undefined;
 wrap_hint(Hint) when is_binary(Hint) ->
     beamtalk_primitive:string_from_binary(Hint).
+
+-spec signal_instance(map()) -> no_return().
+signal_instance(#{error := Error}) ->
+    beamtalk_error:raise(Error);
+signal_instance(#{'$beamtalk_class' := ClassName}) ->
+    %% New exception instance (no error field yet) — create and raise
+    signal_from_class(ClassName).
+
+-doc """
+Re-raise a caught exception unchanged (`Exception>>pass`, BT-4057).
+
+`erlang_class` (set by `ensure_wrapped/3,4`) is `exit`/`throw` only when the
+wrapped exception's `details.reason` is exactly the term that was caught, and
+`pass` then re-raises that term with that class. Every other case re-raises the
+wrapped exception itself as an `error` (the caught value already was a Beamtalk
+exception, or was substituted by one, e.g. an unwrapped rejected future). The
+stacktrace is rebuilt from the stored StackFrame objects (argument values were
+already dropped at catch time).
+""".
+-spec pass(atom(), list(), map()) -> no_return().
+pass(Class, Frames, #{error := #beamtalk_error{details = #{reason := Reason}}}) when
+    Class =:= exit; Class =:= throw
+->
+    erlang:raise(Class, Reason, rebuild_stacktrace(Frames));
+pass(_Class, Frames, Self) ->
+    erlang:raise(error, Self, rebuild_stacktrace(Frames)).
+
+-spec rebuild_stacktrace(term()) -> list().
+rebuild_stacktrace(Frames) when is_list(Frames) ->
+    lists:filtermap(
+        fun
+            (
+                #{
+                    module := M,
+                    function := F,
+                    arity := A,
+                    file := File,
+                    line := Line
+                }
+            ) when
+                is_atom(M), M =/= undefined, is_atom(F), F =/= undefined, is_integer(A), A >= 0
+            ->
+                FileInfo =
+                    case File of
+                        File0 when is_binary(File0) -> [{file, binary_to_list(File0)}];
+                        _ -> []
+                    end,
+                LineInfo =
+                    case Line of
+                        Line0 when is_integer(Line0) -> [{line, Line0}];
+                        _ -> []
+                    end,
+                {true, {M, F, A, FileInfo ++ LineInfo}};
+            (_) ->
+                false
+        end,
+        Frames
+    );
+rebuild_stacktrace(_) ->
+    [].
 
 -doc """
 The raw Erlang term an exception wraps, for `Exception>>reason` (BT-3954).
@@ -743,6 +816,7 @@ has_method('stackTrace') -> true;
 has_method('class') -> true;
 has_method('signal') -> true;
 has_method('signal:') -> true;
+has_method('pass') -> true;
 has_method(_) -> false.
 
 -doc """

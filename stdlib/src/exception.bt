@@ -164,6 +164,21 @@ Object subclass: Exception
   /// ```
   signal -> Never => @primitive
 
+  /// Re-raise this caught exception unchanged (BT-4057).
+  ///
+  /// Unlike `signal`, which always raises a fresh `error` with a new
+  /// stacktrace, `pass` keeps the original Erlang class (`error`, `exit` or
+  /// `throw`), reason and call sites. Use it in an `on:do:` handler to hand
+  /// the exception to an outer handler, or let it propagate as the original
+  /// failure. On an exception that was never caught (`Exception new pass`)
+  /// it behaves like `signal`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [(Erlang erlang) exit: #normal] on: Exception do: [:e | e pass]
+  /// ```
+  pass -> Never => @primitive
+
   /// Raise this exception instance with the given message.
   ///
   /// ## Examples

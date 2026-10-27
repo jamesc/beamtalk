@@ -60,6 +60,18 @@ TestCase subclass: ActorCastErrorTest
     self assert: (exitReason at: 1) message equals: "deliberate cast error after stop"
     table delete
 
+  // BT-4057: an exit passed on from a cast handler keeps its raw reason, so
+  // exit(normal) stops the actor normally (no {Exception, Stack} tuple).
+  testPassedExitNormalInCastStopsActorNormally =>
+    table := Ets new: #castPassNormal type: #set
+    actor := FailingCastActor spawn
+    actor onExit: [:reason | table at: #exitReason put: reason]
+    actor exitNormalPass!
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: actor isAlive
+    self assert: (table at: #exitReason) equals: #normal
+    table delete
+
   testSupervisedActorRestartsAfterRaisingCast =>
     sup := (FailingCastSup supervise) unwrap
     actor :: FailingCastActor := (sup which: FailingCastActor) unwrap

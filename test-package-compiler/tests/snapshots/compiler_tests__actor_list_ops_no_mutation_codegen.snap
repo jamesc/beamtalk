@@ -132,7 +132,12 @@ module 'actor_list_ops_no_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, '
                         <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
                             let CastBuiltStack = primop 'build_stacktrace'(CastStacktrace) in
                             let CastException = call 'beamtalk_exception_handler':'ensure_wrapped'(CastType, CastReason, CastBuiltStack) in
-                            primop 'raw_raise'('error', CastException, CastStacktrace)
+                            case CastType of
+                                <'exit'> when call 'erlang':'or'(call 'erlang':'=:='(CastReason, 'normal'), call 'erlang':'=:='(CastReason, 'shutdown')) ->
+                                    primop 'raw_raise'('exit', CastReason, CastStacktrace)
+                                <_> when 'true' ->
+                                    primop 'raw_raise'('error', CastException, CastStacktrace)
+                            end
                         <{'error', CastError, _CastState2}> when 'true' ->
                             call 'beamtalk_exception_handler':'reraise'(CastError)
                     end
@@ -169,7 +174,12 @@ module 'actor_list_ops_no_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, '
                             <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
                                 let CastBuiltStack = primop 'build_stacktrace'(CastStacktrace) in
                                 let CastException = call 'beamtalk_exception_handler':'ensure_wrapped'(CastType, CastReason, CastBuiltStack) in
-                                primop 'raw_raise'('error', CastException, CastStacktrace)
+                                case CastType of
+                                    <'exit'> when call 'erlang':'or'(call 'erlang':'=:='(CastReason, 'normal'), call 'erlang':'=:='(CastReason, 'shutdown')) ->
+                                        primop 'raw_raise'('exit', CastReason, CastStacktrace)
+                                    <_> when 'true' ->
+                                        primop 'raw_raise'('error', CastException, CastStacktrace)
+                                end
                             <{'error', CastError, _CastState2}> when 'true' ->
                                 call 'beamtalk_exception_handler':'reraise'(CastError)
                         end
@@ -191,7 +201,12 @@ module 'actor_list_ops_no_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, '
                             <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
                                 let CastBuiltStack = primop 'build_stacktrace'(CastStacktrace) in
                                 let CastException = call 'beamtalk_exception_handler':'ensure_wrapped'(CastType, CastReason, CastBuiltStack) in
-                                primop 'raw_raise'('error', CastException, CastStacktrace)
+                                case CastType of
+                                    <'exit'> when call 'erlang':'or'(call 'erlang':'=:='(CastReason, 'normal'), call 'erlang':'=:='(CastReason, 'shutdown')) ->
+                                        primop 'raw_raise'('exit', CastReason, CastStacktrace)
+                                    <_> when 'true' ->
+                                        primop 'raw_raise'('error', CastException, CastStacktrace)
+                                end
                             <{'error', CastError, _CastState2}> when 'true' ->
                                 call 'beamtalk_exception_handler':'reraise'(CastError)
                         end
