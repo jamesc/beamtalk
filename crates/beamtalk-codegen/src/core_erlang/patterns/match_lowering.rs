@@ -75,20 +75,6 @@ impl CoreErlangGenerator {
         value: &Expression,
         arms: &[MatchArm],
     ) -> Result<Document<'static>> {
-        self.generate_match_with(value, arms, None)
-    }
-
-    /// [`Self::generate_match`] with the arms threaded by `producer` (a
-    /// local-threading producer's seeded scratch map and arm frame, BT-3947), or
-    /// by the actor-`State` rule ([`Self::match_needs_state_threading`]) when
-    /// `None`.
-    #[allow(clippy::too_many_lines)]
-    pub(in crate::core_erlang) fn generate_match_with(
-        &mut self,
-        value: &Expression,
-        arms: &[MatchArm],
-        producer: Option<&MatchThreading<'_>>,
-    ) -> Result<Document<'static>> {
         if arms.is_empty() {
             return Err(CodeGenError::UnsupportedFeature {
                 feature: "match expression with no arms".to_string(),
@@ -98,7 +84,7 @@ impl CoreErlangGenerator {
         let recv_tv = self.compile_match_scrutinee(value)?;
         let value_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
         let value_doc = self.threaded_value_doc(&recv_tv.value);
-        let inner = self.generate_match_after_scrutinee(arms, &value_doc, producer)?;
+        let inner = self.generate_match_after_scrutinee(arms, &value_doc, None)?;
         Ok(docvec![value_preamble, inner])
     }
 
@@ -121,9 +107,12 @@ impl CoreErlangGenerator {
         self.threaded_expression(value, recv_frame)
     }
 
-    /// The arms half of [`Self::generate_match_with`]: everything after the
+    /// The arms half of [`Self::generate_match`]: everything after the
     /// scrutinee has been compiled. Returns `let Match = <value> in case ...`
-    /// without the scrutinee's prelude (the caller places it).
+    /// without the scrutinee's prelude (the caller places it). `producer` is a
+    /// local-threading producer's seeded scratch map and arm frame (BT-3947,
+    /// [`Self::generate_match_producer`]); `None` threads the arms by the
+    /// actor-`State` rule ([`Self::match_needs_state_threading`]).
     #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_match_after_scrutinee(
         &mut self,

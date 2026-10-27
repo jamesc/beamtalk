@@ -169,6 +169,11 @@ pub(super) mod fault {
         /// ambient actor `State`, as before BT-4089, whatever the scope
         /// (`ActorStateInClassMethod` in a scope whose frame has none).
         TupleAccRepackFromAmbientState,
+        /// BT-4206: a `match:` producer reads its base `State` and seeds its
+        /// scratch map before compiling its scrutinee, as before BT-4196, so
+        /// the arms thread from the `State` the scrutinee's spliced prelude
+        /// has already stepped past (`StaleConstructSeed`).
+        SeedBeforeScrutinee,
     }
 
     thread_local! {
