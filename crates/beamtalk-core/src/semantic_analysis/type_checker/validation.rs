@@ -904,7 +904,9 @@ impl TypeChecker {
     /// same arity and at least one arg pair is incompatible. When either side is
     /// unparameterized (bare `Array`, which may stand for any `Array(_)`) or the
     /// arities differ, we stay conservative and return `true` so this never
-    /// introduces a false positive on its own.
+    /// introduces a false positive on its own — except for a positional tuple,
+    /// where an arity difference is a definite mismatch
+    /// ([`Self::is_positional_arity_mismatch`]).
     ///
     /// Args are compared invariantly via [`is_type_compatible`], recursing into
     /// nested generics (so `Array(Array(Integer))` vs `Array(Array(String))`
@@ -1788,7 +1790,7 @@ impl TypeChecker {
                 // Check base class compatibility, then inner type args.
                 let base_mismatch = !Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
                 // When the base class matches, also verify inner type args
-                // match. `type_args_compatible` recurses into nested generics so
+                // match. `same_base_type_args_compatible` recurses into nested generics so
                 // mismatches like `Result(Array(Integer), Error)` vs
                 // `Result(Array(String), Error)` are caught (Copilot review on
                 // PR #2059), and rejects a positional-tuple arity mismatch

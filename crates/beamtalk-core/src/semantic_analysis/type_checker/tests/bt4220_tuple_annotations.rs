@@ -213,3 +213,31 @@ typed Object subclass: Holder
     );
     assert!(diags.is_empty(), "got: {diags:#?}");
 }
+
+#[test]
+fn bt4220_nested_positional_tuple_in_list_annotation() {
+    // The Catalina `getstat` shape: `List(Tuple(Symbol, Integer))` — the
+    // element's literal-index `at:` is typed through the block parameter.
+    let diags = analyse_diagnostics(
+        r"
+typed Object subclass: Holder
+  stats: s :: List(Tuple(Symbol, Integer)) -> Integer =>
+    total := 0
+    s do: [:entry | total := total + (entry at: 2)]
+    total
+  bad: s :: List(Tuple(Symbol, Integer)) -> Integer =>
+    s do: [:entry | (entry at: 1) + 1]
+    0
+",
+    );
+    let dnu: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert_eq!(
+        dnu.len(),
+        1,
+        "expected `#sym + 1` DNU only, got: {diags:#?}"
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:#?}");
+}
