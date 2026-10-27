@@ -593,3 +593,31 @@ TestCase subclass: DateTimeTest
           month: 10
           day: 26) weekday)
       equals: "Mon"
+
+  testOffsetMinutesConstructorTypeError =>
+    // year:month:day:hour:minute:second:offsetMinutes: must raise for non-Integer args
+    @expect type
+    self
+      should: [
+        DateTime year: "bad" month: 1 day: 1 hour: 0 minute: 0 second: 0 offsetMinutes: 0
+      ]
+      raise: #type_error
+
+  testParseTwoDigitYear =>
+    // "yy" token in parse:format: expands as 2000 + NN
+    result := DateTime parse: "26-07-25" format: "yy-MM-dd"
+    self assert: result isOk
+    self assert: result unwrap year equals: 2026
+    self assert: result unwrap month equals: 7
+    self assert: result unwrap day equals: 25
+
+  testParseFormatWithDotSeparator =>
+    // '.' in a format literal is a regex metachar; it must be escaped so it
+    // only matches a literal dot, not an arbitrary character.
+    result := DateTime parse: "2026.07.25" format: "yyyy.MM.dd"
+    self assert: result isOk
+    self assert: result unwrap year equals: 2026
+    self assert: result unwrap month equals: 7
+    self assert: result unwrap day equals: 25
+    // A string that replaces dots with a different character must not match.
+    self deny: (DateTime parse: "2026X07X25" format: "yyyy.MM.dd") isOk
