@@ -794,10 +794,6 @@ its wrapped map, e.g. `Error signal:` inside a runtime-defined actor method) is
 not a raw Erlang term, so it answers `nil`, as does an exception with no
 recorded term.
 """.
--spec wrap_detail(term()) -> term().
-wrap_detail(#beamtalk_error{} = Error) -> wrap(Error);
-wrap_detail(Value) -> Value.
-
 -spec raw_reason(map()) -> term().
 raw_reason(Details) ->
     raw_reason_from(Details, [reason, erlang_error, original_reason]).
@@ -812,6 +808,19 @@ raw_reason_from(Details, [Key | Rest]) ->
         #{Key := Reason} -> Reason;
         _ -> raw_reason_from(Details, Rest)
     end.
+
+-doc """
+Present one `details` value to Beamtalk, for `Exception>>details` (BT-4174).
+
+A nested raw `#beamtalk_error{}` answers as an Exception object and Erlang's
+`undefined` as `nil`, as `hint`/`selector` do. Every other value is the
+recorded term as-is: a raw binary stays a `Binary` (only its producer knows
+whether it is text).
+""".
+-spec wrap_detail(term()) -> term().
+wrap_detail(#beamtalk_error{} = Error) -> wrap(Error);
+wrap_detail(undefined) -> nil;
+wrap_detail(Value) -> Value.
 
 -doc "Check if Exception responds to a selector.".
 -spec has_method(atom()) -> boolean().

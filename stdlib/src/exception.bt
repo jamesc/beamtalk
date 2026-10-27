@@ -137,7 +137,10 @@ Object subclass: Exception
   /// `message`, e.g. the byte `#offset` of an invalid UTF-8 sequence, a
   /// `#path`, or the `#expected`/`#got` of an arity mismatch. Read a value
   /// with `at:` instead of parsing `message`. Answers an empty Dictionary when
-  /// nothing was recorded. A nested Beamtalk error answers as an Exception.
+  /// nothing was recorded. A nested Beamtalk error answers as an Exception,
+  /// and an absent (Erlang `undefined`) value as nil. Other values are the
+  /// recorded terms as-is: text a native records as raw bytes, such as a File
+  /// error's `#path`, answers a `Binary`; send it `asString` for a `String`.
   ///
   /// ## Examples
   /// ```beamtalk

@@ -474,6 +474,17 @@ dispatch_details_wraps_nested_error_test() ->
     #{cause := Wrapped} = beamtalk_exception_handler:dispatch('details', [], Ex),
     ?assertEqual(beamtalk_exception_handler:wrap(Inner), Wrapped).
 
+dispatch_details_undefined_is_nil_raw_binary_kept_test() ->
+    Error = beamtalk_error:with_details(
+        beamtalk_error:new(io_error, 'File', 'readAll:'),
+        #{new_path => undefined, path => <<"a.txt">>}
+    ),
+    Ex = beamtalk_exception_handler:wrap(Error),
+    ?assertEqual(
+        #{new_path => nil, path => <<"a.txt">>},
+        beamtalk_exception_handler:dispatch('details', [], Ex)
+    ).
+
 dispatch_details_no_error_field_test() ->
     ?assertEqual(
         #{}, beamtalk_exception_handler:dispatch('details', [], #{'$beamtalk_class' => 'Error'})
