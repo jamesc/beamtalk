@@ -213,9 +213,10 @@ fn test_match_type_pattern_string_compiles_to_tag_test() {
 }
 
 #[test]
-fn test_match_type_pattern_binary_compiles_to_is_binary_test() {
-    // BT-4173: `b :: Binary` is exactly a bare binary — the guard-safe
-    // `is_binary` BIF test the `String` entry used to own.
+fn test_match_type_pattern_binary_compiles_to_subclass_aware_test() {
+    // BT-4228: `b :: Binary` is subclass-aware (agrees with `isKindOf:
+    // Binary`): the `is_binary` BIF test, falling back to the `String`
+    // `{'beamtalk_string', _}` tag test for the sealed subclass.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      b :: Binary -> b;\n      _ -> \"none\"\n    ]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
@@ -225,6 +226,10 @@ fn test_match_type_pattern_binary_compiles_to_is_binary_test() {
     assert!(
         code.contains("'erlang':'is_binary'"),
         "Binary type pattern should test is_binary. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_string'"),
+        "Binary type pattern must also match the String subclass tag. Got:\n{code}"
     );
 }
 

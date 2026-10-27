@@ -27,12 +27,17 @@ use beamtalk_core::ast::{Identifier, MatchArm};
 /// lookup, not just the name, so it cannot be a static table entry.
 #[derive(Clone, Copy)]
 enum TypeTest {
-    /// A guard-safe boolean-returning BIF (`is_binary`, `is_integer`, `is_float`,
+    /// A guard-safe boolean-returning BIF (`is_integer`, `is_float`,
     /// `is_list`, `is_function`, `is_pid`, `is_reference`, `is_port`).
     Bif(&'static str),
     /// `String` — exactly the `{'beamtalk_string', bytes}` 2-tuple tag
     /// (BT-4173; a bare binary is a `Binary`, never a `String`).
     String,
+    /// `Binary` — subclass-aware (BT-4228): a bare binary **or** the
+    /// `String` tag, agreeing with `isKindOf: Binary`. `Binary` is sealed
+    /// and `String` is its only subclass, so the closed subclass set is a
+    /// constant-time test, not ADR 0107 Phase B's general subclass dispatch.
+    Binary,
     /// `Tuple` — any tuple except the reserved actor/supervisor 4-tuple tags
     /// and the `String` 2-tuple tag.
     Tuple,
@@ -52,16 +57,7 @@ enum TypeTest {
 /// supervisor/generic-tagged-class fallback — see [`TypeTest`]'s doc).
 static TYPE_TESTS: &[(&str, TypeTest)] = &[
     ("String", TypeTest::String),
-    // BT-4173: `Binary` is exactly a bare binary. Like every other type
-    // pattern here the test is exact, not subclass-aware (see
-    // `testSupervisorClassPatternDiscriminatesSiblingClasses`), so a
-    // `String` (a `Binary` subclass) does not match `b :: Binary`.
-    // Unreachable today: `match_validators` rejects `:: Binary` as a
-    // non-leaf class. BT-4228 tracks allowing it, and requires the test to
-    // become subclass-aware (bare binary OR the String tag) so it agrees
-    // with `isKindOf: Binary` — do not relax the validator against this
-    // exact-match entry as-is.
-    ("Binary", TypeTest::Bif("is_binary")),
+    ("Binary", TypeTest::Binary),
     ("Integer", TypeTest::Bif("is_integer")),
     ("Float", TypeTest::Bif("is_float")),
     ("List", TypeTest::Bif("is_list")),
@@ -90,7 +86,11 @@ impl CoreErlangGenerator {
     /// - **`String`** (BT-4173): exactly the `{'beamtalk_string', bytes}`
     ///   2-tuple tag ([`Self::wrap_string_test`]) — a bare binary is a
     ///   `Binary`, never a `String`.
-    /// - **Guard-safe BIF primitives** (`Binary` → `is_binary`, `Integer` →
+    /// - **`Binary`** (BT-4228): subclass-aware — `is_binary`, else the
+    ///   `String` tag test ([`Self::wrap_binary_test`]), so `b :: Binary`
+    ///   agrees with `isKindOf: Binary` and also matches a `String`. Write
+    ///   byte-vs-text discrimination String-arm-first.
+    /// - **Guard-safe BIF primitives** (`Integer` →
     ///   `is_integer`, `Float` → `is_float`, `List` → `is_list`): a
     ///   single-level `case call 'erlang':'is_X'(_Match) of <'true'> -> ...
     ///   <'false'> -> rest end` ([`Self::wrap_bif_test`]), generalizing
@@ -276,6 +276,7 @@ impl CoreErlangGenerator {
         match test {
             TypeTest::Bif(bif) => Self::wrap_bif_test(match_var, bif, success, rest),
             TypeTest::String => self.wrap_string_test(match_var, success, rest),
+            TypeTest::Binary => self.wrap_binary_test(match_var, success, rest),
             TypeTest::Tuple => self.wrap_tuple_test(match_var, success, rest),
             TypeTest::Symbol => Self::wrap_symbol_test(match_var, success, rest),
             TypeTest::Boolean => self.wrap_boolean_test(match_var, success, rest),
@@ -355,6 +356,21 @@ impl CoreErlangGenerator {
             rest.clone(),
             " end"
         ]
+    }
+
+    /// Subclass-aware `Binary` test (BT-4228): `is_binary(X)` matches
+    /// directly; otherwise [`Self::wrap_string_test`] decides — `success` on
+    /// the `String` tag, `rest` on anything else. `Binary` is sealed with
+    /// `String` as its only subclass, so this two-shape test is exactly
+    /// `isKindOf: Binary`.
+    fn wrap_binary_test(
+        &mut self,
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let string_doc = self.wrap_string_test(match_var, success.clone(), rest);
+        Self::wrap_bif_test(match_var, "is_binary", success, &string_doc)
     }
 
     /// `is_atom(X) andalso X =/= nil andalso X =/= true andalso X =/=

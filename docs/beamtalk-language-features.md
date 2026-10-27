@@ -4532,6 +4532,18 @@ Bind the match's answer instead: `timeout := value match: [...]`.
 
 **Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor` subclasses (BT-2870).
 
+**`Binary` is the one non-leaf exception (BT-4228).** `Binary` is `sealed` and `String` is its only subclass, so `b :: Binary` is accepted and compiles to a closed, constant-time *subclass-aware* test: it matches a bare binary (valid UTF-8 or not) **or** a `String`, agreeing with `isKindOf: Binary`. To tell bytes from text, put the `String` arm first:
+
+```beamtalk
+value match: [
+  s :: String -> #text;
+  b :: Binary -> #bytes;   // only bare binaries reach here
+  _ -> #other
+]
+```
+
+For exhaustiveness checking, a `b :: Binary` arm covers a `String` member of the scrutinee type, but a `Binary` member is not treated as a closed leaf (so `matchExhaustive:` over a `Binary | Nil` scrutinee cannot be proven; use `match:`).
+
 Four runtime-representation nuances (see ADR 0107 Implementation for the full codegen rationale):
 - **`Supervisor`/`DynamicSupervisor` subclasses use a distinct runtime shape.** A live supervisor reference is a 4-tuple tagged `'beamtalk_supervisor'` (not `'beamtalk_object'` like Actor subclasses, and not a tagged map like Value subclasses). `x :: MySupervisorSubclass` compiles to a tuple-tag check accepting `'beamtalk_supervisor'` at `element(1)` before comparing `element(2)` against the class name (BT-2870).
 - **`Character` is not a supported type pattern.** It compiles to a plain Erlang integer with no runtime tag distinguishing it from `Integer`, so `x :: Character` could never be told apart from `x :: Integer` at runtime — use `x :: Integer` instead.
@@ -4559,7 +4571,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 | Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails (BT-663, BT-4096, BT-4097) |
 | Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
-| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only — see restrictions below (BT-2855, ADR 0107) |
+| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only (plus the sealed `Binary`, subclass-aware) — see restrictions below (BT-2855, ADR 0107) |
 
 **Exhaustiveness checking (BT-1299):** `match:` on a sealed type with constructor patterns must cover all known variants or include a wildcard `_` arm, or the compiler emits an error:
 
