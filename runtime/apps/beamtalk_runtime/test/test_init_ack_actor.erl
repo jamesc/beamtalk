@@ -22,6 +22,8 @@ the `initialize` step passes its result through
 - `stop_continue` — `initialize` succeeds and requests a `{continue, die}`
   step that stops the actor at once with reason `bad_config` (a
   `self stopWith:` in a continuation).
+- `exit_normal` (BT-4104) — as `stop_continue`, but the step stops with
+  reason `normal` (a `self stopWith: #normal` straight after `initialize`).
 - `fail_after_first` (BT-4033) — bumps the `counters` ref in `starts` and
   succeeds only on the first start; every later start (an OTP restart,
   which replays the same args) fails its `initialize` like `crash`.
@@ -42,6 +44,10 @@ handle_continue(initialize = Continue, #{mode := stop_continue} = State) ->
     beamtalk_actor:ack_initialized(Continue, {noreply, State, {continue, die}});
 handle_continue(die, State) ->
     {stop, bad_config, State};
+handle_continue(initialize = Continue, #{mode := exit_normal} = State) ->
+    beamtalk_actor:ack_initialized(Continue, {noreply, State, {continue, die_normal}});
+handle_continue(die_normal, State) ->
+    {stop, normal, State};
 handle_continue(initialize = Continue, #{mode := fail_after_first, starts := Starts} = State) ->
     ok = counters:add(Starts, 1, 1),
     case counters:get(Starts, 1) of

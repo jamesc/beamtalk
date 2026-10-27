@@ -284,6 +284,25 @@ class_start_concrete(ClassName, Module, 'spawnWith:as:', [Args, Name]) ->
     beamtalk_result:from_tagged_tuple(
         spawn_named_instance(ClassName, Module, Args, Name, 'spawnWith:as:')
     );
+class_start_concrete(ClassName, _Module, Selector, _Args) when
+    Selector =:= spawnMonitored; Selector =:= 'spawnMonitoredWith:'
+->
+    %% BT-4104: `Actor>>spawnMonitored`'s atomic start+monitor has no OTP
+    %% supervisor counterpart; codegen routes a static send of it to a
+    %% supervisor class here instead of to a `spawn_monitored` export the
+    %% supervisor module does not have.
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(instantiation_error, ClassName, Selector),
+            iolist_to_binary([
+                atom_to_binary(Selector),
+                <<
+                    " is not supported for supervisors: start the supervisor, "
+                    "then monitor its pid"
+                >>
+            ])
+        )
+    );
 class_start_concrete(ClassName, _Module, Selector, Args) ->
     %% A dynamic send with the wrong argument count (`perform:withArguments:`).
     beamtalk_error:raise(

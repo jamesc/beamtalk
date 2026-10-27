@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4104 fixture: the issue repro — an Actor that stops straight after
+// `initialize`, from a `continueWith:` step, with `exitReason` (`#normal`
+// unless spawned with another). Spawned with a separate `monitor`, its DOWN
+// can carry `#noproc`; with `spawnMonitored` it always carries `exitReason`.
+// See stdlib/test/actor_spawn_monitored_test.bt.
+
+Actor subclass: QuickExitActor
+  state: exitReason = #normal
+
+  initialize -> Nil =>
+    self continueWith: #run
+    nil
+
+  run -> Nil =>
+    self stopWith: self.exitReason
+    nil

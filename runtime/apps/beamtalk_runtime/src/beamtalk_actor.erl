@@ -259,11 +259,18 @@ handle_getValue([], State) ->
 -export([await_initialize/1, await_initialize/2, await_initialize/3, safe_spawn/2]).
 %% BT-4033: the awaited linked start of an anonymous supervised actor child.
 -export([safe_spawn_linked/2]).
+%% BT-4104: an anonymous start that leaves the caller monitoring the actor,
+%% with the monitor created atomically with the process.
+-export([safe_spawn_monitored/2]).
 
 %% BT-3992: named spawns that must not leave the actor linked to the caller.
 -export([spawn_named_for_caller/4, spawn_named_unlinked/3]).
 
 -type link_mode() :: linked | unlinked.
+%% What a successful initialize wait does with the start monitor: `release`
+%% removes it (every plain spawn), `keep` hands it to the caller
+%% (safe_spawn_monitored/2, BT-4104).
+-type monitor_mode() :: release | keep.
 
 %% BT-3992: initialize acknowledgement, called from generated init/1 and
 %% handle_continue/2 (and this module's own init/1).
@@ -415,6 +422,8 @@ handle_getValue([], State) ->
     doSpawnAs/2,
     doSpawnWith/2,
     doSpawnWith/3,
+    doSpawnMonitored/1,
+    doSpawnMonitoredWith/2,
     registerAs/2,
     takeDeferredCall/1,
     replyToDeferred/2,
@@ -602,19 +611,22 @@ process always reports the true exit reason.
 """.
 -spec await_initialize(pid(), reference()) -> ok | {error, term()}.
 await_initialize(Pid, MonRef) ->
-    await_initialize_sys(Pid, MonRef, fun(P) -> sys:get_state(P, ?BT_INITIALIZE_TIMEOUT) end).
+    await_initialize_sys(
+        Pid, MonRef, fun(P) -> sys:get_state(P, ?BT_INITIALIZE_TIMEOUT) end, release
+    ).
 
 %% The sys-based wait behind await_initialize/2: `SysCall` is a `sys` call
 %% (handled only between callbacks) whose exit shapes are sys:get_state/2's.
--spec await_initialize_sys(pid(), reference(), fun((pid()) -> term())) ->
+%% `Mode` says what success does with `MonRef` (settle_monitor/2); every
+%% failure consumes it.
+-spec await_initialize_sys(pid(), reference(), fun((pid()) -> term()), monitor_mode()) ->
     ok | {error, term()}.
-await_initialize_sys(Pid, MonRef, SysCall) ->
+await_initialize_sys(Pid, MonRef, SysCall, Mode) ->
     %% bt-catcher-audit: not-applicable-no-block - SysCall is a local fun
     %% wrapping a sys:get_state/replace_state call, never a Beamtalk block
     try SysCall(Pid) of
         _State ->
-            erlang:demonitor(MonRef, [flush]),
-            ok
+            settle_monitor(Mode, MonRef)
     catch
         exit:{noproc, _} ->
             %% Process already dead — wait for the DOWN message unconditionally.
@@ -659,18 +671,27 @@ actor's `init/1` (take_init_ack/2) has then already sent, before
 (flush_init_ack/1) once the actor is dead.
 """.
 -spec await_initialize(pid(), reference(), reference() | none) -> ok | {error, term()}.
-await_initialize(Pid, MonRef, none) ->
-    await_initialize(Pid, MonRef);
 await_initialize(Pid, MonRef, AckRef) ->
+    await_initialize(Pid, MonRef, AckRef, release).
+
+%% await_initialize/3 with the success-side handling of `MonRef` chosen by
+%% `Mode` (BT-4104): `release` demonitors it, `keep` leaves it live for the
+%% caller, whose later `'DOWN'` then carries the actor's real exit reason.
+%% Every failure consumes `MonRef` in both modes.
+-spec await_initialize(pid(), reference(), reference() | none, monitor_mode()) ->
+    ok | {error, term()}.
+await_initialize(Pid, MonRef, none, Mode) ->
+    await_initialize_sys(
+        Pid, MonRef, fun(P) -> sys:get_state(P, ?BT_INITIALIZE_TIMEOUT) end, Mode
+    );
+await_initialize(Pid, MonRef, AckRef, Mode) ->
     receive
         {AckRef, initialized} ->
-            erlang:demonitor(MonRef, [flush]),
-            ok;
+            settle_monitor(Mode, MonRef);
         {AckRef, initializing} ->
             receive
                 {AckRef, initialized} ->
-                    erlang:demonitor(MonRef, [flush]),
-                    ok;
+                    settle_monitor(Mode, MonRef);
                 {'DOWN', MonRef, process, Pid, Reason} ->
                     {error, Reason}
             after ?BT_INITIALIZE_TIMEOUT ->
@@ -682,10 +703,24 @@ await_initialize(Pid, MonRef, AckRef) ->
         %% an actor module compiled before BT-3992 whose init/1 merges its
         %% start args into its state. Wait the sys way, and strip the target
         %% from a map state so it does not stay there for good.
-        await_initialize_sys(Pid, MonRef, fun(P) ->
-            sys:replace_state(P, fun strip_init_ack_key/1, ?BT_INITIALIZE_TIMEOUT)
-        end)
+        await_initialize_sys(
+            Pid,
+            MonRef,
+            fun(P) ->
+                sys:replace_state(P, fun strip_init_ack_key/1, ?BT_INITIALIZE_TIMEOUT)
+            end,
+            Mode
+        )
     end.
+
+%% The success side of an initialize wait: `release` drops the start monitor,
+%% `keep` leaves it for the caller (BT-4104).
+-spec settle_monitor(monitor_mode(), reference()) -> ok.
+settle_monitor(release, MonRef) ->
+    erlang:demonitor(MonRef, [flush]),
+    ok;
+settle_monitor(keep, _MonRef) ->
+    ok.
 
 -spec strip_init_ack_key(term()) -> term().
 strip_init_ack_key(State) when is_map(State) ->
@@ -834,12 +869,52 @@ safe_spawn(Module, InitArgs) ->
             %% start_monitor (not start + monitor): the monitor must exist before
             %% the actor can possibly die, or a fast-failing initialize reports
             %% `noproc` instead of its real stop reason (BT-3677).
-            {AckArgs, AckRef} = with_init_ack(InitArgs),
-            case gen_server:start_monitor(Module, AckArgs, []) of
-                {ok, {Pid, MonRef}} -> await_initialize_or_kill_unlinked(Pid, MonRef, AckRef);
-                {error, Reason} -> {error, Reason};
-                ignore -> {error, ignore}
+            case start_monitor_and_await(Module, InitArgs, release) of
+                {ok, {Pid, _ReleasedRef}} -> {ok, Pid};
+                {error, Reason} -> {error, Reason}
             end
+    end.
+
+-doc """
+BT-4104: spawn an anonymous actor **monitored by the caller**, with
+initialize synchronization. Answers `{ok, {Pid, MonRef}}` once the actor's
+`initialize` has returned (not the continuations it requested, BT-3992), or
+`{error, Reason}` when it failed or timed out.
+
+`MonRef` is the monitor `gen_server:start_monitor/3` created together with
+the process, so it is live from the actor's first instant: an actor that
+finishes straight after `initialize` (a `continueWith:` step ending in
+`self stopWith: #normal`) delivers `{'DOWN', MonRef, process, Pid, normal}`
+to the caller, never the `noproc` a separate `spawn` + `monitor` reports
+when the actor is already gone by the time `monitor` runs.
+
+The monitor belongs to the process that calls this — the generated
+`Module:spawn_monitored/0,1` runs in whatever process evaluates the spawn
+expression. On failure the actor is killed and the monitor consumed, so the
+caller's mailbox holds no `'DOWN'` for it and no initialize ack.
+
+Never links, not even in a `withClassMethod:` supervisor factory (where
+`safe_spawn/2` links): a monitored start is for a caller that observes the
+actor's exit itself, which is not what a supervisor child needs.
+""".
+-spec safe_spawn_monitored(module(), map()) ->
+    {ok, {pid(), reference()}} | {error, term()}.
+safe_spawn_monitored(Module, InitArgs) ->
+    start_monitor_and_await(Module, InitArgs, keep).
+
+%% Shared unlinked start for safe_spawn/2 and safe_spawn_monitored/2:
+%% start_monitor (not start + monitor), so the monitor exists before the
+%% actor can possibly die, or a fast-failing initialize reports `noproc`
+%% instead of its real stop reason (BT-3677). `Mode` decides whether that
+%% monitor survives a successful start (BT-4104).
+-spec start_monitor_and_await(module(), term(), monitor_mode()) ->
+    {ok, {pid(), reference()}} | {error, term()}.
+start_monitor_and_await(Module, InitArgs, Mode) ->
+    {AckArgs, AckRef} = with_init_ack(InitArgs),
+    case gen_server:start_monitor(Module, AckArgs, []) of
+        {ok, {Pid, MonRef}} -> await_initialize_or_kill_unlinked(Pid, MonRef, AckRef, Mode);
+        {error, Reason} -> {error, Reason};
+        ignore -> {error, ignore}
     end.
 
 -doc """
@@ -1024,16 +1099,22 @@ prefer_exit_reason(Reason, _ExitReason) -> Reason.
 
 -doc """
 Shared await_initialize + force-kill-on-timeout tail for the unlinked
-`safe_spawn/2` path. No link exists to fall back on for an
-'EXIT' message on the force-kill path, so this monitors explicitly to
-deterministically observe termination before returning.
+`safe_spawn/2` and `safe_spawn_monitored/2` paths. No link exists to fall
+back on for an 'EXIT' message on the force-kill path, so this monitors
+explicitly to deterministically observe termination before returning.
+
+On success `MonRef` is demonitored (`release`) or left live for the caller
+(`keep`); either way it is answered with the pid. Every failure has consumed
+it (await_initialize/4).
 """.
--spec await_initialize_or_kill_unlinked(pid(), reference(), reference() | none) ->
-    {ok, pid()} | {error, term()}.
-await_initialize_or_kill_unlinked(Pid, MonRef, AckRef) ->
-    case await_initialize(Pid, MonRef, AckRef) of
+-spec await_initialize_or_kill_unlinked(
+    pid(), reference(), reference() | none, monitor_mode()
+) ->
+    {ok, {pid(), reference()}} | {error, term()}.
+await_initialize_or_kill_unlinked(Pid, MonRef, AckRef, Mode) ->
+    case await_initialize(Pid, MonRef, AckRef, Mode) of
         ok ->
-            {ok, Pid};
+            {ok, {Pid, MonRef}};
         {error, Reason} ->
             KillRef = erlang:monitor(process, Pid),
             exit(Pid, kill),
@@ -4768,7 +4849,7 @@ returning `{error, _}` — `spawn`'s declared return type is `Self`, not
 """.
 -spec doSpawn(#beamtalk_object{}) -> #beamtalk_object{}.
 doSpawn(Self) ->
-    do_spawn_or_raise(Self, [], spawn).
+    do_spawn_or_raise(Self, [], spawn, class_self_spawn).
 
 -doc """
 FFI shim for `class sealed spawnWith: initArgs -> Self`.
@@ -4778,24 +4859,57 @@ the actor's `init/1` callback.
 """.
 -spec doSpawnWith(#beamtalk_object{}, term()) -> #beamtalk_object{}.
 doSpawnWith(Self, InitArgs) ->
-    do_spawn_or_raise(Self, [InitArgs], 'spawnWith:').
+    do_spawn_or_raise(Self, [InitArgs], 'spawnWith:', class_self_spawn).
 
-%% Shared implementation for doSpawn/1 and doSpawnWith/2. Resolves ClassName/
+%% Shared implementation for doSpawn/1, doSpawnWith/2 and (BT-4104)
+%% doSpawnMonitored/1, doSpawnMonitoredWith/2. Resolves ClassName/
 %% Module from Self, resolves the abstract-class flag by name (the
 %% metadata-lookup pattern — no process-dictionary dependency, safe to call
-%% from any process), then delegates to `class_self_spawn/4`, which raises a
-%% structured `instantiation_error` on failure.
--spec do_spawn_or_raise(#beamtalk_object{}, list(), atom()) -> #beamtalk_object{}.
-do_spawn_or_raise(Self, Args, Selector) ->
+%% from any process), then delegates to `Helper` — `class_self_spawn/4` or
+%% `class_self_spawn_monitored/4` — which raises a structured
+%% `instantiation_error` on failure.
+-spec do_spawn_or_raise(
+    #beamtalk_object{}, list(), atom(), class_self_spawn | class_self_spawn_monitored
+) -> #beamtalk_object{} | {#beamtalk_object{}, reference()}.
+do_spawn_or_raise(Self, Args, Selector, Helper) ->
     case class_self_to_name_and_module(Self) of
         {ok, ClassName, Module} ->
             IsAbstract = beamtalk_class_instantiation:resolve_is_abstract_or_raise(
                 ClassName, Selector
             ),
-            beamtalk_class_instantiation:class_self_spawn(ClassName, Module, IsAbstract, Args);
+            beamtalk_class_instantiation:Helper(ClassName, Module, IsAbstract, Args);
         {error, #beamtalk_error{} = Err} ->
             beamtalk_error:raise(beamtalk_error:with_selector(Err, Selector))
     end.
+
+-doc """
+FFI shim for `class sealed spawnMonitored -> Tuple` (BT-4104).
+
+Answers `{Actor, MonitorRef}` — a bare 2-tuple, deliberately not
+ok-wrapped, so it reaches Beamtalk as a `Tuple` (ADR 0076 converts only
+`{ok, _}`/`{error, _}`). Raises `instantiation_error` on failure, like
+`doSpawn/1`. Reuses `beamtalk_class_instantiation:class_self_spawn_monitored/4`,
+the helper the compiler's `self spawnMonitored` intrinsic calls, which calls
+the compiled `Module:spawn_monitored/0`.
+
+The monitor is owned by the process running this shim. A dynamic send of
+`spawnMonitored` runs it in the receiver class's process, so that process
+owns the monitor and its `'DOWN'` is never seen by the sender — a static
+`Counter spawnMonitored` from an actor method monitors from the sender.
+""".
+-spec doSpawnMonitored(#beamtalk_object{}) -> {#beamtalk_object{}, reference()}.
+doSpawnMonitored(Self) ->
+    do_spawn_or_raise(Self, [], spawnMonitored, class_self_spawn_monitored).
+
+-doc """
+FFI shim for `class sealed spawnMonitoredWith: initArgs -> Tuple` (BT-4104).
+
+Same contract as `doSpawnMonitored/1` plus the initialisation arguments
+passed to the actor's `init/1` callback.
+""".
+-spec doSpawnMonitoredWith(#beamtalk_object{}, term()) -> {#beamtalk_object{}, reference()}.
+doSpawnMonitoredWith(Self, InitArgs) ->
+    do_spawn_or_raise(Self, [InitArgs], 'spawnMonitoredWith:', class_self_spawn_monitored).
 
 -doc """
 FFI shim for `class spawnAs: name :: Symbol -> Result(Self, Error)`.
