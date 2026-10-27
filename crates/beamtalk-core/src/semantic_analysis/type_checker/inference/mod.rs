@@ -370,9 +370,9 @@ impl TypeChecker {
     /// via [`type_resolver::resolve_type_annotation`]; untyped
     /// parameters are registered as `Dynamic`. Generic annotations (e.g.,
     /// `:: Result(Integer, Error)`) are resolved to `Known` with `type_args`.
-    /// Type parameters of enclosing generic classes (e.g., `T` in
-    /// `Result(T, E)`) resolve to `Dynamic` when no substitution context is
-    /// available.
+    /// A method-local or class-level type variable (`:: E`, or `T` in
+    /// `Result(T, E)`) resolves to its rigid placeholder `Known("E")`, not
+    /// `Dynamic` (BT-4210; see the comment in the body).
     /// Registering untyped params is necessary to prevent the bare-identifier
     /// state-field fallback in `infer_expr` from mis-inferring an untyped param
     /// as `self.<field>` when the parameter name shadows a state field name.
@@ -400,6 +400,19 @@ impl TypeChecker {
         protocol_registry: Option<&crate::semantic_analysis::protocol_registry::ProtocolRegistry>,
         ctx: &mut type_resolver::ResolutionContext<'_>,
     ) {
+        // BT-4210: inside a method body the method's own substitution is the
+        // identity. Its method-local type variables (and the class's type
+        // params) are bound only at call sites (`infer_method_local_params`);
+        // here they are rigid. The empty map plus the `Declared`-context
+        // resolver gives exactly that: an unbound `:: E` resolves to the
+        // opaque placeholder `Known("E")`. That is the same type a `-> E`
+        // return annotation (`check_return_type`) and `self`'s type args
+        // (`receiver_type_for_class`) resolve to, so `E` flows between them
+        // without a warning, and it never collapses to `Dynamic`. Mismatch
+        // checks treat the placeholder as compatible with anything
+        // (`detect_assignment_type_mismatch`, `type_args_compatible`).
+        // Block parameter annotations share this rule
+        // (`resolve_block_param_types`).
         let subst = type_resolver::SubstitutionMap::new();
         for param in parameters {
             let ty = match &param.type_annotation {

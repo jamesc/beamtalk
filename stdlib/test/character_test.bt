@@ -9,6 +9,8 @@
 // dispatch to Character primitives, for non-printable codepoints too.
 // BT-4161: the factory with a computed argument, and `ifTrue:ifFalse:`
 // conditionals answering a Character, dispatch to Character primitives.
+// BT-4181: constant-taken single-branch `ifTrue:`/`ifFalse:` and
+// `and:`/`or:` answering a Character dispatch to Character primitives.
 
 TestCase subclass: CharacterTest
 
@@ -189,3 +191,54 @@ TestCase subclass: CharacterTest
     self assert: (flag ifTrue: [$A] ifFalse: [$B]) class equals: Character
     self assert: (flag ifTrue: [$A] ifFalse: [$B]) asString size equals: 1
     self assert: (flag ifTrue: [$A] ifFalse: [0]) class equals: Integer
+
+  // BT-4181: a single-branch conditional or `and:`/`or:` whose literal
+  // receiver takes the block answers the block's value, so a
+  // Character-answering block makes the whole send dispatch through
+  // Character. (`@expect lint`: the literal receiver is deliberate. `@expect
+  // all` where the type checker also warns — it types the send as
+  // `Boolean | Character` without narrowing the constant receiver, and
+  // `and:`/`or:` declare a `Block(Boolean)` argument.)
+  testCharacterSingleBranchTaken =>
+    @expect lint
+    self assert: (true ifTrue: [$A]) class equals: Character
+    @expect lint
+    self assert: (true ifTrue: [$A]) printString equals: "$A"
+    @expect all
+    self assert: (true ifTrue: [$A]) asString equals: "A"
+    @expect lint
+    self assert: (false ifFalse: [$A]) class equals: Character
+    @expect lint
+    self assert: (false ifFalse: [$A]) printString equals: "$A"
+    @expect all
+    self assert: (false ifFalse: [$A]) asString equals: "A"
+    @expect all
+    self assert: (true and: [$A]) class equals: Character
+    @expect all
+    self assert: (true and: [$A]) printString equals: "$A"
+    @expect all
+    self assert: (true and: [$A]) asString equals: "A"
+    @expect all
+    self assert: (false or: [$A]) class equals: Character
+    @expect all
+    self assert: (false or: [$A]) printString equals: "$A"
+    @expect all
+    self assert: (false or: [Character value: (48 + 6)]) asString equals: "6"
+
+  // BT-4181: the untaken path answers a Boolean (`False>>ifTrue:` and
+  // `True>>ifFalse:` answer `self`, `false and:` answers `false`, `true or:`
+  // answers `true`) — never a Character — and a non-constant receiver may
+  // take either path, so these stay conservatively Integer-dispatched.
+  testCharacterSingleBranchConservative =>
+    @expect lint
+    self assert: (false ifTrue: [$A]) class equals: False
+    @expect lint
+    self assert: (true ifFalse: [$A]) class equals: True
+    @expect all
+    self assert: (false and: [$A]) class equals: False
+    @expect all
+    self assert: (true or: [$A]) class equals: True
+    flag := 1 < 2
+    self assert: (flag ifTrue: [$A]) class equals: Integer
+    @expect type
+    self assert: (flag and: [$A]) class equals: Integer

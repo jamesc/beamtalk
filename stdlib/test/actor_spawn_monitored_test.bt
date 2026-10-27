@@ -1,0 +1,113 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4104: Actor class>>spawnMonitored / spawnMonitoredWith: — spawn an
+// actor with a monitor created atomically with the process, answering
+// `{actor, ref}`. A fast-exiting actor's DOWN carries its real reason, never
+// the `#noproc` a separate `spawn` + `monitor` reports.
+//
+// The monitor belongs to the process that runs the spawn, so the DOWN cases
+// spawn from inside a Server (static sends in its methods) and read what its
+// `handleInfo:` recorded.
+//
+// Fixtures: stdlib/test/fixtures/spawn_monitored_observer.bt
+//           stdlib/test/fixtures/quick_exit_actor.bt
+//           stdlib/test/fixtures/continue_with_actor.bt
+//           stdlib/test/fixtures/failing_initialize_actor.bt
+//           stdlib/test/fixtures/abstract_shape.bt
+
+TestCase subclass: ActorSpawnMonitoredTest
+
+  // === The issue repro: fast exits report their real reason ===
+  testFastNormalExitsAlwaysReportNormalNeverNoproc =>
+    obs := SpawnMonitoredObserver spawn
+    refs := obs spawnQuick: 50
+    self assert: refs size equals: 50
+    500 timesRepeat: [obs downs size < 50 ifTrue: [Timer sleep: 10]]
+    downs := obs downs
+    self assert: downs size equals: 50
+    self assert: (downs collect: [:d | d at: 5]) asSet asList equals: #(#normal)
+    self assert: (refs allSatisfy: [:r |
+      downs anySatisfy: [:d | (d at: 2) =:= r]
+    ])
+    self assert: obs others isEmpty
+    obs stop
+
+  testCrashReportsTheRealReason =>
+    obs := SpawnMonitoredObserver spawn
+    pair := obs spawnQuickWith: #kaboom
+    50 timesRepeat: [obs downs isEmpty ifTrue: [Timer sleep: 10]]
+    self assert: obs downs size equals: 1
+    msg := obs downs first
+    self assert: (msg at: 1) equals: #DOWN
+    self assert: (msg at: 2) =:= (pair at: 2)
+    self assert: (msg at: 3) equals: #process
+    self assert: (msg at: 4) =:= (pair at: 1) pid
+    self assert: (msg at: 5) equals: #kaboom
+    obs stop
+
+  // === spawnMonitoredWith: passes its init args ===
+  testSpawnMonitoredWithDeliversInitArgs =>
+    // `exitReason` is a declared state slot: the actor stops with the value
+    // passed in, so the DOWN reason proves the args reached `init/1`.
+    obs := SpawnMonitoredObserver spawn
+    obs spawnQuickWith: {#shutdown, #done}
+    50 timesRepeat: [obs downs isEmpty ifTrue: [Timer sleep: 10]]
+    self assert: (obs downs first at: 5) equals: {#shutdown, #done}
+    obs stop
+
+  // === A live actor: no DOWN until it exits; demonitor cancels it ===
+  testLongLivedActorIsAliveAndDemonitorCancelsTheDown =>
+    obs := SpawnMonitoredObserver spawn
+    pair := obs spawnAlive
+    actor := pair at: 1
+    self assert: actor class equals: ContinueWithActor
+    self assert: actor isAlive
+    self assert: actor log equals: #(#initialize, #afterInit)
+    self assert: (obs demonitor: (pair at: 2))
+    actor stop
+    Timer sleep: 50
+    self assert: obs downs isEmpty
+    self assert: obs others isEmpty
+    obs stop
+
+  // === Failure raises, leaving no monitor or ack behind ===
+  testRaisingInitializeRaisesInstantiationErrorWithNoStrayMonitor =>
+    obs := SpawnMonitoredObserver spawn
+    self assert: obs spawnFailing equals: #instantiation_error
+    Timer sleep: 50
+    self assert: obs downs isEmpty
+    self assert: obs others isEmpty
+    obs stop
+
+  testRaisingInitializeRaisesFromAStaticSend =>
+    self should: [
+      FailingInitializeActor spawnMonitored
+    ] raise: #instantiation_error
+
+  testAbstractActorRaisesInstantiationError =>
+    self should: [AbstractShape spawnMonitored] raise: #instantiation_error
+    cls := AbstractShape
+    self should: [cls spawnMonitored] raise: #instantiation_error
+    self should: [cls spawnMonitoredWith: #{}] raise: #instantiation_error
+
+  // === Answer shape on every path ===
+  testStaticSendAnswersActorAndRefTuple =>
+    pair := ContinueWithActor spawnMonitored
+    self assert: pair class equals: Tuple
+    self assert: pair size equals: 2
+    self assert: (pair at: 1) class equals: ContinueWithActor
+    self assert: (pair at: 2) class equals: Reference
+    self assert: (pair at: 2) demonitor
+    (pair at: 1) stop
+
+  testDynamicSendAnswersActorAndRefTuple =>
+    // A dynamic send runs in the class process, which owns this monitor —
+    // only the answer's shape is checked here.
+    cls := QuickExitActor
+    pair := cls spawnMonitoredWith: #{#exitReason => #normal}
+    self assert: pair class equals: Tuple
+    self assert: (pair at: 1) class equals: QuickExitActor
+    pair2 := ContinueWithActor perform: #spawnMonitored
+    self assert: (pair2 at: 1) class equals: ContinueWithActor
+    (pair2 at: 1) stop

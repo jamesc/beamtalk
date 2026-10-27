@@ -95,7 +95,7 @@ crlf := "\r\n"                   // 1 grapheme — byte-identical to (Character 
 
 ### Character Methods
 
-Character-typed receivers dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values. This applies to character literals (`$A`), the `Character value:` class factory, chained `uppercase`/`lowercase` sends, and `ifTrue:ifFalse:` conditionals whose outcome is statically Character — all statically Character-typed forms. A conditional is transparent when a literal condition takes the known branch, or when both branches agree (a non-constant condition with mixed branches stays Integer-dispatched):
+Character-typed receivers dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values. This applies to character literals (`$A`), the `Character value:` class factory, chained `uppercase`/`lowercase` sends, `ifTrue:ifFalse:` conditionals whose outcome is statically Character, and single-block `ifTrue:`/`ifFalse:`/`and:`/`or:` sends whose literal receiver takes a Character-answering block — all statically Character-typed forms. A two-branch conditional is transparent when a literal condition takes the known branch, or when both branches agree (a non-constant condition with mixed branches stays Integer-dispatched). A single-block send is transparent only when its receiver is the literal that runs the block (`true ifTrue:`, `false ifFalse:`, `true and:`, `false or:`): on the other path it answers a Boolean (`false ifTrue: [$A]` answers `false`, not `nil`), so a non-constant receiver stays Integer-dispatched:
 
 ```beamtalk
 $A asInteger              // => 65
@@ -109,6 +109,8 @@ Character value: 65       // => $A
 (Character value: 10) asString   // => "\n" (LF, not "10")
 $a uppercase asString            // => "A"
 (true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) asString  // => "6"
+(true and: [$A]) printString     // => "$A"
+(false ifTrue: [$A]) class       // => False
 ```
 
 ### String Operations (Grapheme-Aware)
@@ -248,6 +250,10 @@ Server subclass: Connection
 - `#normal`, `#shutdown` and `{shutdown, term}` tuples are **clean** stops: no crash report, and a `#transient` supervised child is not restarted. Any other reason — a Symbol like `#boom`, an exception — is a **crash**: it is logged, a `#transient` child is restarted, and any process linked to the actor (its supervisor, or the spawner of a `spawnAs:` actor — plain `spawn`/`spawnWith:` do not link) receives the exit signal, as with any OTP process exit.
 - Stopping itself from `initialize` (`self stop` or `self stopWith:`) makes the `spawn` fail, since the actor is gone before it is handed back.
 - A stop requested earlier in a method still happens if the method then raises: the caller gets the error, then the actor stops.
+
+**Spawn with a monitor (BT-4104).** `Worker spawnMonitored` and `Worker spawnMonitoredWith: initArgs` answer a `{actor, ref}` Tuple (`at: 1` / `at: 2`) whose monitor is created atomically with the process. A separate `X spawn` followed by `monitor` reports `{#DOWN, ref, #process, pid, #noproc}` for an actor that exits straight after `initialize` (for example a `continueWith:` step ending in `stopWith: #normal`); `spawnMonitored` delivers the real reason (`#normal` here). Failures raise `instantiation_error` like `spawn`, leaving no stray monitor. The actor is not linked, and supervisor classes do not support these selectors (OTP has no atomic supervisor start plus monitor).
+
+**The monitor belongs to the process that runs the spawn.** Use a static send (`Worker spawnMonitored`) from an actor or Server method so the `#DOWN` reaches that process's `handleInfo:`. A dynamic send (`cls spawnMonitored`, `perform:`) or a send inside a class method runs in the class's process, which then owns the monitor, so its `#DOWN` is never seen by the sender. This is documented rather than raised, because it cannot be detected on the static-from-class-method path. Linked and named-and-monitored variants are follow-ups.
 
 **Initialization chaining** — `initialize` methods defined on ancestors run automatically, parent-first, before the child's own `initialize`. State threads through each call so the child sees the parent's mutations. Do **not** write `super initialize` yourself — the compiler warns on redundant `super initialize` sends inside an Actor's `initialize`. After the full chain runs, any typed `state:` field without a default (on the child or any ancestor, including cross-file parents) must have been assigned, or the actor crashes with `UninitializedStateError` naming the owning class. See [ADR 0078](ADR/0078-actor-initialize-inheritance.md).
 
@@ -1233,6 +1239,13 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => nil
 ```
 
+**Carrying a reason: `signal:reason:` (BT-4159).** Beamtalk exceptions have no instance fields, so to attach machine-readable data when signalling, use the class-side `signal: message reason: term`. The term can be any value; `reason` answers it in `on:do:` (type `Object | Nil`, so narrow with `isKindOf:` or match), it survives propagation across processes, and uncaught reports print it as a `Reason:` line. There is no separate `error:reason:`; `Error signal: msg reason: term` is the equivalent.
+
+```beamtalk
+[Error signal: "closed" reason: #econnreset] on: Error do: [:e | e reason]
+// => #econnreset
+```
+
 **Structured details (`Exception>>details`, BT-4174).** Natives that know more than the message says record it as structured details: `details` answers a `Dictionary` keyed by Symbol (empty when nothing was recorded), so read the value with `at:` instead of parsing the English `message`. For example, `Binary asString` on invalid UTF-8 answers `Result error:` holding a `parse_error` whose `#offset` is the byte offset of the first invalid sequence. A nested Beamtalk error stored in the details answers as an Exception and an absent (Erlang `undefined`) value as `nil`. Other values are the recorded terms as-is, without the FFI boundary coercions `reason` gets: text a native records as raw bytes, such as a File error's `#path`, answers a `Binary` (send it `asString` for a `String`).
 
 ```beamtalk
@@ -1820,7 +1833,7 @@ self run: [:x :: (Integer | String) | x]
 - Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments. When a type annotation is present, the default value is optional (`field: x :: Integer` / `state: x :: Integer`) — the type annotation is the contract, and `nil` is used internally.
 - Local variable annotations (`name :: Type := expr`) declare the binding's type at type-erasure boundaries. See [Local Variable Type Annotations](#local-variable-type-annotations) below.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
-- Block parameter annotations (`[:x :: Integer | ...]`) type the parameter and win over any inferred type (BT-4102); an annotation unrelated to the expected parameter type warns. Without an annotation, parameter types are inferred from the enclosing message signature, from a method's declared `-> Block(P, R)` return type (block literal as the tail expression or a top-level `^`), or from an annotated local (`f :: Block(P, R) := [:x | ...]`). Block literals inside `#{...}`/`#(...)` literals get no push-down; annotate their parameters. Type variables in a block parameter annotation do not see the method's type-parameter substitution (same as method parameters).
+- Block parameter annotations (`[:x :: Integer | ...]`) type the parameter and win over any inferred type (BT-4102); an annotation unrelated to the expected parameter type warns. Without an annotation, parameter types are inferred from the enclosing message signature, from a method's declared `-> Block(P, R)` return type (block literal as the tail expression or a top-level `^`), or from an annotated local (`f :: Block(P, R) := [:x | ...]`). Block literals inside `#{...}`/`#(...)` literals get no push-down; annotate their parameters. A method-local or class-level type variable in a method or block parameter annotation (`foo: x :: E`, `[:y :: E | ...]`) resolves through the enclosing method's substitution, which inside the method body is the identity: `E` is a rigid placeholder, the same type a `-> E` return annotation names, so it flows between parameters, block parameters and the return type without warnings. It is never `Dynamic`, never the callee's binding for a same-named variable, and is treated as compatible with any type in mismatch checks (BT-4210).
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
 ### Local Variable Type Annotations
@@ -4520,7 +4533,7 @@ x match: [
 // => 2
 ```
 
-**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). Dependent sizes and size expressions are only supported when the binary pattern is the whole arm pattern — nested ones must match the enclosing value first, then the binary. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). Dependent sizes and size expressions are only supported when the binary pattern is the whole arm pattern — nested ones must match the enclosing value first, then the binary. A binary nested inside a tuple is matched after the tuple, so its sizes may name a variable the tuple binds (`{n, <<head:n/binary, _/binary>>}`). A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
 
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. A zero-parameter block body alongside non-block arms warns (`MatchArmBlock`: "this `match:` arm answers a Block without running it"); a match whose every arm is a block literal is read as an intentional dispatch table and stays silent. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is additionally a compile error. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`). Suppress a deliberate block-valued arm with `@expect match_arm_block`, or the whole package with `match-arm-block = "off"` under `[diagnostics]`.
 

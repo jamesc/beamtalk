@@ -850,6 +850,71 @@ fn test_class_ref_spawn_family_on_supervisor_lowers_to_class_start() {
 }
 
 #[test]
+fn test_spawn_monitored_on_supervisor_lowers_to_class_start() {
+    // BT-4104: supervisor modules have no spawn_monitored/0,1, so the
+    // monitored selectors on a supervisor receiver (class reference or
+    // `self` in a class method) reach class_start/4, which raises a clear
+    // unsupported error.
+    let src = "Object subclass: Foo\n  a => Leaf spawnMonitored\n  b => Leaf spawnMonitoredWith: #{#n => 1}\n\nSupervisor subclass: Leaf\n  childSpecs => #()\n";
+    let code = compile_source(src, "foo");
+    for selector in ["'spawnMonitored', []", "'spawnMonitoredWith:', ["] {
+        assert!(
+            code.contains(&format!(
+                "call 'beamtalk_supervisor':'class_start'('Leaf', 'bt@leaf', {selector}"
+            )),
+            "Leaf {selector} must lower to class_start. Got:\n{code}"
+        );
+    }
+    assert!(
+        !code.contains("'spawn_monitored'"),
+        "must not call a spawn_monitored export on a supervisor module. Got:\n{code}"
+    );
+
+    let src =
+        "Supervisor subclass: Leaf\n  class one => self spawnMonitored\n  childSpecs => #()\n";
+    let code = compile_source(src, "bt@leaf");
+    assert!(
+        code.contains("'spawnMonitored', []"),
+        "self spawnMonitored in a supervisor class method must lower to class_start. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("class_self_spawn_monitored"),
+        "must not use the actor class_self_spawn_monitored helper. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_spawn_monitored_on_actor_keeps_actor_intrinsics() {
+    // BT-4104: an actor receiver calls the module's own spawn_monitored/0,1
+    // from the sender; `self spawnMonitored` in a class method lowers to
+    // class_self_spawn_monitored.
+    let src = "Object subclass: Foo\n  a => Counter spawnMonitored\n  b => Counter spawnMonitoredWith: #{#n => 1}\n\nActor subclass: Counter\n  state: n = 0\n";
+    let code = compile_source(src, "foo");
+    assert!(
+        code.contains("call 'bt@counter':'spawn_monitored'()"),
+        "Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'bt@counter':'spawn_monitored'(~{"),
+        "Got:\n{code}"
+    );
+    assert!(!code.contains("'class_start'"), "Got:\n{code}");
+
+    let src = "Actor subclass: Counter\n  state: n = 0\n  class make => self spawnMonitored\n  class makeWith: m => self spawnMonitoredWith: m\n";
+    let code = compile_source(src, "bt@counter");
+    assert_eq!(
+        code.matches("call 'beamtalk_class_instantiation':'class_self_spawn_monitored'(")
+            .count(),
+        2,
+        "self spawnMonitored/spawnMonitoredWith: must lower to class_self_spawn_monitored. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'resolve_is_abstract_or_raise'(") && code.contains("'spawnMonitoredWith:')"),
+        "the abstract check must name the monitored selector. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_class_ref_spawn_on_actor_keeps_actor_intrinsic() {
     let src =
         "Object subclass: Foo\n  a => Counter spawn\n\nActor subclass: Counter\n  state: n = 0\n";
