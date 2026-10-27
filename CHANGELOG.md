@@ -232,6 +232,12 @@
 - Fix: reading a `late` slot whose key is present answers its value, including `nil`, and `late` on a nil-admitting type is a compile error (ADR 0124 amendment, BT-4061) — the read guard used to raise `UninitializedStateError` for a stored `nil` while `hasField:` reported the slot assigned; presence — not value — is now assignment on every surface (direct read, `fieldAt:`, class-side reads), with the guard and `hasField:` sharing one presence helper. Separately, `late state: a :: Object` (and `:: Dynamic`, and any alias or protocol admitting `nil`) is now the B1 compile error ADR 0124 §1 specifies, since `nil` is already a value such a slot can hold. Migration: drop `late` or narrow the type to exclude `nil`.
 - Fix: FFI arity check accepts the multi-arity `erlang` BIFs — `integer_to_binary/2`, `atom_to_binary/2`, `binary_to_atom/2`, `binary_to_list/3` and `spawn/2,4` no longer warn "expected arity 1" (BT-4101)
 - Fix: an `ifTrue:ifFalse:` conditional answering a Character dispatches through Character instead of Integer (BT-4161) — with a literal condition only the taken branch decides, and with a non-constant condition both branches must agree; `(true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) printString` now answers `"$6"` instead of `"54"`. `Character value:` with a computed argument is pinned to match the literal form.
+- **Construction-typed String/Binary dispatch (BT-4173)** — String and Binary are now distinguished by construction, not by UTF-8 validity. A String is the tagged tuple `{beamtalk_string, Bin}`, a Binary is a bare Erlang `binary()`. `class` answers the construction type, and dispatch follows it — `size`, `at:`, `do:`, and the Collection protocol are byte-level on Binary, grapheme-aware on String. `byteSize` removed from Binary (`size` is the byte count). `asString` returns `Result` uniformly. (#4587)
+- **Block parameter annotations are honoured; declared Block types push into literals (BT-4102)** — `[:x :: Integer | ...]` annotations now type the parameter in the type checker (previously parsed but ignored). A method declaring `-> Block(P, R)` pushes its parameter types into block literal arguments. Priority: annotation > pushed type > Dynamic. (#4591)
+- **New lint: `class-process-ffi` (BT-4031)** — warns when a class-side FFI wrapper sends a process-sensitive call (`self()`, `self`, `process_flag`, `monitor`, etc.) that will run in the class gen_server process instead of the caller's. Suppress with `@expect class_process_ffi` or `class-process-ffi = "off"` under `[diagnostics]`. (#4595)
+- Fix: an actor loop nest with an evaluated value block (`[...] value`) over a local no longer clobbers state (BT-4194, #4583)
+- Fix: a `match:` scrutinee that writes a field or local now seeds arms from the post-scrutinee state instead of the pre-scrutinee state (BT-4196, #4579)
+- Fix: type checker false positives — Dynamic-typed field assignment no longer warns, `C class` is assignable to a declared `X class` slot when `C` ≤ `X`, `notNil` narrows the post-guard path, and `includes:` accepts `Object` on typed collections (BT-4199, #4578)
 
 ### Runtime
 
@@ -256,6 +262,9 @@
 - Fix dynamic sends to a Value instance rebuilding the class's module name from strings on every call — resolved module names are now cached (BT-4064, #4501)
 - Fix dynamic sends to a package Value instance calling `code:ensure_loaded` on nonexistent modules — resolution now uses `erlang:module_loaded/1` BIF plus ETS metadata instead of code_server round trips (BT-4053, #4494)
 - Fix inline FFI calls (e.g. `Erlang erlang monotonic_time`) re-reading `module_info(exports)` on every call — the export list is now cached, saving ~12–15 µs per call (BT-4021, #4487)
+- `Json` text leaves and object keys are now validated Strings instead of raw binaries (BT-4171, #4568)
+- `Binary printString` and `String printString` use the full ADR 0138 escape mapping — backslashes, braces, control characters render consistently across Beamtalk and Rust unparser output (BT-4164, BT-4176, BT-4188; #4556, #4567, #4584)
+- Trace store sweep: skip remote pids and reclaim orphan rows on dead-actor cleanup (BT-4197, #4576)
 
 ### Internal
 
@@ -304,6 +313,9 @@
 - `beamtalk new` CI template now targets the newest supported OTP major from `otp-support.toml` instead of a hardcoded value (BT-3955, #4428)
 - **`just bench-vs-elixir` microbenchmark suite (#4508)** — a new `benchmarks/vs-elixir/` directory contains side-by-side Beamtalk and Elixir microbenchmarks for comparing dispatch, collection, and concurrency performance. Results are documented in `docs/development/benchmarks.md`.
 - **Fix: `unresolved_ffi` no longer warns on the package's own hex-dep and native modules (BT-4022)** — an FFI call to a module from the package's `[native.dependencies]` (e.g. `telemetry`) or its own `native/*.erl` no longer reports `Unknown Erlang module` in `beamtalk build`, `test` and `lint`, the LSP, or the MCP `lint`/`diagnostic_summary` tools. The check now also knows the `.beam` files in the compiled dependency ebin dirs and the `native/*.erl` sources, collected once per run after native compilation; genuinely unknown modules still warn. An `@expect unresolved_ffi` added as a workaround for one of these modules now reports a stale expectation — remove it.
+- REPL displays Characters as `$X` (was indistinguishable from Integer), Strings quoted and escaped, Binaries as `<<hex>>`, class names bare (BT-4167, #4569)
+- Fix: nested strings in REPL display no longer double-escape (BT-4203, #4596)
+- `actor-state-abroad` lint now covers `Block>>fork` receiver blocks (BT-4198, #4585)
 
 ### Standard Library
 
@@ -406,6 +418,9 @@
   - **`Enumerable(E)`** (`stdlib/src/enumerable.bt`) requires `elements -> List(E)` and provides `size`, `isEmpty`, `isNotEmpty`, `do:`, `inject:into:`, `select:`, `collect:`, `detect:ifNone:`, `anySatisfy:`, `count:`, each forwarding to the matching `List` primitive over the snapshot (no block crosses a self-send, so every provision is safe on an `Actor`, BT-3580). `Collection` gains `elements -> List(E) => self asList` so every `List`/`Set`/`Array`/`Dictionary`/… **conforms** to `Enumerable` structurally without `uses:` — `Collection` itself does not use the trait (its own `select:`/`collect:` already answer `Self` via species). `SupervisionTree uses: Enumerable(SupervisionNode) excluding: #(#do:)` (keeping its own chainable `do:`) gains `isNotEmpty`/`inject:into:`/`anySatisfy:`/`count:`. `ChangeLog uses: Enumerable(ChangeEntry)` gains the same four selectors plus `collect:`/`detect:ifNone:`, while keeping its own all-entries `select:` and its `notEmpty` predicate.
 - Fix `Ets lookupIfAbsent:key:block:` masking a `badarg` raised by the user's block as a stale-table error — only the `ets:lookup/2` call is now protected (BT-3739, #4186)
 - Fix `Json generate:` and `prettyPrint:` swallowing a non-local return (`^`) from an `asJson` hook — both now pass `$bt_nlr` throws through (BT-3740, #4186)
+- **`String>>asciiLowercase` — ASCII-only case fold (BT-4193)** — `"Content-TYPE" asciiLowercase` answers `"content-type"`; only A–Z folds, non-ASCII bytes pass through untouched. Single O(n) pass via `beamtalk_string:ascii_lowercase/1`. (#4594)
+- **`DateTime>>weekday` — ISO day-of-week (BT-4192)** — answers Monday=1 through Sunday=7 via `calendar:day_of_the_week/3`, computed from the wall-clock date (ignores `offsetMinutes`). (#4588)
+- **`Binary>>includesSubstring:` / `Binary>>indexOf:` — byte-level substring search (BT-4190)** — `includesSubstring: needle` tests whether a byte sequence appears in the receiver; `indexOf: needle` answers a 1-based byte index or `nil`. Empty needle: `includesSubstring:` true, `indexOf:` nil. Backed by `binary:match/2`. (#4590)
 
 ### Runtime
 

@@ -7129,7 +7129,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | **OS**, **System** | Platform info and system operations |
 | **Json** | Data serialisation (JSON) |
 | **Regex** | Regular expression matching |
-| **DateTime**, **Time**, **Duration** | Date/time operations |
+| **DateTime**, **Time**, **Duration** | Date/time operations (`DateTime>>weekday` → ISO Monday=1..Sunday=7) |
 | **Random** | Random number generation |
 | **Digest** | Cryptographic hash functions and HMAC |
 
@@ -7219,6 +7219,15 @@ bin collect: [:b | b]         // => Binary (65, 66, 67, 68, 69)
 bin select: [:b | b /= 67]    // => Binary (65, 66, 68, 69)
 bin includes: 66              // => true
 bin isEmpty                   // => false
+
+// Byte-level substring search (BT-4190)
+data := Binary fromBytes: #(1, 2, 3, 4, 5, 3, 4)
+needle := Binary fromBytes: #(3, 4)
+data includesSubstring: needle   // => true
+data indexOf: needle             // => 3 (1-based byte index of first match)
+data indexOf: (Binary fromBytes: #(9, 9))  // => nil (not found)
+(Binary fromBytes: #()) includesSubstring: (Binary fromBytes: #())  // => true
+(Binary fromBytes: #()) indexOf: (Binary fromBytes: #())            // => nil
 ```
 
 **Method override table (Binary vs String):**
@@ -7235,6 +7244,8 @@ bin isEmpty                   // => false
 | `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
 | `asString` | `Result ok:` String, or `Result error:` with offset | no-op, returns self |
 | `asStringUnchecked` | unchecked cast to String | no-op, returns self |
+| `includesSubstring:` | byte-level substring test | grapheme-level substring test |
+| `indexOf:` | 1-based byte index or `nil` | 1-based grapheme index or `nil` |
 
 (`byteSize` was removed in BT-4173 — `size` is the byte count on Binary.)
 
