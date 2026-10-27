@@ -73,3 +73,50 @@ TestCase subclass: ExceptionReasonTest
   testSelfErrorReasonIsNil =>
     result := [self error: "boom"] on: Error do: [:e | e reason]
     self assert: result isNil
+
+  // --- BT-4159: signal:reason: ---
+  testSignalReasonAtom =>
+    result := [
+      Error signal: "closed" reason: #econnreset
+    ] on: Error do: [:e | e reason]
+    self assert: result equals: #econnreset
+
+  testSignalReasonTuple =>
+    result := [
+      Exception signal: "tls" reason: {#tls_alert, #bad_certificate}
+    ] on: Exception do: [:e | e reason]
+    self assert: result equals: {#tls_alert, #bad_certificate}
+
+  testSignalReasonKeepsMessageAndClass =>
+    result := [
+      TypeError signal: "bad" reason: #why
+    ] on: TypeError do: [:e | e message]
+    self assert: result equals: "bad"
+
+  testSignalReasonCrossProcess =>
+    // Fixture: stdlib/test/fixtures/signal_reason_actor.bt
+    actor := SignalReasonActor spawn
+    result := [actor failWithReason] on: Error do: [:e | e reason]
+    actor stop
+    self assert: result equals: {#code, 42}
+
+  testSignalReasonNotLeakedIntoDetails =>
+    result := [
+      Error signal: "x" reason: #econnreset
+    ] on: Error do: [:e | e details]
+    self assert: result equals: #{}
+
+  testSignalReasonExceptionAsReason =>
+    result := [
+      [
+        Error signal: "inner"
+      ] on: Error do: [:inner | Error signal: "wrapped" reason: inner]
+    ] on: Error do: [:e | e reason]
+    self assert: (result isKindOf: Error)
+    self assert: result message equals: "inner"
+
+  testSignalReasonStringReason =>
+    result := [
+      Error signal: "x" reason: "disk full"
+    ] on: Error do: [:e | e reason]
+    self assert: result equals: "disk full"

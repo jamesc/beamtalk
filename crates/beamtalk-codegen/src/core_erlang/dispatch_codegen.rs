@@ -40,6 +40,7 @@
 
 use super::control_flow::{Closure, FieldWriteSite};
 use super::expr_shape::is_character_typed_receiver;
+use super::gen_server::SpawnVariant;
 use super::method_frame::{CLASS_SELF_VAR, DIRECT_CLASS_SELF_PARAM};
 use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
@@ -1086,16 +1087,26 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Unary spawn/await messages
-        if let MessageSelector::Unary(name) = selector {
-            // Only match ClassReference, not Identifier.
-            if name == "spawn" && arguments.is_empty() {
-                if let Expression::ClassReference { name, package, .. } = receiver {
-                    let pkg = package.as_ref().map(|p| p.name.as_str());
-                    let doc = self.generate_actor_spawn_qualified(&name.name, pkg, None)?;
-                    return Ok(Some(doc));
-                }
+        // `spawn`/`spawnWith:` and (BT-4104) `spawnMonitored`/
+        // `spawnMonitoredWith:` on a class reference call the module's own
+        // `spawn/0,1` / `spawn_monitored/0,1` in the calling process — so a
+        // monitored spawn's monitor belongs to the sender. Only match
+        // ClassReference, not Identifier.
+        if let Expression::ClassReference { name, package, .. } = receiver {
+            if let Some(variant) = SpawnVariant::of_selector(&selector.name(), arguments.len()) {
+                let pkg = package.as_ref().map(|p| p.name.as_str());
+                let doc = self.generate_actor_spawn_qualified(
+                    &name.name,
+                    pkg,
+                    arguments.first(),
+                    variant,
+                )?;
+                return Ok(Some(doc));
             }
+        }
+
+        // Unary await messages
+        if let MessageSelector::Unary(name) = selector {
             if name == "await" && arguments.is_empty() {
                 let doc = self.generate_await(receiver)?;
                 return Ok(Some(doc));
@@ -1106,20 +1117,11 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Keyword await:/spawnWith: messages
+        // Keyword await: messages
         if let MessageSelector::Keyword(parts) = selector {
             if parts.len() == 1 && parts[0].keyword == "await:" && arguments.len() == 1 {
                 let doc = self.generate_await_with_timeout(receiver, &arguments[0])?;
                 return Ok(Some(doc));
-            }
-            // Only match ClassReference, not Identifier.
-            if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
-                if let Expression::ClassReference { name, package, .. } = receiver {
-                    let pkg = package.as_ref().map(|p| p.name.as_str());
-                    let doc =
-                        self.generate_actor_spawn_qualified(&name.name, pkg, Some(&arguments[0]))?;
-                    return Ok(Some(doc));
-                }
             }
         }
 
@@ -1929,10 +1931,19 @@ impl CoreErlangGenerator {
                 ];
                 Ok(Some(self.close_prelude(&args_preamble, call_doc, "NewRes")))
             }
-            "spawn" | "spawnWith:" => {
+            // BT-4104: `spawnMonitored`/`spawnMonitoredWith:` lower the same
+            // way to `class_self_spawn_monitored` — the monitor belongs to the
+            // process running the class method (the class process).
+            "spawn" | "spawnWith:" | "spawnMonitored" | "spawnMonitoredWith:" => {
+                let Some(variant) = SpawnVariant::of_selector(selector_atom, arguments.len())
+                else {
+                    return Ok(None);
+                };
                 let (args_preamble, args_doc) = self.thread_args(arguments)?;
                 let call_doc = docvec![
-                    "call 'beamtalk_class_instantiation':'class_self_spawn'(",
+                    "call 'beamtalk_class_instantiation':",
+                    leaf::atom(variant.class_self_helper()),
+                    "(",
                     Self::class_self_name_doc(),
                     ", ",
                     Self::class_self_module_doc(selector_atom),
@@ -2819,14 +2830,20 @@ impl CoreErlangGenerator {
     ///
     /// In REPL context, registers the spawned actor with the REPL actor registry.
     /// In non-REPL contexts, calls the module's `spawn/0` or `spawn/1` directly.
+    ///
+    /// `SpawnVariant::Monitored` (BT-4104) calls `spawn_monitored/0,1`
+    /// instead; its answer is `{ActorObject, MonRef}`, so the REPL arm takes
+    /// the pid from the pair's actor.
     pub(super) fn generate_actor_spawn_qualified(
         &mut self,
         class_name: &str,
         package: Option<&str>,
         init_args: Option<&Expression>,
+        variant: SpawnVariant,
     ) -> Result<Document<'static>> {
         let module_name = self.compiled_module_name_qualified(class_name, package);
         let in_repl_context = self.lookup_var("__bindings__").is_some();
+        let function = leaf::atom(variant.function_name());
 
         let args_doc = match init_args {
             Some(args) => self.expression_doc(args)?,
@@ -2834,18 +2851,28 @@ impl CoreErlangGenerator {
         };
 
         if in_repl_context {
+            let spawned_object: Document<'static> = match variant {
+                SpawnVariant::Plain => Document::Str("SpawnResult"),
+                SpawnVariant::Monitored => Document::Str("call 'erlang':'element'(1, SpawnResult)"),
+            };
             let doc = docvec![
                 "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of ",
                 "<'undefined'> when 'true' -> call ",
                 leaf::atom(module_name.clone()),
-                ":'spawn'(",
+                ":",
+                function.clone(),
+                "(",
                 args_doc.clone(),
                 ") <RegistryPid> when 'true' -> let SpawnResult = call ",
                 leaf::atom(module_name.clone()),
-                ":'spawn'(",
+                ":",
+                function,
+                "(",
                 args_doc,
                 ") in ",
-                "let SpawnPid = call 'erlang':'element'(4, SpawnResult) in ",
+                "let SpawnPid = call 'erlang':'element'(4, ",
+                spawned_object,
+                ") in ",
                 "let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, ",
                 leaf::atom(class_name.to_string()),
                 ", ",
@@ -2856,7 +2883,15 @@ impl CoreErlangGenerator {
             ];
             Ok(doc)
         } else {
-            let doc = docvec!["call ", leaf::atom(module_name), ":'spawn'(", args_doc, ")"];
+            let doc = docvec![
+                "call ",
+                leaf::atom(module_name),
+                ":",
+                function,
+                "(",
+                args_doc,
+                ")"
+            ];
             Ok(doc)
         }
     }
@@ -3342,10 +3377,15 @@ pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -
 /// The class-side spawn-family selectors that start a supervisor instance
 /// (ADR 0135 §1), with their arities: lowered for supervisor receivers to
 /// `beamtalk_supervisor:class_start/4` instead of the actor spawn intrinsics.
+/// `spawnMonitored`/`spawnMonitoredWith:` (BT-4104) are here only so a
+/// supervisor receiver reaches `class_start/4`'s clear unsupported error
+/// rather than a `spawn_monitored` export supervisor modules do not have.
 pub(super) fn is_supervisor_spawn_selector(selector_atom: &str, arity: usize) -> bool {
     matches!(
         (selector_atom, arity),
-        ("spawn", 0) | ("spawnWith:" | "spawnAs:", 1) | ("spawnWith:as:", 2)
+        ("spawn" | "spawnMonitored", 0)
+            | ("spawnWith:" | "spawnAs:" | "spawnMonitoredWith:", 1)
+            | ("spawnWith:as:", 2)
     )
 }
 

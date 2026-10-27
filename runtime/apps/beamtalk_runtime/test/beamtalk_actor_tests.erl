@@ -2199,6 +2199,120 @@ safe_spawn_failing_initialize_with_ack_reports_real_reason_test_() ->
         end
     end}.
 
+%%% BT-4104: safe_spawn_monitored/2
+
+safe_spawn_monitored_fast_normal_exit_reports_normal_test_() ->
+    %% The issue repro: an actor that stops with `normal` straight after
+    %% `initialize`. The monitor is created with the process, so its DOWN
+    %% always carries `normal` — never the `noproc` a monitor taken after
+    %% the start reports when the actor is already gone.
+    {timeout, 60, fun() ->
+        Reasons = [
+            begin
+                {ok, {Pid, MonRef}} =
+                    beamtalk_actor:safe_spawn_monitored(
+                        test_init_ack_actor, #{mode => exit_normal}
+                    ),
+                receive
+                    {'DOWN', MonRef, process, Pid, Reason} -> Reason
+                after 5000 -> no_down
+                end
+            end
+         || _ <- lists:seq(1, 200)
+        ],
+        ?assertEqual([normal], lists:usort(Reasons)),
+        ?assertEqual(no_stray_ack, stray_ack())
+    end}.
+
+safe_spawn_monitored_fast_abnormal_exit_reports_real_reason_test() ->
+    logger:set_primary_config(level, none),
+    try
+        {ok, {Pid, MonRef}} =
+            beamtalk_actor:safe_spawn_monitored(test_init_ack_actor, #{mode => stop_continue}),
+        receive
+            {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(bad_config, Reason)
+        after 5000 -> error(no_down)
+        end
+    after
+        logger:set_primary_config(level, all)
+    end.
+
+safe_spawn_monitored_live_actor_keeps_monitor_and_no_link_test() ->
+    {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored(test_counter, #{init_count => 0}),
+    ?assert(is_process_alive(Pid)),
+    {monitors, Monitors} = process_info(self(), monitors),
+    ?assert(lists:member({process, Pid}, Monitors)),
+    {links, CallerLinks} = process_info(self(), links),
+    ?assertNot(lists:member(Pid, CallerLinks)),
+    gen_server:stop(Pid),
+    receive
+        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(normal, Reason)
+    after 5000 -> error(no_down)
+    end.
+
+safe_spawn_monitored_ignores_supervisor_spawn_context_test() ->
+    %% Unlike safe_spawn/2, a monitored start never links, even in a
+    %% `withClassMethod:` supervisor factory's context.
+    put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
+    try
+        {ok, {Pid, MonRef}} =
+            beamtalk_actor:safe_spawn_monitored(test_counter, #{init_count => 0}),
+        {links, CallerLinks} = process_info(self(), links),
+        ?assertNot(lists:member(Pid, CallerLinks)),
+        erlang:demonitor(MonRef, [flush]),
+        gen_server:stop(Pid)
+    after
+        erase(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY)
+    end.
+
+safe_spawn_monitored_failing_initialize_cleans_up_test() ->
+    %% A failing `initialize` reports its real reason, kills nothing else,
+    %% and leaves no monitor, DOWN or initialize ack behind.
+    logger:set_primary_config(level, none),
+    flush_downs(),
+    try
+        {monitors, Before} = process_info(self(), monitors),
+        ?assertEqual(
+            {error, {error, function_clause}},
+            beamtalk_actor:safe_spawn_monitored(test_init_ack_actor, #{mode => crash})
+        ),
+        {monitors, After} = process_info(self(), monitors),
+        ?assertEqual(Before, After),
+        ?assertEqual(no_stray_ack, stray_ack()),
+        receive
+            {'DOWN', _, process, _, _} = Down -> error({stray_down, Down})
+        after 50 -> ok
+        end
+    after
+        logger:set_primary_config(level, all)
+    end.
+
+%% Drop DOWN messages left in this (shared) eunit process by earlier tests, so
+%% a "no stray DOWN" assertion only sees messages from its own spawn.
+flush_downs() ->
+    receive
+        {'DOWN', _, process, _, _} -> flush_downs()
+    after 0 -> ok
+    end.
+
+safe_spawn_monitored_initialize_timeout_kills_and_cleans_up_test_() ->
+    {timeout, 30, fun() ->
+        {monitors, Before} = process_info(self(), monitors),
+        ?assertEqual(
+            {error, timeout},
+            beamtalk_actor:safe_spawn_monitored(
+                test_init_ack_actor, #{mode => slow_initialize, delay => 7000}
+            )
+        ),
+        {monitors, After} = process_info(self(), monitors),
+        ?assertEqual(Before, After),
+        ?assertEqual(no_stray_ack, stray_ack()),
+        receive
+            {'DOWN', _, process, _, _} = Down -> error({stray_down, Down})
+        after 50 -> ok
+        end
+    end}.
+
 safe_spawn_fallback_strips_ack_target_from_merged_state_test() ->
     %% An init/1 that merges its start args into its state without
     %% consuming the ack target (an actor module compiled before BT-3992)

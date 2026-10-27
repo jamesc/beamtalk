@@ -2277,6 +2277,29 @@ spawn_start_failure_raises_supervisor_start_failed_test() ->
         )
     end).
 
+%% BT-4104: OTP has no atomic supervisor start+monitor, so the monitored
+%% spawn selectors raise a clear unsupported error and start nothing.
+spawn_monitored_on_supervisor_raises_unsupported_test() ->
+    Config = bt3963_static_config(#{}),
+    with_bt3963_class('BT3963Sup', Config, fun() ->
+        lists:foreach(
+            fun({Selector, Args}) ->
+                ?assertError(
+                    #{
+                        error := #beamtalk_error{
+                            kind = instantiation_error,
+                            class = 'BT3963Sup',
+                            selector = Selector
+                        }
+                    },
+                    beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, Selector, Args)
+                )
+            end,
+            [{spawnMonitored, []}, {'spawnMonitoredWith:', [#{n => 1}]}]
+        ),
+        ?assertEqual(undefined, whereis(?BT3963_MOD))
+    end).
+
 %% BT-3994: a raising `initialize` stops the instance; the `Result` forms
 %% (`supervise`, `spawnAs:`, `spawnWith:as:`) answer `Result error:`
 %% `#supervisor_start_failed` carrying the error (as `Actor spawnAs:` does),

@@ -95,7 +95,7 @@ crlf := "\r\n"                   // 1 grapheme — byte-identical to (Character 
 
 ### Character Methods
 
-Character-typed receivers dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values. This applies to character literals (`$A`), the `Character value:` class factory, chained `uppercase`/`lowercase` sends, and `ifTrue:ifFalse:` conditionals whose outcome is statically Character — all statically Character-typed forms. A conditional is transparent when a literal condition takes the known branch, or when both branches agree (a non-constant condition with mixed branches stays Integer-dispatched):
+Character-typed receivers dispatch through the Character method table, so methods like `asString`, `printString`, `uppercase`, `lowercase`, and `class` return Character-appropriate values. This applies to character literals (`$A`), the `Character value:` class factory, chained `uppercase`/`lowercase` sends, `ifTrue:ifFalse:` conditionals whose outcome is statically Character, and single-block `ifTrue:`/`ifFalse:`/`and:`/`or:` sends whose literal receiver takes a Character-answering block — all statically Character-typed forms. A two-branch conditional is transparent when a literal condition takes the known branch, or when both branches agree (a non-constant condition with mixed branches stays Integer-dispatched). A single-block send is transparent only when its receiver is the literal that runs the block (`true ifTrue:`, `false ifFalse:`, `true and:`, `false or:`): on the other path it answers a Boolean (`false ifTrue: [$A]` answers `false`, not `nil`), so a non-constant receiver stays Integer-dispatched:
 
 ```beamtalk
 $A asInteger              // => 65
@@ -109,6 +109,8 @@ Character value: 65       // => $A
 (Character value: 10) asString   // => "\n" (LF, not "10")
 $a uppercase asString            // => "A"
 (true ifTrue: [Character value: (48 + 6)] ifFalse: [0]) asString  // => "6"
+(true and: [$A]) printString     // => "$A"
+(false ifTrue: [$A]) class       // => False
 ```
 
 ### String Operations (Grapheme-Aware)
@@ -248,6 +250,10 @@ Server subclass: Connection
 - `#normal`, `#shutdown` and `{shutdown, term}` tuples are **clean** stops: no crash report, and a `#transient` supervised child is not restarted. Any other reason — a Symbol like `#boom`, an exception — is a **crash**: it is logged, a `#transient` child is restarted, and any process linked to the actor (its supervisor, or the spawner of a `spawnAs:` actor — plain `spawn`/`spawnWith:` do not link) receives the exit signal, as with any OTP process exit.
 - Stopping itself from `initialize` (`self stop` or `self stopWith:`) makes the `spawn` fail, since the actor is gone before it is handed back.
 - A stop requested earlier in a method still happens if the method then raises: the caller gets the error, then the actor stops.
+
+**Spawn with a monitor (BT-4104).** `Worker spawnMonitored` and `Worker spawnMonitoredWith: initArgs` answer a `{actor, ref}` Tuple (`at: 1` / `at: 2`) whose monitor is created atomically with the process. A separate `X spawn` followed by `monitor` reports `{#DOWN, ref, #process, pid, #noproc}` for an actor that exits straight after `initialize` (for example a `continueWith:` step ending in `stopWith: #normal`); `spawnMonitored` delivers the real reason (`#normal` here). Failures raise `instantiation_error` like `spawn`, leaving no stray monitor. The actor is not linked, and supervisor classes do not support these selectors (OTP has no atomic supervisor start plus monitor).
+
+**The monitor belongs to the process that runs the spawn.** Use a static send (`Worker spawnMonitored`) from an actor or Server method so the `#DOWN` reaches that process's `handleInfo:`. A dynamic send (`cls spawnMonitored`, `perform:`) or a send inside a class method runs in the class's process, which then owns the monitor, so its `#DOWN` is never seen by the sender. This is documented rather than raised, because it cannot be detected on the static-from-class-method path. Linked and named-and-monitored variants are follow-ups.
 
 **Initialization chaining** — `initialize` methods defined on ancestors run automatically, parent-first, before the child's own `initialize`. State threads through each call so the child sees the parent's mutations. Do **not** write `super initialize` yourself — the compiler warns on redundant `super initialize` sends inside an Actor's `initialize`. After the full chain runs, any typed `state:` field without a default (on the child or any ancestor, including cross-file parents) must have been assigned, or the actor crashes with `UninitializedStateError` naming the owning class. See [ADR 0078](ADR/0078-actor-initialize-inheritance.md).
 
@@ -1233,6 +1239,13 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => nil
 (File readAll: "missing.txt") error reason
 // => #enoent  (classified as file_not_found, posix term still available)
+```
+
+**Carrying a reason: `signal:reason:` (BT-4159).** Beamtalk exceptions have no instance fields, so to attach machine-readable data when signalling, use the class-side `signal: message reason: term`. The term can be any value; `reason` answers it in `on:do:` (type `Object | Nil`, so narrow with `isKindOf:` or match), it survives propagation across processes, and uncaught reports print it as a `Reason:` line. There is no separate `error:reason:`; `Error signal: msg reason: term` is the equivalent.
+
+```beamtalk
+[Error signal: "closed" reason: #econnreset] on: Error do: [:e | e reason]
+// => #econnreset
 ```
 
 **Structured details (`Exception>>details`, BT-4174).** Natives that know more than the message says record it as structured details: `details` answers a `Dictionary` keyed by Symbol (empty when nothing was recorded), so read the value with `at:` instead of parsing the English `message`. For example, `Binary asString` on invalid UTF-8 answers `Result error:` holding a `parse_error` whose `#offset` is the byte offset of the first invalid sequence. A nested Beamtalk error stored in the details answers as an Exception and an absent (Erlang `undefined`) value as `nil`. Other values are the recorded terms as-is, without the FFI boundary coercions `reason` gets: text a native records as raw bytes, such as a File error's `#path`, answers a `Binary` (send it `asString` for a `String`).
