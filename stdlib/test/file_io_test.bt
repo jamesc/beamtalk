@@ -78,3 +78,18 @@ TestCase subclass: FileIoTest
     // misuse: a non-string path raises a #beamtalk_error (exception channel)
     @expect type
     self should: [File readAll: 42] raise: #type_error
+
+  testClassifiedErrorsKeepPosixReason =>
+    // BT-3970: classifying a posix failure as a kind never drops the term
+    missing := "target/bt-test-tmp/no_such_reason_xyz.txt"
+    readAll := (File readAll: missing) error
+    self assert: readAll kind equals: #file_not_found
+    self assert: readAll reason equals: #enoent
+    self assert: (File readBinary: missing) error reason equals: #enoent
+    self assert: (File lines: missing) error reason equals: #enoent
+    self assert: (File open: missing do: [:h | h]) error reason equals: #enoent
+    self assert: (File delete: missing) error reason equals: #enoent
+    self assert: (File deleteAll: missing) error reason equals: #enoent
+    listed := (File listDirectory: "target/bt-test-tmp/no_such_reason_dir") error
+    self assert: listed kind equals: #directory_not_found
+    self assert: listed reason equals: #enoent
