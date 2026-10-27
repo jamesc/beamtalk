@@ -170,9 +170,10 @@ typed Object subclass: Holder
   run: q :: Tuple(Symbol, Integer, Integer) -> Integer => self take: q
 ",
     );
+    assert_eq!(diags.len(), 1, "got: {diags:#?}");
     assert!(
-        !diags.is_empty(),
-        "arity mismatch should be diagnosed, got none"
+        diags[0].message.contains("Tuple(Symbol, Integer, Integer)"),
+        "got: {diags:#?}"
     );
 }
 
