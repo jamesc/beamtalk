@@ -1220,7 +1220,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // e is typed as BEAMError — `e message` type-checks without warnings
 ```
 
-**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
+**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. Stdlib natives follow the same rule (BT-3970): a failure that comes from Erlang/OTP keeps its term after it is classified into a `kind`, so `(File readAll: "missing.txt") error` is a `#file_not_found` whose `reason` is `#enoent`, and a failed `Json parse:` keeps the parser's term (e.g. `#unexpected_end`). The one non-OTP case is `Result unwrap` on a plain error value, whose `reason` is that value. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
 
 ```beamtalk
 (Erlang string to_integer: "abc") ifError: [:e | e reason]
@@ -1231,6 +1231,8 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => #badarith  (classified as type_error, original term still available)
 [Error signal: "boom"] on: Error do: [:e | e reason]
 // => nil
+(File readAll: "missing.txt") error reason
+// => #enoent  (classified as file_not_found, posix term still available)
 ```
 
 **Structured details (`Exception>>details`, BT-4174).** Natives that know more than the message says record it as structured details: `details` answers a `Dictionary` keyed by Symbol (empty when nothing was recorded), so read the value with `at:` instead of parsing the English `message`. For example, `Binary asString` on invalid UTF-8 answers `Result error:` holding a `parse_error` whose `#offset` is the byte offset of the first invalid sequence. A nested Beamtalk error stored in the details answers as an Exception and an absent (Erlang `undefined`) value as `nil`. Other values are the recorded terms as-is, without the FFI boundary coercions `reason` gets: text a native records as raw bytes, such as a File error's `#path`, answers a `Binary` (send it `asString` for a `String`).
