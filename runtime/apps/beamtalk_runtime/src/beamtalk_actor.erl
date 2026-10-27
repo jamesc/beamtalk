@@ -5031,7 +5031,13 @@ Same silent no-op rules as `replyToDeferred/2`. Answers `ok`.
 """.
 -spec replyErrorToDeferred(reply_to(), term()) -> ok.
 replyErrorToDeferred(#{'$beamtalk_class' := 'ReplyTo', from := From}, Error) ->
-    gen_server:reply(From, {error, encode_reply_for(From, 'replyError:', Error)}),
+    Reply =
+        case encode_reply_for(From, 'replyError:', Error) of
+            %% Keep the flat `{error, EncErr}` shape, as the handle_call error arm does.
+            {error, EncErr} -> {error, EncErr};
+            EncodedError -> {error, EncodedError}
+        end,
+    gen_server:reply(From, Reply),
     ok.
 
 -doc """
