@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4052 fixture: Server whose onLinkedExit:reason: raises - the server
+// crashes per ADR 0134. See stdlib/test/server_linked_exit_test.bt.
+
+Server subclass: Bt4052RaisingServer
+
+  linkExiting: reason =>
+    Erlang erlang spawn_link: [Erlang erlang exit: reason]
+    nil
+
+  onLinkedExit: _pid :: Pid reason: _reason :: Object =>
+    Error signal: "deliberate hook error"

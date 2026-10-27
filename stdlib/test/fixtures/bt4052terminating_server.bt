@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4052 fixture: Server with both terminate: and onLinkedExit:reason:,
+// supervised by Bt4052Sup - supervisor shutdown must still run terminate:.
+// See stdlib/test/server_linked_exit_test.bt.
+
+Server subclass: Bt4052TerminatingServer
+  state: tableName = nil
+
+  onLinkedExit: _pid :: Pid reason: _reason :: Object => nil
+
+  terminate: reason =>
+    self.tableName isNil
+      ifFalse: [
+        table := Ets named: self.tableName
+        table at: #called put: true; at: #reason put: reason
+      ]

@@ -317,7 +317,7 @@ impl CoreErlangGenerator {
             push_fn(self.generate_handle_continue(module)?)?;
             push_fn(self.generate_handle_cast()?)?;
             push_fn(self.generate_handle_call()?)?;
-            push_fn(self.generate_handle_info()?)?;
+            push_fn(self.generate_handle_info(module)?)?;
             push_fn(self.generate_code_change()?)?;
             push_fn(self.generate_terminate(module)?)?;
             push_fn(self.generate_safe_dispatch()?)?;
