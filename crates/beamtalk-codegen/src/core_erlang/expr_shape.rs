@@ -202,15 +202,14 @@ fn single_branch_result_is_character_typed(
     selector: &MessageSelector,
     branch: &Expression,
 ) -> bool {
-    let MessageSelector::Keyword(parts) = selector else {
-        return false;
-    };
-    let [part] = parts.as_slice() else {
-        return false;
-    };
-    let taking_receiver = match part.keyword.as_str() {
-        "ifTrue:" | "and:" => true,
-        "ifFalse:" | "or:" => false,
+    let taking_receiver = match (selector.well_known(), selector) {
+        (Some(WellKnownSelector::IfTrue), _) => true,
+        (Some(WellKnownSelector::IfFalse), _) => false,
+        (None, MessageSelector::Keyword(parts)) => match parts.as_slice() {
+            [part] if part.keyword == "and:" => true,
+            [part] if part.keyword == "or:" => false,
+            _ => return false,
+        },
         _ => return false,
     };
     receiver.unwrap_parens().as_literal_bool() == Some(taking_receiver)
