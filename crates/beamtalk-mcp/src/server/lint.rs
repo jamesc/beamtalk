@@ -276,37 +276,18 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         }
     }
 
-    // Merge dependency class metadata so cross-file references to
-    // classes defined only in a repository/path dependency (declared in
-    // beamtalk.toml) resolve the same way `beamtalk build` does. Also
-    // collects dependency-sourced provision-bearing protocol ASTs (ADR 0127
-    // §10a; BT-3591) so a cross-package `uses:` flattens too.
-    let mut all_protocol_defs = Vec::new();
-    let mut dependency_protocol_sources =
-        beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
-    let has_package_dependencies = merge_dependency_class_infos(
+    let LintAnalysisContext {
+        has_package_dependencies,
+        native_type_registry,
+        known_erlang_modules,
+        pre_loaded_protocol_defs,
+        protocol_sources,
+    } = build_lint_analysis_context(
         path,
         &mut all_class_infos,
-        &mut all_protocol_defs,
-        &mut dependency_protocol_sources,
-    );
-
-    // Flatten cross-file trait provisions into the same-package infos (BT-3673),
-    // via the helper `beamtalk lint` and `build` use.
-    trait_users.flatten(
-        &mut all_class_infos,
-        all_protocol_defs.iter().cloned(),
+        &trait_users,
         current_package.as_deref(),
     );
-
-    // Populate the FFI type registry the same way `beamtalk lint` does.
-    let native_type_registry = build_native_type_registry(path);
-    // BT-4022: project-known Erlang modules for the `unresolved_ffi` check.
-    let known_erlang_modules = collect_known_erlang_modules(path);
-    let pre_loaded_protocol_defs =
-        package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
-    let protocol_sources =
-        package_then_dependency_protocol_sources(&trait_users, dependency_protocol_sources);
 
     // Pass 2: Analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
@@ -623,6 +604,71 @@ fn package_then_dependency_protocol_sources(
     sources
 }
 
+/// Shared post-Pass-1 context assembled by both `run_lint_structured` and
+/// `compute_diagnostic_summary` before their respective Pass-2 loops.
+struct LintAnalysisContext {
+    has_package_dependencies: bool,
+    native_type_registry:
+        Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
+    known_erlang_modules: std::collections::HashSet<String>,
+    pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
+    protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
+}
+
+/// Merge dependency class metadata and FFI registries into the context shared
+/// by both lint-pipeline functions.
+///
+/// Called once per pipeline run, after Pass 1 has populated `all_class_infos`
+/// and `trait_users`. Mutates `all_class_infos` in-place (dependency classes
+/// appended; trait provisions flattened), then builds the pre-loaded
+/// protocol-def and protocol-source lists for Pass 2 from `trait_users`.
+fn build_lint_analysis_context(
+    path: &str,
+    all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    trait_users: &beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    current_package: Option<&str>,
+) -> LintAnalysisContext {
+    // Merge dependency class metadata so cross-file references to
+    // classes defined only in a repository/path dependency (declared in
+    // beamtalk.toml) resolve the same way `beamtalk build` does. Also
+    // collects dependency-sourced provision-bearing protocol ASTs (ADR 0127
+    // §10a; BT-3591) so a cross-package `uses:` flattens too.
+    let mut all_protocol_defs = Vec::new();
+    let mut dependency_protocol_sources =
+        beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
+    let has_package_dependencies = merge_dependency_class_infos(
+        path,
+        all_class_infos,
+        &mut all_protocol_defs,
+        &mut dependency_protocol_sources,
+    );
+
+    // Flatten cross-file trait provisions into the same-package infos (BT-3673),
+    // via the helper `beamtalk lint` and `build` use.
+    trait_users.flatten(
+        all_class_infos,
+        all_protocol_defs.iter().cloned(),
+        current_package,
+    );
+
+    // Populate the FFI type registry the same way `beamtalk lint` does.
+    let native_type_registry = build_native_type_registry(path);
+    // BT-4022: project-known Erlang modules for the `unresolved_ffi` check.
+    let known_erlang_modules = collect_known_erlang_modules(path);
+    let pre_loaded_protocol_defs =
+        package_then_dependency_protocol_defs(trait_users, &all_protocol_defs);
+    let protocol_sources =
+        package_then_dependency_protocol_sources(trait_users, dependency_protocol_sources);
+
+    LintAnalysisContext {
+        has_package_dependencies,
+        native_type_registry,
+        known_erlang_modules,
+        pre_loaded_protocol_defs,
+        protocol_sources,
+    }
+}
+
 /// Run lint passes on `path` (file or directory) and return structured results.
 ///
 /// Uses a two-pass pipeline mirroring CLI `beamtalk lint`:
@@ -728,37 +774,18 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         }
     }
 
-    // Merge dependency class metadata so cross-file references to
-    // classes defined only in a repository/path dependency (declared in
-    // beamtalk.toml) resolve the same way `beamtalk build` does. Also
-    // collects dependency-sourced provision-bearing protocol ASTs (ADR 0127
-    // §10a; BT-3591) so a cross-package `uses:` flattens too.
-    let mut all_protocol_defs = Vec::new();
-    let mut dependency_protocol_sources =
-        beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
-    let has_package_dependencies = merge_dependency_class_infos(
+    let LintAnalysisContext {
+        has_package_dependencies,
+        native_type_registry,
+        known_erlang_modules,
+        pre_loaded_protocol_defs,
+        protocol_sources,
+    } = build_lint_analysis_context(
         path,
         &mut all_class_infos,
-        &mut all_protocol_defs,
-        &mut dependency_protocol_sources,
-    );
-
-    // Flatten cross-file trait provisions into the same-package infos (BT-3673),
-    // via the helper `beamtalk lint` and `build` use.
-    trait_users.flatten(
-        &mut all_class_infos,
-        all_protocol_defs.iter().cloned(),
+        &trait_users,
         current_package.as_deref(),
     );
-
-    // Populate the FFI type registry the same way `beamtalk lint` does.
-    let native_type_registry = build_native_type_registry(path);
-    // BT-4022: project-known Erlang modules for the `unresolved_ffi` check.
-    let known_erlang_modules = collect_known_erlang_modules(path);
-    let pre_loaded_protocol_defs =
-        package_then_dependency_protocol_defs(&trait_users, &all_protocol_defs);
-    let protocol_sources =
-        package_then_dependency_protocol_sources(&trait_users, dependency_protocol_sources);
 
     let mut all_provision_diags = Vec::new();
 

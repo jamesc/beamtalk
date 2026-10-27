@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4057: Exception>>pass re-raises a caught exception unchanged (original
+// class, reason and stacktrace), unlike `signal`, which raises a fresh error.
+
+TestCase subclass: ExceptionPassTest
+
+  testPassKeepsExitKindAndReason =>
+    result := [
+      [(Erlang erlang) exit: #shutdown] on: Exception do: [:e | e pass]
+    ] on: ExitError do: [:e | e reason]
+    self assert: result equals: #shutdown
+
+  testPassKeepsThrowKindAndReason =>
+    result := [
+      [(Erlang erlang) throw: #oops] on: Exception do: [:e | e pass]
+    ] on: ThrowError do: [:e | e reason]
+    self assert: result equals: #oops
+
+  testPassKeepsErrorKindAndReason =>
+    result := [
+      [(Erlang erlang) error: #boom] on: Exception do: [:e | e pass]
+    ] on: Exception do: [:e | e reason]
+    self assert: result equals: #boom
+
+  testPassKeepsBeamtalkErrorMessage =>
+    result := [
+      [self error: "deliberate"] on: Exception do: [:e | e pass]
+    ] on: Exception do: [:e | e message]
+    self assert: result equals: "deliberate"
+
+  testPassPreservesStackTrace =>
+    table := Ets new: #exceptionPassStack type: #set
+    outer := [
+      [1 / 0]
+        on: Exception
+        do: [:e |
+          table at: #inner put: e stackTrace
+          e pass
+        ]
+    ] on: Exception do: [:e | e stackTrace]
+    self assert: outer equals: (table at: #inner)
+    table delete
+
+  testRespondsToPass =>
+    result := [1 / 0] on: Exception do: [:e | e respondsTo: #pass]
+    self assert: result

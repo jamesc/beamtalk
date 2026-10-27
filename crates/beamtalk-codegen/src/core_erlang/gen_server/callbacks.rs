@@ -2156,6 +2156,89 @@ impl CoreErlangGenerator {
     }
 }
 
+/// Raise tail of the triple-format noreply arm (BT-4057).
+///
+/// `exit` with `normal`/`shutdown` is a control signal, not a crash: keep the
+/// raw reason so the actor stops normally. Everything else is raised as the
+/// wrapped error.
+fn noreply_raise_tail(
+    type_v: Document<'static>,
+    reason_v: Document<'static>,
+    stack_v: Document<'static>,
+    wrapped_v: Document<'static>,
+) -> Document<'static> {
+    docvec![
+        "case ",
+        type_v,
+        " of",
+        nest(
+            INDENT,
+            docvec![
+                line(),
+                "<",
+                leaf::atom("exit"),
+                "> when call ",
+                leaf::atom("erlang"),
+                ":",
+                leaf::atom("or"),
+                "(call ",
+                leaf::atom("erlang"),
+                ":",
+                leaf::atom("=:="),
+                "(",
+                reason_v.clone(),
+                ", ",
+                leaf::atom("normal"),
+                "), call ",
+                leaf::atom("erlang"),
+                ":",
+                leaf::atom("=:="),
+                "(",
+                reason_v.clone(),
+                ", ",
+                leaf::atom("shutdown"),
+                ")) ->",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "primop ",
+                        leaf::atom("raw_raise"),
+                        "(",
+                        leaf::atom("exit"),
+                        ", ",
+                        reason_v,
+                        ", ",
+                        stack_v.clone(),
+                        ")",
+                    ],
+                ),
+                line(),
+                "<_> when ",
+                leaf::atom("true"),
+                " ->",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "primop ",
+                        leaf::atom("raw_raise"),
+                        "(",
+                        leaf::atom("error"),
+                        ", ",
+                        wrapped_v,
+                        ", ",
+                        stack_v,
+                        ")",
+                    ],
+                ),
+            ],
+        ),
+        line(),
+        "end",
+    ]
+}
+
 /// Generates the two error case arms shared by every `gen_server` callback
 /// that dispatches a message with no reply channel: `handle_cast/2` (`!`
 /// sends), a Server's `handle_info/2` (`handleInfo:`) and the
@@ -2170,12 +2253,17 @@ impl CoreErlangGenerator {
 /// Both arms raise the error as a wrapped Exception object (an `error`-class
 /// raise of `beamtalk_exception_handler:ensure_wrapped`'s result), so
 /// `terminate:` and `onExit:` see the same kind of reason whatever was
-/// raised — a Beamtalk `Error signal:`, a raw Erlang `badarith`, an `exit`
-/// or a `throw` — and the same as a runtime-path actor
+/// raised — a Beamtalk `Error signal:`, a raw Erlang `badarith`, an abnormal
+/// `exit` or a `throw` — and the same as a runtime-path actor
 /// (`beamtalk_actor:dispatch_cast/3`). Raising as `error` also matters for a
 /// `throw`: `gen_server` takes a throw escaping a callback as the callback's
 /// *return value*, so re-raising it as a throw would install the thrown term
 /// as the next state.
+///
+/// The one exception (BT-4057, ADR 0134 amendment): an `exit` whose reason is
+/// `normal` or `shutdown` is a control signal, not a crash, and the triple
+/// arm re-raises it as `exit` with the original raw reason so the actor stops
+/// normally (see [`noreply_raise_tail`]).
 ///
 /// 1. **Triple-format error** `{'error', {Type, Reason, RawStack}, _State}`:
 ///    the three-tuple produced by `safe_dispatch`'s `catch`, whose third
@@ -2240,22 +2328,14 @@ fn noreply_error_arms(var_prefix: &str) -> Document<'static> {
                 ":",
                 leaf::atom("ensure_wrapped"),
                 "(",
-                type_v,
+                type_v.clone(),
                 ", ",
-                reason_v,
+                reason_v.clone(),
                 ", ",
                 built_v,
                 ") in",
                 line(),
-                "primop ",
-                leaf::atom("raw_raise"),
-                "(",
-                leaf::atom("error"),
-                ", ",
-                wrapped_v,
-                ", ",
-                stack_v,
-                ")",
+                noreply_raise_tail(type_v, reason_v, stack_v, wrapped_v),
             ],
         ),
         line(),
