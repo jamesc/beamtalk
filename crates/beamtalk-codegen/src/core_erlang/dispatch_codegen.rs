@@ -51,7 +51,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{ClassKind, Expression, MessageSelector, WellKnownSelector};
 use beamtalk_core::semantic_analysis::TypeProvenance;
-use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+use beamtalk_core::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
 use beamtalk_core::source_analysis::Span;
 
 /// One `generate_message_send` dispatch strategy: `Some(doc)` claims the
@@ -718,16 +718,15 @@ impl CoreErlangGenerator {
         // the running class processes) is fresher than `info.is_module_less`,
         // which comes from compiler-server metadata that a `ClassBuilder`
         // re-registration over an existing compiled class never refreshes
-        // (`update_class` finds no `__beamtalk_meta/0` to re-notify with). A
-        // module-less class registers its own class name as its module; a
-        // compiled one is always `bt@`-prefixed. So when the index has an
-        // entry, it decides; metadata is only the fallback for a class the
-        // index does not know.
+        // (`update_class` finds no `__beamtalk_meta/0` to re-notify with).
+        // So when the index has an entry, it decides (by the same rule the
+        // meta decode applies, `registered_module_is_module_less`); metadata
+        // is only the fallback for a class the index does not know.
         let indexed_module = self
             .class_module_registry()
             .module_for_class(&self.own_package_id(), class_name);
         let module_less = indexed_module.map_or(info.is_module_less, |module| {
-            module.as_str() == class_name.as_str()
+            ClassInfo::registered_module_is_module_less(module.as_str(), class_name.as_str())
         });
         if module_less {
             return None;

@@ -8,6 +8,7 @@
 //! and extracts structured fields (class hierarchy, protocol registry,
 //! known type aliases) from request maps.
 
+use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_etf::{
     map_get, term_to_atom, term_to_bool, term_to_string, term_to_string_list, term_to_usize,
 };
@@ -308,14 +309,13 @@ pub(crate) fn parse_method_infos_from_map(
 /// Whether a meta map describes a module-less (`ClassBuilder`) class (BT-4069).
 ///
 /// Only hot-patch meta maps carry `module` (a compiled `__beamtalk_meta/0`
-/// is self-describing and omits it). A live module-less class registers its
-/// own class name as its module (`beamtalk_object_class:init/1`'s default);
-/// a compiled class's module is always `bt@…`-prefixed — so `module == class`
-/// is exactly the module-less test. Absent means compiled (`false`).
+/// is self-describing and omits it); a present `module` is judged by
+/// `ClassInfo::registered_module_is_module_less`. Absent means compiled
+/// (`false`).
 fn meta_is_module_less(m: &Map, class_name: &str) -> bool {
     map_get(m, "module")
         .and_then(term_to_atom)
-        .is_some_and(|s| s.as_str() == class_name)
+        .is_some_and(|s| ClassInfo::registered_module_is_module_less(s.as_str(), class_name))
 }
 
 /// Extracts the declaring package from BEAM metadata (ADR 0071).

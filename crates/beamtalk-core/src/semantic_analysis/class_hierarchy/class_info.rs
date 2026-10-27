@@ -376,6 +376,17 @@ pub struct InitializeAssignsSummary {
 const DIRECT_CALL_EXCLUDED_SELECTORS: &[&str] = &["startLink", "startLink:", "new", "new:"];
 
 impl ClassInfo {
+    /// Whether a class registered under `module` is module-less
+    /// ([`Self::is_module_less`]): a live module-less class registers its own
+    /// class name as its module (`beamtalk_object_class:init/1`'s default),
+    /// while a compiled class's module is always `bt@…`-prefixed. The one
+    /// rule for every reader of a registered module — the live-image meta
+    /// decode and codegen's class-module index alike.
+    #[must_use]
+    pub fn registered_module_is_module_less(module: &str, class_name: &str) -> bool {
+        module == class_name
+    }
+
     /// Returns `true` if this class can be subclassed.
     #[must_use]
     pub fn can_be_subclassed(&self) -> bool {
