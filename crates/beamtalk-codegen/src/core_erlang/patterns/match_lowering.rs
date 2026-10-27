@@ -1056,13 +1056,31 @@ impl CoreErlangGenerator {
 
         let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
 
+        // Each level runs after the outer pattern and every earlier hoisted
+        // binary have matched, so a segment size may name their variables
+        // (`{n, <<payload:n/binary>>}`): mirror exactly those bindings in
+        // scope while each binary pattern is lowered.
         let outer_doc = self.generate_pattern(outer)?;
+        self.push_scope();
+        Self::collect_pattern_variables(outer, |name, core_var| {
+            self.bind_var(name, core_var);
+        });
         let mut levels = Vec::with_capacity(hoisted.len());
         for (var, binary) in hoisted {
             let (prefix, scrutinee) = self.binary_match_scrutinee(var);
-            let pattern_doc = self.generate_pattern(binary)?;
+            let pattern_doc = match self.generate_pattern(binary) {
+                Ok(doc) => doc,
+                Err(err) => {
+                    self.pop_scope();
+                    return Err(err);
+                }
+            };
+            Self::collect_pattern_variables(binary, |name, core_var| {
+                self.bind_var(name, core_var);
+            });
             levels.push((prefix, scrutinee, pattern_doc));
         }
+        self.pop_scope();
 
         // Assemble innermost-first: the last level carries the guard.
         let mut inner = body_doc;

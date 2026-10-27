@@ -286,3 +286,13 @@ TestCase subclass: BinaryPatternsTest
       _ -> nil
     ]
     self assert: result equals: {65, 66}
+
+  testMatchNestedBinarySizeNamesOuterVariable =>
+    // A nested binary matches after the enclosing tuple, so its segment
+    // size may name a variable the tuple bound.
+    pair := {2, "hello"}
+    result := pair match: [
+      {n, <<head:n/binary, _/binary>>} -> head toBytes;
+      _ -> nil
+    ]
+    self assert: result equals: #(104, 101)
