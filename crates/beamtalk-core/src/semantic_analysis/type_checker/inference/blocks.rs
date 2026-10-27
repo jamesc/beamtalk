@@ -1489,13 +1489,19 @@ impl TypeChecker {
     /// over `Dynamic(UnannotatedParam)`.
     ///
     /// Annotations are resolved exactly like method parameters in
-    /// [`Self::set_param_types`] — alias and protocol registries, **empty**
-    /// substitution map. Known limitation (BT-4210, shared with method params): an
-    /// annotation naming a method-local type variable (`[:x :: E | ...]`)
-    /// does not see the method's substitution.
+    /// [`Self::set_param_types`]: alias and protocol registries, and the
+    /// enclosing method's substitution, which inside a method body is the
+    /// identity (BT-4210). An annotation naming a method-local or class-level
+    /// type variable (`[:x :: E | ...]`) therefore resolves to the same rigid
+    /// `Known("E")` placeholder as a method parameter or `-> E` return typed
+    /// `E`. It is never `Dynamic`, and it is never the *callee's* binding for
+    /// a same-named variable: the pushed types come from the callee's
+    /// substitution, and the callee's `E` is a different variable.
     ///
     /// When an annotation and a non-Dynamic pushed type are unrelated, a
-    /// mismatch warning is emitted at the parameter.
+    /// mismatch warning is emitted at the parameter. A type-variable
+    /// placeholder on either side is compatible with anything (see
+    /// [`Self::detect_assignment_type_mismatch`]).
     pub(in crate::semantic_analysis::type_checker) fn resolve_block_param_types(
         &mut self,
         block: &crate::ast::Block,
