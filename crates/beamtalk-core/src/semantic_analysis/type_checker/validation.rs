@@ -1520,8 +1520,12 @@ impl TypeChecker {
                     // We model the metatype's own type as `Class` for the
                     // hierarchy walk, so e.g. `:: Behaviour` accepts it but
                     // `:: Integer` does not.
-                    let compat =
-                        Self::metatype_assignable_to(meta_class, &expected_structural, hierarchy);
+                    let compat = Self::metatype_assignable_to(
+                        meta_class,
+                        &expected_structural,
+                        hierarchy,
+                        Self::is_type_compatible,
+                    );
                     if !compat {
                         let param_pos = i + 1;
                         let actual_display: EcoString = format!("{meta_class} class").into();
@@ -2594,7 +2598,12 @@ impl TypeChecker {
                 // metaclass tower). Model the metatype as `Class` for the
                 // assignability walk.
                 let value_display: EcoString = format!("{meta_class} class").into();
-                if !Self::metatype_assignable_to(meta_class, &declared_type, hierarchy) {
+                if !Self::metatype_assignable_to(
+                    meta_class,
+                    &declared_type,
+                    hierarchy,
+                    Self::is_assignable_to,
+                ) {
                     let declared_display = declared_display.clone();
                     self.diagnostics.push(
                         Diagnostic::warning(
@@ -3328,12 +3337,36 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
+                // A class object as the default (`state: k :: Foo class =
+                // Bar`): the slot rule `check_field_assignment` applies
+                // (BT-4206).
+                InferredType::Meta {
+                    class_name: meta_class,
+                    ..
+                } if !Self::metatype_assignable_to(
+                    meta_class,
+                    &declared_type,
+                    hierarchy,
+                    Self::is_assignable_to,
+                ) =>
+                {
+                    let value_display: EcoString = format!("{meta_class} class").into();
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Type mismatch: state `{}` declared as {declared_display}, default is {value_display}",
+                                decl.name.name
+                            ),
+                            decl.span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!(
+                            "Default value type {value_display} is not compatible with {declared_display}"
+                        )),
+                    );
+                }
                 // Dynamic / Never / Negation / Intersection defaults — skip
-                // conservatively, matching `check_field_assignment`. `Meta`
-                // (`C class` as a default value) is left unchecked here too;
-                // `check_field_assignment`'s explicit `Meta` handling (ADR
-                // 0083, metatype-vs-`Class` assignability) is out of scope
-                // here, which only adds the `Union` arm.
+                // conservatively, matching `check_field_assignment`.
                 _ => {}
             }
         }
@@ -3342,21 +3375,37 @@ impl TypeChecker {
     /// Whether a class object `C class` (`Meta{C}`) may flow into a slot or
     /// parameter declared `declared_type` (BT-4199).
     ///
-    /// A declared `X class` is covariant: `C class` is accepted iff `C` is `X`
-    /// or a subclass of it. Otherwise the metatype is modelled as `Class` for
-    /// the metaclass-tower walk (ADR 0083): `Class` / `Behaviour` / `Object`
-    /// accept it, `Integer` does not.
+    /// A union declared type accepts it iff some top-level member does
+    /// (BT-4206: `:: Integer | Foo class` does not accept `Integer class`).
+    /// A declared `X class` member is covariant: `C class` is accepted iff
+    /// `C` is `X` or a subclass of it. Any other member models the metatype
+    /// as `Class` for the metaclass-tower walk (ADR 0083) — `Class` /
+    /// `Behaviour` / `Object` accept it, `Integer` does not — judged by
+    /// `tower`: [`Self::is_assignable_to`] for a slot (a field or a state
+    /// default, which has no unknown-class escape), [`Self::is_type_compatible`]
+    /// for an argument, as for every other argument type.
     pub(super) fn metatype_assignable_to(
         meta_class: &EcoString,
         declared_type: &EcoString,
         hierarchy: &ClassHierarchy,
+        tower: fn(&EcoString, &EcoString, &ClassHierarchy) -> bool,
     ) -> bool {
-        if let Some(declared_base) = declared_type.strip_suffix(" class") {
-            let declared_base: EcoString = declared_base.into();
-            return Self::is_assignable_to(meta_class, &declared_base, hierarchy);
-        }
-        let class_name_ty: EcoString = "Class".into();
-        Self::is_type_compatible(&class_name_ty, declared_type, hierarchy)
+        let members = crate::semantic_analysis::string_utils::split_top_level(declared_type, '|');
+        let union = members.len() > 1;
+        members.iter().any(|member| {
+            let member = member.trim();
+            if let Some(declared_base) = member.strip_suffix(" class") {
+                let declared_base: EcoString = declared_base.into();
+                return Self::is_assignable_to(meta_class, &declared_base, hierarchy);
+            }
+            let member: EcoString = if union {
+                Self::resolve_type_keyword_static(member)
+            } else {
+                member.into()
+            };
+            let class_name_ty: EcoString = "Class".into();
+            tower(&class_name_ty, &member, hierarchy)
+        })
     }
 
     /// Returns true if `value_type` is assignable to `declared_type`.
