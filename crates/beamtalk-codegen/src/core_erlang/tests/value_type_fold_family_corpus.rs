@@ -368,14 +368,31 @@ pub(super) fn run_probes(
         .map(|p| format!("'{p}'"))
         .collect::<Vec<_>>()
         .join(",");
-    let eval = format!(
-        "Self = {self_map}, \
+    // The probe goes in a module rather than `-eval`: a long `-eval` string exceeds the
+    // Windows command-line limit.
+    let runner = format!(
+        "-module(oracle_runner).\n-export([run/0]).\nrun() ->\n\
+         Self = {self_map}, \
          lists:foreach(fun(F) -> \
            Parent = self(), \
            Pid = spawn(fun() -> Parent ! {{self(), (catch '{module}':F(Self))}} end), \
            R = receive {{Pid, V}} -> V after 5000 -> exit(Pid, kill), timeout end, \
            io:format(\"~s ~w~n\", [F, R]) end, [{names}]), \
-         halt()."
+         halt().\n"
+    );
+    let runner_path = dir.path().join("oracle_runner.erl");
+    std::fs::write(&runner_path, runner).expect("write oracle runner");
+    let runner_compiled = Command::new("erlc")
+        .arg("-o")
+        .arg(dir.path())
+        .arg(&runner_path)
+        .output()
+        .expect("erlc runs");
+    assert!(
+        runner_compiled.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&runner_compiled.stdout),
+        String::from_utf8_lossy(&runner_compiled.stderr)
     );
     let output = Command::new("erl")
         .current_dir(dir.path())
@@ -383,7 +400,7 @@ pub(super) fn run_probes(
         .arg("-pa")
         .arg(dir.path())
         .arg("-eval")
-        .arg(eval)
+        .arg("oracle_runner:run().")
         .output()
         .expect("erl runs");
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();

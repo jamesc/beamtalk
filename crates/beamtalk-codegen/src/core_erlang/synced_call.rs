@@ -165,7 +165,7 @@ pub(in crate::core_erlang) fn capture_site() -> GapSite {
         else {
             continue;
         };
-        let path = at.rsplitn(3, ':').last().unwrap_or(at);
+        let path = at.rsplitn(3, ':').last().unwrap_or(at).replace('\\', "/");
         let Some((_, file)) = path.split_once("src/core_erlang/") else {
             continue;
         };
