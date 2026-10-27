@@ -405,6 +405,9 @@ learning guide, and were chosen explicitly; pinned in
 back by accident.
 """.
 -spec element_to_json(term()) -> term().
+element_to_json({beamtalk_string, Bin}) when is_binary(Bin) ->
+    %% Wave 3 (BT-4173): String elements are tagged; render bare like UTF-8 Binaries.
+    element_to_json(Bin);
 element_to_json(Value) when is_binary(Value) ->
     case unicode:characters_to_binary(Value, utf8, utf8) of
         Bin when is_binary(Bin) -> Bin;
