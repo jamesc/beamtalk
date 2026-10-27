@@ -412,8 +412,18 @@ TestCase subclass: TypePatternMatchTest
 
   testBinaryPatternBindsWholeValue =>
     v := Erlang erlang list_to_binary: #(1, 2, 3)
-    self assert: (v match: [b :: Binary -> b size; _ -> 0]) equals: 3
-    self assert: ("abc" match: [b :: Binary -> b size; _ -> 0]) equals: 3
+    self
+      assert: (v match: [
+        b :: Binary -> b size;
+        _ -> 0
+      ])
+      equals: 3
+    self
+      assert: ("abc" match: [
+        b :: Binary -> b size;
+        _ -> 0
+      ])
+      equals: 3
 
   testBinaryPatternAgreesWithIsKindOfBinary =>
     invalid := Erlang erlang list_to_binary: #(99, 233)
@@ -421,7 +431,5 @@ TestCase subclass: TypePatternMatchTest
     values := #("te", "", invalid, valid, Binary fromBytes: #(), #te, 42, 1.5, nil, true, #(1, 2))
     values
       do: [:each |
-        self
-          assert: ((self classifyBytesBinaryFirst: each) =:= #binary)
-          equals: (each isKindOf: Binary)
+        self assert: ((self classifyBytesBinaryFirst: each) =:= #binary) equals: (each isKindOf: Binary)
       ]
