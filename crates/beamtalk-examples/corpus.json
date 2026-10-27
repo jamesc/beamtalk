@@ -40020,7 +40020,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// BT-1976 fixture — child in a separate file that sets its cross-file\n// parent's typed-no-default field in its own `initialize`. Must succeed\n// (no UninitializedStateError) because the child's initialize runs after\n// the parent's and fills in `token`.\n\ntyped CrossFileParentTyped subclass: CrossFileChildSetsParent\n\n  initialize -> String => self.token := \"set-by-child\"",
+      "source": "// BT-1976 fixture — child in a separate file that sets its cross-file\n// parent's typed-no-default field in its own `initialize`. Must succeed\n// (no UninitializedStateError) because the child's initialize runs after\n// the parent's and fills in `token`.\n\ntyped CrossFileParentTyped subclass: CrossFileChildSetsParent\n\n  initialize -> Nil =>\n    self.token := \"set-by-child\"\n    nil",
       "explanation": "BT-1976 fixture — child in a separate file that sets its cross-file parent's typed-no-default field in its own `initialize`. Must succeed (no UninitializedStateError) because the child's initialize runs after the parent's and fills in `token`."
     },
     {
@@ -40054,7 +40054,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// BT-1976 fixture — cross-file parent whose `initialize` forgets its own\n// typed-no-default field. Used together with\n// `cross_file_child_of_forgetful.bt` to verify that validation of an\n// inherited typed-no-default field works across compilation units.\n\ntyped Actor subclass: CrossFileParentForgets\n  state: required :: String\n  state: counter :: Integer = 0\n\n  initialize -> Integer =>\n    // Deliberately does NOT set self.required — the missing field must be\n    // caught by the child's post-initialize check, which reads the parent's\n    // field metadata from `__beamtalk_meta/0` (no AST available).\n    self.counter := 1\n\n  getRequired -> String => self.required\n\n  getCounter -> Integer => self.counter",
+      "source": "// BT-1976 fixture — cross-file parent whose `initialize` forgets its own\n// typed-no-default field. Used together with\n// `cross_file_child_of_forgetful.bt` to verify that validation of an\n// inherited typed-no-default field works across compilation units.\n\ntyped Actor subclass: CrossFileParentForgets\n  state: required :: String\n  state: counter :: Integer = 0\n\n  initialize -> Nil =>\n    // Deliberately does NOT set self.required — the missing field must be\n    // caught by the child's post-initialize check, which reads the parent's\n    // field metadata from `__beamtalk_meta/0` (no AST available).\n    self.counter := 1\n    nil\n\n  getRequired -> String => self.required\n\n  getCounter -> Integer => self.counter",
       "explanation": "BT-1976 fixture — cross-file parent whose `initialize` forgets its own typed-no-default field. Used together with `cross_file_child_of_forgetful.bt` to verify that validation of an inherited typed-no-default field works across compilation units."
     },
     {
@@ -42768,7 +42768,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// BT-1951 / ADR 0078 — Phase 1 fixture.\n// Parent actor class that sets a typed-no-default field in its own\n// `initialize` method. Subclasses that do not override `initialize`\n// should inherit the initialization by virtue of the auto-chain.\n\ntyped Actor subclass: InheritedInitializeBase\n  state: label :: String\n  state: count :: Integer = 0\n\n  initialize -> String => self.label := \"parent-initialized\"\n\n  getLabel -> String => self.label\n\n  getCount -> Integer => self.count\n\n  increment -> Integer =>\n    self.count := self.count + 1\n    self.count",
+      "source": "// BT-1951 / ADR 0078 — Phase 1 fixture.\n// Parent actor class that sets a typed-no-default field in its own\n// `initialize` method. Subclasses that do not override `initialize`\n// should inherit the initialization by virtue of the auto-chain.\n\ntyped Actor subclass: InheritedInitializeBase\n  state: label :: String\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    self.label := \"parent-initialized\"\n    nil\n\n  getLabel -> String => self.label\n\n  getCount -> Integer => self.count\n\n  increment -> Integer =>\n    self.count := self.count + 1\n    self.count",
       "explanation": "BT-1951 / ADR 0078 — Phase 1 fixture. Parent actor class that sets a typed-no-default field in its own `initialize` method. Subclasses that do not override `initialize` should inherit the initialization by virtue of the auto-chain."
     },
     {
@@ -42805,7 +42805,7 @@
         "string join",
         "subclassing"
       ],
-      "source": "// BT-1951 / ADR 0078 — Phase 1 fixture.\n// Child actor class that defines its own `initialize` which only touches its\n// own typed-no-default field. Parent's `initialize` should run first (via\n// auto-chain), setting `label`, before the child's `initialize` runs and\n// sets `cache`.\n\ntyped InheritedInitializeBase subclass: InheritedInitializeChildAdds\n  state: cache :: String\n\n  initialize -> String =>\n    // parent's initialize already ran; self.label is set\n    self.cache := \"cache-\" ++ self.label\n\n  getCache -> String => self.cache",
+      "source": "// BT-1951 / ADR 0078 — Phase 1 fixture.\n// Child actor class that defines its own `initialize` which only touches its\n// own typed-no-default field. Parent's `initialize` should run first (via\n// auto-chain), setting `label`, before the child's `initialize` runs and\n// sets `cache`.\n\ntyped InheritedInitializeBase subclass: InheritedInitializeChildAdds\n  state: cache :: String\n\n  initialize -> Nil =>\n    // parent's initialize already ran; self.label is set\n    self.cache := \"cache-\" ++ self.label\n    nil\n\n  getCache -> String => self.cache",
       "explanation": "BT-1951 / ADR 0078 — Phase 1 fixture. Child actor class that defines its own `initialize` which only touches its own typed-no-default field. Parent's `initialize` should run first (via auto-chain), setting `label`, before the child's `initialize` runs and sets `cache`."
     },
     {
@@ -42866,7 +42866,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// BT-1951 / ADR 0078 — Phase 1 fixture.\n// Parent actor class whose `initialize` forgets to set its own typed-no-default\n// field. Spawning any subclass should fail with UninitializedStateError\n// because the post-initialize check validates the inherited field too.\n\ntyped Actor subclass: InheritedInitializeParentForgets\n  state: missing :: String\n  state: count :: Integer = 0\n\n  initialize -> Integer =>\n    // Deliberately does NOT set self.missing\n    self.count := 1\n\n  getMissing -> String => self.missing\n\n  getCount -> Integer => self.count",
+      "source": "// BT-1951 / ADR 0078 — Phase 1 fixture.\n// Parent actor class whose `initialize` forgets to set its own typed-no-default\n// field. Spawning any subclass should fail with UninitializedStateError\n// because the post-initialize check validates the inherited field too.\n\ntyped Actor subclass: InheritedInitializeParentForgets\n  state: missing :: String\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    // Deliberately does NOT set self.missing\n    self.count := 1\n    nil\n\n  getMissing -> String => self.missing\n\n  getCount -> Integer => self.count",
       "explanation": "BT-1951 / ADR 0078 — Phase 1 fixture. Parent actor class whose `initialize` forgets to set its own typed-no-default field. Spawning any subclass should fail with UninitializedStateError because the post-initialize check validates the inherited field too."
     },
     {
@@ -43417,7 +43417,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// JsonValueStateActor — regression fixture for BT-3546 (ADR 0124 §7 A1)\n// and BT-3561 (cross-file alias pre-loading in `beamtalk test`).\n//\n// A typed-no-default state field whose type is the real `stdlib/src/json.bt`\n// `JsonValue` alias (`type JsonValue = Nil | Boolean | Integer | Float |\n// String | List | Dictionary`), referenced across files/packages rather than\n// declared locally — this exercises BT-3561's fix (`beamtalk test`'s\n// pipeline now pre-loads same-package `stdlib/src` type aliases the same\n// way it pre-loads `ClassInfo`) in addition to BT-3546's alias-aware\n// definite-assignment predicate.\n//\n// Before BT-3546, the definite-assignment predicate did not resolve\n// aliases, so `JsonValue` was (wrongly) reported non-nilable and this actor\n// raised `UninitializedStateError` at spawn even though `Nil` is a member of\n// the alias's expansion. Should spawn successfully and leave `value` unset\n// (`nil`).\n\ntyped Actor subclass: JsonValueStateActor\n  state: value :: JsonValue\n  state: count :: Integer = 0\n\n  initialize -> Integer =>\n    // Deliberately does NOT set self.value — JsonValue expands to\n    // include Nil, so nil is a legitimate value here.\n    self.count := 1\n\n  getValue -> JsonValue => self.value\n\n  getCount -> Integer => self.count",
+      "source": "// JsonValueStateActor — regression fixture for BT-3546 (ADR 0124 §7 A1)\n// and BT-3561 (cross-file alias pre-loading in `beamtalk test`).\n//\n// A typed-no-default state field whose type is the real `stdlib/src/json.bt`\n// `JsonValue` alias (`type JsonValue = Nil | Boolean | Integer | Float |\n// String | List | Dictionary`), referenced across files/packages rather than\n// declared locally — this exercises BT-3561's fix (`beamtalk test`'s\n// pipeline now pre-loads same-package `stdlib/src` type aliases the same\n// way it pre-loads `ClassInfo`) in addition to BT-3546's alias-aware\n// definite-assignment predicate.\n//\n// Before BT-3546, the definite-assignment predicate did not resolve\n// aliases, so `JsonValue` was (wrongly) reported non-nilable and this actor\n// raised `UninitializedStateError` at spawn even though `Nil` is a member of\n// the alias's expansion. Should spawn successfully and leave `value` unset\n// (`nil`).\n\ntyped Actor subclass: JsonValueStateActor\n  state: value :: JsonValue\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    // Deliberately does NOT set self.value — JsonValue expands to\n    // include Nil, so nil is a legitimate value here.\n    self.count := 1\n    nil\n\n  getValue -> JsonValue => self.value\n\n  getCount -> Integer => self.count",
       "explanation": "JsonValueStateActor — regression fixture for BT-3546 (ADR 0124 §7 A1) and BT-3561 (cross-file alias pre-loading in `beamtalk test`).  A typed-no-default state field whose type is the real `stdlib/src/json.bt` `JsonValue` alias (`type JsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary`), referenced across files/packages rather than declared locally — this exercises BT-3561's fix (`beamtalk test`'s pipeline now pre-loads same-package `stdlib/src` type aliases the same way it pre-loads `ClassInfo`) in addition to BT-3546's alias-aware definite-assignment predicate.  Before BT-3546, the definite-assignment predicate did not resolve aliases, so `JsonValue` was (wrongly) reported non-nilable and this actor raised `UninitializedStateError` at spawn even though `Nil` is a member of the alias's expansion. Should spawn successfully and leave `value` unset (`nil`)."
     },
     {
@@ -43752,7 +43752,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// LocalJsonValueStateActor — regression fixture for BT-3563.\n//\n// A typed-no-default state field whose type is `local_json_value_alias.bt`'s\n// `LocalJsonValue` — a type alias declared in a *different* fixtures/*.bt\n// file, not stdlib/src. Should spawn successfully and leave `value` unset\n// (`nil`), same as `json_value_state_actor.bt`, but exercising the\n// fixture-internal alias pre-loading gap rather than the `src/`-alias one.\n\ntyped Actor subclass: LocalJsonValueStateActor\n  state: value :: LocalJsonValue\n  state: count :: Integer = 0\n\n  initialize -> Integer =>\n    // Deliberately does NOT set self.value — LocalJsonValue expands to\n    // include Nil, so nil is a legitimate value here.\n    self.count := 1\n\n  getValue -> LocalJsonValue => self.value\n\n  getCount -> Integer => self.count",
+      "source": "// LocalJsonValueStateActor — regression fixture for BT-3563.\n//\n// A typed-no-default state field whose type is `local_json_value_alias.bt`'s\n// `LocalJsonValue` — a type alias declared in a *different* fixtures/*.bt\n// file, not stdlib/src. Should spawn successfully and leave `value` unset\n// (`nil`), same as `json_value_state_actor.bt`, but exercising the\n// fixture-internal alias pre-loading gap rather than the `src/`-alias one.\n\ntyped Actor subclass: LocalJsonValueStateActor\n  state: value :: LocalJsonValue\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    // Deliberately does NOT set self.value — LocalJsonValue expands to\n    // include Nil, so nil is a legitimate value here.\n    self.count := 1\n    nil\n\n  getValue -> LocalJsonValue => self.value\n\n  getCount -> Integer => self.count",
       "explanation": "LocalJsonValueStateActor — regression fixture for BT-3563.  A typed-no-default state field whose type is `local_json_value_alias.bt`'s `LocalJsonValue` — a type alias declared in a *different* fixtures/*.bt file, not stdlib/src. Should spawn successfully and leave `value` unset (`nil`), same as `json_value_state_actor.bt`, but exercising the fixture-internal alias pre-loading gap rather than the `src/`-alias one."
     },
     {
@@ -45182,7 +45182,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// NilAllowedStateActor — test fixture for BT-1949\n//\n// Actor with a nilable typed-no-default field (:: String | Nil).\n// Should NOT raise UninitializedStateError since nil is valid.\n\ntyped Actor subclass: NilAllowedStateActor\n  state: label :: String | Nil\n  state: count :: Integer = 0\n\n  initialize -> Integer =>\n    // Deliberately does NOT set self.label — nil is valid for String | Nil\n    self.count := 1\n\n  getLabel -> String | Nil => self.label\n\n  getCount -> Integer => self.count",
+      "source": "// NilAllowedStateActor — test fixture for BT-1949\n//\n// Actor with a nilable typed-no-default field (:: String | Nil).\n// Should NOT raise UninitializedStateError since nil is valid.\n\ntyped Actor subclass: NilAllowedStateActor\n  state: label :: String | Nil\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    // Deliberately does NOT set self.label — nil is valid for String | Nil\n    self.count := 1\n    nil\n\n  getLabel -> String | Nil => self.label\n\n  getCount -> Integer => self.count",
       "explanation": "NilAllowedStateActor — test fixture for BT-1949  Actor with a nilable typed-no-default field (:: String | Nil). Should NOT raise UninitializedStateError since nil is valid."
     },
     {
@@ -49890,7 +49890,7 @@
         "subclassing",
         "typed_no_default_actor"
       ],
-      "source": "// TypedNoDefaultActor — test fixture for BT-1947\n//\n// Demonstrates typed state fields without default values.\n// The type annotation replaces the need for a default.\n\ntyped Actor subclass: TypedNoDefaultActor\n  state: label :: String\n  state: count :: Integer = 0\n\n  initialize -> String => self.label := \"initialized\"\n\n  getLabel -> String => self.label\n\n  getCount -> Integer => self.count\n\n  setLabel: newLabel :: String -> String =>\n    self.label := newLabel\n    self.label\n\n  increment -> Integer =>\n    self.count := self.count + 1\n    self.count",
+      "source": "// TypedNoDefaultActor — test fixture for BT-1947\n//\n// Demonstrates typed state fields without default values.\n// The type annotation replaces the need for a default.\n\ntyped Actor subclass: TypedNoDefaultActor\n  state: label :: String\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    self.label := \"initialized\"\n    nil\n\n  getLabel -> String => self.label\n\n  getCount -> Integer => self.count\n\n  setLabel: newLabel :: String -> String =>\n    self.label := newLabel\n    self.label\n\n  increment -> Integer =>\n    self.count := self.count + 1\n    self.count",
       "explanation": "TypedNoDefaultActor — test fixture for BT-1947  Demonstrates typed state fields without default values. The type annotation replaces the need for a default."
     },
     {
@@ -49947,7 +49947,7 @@
         "subclassing",
         "undefined_object_union_state_actor"
       ],
-      "source": "// UndefinedObjectUnionStateActor — regression fixture for BT-3546 (ADR 0124 §7 A1)\n//\n// A typed-no-default state field spelled with the canonical nil class\n// (`UndefinedObject`) rather than the `Nil` keyword. Before BT-3546, the\n// definite-assignment predicate matched only the literal `TypeAnnotation::\n// Simple(\"Nil\")` spelling, so `String | UndefinedObject` was (wrongly)\n// reported non-nilable and this actor raised `UninitializedStateError` at\n// spawn. Should spawn successfully and leave `label` unset (`nil`).\n\ntyped Actor subclass: UndefinedObjectUnionStateActor\n  state: label :: String | UndefinedObject\n  state: count :: Integer = 0\n\n  initialize -> Integer =>\n    // Deliberately does NOT set self.label — UndefinedObject is the\n    // canonical nil class, so nil is a legitimate value here.\n    self.count := 1\n\n  getLabel -> String | UndefinedObject => self.label\n\n  getCount -> Integer => self.count",
+      "source": "// UndefinedObjectUnionStateActor — regression fixture for BT-3546 (ADR 0124 §7 A1)\n//\n// A typed-no-default state field spelled with the canonical nil class\n// (`UndefinedObject`) rather than the `Nil` keyword. Before BT-3546, the\n// definite-assignment predicate matched only the literal `TypeAnnotation::\n// Simple(\"Nil\")` spelling, so `String | UndefinedObject` was (wrongly)\n// reported non-nilable and this actor raised `UninitializedStateError` at\n// spawn. Should spawn successfully and leave `label` unset (`nil`).\n\ntyped Actor subclass: UndefinedObjectUnionStateActor\n  state: label :: String | UndefinedObject\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    // Deliberately does NOT set self.label — UndefinedObject is the\n    // canonical nil class, so nil is a legitimate value here.\n    self.count := 1\n    nil\n\n  getLabel -> String | UndefinedObject => self.label\n\n  getCount -> Integer => self.count",
       "explanation": "UndefinedObjectUnionStateActor — regression fixture for BT-3546 (ADR 0124 §7 A1)  A typed-no-default state field spelled with the canonical nil class (`UndefinedObject`) rather than the `Nil` keyword. Before BT-3546, the definite-assignment predicate matched only the literal `TypeAnnotation:: Simple(\"Nil\")` spelling, so `String | UndefinedObject` was (wrongly) reported non-nilable and this actor raised `UninitializedStateError` at spawn. Should spawn successfully and leave `label` unset (`nil`)."
     },
     {
@@ -50014,7 +50014,7 @@
         "subclassing",
         "uninitialized_state_actor"
       ],
-      "source": "// UninitializedStateActor — test fixture for BT-1949\n//\n// Actor with a typed-no-default field that the initialize method\n// forgets to set. Should raise UninitializedStateError at startup.\n\ntyped Actor subclass: UninitializedStateActor\n  state: connection :: String\n  state: count :: Integer = 0\n\n  initialize -> Integer =>\n    // Deliberately does NOT set self.connection\n    self.count := 1\n\n  getConnection -> String => self.connection\n\n  getCount -> Integer => self.count",
+      "source": "// UninitializedStateActor — test fixture for BT-1949\n//\n// Actor with a typed-no-default field that the initialize method\n// forgets to set. Should raise UninitializedStateError at startup.\n\ntyped Actor subclass: UninitializedStateActor\n  state: connection :: String\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    // Deliberately does NOT set self.connection\n    self.count := 1\n    nil\n\n  getConnection -> String => self.connection\n\n  getCount -> Integer => self.count",
       "explanation": "UninitializedStateActor — test fixture for BT-1949  Actor with a typed-no-default field that the initialize method forgets to set. Should raise UninitializedStateError at startup."
     },
     {
@@ -61545,7 +61545,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// Parent actor with a typed-no-default field set in initialize.\n// Used by tests/repl-protocol/cases/actor_initialize_inheritance.btscript (BT-1956).\n\ntyped Actor subclass: E2EInitInheritBase\n  state: label :: String\n  state: count :: Integer = 0\n\n  initialize -> String => self.label := \"parent-initialized\"\n\n  getLabel -> String => self.label\n\n  getCount -> Integer => self.count",
+      "source": "// Parent actor with a typed-no-default field set in initialize.\n// Used by tests/repl-protocol/cases/actor_initialize_inheritance.btscript (BT-1956).\n\ntyped Actor subclass: E2EInitInheritBase\n  state: label :: String\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    self.label := \"parent-initialized\"\n    nil\n\n  getLabel -> String => self.label\n\n  getCount -> Integer => self.count",
       "explanation": "Parent actor with a typed-no-default field set in initialize. Used by tests/repl-protocol/cases/actor_initialize_inheritance.btscript (BT-1956)."
     },
     {
@@ -61609,7 +61609,7 @@
         "string join",
         "subclassing"
       ],
-      "source": "// Child actor whose initialize reads a typed-no-default field set by the\n// parent's auto-chained initialize.\n\ntyped E2EInitInheritBase subclass: E2EInitInheritChildUses\n  state: cache :: String\n\n  initialize -> String => self.cache := \"cache-\" ++ self.label\n\n  getCache -> String => self.cache",
+      "source": "// Child actor whose initialize reads a typed-no-default field set by the\n// parent's auto-chained initialize.\n\ntyped E2EInitInheritBase subclass: E2EInitInheritChildUses\n  state: cache :: String\n\n  initialize -> Nil =>\n    self.cache := \"cache-\" ++ self.label\n    nil\n\n  getCache -> String => self.cache",
       "explanation": "Child actor whose initialize reads a typed-no-default field set by the parent's auto-chained initialize."
     },
     {
@@ -61642,7 +61642,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// Parent actor that declares a typed-no-default field but its initialize\n// fails to set it. Spawning (or spawning any subclass) must raise\n// `UninitializedStateError in E2EInitInheritForgets` from the\n// post-initialize check.\n\ntyped Actor subclass: E2EInitInheritForgets\n  state: missing :: String\n  state: count :: Integer = 0\n\n  initialize -> Integer => self.count := 1\n\n  getCount -> Integer => self.count",
+      "source": "// Parent actor that declares a typed-no-default field but its initialize\n// fails to set it. Spawning (or spawning any subclass) must raise\n// `UninitializedStateError in E2EInitInheritForgets` from the\n// post-initialize check.\n\ntyped Actor subclass: E2EInitInheritForgets\n  state: missing :: String\n  state: count :: Integer = 0\n\n  initialize -> Nil =>\n    self.count := 1\n    nil\n\n  getCount -> Integer => self.count",
       "explanation": "Parent actor that declares a typed-no-default field but its initialize fails to set it. Spawning (or spawning any subclass) must raise `UninitializedStateError in E2EInitInheritForgets` from the post-initialize check."
     },
     {

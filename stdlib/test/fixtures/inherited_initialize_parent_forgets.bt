@@ -10,9 +10,10 @@ typed Actor subclass: InheritedInitializeParentForgets
   state: missing :: String
   state: count :: Integer = 0
 
-  initialize -> Integer =>
+  initialize -> Nil =>
     // Deliberately does NOT set self.missing
     self.count := 1
+    nil
 
   getMissing -> String => self.missing
 

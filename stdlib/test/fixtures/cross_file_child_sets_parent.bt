@@ -8,4 +8,6 @@
 
 typed CrossFileParentTyped subclass: CrossFileChildSetsParent
 
-  initialize -> String => self.token := "set-by-child"
+  initialize -> Nil =>
+    self.token := "set-by-child"
+    nil

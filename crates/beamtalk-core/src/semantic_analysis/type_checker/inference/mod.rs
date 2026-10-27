@@ -160,7 +160,8 @@ impl TypeChecker {
             // typed-annotation check here — `is_typed` above only feeds
             // `typed_class_context` (the Dynamic-in-typed-class warning) for
             // this call site, not `check_typed_method_annotations`.
-            // `check_override_param_compatibility` is likewise never run for
+            // `check_override_param_compatibility` /
+            // `check_override_return_compatibility` are likewise never run for
             // standalone definitions.
             self.check_method_body(
                 &standalone.method,
@@ -339,6 +340,7 @@ impl TypeChecker {
         self.check_return_type(method, &body_type, class_name, hierarchy);
         if check_override {
             self.check_override_param_compatibility(method, class_name, hierarchy);
+            self.check_override_return_compatibility(method, class_name, hierarchy);
         }
         self.check_no_self_in_params(method, class_name);
         if is_typed && check_typed_annotations {

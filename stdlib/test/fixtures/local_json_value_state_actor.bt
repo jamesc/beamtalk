@@ -13,10 +13,11 @@ typed Actor subclass: LocalJsonValueStateActor
   state: value :: LocalJsonValue
   state: count :: Integer = 0
 
-  initialize -> Integer =>
+  initialize -> Nil =>
     // Deliberately does NOT set self.value — LocalJsonValue expands to
     // include Nil, so nil is a legitimate value here.
     self.count := 1
+    nil
 
   getValue -> LocalJsonValue => self.value
 
