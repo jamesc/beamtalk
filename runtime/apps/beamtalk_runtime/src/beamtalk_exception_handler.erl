@@ -682,6 +682,11 @@ dispatch('reason', [], #{error := #beamtalk_error{details = Details}}) ->
     raw_reason(Details);
 dispatch('reason', [], _) ->
     nil;
+dispatch('details', [], #{error := #beamtalk_error{details = Details}}) ->
+    %% BT-4174: a nested raw record answers as an Exception object.
+    maps:map(fun(_Key, Value) -> wrap_detail(Value) end, Details);
+dispatch('details', [], _) ->
+    #{};
 dispatch('printString', [], #{error := Error}) ->
     %% BT-4170: `format/1` renders raw bytes; `printString` answers a `String`.
     beamtalk_primitive:string_from_binary(beamtalk_error:format(Error));
@@ -789,6 +794,10 @@ its wrapped map, e.g. `Error signal:` inside a runtime-defined actor method) is
 not a raw Erlang term, so it answers `nil`, as does an exception with no
 recorded term.
 """.
+-spec wrap_detail(term()) -> term().
+wrap_detail(#beamtalk_error{} = Error) -> wrap(Error);
+wrap_detail(Value) -> Value.
+
 -spec raw_reason(map()) -> term().
 raw_reason(Details) ->
     raw_reason_from(Details, [reason, erlang_error, original_reason]).
@@ -812,6 +821,7 @@ has_method('kind') -> true;
 has_method('selector') -> true;
 has_method('errorClass') -> true;
 has_method('reason') -> true;
+has_method('details') -> true;
 has_method('printString') -> true;
 has_method('stackTrace') -> true;
 has_method('class') -> true;

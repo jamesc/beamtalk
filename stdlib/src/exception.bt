@@ -131,6 +131,21 @@ Object subclass: Exception
   /// ```
   reason -> Object | Nil => @primitive
 
+  /// Return the structured details recorded with this error, keyed by Symbol.
+  ///
+  /// Natives record machine-readable context here alongside the rendered
+  /// `message`, e.g. the byte `#offset` of an invalid UTF-8 sequence, a
+  /// `#path`, or the `#expected`/`#got` of an arity mismatch. Read a value
+  /// with `at:` instead of parsing `message`. Answers an empty Dictionary when
+  /// nothing was recorded. A nested Beamtalk error answers as an Exception.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 255)) asString error details   // => #{#offset => 1}
+  /// [Error signal: "boom"] on: Error do: [:e | e details]     // => #{}
+  /// ```
+  details -> Dictionary(Symbol, Object) => @primitive
+
   // === Printing ===
 
   /// Return a developer-readable string representation of the error.
