@@ -599,7 +599,14 @@ TestCase subclass: DateTimeTest
     @expect type
     self
       should: [
-        DateTime year: "bad" month: 1 day: 1 hour: 0 minute: 0 second: 0 offsetMinutes: 0
+        DateTime
+          year: "bad"
+          month: 1
+          day: 1
+          hour: 0
+          minute: 0
+          second: 0
+          offsetMinutes: 0
       ]
       raise: #type_error
 
