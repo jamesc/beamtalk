@@ -393,7 +393,8 @@ Render an element nested inside a List (BT-4203).
 Elements become JSON strings inside a JSON array, so a String element must
 not be pre-quoted by `print_string` (the JSON encoder already quotes it:
 `["a","b"]`, not `["\\"a\\""]`). Only the top-level value is quoted
-(BT-4167). UTF-8 Binaries are bare; non-UTF-8 Binaries keep the `<<AB CD>>`
+(BT-4167). Strings arrive as tagged `{beamtalk_string, Bin}` tuples
+(BT-4173) and render bare, as do UTF-8 Binaries; non-UTF-8 Binaries keep the `<<AB CD>>`
 hex form so they stay distinguishable. Nested lists recurse; everything else
 uses the normal rendering.
 
@@ -406,8 +407,9 @@ back by accident.
 """.
 -spec element_to_json(term()) -> term().
 element_to_json({beamtalk_string, Bin}) when is_binary(Bin) ->
-    %% Wave 3 (BT-4173): String elements are tagged; render bare like UTF-8 Binaries.
-    element_to_json(Bin);
+    %% Wave 3 (BT-4173): String elements are tagged; render bare (unquoted).
+    %% ensure_utf8/1 contains `asStringUnchecked`-smuggled bytes, as at top level.
+    beamtalk_transcript_stream:ensure_utf8(Bin);
 element_to_json(Value) when is_binary(Value) ->
     case unicode:characters_to_binary(Value, utf8, utf8) of
         Bin when is_binary(Bin) -> Bin;
