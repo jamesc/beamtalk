@@ -72,6 +72,11 @@ instantiation_test_() ->
             {"class_self_spawn/4 raises for abstract class", fun test_class_self_spawn_abstract/0},
             {"class_self_spawn/4 normalizes non-boolean IsAbstract",
                 fun test_class_self_spawn_normalize_abstract/0},
+            %% BT-4104: class_self_spawn_monitored tests
+            {"class_self_spawn_monitored answers {Actor, live MonRef}",
+                fun test_class_self_spawn_monitored_success/0},
+            {"class_self_spawn_monitored raises for abstract class with monitored selectors",
+                fun test_class_self_spawn_monitored_abstract/0},
             %% compute_is_constructible edge cases
             {"module without new/0 is not constructible", fun test_compute_no_new_export/0},
             %% handle_new with undefined IsConstructible
@@ -432,6 +437,35 @@ test_class_self_spawn_normalize_abstract() ->
     ),
     ?assertMatch(#beamtalk_object{class = 'Counter'}, Result),
     gen_server:stop(Result#beamtalk_object.pid).
+
+test_class_self_spawn_monitored_success() ->
+    %% BT-4104: calls the compiled spawn_monitored/0 and answers its pair;
+    %% the monitor belongs to this (the calling) process.
+    ok = ensure_counter_loaded(),
+    {Obj, MonRef} = beamtalk_class_instantiation:class_self_spawn_monitored(
+        'Counter', 'bt@counter', false, []
+    ),
+    ?assertMatch(#beamtalk_object{class = 'Counter'}, Obj),
+    Pid = Obj#beamtalk_object.pid,
+    gen_server:stop(Pid),
+    receive
+        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(normal, Reason)
+    after 5000 -> error(no_down)
+    end.
+
+test_class_self_spawn_monitored_abstract() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = instantiation_error, selector = spawnMonitored}},
+        beamtalk_class_instantiation:class_self_spawn_monitored(
+            'AbstractThing', some_mod, true, []
+        )
+    ),
+    ?assertError(
+        #{error := #beamtalk_error{kind = instantiation_error, selector = 'spawnMonitoredWith:'}},
+        beamtalk_class_instantiation:class_self_spawn_monitored(
+            'AbstractThing', some_mod, true, [#{}]
+        )
+    ).
 
 %%====================================================================
 %% compute_is_constructible edge cases

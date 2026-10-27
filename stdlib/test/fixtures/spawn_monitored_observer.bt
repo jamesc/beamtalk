@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4104 fixture: a Server that spawns actors with `spawnMonitored` /
+// `spawnMonitoredWith:` from its own methods — so it owns the monitors — and
+// records every `{#DOWN, ref, #process, pid, reason}` it receives in
+// `handleInfo:` (anything else lands in `others`, which must stay empty: no
+// stray initialize ack or DOWN). See stdlib/test/actor_spawn_monitored_test.bt.
+
+Server subclass: SpawnMonitoredObserver
+  state: downs = #()
+  state: others = #()
+
+  handleInfo: msg =>
+    isDown := msg match: [
+      {#DOWN, _, #process, _, _} -> true;
+      _ -> false
+    ]
+    isDown ifTrue: [
+      self.downs := self.downs add: msg
+    ] ifFalse: [self.others := self.others add: msg]
+
+  downs => self.downs
+
+  others => self.others
+
+  // `count` QuickExitActors, each stopping with `#normal` straight after
+  // `initialize`; answers their monitor refs.
+  spawnQuick: count =>
+    (1 to: count) inject: #() into: [:refs :i |
+      refs add: (QuickExitActor spawnMonitored at: 2)
+    ]
+
+  // A QuickExitActor stopping with `reason`; answers its `{actor, ref}`.
+  spawnQuickWith: reason =>
+    QuickExitActor spawnMonitoredWith: #{#exitReason => reason}
+
+  // A long-lived actor; answers its `{actor, ref}`.
+  spawnAlive => ContinueWithActor spawnMonitored
+
+  // A spawn whose `initialize` raises; answers the error kind.
+  spawnFailing =>
+    [FailingInitializeActor spawnMonitored] on: Exception do: [:e | e kind]
+
+  // Cancel a monitor this Server owns.
+  demonitor: ref => ref demonitor

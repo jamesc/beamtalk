@@ -32,6 +32,7 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
     class_self_new/3,
     class_self_spawn/3,
     class_self_spawn/4,
+    class_self_spawn_monitored/4,
     class_self_spawn_as/4,
     class_self_spawn_with/5,
     ensure_is_constructible/3,
@@ -47,6 +48,11 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
 ]).
 
 -type class_name() :: atom().
+%% A spawn's compiled entry point and public selectors: `plain` is
+%% `Module:spawn/0,1` (`spawn`/`spawnWith:`), `monitored` is
+%% `Module:spawn_monitored/0,1` (`spawnMonitored`/`spawnMonitoredWith:`,
+%% BT-4104).
+-type spawn_variant() :: plain | monitored.
 
 %%====================================================================
 %% Spawn Protocol
@@ -61,33 +67,50 @@ Returns gen_server reply tuple.
 """.
 -spec handle_spawn(list(), class_name(), atom(), boolean()) ->
     {ok, #beamtalk_object{}} | {error, term()}.
-handle_spawn(Args, ClassName, _Module, true) ->
-    Selector =
-        case Args of
-            [] -> spawn;
-            _ -> 'spawnWith:'
-        end,
-    {error, abstract_class_error(ClassName, Selector)};
-handle_spawn(Args, ClassName, Module, false) ->
+handle_spawn(Args, ClassName, Module, IsAbstract) ->
+    do_handle_spawn(plain, Args, ClassName, Module, IsAbstract).
+
+-spec spawn_function(spawn_variant()) -> spawn | spawn_monitored.
+spawn_function(plain) -> spawn;
+spawn_function(monitored) -> spawn_monitored.
+
+-spec spawn_selector(spawn_variant(), list()) -> atom().
+spawn_selector(plain, []) -> spawn;
+spawn_selector(plain, _) -> 'spawnWith:';
+spawn_selector(monitored, []) -> spawnMonitored;
+spawn_selector(monitored, _) -> 'spawnMonitoredWith:'.
+
+-spec do_handle_spawn(spawn_variant(), list(), class_name(), atom(), boolean()) ->
+    {ok, #beamtalk_object{} | {#beamtalk_object{}, reference()}} | {error, term()}.
+do_handle_spawn(Variant, Args, ClassName, _Module, true) ->
+    {error, abstract_class_error(ClassName, spawn_selector(Variant, Args))};
+do_handle_spawn(Variant, Args, ClassName, Module, false) ->
+    Function = spawn_function(Variant),
     %% bt-catcher-audit: not-applicable-other-process - Module:spawn runs init/1 in the new actor
     %% process
     try
         SpawnResult =
             case Args of
                 [] ->
-                    erlang:apply(Module, spawn, []);
+                    erlang:apply(Module, Function, []);
                 [InitArgs] ->
-                    erlang:apply(Module, spawn, [InitArgs]);
+                    erlang:apply(Module, Function, [InitArgs]);
                 _ ->
-                    Error1 = beamtalk_error:new(type_error, ClassName, 'spawnWith:'),
+                    WithSelector = spawn_selector(Variant, Args),
+                    Error1 = beamtalk_error:new(type_error, ClassName, WithSelector),
                     Error2 = beamtalk_error:with_hint(
-                        Error1, <<"spawnWith: expects a Dictionary argument">>
+                        Error1,
+                        iolist_to_binary([
+                            atom_to_binary(WithSelector), <<" expects a Dictionary argument">>
+                        ])
                     ),
                     beamtalk_error:raise(Error2)
             end,
         case SpawnResult of
             #beamtalk_object{} = Obj ->
                 {ok, Obj};
+            {#beamtalk_object{}, MonRef} = Monitored when is_reference(MonRef) ->
+                {ok, Monitored};
             {ok, Pid} ->
                 Obj = #beamtalk_object{
                     class = ClassName,
@@ -620,8 +643,27 @@ any non-true value is treated as false (non-abstract).
 """.
 -spec class_self_spawn(class_name(), atom(), boolean() | term(), list()) -> term().
 class_self_spawn(ClassName, Module, IsAbstract0, Args) ->
+    class_self_spawn_variant(plain, ClassName, Module, IsAbstract0, Args).
+
+-doc """
+BT-4104: `self spawnMonitored` / `self spawnMonitoredWith:` from a class
+method, and the `Actor>>spawnMonitored`/`spawnMonitoredWith:` FFI shims.
+
+Calls the compiled `Module:spawn_monitored/0,1` and answers its
+`{Actor, MonitorRef}` pair; raises `instantiation_error` on failure, like
+`class_self_spawn/4`. The monitor belongs to the process running this —
+for a class method, the class process.
+""".
+-spec class_self_spawn_monitored(class_name(), atom(), boolean() | term(), list()) ->
+    {#beamtalk_object{}, reference()}.
+class_self_spawn_monitored(ClassName, Module, IsAbstract0, Args) ->
+    class_self_spawn_variant(monitored, ClassName, Module, IsAbstract0, Args).
+
+-spec class_self_spawn_variant(spawn_variant(), class_name(), atom(), boolean() | term(), list()) ->
+    term().
+class_self_spawn_variant(Variant, ClassName, Module, IsAbstract0, Args) ->
     IsAbstract = IsAbstract0 =:= true,
-    case handle_spawn(Args, ClassName, Module, IsAbstract) of
+    case do_handle_spawn(Variant, Args, ClassName, Module, IsAbstract) of
         {ok, Result} ->
             Result;
         {error, Error} ->

@@ -266,6 +266,77 @@ fn test_generate_spawn_with_message_send() {
 }
 
 #[test]
+fn test_generate_spawn_monitored_message_send() {
+    // BT-4104: `Counter spawnMonitored` / `Counter spawnMonitoredWith: 42`
+    // on a class reference call the module's own spawn_monitored/0,1 in the
+    // sending process (never class dispatch), so the sender owns the monitor.
+    let mut generator = CoreErlangGenerator::new("bt@my_pkg@test_module");
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("Counter", Span::new(0, 7)),
+        span: Span::new(0, 7),
+        package: None,
+    };
+    let unary = MessageSelector::Unary("spawnMonitored".into());
+    let output = generator
+        .generate_message_send(&receiver, &unary, &[])
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'bt@my_pkg@counter':'spawn_monitored'()"),
+        "spawnMonitored should call spawn_monitored/0. Got: {output}",
+    );
+
+    let keyword = MessageSelector::Keyword(vec![KeywordPart::new(
+        "spawnMonitoredWith:",
+        Span::new(8, 27),
+    )]);
+    let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(28, 30))];
+    let output = generator
+        .generate_message_send(&receiver, &keyword, &arguments)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'bt@my_pkg@counter':'spawn_monitored'(42)"),
+        "spawnMonitoredWith: should call spawn_monitored/1. Got: {output}",
+    );
+    assert!(
+        !output.contains("beamtalk_future") && !output.contains("class_send"),
+        "spawnMonitoredWith: must be a direct call. Got: {output}",
+    );
+}
+
+#[test]
+fn test_generate_spawn_monitored_exports_and_functions() {
+    // BT-4104: every concrete actor module exports spawn_monitored/0,1 over
+    // safe_spawn_monitored, answering {Actor, MonRef}.
+    use beamtalk_core::ast::*;
+    let value_assignment = Expression::Assignment {
+        target: Box::new(Expression::Identifier(Identifier::new(
+            "value",
+            Span::new(0, 5),
+        ))),
+        value: Box::new(Expression::Literal(Literal::Integer(0), Span::new(9, 10))),
+        type_annotation: None,
+        span: Span::new(0, 10),
+    };
+    let module = Module::new(vec![bare(value_assignment)], Span::new(0, 10));
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    assert!(
+        code.contains("'spawn_monitored'/0, 'spawn_monitored'/1"),
+        "spawn_monitored/0,1 must be exported. Got: {code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor':'safe_spawn_monitored'('counter', ~{}~)"),
+        "spawn_monitored/0 must use safe_spawn_monitored. Got: {code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor':'safe_spawn_monitored'('counter', InitArgs)"),
+        "spawn_monitored/1 must use safe_spawn_monitored. Got: {code}"
+    );
+}
+
+#[test]
 fn test_generate_spawn_function() {
     use beamtalk_core::ast::*;
 
@@ -3497,8 +3568,24 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
     );
     assert_eq!(
         code.matches(abstract_hint.as_str()).count(),
-        2,
-        "Both spawn/0 and spawn/1 stubs must include the abstract-class hint. Got:\n{code}"
+        4,
+        "spawn/0,1 and spawn_monitored/0,1 stubs must all include the abstract-class hint. Got:\n{code}"
+    );
+    // BT-4104: spawn_monitored/0,1 are abstract stubs too, naming their own selectors.
+    assert!(
+        code.contains("'spawn_monitored'/0 = fun () ->")
+            && code.contains("'spawn_monitored'/1 = fun (_InitArgs) ->"),
+        "Abstract actor must emit spawn_monitored/0,1 stubs. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_error':'with_selector'(Error0, 'spawnMonitored')")
+            && code
+                .contains("call 'beamtalk_error':'with_selector'(Error0, 'spawnMonitoredWith:')"),
+        "spawn_monitored stubs must name the monitored selectors. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'beamtalk_actor':'safe_spawn_monitored'"),
+        "Abstract actor must NOT call safe_spawn_monitored. Got:\n{code}"
     );
     // Abstract stubs must never emit an instance-registration call.
     assert!(

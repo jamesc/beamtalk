@@ -126,8 +126,8 @@ impl CoreErlangGenerator {
         // emit_local_probe: true path) — see actor_codegen.rs's identical
         // has_method_local_export.
         let base_exports: Document<'static> = docvec![
-            "'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
-             'has_method'/1, 'method_table'/0, 'class_name'/0, 'superclass'/0",
+            "'spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_monitored'/1, \
+             'new'/0, 'new'/1, 'has_method'/1, 'method_table'/0, 'class_name'/0, 'superclass'/0",
             dispatch_exports,
             if has_classes {
                 Document::Str(", '__beamtalk_meta'/0, 'has_method_local'/1")
@@ -183,6 +183,11 @@ impl CoreErlangGenerator {
 
         push_fn(self.generate_native_spawn_0()?);
         push_fn(self.generate_native_spawn_1(backing_module)?);
+
+        // BT-4104: the backing module's own start_link has no atomic monitor,
+        // so spawn_monitored/0,1 raise instead of failing with `undef`.
+        push_fn(self.generate_unsupported_spawn_monitored_method(false));
+        push_fn(self.generate_unsupported_spawn_monitored_method(true));
 
         // new/0 and new/1 error methods (actors can't use new)
         push_fn(self.generate_actor_new_error_method()?);

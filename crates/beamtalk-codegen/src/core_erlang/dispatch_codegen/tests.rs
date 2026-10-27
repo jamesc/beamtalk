@@ -4,6 +4,7 @@
 use super::{class_self_send_reflective_primitive, is_class_auto_export_selector};
 use crate::core_erlang::CoreErlangGenerator;
 use crate::core_erlang::expr_shape::is_character_typed_receiver;
+use crate::core_erlang::gen_server::SpawnVariant;
 use beamtalk_core::ast::{
     Block, Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector,
     MethodDefinition, TypeAnnotation,
@@ -299,7 +300,7 @@ fn test_generate_super_send_value_context_uses_super_value() {
 fn test_generate_actor_spawn_non_repl() {
     let mut generator = CoreErlangGenerator::new("test");
     let doc = generator
-        .generate_actor_spawn_qualified("Counter", None, None)
+        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Plain)
         .unwrap();
     let output = doc.to_pretty_string();
     assert!(
@@ -310,6 +311,100 @@ fn test_generate_actor_spawn_non_repl() {
         output.contains("counter"),
         "spawn should reference module. Got: {output}"
     );
+}
+
+#[test]
+fn test_generate_actor_spawn_monitored_non_repl() {
+    // BT-4104: `Counter spawnMonitored` calls the module's own
+    // `spawn_monitored/0` in the sender's process.
+    let mut generator = CoreErlangGenerator::new("test");
+    let doc = generator
+        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Monitored)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains(":'spawn_monitored'()"),
+        "spawnMonitored should call spawn_monitored/0. Got: {output}"
+    );
+    assert!(
+        !output.contains("'spawn'("),
+        "spawnMonitored must not call spawn/0. Got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_actor_spawn_monitored_repl_registers_pair_actor() {
+    // BT-4104: in the REPL the registry gets the pid of the pair's actor
+    // (element 4 of element 1), and the whole pair is answered.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.bind_var("__bindings__", "Bindings");
+    let doc = generator
+        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Monitored)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.matches(":'spawn_monitored'()").count() == 2,
+        "both REPL arms should call spawn_monitored/0. Got: {output}"
+    );
+    assert!(
+        output.contains(
+            "let SpawnPid = call 'erlang':'element'(4, call 'erlang':'element'(1, SpawnResult)) in"
+        ),
+        "REPL registration must take the pid from the pair's actor. Got: {output}"
+    );
+    assert!(
+        output.contains("register_spawned"),
+        "REPL variant must register the actor. Got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_actor_spawn_repl_registers_plain_result() {
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.bind_var("__bindings__", "Bindings");
+    let doc = generator
+        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Plain)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("let SpawnPid = call 'erlang':'element'(4, SpawnResult) in"),
+        "plain REPL spawn takes the pid from the actor itself. Got: {output}"
+    );
+}
+
+#[test]
+fn test_spawn_variant_of_selector() {
+    assert_eq!(
+        SpawnVariant::of_selector("spawn", 0),
+        Some(SpawnVariant::Plain)
+    );
+    assert_eq!(
+        SpawnVariant::of_selector("spawnWith:", 1),
+        Some(SpawnVariant::Plain)
+    );
+    assert_eq!(
+        SpawnVariant::of_selector("spawnMonitored", 0),
+        Some(SpawnVariant::Monitored)
+    );
+    assert_eq!(
+        SpawnVariant::of_selector("spawnMonitoredWith:", 1),
+        Some(SpawnVariant::Monitored)
+    );
+    assert_eq!(SpawnVariant::of_selector("spawnAs:", 1), None);
+    assert_eq!(SpawnVariant::of_selector("spawnMonitored", 1), None);
+}
+
+#[test]
+fn test_supervisor_spawn_selector_includes_monitored() {
+    // BT-4104: a supervisor receiver of the monitored selectors is routed to
+    // `beamtalk_supervisor:class_start/4` (which raises unsupported), never
+    // to a `spawn_monitored` export supervisor modules do not have.
+    assert!(super::is_supervisor_spawn_selector("spawnMonitored", 0));
+    assert!(super::is_supervisor_spawn_selector(
+        "spawnMonitoredWith:",
+        1
+    ));
+    assert!(!super::is_supervisor_spawn_selector("spawnMonitored", 1));
 }
 
 #[test]
