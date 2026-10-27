@@ -60,32 +60,6 @@ pub struct ReturnTypeMismatch {
     pub expected: DeclaredType,
 }
 
-/// `true` when any bare name inside `ty` is one of `names` (a protocol's own
-/// type parameters).
-fn declared_type_names_any(ty: &DeclaredType, names: &[EcoString]) -> bool {
-    if names.is_empty() {
-        return false;
-    }
-    match ty {
-        DeclaredType::Simple(name) => names.contains(name),
-        DeclaredType::Generic { base, parameters } => {
-            names.contains(base) || parameters.iter().any(|p| declared_type_names_any(p, names))
-        }
-        DeclaredType::Union(members) => members.iter().any(|m| declared_type_names_any(m, names)),
-        DeclaredType::FalseOr(inner) => declared_type_names_any(inner, names),
-        DeclaredType::Difference { base, excluded } => {
-            declared_type_names_any(base, names) || declared_type_names_any(excluded, names)
-        }
-        DeclaredType::Intersection { left, right } => {
-            declared_type_names_any(left, names) || declared_type_names_any(right, names)
-        }
-        DeclaredType::Singleton(_)
-        | DeclaredType::SelfType
-        | DeclaredType::SelfClass
-        | DeclaredType::ClassOf(_) => false,
-    }
-}
-
 /// Information about a protocol in the registry.
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
@@ -692,7 +666,7 @@ impl ProtocolRegistry {
                 continue;
             };
             let expected = DeclaredType::parse(req_rt);
-            if declared_type_names_any(&expected, &protocol.type_params) {
+            if expected.mentions_any(&protocol.type_params) {
                 continue;
             }
             let Some(method) = hierarchy.find_method(class_name, &req.selector) else {

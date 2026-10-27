@@ -2319,10 +2319,20 @@ impl TypeChecker {
         else {
             return;
         };
-        if Self::is_return_type_refinement(child_rt, parent_rt, hierarchy) {
+        // Class type params (possibly multi-letter, which the shared rule's
+        // single-letter heuristic would miss) have no substitution here.
+        let parent_class = &parent_method.defined_in;
+        let type_params: Vec<EcoString> = [class_name, parent_class]
+            .into_iter()
+            .filter_map(|c| hierarchy.get_class(c))
+            .flat_map(|c| c.type_params.iter().cloned())
+            .collect();
+        if child_rt.mentions_any(&type_params)
+            || parent_rt.mentions_any(&type_params)
+            || Self::is_return_type_refinement(child_rt, parent_rt, hierarchy)
+        {
             return;
         }
-        let parent_class = &parent_method.defined_in;
         self.diagnostics.push(
             Diagnostic::warning(
                 format!(
