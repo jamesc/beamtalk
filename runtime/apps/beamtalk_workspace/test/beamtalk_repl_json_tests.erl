@@ -306,6 +306,16 @@ term_to_json_list_elements_not_prequoted_test() ->
         [<<"<<FF 00>>">>], beamtalk_repl_json:term_to_json([<<255, 0>>])
     ).
 
+element_to_json_tagged_string_test() ->
+    %% Tagged String elements render bare; invalid UTF-8 is contained like at top level.
+    ?assertEqual(<<"a">>, beamtalk_repl_json:element_to_json({beamtalk_string, <<"a">>})),
+    ?assertEqual(
+        [<<"a">>, <<"b">>],
+        beamtalk_repl_json:term_to_json([{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}])
+    ),
+    Bad = beamtalk_repl_json:element_to_json({beamtalk_string, <<255, 0>>}),
+    ?assertEqual(Bad, unicode:characters_to_binary(Bad)).
+
 term_to_json_character_tag_test() ->
     %% BT-4167: tagged Character results display as $X, distinct from Integers.
     ?assertEqual(<<"$A">>, beamtalk_repl_json:term_to_json({beamtalk_character, 65})),
