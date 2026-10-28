@@ -32,17 +32,42 @@
 //!   `(super) foo` is not a super send;
 //! - a cascade's folded first send or its shared receiver
 //!   (`ast_walker::cascade_shared_receiver`, a `SendRef` receiver from
-//!   `walk_sends`/`cascade_sends`): `(a foo); bar` cascades onto the result of
-//!   `a foo`, so that wrapper stays;
-//! - code reachable with a raw, un-normalised AST: `beamtalk-lint`'s passes
-//!   (which run on the parsed module and reach `block_facts`,
-//!   `local_threading_diagnostics`, `check_effect_free_statements`), the
-//!   language service's type inference (`type_checker`), `class_var_census`,
-//!   the formatter and `unparse`.
+//!   `walk_sends`/`cascade_sends`, or the dispatch receiver the type checker's
+//!   `infer_cascade` hands `infer_message_send_with_receiver_ty`): `(a foo);
+//!   bar` cascades onto the result of `a foo`, so that wrapper stays.
+//!
+//! "The pass already ran" is no longer a matter of which caller you are
+//! (BT-4238): every `semantic_analysis` entry that a parsed module reaches
+//! reads the operand-normalised tree, through `ast::normalize::normalised` or
+//! the pass itself:
+//!
+//! - `analyse_full` (its own clone) and codegen's entries (BT-4059);
+//! - `TypeChecker::check_module` / `check_module_with_protocols_and_aliases`,
+//!   so `infer_types`, `infer_types_and_returns(_with_aliases)` and
+//!   `infer_method_return_types` (the language service's hover, completion,
+//!   signature help and go-to-definition, MCP and CLI type coverage);
+//! - `local_threading_diagnostics`;
+//! - `beamtalk-lint`'s `run_lint_passes`, which hands every pass but
+//!   `unnecessary_parens` the normalised module (so `check_effect_free_statements`,
+//!   `block_facts` and the span joins of `dead_block_assignment` /
+//!   `dead_returned_assignment` read one tree);
+//! - `class_var_census::parse_corpus_source`, `ffi_sites_query` and
+//!   `method_source_walker` (peeled at parse).
+//!
+//! **Raw-tree readers that remain**, none of which reaches a peel this guard
+//! counts: the `unnecessary_parens` lint and the formatter/`unparse`, whose
+//! subject is the parentheses as written; the language service's position
+//! lookups, which walk the parsed tree and look a node's type up through
+//! `queries::type_of_parsed` / `normalize::canonical_operand`; and
+//! `build_stdlib`'s metadata pass, which calls
+//! `semantic_analysis::analyze_initialize_assigns` / `has_dynamic_field_writer`
+//! on the parsed stdlib class (they walk `Parenthesized` themselves and use
+//! no operand peel).
 //!
 //! The scanned trees are codegen, the REPL's codegen and `beamtalk-core`
-//! (where `semantic_analysis` lives). `ast::normalize` itself, and the raw-AST
-//! crates (`beamtalk-lint`, `beamtalk-language-service`), are not scanned.
+//! (where `semantic_analysis` lives). `ast::normalize` itself, and the crates
+//! that read the parsed tree for positions (`beamtalk-lint`,
+//! `beamtalk-language-service`), are not scanned.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -94,46 +119,52 @@ const CEILINGS: &[(&str, usize)] = &[
     ("beamtalk-codegen/src/core_erlang/value_type_codegen.rs", 11),
     // Expression helpers in the AST leaf (`as_literal_bool`).
     ("beamtalk-core/src/ast/expression.rs", 1),
-    // Raw-AST reachable: FFI receiver recognition, read by the language
-    // service's `ffi_sites_query` on the parsed module.
-    ("beamtalk-core/src/ffi_receiver.rs", 2),
-    // Raw-AST reachable: `block_facts` is the shared recognizer that
-    // `local_threading_diagnostics` (run by `beamtalk-lint` on the parsed
-    // module), `beamtalk-lint`'s own passes and `class_var_census` read.
-    ("beamtalk-core/src/semantic_analysis/block_facts.rs", 38),
-    // Raw-AST reachable: the language service runs type inference on the
-    // parsed module (`infer_types`, `infer_method_return_types`).
+    // A cascade shared receiver: `erlang_module_of_receiver` is handed
+    // `(Erlang lists)` as the shared receiver of `(Erlang lists); f: x`.
+    ("beamtalk-core/src/ffi_receiver.rs", 1),
+    // Predicates called on a statement, an assignment or return value and an
+    // operand alike (`local_threading_construct`, the site rules, `match_arms`,
+    // `repl_*_sites`, `LoopBodyContext`), assignment and literal-element
+    // escape operands, a field-write target's receiver, and `(super)`
+    // (`is_self_or_super`, `receiver_statically_not_dictionary`).
+    ("beamtalk-core/src/semantic_analysis/block_facts.rs", 35),
+    // A block literal stashed for a declared `Block(...)` return or local
+    // (a return / assignment value).
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/blocks.rs",
-        11,
+        1,
     ),
+    // A `match:` scrutinee.
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/flow.rs",
         1,
     ),
-    (
-        "beamtalk-core/src/semantic_analysis/type_checker/inference/literals.rs",
-        1,
-    ),
+    // Cascade shared receivers (`infer_cascade`'s dispatch receiver) and
+    // `(super)`: `is_class_side_receiver`.
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/send/mod.rs",
         1,
     ),
+    // A cascade shared receiver reaching the class-side check.
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/send/receiver.rs",
         1,
     ),
+    // `classify`, read on assignment values, receivers and arguments alike;
+    // a block body's statement.
     (
         "beamtalk-core/src/semantic_analysis/type_checker/known_remote.rs",
-        4,
+        2,
     ),
+    // Narrowing reads a send's receiver, which may be a cascade shared
+    // receiver; the compound-guard walk also reads a block's statement.
     (
         "beamtalk-core/src/semantic_analysis/type_checker/narrowing/mod.rs",
         1,
     ),
     (
         "beamtalk-core/src/semantic_analysis/type_checker/narrowing/refine.rs",
-        4,
+        3,
     ),
     (
         "beamtalk-core/src/semantic_analysis/type_checker/narrowing/rules/singleton_eq.rs",
@@ -154,13 +185,16 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-core/src/semantic_analysis/validators/lint_validators.rs",
         9,
     ),
-    // Raw-AST reachable: `local_threading_diagnostics` (`beamtalk-lint`).
+    // Constructs judged in any position (`expr` itself), the `Parenthesized`
+    // arm, statements, cascade receivers (`nlr_cause`'s `check_send`, a
+    // cascade's shared receiver) and `(super)`.
     (
         "beamtalk-core/src/semantic_analysis/validators/local_threading.rs",
-        19,
+        17,
     ),
-    // Raw-AST reachable: `send_user_code`, which `block_facts`'
-    // `analyze_block` reads (see `block_facts.rs` above).
+    // `send_user_code`'s `is_block`, read on a cascade's shared receiver
+    // (`record_send_target` for each later cascade message) and arguments
+    // alike.
     ("beamtalk-core/src/state_threading_selectors.rs", 1),
 ];
 
