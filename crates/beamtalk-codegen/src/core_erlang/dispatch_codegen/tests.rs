@@ -888,8 +888,10 @@ fn if_true_if_false_recurses_through_nested_branches() {
         block_answering(int_lit(0)),
     )));
 
-    // Parenthesized condition and branch see through, like every other arm.
-    let parenthesized = Expression::Parenthesized {
+    // Parenthesized condition and branch see through, like every other arm:
+    // the operands through `ast::normalize`, which runs before codegen
+    // (BT-4232), the whole send through the recognizer's own peel.
+    let mut parenthesized = Expression::Parenthesized {
         expression: Box::new(if_true_if_false(
             Expression::Parenthesized {
                 expression: Box::new(bool_ident("true")),
@@ -903,6 +905,7 @@ fn if_true_if_false_recurses_through_nested_branches() {
         )),
         span: s(),
     };
+    beamtalk_core::ast::normalize::peel_operand_parens_expr(&mut parenthesized);
     assert!(is_character_typed_receiver(&parenthesized));
 }
 
@@ -974,8 +977,10 @@ fn single_branch_constant_taken_is_character_typed() {
             "`{receiver} {keyword} [Character value: 54]` must be Character-typed"
         );
 
-        // Parenthesized receiver, block and whole send all see through.
-        let parenthesized = Expression::Parenthesized {
+        // Parenthesized receiver, block and whole send all see through: the
+        // operands through `ast::normalize`, which runs before codegen
+        // (BT-4232), the whole send through the recognizer's own peel.
+        let mut parenthesized = Expression::Parenthesized {
             expression: Box::new(single_branch(
                 Expression::Parenthesized {
                     expression: Box::new(bool_ident(receiver)),
@@ -992,6 +997,7 @@ fn single_branch_constant_taken_is_character_typed() {
             )),
             span: s(),
         };
+        beamtalk_core::ast::normalize::peel_operand_parens_expr(&mut parenthesized);
         assert!(
             is_character_typed_receiver(&parenthesized),
             "parenthesized `{receiver} {keyword} [$A]` must be Character-typed"
