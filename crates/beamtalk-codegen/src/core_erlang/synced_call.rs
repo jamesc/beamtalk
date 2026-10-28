@@ -1640,6 +1640,12 @@ impl CoreErlangGenerator {
     /// when the loop needs no store (identical code, hybrid (loud), or
     /// nested stateless (the need propagated outward)), so the caller
     /// splices it unconditionally.
+    ///
+    /// BT-4180: a loop that does not bracket itself but sits in an enclosing
+    /// bracketed region (the read choke point answers the cell,
+    /// [`Self::actor_state_read_source`]) seeds its exit packs
+    /// from the cell too: its plan's initial state is the region's entry
+    /// `State`, which the region's slow paths have overtaken.
     pub(in crate::core_erlang) fn checkout_guarded_op_loop_docs(
         &mut self,
         marker: GuardedOpLoopMarker,
@@ -1657,7 +1663,11 @@ impl CoreErlangGenerator {
             ];
             (true, prestore)
         } else {
-            (bracket, Document::Nil)
+            let in_region = matches!(
+                self.actor_state_read_source(StateReadSite::LoopPlanInitialState, None, at),
+                Some(ActorStateSource::Cell)
+            );
+            (bracket || in_region, Document::Nil)
         }
     }
 

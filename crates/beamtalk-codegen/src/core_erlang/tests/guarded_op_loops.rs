@@ -1062,3 +1062,23 @@ fn pin_bug_bt4255_non_carried_loop_nested_in_a_bracketing_loop() {
         "{report}"
     );
 }
+
+#[test]
+fn nested_loop_exit_in_a_bracketed_region_seeds_from_the_cell() {
+    // BT-4180 (found by the local-producer agreement corpus): a `detect:`
+    // that does not bracket itself, in a conditional arm of a fold whose
+    // walk brackets the `ifNone:` operator, rebuilt its exit state from its
+    // plan's initial state — the fold's entry `State`. In a bracketed region
+    // the exit pack seeds from the cell; with the read choke point faulted
+    // the checkout reports the plan's initial state.
+    let src = format!(
+        "{ACTOR_PREAMBLE}  go =>\n    t := 0\n    s := 0\n    #(1, 2) do: [:k | (s == 3) ifTrue: [#(1, 2) detect: [:x | x == 5] ifNone: [t := t + 1]]]\n    t\n"
+    );
+    assert_eq!(enforce_report(&src), None);
+    let (_, report) = entry_state_read_reports(vec![src]).remove(0);
+    let report = report.expect("faulted compile should report");
+    assert!(
+        report.contains("StaleReadInBracketedLoop") && report.contains("LoopPlanInitialState"),
+        "loud stale-read finding:\n{report}"
+    );
+}
