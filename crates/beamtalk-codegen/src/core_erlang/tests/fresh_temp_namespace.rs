@@ -153,13 +153,13 @@ fn temps_and_user_names_are_disjoint() {
 /// None can share a binding with user code: a user `_`-identifier maps to
 /// `_@<name>` and none of these contains [`TEMP_MARKER`]. Before BT-4247 the
 /// one reachable entry was `_Unit` (see the module doc); the rest are bound
-/// in module boilerplate with no user code in scope (gen_server callbacks,
+/// in module boilerplate with no user code in scope (`gen_server` callbacks,
 /// `register_class`, spawn/`new`, protocol registration, `dispatch`/4
 /// fallbacks), in `@primitive` method bodies, which hold no user statements
-/// (`_H`, `_T`, `_Value`, `_Reason`), as parameters read only in the prologue before user code
-/// (`_ExtArgs`, `_DirectClassSelf`, `_ClassSelf`, `_InitArgs`, `_Selector`),
-/// or as tail bindings whose body is generated code only (`_SuperTuple`,
-/// `_Result`, `_NewState`, `_ReturnValue`, `_ExtReply`).
+/// (`_H`, `_T`, `_Value`, `_Reason`), as parameters read only in the
+/// prologue before user code (`_ExtArgs`, `_DirectClassSelf`, `_ClassSelf`,
+/// `_InitArgs`, `_Selector`), or as tail bindings whose body is generated
+/// code only (`_SuperTuple`, `_Result`, `_NewState`, `_ReturnValue`).
 ///
 /// A name added here must be hand-written (never derived from a user
 /// identifier) and must not contain [`TEMP_MARKER`].
