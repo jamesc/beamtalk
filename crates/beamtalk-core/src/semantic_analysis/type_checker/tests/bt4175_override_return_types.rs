@@ -205,11 +205,13 @@ Protocol define: Printable
   printString -> String
 ";
 
-/// Pins the `Binary>>asString` case against `Printable`: `Binary` responds to
-/// both selectors, but `asString` answers a `Result`, so `:: Printable` code
-/// that statically sees `String` can get a `Result` at runtime.
+/// `Binary>>asString` widens the inherited, `Printable`-conforming
+/// `Collection>>asString -> String`. That unsoundness is reported once, at
+/// the override (where the stdlib suppresses it with `@expect type`), not at
+/// every call site that passes a `Binary` to a `:: Printable` parameter —
+/// callers can't fix it.
 #[test]
-fn binary_passed_as_printable_warns_on_as_string_return_type() {
+fn binary_passed_as_printable_is_not_rewarned_at_call_site() {
     let source = format!(
         r"{PRINTABLE}
 Object subclass: Caller
@@ -218,26 +220,77 @@ Object subclass: Caller
 "
     );
     let diags = type_diagnostics(&source);
-    let hits = protocol_return_warnings(&diags);
-    assert_eq!(
-        hits.len(),
-        1,
-        "expected one protocol return warning: {diags:#?}"
-    );
-    assert_eq!(hits[0].severity, Severity::Warning);
     assert!(
-        hits[0]
-            .message
-            .contains("Binary>>asString returns Result(String, Error)")
-            && hits[0].message.contains("Printable's String"),
-        "unexpected message: {}",
-        hits[0].message
+        protocol_return_warnings(&diags).is_empty(),
+        "inherited-widening mismatch belongs to the override site: {diags:#?}"
     );
     assert!(
         !diags
             .iter()
             .any(|d| d.message.contains("does not conform to protocol")),
         "selector-presence conformance still holds: {diags:#?}"
+    );
+}
+
+/// A user override that widens a conforming inherited return type warns
+/// once at its definition and is silent at the protocol-typed call site.
+#[test]
+fn user_override_widening_conforming_parent_warns_at_definition_only() {
+    let source = format!(
+        r#"{PRINTABLE}
+Object subclass: Base
+  asString -> String => "b"
+
+Base subclass: Derived
+  asString -> Integer => 1
+
+Object subclass: Caller
+  show: p :: Printable -> String => p printString
+  run => self show: Derived new
+"#
+    );
+    let diags = type_diagnostics(&source);
+    assert_eq!(
+        override_return_warnings(&diags).len(),
+        1,
+        "expected the override warning: {diags:#?}"
+    );
+    assert!(
+        protocol_return_warnings(&diags).is_empty(),
+        "no duplicate call-site warning: {diags:#?}"
+    );
+}
+
+/// The parent itself violating the protocol keeps the call-site warning:
+/// no override site covers that mismatch.
+#[test]
+fn override_of_non_conforming_parent_still_warns_at_call_site() {
+    let source = format!(
+        r#"{PRINTABLE}
+Object subclass: Base
+  asString -> Integer => 1
+
+Base subclass: Derived
+  asString -> Integer => 2
+
+Object subclass: Caller
+  show: p :: Printable -> String => p printString
+  run => self show: Derived new
+"#
+    );
+    let diags = type_diagnostics(&source);
+    let hits = protocol_return_warnings(&diags);
+    assert_eq!(
+        hits.len(),
+        1,
+        "expected one protocol return warning: {diags:#?}"
+    );
+    assert!(
+        hits[0]
+            .message
+            .contains("Derived>>asString returns Integer"),
+        "unexpected message: {}",
+        hits[0].message
     );
 }
 

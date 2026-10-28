@@ -294,9 +294,6 @@ impl DeclaredType {
         DeclaredType::Union(members)
     }
 
-    /// `true` when `self`, used as an operand of `\`, must be parenthesised
-    /// for the printed form to re-parse to the same value — mirrors
-    /// [`TypeAnnotation::needs_parens_in_difference`].
     /// `true` when any bare name anywhere inside this type (a `Simple`
     /// name or a generic base) is one of `names` — e.g. a class's or
     /// protocol's own type parameters, which a caller without a substitution
@@ -323,6 +320,9 @@ impl DeclaredType {
         }
     }
 
+    /// `true` when `self`, used as an operand of `\`, must be parenthesised
+    /// for the printed form to re-parse to the same value — mirrors
+    /// [`TypeAnnotation::needs_parens_in_difference`].
     fn needs_parens_in_difference(&self, is_excluded: bool) -> bool {
         match self {
             Self::Union(_) | Self::FalseOr(_) | Self::Intersection { .. } => true,

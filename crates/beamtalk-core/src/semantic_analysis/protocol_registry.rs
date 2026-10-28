@@ -645,7 +645,10 @@ impl ProtocolRegistry {
     /// [`TypeChecker::is_return_type_refinement`](crate::semantic_analysis::type_checker::TypeChecker::is_return_type_refinement).
     /// Requirements or methods without a declared return type are skipped,
     /// as is any requirement whose return type names one of the protocol's
-    /// own type parameters (no substitution context here). Instance side only.
+    /// own type parameters (no substitution context here). A mismatch that an
+    /// override introduces by widening an inherited, conforming return type
+    /// is skipped: the override check reports it once at the definition.
+    /// Instance side only.
     #[must_use]
     pub fn conformance_return_type_mismatches(
         &self,
@@ -675,16 +678,55 @@ impl ProtocolRegistry {
             let Some(ref actual) = method.return_type else {
                 continue;
             };
-            if !TypeChecker::is_return_type_refinement(actual, &expected, hierarchy) {
-                mismatches.push(ReturnTypeMismatch {
-                    selector: req.selector.clone(),
-                    defined_in: method.defined_in.clone(),
-                    actual: actual.clone(),
-                    expected,
-                });
+            if TypeChecker::is_return_type_refinement(actual, &expected, hierarchy) {
+                continue;
             }
+            // An override that widens an inherited return type which already
+            // satisfies the protocol is reported once, at the override's
+            // definition (`check_override_return_compatibility`), where
+            // `@expect type` can suppress a deliberate widening such as
+            // `Binary>>asString`. Re-reporting it at every call site that
+            // passes the class to a protocol-typed parameter would be noise
+            // the caller cannot fix.
+            if Self::widens_conforming_inherited_return(
+                &method.defined_in,
+                &req.selector,
+                &expected,
+                hierarchy,
+            ) {
+                continue;
+            }
+            mismatches.push(ReturnTypeMismatch {
+                selector: req.selector.clone(),
+                defined_in: method.defined_in.clone(),
+                actual: actual.clone(),
+                expected,
+            });
         }
         mismatches
+    }
+
+    /// `true` when `defined_in`'s superclass chain declares `selector` with a
+    /// return type that refines `expected` — i.e. the protocol mismatch is
+    /// introduced by `defined_in`'s override alone.
+    fn widens_conforming_inherited_return(
+        defined_in: &str,
+        selector: &str,
+        expected: &DeclaredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        let Some(superclass) = hierarchy
+            .get_class(defined_in)
+            .and_then(|c| c.superclass.clone())
+        else {
+            return false;
+        };
+        hierarchy
+            .find_method(&superclass, selector)
+            .and_then(|parent| parent.return_type)
+            .is_some_and(|parent_rt| {
+                TypeChecker::is_return_type_refinement(&parent_rt, expected, hierarchy)
+            })
     }
 
     /// `true` when `class_name`'s *known* method surface resolves every
