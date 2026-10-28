@@ -82,3 +82,16 @@ TestCase subclass: ClassSideBehaviourProtocolTest
 
   testSealedDirectCalledClassMethodSuperNameInClosure =>
     self assert: Bt4252ClassProtocolSealed superNameInClosure equals: #(#Bt4252ClassProtocolSealed)
+
+  // `doc`'s primitive messages the class process, which cannot answer from
+  // inside one of its own class methods: a structured error naming the send,
+  // not a raw `calling_self` exit.
+  testActorClassMethodSelfDocInClassProcessRaisesStructuredError =>
+    self should: [Bt4252ClassProtocolActorChild selfDoc] raise: #dispatch_error
+    selector := [
+      Bt4252ClassProtocolActorChild selfDoc
+    ] on: Exception do: [:e | e selector]
+    self assert: selector equals: #doc
+
+  testSealedDirectCalledClassMethodSelfDoc =>
+    self assert: Bt4252ClassProtocolSealed selfDoc equals: Bt4252ClassProtocolSealed doc

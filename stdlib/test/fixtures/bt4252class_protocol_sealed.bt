@@ -16,3 +16,7 @@ sealed Bt4252ClassProtocolObjectBase subclass: Bt4252ClassProtocolSealed
   class sealed superSuperclass => super superclass
 
   class sealed superNameInClosure => #(1) collect: [:x | super name]
+
+  // Direct-called in the caller, so even `doc` (whose primitive messages the
+  // class process) answers.
+  class sealed selfDoc => self doc

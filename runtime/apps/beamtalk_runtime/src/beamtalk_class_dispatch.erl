@@ -558,11 +558,38 @@ class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag) ->
                 class_mod = self_dispatch_module(ReceiverName),
                 pid = ReceiverPid
             },
-            case try_class_chain_fallthrough(ClassSelf, Selector, Args) of
+            try try_class_chain_fallthrough(ClassSelf, Selector, Args) of
                 {ok, Result} -> Result;
                 not_found -> raise_class_self_dnu(ClassName, Selector)
+            catch
+                %% A protocol method whose implementation `gen_server:call`s the
+                %% receiving class (e.g. `doc`) cannot answer from inside that
+                %% class's own process: report it as a structured error instead
+                %% of the opaque `calling_self` exit. Anything else propagates.
+                exit:{calling_self, _} when ReceiverPid =:= self() ->
+                    raise_class_self_protocol_self_call(ReceiverName, Selector)
             end
     end.
+
+-spec raise_class_self_protocol_self_call(class_name(), selector()) -> no_return().
+raise_class_self_protocol_self_call(ClassName, Selector) ->
+    %% Atom-safe formatting — see note on raise_class_self_dnu/2.
+    Hint = iolist_to_binary(
+        io_lib:format(
+            "'~ts' is class-object protocol whose implementation messages the "
+            "'~ts' class process, so it cannot answer from inside one of its "
+            "own class methods. Send `~ts ~ts` from outside the class method "
+            "instead.",
+            [
+                atom_to_list(Selector),
+                atom_to_list(ClassName),
+                atom_to_list(ClassName),
+                atom_to_list(Selector)
+            ]
+        )
+    ),
+    Error = beamtalk_error:new(dispatch_error, ClassName, Selector, Hint),
+    beamtalk_error:raise(Error).
 
 -doc """
 ADR 0084: Dispatch a class-method self-send that may resolve to the

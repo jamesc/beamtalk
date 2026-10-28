@@ -16,3 +16,7 @@ Bt4252ClassProtocolActorBase subclass: Bt4252ClassProtocolActorChild
   class superSuperclass => super superclass
 
   class superNameInClosure => #(1) collect: [:x | super name]
+
+  // `doc` is protocol whose primitive messages the class process, so from a
+  // class method running in that process it raises a structured error.
+  class selfDoc => self doc
