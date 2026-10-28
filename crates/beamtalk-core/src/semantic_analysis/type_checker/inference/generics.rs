@@ -291,6 +291,12 @@ impl TypeChecker {
         class_name: &str,
     ) -> HashMap<EcoString, InferredType> {
         let mut method_subst = HashMap::new();
+        // Bindings observed in a `Block(..., R)` param's *result* slot, kept
+        // apart from argument-position bindings so alternative arms sharing
+        // one type variable (`ifTrue: Block(R) ifFalse: Block(R) -> R`) are
+        // joined with branch (union) semantics rather than unified with
+        // Known-beats-Dynamic (BT-4207). Ordered for deterministic output.
+        let mut branch_arms: Vec<(EcoString, Vec<InferredType>)> = Vec::new();
 
         // Identify which single-letter uppercase identifiers in param/return types
         // are NOT class-level type params — those are method-local.
@@ -358,25 +364,58 @@ impl TypeChecker {
                     arg_ty
                 };
 
-                // Match against the argument's actual type if it's a Known type
-                if let InferredType::Known {
+                let is_method_local = |name: &EcoString| {
+                    crate::semantic_analysis::type_checker::is_generic_type_param(name)
+                        && !class_type_params.contains(name)
+                        && !hierarchy.has_class(name)
+                };
+
+                if declared_base == "Block" {
+                    // A `Block(P1, ..., Pn, R)` param: the last declared slot
+                    // is the block's *result*, aligned with the argument
+                    // block's last type arg (its arity may differ from the
+                    // declared one, e.g. `ifNotNil: Block(R)` given `[:v |
+                    // ...]`); the leading slots are its parameters. A
+                    // Dynamic or bare `Block` argument contributes an
+                    // unknown result arm, so a sibling arm cannot claim
+                    // the whole join (BT-4207).
+                    let Some((result_decl, param_decls)) = declared_params.split_last() else {
+                        continue;
+                    };
+                    let (actual_params, actual_result) = Self::split_block_arg(effective_arg);
+                    for (declared, actual) in param_decls.iter().zip(actual_params.iter()) {
+                        let decl_eco: EcoString = (*declared).into();
+                        if is_method_local(&decl_eco) {
+                            Self::merge_method_local_binding(
+                                &mut method_subst,
+                                decl_eco,
+                                actual.clone(),
+                            );
+                        }
+                    }
+                    let result_eco: EcoString = (*result_decl).into();
+                    if let Some(actual) = actual_result
+                        && is_method_local(&result_eco)
+                    {
+                        match branch_arms.iter_mut().find(|(k, _)| *k == result_eco) {
+                            Some((_, arms)) => arms.push(actual),
+                            None => branch_arms.push((result_eco, vec![actual])),
+                        }
+                    }
+                } else if let InferredType::Known {
                     class_name: arg_class,
                     type_args,
                     ..
                 } = effective_arg
                 {
-                    // Verify the base class matches (e.g., Block == Block, Result == Result)
+                    // Verify the base class matches (e.g., Result == Result)
                     if arg_class.as_str() == declared_base && !type_args.is_empty() {
                         // Zip declared params with actual type args positionally
                         for (declared, actual) in declared_params.iter().zip(type_args.iter()) {
                             let decl_eco: EcoString = (*declared).into();
                             // Only infer if this is a method-local type param
                             // (single uppercase letter, not a class-level param, not a known class)
-                            if crate::semantic_analysis::type_checker::is_generic_type_param(
-                                &decl_eco,
-                            ) && !class_type_params.contains(&decl_eco)
-                                && !hierarchy.has_class(&decl_eco)
-                            {
+                            if is_method_local(&decl_eco) {
                                 Self::merge_method_local_binding(
                                     &mut method_subst,
                                     decl_eco,
@@ -389,19 +428,89 @@ impl TypeChecker {
             }
         }
 
+        // Join each type variable's block-result arms first (branch
+        // semantics), then unify that join with any argument-position
+        // binding for the same variable (Known-beats-Dynamic).
+        for (key, arms) in branch_arms {
+            Self::merge_method_local_binding(&mut method_subst, key, Self::join_branch_arms(&arms));
+        }
+
         method_subst
+    }
+
+    /// Split an argument passed to a `Block(...)` param into its parameter
+    /// types and its result type (the last type arg). A bare `Block` or a
+    /// `Dynamic` argument has no parameter types and an unknown
+    /// (`Dynamic(Unknown)`) result; any other argument contributes nothing.
+    fn split_block_arg(arg: &InferredType) -> (&[InferredType], Option<InferredType>) {
+        let unknown = || Some(InferredType::Dynamic(DynamicReason::Unknown));
+        match arg {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } if class_name.as_str() == "Block" => match type_args.split_last() {
+                Some((result, params)) => (params, Some(result.clone())),
+                None => (&[], unknown()),
+            },
+            InferredType::Dynamic(_) => (&[], unknown()),
+            _ => (&[], None),
+        }
+    }
+
+    /// Join the result types of alternative block arms that share one
+    /// method-local type variable — e.g. `R` in `ifTrue: Block(R) ifFalse:
+    /// Block(R) -> R`, `ifNil:ifNotNil:`, `ifOk:ifError:` (BT-4207).
+    ///
+    /// Exactly one arm runs, so the result is the *union* of the arms. A
+    /// `Dynamic` arm therefore makes the join `Dynamic`: letting a concrete
+    /// arm win (as argument-position unification in
+    /// [`Self::merge_method_local_binding`] does) would type
+    /// `c ifTrue: [d foo] ifFalse: [nil]` as plain `Nil` and flag every
+    /// later send as a DNU on `UndefinedObject`.
+    ///
+    /// - An `ExplicitDynamic` arm is authoritative and survives as-is
+    ///   (BT-2865).
+    /// - A `Dynamic` arm mixed with a concrete arm yields
+    ///   `Dynamic(DynamicBranch)`, a non-root-cause reason that does not
+    ///   re-warn "Dynamic in typed class" — the `Dynamic` arm already
+    ///   reported itself at its source (BT-2039's single-warning intent).
+    /// - `Never` arms (`[self error: ...]`) are the union identity and are
+    ///   skipped; otherwise arms combine via [`InferredType::union_of`].
+    pub(in crate::semantic_analysis::type_checker) fn join_branch_arms(
+        arms: &[InferredType],
+    ) -> InferredType {
+        if let Some(explicit) = arms
+            .iter()
+            .find(|ty| matches!(ty, InferredType::Dynamic(DynamicReason::ExplicitDynamic)))
+        {
+            return explicit.clone();
+        }
+        let has_dynamic = arms.iter().any(|ty| matches!(ty, InferredType::Dynamic(_)));
+        let has_concrete = arms
+            .iter()
+            .any(|ty| !matches!(ty, InferredType::Dynamic(_) | InferredType::Never));
+        if has_dynamic && has_concrete {
+            return InferredType::Dynamic(DynamicReason::DynamicBranch);
+        }
+        InferredType::union_of(arms)
     }
 
     /// Merge a new binding for a method-local type parameter, preferring Known
     /// types over Dynamic — except an *explicitly declared*
     /// `Dynamic` binding, which is authoritative and always wins.
     ///
+    /// This is *argument-position unification* (e.g. `inject: initial :: A
+    /// into: Block(A, E, A)`'s `A` seen as both the initial value and a block
+    /// parameter). Alternative block *results* sharing one type variable
+    /// (`ifTrue: Block(R) ifFalse: Block(R) -> R`) are first combined by
+    /// [`Self::join_branch_arms`] with union semantics, where a Dynamic arm
+    /// is not discarded (BT-4207); only that joined result reaches this merge.
+    ///
     /// When the same type parameter appears in multiple argument
-    /// positions (e.g. `Block(R) Block(R) -> R` in `ifTrue:ifFalse:`), a
-    /// last-wins `insert` could collapse a Known return type to
-    /// `Dynamic(UntypedFfi)` whenever one branch was an untyped FFI call.
-    /// Preserve the Known binding instead so the method's declared return
-    /// type survives the join. This applies broadly — every `DynamicReason`
+    /// positions, a last-wins `insert` could collapse a Known binding to
+    /// `Dynamic(UntypedFfi)` whenever one position was an untyped FFI call.
+    /// Preserve the Known binding instead. This applies broadly — every `DynamicReason`
     /// other than `ExplicitDynamic` means "we don't have enough information
     /// to give a concrete type", so Known wins regardless of *which*
     /// uninformative reason it is or which side arrived first (an earlier,
