@@ -266,7 +266,7 @@ Object subclass: Caller
 #[test]
 fn override_of_non_conforming_parent_still_warns_at_call_site() {
     let source = format!(
-        r#"{PRINTABLE}
+        r"{PRINTABLE}
 Object subclass: Base
   asString -> Integer => 1
 
@@ -276,7 +276,7 @@ Base subclass: Derived
 Object subclass: Caller
   show: p :: Printable -> String => p printString
   run => self show: Derived new
-"#
+"
     );
     let diags = type_diagnostics(&source);
     let hits = protocol_return_warnings(&diags);
