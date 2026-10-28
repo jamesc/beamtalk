@@ -839,13 +839,13 @@ impl TypeChecker {
         // must not fail just because it's unresolved.
         if expected.starts_with('#') && !expected.contains('|') {
             return actual == expected
-                || super::is_generic_type_param(actual)
+                || super::is_type_var_placeholder(actual, hierarchy)
                 || WellKnownClass::from_str(actual) == Some(WellKnownClass::Dynamic);
         }
         if actual.starts_with('#') && !actual.contains('|') {
             // Singletons are subtypes of Symbol — check if expected is Symbol
             // or an ancestor of Symbol in the class hierarchy.
-            if super::is_generic_type_param(expected) {
+            if super::is_type_var_placeholder(expected, hierarchy) {
                 return true;
             }
             let symbol: EcoString = "Symbol".into();
@@ -956,7 +956,7 @@ impl TypeChecker {
     fn declared_type_is_opaque(ty: &DeclaredType, hierarchy: &ClassHierarchy) -> bool {
         match ty {
             DeclaredType::Simple(name) => {
-                super::is_generic_type_param(name)
+                super::is_type_var_placeholder(name, hierarchy)
                     || WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic)
                     || hierarchy.is_protocol_class(name)
             }
@@ -1023,8 +1023,10 @@ impl TypeChecker {
         }
         actual_args.iter().zip(expected_args.iter()).all(|(a, e)| {
             // Generic placeholders (T, E, K, V) are symbolic — treat as
-            // compatible, matching `type_args_compatible`.
-            if super::is_generic_type_param(a) || super::is_generic_type_param(e) {
+            // compatible, with the same predicate `type_args_compatible` uses.
+            if super::is_type_var_placeholder(a, hierarchy)
+                || super::is_type_var_placeholder(e, hierarchy)
+            {
                 return true;
             }
             Self::is_type_compatible(&a.as_str().into(), &e.as_str().into(), hierarchy)
@@ -1089,7 +1091,9 @@ impl TypeChecker {
         else {
             return true; // Dynamic / Never on either side — skip
         };
-        if super::is_generic_type_param(exp_name) || super::is_generic_type_param(act_name) {
+        if super::is_type_var_placeholder(exp_name, hierarchy)
+            || super::is_type_var_placeholder(act_name, hierarchy)
+        {
             return true;
         }
         if !Self::is_type_compatible(act_name, exp_name, hierarchy) {
@@ -1615,7 +1619,7 @@ impl TypeChecker {
                     if !instance_compat && !class_literal_compat {
                         let param_pos = i + 1;
                         // Use hint severity for generic type params (likely false positive)
-                        let is_generic = super::is_generic_type_param(actual_ty);
+                        let is_generic = super::is_type_var_placeholder(actual_ty, hierarchy);
                         // Render `UndefinedObject` as `Nil` in user-facing messages.
                         let actual_display =
                             InferredType::class_name_for_diagnostic(actual_ty.as_str());
@@ -2441,7 +2445,7 @@ impl TypeChecker {
         let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
         let is_concat = operator == "++"
             && WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String);
-        let is_generic = super::is_generic_type_param(arg_ty);
+        let is_generic = super::is_type_var_placeholder(arg_ty, hierarchy);
         // Render `UndefinedObject` as `Nil` in user-facing messages.
         let arg_display = InferredType::class_name_for_diagnostic(arg_ty.as_str());
         let receiver_display = InferredType::class_name_for_diagnostic(receiver_ty.as_str());
@@ -3610,7 +3614,7 @@ impl TypeChecker {
         members.iter().any(|member| {
             let member = member.trim();
             if let Some(declared_base) = member.strip_suffix(" class") {
-                if super::is_generic_type_param(declared_base.trim()) {
+                if super::is_type_var_placeholder(declared_base.trim(), hierarchy) {
                     return true;
                 }
                 let declared_base: EcoString = declared_base.into();
@@ -3618,7 +3622,7 @@ impl TypeChecker {
             }
             // A type-parameter member (`T | Nil`, `T class`) cannot be judged until the
             // class is instantiated: accept, as `is_type_compatible` does.
-            if super::is_generic_type_param(member) {
+            if super::is_type_var_placeholder(member, hierarchy) {
                 return true;
             }
             let member: EcoString = if union {
