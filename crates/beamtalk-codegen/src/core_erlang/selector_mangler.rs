@@ -293,11 +293,7 @@ mod tests {
     /// `beamtalk_class_dispatch_tests:class_method_fun_name_matches_shared_corpus_test/0`.
     #[test]
     fn safe_class_method_fn_name_matches_shared_corpus() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crates/")
-            .parent()
-            .expect("repo root")
+        let path = crate::core_erlang::tests::repo_root()
             .join("runtime/apps/beamtalk_runtime/test/fixtures/class_method_fun_name_corpus.json");
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));

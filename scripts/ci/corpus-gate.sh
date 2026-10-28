@@ -10,8 +10,19 @@
 #
 # The tier's tests call the compiler in-process (beamtalk-core, beamtalk-codegen,
 # beamtalk-repl; the `corpus_tests` filterset in the Justfile is scoped to those
-# three packages) and never touch the runtime, the CLI or the stdlib sources, so
-# only those crates and the build/test configuration are listed.
+# three packages) and never run the runtime or the CLI, so those crates and
+# the build/test configuration are listed. They do read two kinds of input from
+# outside those crates, and a change to either alone can flip their verdict
+# (BT-4261):
+#   - the Beamtalk sources under stdlib/ and examples/, which many of them
+#     compile as their corpus (e.g. match_fallthrough_goto's
+#     `goto_labels_are_applied_in_tail_position_over_the_corpus`,
+#     escape_corpus_conformance, paren_transparency's stdlib/test corpus);
+#   - the runtime's shared cross-language conformance fixtures
+#     (runtime/apps/*/test/fixtures/), which the `*_matches_shared_corpus`
+#     tests read (the `_corpus` in their name puts them in this tier).
+# Both are listed by directory, failing closed rather than guessing which
+# files a corpus reads.
 set -euo pipefail
 
 # Read every line before exiting: both callers pipe into this script under
@@ -23,6 +34,7 @@ while IFS= read -r path; do
   [[ -z "$path" ]] && continue
   case "$path" in
     crates/beamtalk-core/*|crates/beamtalk-codegen/*|crates/beamtalk-repl/*) hit=0 ;;
+    stdlib/*|examples/*|runtime/apps/*/test/fixtures/*) hit=0 ;;
     Cargo.toml|Cargo.lock|Justfile|.github/workflows/ci.yml|scripts/ci/corpus-gate.sh) hit=0 ;;
   esac
 done

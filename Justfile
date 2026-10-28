@@ -46,8 +46,9 @@ doctor:
 # nothing but such proofs. Scoped by package so that a same-named test in another
 # crate (beamtalk-examples' class_corpus, beamtalk-cli's cli_class_var_agreement)
 # stays in the fast tier, where its own crate's changes run it; the gate that
-# decides when this tier runs (scripts/ci/corpus-gate.sh) watches exactly these
-# three crates.
+# decides when this tier runs (scripts/ci/corpus-gate.sh) watches these three
+# crates plus the stdlib/ and examples/ sources the corpora compile and the
+# runtime's shared conformance fixtures the `*_matches_shared_corpus` tests read.
 corpus_tests := "package(/^beamtalk-(core|codegen|repl)$/) & (test(/agreement|_corpus/) | binary(/agreement|repl_local_producer/))"
 
 # Run local CI checks (combination of GitHub Actions check + test jobs)
@@ -143,7 +144,7 @@ ci-changed:
     if printf '%s\n' "$changed_files" | scripts/ci/corpus-gate.sh; then
       just test-corpus
     else
-      echo "⏭️  compiler crates untouched — skipping the Rust corpus tier (just test-corpus; CI's test-corpus job runs the same gate)"
+      echo "⏭️  compiler crates, stdlib/, examples/ and runtime fixtures untouched — skipping the Rust corpus tier (just test-corpus; CI's test-corpus job runs the same gate)"
     fi
 
 # Windows: path-based skip logic below is unix-only for now — run the full suite.

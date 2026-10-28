@@ -862,9 +862,8 @@ fn non_tagged_exclusions_match_shared_runtime_routing_fixture() {
     use crate::core_erlang::dispatch_codegen::{EXCEPTION_ROOT_CLASS, NON_TAGGED_MAP_CLASSES};
     use std::collections::BTreeSet;
 
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
-        "../../runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json",
-    );
+    let path = super::repo_root()
+        .join("runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json");
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
     let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture is JSON");
 
