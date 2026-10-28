@@ -327,11 +327,12 @@ class_super_dispatch(ClassName, Selector, Args, ReceiverTag) when
                 %% own class methods (then its ancestors') answer instead.
                 %% `find_class_method_from_class/2` walks class methods only,
                 %% so a higher ancestor's class-side extension is not
-                %% re-probed on this path. That is harmless: the send raced a
-                %% concurrent unregister, so either registry snapshot is a
-                %% valid answer, the walk still starts at `AncestorName`
-                %% (never `ClassName`, so no self-recursion), and the next
-                %% send sees the settled registry through the full probe.
+                %% re-probed on this path. That is harmless: the answer can
+                %% only differ when a higher ancestor also extends `Selector`
+                %% and this send raced a concurrent unregister of the nearer
+                %% one; the walk still starts at `AncestorName` (never
+                %% `ClassName`, so no self-recursion), and the next send sees
+                %% the settled registry through the full probe.
                 not_found ->
                     class_self_dispatch_chain(
                         ClassName,
@@ -580,8 +581,9 @@ class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
 -doc """
 Shared extension-registry probe for `class_self_send/3`,
 `class_self_dispatch_local/3` and `class_super_dispatch/4` — checking whether
-`ClassName`'s metaclass tag has a matching class-side extension (`beamtalk_extensions`, ADR 0066) before either
-function falls through to its local/inherited-method lookups. Mirrors
+`ClassName`'s metaclass tag has a matching class-side extension
+(`beamtalk_extensions`, ADR 0066) before the caller falls through to its
+local/inherited-method lookups. Mirrors
 `handle_class_method_call/6`'s priority order (extension before
 local method table).
 

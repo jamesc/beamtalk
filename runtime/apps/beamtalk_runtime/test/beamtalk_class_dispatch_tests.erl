@@ -2671,7 +2671,7 @@ test_class_self_dispatch_extension_crash_surfaces_error() ->
 class_self_dispatch_extension_priority_test_() ->
     {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
         [
-            {"class_self_send/3 checks the extension before walking the superclass chain",
+            {"class_self_send/3 checks the extension before walking the class chain",
                 fun test_class_self_dispatch_extension_priority_over_inherited/0},
             {"class_self_dispatch_local/3 checks the extension before its own runtime class method",
                 fun test_class_self_dispatch_local_extension_priority_over_runtime_fun/0}
