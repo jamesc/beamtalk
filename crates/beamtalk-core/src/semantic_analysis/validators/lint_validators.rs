@@ -834,7 +834,7 @@ fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
 /// answered `v`, so code written for that meaning now answers something
 /// else. This is a one-release migration warning (category
 /// [`DiagnosticCategory::Deprecation`], so `beamtalk build` shows it but
-/// `--warnings-as-errors` does not promote it); a follow-up issue removes it
+/// `--warnings-as-errors` does not promote it); BT-4234 removes it
 /// after the next release.
 ///
 /// Fires only on instance methods of classes codegen compiles as value
