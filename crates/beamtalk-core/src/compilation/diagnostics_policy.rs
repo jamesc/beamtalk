@@ -155,6 +155,7 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     ("class-state-abroad", DiagnosticCategory::ClassStateAbroad),
     ("class-process-ffi", DiagnosticCategory::ClassProcessFfi),
     ("actor-state-abroad", DiagnosticCategory::ActorStateAbroad),
+    ("ffi-nested-string", DiagnosticCategory::FfiNestedString),
     (
         "handleinfo-no-catch-all",
         DiagnosticCategory::HandleInfoNoCatchAll,
@@ -598,6 +599,7 @@ fn expect_category_unchecked(
         | ExpectCategory::MatchArmBlock
         | ExpectCategory::ClassStateAbroad
         | ExpectCategory::ClassProcessFfi
+        | ExpectCategory::FfiNestedString
         // Deprecated, parse-only (ADR 0130): nothing produces it, so it is
         // never "unchecked" — it is reported stale like any unmatched directive.
         | ExpectCategory::StoredClosure => false,
@@ -915,6 +917,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::ActorStateAbroad,
                     Some(DiagnosticCategory::ActorStateAbroad)
                 )
+                | (
+                    ExpectCategory::FfiNestedString,
+                    Some(DiagnosticCategory::FfiNestedString)
+                )
         )
 }
 
@@ -1104,6 +1110,7 @@ match-arm-block = "off"
 class-state-abroad = "off"
 class-process-ffi = "off"
 actor-state-abroad = "off"
+ffi-nested-string = "off"
 handleinfo-no-catch-all = "error"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();

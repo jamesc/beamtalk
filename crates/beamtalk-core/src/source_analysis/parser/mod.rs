@@ -680,6 +680,16 @@ pub enum DiagnosticCategory {
     /// creation-time values, and the send can deadlock. A lint, not a
     /// guarantee.
     ActorStateAbroad,
+    /// A `String` nested inside a collection argument (`List(String)`,
+    /// `Dictionary` keys or values, `Tuple(…, String, …)`, at
+    /// any depth) of an inline `Erlang <mod> <fn>:` call or a `native:`
+    /// `Object` `self delegate` to a stock (non-Beamtalk-owned) module
+    /// (BT-4243). The FFI boundary unwraps only top-level `String`s, so the
+    /// nested ones reach Erlang as tagged `{beamtalk_string, Bin}` terms and
+    /// an Erlang comparison against raw binaries (`lists:member/2`,
+    /// `maps:get/2`) silently misses. A hint, silent on `Dynamic` element
+    /// types (ADR 0100 Rule 1). Suppressible with `@expect ffi_nested_string`.
+    FfiNestedString,
     /// ADR 0131 §6 (BT-3745): a Tier 2 block value — a block literal that
     /// writes an outer local, or a local bound to one — flows to a send that
     /// has no way to return the write (anything but a control-flow construct,
