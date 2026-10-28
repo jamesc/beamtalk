@@ -50,7 +50,10 @@ fn user_wildcard_name_beside_wildcard_is_distinct_in_pattern() {
             !out.contains(&pattern),
             "`_` aliased user `{user}` in one pattern.\nCore:\n{out}"
         );
-        assert!(mentions(&out, &user), "user `{user}` must stay bound.\nCore:\n{out}");
+        assert!(
+            mentions(&out, &user),
+            "user `{user}` must stay bound.\nCore:\n{out}"
+        );
         assert_compiles_through_erlc("test", &out);
     }
 }
@@ -80,7 +83,15 @@ fn user_wildcard_name_outside_match_is_not_shadowed() {
 #[test]
 fn temps_and_user_names_are_disjoint() {
     let mut ctx = VariableContext::new();
-    for base in ["Wildcard", "Size", "Split", "Fallthrough", "temp", "my_var", ""] {
+    for base in [
+        "Wildcard",
+        "Size",
+        "Split",
+        "Fallthrough",
+        "temp",
+        "my_var",
+        "",
+    ] {
         let temp = ctx.fresh_var(base);
         assert!(temp.contains(TEMP_MARKER), "temp `{temp}` lacks the marker");
     }
