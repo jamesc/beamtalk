@@ -1260,6 +1260,19 @@ impl ThreadingPlan {
             .collect()
     }
 
+    /// BT-4180: notes that a lowering emits [`Self::initial_state_var`] as the
+    /// source of a state map (an exit-arm rebuild, a repack, a hybrid loop's
+    /// pre-extracted fields), for the checkout of an enclosing loop that
+    /// brackets: inside one that `State` is the loop-entry version.
+    pub(in crate::core_erlang) fn note_initial_state_read(&self, generator: &CoreErlangGenerator) {
+        generator.note_state_read(
+            crate::core_erlang::threaded_ir::StateReadSite::LoopPlanInitialState,
+            crate::core_erlang::threaded_ir::StaleReadDefect::ThreadedState,
+            &self.initial_state_var,
+            self.span,
+        );
+    }
+
     /// Generates the exit `{'nil', StateAcc}` expression for the false arm of a
     /// direct-params loop.
     ///
@@ -1281,19 +1294,6 @@ impl ThreadingPlan {
     /// is the loop's exit state. Without the flag the seed is the entry
     /// `State` exactly as before. Never seeds from the cell in a fresh-map
     /// frame (no callback installed one there).
-    /// BT-4180: notes that a lowering emits [`Self::initial_state_var`] as the
-    /// source of a state map (an exit-arm rebuild, a repack, a hybrid loop's
-    /// pre-extracted fields), for the checkout of an enclosing loop that
-    /// brackets: inside one that `State` is the loop-entry version.
-    pub(in crate::core_erlang) fn note_initial_state_read(&self, generator: &CoreErlangGenerator) {
-        generator.note_state_read(
-            crate::core_erlang::threaded_ir::StateReadSite::LoopPlanInitialState,
-            crate::core_erlang::threaded_ir::StaleReadDefect::ThreadedState,
-            &self.initial_state_var,
-            self.span,
-        );
-    }
-
     pub fn generate_exit_stateacc(
         &self,
         param_names: &[String],
