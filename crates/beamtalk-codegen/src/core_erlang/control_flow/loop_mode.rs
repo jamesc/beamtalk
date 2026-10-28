@@ -79,7 +79,21 @@ pub(in crate::core_erlang) struct LoopMode {
     /// `None` outside a direct-params loop, or when a direct-params loop
     /// site hasn't been updated to capture it (the accessor then falls back
     /// to the previous `current_state_var()` behaviour, unchanged).
+    ///
+    /// BT-4178: a tuple-accumulator fold binds no `StateAcc` map either (its
+    /// lambda's accumulator is a tuple of locals), and its body writes no
+    /// field (`ThreadingPlan::select_tuple_acc`), so
+    /// `generate_foldl_loop_body` captures the fold's entry state here too.
+    /// A hybrid loop body or condition binds its own `State` and clears the
+    /// capture while it lowers.
     pub(in crate::core_erlang) direct_params_outer_state_var: Option<String>,
+    /// BT-4178: one log per tuple-accumulator fold body being lowered,
+    /// innermost last: every name
+    /// `CoreErlangGenerator::current_field_read_state_var` answers inside
+    /// it. The fold's checkout verifies each is its entry state
+    /// (`threaded_ir::verify_tuple_acc_state_reads`). Behind a `RefCell`
+    /// because the accessor takes `&self`.
+    pub(in crate::core_erlang) tuple_acc_state_reads: std::cell::RefCell<Vec<Vec<String>>>,
 }
 
 impl LoopMode {
