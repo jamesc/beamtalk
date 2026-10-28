@@ -166,7 +166,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0137](0137-actor-closures-see-live-state.md) | Actor Closures See the Actor's Live State | Accepted | 2026-10-20 |
 | [0138](0138-string-literal-escape-sequences.md) | String Literal Escape Sequences | Accepted | 2026-10-25 |
 | [0139](0139-beam-abstraction-boundaries.md) | BEAM Abstraction Boundaries — What Leaks and What Doesn't | Accepted (amended 2026-10-26: post-acceptance review fixes) | 2026-10-26 |
-| [0140](0140-text-default-binaries.md) | Text-Default Binaries — a String Is the Raw Binary, Binary Is Explicit | Proposed | 2026-10-28 |
+| [0140](0140-text-default-binaries.md) | Text-Default Binaries — a String Is the Raw Binary, Binary Is Explicit | Rejected | 2026-10-28 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

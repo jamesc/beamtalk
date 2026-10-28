@@ -1,7 +1,53 @@
 # ADR 0140: Text-Default Binaries — a String Is the Raw Binary, Binary Is Explicit
 
 ## Status
-Proposed (2026-10-28)
+Rejected (2026-10-28). Kept as a record: the proposal below, the evidence, and why it was not adopted. If flipping the String/Binary representation is raised again, start from this record and its open questions.
+
+## Rejection
+
+The proposal (flip the default representation: a raw binary is a `String`, `Binary` is tagged) was reviewed in full and **rejected in favour of keeping BT-4170's representation**. BT-4243 is instead handled by a narrow lint. There were three reasons.
+
+**1. The evidence was overstated.** The first draft's audit counted tokens, including tests, `-spec`s and pattern clauses, instead of conversion sites in shipped code. Re-counted on the same sibling-repo clones:
+
+| Binaries from Erlang used as text | Draft claimed | Shipped code |
+|---|---|---|
+| native tagging (`string_from_binary` and helpers) | 133 | ≈ 30 |
+| `asStringUnchecked` in `.bt` | 52 | 8 (another 34 are in tests; 22 of those convert socket buffers, which stay bytes) |
+| buccaneer `stringOrOpaque:` | 27 | ≈ 10 |
+| **ratio of text to byte sites** | ≈ 20 : 1 | ≈ 4 : 1 |
+
+The flip would have removed about 50 conversions, not about 210. The draft also claimed no sibling repo persists Beamtalk terms. That is false: exdura's event store writes `Binary serialize:` output to disk (`event_store.bt:182-183`), so tagged Strings are already persisted, nested inside events.
+
+**2. The bug it fixes does not occur in practice.** A scan of every Erlang call in the shipped code of the sibling repos and the stdlib that passes a key or a collection to a comparing or lookup function found **no** instance of a Beamtalk String nested in an argument to an Erlang lookup:
+
+* every `proplists:get_value`/`is_defined` key is a Symbol;
+* `erlang:put`/`get` keys are tuples of Symbols and refs;
+* `binary:match` gets its String top-level.
+
+Beamtalk code uses `includes:`/`at:`/`detect:` on its own collections, and those compare Strings correctly. The day-to-day cost of the current design is a conversion tax of about 50 sites, not wrong answers.
+
+**3. The proposal had unresolved semantics.** An independent review found these questions, and any future revival must answer them:
+
+1. **Invalid UTF-8.** The draft said invalid UTF-8 raises, but that only holds for some of the String API. `includesSubstring:`, `startsWith:`, `split:` and `lines` are byte operations that never raise. `at:` raises the wrong error, and `trim` would silently return an error tuple. The inlined `string:` calls in codegen have no place to map `badarg` to `#invalid_utf8`. Which methods validate, which raise lazily, and which never raise?
+2. **Equality across the two classes.** `"abc" =:= "abc" asBinary` is false, and `hash` differs (`phash2` of raw vs tagged), so Dictionary and Set keys silently miss across the two classes. Accept and document it, or define byte equality across the hierarchy?
+3. **Result class of `concat:` and `part:size:`.** These are shared String/Binary selectors (`beamtalk_primitive.erl` shared-selector fast path, ADR 0086's return-class table). What would `aString concat: aBinary` and `aString part: 0 size: 3` answer?
+4. **Printing.** `printString`/`displayString` for String and Binary, each valid and invalid. This is a REPL display change.
+5. **Persisted data.** What happens to the tagged Strings exdura has written to disk? A deep rewrite in `Binary deserialize:`, a versioned format, or a declared incompatibility? And what about mixed-version distributed nodes? A `class_of`-only compatibility window does not reach nested terms, and it does not make `:: String` match them.
+6. **Mapping `badarg`.** How would `badarg` from inlined `string:` calls be mapped: a try/catch at each call site, or by routing through `beamtalk_string`?
+7. **Bitstrings.** Must `{beamtalk_binary, X}` require `is_binary(X)` (BT-4139 Bitstring)?
+8. **Stock byte producers.** Should the proxy automatically wrap results from `crypto`, `zlib`, `base64`, `term_to_binary` and `file:read_file` as `Binary`?
+
+Other gaps the review found:
+
+* The draft did not reconcile ADR 0086 (String is a kind of Binary; its return-class table).
+* It missed several places that hard-code the tag: the Tuple type test's String exclusion, the inlined `class` intrinsic, string interpolation, `beamtalk_repl_json` and trace metadata.
+* Its count of 697 tag references undercounts the churn: there are about 1800 across runtime tests.
+
+**Outcome:** keep BT-4170's representation. BT-4243 becomes a hint-level lint for a String nested in a collection argument to a stock Erlang call, limited to static types that actually contain a String (ADR 0100: silent on `Dynamic`). Against today's code it fires zero times; it catches new code such as `Erlang lists member: "a" with: names`.
+
+The sections below are the proposal as reviewed. The audit table in Context keeps the draft's numbers so the record shows what was argued; the corrected numbers are in the table above.
+
+---
 
 ## Context
 
@@ -16,7 +62,7 @@ BT-4170 fixed this with a rule worth keeping: **class follows construction, neve
 
 ### What the default costs
 
-Most binaries crossing from Erlang into Beamtalk are text, so under this default each one must be converted explicitly. An audit of the sibling repos (2026-10-28, `beamtalk-{buccaneer,catalina,collections,exdura,http,symphony,uat,watcher,yaml}`) found:
+Most binaries crossing from Erlang into Beamtalk are text, so under this default each one must be converted explicitly. An audit of the sibling repos (2026-10-28, `beamtalk-{buccaneer,catalina,collections,exdura,http,symphony,uat,watcher,yaml}`) found (**overstated, see Rejection for the corrected counts**):
 
 | Binaries from Erlang used as **text** | Sites |
 |---|---|
@@ -54,7 +100,7 @@ Today's shallow unwrap gets the second right and the first wrong. Passing String
 4. Bytes stay a first-class, distinct type for the code that needs them: networking, storage, crypto and serialization.
 5. Every Beamtalk surface (REPL, `beamtalk run`, `beamtalk test`, releases) behaves the same (CLAUDE.md: no image mechanics).
 
-## Decision
+## Decision (proposed, rejected)
 
 **Flip the default representation. A raw BEAM binary is a `String`. A `Binary` is the explicitly constructed tagged term `{beamtalk_binary, Bin}`.**
 
