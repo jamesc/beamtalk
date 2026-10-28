@@ -12,6 +12,7 @@
 
 use crate::ast::{Expression, Literal, MapPair, StringSegment, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 use ecow::{EcoString, eco_format};
 
@@ -97,7 +98,7 @@ impl TypeChecker {
         type_args: &[InferredType],
         arguments: &[Expression],
     ) -> Option<InferredType> {
-        if class_name != "Tuple"
+        if WellKnownClass::from_str(class_name) != Some(WellKnownClass::Tuple)
             || WellKnownSelector::from_name(selector_name) != Some(WellKnownSelector::At)
         {
             return None;
@@ -223,9 +224,9 @@ impl TypeChecker {
             .map(|elem| self.infer_expr(elem, hierarchy, env, in_abstract_method))
             .collect();
         if element_types.is_empty() {
-            InferredType::known("Tuple")
+            InferredType::known(WellKnownClass::Tuple.as_str())
         } else {
-            InferredType::known_with_args("Tuple", element_types)
+            InferredType::known_with_args(WellKnownClass::Tuple.as_str(), element_types)
         }
     }
 

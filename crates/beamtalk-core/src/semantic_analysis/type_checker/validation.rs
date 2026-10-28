@@ -881,6 +881,22 @@ impl TypeChecker {
             .any(|ancestor| ancestor.as_str() == expected_base)
     }
 
+    /// `true` when two same-base, *both*-parameterized positional types
+    /// disagree on arity — `Tuple(A, B)` vs `Tuple(A, B, C)` (BT-4220).
+    ///
+    /// For a class with a fixed type-param list an arity difference is a
+    /// malformed annotation (reported elsewhere), so the arg comparisons stay
+    /// conservative about it. A positional tuple's arity *is* its shape, though:
+    /// a 2-tuple is never a 3-tuple, so the mismatch is a definite type error.
+    /// A bare (unparameterized) side has length 0 and never mismatches — it
+    /// flows either way per the gradual rules.
+    fn is_positional_arity_mismatch(base: &str, actual_len: usize, expected_len: usize) -> bool {
+        WellKnownClass::from_str(base) == Some(WellKnownClass::Tuple)
+            && actual_len != 0
+            && expected_len != 0
+            && actual_len != expected_len
+    }
+
     /// Compare the *type arguments* of two same-base generic type
     /// strings (e.g. `"Array(Integer)"` vs `"Array(String)"`).
     ///
@@ -888,14 +904,19 @@ impl TypeChecker {
     /// same arity and at least one arg pair is incompatible. When either side is
     /// unparameterized (bare `Array`, which may stand for any `Array(_)`) or the
     /// arities differ, we stay conservative and return `true` so this never
-    /// introduces a false positive on its own.
+    /// introduces a false positive on its own — except for a positional tuple,
+    /// where an arity difference is a definite mismatch
+    /// ([`Self::is_positional_arity_mismatch`]).
     ///
     /// Args are compared invariantly via [`is_type_compatible`], recursing into
     /// nested generics (so `Array(Array(Integer))` vs `Array(Array(String))`
     /// is also caught).
     fn type_args_match(actual: &str, expected: &str, hierarchy: &ClassHierarchy) -> bool {
-        let (_, actual_args) = Self::parse_generic_type_string(actual);
+        let (base, actual_args) = Self::parse_generic_type_string(actual);
         let (_, expected_args) = Self::parse_generic_type_string(expected);
+        if Self::is_positional_arity_mismatch(&base, actual_args.len(), expected_args.len()) {
+            return false;
+        }
         if actual_args.is_empty()
             || expected_args.is_empty()
             || actual_args.len() != expected_args.len()
@@ -976,13 +997,39 @@ impl TypeChecker {
         if !Self::is_type_compatible(act_name, exp_name, hierarchy) {
             return false;
         }
-        // Base classes match — recurse into inner type args when arity lines up.
-        if exp_inner.is_empty() || act_inner.is_empty() || exp_inner.len() != act_inner.len() {
+        // Base classes match — recurse into inner type args.
+        Self::same_base_type_args_compatible(exp_name, exp_inner, act_inner, hierarchy)
+    }
+
+    /// Compare the type-arg lists of two compatible-base `Known` types
+    /// (`expected_base` is the expected side's class name), slot by slot via
+    /// [`Self::type_args_compatible`].
+    ///
+    /// Conservative (`true`) when either side is unparameterized (bare `Array`
+    /// may stand for any `Array(_)`) or the arities differ — except for a
+    /// positional tuple, whose arity is its shape, so `Tuple(A, B)` vs
+    /// `Tuple(A, B, C)` is a mismatch ([`Self::is_positional_arity_mismatch`],
+    /// BT-4220). The single home of this rule for every `Known`-vs-`Known`
+    /// return/arg comparison in this file.
+    fn same_base_type_args_compatible(
+        expected_base: &str,
+        expected_args: &[InferredType],
+        actual_args: &[InferredType],
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        if Self::is_positional_arity_mismatch(expected_base, actual_args.len(), expected_args.len())
+        {
+            return false;
+        }
+        if expected_args.is_empty()
+            || actual_args.is_empty()
+            || expected_args.len() != actual_args.len()
+        {
             return true;
         }
-        exp_inner
+        expected_args
             .iter()
-            .zip(act_inner.iter())
+            .zip(actual_args.iter())
             .all(|(e, a)| Self::type_args_compatible(e, a, hierarchy))
     }
 
@@ -1743,19 +1790,18 @@ impl TypeChecker {
                 // Check base class compatibility, then inner type args.
                 let base_mismatch = !Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
                 // When the base class matches, also verify inner type args
-                // match. Recurse into nested generics so mismatches like
-                // `Result(Array(Integer), Error)` vs `Result(Array(String), Error)`
-                // are caught (Copilot review on PR #2059).
+                // match. `same_base_type_args_compatible` recurses into nested generics so
+                // mismatches like `Result(Array(Integer), Error)` vs
+                // `Result(Array(String), Error)` are caught (Copilot review on
+                // PR #2059), and rejects a positional-tuple arity mismatch
+                // (`-> Tuple(A, B)` with body `Tuple(A, B, C)`, BT-4220).
                 let args_mismatch = !base_mismatch
-                    && !expected_args.is_empty()
-                    && !actual_args.is_empty()
-                    && expected_args.len() == actual_args.len()
-                    && expected_args
-                        .iter()
-                        .zip(actual_args.iter())
-                        .any(|(exp_arg, act_arg)| {
-                            !Self::type_args_compatible(exp_arg, act_arg, hierarchy)
-                        });
+                    && !Self::same_base_type_args_compatible(
+                        expected_ty,
+                        expected_args,
+                        actual_args,
+                        hierarchy,
+                    );
                 if base_mismatch || args_mismatch {
                     let expected_display = expected.display_for_diagnostic().unwrap_or_else(|| {
                         InferredType::class_name_for_diagnostic(expected_ty.as_str())
@@ -1878,21 +1924,13 @@ impl TypeChecker {
                 type_args: expected_args,
                 ..
             } => {
-                if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
-                    return false;
-                }
-                if expected_args.is_empty()
-                    || actual_args.is_empty()
-                    || expected_args.len() != actual_args.len()
-                {
-                    return true;
-                }
-                expected_args
-                    .iter()
-                    .zip(actual_args.iter())
-                    .all(|(exp_arg, act_arg)| {
-                        Self::type_args_compatible(exp_arg, act_arg, hierarchy)
-                    })
+                Self::is_type_compatible(actual_ty, expected_ty, hierarchy)
+                    && Self::same_base_type_args_compatible(
+                        expected_ty,
+                        expected_args,
+                        actual_args,
+                        hierarchy,
+                    )
             }
             // Delegate to `known_type_compatible_with_union_member`,
             // which also compares generic type args instead of stopping at
@@ -1954,15 +1992,7 @@ impl TypeChecker {
             return true;
         };
         Self::is_type_compatible(actual_ty, member_ty, hierarchy)
-            && (member_args.is_empty()
-                || actual_args.is_empty()
-                || member_args.len() != actual_args.len()
-                || member_args
-                    .iter()
-                    .zip(actual_args.iter())
-                    .all(|(exp_arg, act_arg)| {
-                        Self::type_args_compatible(exp_arg, act_arg, hierarchy)
-                    }))
+            && Self::same_base_type_args_compatible(member_ty, member_args, actual_args, hierarchy)
     }
 
     /// Part A: validate a `Union` method body against the declared
@@ -3480,6 +3510,11 @@ impl TypeChecker {
         // Same base, same args — trivially compatible
         if value_args == declared_args {
             return true;
+        }
+
+        if Self::is_positional_arity_mismatch(&declared_base, value_args.len(), declared_args.len())
+        {
+            return false;
         }
 
         // Same base, different args — check variance

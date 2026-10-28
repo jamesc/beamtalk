@@ -1241,7 +1241,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // e is typed as BEAMError — `e message` type-checks without warnings
 ```
 
-**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
+**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. The File and Json natives follow the same rule (BT-3970; the remaining natives are tracked in BT-4236): a failure that comes from Erlang/OTP keeps its term after it is classified into a `kind`, so `(File readAll: "missing.txt") error` is a `#file_not_found` whose `reason` is `#enoent`, and a failed `Json parse:` keeps the parser's term (e.g. `#unexpected_end`). The one non-OTP case is `Result unwrap` on a plain error value, whose `reason` is that value. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
 
 ```beamtalk
 (Erlang string to_integer: "abc") ifError: [:e | e reason]
@@ -1252,6 +1252,8 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => #badarith  (classified as type_error, original term still available)
 [Error signal: "boom"] on: Error do: [:e | e reason]
 // => nil
+(File readAll: "missing.txt") error reason
+// => #enoent  (classified as file_not_found, posix term still available)
 ```
 
 **Carrying a reason: `signal:reason:` (BT-4159).** Beamtalk exceptions have no instance fields, so to attach machine-readable data when signalling, use the class-side `signal: message reason: term`. The term can be any value; `reason` answers it in `on:do:` (type `Object | Nil`, so narrow with `isKindOf:` or match), it survives propagation across processes, and uncaught reports print it as a `Reason:` line. There is no separate `error:reason:`; `Error signal: msg reason: term` is the equivalent.
@@ -1381,6 +1383,20 @@ opts := #({#local, path}, {#nodelay, true},)  // trailing comma is allowed
   assignment; `{a, b} size` is an expression. `{a, b} := {b, a}` swaps.
 - A tuple literal infers the positional type `Tuple(T1, …, Tn)`, so `at:` with a
   literal index is typed (see above). `{}` infers as bare `Tuple`.
+- The same positional type can be written as an annotation — parameter, return,
+  `state:` and local — with any number of element types (`Tuple()` is bare
+  `Tuple`). An annotated tuple behaves exactly like an inferred one:
+
+  ```beamtalk
+  marker -> Tuple(Symbol, Reference | Nil) => {#emitted, self.spanContext}
+
+  countOf: entry :: Tuple(Symbol, Integer) -> Integer => entry at: 2   // inferred Integer
+  ```
+
+  `Tuple(A, B)` is assignable to bare `Tuple`, and a bare `Tuple` (or `Dynamic`)
+  flows into `Tuple(A, B)` gradually. Element types are checked slot by slot, and
+  an arity mismatch between two positional tuple types (`Tuple(A, B)` vs
+  `Tuple(A, B, C)`) is a type error.
 - **`{#ok, x}` is a `Tuple`, not a `Result`.** FFI `ok`/`error` conversion
   (ADR 0076) applies only to values *returned* from Erlang; arguments pass
   through unchanged. Use `Result ok:` / `Result error:` to build a `Result`.
@@ -1834,7 +1850,7 @@ self run: [:x :: (Integer | String) | x]
 - Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments. When a type annotation is present, the default value is optional (`field: x :: Integer` / `state: x :: Integer`) — the type annotation is the contract, and `nil` is used internally.
 - Local variable annotations (`name :: Type := expr`) declare the binding's type at type-erasure boundaries. See [Local Variable Type Annotations](#local-variable-type-annotations) below.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
-- Block parameter annotations (`[:x :: Integer | ...]`) type the parameter and win over any inferred type (BT-4102); an annotation unrelated to the expected parameter type warns. Without an annotation, parameter types are inferred from the enclosing message signature, from a method's declared `-> Block(P, R)` return type (block literal as the tail expression or a top-level `^`), or from an annotated local (`f :: Block(P, R) := [:x | ...]`). Block literals inside `#{...}`/`#(...)` literals get no push-down; annotate their parameters. Type variables in a block parameter annotation do not see the method's type-parameter substitution (same as method parameters).
+- Block parameter annotations (`[:x :: Integer | ...]`) type the parameter and win over any inferred type (BT-4102); an annotation unrelated to the expected parameter type warns. Without an annotation, parameter types are inferred from the enclosing message signature, from a method's declared `-> Block(P, R)` return type (block literal as the tail expression or a top-level `^`), or from an annotated local (`f :: Block(P, R) := [:x | ...]`). Block literals inside `#{...}`/`#(...)` literals get no push-down; annotate their parameters. A method-local or class-level type variable in a method or block parameter annotation (`foo: x :: E`, `[:y :: E | ...]`) resolves through the enclosing method's substitution, which inside the method body is the identity: `E` is a rigid placeholder, the same type a `-> E` return annotation names, so it flows between parameters, block parameters and the return type without warnings. It is never `Dynamic`, never the callee's binding for a same-named variable, and is treated as compatible with any type in mismatch checks (BT-4210).
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
 ### Local Variable Type Annotations

@@ -66,12 +66,9 @@ Type error (non-String argument) still raises.
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
-        error:Reason when is_tuple(Reason); Reason =:= unexpected_end ->
-            Error2 = beamtalk_error:new(
-                parse_error, 'Json', 'parse:', <<"Check that the string is valid JSON">>
-            ),
-            beamtalk_result:from_tagged_tuple({error, Error2});
         _:Reason ->
+            %% BT-3970: keep OTP json's term (`unexpected_end`, `{invalid_byte, B}`)
+            %% so `Exception>>reason` answers it.
             Error = beamtalk_error:with_details(
                 beamtalk_error:new(
                     parse_error, 'Json', 'parse:', <<"Check that the string is valid JSON">>
