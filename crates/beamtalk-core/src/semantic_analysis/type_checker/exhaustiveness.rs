@@ -236,8 +236,10 @@ impl TypeChecker {
     /// exact sense a `Type` pattern arm is already restricted to
     /// ([`is_concrete_leaf_class`](crate::semantic_analysis::validators::is_concrete_leaf_class) —
     /// the same check `validate_type_pattern_class`'s "has subclasses"
-    /// compile error enforces, factored out so the two mechanisms can never
-    /// disagree about which classes are "closed").
+    /// compile error enforces, factored out so every class treated as
+    /// "closed" here is one a `Type` arm may legally test; the sealed
+    /// `Binary` hierarchy is a legal arm but deliberately not a closed leaf,
+    /// BT-4228).
     ///
     /// Disjoint from [`is_closed_singleton_union`](Self::is_closed_singleton_union)
     /// by construction: `is_concrete_leaf_class` never accepts a `#`-prefixed

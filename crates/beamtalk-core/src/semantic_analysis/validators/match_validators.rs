@@ -289,7 +289,9 @@ const SEALED_CLOSED_HIERARCHY_CLASSES: &[&str] = &["Binary"];
 /// `type_checker::inference` (`is_closed_leaf_type_union`) can never disagree
 /// with what a `Type` pattern arm is legally allowed to test: a class this
 /// function accepts is always one a `binding :: class_name` arm could
-/// legally appear in, and vice versa.
+/// legally appear in. The converse does not hold for
+/// [`SEALED_CLOSED_HIERARCHY_CLASSES`] (BT-4228): `b :: Binary` is a legal
+/// arm, but a `Binary` scrutinee member is not a closed leaf.
 ///
 /// `Character` is excluded (shares `Integer`'s runtime representation, no
 /// distinguishing tag — see `validate_type_pattern_class`'s doc), and an
