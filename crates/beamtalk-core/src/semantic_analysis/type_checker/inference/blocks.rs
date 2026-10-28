@@ -56,13 +56,11 @@ impl TypeChecker {
         // Infer the exception class argument normally
         let ex_class_ty = self.infer_expr(ex_class_arg, hierarchy, env, in_abstract_method);
 
-        // Unwrap parentheses so `on: (Error) do: ([:e | ...])` also gets the
-        // contextual block-param typing.
-        let ex_class_inner = ex_class_arg.unwrap_parens();
-        let handler_inner = handler_arg.unwrap_parens();
+        // `on: (Error) do: ([:e | ...])` gets the same contextual block-param
+        // typing: the checker reads the operand-normalised tree (BT-4238).
 
         // Extract class name from ClassReference for block param typing
-        let exception_class_name = if let Expression::ClassReference { name, .. } = ex_class_inner {
+        let exception_class_name = if let Expression::ClassReference { name, .. } = ex_class_arg {
             Some(name.name.clone())
         } else {
             None
@@ -70,7 +68,7 @@ impl TypeChecker {
 
         // If handler is a block and we have a class name, type the block param
         let handler_ty = if let (Some(class_name), Expression::Block(block)) =
-            (&exception_class_name, handler_inner)
+            (&exception_class_name, handler_arg)
         {
             let param_types = if block.parameters.is_empty() {
                 vec![]
@@ -151,8 +149,7 @@ impl TypeChecker {
                     // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — a bare
                     // `infer_expr` would drop the `Block(..., R)` return type,
                     // degrading the whole send on statically-known receivers.
-                    let inner = arg.unwrap_parens();
-                    if let Expression::Block(block) = inner {
+                    if let Expression::Block(block) = arg {
                         self.infer_block_with_typed_params(
                             block,
                             arg.span(),
@@ -184,10 +181,9 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
-        // Unwrap parens: `ifNotNil: ([:x | ...])` should narrow the same as
-        // the unparenthesised form.
-        let inner = arg.unwrap_parens();
-        let Expression::Block(block) = inner else {
+        // `ifNotNil: ([:x | ...])` narrows the same as the unparenthesised
+        // form: the checker reads the operand-normalised tree (BT-4238).
+        let Expression::Block(block) = arg else {
             return self.infer_expr(arg, hierarchy, env, in_abstract_method);
         };
 
@@ -266,7 +262,7 @@ impl TypeChecker {
             // sub-expressions like `[[^1] value]` or `foo: (^bar)`) exits
             // the method before the expression value is observed — treat
             // the branch as Never so `union_of` skips it.
-            if let Expression::Block(block) = arg.unwrap_parens() {
+            if let Expression::Block(block) = arg {
                 if block_has_any_return(block) {
                     return Some(InferredType::Never);
                 }
@@ -343,7 +339,7 @@ impl TypeChecker {
         if class_name.as_str() != "Block" {
             return None;
         }
-        let block_ret = if let Expression::Block(block) = arg.unwrap_parens() {
+        let block_ret = if let Expression::Block(block) = arg {
             if block_has_any_return(block) {
                 InferredType::Never
             } else {
@@ -470,7 +466,7 @@ impl TypeChecker {
         // exit the method on every path. Some blocks that may-but-not-always
         // diverge get widened to `Never` here — an accepted imprecision this
         // shares with the mirror function, [`Self::if_nil_solo_union_ret_ty`].
-        let block_ret = if let Expression::Block(block) = arg.unwrap_parens() {
+        let block_ret = if let Expression::Block(block) = arg {
             if block_has_any_return(block) {
                 InferredType::Never
             } else {
@@ -565,7 +561,7 @@ impl TypeChecker {
                         // `respondsTo: ifFalse: [...]` on `Boolean` lost `R`
                         // entirely and `if_true_false_solo_boolean_ret_ty`
                         // couldn't union it with the `Boolean` self-branch.
-                        let ty = if let Expression::Block(block) = arg.unwrap_parens() {
+                        let ty = if let Expression::Block(block) = arg {
                             self.infer_block_with_typed_params(
                                 block,
                                 arg.span(),
@@ -966,7 +962,7 @@ impl TypeChecker {
                 return arguments
                     .iter()
                     .map(|arg| {
-                        if let Expression::Block(block) = arg.unwrap_parens() {
+                        if let Expression::Block(block) = arg {
                             self.infer_block_with_typed_params(
                                 block,
                                 arg.span(),
@@ -1400,11 +1396,10 @@ impl TypeChecker {
         arguments
             .iter()
             .map(|arg| {
-                // Unwrap parens so `foo: ([:x | ...])` gets the same
-                // Dynamic(DynamicReceiver) propagation as the unparenthesised
-                // `foo: [:x | ...]` form.
-                let inner = arg.unwrap_parens();
-                if let Expression::Block(block) = inner {
+                // `foo: ([:x | ...])` gets the same Dynamic(DynamicReceiver)
+                // propagation as `foo: [:x | ...]`: the checker reads the
+                // operand-normalised tree (BT-4238).
+                if let Expression::Block(block) = arg {
                     if propagate_dynamic {
                         let param_types: Vec<InferredType> = (0..block.parameters.len())
                             .map(|_| InferredType::Dynamic(DynamicReason::DynamicReceiver))

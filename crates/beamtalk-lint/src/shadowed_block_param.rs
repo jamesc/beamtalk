@@ -313,14 +313,13 @@ fn check_block(block: &Block, scope: &mut LintScope, diagnostics: &mut Vec<Diagn
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::LintPass;
     use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
     fn lint(src: &str) -> Vec<Diagnostic> {
         let tokens = lex_with_eof(src);
         let (module, _) = parse(tokens);
         let mut diags = Vec::new();
-        ShadowedBlockParamPass.check(&module, &mut diags);
+        crate::run_pass(&ShadowedBlockParamPass, &module, &mut diags);
         diags
     }
 

@@ -146,7 +146,7 @@ impl TypeChecker {
         if selector.name() != chain_selector || arguments.len() != 1 {
             return None;
         }
-        let Expression::Block(block) = arguments[0].unwrap_parens() else {
+        let Expression::Block(block) = &arguments[0] else {
             return None;
         };
         // The block must hold exactly one test: its value is what the chain

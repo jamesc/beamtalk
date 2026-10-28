@@ -49,14 +49,33 @@ pub mod selector_rename_query;
 pub mod senders_query;
 pub mod signature_help_provider;
 
-use beamtalk_core::ast::Module;
+use beamtalk_core::ast::{Expression, Module};
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
-use beamtalk_core::semantic_analysis::{AliasRegistry, ClassHierarchy, infer_types_and_returns};
+use beamtalk_core::semantic_analysis::{
+    AliasRegistry, ClassHierarchy, InferredType, infer_types_and_returns,
+};
 
 /// Re-exported from [`beamtalk_core::method_source_walker`] so sibling query modules
 /// (`senders_query`, `all_sends_query`, `announce_sites_query`, `ffi_sites_query`)
 /// can reach it via `super::selector_span` without importing across layers.
 pub(crate) use beamtalk_core::method_source_walker::selector_span;
+
+/// The type `type_map` gives `expr`, a node of the **parsed** module.
+///
+/// The providers walk the parsed tree (positions must land on the
+/// parentheses as written), but the type checker builds its [`TypeMap`] from
+/// the operand-normalised tree (BT-4237, `TypeChecker::check_module`), so a
+/// removed send-operand wrapper has no entry of its own. A wrapper's type is
+/// its inner expression's, so the lookup falls through every
+/// `Parenthesized` layer to that node's span, which both trees share.
+pub(crate) fn type_of_parsed<'t>(
+    type_map: &'t TypeMap,
+    expr: &Expression,
+) -> Option<&'t InferredType> {
+    type_map
+        .get(expr.span())
+        .or_else(|| type_map.get(expr.unwrap_parens().span()))
+}
 
 /// Enriches a class hierarchy with method return types inferred from a module's source,
 /// and returns the [`TypeMap`] from the same single [`TypeChecker`] pass.

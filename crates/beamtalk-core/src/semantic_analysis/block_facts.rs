@@ -338,9 +338,10 @@ pub enum EscapeShape {
     StoredInLiteral,
 }
 
-/// The block literal an expression is, looking through parentheses.
+/// The block literal an escape operand is ([`for_each_escape_operand`] hands
+/// every operand over with its parentheses already peeled).
 fn as_block(expr: &Expression) -> Option<&Block> {
-    match expr.unwrap_parens() {
+    match expr {
         Expression::Block(block) => Some(block),
         _ => None,
     }
@@ -943,7 +944,7 @@ fn send_may_run_user_code(
         // as a threaded fold and is not one (the block's own sends are counted
         // as the block is analysed).
         SendUserCode::InlinedOrClosureCall => !arguments.iter().any(|argument| {
-            matches!(argument.unwrap_parens(), Expression::Block(block) if {
+            matches!(argument, Expression::Block(block) if {
                 let analysis = analyze_block(block);
                 !captured_local_mutations_from_analysis(&analysis).is_empty()
                     || !analysis.field_writes.is_empty()
@@ -2773,8 +2774,9 @@ pub fn block_literal_of_other_arity<'a>(
     arity: usize,
 ) -> Option<&'a Block> {
     // BT-3942: a parenthesized literal (`([t := t + 1]) value: 1`) is the
-    // same literal, so it is applied and raises `arity_mismatch` alike.
-    match receiver.unwrap_parens() {
+    // same literal, so it is applied and raises `arity_mismatch` alike: the
+    // send receiver reaches here operand-normalised (BT-4059, BT-4238).
+    match receiver {
         Expression::Block(block)
             if is_safe_value_family_selector(selector)
                 && !block_literal_arity_matches(block, arity) =>

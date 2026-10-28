@@ -85,7 +85,23 @@ impl TypeChecker {
     /// available when type-checking top-level expressions. This
     /// enables single-pass chain resolution: the `TypeChecker` consults its own
     /// `method_return_types` map when the hierarchy has no explicit annotation.
+    ///
+    /// Checks the operand-normalised tree (BT-4238,
+    /// [`normalised`](crate::ast::normalize::normalised)) whatever `module`
+    /// is: a raw parse from the language service checks exactly like the
+    /// module `analyse_full` hands in, so `(e) foo` types as `e foo` and the
+    /// [`TypeMap`](super::TypeMap) has no entry for a removed wrapper's span.
     pub fn check_module(&mut self, module: &Module, hierarchy: &ClassHierarchy) {
+        self.check_normalised_module(&crate::ast::normalize::normalised(module), hierarchy);
+    }
+
+    /// [`Self::check_module`] on a module whose send operands are already
+    /// normalised.
+    pub(in crate::semantic_analysis::type_checker) fn check_normalised_module(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+    ) {
         // Test-only instrumentation — see `CHECK_MODULE_CALL_COUNT`'s doc.
         #[cfg(any(test, feature = "test"))]
         super::CHECK_MODULE_CALL_COUNT.with(|c| c.set(c.get() + 1));

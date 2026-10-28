@@ -144,7 +144,7 @@ fn node_hint_for_send(selector: &MessageSelector, arguments: &[Expression]) -> O
     if !KNOWN_REMOTE_SELECTORS.contains(&selector.name().as_str()) {
         return None;
     }
-    match arguments.last()?.unwrap_parens() {
+    match arguments.last()? {
         Expression::Identifier(id) => Some(id.name.clone()),
         _ => None,
     }
@@ -163,10 +163,11 @@ fn scope_arg_is_global(selector: &MessageSelector, arguments: &[Expression]) -> 
         .is_some_and(|i| arguments.get(i).is_some_and(is_global_symbol))
 }
 
-/// Whether `expr` is the bare symbol literal `#global` (parens-tolerant).
+/// Whether `expr`, a send argument (operand-normalised, so `scope: (#global)`
+/// arrives as `#global`), is the symbol literal `#global`.
 fn is_global_symbol(expr: &Expression) -> bool {
     matches!(
-        expr.unwrap_parens(),
+        expr,
         Expression::Literal(Literal::Symbol(s), _) if s.as_str() == "global"
     )
 }

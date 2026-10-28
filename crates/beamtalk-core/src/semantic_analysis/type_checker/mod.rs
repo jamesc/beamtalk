@@ -702,6 +702,9 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
         alias_registry: &AliasRegistry,
     ) {
+        // BT-4238: every phase below reads the operand-normalised tree (see
+        // `check_module`).
+        let module = &*crate::ast::normalize::normalised(module);
         // Store protocol registry for respondsTo: narrowing.
         // This allows detect_narrowing to refine Dynamic → protocol type.
         self.protocol_registry = Some(protocol_registry.clone());
@@ -715,7 +718,7 @@ impl TypeChecker {
         self.alias_registry = Some(alias_registry.clone());
 
         // Run the standard type checking pass first
-        self.check_module(module, hierarchy);
+        self.check_normalised_module(module, hierarchy);
 
         // Clear the protocol registry after the main pass — it's borrowed by
         // the caller for the remaining protocol-specific passes below via
