@@ -337,3 +337,38 @@ fn symbol_singleton_union_behaviour_is_unaffected() {
     assert_eq!(warnings[0].severity, Severity::Warning);
     assert!(warnings[0].message.contains("#south"));
 }
+
+// ── BT-4228: subclass-aware `b :: Binary` ───────────────────────────────
+
+/// A `b :: Binary` arm covers a `String` scrutinee member (`String <:
+/// Binary`, and the codegen test is subclass-aware), so `String | Nil`
+/// covered by `b :: Binary` + `nil` is provably exhaustive.
+#[test]
+fn asserted_binary_arm_covers_string_member() {
+    let diags = asserted_diagnostics(
+        string_or_nil(),
+        vec![type_arm("b", "Binary", var("b")), nil_arm(var("raw"))],
+    );
+    assert!(
+        diags.is_empty(),
+        "a `:: Binary` arm must cover the `String` member, got: {diags:?}"
+    );
+}
+
+/// A `Binary` scrutinee member is conservatively *not* a closed leaf (it
+/// has the subclass `String`), so `matchExhaustive:` over `Binary | Nil`
+/// cannot be verified even with `b :: Binary` + `nil` arms.
+#[test]
+fn asserted_binary_scrutinee_member_is_not_closed() {
+    let diags = asserted_diagnostics(
+        InferredType::simple_union(&["Binary", "UndefinedObject"]),
+        vec![type_arm("b", "Binary", var("b")), nil_arm(var("raw"))],
+    );
+    assert_eq!(diags.len(), 1, "expected one diagnostic, got: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Error);
+    assert!(
+        diags[0].message.contains("cannot verify"),
+        "expected the cannot-verify error: {}",
+        diags[0].message
+    );
+}
