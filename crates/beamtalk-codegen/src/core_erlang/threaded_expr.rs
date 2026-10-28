@@ -186,6 +186,12 @@ pub(super) mod fault {
         /// names the loop context's `StateAcc`
         /// (`TupleAccStateReadNotEntryState`).
         TupleAccNoEntryCapture,
+        /// BT-3982: an actor evaluated literal block that threads `State` is
+        /// no producer (`actor_evaluated_block_producer_parts` answers
+        /// `None`), as before BT-3982: in value position it reaches the
+        /// legacy inline lowering, whose raw `{Value, State}` tuple becomes
+        /// the value (`UnthreadedEvaluatedBlock`).
+        EvaluatedBlockNotAProducer,
     }
 
     thread_local! {
@@ -991,6 +997,22 @@ impl CoreErlangGenerator {
                 .is_some()
             && self.is_producer_frame_for(self.current_frame(), inner)
             && self.conditional_producer_locals(inner).is_some()
+    }
+
+    /// BT-3982: whether `expr` (paren-unwrapped) is an evaluated literal block
+    /// that [`Self::threaded_expression`] lowers as a producer here, wherever
+    /// it sits: a local-threading one ([`Self::block_value_producer_in_frame`])
+    /// or an actor one that threads `State`
+    /// ([`Self::actor_evaluated_block_producer_parts`]). The one predicate the
+    /// statement classifiers (`control_flow_has_mutations`,
+    /// `is_tier2_value_call`) read, so a statement is lowered by the same
+    /// producer as an operand and never through the legacy Tier 2 inline-block
+    /// tuple.
+    pub(super) fn evaluated_block_is_producer(&self, expr: &Expression) -> bool {
+        self.block_value_producer_in_frame(expr)
+            || self
+                .actor_evaluated_block_producer_parts(expr.unwrap_parens())
+                .is_some()
     }
 
     /// The kind of method body being lowered, `None` outside a class,

@@ -56,7 +56,7 @@ use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
     RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity, conditional_arm_blocks,
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
-    exception_producer_writes, inline_block_threads, is_actor_fold_value_site, is_fold_frame_body,
+    exception_producer_writes, is_actor_fold_value_site, is_fold_frame_body,
     is_loop_body_producer_site, is_self_or_super, is_threaded_frame_body, literal_block_value_arm,
     local_threading_construct, lookup_arm_blocks, loop_body_producer_sites, match_arm_block,
     match_arm_body_writes, match_arms, match_guard_writes, match_producer_writes,
@@ -959,13 +959,6 @@ pub(crate) enum Residual {
     /// not a producer there: a guard that writes, or a `match:` at no producer
     /// site (the subject of another `match:`).
     MatchArmWrite,
-    /// BT-3981: an evaluated block literal (`[...] value`, `[:k | ...]
-    /// value: x`) that binds a local, writes a field or sends to `self` is
-    /// inlined as a state-threading block in an actor method, and only some
-    /// positions unpack its `{Value, State}` result
-    /// ([`evaluated_block_value_unpacked`]); anywhere else the raw tuple is
-    /// the value, silently. Class and value-type methods answer the value.
-    EvaluatedBlockValue,
     /// BT-3948: an actor `[:z | ...] value: x` (a literal block applied in
     /// place) whose body assigns a local of its own, with a loop among the
     /// enclosing blocks. The loop frame carries its locals as parameters (no
@@ -1047,12 +1040,6 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         issue: "BT-3875",
         fixed_by: "BT-3913",
     },
-    ResidualDenied {
-        shape: Residual::EvaluatedBlockValue,
-        contexts: &[Actor],
-        issue: "BT-3981",
-        fixed_by: "BT-3947",
-    },
     // Closure bodies need a frame identity of their own (BT-3947 item 2).
     ResidualDenied {
         shape: Residual::InlineBlockLocalInLoop,
@@ -1078,160 +1065,6 @@ fn residual_denied(shape: Residual, context: MethodContext) -> Option<&'static R
     RESIDUAL_DENY_SET
         .iter()
         .find(|row| row.shape == shape && row.contexts.contains(&context))
-}
-
-/// Whether the value of an evaluated block literal that threads state
-/// ([`Residual::EvaluatedBlockValue`]) at `position` in an actor method is
-/// unpacked from its `{Value, State}` pair. Every accepted branch has a
-/// BEAM-run cell in `stdlib/test/bt3981evalblock_test.bt` (its fixture
-/// `bt3981evalblock_actor.bt`); anything without one is rejected.
-///
-/// Accepted: a method body statement, `x := <here>` or `^<here>`; a `match:`
-/// arm; inside a block, `x := <here>` or a statement of an inlined block: an
-/// arm (`ifTrue:ifFalse:`, `ifTrue:`, `ifFalse:`, `and:`, `ifNil:`,
-/// `ifNotNil:`), a `whileTrue:` body or condition, a collection operation's
-/// block (`collect:`, `inject:into:`, `select:`, `detect:ifNone:`) or another
-/// evaluated block, nested up to four deep; a `do:` or counted-loop body
-/// (when its last statement: a non-last one raised or failed to compile); a
-/// protected body or handler (when not its last, whose value a caller may
-/// use); a plain block's statement that is not its last (its value is
-/// dropped), also inside an arm. Exception: with a `do:`, collection
-/// operation or loop body that writes an outer local enclosing the site and no
-/// conditional arm between them (the nearest such block, however many blocks
-/// away), only the value of a write to that one local is accepted; any other
-/// statement there is a `ThreadedIr` verifier rejection (a panic in a debug
-/// build, an `internal:` error in a release build), an `erlc` unbound
-/// `StateAcc` or a runtime error.
-///
-/// Acceptance is positive: a site with any construct block of a selector
-/// outside [`EVALUATED_BLOCK_MEASURED_SELECTORS`] anywhere between it and the
-/// method body is rejected, whatever its position.
-///
-/// Rejected: the last statement or an assignment directly in a plain block (a
-/// stored block, an Erlang FFI argument, a block passed to a method; a
-/// conditional arm inside such a block is still an arm), `^` inside a block, a
-/// field assignment, a parenthesized evaluated block and every operand
-/// position (receiver, argument, cascade, literal element, ...). `last` is
-/// whether the statement is the last of its innermost block.
-fn evaluated_block_value_unpacked(position: Position, site: &EvaluatedBlockSite) -> bool {
-    let EvaluatedBlockSite {
-        depth,
-        parenthesized,
-        inner,
-        chain_measured,
-        fold_writes,
-        assign_target,
-        evaluated_nesting,
-        last,
-    } = site;
-    let (depth, last) = (*depth, *last);
-    // Measured up to four evaluated blocks deep (three around the site).
-    if *parenthesized || *evaluated_nesting > 3 {
-        return false;
-    }
-    // Positive acceptance: every construct block between the site and the
-    // method body must be of a selector with a measured cell, whatever the
-    // position (including `outer := [...] value` and the fold rule below).
-    if !*chain_measured {
-        return false;
-    }
-    // A `do:`, `collect:` or loop body that writes an outer local is a fold
-    // carrying it; an evaluated block directly in it (or in another evaluated
-    // block in it) is a ThreadedIr verifier rejection (a panic in a debug
-    // build, an `internal:` error in a release build), an erlc "unbound
-    // `StateAcc`" or a runtime error, except as the value of a write to that
-    // one outer local (`r := [...] value`). Inside an arm of it, it answers.
-    if !fold_writes.is_empty() {
-        match position {
-            Position::Statement | Position::NestedStatement { .. } if depth > 0 => return false,
-            Position::AssignValue { nested: true } => {
-                return assign_target
-                    .as_ref()
-                    .is_some_and(|target| fold_writes.iter().all(|w| w == target));
-            }
-            _ => {}
-        }
-    }
-    match position {
-        // A `match:` arm's body is lowered with the arm's own state
-        // (`nil_type_match_self_mutation_registry.bt`, `bt3981evalblock_test.bt`).
-        Position::Statement if depth == 0 => true,
-        Position::MatchArm
-        | Position::AssignValue { nested: false }
-        | Position::ReturnValue { nested: false } => true,
-        Position::AssignValue { nested: true } => *inner != Some(Container::Other),
-        // The walker reports a statement of a block body as `Statement` too.
-        Position::Statement | Position::NestedStatement { .. } => match inner {
-            // An evaluated block's own value is judged at the outer evaluated
-            // block's position (it is a send of its own to check); a
-            // `whileTrue:` block's condition statements are a frame of their
-            // own (BT-3911, `bt3911arm_frames_test.bt`).
-            Some(
-                Container::Arm
-                | Container::EvaluatedBlock
-                | Container::LoopBody
-                | Container::ListOpBody,
-            ) => true,
-            Some(Container::DoBody | Container::CountedLoopBody) => last,
-            // A protected body or handler, or a plain block, drops a non-last
-            // statement's value; its last one is the block's value, which
-            // leaks.
-            Some(Container::ProtectedBody | Container::Handler | Container::Other) => !last,
-            None => false,
-        },
-        _ => false,
-    }
-}
-
-/// The selectors whose construct blocks have a BEAM-run evaluated-block cell
-/// in `stdlib/test/fixtures/bt3981evalblock_actor.bt`. The container role
-/// ([`Container::of`]) is per family, so another selector of a family (`or:`,
-/// `at:ifAbsent:`, `reject:`, `whileFalse:`, `keysAndValuesDo:`, ...) is judged
-/// as a plain block: a `Dictionary` lookup handler is a plain fun unless the
-/// receiver is statically a `Dictionary`.
-const EVALUATED_BLOCK_MEASURED_SELECTORS: &[&str] = &[
-    "ifTrue:ifFalse:",
-    "ifTrue:",
-    "ifFalse:",
-    "and:",
-    "ifNil:",
-    "ifNotNil:",
-    "collect:",
-    "inject:into:",
-    "select:",
-    "detect:ifNone:",
-    "whileTrue:",
-    "do:",
-    "to:do:",
-    "timesRepeat:",
-    "on:do:",
-    "ensure:",
-    "value",
-    "value:",
-];
-
-/// Where an evaluated block sits, as [`evaluated_block_value_unpacked`] reads
-/// it.
-struct EvaluatedBlockSite {
-    /// Block nesting depth.
-    depth: usize,
-    /// Whether the evaluated block is written in parentheses.
-    parenthesized: bool,
-    /// The role of the innermost enclosing block.
-    inner: Option<Container>,
-    /// Whether every enclosing construct block is of a selector in
-    /// [`EVALUATED_BLOCK_MEASURED_SELECTORS`].
-    chain_measured: bool,
-    /// The outer locals written by the enclosing fold-like blocks (`do:`, a
-    /// collection operation, a loop or counted loop), with no conditional arm
-    /// between them and the site; empty when there is none.
-    fold_writes: Vec<EcoString>,
-    /// The local the statement assigns the evaluated block's value to.
-    assign_target: Option<EcoString>,
-    /// How many evaluated blocks enclose the site directly (innermost first).
-    evaluated_nesting: usize,
-    /// Whether the statement is the last of its innermost block.
-    last: bool,
 }
 
 /// Whether the Phase 0 check accepts `kind` in `position` in `context`: a
@@ -2358,22 +2191,6 @@ struct Walker<'d> {
     block_frames: Vec<usize>,
     /// For each enclosing block, innermost last: its role.
     containers: Vec<Container>,
-    /// The spans of the sends written in parentheses (`([...] value)`):
-    /// [`evaluated_block_value_unpacked`] does not unpack a parenthesized
-    /// evaluated block's value anywhere.
-    parenthesized_sends: HashSet<Span>,
-    /// For each enclosing block, innermost last: the locals bound outside it
-    /// that it writes ([`Walker::writes_of`]); non-empty makes a `do:`,
-    /// collection-operation or loop body a fold that carries them.
-    writes_outer_local_blocks: Vec<Vec<EcoString>>,
-    /// The local the assignment being walked assigns to, while its value is.
-    assign_target: Option<EcoString>,
-    /// Set like `pending_frame_body`: the next block operand is a construct
-    /// block of a selector with no measured evaluated-block cell
-    /// ([`EVALUATED_BLOCK_MEASURED_SELECTORS`]).
-    pending_unmeasured_block: bool,
-    /// For each enclosing block, innermost last: whether it is such a block.
-    unmeasured_blocks: Vec<bool>,
     /// For the method body and each enclosing block, innermost last:
     /// whether the statement being walked in that body is its last.
     last_statements: Vec<bool>,
@@ -2462,11 +2279,6 @@ impl<'d> Walker<'d> {
             depth: 0,
             block_frames: Vec::new(),
             containers: Vec::new(),
-            parenthesized_sends: HashSet::new(),
-            writes_outer_local_blocks: Vec::new(),
-            assign_target: None,
-            pending_unmeasured_block: false,
-            unmeasured_blocks: Vec::new(),
             assign_target_fresh: false,
             inline_local_reported: Vec::new(),
             last_statements: Vec::new(),
@@ -2628,13 +2440,6 @@ impl<'d> Walker<'d> {
         self.direct_blocks.push(direct);
         self.block_frames.push(self.scope.len());
         self.containers.push(container);
-        let mut writes_outer_locals: Vec<EcoString> =
-            self.writes_of(block).into_iter().map(|w| w.name).collect();
-        writes_outer_locals.sort();
-        writes_outer_locals.dedup();
-        self.writes_outer_local_blocks.push(writes_outer_locals);
-        let unmeasured = std::mem::take(&mut self.pending_unmeasured_block);
-        self.unmeasured_blocks.push(unmeasured);
         self.scope
             .push(block.parameters.iter().map(|p| p.name.clone()).collect());
         self.depth += 1;
@@ -2642,8 +2447,6 @@ impl<'d> Walker<'d> {
         self.depth -= 1;
         self.pop_frame();
         self.containers.pop();
-        self.unmeasured_blocks.pop();
-        self.writes_outer_local_blocks.pop();
         self.direct_blocks.pop();
         self.block_frames.pop();
     }
@@ -2677,18 +2480,14 @@ impl<'d> Walker<'d> {
         let nested = self.depth > 0;
         match expr {
             Expression::Parenthesized { expression, .. } => {
-                self.parenthesized_sends
-                    .insert(expression.unwrap_parens().span());
                 self.expr(expression, position);
             }
             Expression::Assignment { target, value, .. } => match target.as_ref() {
                 Expression::Identifier(id) => {
-                    let outer_target = self.assign_target.replace(id.name.clone());
                     let fresh = !self.is_bound(&id.name);
                     let outer = std::mem::replace(&mut self.assign_target_fresh, fresh);
                     self.operand(value, Position::AssignValue { nested });
                     self.assign_target_fresh = outer;
-                    self.assign_target = outer_target;
                     self.define(&id.name);
                     self.note_block_binding(&id.name, value);
                 }
@@ -2743,14 +2542,6 @@ impl<'d> Walker<'d> {
                     _ => Container::Other,
                 };
                 let receiver_role = role(receiver, true);
-                let unmeasured = |e: &Expression| match (e, &construct) {
-                    (Expression::Block(b), Some(c))
-                        if c.blocks.iter().any(|blk| std::ptr::eq(*blk, b)) =>
-                    {
-                        !EVALUATED_BLOCK_MEASURED_SELECTORS.contains(&c.selector.as_str())
-                    }
-                    _ => false,
-                };
                 // ADR 0131 Phase 3 (BT-3738): the arms of a conditional that is
                 // a local-threading producer are `BranchArm` frames, so a loop
                 // or fold in an arm is a producer there (codegen's
@@ -2775,10 +2566,8 @@ impl<'d> Walker<'d> {
                     }
                     _ => None,
                 };
-                self.pending_unmeasured_block = unmeasured(receiver);
                 self.operand_in(receiver, Position::Receiver, receiver_role);
                 self.pending_frame_body = None;
-                self.pending_unmeasured_block = false;
                 for arg in arguments {
                     let arg_role = role(arg, false);
                     self.pending_frame_body = match arg {
@@ -2794,10 +2583,8 @@ impl<'d> Walker<'d> {
                         }),
                         _ => None,
                     };
-                    self.pending_unmeasured_block = unmeasured(arg);
                     self.operand_in(arg, Position::Argument, arg_role);
                     self.pending_frame_body = None;
-                    self.pending_unmeasured_block = false;
                 }
             }
             Expression::Cascade {
@@ -3554,9 +3341,6 @@ impl<'d> Walker<'d> {
     fn check_residuals(&mut self, expr: &Expression, position: Position) {
         // BT-3948's check first: a site it reports is not reported twice.
         self.check_inline_block_local_in_loop(expr, position);
-        if let Some(block) = repl_evaluated_block(expr.unwrap_parens()) {
-            self.check_evaluated_block_value(expr, block, position);
-        }
         self.check_state_fold_operand_in_fold(expr, position);
     }
 
@@ -3633,100 +3417,6 @@ impl<'d> Walker<'d> {
             .with_hint(
                 "assign its value to a local in a statement of the body (`r := ...`) and use \
                  the local here",
-            )
-            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
-        );
-    }
-
-    /// [`Residual::EvaluatedBlockValue`] (BT-3981): an actor evaluated block
-    /// literal that binds a local, writes a field or sends to `self` (codegen
-    /// inlines it as a state-threading block: [`inline_block_threads`]) and
-    /// writes no outer local (that is the Phase 0 check's), at a position
-    /// whose value is the raw `{Value, State}` tuple.
-    fn check_evaluated_block_value(
-        &mut self,
-        expr: &Expression,
-        block: &Block,
-        position: Position,
-    ) {
-        let Some(row) = residual_denied(Residual::EvaluatedBlockValue, self.context) else {
-            return;
-        };
-        if self
-            .inline_local_reported
-            .iter()
-            .any(|r| r.start() <= expr.span().start() && expr.span().end() <= r.end())
-        {
-            return;
-        }
-        if !inline_block_threads(block, self.context.root_method_kind()) {
-            return;
-        }
-        if !self.writes_of(block).is_empty() {
-            return;
-        }
-        let last = self.last_statements.last().copied().unwrap_or(false);
-        let parenthesized = self
-            .parenthesized_sends
-            .contains(&expr.unwrap_parens().span());
-        // Every enclosing fold-like block (`do:`, a collection operation, a
-        // loop or counted loop) that writes an outer local, with no
-        // measured conditional arm between it and the site (an arm is a frame
-        // of its own, measured; an arm of an unmeasured selector is not): the
-        // union of their writes.
-        let mut fold_writes: Vec<EcoString> = Vec::new();
-        for ((container, writes), unmeasured) in self
-            .containers
-            .iter()
-            .zip(&self.writes_outer_local_blocks)
-            .zip(&self.unmeasured_blocks)
-            .rev()
-        {
-            match container {
-                Container::Arm if !unmeasured => break,
-                Container::DoBody
-                | Container::ListOpBody
-                | Container::LoopBody
-                | Container::CountedLoopBody => fold_writes.extend(writes.iter().cloned()),
-                _ => {}
-            }
-        }
-        fold_writes.sort();
-        fold_writes.dedup();
-        let site = EvaluatedBlockSite {
-            depth: self.depth,
-            parenthesized,
-            inner: self.containers.last().copied(),
-            chain_measured: !self.unmeasured_blocks.iter().any(|u| *u),
-            fold_writes,
-            assign_target: self.assign_target.clone(),
-            evaluated_nesting: self
-                .containers
-                .iter()
-                .rev()
-                .take_while(|c| **c == Container::EvaluatedBlock)
-                .count(),
-            last,
-        };
-        if evaluated_block_value_unpacked(position, &site) {
-            return;
-        }
-        self.diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "an evaluated block (`[...] value`) binds a local, writes a field or sends \
-                     to `self`, but as {position} in {context} its value is not unpacked from \
-                     the block's state yet ({issue}, until {fixed_by})",
-                    context = self.context,
-                    issue = row.issue,
-                    fixed_by = row.fixed_by,
-                ),
-                expr.span(),
-            )
-            .with_hint(
-                "assign the block's value to a local in a statement of the method body \
-                 (`r := [...] value`) and use the local here, or compute it in a method \
-                 of its own",
             )
             .with_category(DiagnosticCategory::UnmigratedLocalThreading),
         );

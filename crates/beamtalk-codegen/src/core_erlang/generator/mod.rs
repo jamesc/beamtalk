@@ -288,6 +288,14 @@ pub struct CoreErlangGenerator {
     /// once for a REPL input; empty elsewhere.
     pub(in crate::core_erlang) value_assign_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
+    /// BT-3982: the block-literal spans of the evaluated blocks a body
+    /// sequencer is compiling right now as a Tier 2 statement
+    /// (`generate_tier2_value_call_doc`), which unpacks the raw
+    /// `{Value, State}` tuple of `generate_block_value_inline_with_mutations`.
+    /// That lowering reached for any other site reports
+    /// `VerifyError::UnthreadedEvaluatedBlock`.
+    pub(in crate::core_erlang) tier2_evaluated_block_sites:
+        std::collections::HashSet<beamtalk_core::source_analysis::Span>,
     /// BT-3827: the body-block span of the one fold a value-type consumer is
     /// compiling right now AND will unpack the `Self` slot of
     /// (`with_fold_self_slot_consumer`); `None` everywhere else. A fold that
@@ -600,6 +608,7 @@ impl CoreErlangGenerator {
             precompiled_subexprs: std::collections::HashMap::new(),
             local_producer_sites: std::collections::HashSet::new(),
             value_assign_sites: std::collections::HashSet::new(),
+            tier2_evaluated_block_sites: std::collections::HashSet::new(),
             fold_self_slot_consumer: None,
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),

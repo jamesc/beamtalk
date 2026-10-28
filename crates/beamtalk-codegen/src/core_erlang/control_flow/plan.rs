@@ -313,12 +313,23 @@ impl BodyEffects {
 
         // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
         // fall back to StateAcc mode so `lower_local_var_assignment_bind`
-        // can properly unpack the {Result, NewStateAcc} tuple.
+        // can properly unpack the {Result, NewStateAcc} tuple. BT-3982: an
+        // evaluated literal block inlined with its writes threaded is one
+        // too, whichever lowering takes it (the producer, read off the
+        // enclosing frame here, or the Tier 2 path in the body's own frame):
+        // either runs on the body's `StateAcc`.
         let has_tier2_threaded_assign = body.body.iter().any(|s| {
             if let Expression::Assignment { target, value, .. } = &s.expression {
                 if let Expression::Identifier(id) = target.as_ref() {
                     if threaded_locals.contains(&id.name.to_string()) {
-                        return generator.is_tier2_value_call(value);
+                        return generator.is_tier2_value_call(value)
+                            || !generator.is_repl_mode()
+                                && beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(
+                                value,
+                            )
+                            .is_some_and(|(block, _)| {
+                                generator.evaluated_block_inlines_with_mutations(block)
+                            });
                     }
                 }
             }

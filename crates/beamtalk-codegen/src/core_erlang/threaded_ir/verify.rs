@@ -339,6 +339,21 @@ pub(in crate::core_erlang) enum VerifyError {
     /// Applies in every frame and context.
     UnthreadedLocalAssignment { local: String, span: Span },
 
+    /// BT-3982 (ADR 0118 §Decision 2): an evaluated literal block (`[...]
+    /// value`, `[:y | ...] value: x`) reached the legacy inline lowering
+    /// (`generate_block_value_inline_with_mutations`), whose value is a raw
+    /// `{Value, State}` tuple, at a site no body sequencer consumes as a
+    /// Tier 2 statement (`generate_tier2_value_call_doc`, which unpacks the
+    /// tuple and binds the next `State`). Anywhere else the tuple is the
+    /// value (`{[:y | self.count := y] value: 5, self.count}` answered
+    /// `{{5, Counter(count: 5)}, 0}`) and the block's `State` is dropped,
+    /// `erlc`-clean. An evaluated block that threads `State` is a producer
+    /// wherever it sits (`generate_evaluated_block_producer`), so a producer
+    /// gate that missed the shape, or a consumer that compiled it as a plain
+    /// sub-expression, is the cause. `at` is the block literal's span.
+    /// Applies in every actor frame (the REPL unpacks its own tuple).
+    UnthreadedEvaluatedBlock { at: Span },
+
     /// BT-3830: a child an enclosing sequencing pass compiled ahead
     /// (`precompiled_subexprs`) was read back `reads` (> 1) times by its
     /// parent's compile. Its prelude ran once; every read after the first

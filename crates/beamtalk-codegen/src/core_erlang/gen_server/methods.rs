@@ -778,10 +778,13 @@ impl CoreErlangGenerator {
                     // which splices the producer's prelude; the dedicated arms
                     // compile their value with plain `expression_doc` and would
                     // leak the construct tuple.
+                    // BT-3982: so is an evaluated literal block that is a
+                    // producer (`^[:y | self.n := y] value: 5`).
                     if matches!(
                         value_kind,
                         BodyExprKind::ControlFlowWithMutations | BodyExprKind::Pure
-                    ) && self.statement_has_local_producer(expr)
+                    ) && (self.statement_has_local_producer(expr)
+                        || self.evaluated_block_is_producer(value))
                     {
                         value_kind = BodyExprKind::Pure;
                     }
@@ -2979,9 +2982,10 @@ impl CoreErlangGenerator {
     /// When true, the expression will generate a `{Result, NewState}` tuple via
     /// `generate_block_value_call_stateful()` and must be unpacked by the caller.
     pub(in crate::core_erlang) fn is_tier2_value_call(&self, expr: &Expression) -> bool {
-        // BT-3841: a producer-shaped `[...] value` in this frame is lowered by
-        // the evaluated-block producer (see `control_flow_has_mutations`).
-        if self.block_value_producer_in_frame(expr) {
+        // BT-3841 / BT-3982: an evaluated literal block that is a producer here
+        // is lowered by the evaluated-block producer (see
+        // `control_flow_has_mutations`).
+        if self.evaluated_block_is_producer(expr) {
             return false;
         }
         if let Expression::MessageSend {
@@ -3242,6 +3246,15 @@ impl CoreErlangGenerator {
                     return self.generate_block_value_call_stateful(receiver, arguments);
                 }
             }
+            // BT-3982: a literal block receiver is inlined by
+            // `generate_block_value_inline_with_mutations`, whose raw tuple
+            // this statement's caller unpacks: the one consumed site.
+            if let Expression::Block(block) = receiver.as_ref() {
+                self.tier2_evaluated_block_sites.insert(block.span);
+                let doc = self.expression_doc(expr);
+                self.tier2_evaluated_block_sites.remove(&block.span);
+                return doc;
+            }
         }
         // `blk value: x; value: y` — proved safe by `is_tier2_value_call`'s
         // Cascade branch. Unlike the single-send case, `expression_doc` has no
@@ -3344,12 +3357,12 @@ impl CoreErlangGenerator {
         // rather than falling through to a plain pure local assignment.
         let expr = expr.unwrap_parens();
 
-        // BT-3841: an evaluated literal block (`[...] value`) that is a
-        // local-threading producer in the frame being lowered is control flow
-        // with mutations: its arm's writes come back through the producer's
-        // prelude, never through the legacy Tier 2 inline-block tuple
-        // ([`Self::is_tier2_value_call`] leaves it to this classifier).
-        if self.block_value_producer_in_frame(expr) {
+        // BT-3841 / BT-3982: an evaluated literal block that is a producer here
+        // (a local-threading one, or an actor one that threads `State`) is
+        // control flow with mutations: its arm's writes come back through the
+        // producer's prelude, never through the legacy Tier 2 inline-block
+        // tuple ([`Self::is_tier2_value_call`] leaves it to this classifier).
+        if self.evaluated_block_is_producer(expr) {
             return true;
         }
 
