@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to
+// `self`/`super` from Actor class methods answer what the external send
+// (`Bt4252ClassProtocolActorChild name`) answers.
+
+Bt4252ClassProtocolActorBase subclass: Bt4252ClassProtocolActorChild
+
+  class selfName => self name
+
+  class superName => super name
+
+  class selfSuperclass => self superclass
+
+  class superSuperclass => super superclass
+
+  class superNameInClosure => #(1) collect: [:x | super name]

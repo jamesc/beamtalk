@@ -1667,64 +1667,22 @@ impl CoreErlangGenerator {
             });
         }
 
-        // Behaviour-protocol reflective primitives (`superclass`,
-        // `includesSelector:`, ...) are not compiled class exports — they are
-        // `@primitive`-backed methods inherited from `Behaviour`/`Class` and
-        // normally resolved via `try_class_chain_fallthrough`'s
-        // `beamtalk_dispatch:lookup/5` walk. That walk needs a `ClassPid` that
-        // isn't `self()` (it goes through `gen_server:call` for the class
-        // method table), so it cannot run from inside the class's own
-        // process. Route these selectors directly to the real
-        // `beamtalk_behaviour_intrinsics` implementation instead, passing the
-        // closure-captured `ClassSelf` as receiver — every entry here is
-        // deadlock-safe specifically because its implementation resolves the
-        // class module via `beamtalk_object_class:module_name_safe/1` (which
-        // has a `ClassPid =:= self()` fast path reading the process
-        // dictionary) and looks up class metadata from
-        // `__beamtalk_meta/0` / ETS rather than calling back into this
-        // process's own gen_server. `class_self_send_reflective_primitive`
-        // must stay in sync with that safety property — do not add a
-        // selector here whose intrinsic can call `gen_server:call(ClassPid,
-        // ...)` unconditionally (e.g. `classSubclasses/1`,
-        // `classAllSubclasses/1`, `className/1` as of this writing).
-        if let Some(fun_name) =
-            class_self_send_reflective_primitive(&selector_atom, arguments.len())
-        {
-            let (args_preamble, args_doc) = self.thread_args(arguments)?;
-            let comma = if arguments.is_empty() { "" } else { ", " };
-            let call_doc = docvec![
-                "call 'beamtalk_behaviour_intrinsics':",
-                leaf::atom(fun_name),
-                "(",
-                leaf::var("ClassSelf"),
-                comma,
-                args_doc,
-                ")"
-            ];
-            let doc = self.close_prelude(&args_preamble, call_doc, "ReflectivePrimitive");
-            return Ok(ThreadedValue {
-                prelude: Vec::new(),
-                value: ValueRef::Doc(doc),
-            });
-        }
-
         // Inherited class method — walk the hierarchy at runtime and
         // apply the defining module's class_<sel>(ClassSelf, Args...).
         // The one remaining auto-generated 0-arity export reachable via plain
-        // self-send (`class_name/0`) stays on the direct-call path because the
-        // chain walker only looks at user-defined class_methods, and its
-        // intrinsic (`className/1`) is not deadlock-safe from inside the
-        // class's own process (see the reflective-primitive branch above) —
-        // `class_name/0` sidesteps that by returning the raw atom directly
-        // rather than going through the primitive. The other auto-exports
+        // self-send (`class_name/0`) stays on the direct-call path: it returns
+        // the raw atom straight from the module. The other auto-exports
         // (`method_table/0`, `has_method/1`, `register_class/0`,
         // `__beamtalk_meta/0`) are codegen-internal reflection and metadata
         // accessors without a stable user-level API, so they are deliberately
         // NOT on the direct-call path — `is_class_auto_export_selector` must
         // stay in sync with the actual reachable set. Anything else that falls
-        // through here — inherited or missing — routes through
-        // class_self_send/4, which raises a structured does_not_understand
-        // error for genuine DNU.
+        // through here — inherited, Behaviour protocol, or missing — routes
+        // through class_self_send/3: after the class-method chain misses it
+        // dispatches through the class-object protocol (`Class` ->
+        // `Behaviour` -> ...) exactly as an external `C name` does (BT-4252),
+        // so `self name` / `self superclass` answer the same value, and it
+        // raises a structured does_not_understand for genuine DNU.
         if is_class_auto_export_selector(&selector_atom, arguments.len()) {
             // Hoist preambles from sub-expression class var mutations.
             let module = self.module_name.clone();
@@ -3351,16 +3309,12 @@ impl CoreErlangGenerator {
 /// does not index them (it reads only user-defined `class_methods` on each
 /// ancestor `gen_server`).
 ///
-/// `superclass` moved off this path — its raw export returns the
-/// bare class-name atom, not the `#beamtalk_object{}` a Beamtalk-level
-/// `self superclass` must produce, and callers comparing it against a real
-/// class object got a silent `equals:`/`==` mismatch. It is now handled by
-/// `class_self_send_reflective_primitive`, which calls the real
-/// `beamtalk_behaviour_intrinsics:classSuperclass/1` intrinsic. `class_name`
-/// stays here: its intrinsic (`className/1`) always calls
-/// `gen_server:call(ClassPid, class_name)`, which would deadlock from inside
-/// the class's own process, so returning the raw atom directly is the
-/// correct (deadlock-safe) behavior for this one, not a bug.
+/// `superclass` is not on this path: its raw export returns the bare
+/// class-name atom, not the `#beamtalk_object{}` a Beamtalk-level
+/// `self superclass` must produce. It takes the virtual self-send path,
+/// whose class-object protocol fallthrough (BT-4252) answers what an
+/// external `C superclass` answers. `class_name` stays here, returning the
+/// raw atom from its export.
 ///
 /// Intentionally narrow. The three audited exports on every user class
 /// module are `superclass/0`, `class_name/0`, and `method_table/0` — but
@@ -3371,10 +3325,9 @@ impl CoreErlangGenerator {
 /// initially in this list by mistake — no class module exports `methods/0`,
 /// so including it would have compiled `self methods` to a non-existent
 /// direct call (would crash with `undef`). Any auto-export added later that
-/// is reachable via plain self-send needs to be added here (if its raw
-/// export form is the desired behavior) or to
-/// `class_self_send_reflective_primitive` (if it must produce the same
-/// value the non-self-send Behaviour-protocol dispatch would). Unknown
+/// is reachable via plain self-send needs to be added here only if its raw
+/// export form is the desired behavior; a Behaviour-protocol selector needs
+/// nothing, since the virtual self-send path already answers it. Unknown
 /// selectors take the inherited-dispatch path, which raises structured DNU
 /// on miss — strictly better than the old fallthrough (direct call
 /// → runtime `undef`).
@@ -3395,48 +3348,6 @@ pub(super) fn is_supervisor_spawn_selector(selector_atom: &str, arity: usize) ->
             | ("spawnWith:" | "spawnAs:" | "spawnMonitoredWith:", 1)
             | ("spawnWith:as:", 2)
     )
-}
-
-/// Behaviour-protocol reflective primitives that are safe to
-/// dispatch directly from a class-method self-send.
-///
-/// Unlike `is_class_auto_export_selector`'s raw module exports, these
-/// selectors are ordinary `@primitive`-backed methods inherited from
-/// `Behaviour`/`Class` (see `stdlib/src/behaviour.bt`) that non-self-send
-/// dispatch resolves via `try_class_chain_fallthrough`'s
-/// `beamtalk_dispatch:lookup/5` walk — a walk that itself is not reachable
-/// from inside the class's own process (it round-trips through
-/// `gen_server:call` for the class method table). Each selector listed here
-/// is deadlock-safe to call directly with `ClassSelf` because its
-/// `beamtalk_behaviour_intrinsics` implementation resolves everything it
-/// needs (module, metadata) through `beamtalk_object_class:module_name_safe/1`
-/// (which has a `ClassPid =:= self()` fast path) and
-/// `__beamtalk_meta/0`/ETS lookups rather than an unconditional
-/// `gen_server:call(ClassPid, ...)`.
-///
-/// Deliberately does NOT include every Behaviour-protocol selector:
-/// `classSubclasses/1` and `classAllSubclasses/1` unconditionally call
-/// `gen_server:call(ClassPid, class_name)` with no metadata-first fast
-/// path, so adding `subclasses`/`allSubclasses` here today would trade a
-/// `does_not_understand` for a real self-call deadlock. Extending this list
-/// requires auditing the target intrinsic for that property first.
-///
-/// Note the metadata-first fast path itself still has a `not_available`
-/// fallback in `classSuperclass/1`/`classIncludesSelector/2` that calls
-/// `gen_server:call(ClassPid, ...)` — safe here only because every class
-/// module this codegen emits unconditionally exports `__beamtalk_meta/0`
-/// (see `native_facade.rs` / the `gen_server` codegen), so `meta_for_module/1`
-/// never actually falls through to it for a compiled class. If that
-/// invariant ever changes, this function's safety claim needs re-auditing.
-pub(super) fn class_self_send_reflective_primitive(
-    selector_atom: &str,
-    arity: usize,
-) -> Option<&'static str> {
-    match (selector_atom, arity) {
-        ("superclass", 0) => Some("classSuperclass"),
-        ("includesSelector:", 1) => Some("classIncludesSelector"),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

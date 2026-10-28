@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4252: superclass of Bt4252ClassProtocolValueChild. Its class methods
+// send Behaviour-protocol selectors to `self`/`super`; inherited by the
+// child, they answer for the receiving subclass.
+
+Value subclass: Bt4252ClassProtocolValueBase
+
+  class inheritedSelfName => self name
+
+  class inheritedSuperName => super name

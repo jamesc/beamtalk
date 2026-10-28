@@ -309,8 +309,9 @@ defined it.
 
 `ReceiverTag` is the live receiver's metaclass tag (`element(2, ClassSelf)`),
 so the found method runs under the receiver's class-variable key. Returns the
-plain result (ADR 0130 §3) and raises a structured `does_not_understand` when
-no ancestor defines `Selector`.
+plain result (ADR 0130 §3). When no ancestor defines `Selector`, the
+class-object protocol answers (`class_self_protocol_fallthrough/4`, BT-4252),
+else a structured `does_not_understand` is raised.
 """.
 -spec class_super_dispatch(class_name(), selector(), list(), atom()) -> term() | no_return().
 class_super_dispatch(ClassName, Selector, Args, ReceiverTag) when
@@ -347,7 +348,9 @@ class_super_dispatch(ClassName, Selector, Args, ReceiverTag) when
                 ClassName, Selector, Args, {ok, AncestorName, AncestorModule}, ReceiverTag
             );
         not_found ->
-            raise_class_self_dnu(ClassName, Selector)
+            %% No ancestor class method or extension: the class-object
+            %% protocol answers (`super name`, `super superclass`, BT-4252).
+            class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag)
     end.
 
 -doc """
@@ -419,9 +422,10 @@ inherited definition, exactly as an instance-side self-send resolves.
 A class-side `super`, builder or compiled, uses `class_super_dispatch/4`
 instead, which never consults `ClassName` itself.
 
-Returns the plain result (ADR 0130 §3) and raises a structured
-`does_not_understand` when neither an extension nor any class in the chain
-defines `Selector`.
+Returns the plain result (ADR 0130 §3). When neither an extension nor any
+class in the chain defines `Selector`, the class-object protocol answers
+(`self name`, `self superclass`: `class_self_protocol_fallthrough/4`,
+BT-4252), else a structured `does_not_understand` is raised.
 """.
 -spec class_self_send(class_name(), selector(), list()) -> term() | no_return().
 class_self_send(ClassName, Selector, Args) ->
@@ -510,7 +514,54 @@ class_self_dispatch_chain(ClassName, Selector, Args, Found, ReceiverTag) ->
                 )
             );
         not_found ->
-            raise_class_self_dnu(ClassName, Selector)
+            class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag)
+    end.
+
+-doc """
+The class-object protocol fallthrough for a class-side `self`/`super` send
+(BT-4252): no class method or class-side extension in the chain answers
+`Selector`, so dispatch it the way an external send to the receiving class
+object does after its class-method lookup misses
+(`class_send_dispatch/3`'s `{error, not_found}` branch) — through the
+`Class -> Behaviour -> Object -> ProtoObject` instance-method chain, via
+`try_class_chain_fallthrough/3`. So `self name`, `super name` and
+`super superclass` in a class method answer what `C name` /
+`C superclass` answer from outside, and the type checker's class-side check
+(which resolves an unknown class-side selector against `Class`) agrees with
+the runtime by construction — one lookup, no selector list.
+
+The receiver is rebuilt from `ReceiverTag` (`element(2, ClassSelf)` at the
+call site), so a subclass receiver answers for itself: `super name` from a
+`Base` class method inherited by `C` answers `#C`. Its pid is the
+receiving class's registered pid, never `self()`-derived, so the same
+`ClassSelf` results whether the class method runs in the class's own
+process or (a direct-called sealed method, ADR 0129) in the caller. The
+`Behaviour` primitives reach class state through the message-free
+`beamtalk_object_class:*_safe/1` readers, so running in the class's own
+process does not self-call its gen_server. Raises the structured
+`does_not_understand` when `Class` does not understand `Selector` either.
+""".
+-spec class_self_protocol_fallthrough(class_name(), selector(), list(), atom()) ->
+    term() | no_return().
+class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag) ->
+    ReceiverName =
+        case beamtalk_primitive:class_name_from_tag(ReceiverTag) of
+            undefined -> ClassName;
+            Name -> Name
+        end,
+    case beamtalk_class_registry:whereis_class(ReceiverName) of
+        undefined ->
+            raise_class_self_dnu(ClassName, Selector);
+        ReceiverPid ->
+            ClassSelf = #beamtalk_object{
+                class = ReceiverTag,
+                class_mod = self_dispatch_module(ReceiverName),
+                pid = ReceiverPid
+            },
+            case try_class_chain_fallthrough(ClassSelf, Selector, Args) of
+                {ok, Result} -> Result;
+                not_found -> raise_class_self_dnu(ClassName, Selector)
+            end
     end.
 
 -doc """
@@ -527,8 +578,9 @@ class's own runtime class-method fun (the retrieval store), and only falls
 back to `class_self_dispatch_chain/4` (super + inherited, walked from the
 superclass) when the selector is neither.
 
-Returns the raw result and raises a structured `does_not_understand`
-when no definition is found. No `gen_server` hop: the local lookup is the same
+Returns the raw result; when no definition is found the class-object
+protocol answers (`class_self_protocol_fallthrough/4`, BT-4252), else a
+structured `does_not_understand` is raised. No `gen_server` hop: the local lookup is the same
 ETS read the dispatch hot path already uses.
 """.
 -spec class_self_dispatch_local(class_name(), selector(), list()) -> term() | no_return().
