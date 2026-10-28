@@ -111,14 +111,14 @@ ts class name
 
 // Convert an ok tuple explicitly
 okTuple := Tuple withAll: #(#ok, 42)
-// => _
+// => {#ok, 42}
 
 Result fromTuple: okTuple
 // => Result ok: 42
 
 // Convert an error tuple explicitly
 errTuple := Tuple withAll: #(#error, #oops)
-// => _
+// => {#error, #oops}
 
 fromTupleResult := Result fromTuple: errTuple
 // => Result error: oops
