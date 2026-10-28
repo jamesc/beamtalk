@@ -54,6 +54,7 @@ mod destructure_and_extension;
 mod dynamic_and_blocks;
 mod dynamic_iterable;
 mod ffi;
+mod ffi_nested_string;
 mod generic_inheritance;
 mod generic_preservation;
 mod generic_validation;
