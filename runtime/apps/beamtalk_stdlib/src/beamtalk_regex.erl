@@ -184,12 +184,13 @@ matches_regex_options(Str, {beamtalk_string, _} = Pattern, Options) when is_bina
 matches_regex_options({beamtalk_string, Str}, {beamtalk_string, Pattern}, Options) when
     is_binary(Str), is_binary(Pattern), is_list(Options)
 ->
-    ErlOpts = [{capture, none} | translate_options(Options)],
+    CompileOpts = translate_options(Options),
+    ErlOpts = [{capture, none} | CompileOpts],
     try
         re:run(Str, Pattern, ErlOpts) =:= match
     catch
         error:badarg ->
-            raise_bad_pattern('matchesRegex:options:', Pattern, translate_options(Options))
+            raise_bad_pattern('matchesRegex:options:', Pattern, CompileOpts)
     end;
 matches_regex_options(_, _, _) ->
     beamtalk_error:raise_type_error(

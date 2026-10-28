@@ -240,6 +240,42 @@ impl ProtocolInfo {
         }
     }
 
+    /// This protocol followed by every protocol it transitively `extending:`s,
+    /// nearest first, stopping at a cycle or an unknown parent.
+    fn extending_chain<'a>(&'a self, registry: &'a ProtocolRegistry) -> Vec<&'a ProtocolInfo> {
+        let mut chain = vec![self];
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(self.name.clone());
+        let mut current = self;
+        while let Some(parent) = current
+            .extending
+            .as_ref()
+            .filter(|name| visited.insert((*name).clone()))
+            .and_then(|name| registry.get(name))
+        {
+            chain.push(parent);
+            current = parent;
+        }
+        chain
+    }
+
+    /// The type parameters of this protocol and of every protocol it
+    /// transitively extends — the names a requirement from
+    /// [`Self::all_requirements`] may mention without a substitution
+    /// context (BT-4239).
+    #[must_use]
+    pub fn all_type_params(&self, registry: &ProtocolRegistry) -> Vec<EcoString> {
+        let mut params: Vec<EcoString> = Vec::new();
+        for protocol in self.extending_chain(registry) {
+            for param in &protocol.type_params {
+                if !params.contains(param) {
+                    params.push(param.clone());
+                }
+            }
+        }
+        params
+    }
+
     /// Returns all method requirements, including those inherited from extended protocols.
     pub fn all_requirements<'a>(
         &'a self,
@@ -644,8 +680,8 @@ impl ProtocolRegistry {
     /// mismatches), and the same covariance rule as an inherited override —
     /// [`TypeChecker::is_return_type_refinement`](crate::semantic_analysis::type_checker::TypeChecker::is_return_type_refinement).
     /// Requirements or methods without a declared return type are skipped,
-    /// as is any requirement whose return type names one of the protocol's
-    /// own type parameters (no substitution context here). A mismatch that an
+    /// as is any requirement whose return type names a type parameter of the
+    /// protocol or of any protocol it extends (no substitution context here). A mismatch that an
     /// override introduces by widening an inherited, conforming return type
     /// is skipped: the override check reports it once at the definition.
     /// Instance side only.
@@ -663,13 +699,14 @@ impl ProtocolRegistry {
         {
             return Vec::new();
         }
+        let type_params = protocol.all_type_params(self);
         let mut mismatches = Vec::new();
         for req in protocol.all_requirements(self) {
             let Some(ref req_rt) = req.return_type else {
                 continue;
             };
             let expected = DeclaredType::parse(req_rt);
-            if expected.mentions_any(&protocol.type_params) {
+            if expected.mentions_any(&type_params) {
                 continue;
             }
             let Some(method) = hierarchy.find_method(class_name, &req.selector) else {
@@ -688,11 +725,15 @@ impl ProtocolRegistry {
             // call site that passes the class to a protocol-typed parameter
             // would be noise the caller cannot fix. Skip only when the
             // override check reports it (same decision, shared).
-            if TypeChecker::override_return_widening(&method.defined_in, &req.selector, hierarchy)
-                .is_some_and(|w| {
-                    TypeChecker::is_return_type_refinement(&w.parent_rt, &expected, hierarchy)
-                })
-            {
+            if TypeChecker::override_return_widening(
+                &method.defined_in,
+                &req.selector,
+                actual,
+                hierarchy,
+            )
+            .is_some_and(|w| {
+                TypeChecker::is_return_type_refinement(&w.parent_rt, &expected, hierarchy)
+            }) {
                 continue;
             }
             mismatches.push(ReturnTypeMismatch {

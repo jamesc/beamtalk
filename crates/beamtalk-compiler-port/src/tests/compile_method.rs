@@ -397,6 +397,37 @@ fn compile_method_body_diagnostic_is_method_relative() {
 }
 
 #[test]
+fn compile_method_records_source_with_operand_parens_as_written() {
+    // BT-4059: the recorded method source goes to the `ChangeLog` and is
+    // written back on flush, so it keeps the operand parentheses the user
+    // wrote (readability parens included), exactly as reflected
+    // `methodSource`, emitted by codegen, does.
+    for (method_source, expected) in [
+        (
+            "bumped => (self) printString",
+            "bumped => (self) printString",
+        ),
+        ("scaled: a => a * ((a) + 1)", "scaled: a => a * ((a) + 1)"),
+        ("summed: a => (a * 2) + 1", "summed: a => (a * 2) + 1"),
+    ] {
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(COMPILE_METHOD_CLASS)),
+            (atom("method_source"), binary(method_source)),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        let ms = response_field_str(&response, "method_source").expect("method_source");
+        assert_eq!(ms.trim(), expected, "{method_source}");
+    }
+}
+
+#[test]
 fn compile_method_rejects_non_method_source() {
     let request = Term::from(Map::from([
         (atom("command"), atom("compile_method")),

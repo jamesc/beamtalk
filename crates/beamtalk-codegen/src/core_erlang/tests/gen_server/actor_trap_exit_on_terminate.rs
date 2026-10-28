@@ -182,8 +182,8 @@ fn test_server_subclass_handle_info_intercepts_linked_exit_before_dispatch() {
         .expect("handle_info/2 must be present in generated code");
 
     assert!(
-        info_body.contains("call 'beamtalk_actor':'handle_linked_exit'(Msg, State)"),
-        "Server-subclass handle_info/2 must check handle_linked_exit/2 first. Got:\n{info_body}"
+        info_body.contains("call 'beamtalk_actor':'handle_linked_exit'(Msg, State, 'false')"),
+        "Server-subclass handle_info/2 must check handle_linked_exit/3 first. Got:\n{info_body}"
     );
     // The 'pass' arm must still contain the original handleInfo: dispatch.
     let pass_idx = info_body
@@ -196,5 +196,84 @@ fn test_server_subclass_handle_info_intercepts_linked_exit_before_dispatch() {
         pass_idx < dispatch_idx,
         "the handleInfo: dispatch must be nested inside the 'pass' arm, after \
          the handle_linked_exit check. Got:\n{info_body}"
+    );
+}
+
+fn gen_code(src: &str, name: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    generate_module(&module, CodegenOptions::new(name)).expect("codegen should succeed")
+}
+
+/// BT-4052: a Server that only defines `onLinkedExit:reason:` (no
+/// `terminate:`) must trap exits.
+#[test]
+fn test_server_with_linked_exit_hook_only_traps_exit() {
+    let code = gen_code(
+        concat!(
+            "Server subclass: HookServer\n",
+            "  state: n = 0\n\n",
+            "  onLinkedExit: _pid reason: _reason => nil\n",
+        ),
+        "hook_server",
+    );
+    let init_body = extract_core_fn(&code, "'init'/1 = fun").expect("init/1");
+    assert!(
+        init_body.contains("call 'erlang':'process_flag'('trap_exit', 'true')"),
+        "hook-only Server must trap exits. Got:\n{init_body}"
+    );
+}
+
+/// BT-4052: the hook flag is baked `true` and the `{hook, ...}` marker is
+/// dispatched to `onLinkedExit:reason:`.
+#[test]
+fn test_server_with_linked_exit_hook_dispatches_hook() {
+    let code = gen_code(
+        concat!(
+            "Server subclass: HookServer\n",
+            "  state: n = 0\n\n",
+            "  onLinkedExit: _pid reason: _reason => nil\n",
+        ),
+        "hook_server",
+    );
+    let info_body = extract_core_fn(&code, "'handle_info'/2 = fun").expect("handle_info/2");
+    assert!(
+        info_body.contains("call 'beamtalk_actor':'handle_linked_exit'(Msg, State, 'true')"),
+        "flag must be baked true. Got:\n{info_body}"
+    );
+    assert!(
+        info_body.contains("<{'hook', HookPid, HookReason}> when 'true' ->")
+            && info_body
+                .contains("'safe_dispatch'('onLinkedExit:reason:', [HookPid, HookReason], State)"),
+        "hook marker must dispatch onLinkedExit:reason:. Got:\n{info_body}"
+    );
+}
+
+/// BT-4052: a Server without the hook has no hook arm, and a plain Actor
+/// defining a method of that name neither traps nor dispatches it.
+#[test]
+fn test_server_without_hook_and_plain_actor_unaffected() {
+    let code = gen_code(
+        "Server subclass: Quiet\n  state: n = 0\n  terminate: _r => nil\n",
+        "quiet",
+    );
+    let info_body = extract_core_fn(&code, "'handle_info'/2 = fun").expect("handle_info/2");
+    assert!(
+        !info_body.contains("onLinkedExit:reason:"),
+        "Got:\n{info_body}"
+    );
+
+    let code = gen_code(
+        "Actor subclass: PlainHook\n  onLinkedExit: _pid reason: _reason => nil\n",
+        "plain_hook",
+    );
+    assert!(
+        !code.contains("trap_exit"),
+        "plain Actor must not trap. Got:\n{code}"
+    );
+    let info_body = extract_core_fn(&code, "'handle_info'/2 = fun").expect("handle_info/2");
+    assert!(
+        info_body.contains("call 'beamtalk_actor':'handle_info'(Msg, State)"),
+        "Got:\n{info_body}"
     );
 }

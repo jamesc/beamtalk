@@ -591,6 +591,17 @@ Transcript show: "Hello"; cr; show: "World"
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
 3. Keyword messages: `dict at: #name`
 
+Parentheses around a send's receiver or argument only group: when they are
+redundant they mean nothing, so `(self) foo`, `(MyClass) + 1` and
+`xs do: ([:x | t := t + x])` compile and run exactly like `self foo`,
+`MyClass + 1` and `xs do: [:x | t := t + x]`: the compiled behaviour is the
+same with or without them. Reflected method source
+(`(MyClass >> #sel) source`) is the text as written and keeps them — a method
+written `summed: a => (a * 2) + 1` reflects as exactly that — so the IDE method
+editor shows what is on disk. Source files are never rewritten to drop them:
+`beamtalk fmt`, and a workspace flush of a method edited in the REPL or IDE,
+keep the parentheses as written.
+
 ### Splitting a Message Send Across Lines
 
 A newline acts as a statement separator (see "Core Syntax" above), so whether
@@ -1263,7 +1274,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => #econnreset
 ```
 
-**Structured details (`Exception>>details`, BT-4174).** Natives that know more than the message says record it as structured details: `details` answers a `Dictionary` keyed by Symbol (empty when nothing was recorded), so read the value with `at:` instead of parsing the English `message`. For example, `Binary asString` on invalid UTF-8 answers `Result error:` holding a `parse_error` whose `#offset` is the byte offset of the first invalid sequence. A nested Beamtalk error stored in the details answers as an Exception and an absent (Erlang `undefined`) value as `nil`. Other values are the recorded terms as-is, without the FFI boundary coercions `reason` gets: text a native records as raw bytes, such as a File error's `#path`, answers a `Binary` (send it `asString` for a `String`).
+**Structured details (`Exception>>details`, BT-4174).** Natives that know more than the message says record it as structured details: `details` answers a `Dictionary` keyed by Symbol (empty when nothing was recorded), so read the value with `at:` instead of parsing the English `message`. For example, `Binary asString` on invalid UTF-8 answers `Result error:` holding a `parse_error` whose `#offset` is the byte offset of the first invalid sequence. A nested Beamtalk error stored in the details answers as an Exception and an absent (Erlang `undefined`) value as `nil`. Other values are the recorded terms as-is, without the FFI boundary coercions `reason` gets. Natives record text details (a File error's `#path`, `rename:to:`'s `#from`/`#to`) as `String`s, so `(File readAll: "missing.txt") error details at: #path` equals `"missing.txt"` (BT-4229).
 
 ```beamtalk
 (Binary fromBytes: #(104, 101, 255)) asString error details at: #offset
@@ -3562,6 +3573,25 @@ A `match:` arm body is an expression, so an arm that needs more than one stateme
       {#tick, n} -> self.count := self.count + n;
       _ -> nil
     ]
+  ```
+
+### onLinkedExit:reason: Semantics
+
+By default a `Server` that traps exits (see `Actor>>terminate:`) treats a linked process's `EXIT` like an untrapped link would: a non-`#normal` reason stops the server with that reason, and `#normal` is ignored. A server that links worker processes on purpose (for example `Erlang erlang spawn_link:`) can handle their exits itself by overriding `onLinkedExit: source reason: reason`:
+
+- Defined on `Server` with a **default no-op**. Overriding it (in the class or any ancestor other than `Server`) is the opt-in; there is no class-side flag.
+- **All** non-parent `EXIT`s — normal (`reason` is `#normal`) and abnormal — go to the hook, and only to the hook: they are never also delivered to `handleInfo:`. `EXIT` from the server's parent (supervisor/spawner) stays with the `gen_server` loop: `terminate:` runs and the server stops.
+- Overriding the hook makes the server trap exits; no `terminate:` override is needed.
+- **Error handling** is the same as `handleInfo:` (ADR 0134): a raise crashes the server. `continueWith:` and `stopWith:` work from the hook.
+- **`source` is a `Pid | Port`**: a trapping server also receives `EXIT` from linked ports (`open_port`, `gen_tcp`/`ssl` sockets), so annotate the parameter `Pid | Port`.
+- **Hot reload**: the server only traps exits from `init/1`, so adding or removing the override by hot reload applies to instances started after the change (same as `terminate:`).
+- **Server-only.** Plain ``Actor`s` keep the default behaviour and never receive the hook.
+
+  ```beamtalk
+  Server subclass: StreamHost
+    state: resets = 0
+    onLinkedExit: _source :: Pid | Port reason: reason :: Object =>
+      reason == #normal ifFalse: [self.resets := self.resets + 1]
   ```
 
 ### Migration: Actor to Server

@@ -2974,9 +2974,9 @@ impl CoreErlangGenerator {
                 &key,
                 &self.method_return_types_written_back,
             );
-            beamtalk_core::unparse::unparse_method(&stripped)
+            self.as_written_method_source(&stripped)
         } else {
-            beamtalk_core::unparse::unparse_method(method)
+            self.as_written_method_source(method)
         }
     }
 

@@ -807,9 +807,9 @@ impl TypeChecker {
                     // (single uppercase letter like E, T, V), fall back to Dynamic
                     // so downstream sends don't get false DNU warnings.
                     if let DeclaredType::Simple(n) = ret_ty {
-                        if crate::semantic_analysis::type_checker::is_generic_type_param(n)
-                            && !hierarchy.has_class(n)
-                        {
+                        if crate::semantic_analysis::type_checker::is_type_var_placeholder(
+                            n, hierarchy,
+                        ) {
                             return InferredType::Dynamic(DynamicReason::Unknown);
                         }
                     }
@@ -990,9 +990,7 @@ impl TypeChecker {
             return Some(InferredType::Never);
         }
         if let DeclaredType::Simple(n) = ret_ty {
-            if crate::semantic_analysis::type_checker::is_generic_type_param(n)
-                && !hierarchy.has_class(n)
-            {
+            if crate::semantic_analysis::type_checker::is_type_var_placeholder(n, hierarchy) {
                 return None;
             }
         }
@@ -1178,7 +1176,7 @@ impl TypeChecker {
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Substitution,
                                 ));
-                            } else if matches!(ret_ty, DeclaredType::Simple(n) if crate::semantic_analysis::type_checker::is_generic_type_param(n) && !hierarchy.has_class(n))
+                            } else if matches!(ret_ty, DeclaredType::Simple(n) if crate::semantic_analysis::type_checker::is_type_var_placeholder(n, hierarchy))
                             {
                                 return_types.push(InferredType::Dynamic(DynamicReason::Unknown));
                             } else {

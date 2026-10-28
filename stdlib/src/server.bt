@@ -47,3 +47,33 @@ abstract Actor subclass: Server
   /// block without running it (in an actor, a block that sends to `self` or
   /// writes a field is a compile error). Call a method from the arm instead.
   handleInfo: _msg => nil
+
+  /// Handle the exit of a process linked to this server (BT-4052).
+  ///
+  /// Override in subclasses to react to workers the server spawned and
+  /// linked itself (for example `Erlang erlang spawn_link: ...`). Overriding
+  /// this method makes the server trap exits, and **every** non-parent
+  /// `EXIT` — normal and abnormal — is delivered here instead of the default
+  /// behaviour (a non-`#normal` reason stops the server with that reason; a
+  /// `#normal` exit is ignored). The `EXIT` is never also delivered to
+  /// `handleInfo:`. `EXIT` from the server's parent (its supervisor or
+  /// spawner) is unchanged: `terminate:` runs and the server stops.
+  ///
+  /// `reason` is the raw exit reason (`#normal` for a clean stop). The return
+  /// value is discarded. If this method raises, the server crashes, as for
+  /// `handleInfo:` (ADR 0134). `continueWith:` and `stopWith:` work as in any
+  /// other method.
+  ///
+  /// `source` is a `Pid` for a linked process, or a `Port` for a linked port
+  /// (`open_port`, `gen_tcp` / `ssl` sockets): a trapping server receives
+  /// `EXIT` from linked ports too.
+  ///
+  /// The server only traps exits from `init/1` on, so adding or removing this
+  /// override by hot reload applies to instances started after the change.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// onLinkedExit: _source :: Pid | Port reason: reason :: Object =>
+  ///   self.failed := self.failed + 1
+  /// ```
+  onLinkedExit: _source :: Pid | Port reason: _reason :: Object -> Nil => nil

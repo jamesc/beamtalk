@@ -2479,11 +2479,28 @@ open_mode_read_missing_file_test() ->
         R
     ).
 
+%% BT-4229: a bare-`Binary` path that is not valid UTF-8 stays a `Binary` in
+%% the `path` detail; tagging it would forge an invalid `String` (BT-4170).
+invalid_utf8_binary_path_detail_stays_binary_test() ->
+    #{'errReason' := #{error := #beamtalk_error{details = Details}}} =
+        beamtalk_file:'readAll:'(<<255, 254>>),
+    ?assertEqual(<<255, 254>>, maps:get(path, Details)).
+
+text_detail_tags_valid_utf8_test() ->
+    ?assertEqual(
+        {beamtalk_string, <<"caf\x{e9}.txt"/utf8>>},
+        beamtalk_file:text_detail(<<"caf\x{e9}.txt"/utf8>>)
+    ).
+
 %% BT-3970: classifying a posix failure never drops the term.
 open_mode_read_missing_file_keeps_reason_test() ->
     #{'errReason' := #{error := #beamtalk_error{details = Details}}} =
         beamtalk_file:'open:mode:'(<<"_bt_test_open_mode_absent.txt">>, read),
-    ?assertMatch(#{reason := enoent, path := <<"_bt_test_open_mode_absent.txt">>}, Details).
+    %% BT-4229: the path detail is the caller's text, as a String.
+    ?assertMatch(
+        #{reason := enoent, path := {beamtalk_string, <<"_bt_test_open_mode_absent.txt">>}},
+        Details
+    ).
 
 file_error_classified_keeps_reason_test() ->
     Classified = [{eacces, permission_denied, <<"Check file permissions">>}],

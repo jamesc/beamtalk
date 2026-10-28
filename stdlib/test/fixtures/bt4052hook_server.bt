@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4052 fixture: Server that overrides onLinkedExit:reason: (and so traps
+// exits without a terminate: override). Records the last hook call and never
+// sees an EXIT in handleInfo:. See stdlib/test/server_linked_exit_test.bt.
+
+Server subclass: Bt4052HookServer
+  state: hookCount = 0
+  state: lastReason = nil
+  state: lastPid = nil
+  state: infoCount = 0
+
+  linkExiting: reason =>
+    Erlang erlang spawn_link: [Erlang erlang exit: reason]
+    nil
+
+  linkNormal =>
+    Erlang erlang spawn_link: [nil]
+    nil
+
+  onLinkedExit: pid :: Pid | Port reason: reason :: Object =>
+    self.hookCount := self.hookCount + 1
+    self.lastPid := pid
+    self.lastReason := reason
+
+  handleInfo: _msg => self.infoCount := self.infoCount + 1
+
+  hookCount => self.hookCount
+
+  lastReason => self.lastReason
+
+  lastPid => self.lastPid
+
+  infoCount => self.infoCount

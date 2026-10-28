@@ -1525,6 +1525,69 @@ Value subclass: Bag
     );
 }
 
+/// BT-4239: the provision check uses the shared covariant return rule, so a
+/// union is strict: a class-body `-> Integer | String` does not refine a
+/// provision's `-> Integer`.
+#[test]
+fn class_body_override_widening_provision_return_to_union_is_warning() {
+    let diagnostics = analyse(
+        "Protocol define: Sized
+  size -> Integer => 0
+
+Value subclass: Bag
+  uses: Sized
+
+  size -> Integer | String => 0",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "incompatible with").is_some(),
+        "a widening union override should warn: {diagnostics:?}"
+    );
+}
+
+/// BT-4239: narrowing a provision's union return type is a refinement.
+#[test]
+fn class_body_override_narrowing_provision_union_return_is_silent() {
+    let diagnostics = analyse(
+        "Protocol define: Sized
+  size -> Integer | Nil => nil
+
+Value subclass: Bag
+  uses: Sized
+
+  size -> Integer => 0",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "incompatible with").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
+/// BT-4239: a protocol-typed provision return is structural, so the shared
+/// rule declines to judge it nominally and stays silent.
+#[test]
+fn class_body_override_of_protocol_typed_provision_return_is_silent() {
+    let diagnostics = analyse(
+        "Protocol define: Shown
+  label -> String
+
+Protocol define: Labelled
+  labelled -> Shown => self
+
+Value subclass: Tag
+  uses: Labelled
+
+  labelled -> Integer => 0",
+    );
+
+    assert!(
+        find_diagnostic(&diagnostics, "incompatible with").is_none(),
+        "{diagnostics:?}"
+    );
+}
+
 // ── Protocol-side checks (§5, §7, §13) ───────────────────────────────────
 
 #[test]

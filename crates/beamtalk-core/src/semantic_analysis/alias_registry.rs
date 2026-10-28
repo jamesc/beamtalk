@@ -58,7 +58,7 @@ use ecow::EcoString;
 use crate::ast::{Identifier, Module, TypeAliasDefinition, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
-use crate::semantic_analysis::type_checker::{is_generic_type_param, resolve_type_annotation};
+use crate::semantic_analysis::type_checker::{is_type_var_placeholder, resolve_type_annotation};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// Information about a type alias in the registry.
@@ -758,7 +758,7 @@ fn check_unbound_type_vars(
     match ann {
         TypeAnnotation::Simple(type_id) => {
             let name = &type_id.name;
-            if is_generic_type_param(name) && !hierarchy.has_class(name) {
+            if is_type_var_placeholder(name, hierarchy) {
                 diagnostics.push(
                     Diagnostic::error(
                         format!(

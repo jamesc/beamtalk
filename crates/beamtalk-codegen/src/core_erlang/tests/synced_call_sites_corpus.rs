@@ -49,7 +49,12 @@ fn programs() -> usize {
 
 /// The generated programs as actor-class sources, `BATCH` run methods each.
 fn generated_sources() -> Vec<String> {
-    let mut drawn = draw_programs("GenSitesProbe", programs());
+    generated_sources_of(programs())
+}
+
+/// [`generated_sources`] for `n` programs. Shared with `paren_transparency`.
+pub(super) fn generated_sources_of(n: usize) -> Vec<String> {
+    let mut drawn = draw_programs("GenSitesProbe", n);
     let mut sources = Vec::new();
     while !drawn.is_empty() {
         let rest = drawn.split_off(drawn.len().min(BATCH));
@@ -70,7 +75,7 @@ fn generated_sources() -> Vec<String> {
 }
 
 /// The statement-position corpus of `dropped_assignment_probe`, as actor methods.
-fn statement_sources() -> Vec<String> {
+pub(super) fn statement_sources() -> Vec<String> {
     corpus()
         .into_iter()
         .map(|body| {
@@ -164,7 +169,7 @@ const CONSTRUCTS: &[&str] = &[
 const PREFIXES: &[&str] = &["", "t := 0.", "self.n := self.n + 1.", "x := o foo."];
 
 /// The construct matrix, every payload x construct x prefix, as actor methods.
-fn construct_sources() -> Vec<String> {
+pub(super) fn construct_sources() -> Vec<String> {
     let mut out = Vec::new();
     for payload in PAYLOADS {
         for construct in CONSTRUCTS {

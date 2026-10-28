@@ -403,8 +403,6 @@ fn former_actor_exemptions_and_their_near_misses_are_errors() {
         // Stored block: bound inside a block, or write-only.
         "#(1) do: [:e | b := [t := t + 1]. b value]\nt",
         "b := [t := 5]\nb value\nt",
-        // Literal block: parenthesized receiver sent `value`.
-        "([t := t + 1]) value\nt",
     ] {
         let src = in_actor(body);
         let diags = adr0131_diagnostics(&src);
@@ -1070,29 +1068,82 @@ fn detect_if_none_handler_write_in_a_counted_loop_body_is_a_producer_in_every_co
     }
 }
 
+/// BT-4059: redundant parentheses around a send operand are transparent — the
+/// analysis runs on the tree with them peeled (`ast::normalize`), so a
+/// parenthesised block argument or receiver is the literal block it wraps, and
+/// gets exactly the bare form's verdict in every method context. These rows
+/// once pinned the parenthesised form as a block value (§6) or an unpacked
+/// search block (BT-3794); BT-4091 found codegen rejecting them.
 #[test]
-fn allow_set_detect_if_none_needs_a_literal_search_block() {
-    // BT-3794 review: codegen packs the handler's writes only when the search
-    // block is a literal (`producer_body_block`). A parenthesised search block
-    // routes to the fold but is not packed, so its handler's write was dropped
-    // (statement) or leaked a raw tuple (`r :=`). Phase 0 rejects every
-    // position in every method context; the REPL threads its bindings map.
-    for body in [
-        "#(1, 2) detect: ([:x | x > 5]) ifNone: [t := 7]\nt",
-        "(#(1, 2) detect: ([:x | x > 5]) ifNone: [t := 7])\nt",
-        "r := #(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]\n#[r, t]",
-        "^(#(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]) + t",
-        "r := t + (#(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0])\n#[r, t]",
-        "#(1, 2) detect: ([:x | t := t + 1. x > 5]) ifNone: [t := t + 10. 0]\nt",
+fn parenthesised_block_operands_analyse_like_bare_ones() {
+    let verdict = |src: &str| -> Vec<(Option<DiagnosticCategory>, String)> {
+        adr0131_diagnostics(src)
+            .into_iter()
+            .map(|d| (d.category, d.message.to_string()))
+            .collect()
+    };
+    for (parenthesised, bare) in [
+        (
+            "#(1, 2) detect: ([:x | x > 5]) ifNone: [t := 7]\nt",
+            "#(1, 2) detect: [:x | x > 5] ifNone: [t := 7]\nt",
+        ),
+        (
+            "r := #(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]\n#[r, t]",
+            "r := #(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]\n#[r, t]",
+        ),
+        (
+            "r := t + (#(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0])\n#[r, t]",
+            "r := t + (#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0])\n#[r, t]",
+        ),
+        (
+            "#(1, 2) detect: ([:x | t := t + 1. x > 5]) ifNone: [t := t + 10. 0]\nt",
+            "#(1, 2) detect: [:x | t := t + 1. x > 5] ifNone: [t := t + 10. 0]\nt",
+        ),
+        (
+            "d := #{#a => 1}\nr := d at: #k ifAbsent: ([t := t + 1. 0])\n#[r, t]",
+            "d := #{#a => 1}\nr := d at: #k ifAbsent: [t := t + 1. 0]\n#[r, t]",
+        ),
+        (
+            "d := #{#a => 1}\n#(1, 2) do: [:x | d at: x ifAbsent: ([t := t + 1. 0])]\nt",
+            "d := #{#a => 1}\n#(1, 2) do: [:x | d at: x ifAbsent: [t := t + 1. 0]]\nt",
+        ),
+        (
+            "d := #{#a => 1}\nr := d at: #k ifPresent: ([:v | t := t + v. 0])\n#[r, t]",
+            "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | t := t + v. 0]\n#[r, t]",
+        ),
+        ("([t := t + 1]) value\nt", "[t := t + 1] value\nt"),
+        ("(([t := t + 1])) value\nt", "[t := t + 1] value\nt"),
+        (
+            "([t := t + 1. 1]) on: Error do: [:e | 0]\nt",
+            "[t := t + 1. 1] on: Error do: [:e | 0]\nt",
+        ),
+        (
+            "([t := t + 1. t < 3]) whileTrue: [nil]\nt",
+            "[t := t + 1. t < 3] whileTrue: [nil]\nt",
+        ),
+        (
+            "#(1, 2) do: ([:k | t := t + 1])\nt",
+            "#(1, 2) do: [:k | t := t + 1]\nt",
+        ),
+        (
+            "1 to: 2 do: ([:k | t := t + 1])\nt",
+            "1 to: 2 do: [:k | t := t + 1]\nt",
+        ),
+        ("self ap: ([t := t + 1])\nt", "self ap: [t := t + 1]\nt"),
+        (
+            "b := [t := t + 1]\n(b) value\nt",
+            "b := [t := t + 1]\nb value\nt",
+        ),
     ] {
-        for src in [in_class(body), in_value(body), in_actor(body)] {
-            let diags = adr0131_diagnostics(&src);
-            assert!(
-                !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
-                "{src}: {diags:?}"
-            );
+        for (p, b) in [
+            (in_class(parenthesised), in_class(bare)),
+            (in_value(parenthesised), in_value(bare)),
+            (in_actor(parenthesised), in_actor(bare)),
+        ] {
+            assert_eq!(verdict(&p), verdict(&b), "{p}");
         }
     }
+    // The REPL threads its bindings map either way.
     let known = ["t"];
     let ok = adr0131_diagnostics_with(
         "r := #(1, 2) detect: ([:x | x > 5]) ifNone: [t := t + 1. 0]\n",
@@ -1346,26 +1397,6 @@ fn section6_cascade_block_receiver_is_reported_once() {
         1,
         "{diags:?}"
     );
-}
-
-#[test]
-fn section6_parenthesized_block_receiver_is_a_block_value() {
-    for body in [
-        "([t := t + 1]) value\nt",
-        "([t := t + 1. 1]) on: Error do: [:e | 0]\nt",
-        "([t := t + 1. t < 3]) whileTrue: [nil]\nt",
-    ] {
-        // Also in an actor method: codegen's Tier 2 `value` paths only match
-        // a bare block, and `([t := t + 1]) value` raises there (probed).
-        for src in [in_class(body), in_actor(body)] {
-            let diags = adr0131_diagnostics(&src);
-            assert_eq!(
-                of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
-                1,
-                "{src}: {diags:?}"
-            );
-        }
-    }
 }
 
 #[test]
@@ -3211,8 +3242,6 @@ fn dictionary_lookup_handler_write_in_a_loop_or_fold_body_is_a_producer() {
 #[test]
 fn dictionary_lookup_that_the_producer_cannot_lower_keeps_the_section6_error() {
     for body in [
-        // A parenthesised handler is a block value.
-        "d := #{#a => 1}\nr := d at: #k ifAbsent: ([t := t + 1. 0])\n#[r, t]",
         // A block key is a block value too.
         "d := #{#a => 1}\nr := d at: [t := t + 1. #k] ifAbsent: [0]\n#[r, t]",
         // The handler takes a parameter: the primitive calls it with none.
@@ -3223,8 +3252,6 @@ fn dictionary_lookup_that_the_producer_cannot_lower_keeps_the_section6_error() {
         // producer has no frame there), alone and in a loop body.
         "d := #{#a => 1}\nb := [d at: #k ifAbsent: [t := t + 1. 0]]\nb value",
         "d := #{#a => 1}\n#(1, 2) do: [:x | [:z | d at: z ifAbsent: [t := t + 1. 0]] value: x]\nt",
-        // A parenthesised handler in a loop body.
-        "d := #{#a => 1}\n#(1, 2) do: [:x | d at: x ifAbsent: ([t := t + 1. 0])]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);
@@ -3284,8 +3311,6 @@ fn dictionary_if_present_that_the_producer_cannot_lower_keeps_the_section6_error
         "d := #{#a => 1}\nr := d at: #k ifPresent: [t := t + 1. 0]\n#[r, t]",
         // The absent handler takes a parameter: the primitive passes none.
         "d := #{#a => 1}\nr := d at: #k ifPresent: [:v | v] ifAbsent: [:x | t := t + 1. 0]\n#[r, t]",
-        // A parenthesised handler is a block value.
-        "d := #{#a => 1}\nr := d at: #k ifPresent: ([:v | t := t + v. 0])\n#[r, t]",
         // The present handler takes no parameter, in a loop body.
         "d := #{#a => 1}\n#(1, 2) do: [:x | d at: #a ifPresent: [t := t + 1]]\nt",
     ] {
@@ -3517,8 +3542,9 @@ fn while_condition_without_outer_write_is_accepted() {
 /// site rule: accepted as a statement, as an operand, in an arm, a protected body,
 /// a handler and a loop body, and nested in itself, at any depth, in every method
 /// context. What is not a producer keeps the legacy verdict: `value:` (its
-/// arguments bind the block's parameters outside the frame), a parenthesised
-/// receiver (a block value, §6), and the REPL.
+/// arguments bind the block's parameters outside the frame) and the REPL. A
+/// parenthesised receiver is the literal it wraps (BT-4059,
+/// `parenthesised_block_operands_analyse_like_bare_ones`).
 #[test]
 fn evaluated_literal_blocks_are_producers_at_any_depth() {
     for body in [
@@ -3540,12 +3566,8 @@ fn evaluated_literal_blocks_are_producers_at_any_depth() {
             assert!(diags.is_empty(), "{src}: {diags:?}");
         }
     }
-    // Not producers: a `value:` send and a parenthesised receiver (§6) keep their
-    // legacy verdict.
-    for body in [
-        "t := 0\ntrue ifTrue: [[:v | t := t + v] value: 1]\nt",
-        "t := 0\n([t := t + 1]) value\nt",
-    ] {
+    // Not a producer: a `value:` send keeps its legacy verdict.
+    for body in ["t := 0\ntrue ifTrue: [[:v | t := t + v] value: 1]\nt"] {
         for src in [in_class(body), in_value(body)] {
             assert!(
                 !adr0131_diagnostics(&src).is_empty(),

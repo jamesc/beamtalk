@@ -24,11 +24,39 @@ use beamtalk_codegen::core_erlang::module_shell::core_module;
 use beamtalk_codegen::core_erlang::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, GeneratedModule, Result,
 };
+use beamtalk_core::ast::normalize::{
+    PeeledParens, expr_has_parenthesised_operand, peel_operand_parens_expr_recording,
+};
 use beamtalk_core::ast::{Expression, Pattern};
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
 use beamtalk_core::source_analysis::Diagnostic;
+use std::borrow::Cow;
 
 // ── Public API ──────────────────────────────────────────────────────────
+
+/// `expressions` with redundant send-operand parentheses stripped
+/// (`ast::normalize`, BT-4059), borrowed when there are none, and a record of
+/// the wrappers removed.
+///
+/// The REPL entries build a [`CoreErlangGenerator`] directly rather than
+/// going through `generate_module_with_warnings`, so they normalise here:
+/// every public entry below compiles the peeled form, so `(e) foo` evaluates
+/// exactly like `e foo` in the REPL as it does in compiled modules. The record
+/// goes to the generator ([`CoreErlangGenerator::set_peeled_parens`]) so a
+/// method source it reflects (a `ClassBuilder` block method) keeps the
+/// parentheses as written.
+fn peeled(expressions: &[Expression]) -> (Cow<'_, [Expression]>, PeeledParens) {
+    let mut record = PeeledParens::default();
+    if expressions.iter().any(expr_has_parenthesised_operand) {
+        let mut owned = expressions.to_vec();
+        for expression in &mut owned {
+            peel_operand_parens_expr_recording(expression, &mut record);
+        }
+        (Cow::Owned(owned), record)
+    } else {
+        (Cow::Borrowed(expressions), record)
+    }
+}
 
 /// Generates Core Erlang for a REPL expression.
 ///
@@ -47,9 +75,11 @@ use beamtalk_core::source_analysis::Diagnostic;
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> Result<String> {
+    let (expression, peeled_parens) = peeled(std::slice::from_ref(expression));
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.set_peeled_parens(peeled_parens);
     let mut assembler = ReplAssembler::new(&mut generator);
-    let doc = assembler.generate_repl_module(expression)?;
+    let doc = assembler.generate_repl_module(&expression[0])?;
     Ok(doc.to_pretty_string())
 }
 
@@ -140,14 +170,16 @@ fn generate_repl_expressions_impl(
             span: None,
         });
     }
+    let (expressions, peeled_parens) = peeled(expressions);
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.set_peeled_parens(peeled_parens);
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
         generator.set_supervisor_classes_from_hierarchy(hierarchy);
     }
     let mut assembler = ReplAssembler::new(&mut generator);
-    let doc = assembler.generate_repl_module_multi(expressions)?;
+    let doc = assembler.generate_repl_module_multi(&expressions)?;
     let code = doc.to_pretty_string();
     generator.inject_synthetic_verifier_violation(inject_verifier_violation, expressions[0].span());
     Ok(GeneratedModule {
@@ -293,14 +325,16 @@ fn generate_repl_expressions_traced_impl(
         })
         .collect();
 
+    let (expressions, peeled_parens) = peeled(expressions);
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.set_peeled_parens(peeled_parens);
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
         generator.set_supervisor_classes_from_hierarchy(hierarchy);
     }
     let mut assembler = ReplAssembler::new(&mut generator);
-    let doc = assembler.generate_repl_module_multi_traced(expressions, &source_texts)?;
+    let doc = assembler.generate_repl_module_multi_traced(&expressions, &source_texts)?;
     let code = doc.to_pretty_string();
     generator.inject_synthetic_verifier_violation(inject_verifier_violation, expressions[0].span());
     Ok(GeneratedModule {
@@ -333,9 +367,11 @@ pub fn generate_test_expression_surfacing_verifier(
     expression: &Expression,
     module_name: &str,
 ) -> Result<(String, Vec<Diagnostic>)> {
+    let (expression, peeled_parens) = peeled(std::slice::from_ref(expression));
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.set_peeled_parens(peeled_parens);
     let mut assembler = ReplAssembler::new(&mut generator);
-    let doc = assembler.generate_test_module(expression)?;
+    let doc = assembler.generate_test_module(&expression[0])?;
     let code = doc.to_pretty_string();
     Ok(GeneratedModule {
         code,
@@ -1343,6 +1379,69 @@ mod tests {
     }
 
     // ── generate_repl_expressions_with_index ──────────────────────────
+
+    /// BT-4059: every REPL entry compiles the peeled tree, so a redundant
+    /// operand paren — around a block argument to an inlined construct, a
+    /// receiver, an argument — generates exactly the unparenthesised code.
+    #[test]
+    fn repl_entries_compile_redundant_operand_parens_like_bare_ones() {
+        let parse_exprs = |src: &str| -> Vec<Expression> {
+            let (module, _) = beamtalk_core::source_analysis::parse(
+                beamtalk_core::source_analysis::lex_with_eof(src),
+            );
+            module
+                .expressions
+                .into_iter()
+                .map(|s| s.expression)
+                .collect()
+        };
+        let wrapped = parse_exprs("t := 0\n#(1, 2) do: ([:k | t := t + (k)])\n(t) + (1)");
+        let bare = parse_exprs("t := 0\n#(1, 2) do: [:k | t := t + k]\nt + 1");
+        assert_eq!(
+            generate_repl_expressions(&wrapped, "repl_paren").unwrap(),
+            generate_repl_expressions(&bare, "repl_paren").unwrap()
+        );
+        let wrapped = parse_exprs("(3) max: ((4))");
+        let bare = parse_exprs("3 max: 4");
+        assert_eq!(
+            generate_repl_expression(&wrapped[0], "repl_paren1").unwrap(),
+            generate_repl_expression(&bare[0], "repl_paren1").unwrap()
+        );
+        assert_eq!(
+            generate_test_expression(&wrapped[0], "test_paren").unwrap(),
+            generate_test_expression(&bare[0], "test_paren").unwrap()
+        );
+        // Trace mode echoes each statement's own source text (a binary), so
+        // only the code around it is compared.
+        let without_binaries = |code: String| -> Vec<String> {
+            code.lines()
+                .filter(|line| !line.contains("#{"))
+                .map(str::to_string)
+                .collect()
+        };
+        let src = "t := 0\n#(1, 2) do: ([:k | t := t + (k)])\n(t) + (1)";
+        let bare_src = "t := 0\n#(1, 2) do: [:k | t := t + k]\nt + 1";
+        assert_eq!(
+            without_binaries(
+                generate_repl_expressions_traced(
+                    &parse_exprs(src),
+                    src,
+                    "repl_trace",
+                    HashMap::new()
+                )
+                .unwrap()
+            ),
+            without_binaries(
+                generate_repl_expressions_traced(
+                    &parse_exprs(bare_src),
+                    bare_src,
+                    "repl_trace",
+                    HashMap::new()
+                )
+                .unwrap()
+            )
+        );
+    }
 
     #[test]
     fn repl_with_empty_class_index() {

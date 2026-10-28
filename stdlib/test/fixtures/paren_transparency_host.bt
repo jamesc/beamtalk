@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4059: redundant parentheses around a send operand are transparent. Each
+// class method below is an own-class-reference (or `self`) send of BT-4005's
+// shapes with its receiver parenthesised, which once raised `dispatch_error`;
+// see paren_transparency_test.bt.
+
+Object subclass: ParenTransparencyHost
+
+  class + x => x
+
+  class twice => 2
+
+  class add: a to: b => a + b
+
+  class runParenBinary => (ParenTransparencyHost) + 1
+
+  class runDoubleParenBinary => ((ParenTransparencyHost)) + 1
+
+  class runParenSelfBinary => (self) + 1
+
+  class runParenUnary => (ParenTransparencyHost) twice
+
+  class runParenKeyword => (ParenTransparencyHost) add: (3) to: ((4))
+
+  // Reflected source keeps the operand parentheses as written, redundant or
+  // not.
+  reflectSelf => (self) printString
+
+  reflectProduct: a => a * ((a) + 1)
+
+  summed: a => (a * 2) + 1

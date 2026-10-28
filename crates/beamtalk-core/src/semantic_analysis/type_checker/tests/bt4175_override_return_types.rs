@@ -389,3 +389,57 @@ Object subclass: Caller
         "an undeclared return type is not contradicted: {diags:#?}"
     );
 }
+
+/// BT-4239: a requirement inherited from an extended protocol may name that
+/// protocol's own type parameter. It is skipped like the base protocol's own
+/// params, even when the (multi-letter) name collides with a real class.
+#[test]
+fn extended_protocol_type_param_return_is_not_judged_nominally() {
+    let source = r"
+Object subclass: Item
+
+Protocol define: Source(Item)
+  next -> Item
+
+Protocol define: Pipe
+  extending: Source
+  close -> Nil
+
+Object subclass: Widget
+  next -> Integer => 1
+  close -> Nil => nil
+
+Object subclass: Caller
+  use: p :: Pipe -> Nil => nil
+  run => self use: Widget new
+";
+    let diags = type_diagnostics(source);
+    assert!(
+        protocol_return_warnings(&diags).is_empty(),
+        "`Item` is Source's type parameter, not the class: {diags:#?}"
+    );
+}
+
+/// BT-4239: each definition is judged on its own annotation. A class-body
+/// `value -> Integer` and a standalone `Derived >> value -> String` over a
+/// parent's `value -> Integer` report exactly one warning, for the String one.
+#[test]
+fn class_body_and_standalone_redefinition_each_judge_own_return_type() {
+    let source = r#"
+Object subclass: Base
+  value -> Integer => 1
+
+Base subclass: Derived
+  value -> Integer => 2
+
+Derived >> value -> String => "x"
+"#;
+    let diags = type_diagnostics(source);
+    let hits = override_return_warnings(&diags);
+    assert_eq!(hits.len(), 1, "expected one override warning: {diags:#?}");
+    assert!(
+        hits[0].message.contains("'value' in Derived is String"),
+        "unexpected message: {}",
+        hits[0].message
+    );
+}

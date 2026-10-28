@@ -264,3 +264,43 @@ typed Object subclass: M
         "`:v` should be pushed down as Integer: {diags:#?}"
     );
 }
+
+/// A union-typed block argument contributes its members' results as one
+/// branch arm (BT-4240): `Block(Integer) | Block(Nil)` joins to
+/// `Integer | Nil`, so a sibling `nil` arm cannot claim `R` alone.
+#[test]
+fn union_of_blocks_arm_does_not_collapse_to_nil() {
+    let diags = type_diagnostics(
+        r"
+typed Object subclass: M
+  run: flag :: Boolean with: blk :: Block(Integer) | Block(Nil) -> Integer =>
+    x := flag ifTrue: blk ifFalse: [nil]
+    x bar
+    1
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("Integer") && d.message.contains("bar")),
+        "`x` is Integer | Nil, so `bar` reports against Integer: {diags:#?}"
+    );
+}
+
+/// A union of an opaque `Block` and a non-block member is an unknown arm
+/// (BT-4240): the join is Dynamic, not `Nil`.
+#[test]
+fn union_of_block_and_non_block_arm_does_not_collapse_to_nil() {
+    no_dnu_on_nil(
+        r"
+typed Object subclass: Handler
+  value -> Integer => 1
+
+typed Object subclass: M
+  run: flag :: Boolean with: blk :: Block | Handler -> Integer =>
+    x := flag ifTrue: blk ifFalse: [nil]
+    x bar
+    1
+",
+    );
+}

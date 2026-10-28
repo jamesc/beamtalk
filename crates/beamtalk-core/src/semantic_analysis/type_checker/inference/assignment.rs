@@ -90,11 +90,11 @@ impl TypeChecker {
     /// type-erasure pattern the annotation exists for).
     ///
     /// Also `None` when either side is a bare type-variable placeholder
-    /// (`E`, `T` — a single uppercase letter that is not a real class).
-    /// Inside a method body a method-local or class-level type variable is
-    /// an opaque placeholder with no binding (BT-4210), so it is symbolic
-    /// and compatible with anything — the same rule
-    /// `type_args_compatible` (validation.rs) applies to generic type args.
+    /// (`E`, `T` — see `is_type_var_placeholder`). Inside a method body a
+    /// method-local or class-level type variable is an opaque placeholder
+    /// with no binding (BT-4210), so it is symbolic and compatible with
+    /// anything; `type_args_compatible` (validation.rs) treats generic type
+    /// args with the same predicate.
     pub(in crate::semantic_analysis::type_checker) fn detect_assignment_type_mismatch(
         inferred_ty: &InferredType,
         declared: &InferredType,
@@ -108,8 +108,9 @@ impl TypeChecker {
                 ty,
                 InferredType::Known { class_name, type_args, .. }
                     if type_args.is_empty()
-                        && crate::semantic_analysis::type_checker::is_generic_type_param(class_name)
-                        && !hierarchy.has_class(class_name)
+                        && crate::semantic_analysis::type_checker::is_type_var_placeholder(
+                            class_name, hierarchy,
+                        )
             )
         };
         if is_type_var(inferred_ty) || is_type_var(declared) {

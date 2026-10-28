@@ -27,7 +27,7 @@ use beamtalk_core::semantic_analysis::block_facts::{
     repl_operand_sites, repl_producer_writes,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
-use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span};
 use std::collections::{HashMap, HashSet};
 
 /// REPL inputs placing a construct `{c}` that writes `t` around the sites of
@@ -167,7 +167,7 @@ fn check_repl_agreement(constructs: &[&str], least_named: usize) {
     for construct in constructs {
         for position in REPL_POSITIONS {
             let src = format!("{}\n", position.replace("{c}", construct));
-            let (module, parse_diags) = parse(lex_with_eof(&src));
+            let (module, parse_diags) = super::parse_normalised(&src);
             assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
             let analysis =
                 analyse_full(&module, AnalysisContext::default().with_known_vars(&known));
@@ -409,7 +409,7 @@ fn every_repl_arm_site_the_core_rule_accepts_is_lowered_by_the_producer() {
                     "{}\n",
                     arm.replace("{p}", &statement.replace("{c}", construct))
                 );
-                let (module, parse_diags) = parse(lex_with_eof(&src));
+                let (module, parse_diags) = super::parse_normalised(&src);
                 assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
                 let analysis =
                     analyse_full(&module, AnalysisContext::default().with_known_vars(&known));

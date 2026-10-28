@@ -82,6 +82,7 @@ pub use parser::{
 // step 4) — beneath both `ast` and `source_analysis` — and re-exported here so
 // existing `source_analysis::Span` call sites keep working unchanged.
 pub use crate::span::Span;
+pub(crate) use parser::binary_binding_power;
 pub use summary::{DiagnosticSummary, SeverityCounts, category_name};
 pub use token::{Token, TokenKind, Trivia};
 

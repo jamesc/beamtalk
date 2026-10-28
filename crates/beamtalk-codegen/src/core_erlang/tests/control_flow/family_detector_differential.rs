@@ -59,7 +59,10 @@ fn expected_mismatches() -> Vec<Mismatch> {
 }
 
 /// Recursively collects every `.bt`/`.btscript` file under `dir`.
-fn collect_source_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+pub(in crate::core_erlang::tests) fn collect_source_files(
+    dir: &std::path::Path,
+    out: &mut Vec<std::path::PathBuf>,
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -81,7 +84,7 @@ fn collect_source_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>
 /// Repo root, derived from this crate's own manifest directory rather than
 /// the test process's current directory (which `cargo test` does not
 /// guarantee is the workspace root).
-fn repo_root() -> std::path::PathBuf {
+pub(in crate::core_erlang::tests) fn repo_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()

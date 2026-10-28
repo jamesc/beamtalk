@@ -643,6 +643,8 @@ Object subclass: Actor
   /// lets OTP deliver a supervisor's shutdown signal as a message instead of
   /// killing the process before `terminate:` can run. A class that never
   /// overrides `terminate:` keeps the plain link semantics it always had.
+  /// (BT-4052: a `Server` that overrides `onLinkedExit:reason:` also traps
+  /// exits, even without a `terminate:` override.)
   ///
   /// ## Examples
   /// ```beamtalk
