@@ -411,14 +411,15 @@ fn infer_method_local_params_inject_into_block() {
     assert_eq!(result.get("R"), Some(&InferredType::known("Integer")));
 }
 
-/// When the same method-local type parameter is unified across
-/// multiple argument positions and one resolves to `Known` while another
-/// resolves to `Dynamic`, the Known binding must win. Otherwise
-/// `Block(R) Block(R) -> R` on `ifTrue:ifFalse:` collapses to `Dynamic`
-/// whenever one branch is an untyped FFI call, triggering a spurious
-/// "expression inferred as Dynamic in typed class" warning.
+/// BT-4207 (supersedes BT-2039's branch-join rule): `Block(R) Block(R) -> R`
+/// on `ifTrue:ifFalse:` is a *branch join* — exactly one arm runs — so a
+/// Dynamic arm joined with a Known arm must not collapse to the Known type.
+/// It becomes `Dynamic(DynamicBranch)`, a non-root-cause reason that keeps
+/// BT-2039's intent (no second "Dynamic in typed class" warning on the
+/// enclosing expression; see
+/// `bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning`).
 #[test]
-fn bt_2039_method_local_known_beats_dynamic_across_args() {
+fn bt_4207_branch_join_of_known_and_dynamic_arms_is_dynamic_branch() {
     let method = method_info(
         "ifTrue:ifFalse:",
         vec![Some("Block(R)"), Some("Block(R)")],
@@ -426,7 +427,7 @@ fn bt_2039_method_local_known_beats_dynamic_across_args() {
     );
     let known_block = InferredType::Known {
         class_name: "Block".into(),
-        type_args: vec![InferredType::known("Integer")],
+        type_args: vec![InferredType::known("Nil")],
         provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
     };
     let dynamic_block = InferredType::Known {
@@ -436,34 +437,93 @@ fn bt_2039_method_local_known_beats_dynamic_across_args() {
     };
     let hierarchy = ClassHierarchy::with_builtins();
 
-    // Known branch first, Dynamic second — naive last-wins would pick Dynamic.
+    for args in [
+        [known_block.clone(), dynamic_block.clone()],
+        [dynamic_block, known_block],
+    ] {
+        let result = TypeChecker::infer_method_local_params(
+            &method,
+            &args,
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        assert_eq!(
+            result.get("R"),
+            Some(&InferredType::Dynamic(DynamicReason::DynamicBranch)),
+            "a Dynamic arm must not be discarded by the branch join, got {:?}",
+            result.get("R")
+        );
+    }
+}
+
+/// BT-2039/BT-2865 intent for *argument-position* unification is unchanged:
+/// `inject: initial :: A into: Block(A, E, A)` binds `A` from the initial
+/// value, the block's accumulator parameter, and the block's result; an
+/// uninformative Dynamic in either block slot loses to the Known initial
+/// value.
+#[test]
+fn bt_4207_argument_unification_keeps_known_over_dynamic() {
+    let method = method_info(
+        "inject:into:",
+        vec![Some("A"), Some("Block(A, E, A)")],
+        Some("A"),
+    );
+    let block = InferredType::Known {
+        class_name: "Block".into(),
+        type_args: vec![
+            InferredType::Dynamic(DynamicReason::UnannotatedParam),
+            InferredType::known("Integer"),
+            InferredType::Dynamic(DynamicReason::UntypedFfi),
+        ],
+        provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+    };
+    let hierarchy = ClassHierarchy::with_builtins();
     let result = TypeChecker::infer_method_local_params(
         &method,
-        &[known_block.clone(), dynamic_block.clone()],
+        &[InferredType::known("List"), block],
         &HashMap::new(),
         &hierarchy,
         "TestCase",
     );
-    assert_eq!(
-        result.get("R"),
-        Some(&InferredType::known("Integer")),
-        "Known branch must win when second arg is Dynamic, got {:?}",
-        result.get("R")
-    );
+    assert_eq!(result.get("A"), Some(&InferredType::known("List")));
+}
 
-    // Reverse order — Dynamic first, Known second — also resolves to Known.
-    let result_rev = TypeChecker::infer_method_local_params(
-        &method,
-        &[dynamic_block, known_block],
-        &HashMap::new(),
-        &hierarchy,
-        "TestCase",
+#[test]
+fn bt_4207_join_branch_arms_rules() {
+    let int = InferredType::known("Integer");
+    let nil = InferredType::known("Nil");
+    let ffi = InferredType::Dynamic(DynamicReason::UntypedFfi);
+    let explicit = InferredType::Dynamic(DynamicReason::ExplicitDynamic);
+
+    // Known | Known => union of both.
+    assert_eq!(
+        TypeChecker::join_branch_arms(&[int.clone(), nil.clone()]),
+        InferredType::union_of(&[int.clone(), nil.clone()])
+    );
+    // Known | Dynamic => DynamicBranch, either order.
+    assert_eq!(
+        TypeChecker::join_branch_arms(&[nil.clone(), ffi.clone()]),
+        InferredType::Dynamic(DynamicReason::DynamicBranch)
     );
     assert_eq!(
-        result_rev.get("R"),
-        Some(&InferredType::known("Integer")),
-        "Known branch must win when first arg is Dynamic, got {:?}",
-        result_rev.get("R")
+        TypeChecker::join_branch_arms(&[ffi.clone(), nil.clone()]),
+        InferredType::Dynamic(DynamicReason::DynamicBranch)
+    );
+    // ExplicitDynamic is authoritative (BT-2865).
+    assert_eq!(
+        TypeChecker::join_branch_arms(&[nil.clone(), explicit.clone()]),
+        explicit
+    );
+    // Never (a diverging arm) is the identity: Dynamic | Never stays the
+    // arm's own Dynamic, Known | Never stays Known.
+    assert_eq!(
+        TypeChecker::join_branch_arms(&[ffi.clone(), InferredType::Never]),
+        ffi
+    );
+    assert_eq!(
+        TypeChecker::join_branch_arms(&[InferredType::Never, int.clone()]),
+        int
     );
 }
 

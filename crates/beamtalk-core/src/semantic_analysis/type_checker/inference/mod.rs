@@ -853,7 +853,8 @@ impl TypeChecker {
     /// not `Unknown` (no actionable message), and not `ExplicitDynamic`
     /// (the author already wrote `Dynamic` in a type annotation,
     /// so "add a type annotation" would be nonsensical advice for something
-    /// that already has one).
+    /// that already has one), and not `DynamicBranch` (a branch join whose
+    /// `Dynamic` arm already warned at its own source, BT-4207).
     fn detect_dynamic_in_typed_class(
         ty: &InferredType,
         typed_class_context: Option<&EcoString>,
@@ -867,6 +868,7 @@ impl TypeChecker {
                 | DynamicReason::DynamicSpec
                 | DynamicReason::Unknown
                 | DynamicReason::ExplicitDynamic
+                | DynamicReason::DynamicBranch
         ) {
             return None;
         }

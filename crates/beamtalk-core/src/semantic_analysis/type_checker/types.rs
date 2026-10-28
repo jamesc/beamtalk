@@ -46,6 +46,15 @@ pub enum DynamicReason {
     /// `DynamicReason` instead loses to a concrete binding observed
     /// elsewhere.
     ExplicitDynamic,
+    /// A branch join (e.g. `ifTrue:ifFalse:`'s shared `R`) where at least
+    /// one arm is `Dynamic` and another is concrete (BT-4207).
+    ///
+    /// The join is soundly `Dynamic` — collapsing it to the concrete arm
+    /// (`Dynamic | Nil` ⇒ `Nil`) would make later sends report spurious
+    /// DNUs. It is not a root cause: the `Dynamic` arm already produced
+    /// its own diagnostic (if any) at its source, so this reason does not
+    /// re-warn "Dynamic in typed class" on the enclosing expression.
+    DynamicBranch,
     /// Fallback — no specific reason available.
     Unknown,
 }
@@ -63,6 +72,7 @@ impl DynamicReason {
             Self::UntypedFfi => Some("untyped FFI"),
             Self::DynamicSpec => Some("FFI spec is Dynamic"),
             Self::ExplicitDynamic => Some("explicitly declared Dynamic"),
+            Self::DynamicBranch => Some("dynamic branch"),
             Self::Unknown => None,
         }
     }

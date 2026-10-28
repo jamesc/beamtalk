@@ -314,17 +314,15 @@ fn bt_2020_narrowed_if_true_is_kind_of_preserves_inner_sends() {
 // Dynamic|Known join on narrowing ifTrue:ifFalse:
 //
 // `ifTrue:ifFalse:` carries `Block(R)` so the method-local `R` can be
-// unified. `infer_method_local_params` last-wins when the same type var
-// appears in multiple arg positions, so it must prefer Known over Dynamic
-// when merging bindings: if branch 1 gives R=T and branch 2 gives
-// R=Dynamic(UntypedFfi), R must stay `T`, not collapse to Dynamic and fire
-// the "expression inferred as Dynamic in typed class" warning on the method
-// body.
+// unified. When branch 1 gives R=T and branch 2 gives R=Dynamic(UntypedFfi),
+// the join is `Dynamic(DynamicBranch)` (BT-4207 — a Dynamic arm is never
+// discarded), which must not fire a second "expression inferred as Dynamic
+// in typed class" warning on the method body: the FFI arm already warned.
 // =========================================================================
 
 /// `method -> Integer => cond ifTrue: [self.value] ifFalse: [(Erlang foo) bar]`
-/// must not produce the "Dynamic in typed class" warning — the Known branch
-/// pins `R` to `Integer` so the method's declared return type is preserved.
+/// must not produce a second "Dynamic in typed class" warning on the outer
+/// expression — only the FFI arm itself warns.
 #[test]
 fn bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning() {
     // typed class Container

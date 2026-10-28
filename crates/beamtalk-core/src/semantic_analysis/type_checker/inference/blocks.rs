@@ -631,23 +631,11 @@ impl TypeChecker {
                         // narrowing for false block. (isKindOf: populates
                         // `false_type` above; class =:= still leaves
                         // it None, since its false branch can't be narrowed via
-                        // subtree exclusion.)
-                        //
-                        // The false block deliberately stays a bare `Block`
-                        // (no `R`): the true block's body is `Dynamic` here
-                        // (`respondsTo:` narrows to `Dynamic`), and
-                        // `merge_method_local_binding` lets a Known `R` beat
-                        // a Dynamic one, so a precise `Block(Nil)` on this arm
-                        // would collapse `x := (o respondsTo: #foo) ifTrue:
-                        // [o foo] ifFalse: [nil]` to plain `Nil` and then
-                        // flag `x bar` as a DNU on `Nil` (BT-4102 fallout).
-                        let inferred =
-                            self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
-                        let ty = if matches!(false_arg.unwrap_parens(), Expression::Block(_)) {
-                            InferredType::known("Block")
-                        } else {
-                            inferred
-                        };
+                        // subtree exclusion.) The arms' shared `R` is joined
+                        // with branch semantics (`join_branch_arms`), so a
+                        // Dynamic true arm and a `nil` false arm stay Dynamic
+                        // rather than collapsing to `Nil` (BT-4207).
+                        let ty = self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
                         arg_types.push(ty);
                     }
                 }
@@ -1455,7 +1443,7 @@ impl TypeChecker {
         // *enclosing method's* return type — unrelated to what this block's
         // sibling argument (e.g. `ifOk:`'s block) actually produces locally.
         // Override to `Never` (the `union_of` identity element — see
-        // `infer_method_local_params`/`merge_method_local_binding`) so only
+        // `infer_method_local_params`/`join_branch_arms`) so only
         // branches that genuinely produce a local value participate in `R`.
         // `block_has_return` (not the deeper `block_has_any_return`) matches
         // `infer_stmts`'s own top-level-only `break` check above exactly —
