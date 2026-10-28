@@ -804,10 +804,45 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// Compiles the later arms of a match chain once and binds them to a
+    /// zero-arity `letrec` label, for an arm that falls through from several
+    /// sites (BT-4141). Returns the label's binding prefix (ending in `in `,
+    /// wrapped around the arm by the caller) and the `apply` every miss site
+    /// uses in place of a copy of the later arms.
+    ///
+    /// Without it each such arm embedded a full copy of the rest of the
+    /// chain at every miss site, so N consecutive Array/Type/binary arms
+    /// emitted O(k^N) Core. `erlc` shares a fallthrough the same way. A
+    /// `letrec` that is only applied is lambda-lifted to a local function
+    /// (no closure is allocated, unlike a `let`-bound fun). The label is
+    /// defined outside the arm's own `case`s, so the later arms' free
+    /// variables resolve exactly as before: the arm's pattern bindings are
+    /// popped before the rest is generated, and threading state (`StateAcc`,
+    /// the producer's base map) is bound outside the whole chain.
+    pub(super) fn generate_shared_rest(
+        &mut self,
+        match_var: &str,
+        rest_arms: &[MatchArm],
+        threading: Option<&MatchThreading<'_>>,
+    ) -> Result<(Document<'static>, Document<'static>)> {
+        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+        let label = self.fresh_temp_var("Fallthrough");
+        let bind = docvec![
+            "letrec ",
+            leaf::fname(label.clone(), 0),
+            " = fun () -> ",
+            rest_doc,
+            " in "
+        ];
+        let apply = docvec!["apply ", leaf::fname(label, 0), " ()"];
+        Ok((bind, apply))
+    }
+
     /// Compiles a single `Pattern::Array` match arm.
     ///
     /// Emits a three-level conditional check (`is_map` → class → size), then element
-    /// extractions via `at:` dispatch. `rest_doc` is cloned for all failure branches.
+    /// extractions via `at:` dispatch. Every failure branch applies the shared
+    /// fallthrough label ([`Self::generate_shared_rest`]).
     ///
     /// Takes `rest_arms` (not a pre-built `rest_doc`) so that the current arm's body
     /// is fully generated before any later arm's codegen advances generator state.
@@ -837,7 +872,7 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         // Generate rest AFTER the current arm body to prevent state leakage.
-        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
 
         // Build body section: element extractions + optional guard check.
         // Use `case 'true' of <'true'> when GUARD ->` (Core Erlang guard position) so that
@@ -873,6 +908,7 @@ impl CoreErlangGenerator {
         let no_match_class = self.fresh_temp_var("NoMatch");
 
         Ok(docvec![
+            rest_bind,
             "case call 'erlang':'is_map'(",
             leaf::var(match_var.to_string()),
             ") of ",
@@ -1043,7 +1079,7 @@ impl CoreErlangGenerator {
         let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
-        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
 
         // Each level runs after the outer pattern and every earlier hoisted
         // binary have matched, so a segment size may name their variables
@@ -1096,6 +1132,7 @@ impl CoreErlangGenerator {
 
         let fallthrough = self.fresh_temp_var("NoMatch");
         Ok(docvec![
+            rest_bind,
             "case ",
             leaf::var(match_var.to_string()),
             " of <",
@@ -1133,7 +1170,7 @@ impl CoreErlangGenerator {
         let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
-        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
 
         let plan = plan_binary_split(segments);
         debug_assert!(
@@ -1147,6 +1184,7 @@ impl CoreErlangGenerator {
         let levels =
             self.build_segmented_levels(&scrutinee, arm.pattern.span(), segments, &plan)?;
         Ok(docvec![
+            rest_bind,
             scrutinee_prefix,
             self.assemble_segmented_levels(levels, guard_part, body_doc, &rest_doc)
         ])
