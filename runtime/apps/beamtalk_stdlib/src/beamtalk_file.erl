@@ -805,7 +805,7 @@ The `path` detail of a File error (BT-4229), via `text_detail/1`.
 Recording it as a `String` makes `e details at: #path` equal the path the
 caller passed.
 """.
--spec path_detail(binary()) -> #{path := beamtalk_string:t()}.
+-spec path_detail(binary()) -> #{path := beamtalk_string:t() | binary()}.
 path_detail(Path) ->
     #{path => text_detail(Path)}.
 
