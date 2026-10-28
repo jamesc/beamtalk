@@ -1585,15 +1585,13 @@ sealed typed Object subclass: SystemNavigation
     // accumulator on the RIGHT of `++` so each step copies only the small
     // per-class list and shares `acc` — `++` copies only its LEFT operand, so
     // `(perClass) ++ acc` keeps the walk O(total_selectors) rather than O(n²).
-    // Typed locals: a class-side method-local type parameter (`A`) types the
-    // block's params but not the send's result, so bind it explicitly.
-    fallbackSels :: List(Symbol) := self
+    fallbackSels := self
       liveClassesIn: (self classesNamed: fallbackClasses)
       inject: indexedSels
       into: [:acc :cls | (self selectorsForClass: cls) ++ acc]
     // Extension selectors are not in the index yet, so gather them across the
     // full scope; `unique sort` below absorbs any overlap with the above.
-    allSels :: List(Symbol) := self
+    allSels := self
       liveClassesIn: self allClasses
       inject: fallbackSels
       into: [:acc :cls | (self extensionSelectorsForBothSides: cls) ++ acc]
@@ -1847,9 +1845,7 @@ sealed typed Object subclass: SystemNavigation
     // Defined set = indexed defines + fallback-class defines + extension
     // selectors (not yet indexed) + the documented runtime-provided selectors.
     indexedDefined := self definedSetFromIndex: definedRows into: Set new
-    // Typed locals: a class-side method-local type parameter (`A`) types the
-    // block's params but not the send's result, so bind it explicitly.
-    withFallbackDefined :: Set(Symbol) := self
+    withFallbackDefined := self
       liveClassesIn: fallbackScope
       inject: indexedDefined
       into: [:acc :cls |
@@ -1857,7 +1853,7 @@ sealed typed Object subclass: SystemNavigation
           innerAcc add: sel
         ]
       ]
-    withExtDefined :: Set(Symbol) := self
+    withExtDefined := self
       liveClassesIn: self allClasses
       inject: withFallbackDefined
       into: [:acc :cls |
@@ -1885,7 +1881,7 @@ sealed typed Object subclass: SystemNavigation
       into: Dictionary new
     // Miss-policy fallback: source-scan only the loaded-but-unindexed classes,
     // both sides, as the legacy walk did.
-    groupedWithFallback :: Dictionary := self
+    groupedWithFallback := self
       liveClassesIn: fallbackScope
       inject: grouped
       into: [:acc :cls |
