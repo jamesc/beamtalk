@@ -227,3 +227,16 @@ typed Object subclass: M
 ",
     );
 }
+
+#[test]
+fn opaque_block_variable_arm_does_not_collapse_to_nil() {
+    no_dnu_on_nil(
+        r"
+typed Object subclass: M
+  run: flag :: Boolean with: blk :: Block -> Integer =>
+    x := flag ifTrue: blk ifFalse: [nil]
+    x bar
+    1
+",
+    );
+}

@@ -364,41 +364,63 @@ impl TypeChecker {
                     arg_ty
                 };
 
-                // Match against the argument's actual type if it's a Known type
-                if let InferredType::Known {
+                let is_method_local = |name: &EcoString| {
+                    crate::semantic_analysis::type_checker::is_generic_type_param(name)
+                        && !class_type_params.contains(name)
+                        && !hierarchy.has_class(name)
+                };
+
+                if declared_base == "Block" {
+                    // A `Block(P1, ..., Pn, R)` param: the last declared slot
+                    // is the block's *result*, aligned with the argument
+                    // block's last type arg (its arity may differ from the
+                    // declared one, e.g. `ifNotNil: Block(R)` given `[:v |
+                    // ...]`); the leading slots are its parameters. A
+                    // Dynamic or bare `Block` argument contributes an
+                    // unknown result arm, so a sibling arm cannot claim
+                    // the whole join (BT-4207).
+                    let Some((result_decl, param_decls)) = declared_params.split_last() else {
+                        continue;
+                    };
+                    let (actual_params, actual_result) = Self::split_block_arg(effective_arg);
+                    for (declared, actual) in param_decls.iter().zip(actual_params.iter()) {
+                        let decl_eco: EcoString = (*declared).into();
+                        if is_method_local(&decl_eco) {
+                            Self::merge_method_local_binding(
+                                &mut method_subst,
+                                decl_eco,
+                                actual.clone(),
+                            );
+                        }
+                    }
+                    let result_eco: EcoString = (*result_decl).into();
+                    if let Some(actual) = actual_result
+                        && is_method_local(&result_eco)
+                    {
+                        match branch_arms.iter_mut().find(|(k, _)| *k == result_eco) {
+                            Some((_, arms)) => arms.push(actual),
+                            None => branch_arms.push((result_eco, vec![actual])),
+                        }
+                    }
+                } else if let InferredType::Known {
                     class_name: arg_class,
                     type_args,
                     ..
                 } = effective_arg
                 {
-                    // Verify the base class matches (e.g., Block == Block, Result == Result)
+                    // Verify the base class matches (e.g., Result == Result)
                     if arg_class.as_str() == declared_base && !type_args.is_empty() {
                         // Zip declared params with actual type args positionally
-                        for (idx, (declared, actual)) in
-                            declared_params.iter().zip(type_args.iter()).enumerate()
-                        {
+                        for (declared, actual) in declared_params.iter().zip(type_args.iter()) {
                             let decl_eco: EcoString = (*declared).into();
                             // Only infer if this is a method-local type param
                             // (single uppercase letter, not a class-level param, not a known class)
-                            if crate::semantic_analysis::type_checker::is_generic_type_param(
-                                &decl_eco,
-                            ) && !class_type_params.contains(&decl_eco)
-                                && !hierarchy.has_class(&decl_eco)
-                            {
-                                let is_block_result =
-                                    declared_base == "Block" && idx + 1 == declared_params.len();
-                                if is_block_result {
-                                    match branch_arms.iter_mut().find(|(k, _)| *k == decl_eco) {
-                                        Some((_, arms)) => arms.push(actual.clone()),
-                                        None => branch_arms.push((decl_eco, vec![actual.clone()])),
-                                    }
-                                } else {
-                                    Self::merge_method_local_binding(
-                                        &mut method_subst,
-                                        decl_eco,
-                                        actual.clone(),
-                                    );
-                                }
+                            if is_method_local(&decl_eco) {
+                                Self::merge_method_local_binding(
+                                    &mut method_subst,
+                                    decl_eco,
+                                    actual.clone(),
+                                );
                             }
                         }
                     }
@@ -414,6 +436,26 @@ impl TypeChecker {
         }
 
         method_subst
+    }
+
+    /// Split an argument passed to a `Block(...)` param into its parameter
+    /// types and its result type (the last type arg). A bare `Block` or a
+    /// `Dynamic` argument has no parameter types and an unknown
+    /// (`Dynamic(Unknown)`) result; any other argument contributes nothing.
+    fn split_block_arg(arg: &InferredType) -> (&[InferredType], Option<InferredType>) {
+        let unknown = || Some(InferredType::Dynamic(DynamicReason::Unknown));
+        match arg {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } if class_name.as_str() == "Block" => match type_args.split_last() {
+                Some((result, params)) => (params, Some(result.clone())),
+                None => (&[], unknown()),
+            },
+            InferredType::Dynamic(_) => (&[], unknown()),
+            _ => (&[], None),
+        }
     }
 
     /// Join the result types of alternative block arms that share one

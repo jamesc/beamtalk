@@ -489,6 +489,77 @@ fn bt_4207_argument_unification_keeps_known_over_dynamic() {
     assert_eq!(result.get("A"), Some(&InferredType::known("List")));
 }
 
+/// BT-4207: a `Block(R)` param's result slot aligns with the argument
+/// block's *last* type arg even when the block takes parameters the declared
+/// type omits (`ifNotNil: Block(R)` given `[:v | nil]`), so `R` binds to the
+/// block's result, not its parameter type.
+#[test]
+fn bt_4207_block_result_slot_aligns_with_last_type_arg() {
+    let method = method_info(
+        "ifNil:ifNotNil:",
+        vec![Some("Block(R)"), Some("Block(R)")],
+        Some("R"),
+    );
+    let nil_block = InferredType::Known {
+        class_name: "Block".into(),
+        type_args: vec![InferredType::known("Integer")],
+        provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+    };
+    let one_arg_block = InferredType::Known {
+        class_name: "Block".into(),
+        type_args: vec![
+            InferredType::known("String"),
+            InferredType::known("Integer"),
+        ],
+        provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+    };
+    let hierarchy = ClassHierarchy::with_builtins();
+    let result = TypeChecker::infer_method_local_params(
+        &method,
+        &[nil_block, one_arg_block],
+        &HashMap::new(),
+        &hierarchy,
+        "TestCase",
+    );
+    assert_eq!(result.get("R"), Some(&InferredType::known("Integer")));
+}
+
+/// BT-4207: a Dynamic or bare `Block` argument has an unknown result, which
+/// is an arm of the join like any other — the sibling `nil` arm must not
+/// claim `R` alone.
+#[test]
+fn bt_4207_opaque_block_argument_is_an_unknown_arm() {
+    let method = method_info(
+        "ifTrue:ifFalse:",
+        vec![Some("Block(R)"), Some("Block(R)")],
+        Some("R"),
+    );
+    let nil_block = InferredType::Known {
+        class_name: "Block".into(),
+        type_args: vec![InferredType::known("Nil")],
+        provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+    };
+    let hierarchy = ClassHierarchy::with_builtins();
+    for opaque in [
+        InferredType::known("Block"),
+        InferredType::Dynamic(DynamicReason::UnannotatedParam),
+    ] {
+        let result = TypeChecker::infer_method_local_params(
+            &method,
+            &[opaque.clone(), nil_block.clone()],
+            &HashMap::new(),
+            &hierarchy,
+            "TestCase",
+        );
+        assert_eq!(
+            result.get("R"),
+            Some(&InferredType::Dynamic(DynamicReason::DynamicBranch)),
+            "opaque arm {opaque:?} must keep R Dynamic, got {:?}",
+            result.get("R")
+        );
+    }
+}
+
 #[test]
 fn bt_4207_join_branch_arms_rules() {
     let int = InferredType::known("Integer");
