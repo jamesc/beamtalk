@@ -5281,8 +5281,14 @@ new_class_error(Kind, Message, TargetPath) ->
     Err1 = beamtalk_error:with_selector(Err0, 'newClass:at:'),
     Err2 = beamtalk_error:with_message(Err1, Message),
     case TargetPath of
-        undefined -> Err2;
-        _ -> beamtalk_error:with_details(Err2, #{target => list_to_binary(TargetPath)})
+        undefined ->
+            Err2;
+        _ ->
+            beamtalk_error:with_details(Err2, #{
+                target => beamtalk_primitive:string_from_binary(
+                    unicode:characters_to_binary(TargetPath)
+                )
+            })
     end.
 
 -spec new_class_type_error(binary()) -> #beamtalk_error{}.

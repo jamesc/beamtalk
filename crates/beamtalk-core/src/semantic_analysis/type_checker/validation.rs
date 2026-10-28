@@ -288,6 +288,16 @@ impl TypeChecker {
                         let class_subst = Self::class_method_substitution(
                             class_name, hierarchy, &method, arg_types,
                         );
+                        // Method-local type params (`inject: initial :: A
+                        // into: Block(A, E, A) -> A`) bind from the arguments
+                        // exactly as on the instance side (BT-4110).
+                        let method_subst = Self::infer_method_local_params(
+                            &method,
+                            arg_types,
+                            &class_subst,
+                            hierarchy,
+                            &method.defined_in,
+                        );
                         // Self resolves to the receiver class. For a generic
                         // receiver (e.g. `Box(T)`) we thread the inferred
                         // type args through `self_type` so nested `Self` in
@@ -329,7 +339,7 @@ impl TypeChecker {
                             ret_ty,
                             &type_resolver::merge_substitutions(
                                 &class_subst,
-                                &type_resolver::SubstitutionMap::new(),
+                                &method_subst,
                                 Some(&self_type),
                             ),
                             self.protocol_registry.as_ref(),
@@ -829,13 +839,13 @@ impl TypeChecker {
         // must not fail just because it's unresolved.
         if expected.starts_with('#') && !expected.contains('|') {
             return actual == expected
-                || super::is_generic_type_param(actual)
+                || super::is_type_var_placeholder(actual, hierarchy)
                 || WellKnownClass::from_str(actual) == Some(WellKnownClass::Dynamic);
         }
         if actual.starts_with('#') && !actual.contains('|') {
             // Singletons are subtypes of Symbol — check if expected is Symbol
             // or an ancestor of Symbol in the class hierarchy.
-            if super::is_generic_type_param(expected) {
+            if super::is_type_var_placeholder(expected, hierarchy) {
                 return true;
             }
             let symbol: EcoString = "Symbol".into();
@@ -946,7 +956,7 @@ impl TypeChecker {
     fn declared_type_is_opaque(ty: &DeclaredType, hierarchy: &ClassHierarchy) -> bool {
         match ty {
             DeclaredType::Simple(name) => {
-                super::is_generic_type_param(name)
+                super::is_type_var_placeholder(name, hierarchy)
                     || WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic)
                     || hierarchy.is_protocol_class(name)
             }
@@ -1013,8 +1023,10 @@ impl TypeChecker {
         }
         actual_args.iter().zip(expected_args.iter()).all(|(a, e)| {
             // Generic placeholders (T, E, K, V) are symbolic — treat as
-            // compatible, matching `type_args_compatible`.
-            if super::is_generic_type_param(a) || super::is_generic_type_param(e) {
+            // compatible, with the same predicate `type_args_compatible` uses.
+            if super::is_type_var_placeholder(a, hierarchy)
+                || super::is_type_var_placeholder(e, hierarchy)
+            {
                 return true;
             }
             Self::is_type_compatible(&a.as_str().into(), &e.as_str().into(), hierarchy)
@@ -1079,7 +1091,9 @@ impl TypeChecker {
         else {
             return true; // Dynamic / Never on either side — skip
         };
-        if super::is_generic_type_param(exp_name) || super::is_generic_type_param(act_name) {
+        if super::is_type_var_placeholder(exp_name, hierarchy)
+            || super::is_type_var_placeholder(act_name, hierarchy)
+        {
             return true;
         }
         if !Self::is_type_compatible(act_name, exp_name, hierarchy) {
@@ -1605,7 +1619,7 @@ impl TypeChecker {
                     if !instance_compat && !class_literal_compat {
                         let param_pos = i + 1;
                         // Use hint severity for generic type params (likely false positive)
-                        let is_generic = super::is_generic_type_param(actual_ty);
+                        let is_generic = super::is_type_var_placeholder(actual_ty, hierarchy);
                         // Render `UndefinedObject` as `Nil` in user-facing messages.
                         let actual_display =
                             InferredType::class_name_for_diagnostic(actual_ty.as_str());
@@ -2334,11 +2348,15 @@ impl TypeChecker {
         class_name: &EcoString,
         hierarchy: &ClassHierarchy,
     ) {
-        if method.return_type.is_none() {
+        // Judge *this* definition's own annotation: a class body and a
+        // standalone `Class >> sel` can both define `sel`, and the hierarchy
+        // keeps only one of them (BT-4239).
+        let Some(own_rt) = method.return_type.as_ref().map(DeclaredType::from) else {
             return;
-        }
+        };
         let selector = method.selector.name();
-        let Some(widening) = Self::override_return_widening(class_name, &selector, hierarchy)
+        let Some(widening) =
+            Self::override_return_widening(class_name, &selector, &own_rt, hierarchy)
         else {
             return;
         };
@@ -2362,26 +2380,22 @@ impl TypeChecker {
     }
 
     /// The incompatible override `check_override_return_compatibility`
-    /// reports for `class_name>>selector`, if any: the class's declared
-    /// return type does not refine the one inherited from its superclass.
-    /// `None` when there is no inherited declaration, either side is
-    /// unannotated, either side names a class type parameter (no
-    /// substitution here), or the override refines its parent. Shared with
+    /// reports for a `class_name>>selector` declared `-> child_rt`, if any:
+    /// `child_rt` does not refine the return type inherited from the
+    /// superclass. `None` when there is no annotated inherited declaration,
+    /// either side names a class type parameter (no substitution here), or
+    /// the override refines its parent. Shared with
     /// [`ProtocolRegistry::conformance_return_type_mismatches`], which leaves
     /// exactly these mismatches to the override site (BT-4175).
     pub(crate) fn override_return_widening(
         class_name: &str,
         selector: &str,
+        child_rt: &DeclaredType,
         hierarchy: &ClassHierarchy,
     ) -> Option<OverrideReturnWidening> {
         let superclass = hierarchy.get_class(class_name)?.superclass.clone()?;
         let parent_method = hierarchy.find_method(&superclass, selector)?;
-        let child_method = hierarchy.find_method(class_name, selector)?;
-        let (Some(child_rt), Some(parent_rt)) =
-            (child_method.return_type, parent_method.return_type)
-        else {
-            return None;
-        };
+        let parent_rt = parent_method.return_type?;
         // Class type params (possibly multi-letter, which the shared rule's
         // single-letter heuristic would miss) have no substitution here.
         let parent_class = parent_method.defined_in;
@@ -2392,12 +2406,12 @@ impl TypeChecker {
             .collect();
         if child_rt.mentions_any(&type_params)
             || parent_rt.mentions_any(&type_params)
-            || Self::is_return_type_refinement(&child_rt, &parent_rt, hierarchy)
+            || Self::is_return_type_refinement(child_rt, &parent_rt, hierarchy)
         {
             return None;
         }
         Some(OverrideReturnWidening {
-            child_rt,
+            child_rt: child_rt.clone(),
             parent_rt,
             parent_class,
         })
@@ -2431,7 +2445,7 @@ impl TypeChecker {
         let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
         let is_concat = operator == "++"
             && WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String);
-        let is_generic = super::is_generic_type_param(arg_ty);
+        let is_generic = super::is_type_var_placeholder(arg_ty, hierarchy);
         // Render `UndefinedObject` as `Nil` in user-facing messages.
         let arg_display = InferredType::class_name_for_diagnostic(arg_ty.as_str());
         let receiver_display = InferredType::class_name_for_diagnostic(receiver_ty.as_str());
@@ -3600,7 +3614,7 @@ impl TypeChecker {
         members.iter().any(|member| {
             let member = member.trim();
             if let Some(declared_base) = member.strip_suffix(" class") {
-                if super::is_generic_type_param(declared_base.trim()) {
+                if super::is_type_var_placeholder(declared_base.trim(), hierarchy) {
                     return true;
                 }
                 let declared_base: EcoString = declared_base.into();
@@ -3608,7 +3622,7 @@ impl TypeChecker {
             }
             // A type-parameter member (`T | Nil`, `T class`) cannot be judged until the
             // class is instantiated: accept, as `is_type_compatible` does.
-            if super::is_generic_type_param(member) {
+            if super::is_type_var_placeholder(member, hierarchy) {
                 return true;
             }
             let member: EcoString = if union {

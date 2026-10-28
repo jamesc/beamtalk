@@ -301,7 +301,7 @@ handle_getValue([], State) ->
 
 %% BT-3596: non-parent 'EXIT' interception for trapping actors — called
 %% from generated handle_info/2 (both Server-subclass and plain-Actor paths)
--export([handle_linked_exit/2]).
+-export([handle_linked_exit/2, handle_linked_exit/3]).
 
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
@@ -3705,11 +3705,29 @@ place BT-3596's EXIT semantics are implemented, so neither codegen nor
 this module duplicates the reason-branching logic.
 """.
 -spec handle_linked_exit(term(), map()) -> {stop, term(), map()} | {noreply, map()} | pass.
-handle_linked_exit({'EXIT', _From, normal}, State) ->
+handle_linked_exit(Msg, State) ->
+    handle_linked_exit(Msg, State, false).
+
+-doc """
+BT-4052: `handle_linked_exit/2` with a baked hook flag.
+
+`HasHook` is `true` only in a `Server` subclass whose class (or an ancestor
+other than `Server`) defines `onLinkedExit:reason:` — decided at codegen time
+and baked into the generated `handle_info/2`. With the flag set, *every*
+non-parent `'EXIT'` (normal and abnormal) returns `{hook, Pid, Reason}`; the
+generated code dispatches it to `onLinkedExit:reason:` (same error arms and
+state commit as `handleInfo:`) and the EXIT never reaches `handleInfo:`.
+With the flag clear this is exactly `handle_linked_exit/2`.
+""".
+-spec handle_linked_exit(term(), map(), boolean()) ->
+    {stop, term(), map()} | {noreply, map()} | {hook, term(), term()} | pass.
+handle_linked_exit({'EXIT', From, Reason}, _State, true) ->
+    {hook, From, Reason};
+handle_linked_exit({'EXIT', _From, normal}, State, false) ->
     {noreply, State};
-handle_linked_exit({'EXIT', _From, Reason}, State) ->
+handle_linked_exit({'EXIT', _From, Reason}, State, false) ->
     {stop, Reason, State};
-handle_linked_exit(_Msg, _State) ->
+handle_linked_exit(_Msg, _State, _HasHook) ->
     pass.
 
 -doc """

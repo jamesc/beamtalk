@@ -26,7 +26,7 @@ use super::local_producer_agreement_conditional::{
     LOOP_BODY_FRAME_FAMILIES, LOOP_BODY_FRAMES, check_conditional_agreement,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
-use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{DiagnosticCategory, Severity};
 
 /// Lookups that write `t`: read-write and write-only handlers, two locals, a
 /// key that reads a local, a handler holding a loop, a fold, a conditional,
@@ -82,7 +82,8 @@ pub(super) const LOOKUPS: &[&str] = &[
 /// A cross-section of [`LOOKUPS`] for the arm-frame products, which multiply
 /// by every frame and statement shape: read-write and write-only handlers,
 /// two locals, a handler holding a loop, a fold, a lookup and an `on:do:`, a
-/// `^`, a parenthesised form, and one the producer cannot lower.
+/// `^`, a parenthesised lookup, and a parenthesised handler (the literal it
+/// wraps since BT-4059).
 const LOOKUP_SAMPLE: &[&str] = &[
     "#{#a => 1} at: #k ifAbsent: [t := t + 1. 0]",
     "#{#a => 1} at: #k ifAbsent: [t := 7]",
@@ -144,7 +145,7 @@ const CLOSURE_FRAMES: &[&str] = &[
 
 /// Whether the Phase 0 / §6 checks reject `src`.
 pub(super) fn rejected(src: &str) -> bool {
-    let (module, parse_diags) = parse(lex_with_eof(src));
+    let (module, parse_diags) = super::parse_normalised(src);
     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
     analyse_full(&module, AnalysisContext::default())
         .diagnostics
@@ -347,19 +348,18 @@ fn loop_body_lookups_in_arm_frames_agree() {
 }
 
 /// BT-3839: a handler-writing lookup in a loop or fold body that the producer
-/// cannot lower (a parenthesised handler, a block key, a handler with the
-/// wrong parameter count), and any handler-writing lookup inside a closure
+/// cannot lower (a block key, a handler with the wrong parameter count — a
+/// parenthesised handler is the literal it wraps since BT-4059), and any
+/// handler-writing lookup inside a closure
 /// that is not inlined ([`CLOSURE_FRAMES`]), keeps its Phase 0 / §6 error in
 /// every method context: codegen never gets one to lower, so its write is
 /// never silently dropped.
 #[test]
 fn lookups_the_producer_cannot_lower_stay_rejected_in_loop_bodies_and_closures() {
     let cannot_lower = [
-        "#{#a => 1} at: #k ifAbsent: ([t := t + 1. 0])",
         "#{#a => 1} at: [t := t + 1. #k] ifAbsent: [0]",
         "#{#a => 1} at: #k ifAbsent: [:x | t := t + 1. 0]",
         "#{#a => 1} at: #k ifPresent: [t := t + 1. 0]",
-        "#{#a => 1} at: #k ifPresent: ([:v | t := t + v. 0])",
     ];
     let statements = [
         "{c}",
@@ -440,13 +440,13 @@ fn lookups_on_a_statically_non_dictionary_receiver_are_rejected_in_every_positio
 /// BT-3824: the `at:ifPresent:` and `at:ifPresent:ifAbsent:` handlers that
 /// write an outer local are producers (accepted by Phase 0 and lowered by the
 /// lookup producer) in every method context, unless the producer cannot lower
-/// them (a handler with the wrong parameter count, a parenthesised handler).
+/// them (a handler with the wrong parameter count). A parenthesised handler is
+/// the literal it wraps (BT-4059).
 #[test]
 fn if_present_lookups_are_producers_in_every_context() {
     let cannot_lower = [
         "#{#a => 1} at: #k ifPresent: [t := t + 1. 0]",
         "#{#a => 1} at: #k ifPresent: [:v | v] ifAbsent: [:x | t := t + 1. 0]",
-        "#{#a => 1} at: #k ifPresent: ([:v | t := t + v. 0])",
     ];
     let mut checked = 0;
     for construct in LOOKUPS.iter().filter(|c| c.contains("ifPresent:")) {

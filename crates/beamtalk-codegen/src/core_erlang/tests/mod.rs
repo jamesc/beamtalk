@@ -101,6 +101,24 @@ pub(crate) fn erlc_available() -> bool {
     }
 }
 
+/// Parses `src` and normalises it the way analysis and codegen see it: with
+/// redundant send-operand parentheses peeled (`ast::normalize`, BT-4059).
+///
+/// For the agreement harnesses that apply a core rule to the parsed tree
+/// directly and compare it with what codegen lowered: both sides must read
+/// the same canonical tree, as `analyse_full` and codegen do.
+pub(crate) fn parse_normalised(
+    src: &str,
+) -> (
+    beamtalk_core::ast::Module,
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+) {
+    let (mut module, diagnostics) =
+        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
+    beamtalk_core::ast::normalize::peel_operand_parens(&mut module);
+    (module, diagnostics)
+}
+
 /// Parse `src` as a single-class Beamtalk module and run codegen in workspace mode.
 ///
 /// Shared by control-flow and dispatch test modules to avoid copy-pasting this
@@ -232,9 +250,11 @@ mod local_producer_agreement_repl;
 mod local_rebind_verifier_corpus;
 mod loop_body_conditional_receiver_corpus;
 mod loop_body_self_send_operand_corpus;
+mod match_fallthrough_sharing;
 mod match_scrutinee_state_corpus;
 mod module_info;
 mod nlr;
+mod paren_transparency;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;

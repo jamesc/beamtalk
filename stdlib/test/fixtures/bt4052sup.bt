@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4052 fixture: single-child supervisor for Bt4052TerminatingServer.
+// See stdlib/test/server_linked_exit_test.bt.
+
+Supervisor subclass: Bt4052Sup
+
+  strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+
+  childSpecs -> List =>
+    spec := Bt4052TerminatingServer supervisionSpec withArgs: #{
+      #tableName => #bt4052Terminate
+    }
+    #(spec)

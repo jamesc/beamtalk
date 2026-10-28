@@ -1489,7 +1489,7 @@ impl Parser {
             // literal/type tests: `x :: True` / `x :: False` (exact literal)
             // or `x :: Boolean` (either), both `Pattern::Type`
             // (ADR 0107 Phase A, `generate_type_pattern`'s
-            // `wrap_single_atom_test` / `wrap_boolean_test`).
+            // `wrap_single_atom_test` / the `is_boolean` BIF test).
             //
             // A trailing `:: ClassName` (e.g. a plausible `true :: Boolean`
             // typo before discovering the `b :: Boolean` idiom) is consumed

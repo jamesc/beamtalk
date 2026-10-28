@@ -18,6 +18,11 @@
 //! - [`apply_supervisor_kind_writeback`](crate::semantic_analysis::supervisor_kind_writeback::apply_supervisor_kind_writeback)
 //! - [`apply_class_kind_writeback`](crate::semantic_analysis::class_kind_writeback::apply_class_kind_writeback)
 //!
+//! Lowering does **not** strip redundant send-operand parentheses (BT-4059):
+//! the lowered module keeps them, and codegen peels its own clone at its entry
+//! (`generate_module_with_warnings`), recording what it removed so a method's
+//! reflected source stays the text as written.
+//!
 //! The three writebacks are each a pure application of already-computed
 //! data — no inference or hierarchy construction happens in this module.
 //! Flattening runs first and is the one step here that isn't purely

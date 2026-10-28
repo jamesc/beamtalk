@@ -532,6 +532,24 @@ dispatch_missing_function_raises_test() ->
             )
     end.
 
+%% BT-4229: an unknown function's name is recorded as a UTF-8 `String`, also
+%% for a non-ASCII dynamic selector (`list_to_binary/1` produced Latin-1 bytes,
+%% an invalid `String`). Codepoints above 255 are BT-4241 (message formatting).
+dispatch_missing_function_records_name_as_string_test() ->
+    Proxy = beamtalk_erlang_proxy:new(lists),
+    Selector = list_to_atom("n\x{f6}t_there_bt4229:"),
+    try
+        beamtalk_erlang_proxy:dispatch(Selector, [1], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+            ?assertEqual(
+                {beamtalk_string, unicode:characters_to_binary("n\x{f6}t_there_bt4229")},
+                maps:get(function, Inner#beamtalk_error.details)
+            )
+    end.
+
 %%% ===================================================================
 %%% Export introspection — unloaded module
 %%% ===================================================================

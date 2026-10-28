@@ -478,6 +478,33 @@ open_args_env_dir_notify_type_error_test() ->
         )
     ).
 
+%% BT-4236: a spawn failure keeps the supervisor's term as `details.reason`.
+open_start_failure_keeps_reason_test() ->
+    meck:new(beamtalk_reactive_subprocess_sup, [passthrough]),
+    meck:expect(beamtalk_reactive_subprocess_sup, start_child, fun(_Config) ->
+        {error, {spawn_failed, enoent}}
+    end),
+    try
+        R = beamtalk_reactive_subprocess:open(
+            <<"echo">>,
+            [],
+            #beamtalk_object{class = 'MockNotify', class_mod = 'mock', pid = self()}
+        ),
+        ?assertMatch(
+            #{
+                'isOk' := false,
+                'errReason' := #{
+                    error := #beamtalk_error{
+                        kind = runtime_error, details = #{reason := {spawn_failed, enoent}}
+                    }
+                }
+            },
+            R
+        )
+    after
+        meck:unload(beamtalk_reactive_subprocess_sup)
+    end.
+
 %%% ============================================================================
 %%% Additional coverage — handle_call/3 DNU path
 %%% ============================================================================

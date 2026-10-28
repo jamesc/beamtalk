@@ -10,6 +10,7 @@
 
 mod common;
 
+mod canonical_source;
 mod corpus_conformance_tests;
 mod declaration_order_and_blank_lines;
 mod escape_corpus_conformance;

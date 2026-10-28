@@ -591,6 +591,17 @@ Transcript show: "Hello"; cr; show: "World"
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
 3. Keyword messages: `dict at: #name`
 
+Parentheses around a send's receiver or argument only group: when they are
+redundant they mean nothing, so `(self) foo`, `(MyClass) + 1` and
+`xs do: ([:x | t := t + x])` compile and run exactly like `self foo`,
+`MyClass + 1` and `xs do: [:x | t := t + x]`: the compiled behaviour is the
+same with or without them. Reflected method source
+(`(MyClass >> #sel) source`) is the text as written and keeps them — a method
+written `summed: a => (a * 2) + 1` reflects as exactly that — so the IDE method
+editor shows what is on disk. Source files are never rewritten to drop them:
+`beamtalk fmt`, and a workspace flush of a method edited in the REPL or IDE,
+keep the parentheses as written.
+
 ### Splitting a Message Send Across Lines
 
 A newline acts as a statement separator (see "Core Syntax" above), so whether
@@ -1241,7 +1252,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // e is typed as BEAMError — `e message` type-checks without warnings
 ```
 
-**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. The File and Json natives follow the same rule (BT-3970; the remaining natives are tracked in BT-4236): a failure that comes from Erlang/OTP keeps its term after it is classified into a `kind`, so `(File readAll: "missing.txt") error` is a `#file_not_found` whose `reason` is `#enoent`, and a failed `Json parse:` keeps the parser's term (e.g. `#unexpected_end`). The one non-OTP case is `Result unwrap` on a plain error value, whose `reason` is that value. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
+**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. Stdlib natives follow the same rule (BT-3970, BT-4236): a failure that comes from Erlang/OTP keeps its term after it is classified into a `kind`, so `(File readAll: "missing.txt") error` is a `#file_not_found` whose `reason` is `#enoent`, a failed `Json parse:` keeps the parser's term (e.g. `#unexpected_end`), and an invalid `Regex from:` pattern keeps `re:compile`'s `{ErrCharlist, Position}`, the same term `Erlang re compile:` answers (element 1 is OTP's charlist, a `List`, not a `String`). The one non-OTP case is `Result unwrap` on a plain error value, whose `reason` is that value. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
 
 ```beamtalk
 (Erlang string to_integer: "abc") ifError: [:e | e reason]
@@ -1263,7 +1274,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => #econnreset
 ```
 
-**Structured details (`Exception>>details`, BT-4174).** Natives that know more than the message says record it as structured details: `details` answers a `Dictionary` keyed by Symbol (empty when nothing was recorded), so read the value with `at:` instead of parsing the English `message`. For example, `Binary asString` on invalid UTF-8 answers `Result error:` holding a `parse_error` whose `#offset` is the byte offset of the first invalid sequence. A nested Beamtalk error stored in the details answers as an Exception and an absent (Erlang `undefined`) value as `nil`. Other values are the recorded terms as-is, without the FFI boundary coercions `reason` gets: text a native records as raw bytes, such as a File error's `#path`, answers a `Binary` (send it `asString` for a `String`).
+**Structured details (`Exception>>details`, BT-4174).** Natives that know more than the message says record it as structured details: `details` answers a `Dictionary` keyed by Symbol (empty when nothing was recorded), so read the value with `at:` instead of parsing the English `message`. For example, `Binary asString` on invalid UTF-8 answers `Result error:` holding a `parse_error` whose `#offset` is the byte offset of the first invalid sequence. A nested Beamtalk error stored in the details answers as an Exception and an absent (Erlang `undefined`) value as `nil`. Other values are the recorded terms as-is, without the FFI boundary coercions `reason` gets. Natives record text details (a File error's `#path`, `rename:to:`'s `#from`/`#to`) as `String`s, so `(File readAll: "missing.txt") error details at: #path` equals `"missing.txt"` (BT-4229).
 
 ```beamtalk
 (Binary fromBytes: #(104, 101, 255)) asString error details at: #offset
@@ -3585,6 +3596,25 @@ A `match:` arm body is an expression, so an arm that needs more than one stateme
     ]
   ```
 
+### onLinkedExit:reason: Semantics
+
+By default a `Server` that traps exits (see `Actor>>terminate:`) treats a linked process's `EXIT` like an untrapped link would: a non-`#normal` reason stops the server with that reason, and `#normal` is ignored. A server that links worker processes on purpose (for example `Erlang erlang spawn_link:`) can handle their exits itself by overriding `onLinkedExit: source reason: reason`:
+
+- Defined on `Server` with a **default no-op**. Overriding it (in the class or any ancestor other than `Server`) is the opt-in; there is no class-side flag.
+- **All** non-parent `EXIT`s — normal (`reason` is `#normal`) and abnormal — go to the hook, and only to the hook: they are never also delivered to `handleInfo:`. `EXIT` from the server's parent (supervisor/spawner) stays with the `gen_server` loop: `terminate:` runs and the server stops.
+- Overriding the hook makes the server trap exits; no `terminate:` override is needed.
+- **Error handling** is the same as `handleInfo:` (ADR 0134): a raise crashes the server. `continueWith:` and `stopWith:` work from the hook.
+- **`source` is a `Pid | Port`**: a trapping server also receives `EXIT` from linked ports (`open_port`, `gen_tcp`/`ssl` sockets), so annotate the parameter `Pid | Port`.
+- **Hot reload**: the server only traps exits from `init/1`, so adding or removing the override by hot reload applies to instances started after the change (same as `terminate:`).
+- **Server-only.** Plain ``Actor`s` keep the default behaviour and never receive the hook.
+
+  ```beamtalk
+  Server subclass: StreamHost
+    state: resets = 0
+    onLinkedExit: _source :: Pid | Port reason: reason :: Object =>
+      reason == #normal ifFalse: [self.resets := self.resets + 1]
+  ```
+
 ### Migration: Actor to Server
 
 Promoting an Actor to a Server is a one-word change. All existing methods continue to work:
@@ -4571,7 +4601,7 @@ x match: [
 // => 2
 ```
 
-**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). Dependent sizes and size expressions are only supported when the binary pattern is the whole arm pattern — nested ones must match the enclosing value first, then the binary. A binary nested inside a tuple is matched after the tuple, so its sizes may name a variable the tuple binds (`{n, <<head:n/binary, _/binary>>}`). A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). A size that names an earlier segment of the *same* binary, or a size expression, is only supported when the binary pattern is the whole arm pattern — match the enclosing value first, then the binary. A binary nested inside a tuple in a `match:` arm is matched after the tuple, so its sizes may name a variable the tuple or an earlier nested binary binds (`{n, <<head:n/binary, _/binary>>}`). Destructuring assignment does not accept nested patterns. A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
 
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. A zero-parameter block body alongside non-block arms warns (`MatchArmBlock`: "this `match:` arm answers a Block without running it"); a match whose every arm is a block literal is read as an intentional dispatch table and stays silent. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is additionally a compile error. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`). Suppress a deliberate block-valued arm with `@expect match_arm_block`, or the whole package with `match-arm-block = "off"` under `[diagnostics]`.
 

@@ -465,7 +465,14 @@ connect_policy(Node, false) ->
                     <<" without TLS distribution">>
                 ])
             ),
-            {error, beamtalk_error:with_details(Error1, #{node => Node, host => Host})}
+            {error,
+                beamtalk_error:with_details(Error1, #{
+                    node => Node,
+                    %% BT-4229: the host part is a charlist; record it as a String.
+                    host => beamtalk_primitive:string_from_binary(
+                        unicode:characters_to_binary(Host)
+                    )
+                })}
     end.
 
 -doc """

@@ -70,7 +70,8 @@ const HEADER: &str = "Actor subclass: CascadeOperandProbe
 /// (`classMethods:` map values and keys, `addClassMethod:body:`).
 ///
 /// A field assignment as a cascade argument (`field_assignment_arg`, BT-3803) rebinds
-/// `State` like any other operand; `split_cascade_arg` lowers it to a real `Bind`.
+/// `State` like any other operand; `split_cascade_arg` lowers it to a real `Bind`
+/// through the general producer path.
 const CASCADES: &[(&str, &str)] = &[
     (
         "field_assignment_arg",

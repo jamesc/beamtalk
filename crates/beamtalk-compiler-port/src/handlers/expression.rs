@@ -213,8 +213,10 @@ pub(crate) fn handle_compile_expression_with_options(
         // full `Class >> sel => body` input — it is recorded verbatim in the
         // ChangeLog and written back on flush. Echoing the input would splice a
         // stray `Class >>` extension into the class body on flush.
-        // `unparse_method` re-emits the parsed method, comments and
-        // all, so the recorded source round-trips cleanly.
+        // `unparse_method` re-emits the parsed method, comments, operand
+        // parentheses and all, so the recorded source round-trips cleanly and a
+        // flush never drops parentheses the user wrote (BT-4059; reflected
+        // `methodSource`, from codegen, keeps them too).
         let method_source = beamtalk_core::unparse::unparse_method(&method_def.method);
         let (return_type, param_types) = method_signature_terms(&method_def.method);
         return method_definition_ok_response(

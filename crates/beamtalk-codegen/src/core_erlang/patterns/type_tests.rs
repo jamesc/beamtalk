@@ -43,8 +43,6 @@ enum TypeTest {
     Tuple,
     /// `Symbol` — `is_atom` minus `nil`/`true`/`false`.
     Symbol,
-    /// `Boolean` — exact `'true'`/`'false'` literal match.
-    Boolean,
     /// `True`/`False`/`Nil`/`UndefinedObject` — exact single-atom match.
     Atom(&'static str),
     /// `Dictionary` — tagged-class test for the "no `$beamtalk_class` key" tag.
@@ -67,13 +65,21 @@ static TYPE_TESTS: &[(&str, TypeTest)] = &[
     ("Port", TypeTest::Bif("is_port")),
     ("Tuple", TypeTest::Tuple),
     ("Symbol", TypeTest::Symbol),
-    ("Boolean", TypeTest::Boolean),
+    ("Boolean", TypeTest::Bif("is_boolean")),
     ("True", TypeTest::Atom("true")),
     ("False", TypeTest::Atom("false")),
     ("Nil", TypeTest::Atom("nil")),
     ("UndefinedObject", TypeTest::Atom("nil")),
     ("Dictionary", TypeTest::UntaggedMap),
 ];
+
+fn true_doc() -> Document<'static> {
+    Document::Str("'true'")
+}
+
+fn false_doc() -> Document<'static> {
+    Document::Str("'false'")
+}
 
 impl CoreErlangGenerator {
     /// Compiles a single `Pattern::Type` match arm (`binding :: ClassName ->
@@ -105,10 +111,10 @@ impl CoreErlangGenerator {
     ///   Symbol` arm can never shadow a later `nil ->`/`b :: Boolean` arm
     ///   (all four are plain Erlang atoms with no distinguishing runtime
     ///   tag).
-    /// - **`Boolean`**: an exact 3-clause literal match on the scrutinee
-    ///   (`'true'`/`'false'`/anything-else-falls-through,
-    ///   [`Self::wrap_boolean_test`]) — not a bare `is_atom` guard, for the
-    ///   same shadowing reason as `Symbol`.
+    /// - **`Boolean`**: the guard-safe `is_boolean` BIF
+    ///   ([`Self::wrap_bif_test`]), true for exactly `'true'`/`'false'` —
+    ///   not a bare `is_atom` guard, for the same shadowing reason as
+    ///   `Symbol`.
     /// - **`Dictionary`/exact tagged `Value`/sealed classes**: `maps:get/3`
     ///   is not guard-safe, so [`Self::wrap_class_tag_test`] reuses the
     ///   exact nested-`case` shape `generate_array_match_arm` (`patterns::match_lowering`)
@@ -165,8 +171,10 @@ impl CoreErlangGenerator {
         let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
-        // Rest is generated AFTER the current arm to prevent state leakage.
-        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+        // Rest is generated AFTER the current arm to prevent state leakage,
+        // and bound once: every test shape below falls through from several
+        // sites (BT-4141).
+        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
 
         // Use `case 'true' of <'true'> when GUARD -> body <'true'> when
         // 'true' -> rest end` (Core Erlang guard position) so guard
@@ -200,7 +208,9 @@ impl CoreErlangGenerator {
             success_doc
         ];
 
-        Ok(self.dispatch_type_pattern_strategy(match_var, &class.name, bound_success, &rest_doc))
+        let test_doc =
+            self.dispatch_type_pattern_strategy(match_var, &class.name, bound_success, &rest_doc);
+        Ok(docvec![rest_bind, test_doc])
     }
 
     /// Picks (and applies) one of `generate_type_pattern`'s per-class
@@ -279,7 +289,6 @@ impl CoreErlangGenerator {
             TypeTest::Binary => self.wrap_binary_test(match_var, success, rest),
             TypeTest::Tuple => self.wrap_tuple_test(match_var, success, rest),
             TypeTest::Symbol => Self::wrap_symbol_test(match_var, success, rest),
-            TypeTest::Boolean => self.wrap_boolean_test(match_var, success, rest),
             TypeTest::Atom(atom) => self.wrap_single_atom_test(match_var, atom, success, rest),
             TypeTest::UntaggedMap => {
                 self.wrap_class_tag_test(match_var, Document::Str("'undefined'"), success, rest)
@@ -290,7 +299,7 @@ impl CoreErlangGenerator {
     /// `case call 'erlang':'BIF'(_Match) of <'true'> -> success <'false'> ->
     /// rest end` — the single-level generalization of
     /// `generate_array_match_arm`'s outer `is_map` check to an arbitrary
-    /// guard-safe boolean-returning BIF (`is_binary`, `is_integer`,
+    /// guard-safe boolean-returning BIF (`is_binary`, `is_boolean`, `is_integer`,
     /// `is_float`, `is_list`). No wildcard fallback clause is needed: these
     /// BIFs only ever return `'true'`/`'false'`, exactly like the existing
     /// `is_map` check's 2-clause case.
@@ -358,19 +367,40 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Subclass-aware `Binary` test (BT-4228): `is_binary(X)` matches
-    /// directly; otherwise [`Self::wrap_string_test`] decides — `success` on
-    /// the `String` tag, `rest` on anything else. `Binary` is sealed with
-    /// `String` as its only subclass, so this two-shape test is exactly
-    /// `isKindOf: Binary`.
+    /// Subclass-aware `Binary` test (BT-4228): `is_binary(X)`, else the
+    /// [`Self::wrap_string_test`] tag test. `Binary` is sealed with `String`
+    /// as its only subclass, so this two-shape test is exactly
+    /// `isKindOf: Binary`. The two shapes compute one `'true'`/`'false'`
+    /// that a single `case` branches on, so `success` is emitted once
+    /// (BT-4141).
     fn wrap_binary_test(
         &mut self,
         match_var: &str,
         success: Document<'static>,
         rest: &Document<'static>,
     ) -> Document<'static> {
-        let string_doc = self.wrap_string_test(match_var, success.clone(), rest);
-        Self::wrap_bif_test(match_var, "is_binary", success, &string_doc)
+        let is_string = self.wrap_string_test(match_var, true_doc(), &false_doc());
+        let is_binary = Self::wrap_bif_test(match_var, "is_binary", true_doc(), &is_string);
+        Self::branch_on_test(is_binary, success, rest)
+    }
+
+    /// `case <test> of <'true'> -> success <'false'> -> rest end`, for a
+    /// test shape rendered with `'true'`/`'false'` at its sites (BT-4141).
+    fn branch_on_test(
+        test: Document<'static>,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            "case ",
+            test,
+            " of ",
+            "<'true'> when 'true' -> ",
+            success,
+            " <'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
     }
 
     /// `is_atom(X) andalso X =/= nil andalso X =/= true andalso X =/=
@@ -405,35 +435,6 @@ impl CoreErlangGenerator {
                 " end"
             ]
         })
-    }
-
-    /// Exact literal match on `'true'`/`'false'` — not a bare `is_atom`
-    /// guard, so an earlier `b :: Boolean` arm can never shadow a later
-    /// `nil ->`/`s :: Symbol` arm (ADR 0107 Phase A; see
-    /// [`Self::generate_type_pattern`]'s doc). Needs a fresh wildcard
-    /// binder (unlike the pure-boolean tests above) because the scrutinee
-    /// ranges over more than `{'true', 'false'}`.
-    fn wrap_boolean_test(
-        &mut self,
-        match_var: &str,
-        success: Document<'static>,
-        rest: &Document<'static>,
-    ) -> Document<'static> {
-        let no_match = self.fresh_temp_var("NoMatch");
-        docvec![
-            "case ",
-            leaf::var(match_var.to_string()),
-            " of ",
-            "<'true'> when 'true' -> ",
-            success.clone(),
-            " <'false'> when 'true' -> ",
-            success,
-            " <",
-            leaf::var(no_match),
-            "> when 'true' -> ",
-            rest.clone(),
-            " end"
-        ]
     }
 
     /// `case is_map(_Match) of <'true'> -> case maps:get('$beamtalk_class',
@@ -652,7 +653,22 @@ impl CoreErlangGenerator {
     /// [`Self::wrap_supervisor_class_tag_test`] above — this exclusion
     /// still applies to an *unrelated* `x :: Tuple` arm that could see one
     /// of these values flow through.)
+    ///
+    /// The test reaches a match from three sites, so it computes one
+    /// `'true'`/`'false'` and `success` is emitted once (BT-4141).
     fn wrap_tuple_test(
+        &mut self,
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let is_tuple = self.tuple_shape_test(match_var, true_doc(), &false_doc());
+        Self::branch_on_test(is_tuple, success, rest)
+    }
+
+    /// The `Tuple` test's shape ([`Self::wrap_tuple_test`]), with `success`
+    /// at each of its three matching sites.
+    fn tuple_shape_test(
         &mut self,
         match_var: &str,
         success: Document<'static>,

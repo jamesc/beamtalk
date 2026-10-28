@@ -28,7 +28,7 @@ use beamtalk_core::semantic_analysis::block_facts::{
     sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
-use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span};
 use std::collections::{HashMap, HashSet};
 
 /// Conditionals that write `t`: every selector, read-write and write-only
@@ -229,7 +229,7 @@ fn exception_spans(body: &[ExpressionStatement]) -> HashSet<Span> {
 /// `None` for a program the Phase 0 checks reject (nothing is compiled or
 /// compared), else the number of producer sites compared.
 pub(super) fn check_conditional_agreement(src: &str) -> Option<usize> {
-    let (module, parse_diags) = parse(lex_with_eof(src));
+    let (module, parse_diags) = super::parse_normalised(src);
     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
     let analysis = analyse_full(&module, AnalysisContext::default());
     let rejected = analysis.diagnostics.iter().any(|d| {

@@ -1102,6 +1102,52 @@ impl CoreErlangGenerator {
         self.subexpr_needs_prelude_with(expr, PreludeProbe::FieldWrites)
     }
 
+    /// BT-4034: the one list of constructs [`Self::thread_ahead`] registers
+    /// already unwrapped (paren-unwrapped `expr`), restricted to those `probe`
+    /// counts: an inline-threaded conditional or `match:` (ADR 0118 phase 4;
+    /// not a field-write producer), an `on:do:`/`ensure:` producer (ADR 0131
+    /// Phase 3b), an evaluated literal block (BT-3841), or a conditional whose
+    /// receiver's prelude is spliced into the caller's frame (BT-3910 /
+    /// BT-4000, `conditional_receiver_operand`).
+    ///
+    /// Both [`Self::thread_ahead_unwraps`] (at [`PreludeProbe::Sequencing`])
+    /// and [`Self::subexpr_needs_prelude_with`] read this one function, so
+    /// `thread_ahead_unwraps(e)` implies `subexpr_needs_prelude(e)` by
+    /// construction: a disjunct added here is a prelude producer for
+    /// `thread_ahead`'s gate too. (The gate's only earlier exits are a trivial
+    /// expression — never one of these sends — and a value an enclosing scope
+    /// already registered, which `expression_doc` reads back unwrapped.)
+    fn unwrapped_producer_under(&self, expr: &Expression, probe: PreludeProbe) -> bool {
+        let inner = expr.unwrap_parens();
+        self.inline_producer_construct_under(inner, probe)
+            || self.is_conditional_with_sequenced_receiver(inner)
+    }
+
+    /// The inline-threaded constructs of [`Self::unwrapped_producer_under`]
+    /// (paren-unwrapped `expr`) — everything but the sequenced-receiver
+    /// conditional; [`Self::inline_producer_construct`] at
+    /// [`PreludeProbe::Sequencing`].
+    fn inline_producer_construct_under(&self, expr: &Expression, probe: PreludeProbe) -> bool {
+        (probe != PreludeProbe::FieldWrites && self.inline_control_flow_needs_threading(expr))
+            || self.exception_producer_in_frame(expr)
+            || self.block_value_producer_in_frame(expr)
+    }
+
+    /// [`Self::unwrapped_producer_under`] at [`PreludeProbe::Sequencing`], the
+    /// probe [`Self::thread_ahead`] gates on.
+    pub(super) fn thread_ahead_unwraps(&self, expr: &Expression) -> bool {
+        self.unwrapped_producer_under(expr, PreludeProbe::Sequencing)
+    }
+
+    /// [`Self::inline_producer_construct_under`] at
+    /// [`PreludeProbe::Sequencing`]: whether `thread_ahead` has already spliced
+    /// `expr` (paren-unwrapped) as an inline-threaded producer when a consumer
+    /// compiles it. `expression_doc` then answers the already-unwrapped value,
+    /// not a `{Value, State}` tuple.
+    pub(super) fn inline_producer_construct(&self, expr: &Expression) -> bool {
+        self.inline_producer_construct_under(expr, PreludeProbe::Sequencing)
+    }
+
     /// [`Self::subexpr_needs_prelude`], with `probe` saying which effects count
     /// as needing a prelude ([`PreludeProbe`]).
     fn subexpr_needs_prelude_with(&self, expr: &Expression, probe: PreludeProbe) -> bool {
@@ -1134,27 +1180,18 @@ impl CoreErlangGenerator {
         if self.is_local_assignment_producer(inner) {
             return true;
         }
-        // BT-3910 / BT-4000: and a conditional whose receiver's prelude is
-        // spliced into the caller's frame (`conditional_receiver_operand`).
-        if self.is_conditional_with_sequenced_receiver(inner) {
+        // BT-4034: every construct `thread_ahead` registers already unwrapped
+        // ([`Self::unwrapped_producer_under`], the one list
+        // `thread_ahead_unwraps` reads) needs a prelude — derived from that
+        // list, not mirrored by hand, so a consumer routing a
+        // `thread_ahead_unwraps` statement through `thread_ahead` always gets
+        // the prelude and the unwrapped value it relies on.
+        if self.unwrapped_producer_under(inner, probe) {
             return true;
         }
         // ADR 0131 Phase 2: mirrors `threaded_expression`'s
         // `local_threading_producer` branch.
         if all_producers && self.local_producer_locals(inner).is_some() {
-            return true;
-        }
-        // ADR 0118 phase 4: mirrors `threaded_expression`'s new
-        // inline-control-flow producer branch — see its doc comment.
-        if all_producers && self.inline_control_flow_needs_threading(inner) {
-            return true;
-        }
-        // ADR 0131 Phase 3b: mirrors `threaded_expression`'s exception producer.
-        if self.exception_producer_in_frame(inner) {
-            return true;
-        }
-        // BT-3841: and its evaluated literal block (`[...] value`) producer.
-        if self.block_value_producer_in_frame(inner) {
             return true;
         }
         // ADR 0118 phase 5b: mirrors `threaded_expression`'s

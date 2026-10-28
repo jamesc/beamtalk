@@ -140,8 +140,13 @@ impl CoreErlangGenerator {
         // `class_or_ancestor_overrides_terminate` doc comment. Actors that
         // never override `terminate:` keep today's plain-link semantics and
         // this leaves their `init/1` byte-identical.
-        let traps_exit = current_class
-            .is_some_and(|c| self.class_or_ancestor_overrides_terminate(module, &c.name.name));
+        // BT-4052: a Server that overrides `onLinkedExit:reason:` also traps
+        // (the hook alone suffices — no dummy `terminate:` needed).
+        let traps_exit = current_class.is_some_and(|c| {
+            self.class_or_ancestor_overrides_terminate(module, &c.name.name)
+                || (self.is_server_subclass
+                    && self.class_or_ancestor_defines_linked_exit_hook(module, &c.name.name))
+        });
 
         let module_name = self.module_name.clone();
 
@@ -816,12 +821,50 @@ impl CoreErlangGenerator {
         module: &Module,
         leaf_class: &str,
     ) -> bool {
+        self.class_or_ancestor_defines_method(
+            module,
+            leaf_class,
+            "terminate:",
+            &["Actor", "Object", "ProtoObject"],
+        )
+    }
+
+    /// BT-4052: Returns true when `leaf_class`, or an ancestor other than
+    /// `Server`/`Actor`/`Object`/`ProtoObject`, defines its own
+    /// `onLinkedExit:reason:` method — i.e. overrides `Server`'s no-op default.
+    ///
+    /// Drives both the `trap_exit` gating in `generate_init_function` (for
+    /// Server subclasses) and the baked flag passed to
+    /// `beamtalk_actor:handle_linked_exit/3` in `generate_handle_info`. Same
+    /// AST-only no-hierarchy fallback as `class_or_ancestor_overrides_terminate`.
+    pub(in crate::core_erlang) fn class_or_ancestor_defines_linked_exit_hook(
+        &self,
+        module: &Module,
+        leaf_class: &str,
+    ) -> bool {
+        self.class_or_ancestor_defines_method(
+            module,
+            leaf_class,
+            "onLinkedExit:reason:",
+            &["Server", "Actor", "Object", "ProtoObject"],
+        )
+    }
+
+    /// Shared walk for the override predicates above: does `leaf_class` or an
+    /// ancestor not in `excluded_defaults` define `selector`?
+    fn class_or_ancestor_defines_method(
+        &self,
+        module: &Module,
+        leaf_class: &str,
+        selector: &str,
+        excluded_defaults: &[&str],
+    ) -> bool {
         let Some(hierarchy) = self.class_hierarchy.as_ref() else {
             return module
                 .classes
                 .iter()
                 .find(|c| c.name.name == leaf_class)
-                .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "terminate:"));
+                .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == selector));
         };
 
         let mut ordered: Vec<ecow::EcoString> = hierarchy
@@ -832,13 +875,13 @@ impl CoreErlangGenerator {
         ordered.push(ecow::EcoString::from(leaf_class));
 
         ordered.iter().any(|name| {
-            if matches!(name.as_str(), "Actor" | "Object" | "ProtoObject") {
+            if excluded_defaults.contains(&name.as_str()) {
                 return false;
             }
             hierarchy
                 .classes()
                 .get(name.as_str())
-                .is_some_and(|info| info.methods.iter().any(|m| m.selector == "terminate:"))
+                .is_some_and(|info| info.methods.iter().any(|m| m.selector == selector))
         })
     }
 
@@ -1966,56 +2009,41 @@ impl CoreErlangGenerator {
     ///     call 'beamtalk_actor':'handle_info'(Msg, State)
     /// ```
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    pub(in crate::core_erlang) fn generate_handle_info(&self) -> Result<Document<'static>> {
+    pub(in crate::core_erlang) fn generate_handle_info(
+        &self,
+        module: &Module,
+    ) -> Result<Document<'static>> {
         if self.is_server_subclass {
-            let module_name = self.module_name.clone();
-            let dispatch_body = docvec![
-                // Stash State for re-entrant self-sends
-                Self::pdict_stash_preamble(),
-                line(),
+            // BT-4052: baked flag - true when the class (or an ancestor other
+            // than `Server`) defines `onLinkedExit:reason:`.
+            let has_hook = self.current_class(module).is_some_and(|c| {
+                self.class_or_ancestor_defines_linked_exit_hook(module, &c.name.name)
+            });
+            let dispatch_body = self.info_dispatch_doc("handleInfo:", "[Msg]");
+            let hook_arm = has_hook.then(|| {
                 docvec![
-                    "let _InfoDispatchResult = call ",
-                    leaf::atom(module_name),
-                    ":'safe_dispatch'('handleInfo:', [Msg], State) in",
-                ],
-                Self::pdict_restore_epilogue(),
-                line(),
-                "case _InfoDispatchResult of",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "<{'reply', _Result, NewState}> when 'true' ->",
-                        nest(
-                            INDENT,
-                            docvec![
-                                // handle_info is an outermost state-commit
-                                // boundary too — a Server `handleInfo:` that threads an
-                                // outer local through a control-flow desugar must not
-                                // persist `__local__` temps into the committed state.
-                                line(),
-                                "let CleanInfoNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in",
-                                line(),
-                                "{'noreply', CleanInfoNewState}",
-                            ]
-                        ),
-                        line(),
-                        // ADR 0134: re-raise, crashing the actor — shared with handle_cast
-                        noreply_error_arms("Info"),
-                        line(),
-                        "<_Other> when 'true' -> {'noreply', State}",
-                    ]
-                ),
-                line(),
-                "end",
-            ];
+                    line(),
+                    "<{'hook', HookPid, HookReason}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            self.info_dispatch_doc("onLinkedExit:reason:", "[HookPid, HookReason]")
+                        ]
+                    ),
+                ]
+            });
             let doc = docvec![
                 "'handle_info'/2 = fun (Msg, State) ->",
                 nest(
                     INDENT,
                     docvec![
                         line(),
-                        Self::pending_actions_wrap(Self::linked_exit_intercept_doc(dispatch_body)),
+                        Self::pending_actions_wrap(Self::linked_exit_intercept_doc(
+                            dispatch_body,
+                            hook_arm,
+                            has_hook,
+                        )),
                     ]
                 ),
                 "\n",
@@ -2036,20 +2064,81 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-3596: Wraps a `handle_info/2` body in a `beamtalk_actor:handle_linked_exit/2`
+    /// The `safe_dispatch` + state-commit + error-arms block shared by the
+    /// `handleInfo:` dispatch and (BT-4052) the `onLinkedExit:reason:` hook
+    /// dispatch in `handle_info/2`. `args` is a Core Erlang list literal.
+    fn info_dispatch_doc(&self, selector: &str, args: &'static str) -> Document<'static> {
+        docvec![
+            // Stash State for re-entrant self-sends
+            Self::pdict_stash_preamble(),
+            line(),
+            docvec![
+                "let _InfoDispatchResult = call ",
+                leaf::atom(self.module_name.clone()),
+                ":'safe_dispatch'(",
+                leaf::atom(selector.to_string()),
+                ", ",
+                args,
+                ", State) in",
+            ],
+            Self::pdict_restore_epilogue(),
+            line(),
+            "case _InfoDispatchResult of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<{'reply', _Result, NewState}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            // handle_info is an outermost state-commit
+                            // boundary too - a Server `handleInfo:` that threads an
+                            // outer local through a control-flow desugar must not
+                            // persist `__local__` temps into the committed state.
+                            line(),
+                            "let CleanInfoNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in",
+                            line(),
+                            "{'noreply', CleanInfoNewState}",
+                        ]
+                    ),
+                    line(),
+                    // ADR 0134: re-raise, crashing the actor - shared with handle_cast
+                    noreply_error_arms("Info"),
+                    line(),
+                    "<_Other> when 'true' -> {'noreply', State}",
+                ]
+            ),
+            line(),
+            "end",
+        ]
+    }
+
+    /// BT-3596: Wraps a `handle_info/2` body in a `beamtalk_actor:handle_linked_exit/3`
     /// interception `case`. That runtime helper only ever produces a non-`'pass'`
     /// result for a trapping actor's non-parent `'EXIT'` message (see its own doc
-    /// comment) — for every other message, and for any actor not trapping exits at
+    /// comment) - for every other message, and for any actor not trapping exits at
     /// all, it returns `'pass'` and `inner_body` runs exactly as before.
-    fn linked_exit_intercept_doc(inner_body: Document<'static>) -> Document<'static> {
+    ///
+    /// BT-4052: the third argument is the baked hook flag; when true the helper
+    /// returns `{'hook', Pid, Reason}` for every non-parent `'EXIT'`, which
+    /// `hook_arm` dispatches to `onLinkedExit:reason:`.
+    fn linked_exit_intercept_doc(
+        inner_body: Document<'static>,
+        hook_arm: Option<Document<'static>>,
+        has_hook: bool,
+    ) -> Document<'static> {
         docvec![
-            "case call 'beamtalk_actor':'handle_linked_exit'(Msg, State) of",
+            "case call 'beamtalk_actor':'handle_linked_exit'(Msg, State, ",
+            leaf::atom(if has_hook { "true" } else { "false" }.to_string()),
+            ") of",
             nest(
                 INDENT,
                 docvec![
                     line(),
                     "<'pass'> when 'true' ->",
                     nest(INDENT, docvec![line(), inner_body]),
+                    hook_arm.unwrap_or_else(|| docvec![]),
                     line(),
                     "<_ExitResult> when 'true' -> _ExitResult",
                 ]

@@ -24,6 +24,12 @@
 //! compile (a rejected program, or a `ThreadedIr` verifier `internal:` error
 //! or debug panic) the batch is bisected to find the offending programs.
 //!
+//! Programs the compiler loudly rejects under the ADR 0133 `ensure:` rule are
+//! skipped, not judged. The report counts them, and the property fails when
+//! under [`MIN_JUDGED_PERCENT`] of the draw was judged or every
+//! `ensure:`-bearing program was skipped, so it cannot pass vacuously
+//! (BT-4013).
+//!
 //! # Environment failures (BT-3767)
 //!
 //! Before compiling anything, [`preflight`] asserts the runtime exports
@@ -630,11 +636,14 @@ fn run_alone(case: &Case) -> (Package, Run) {
 /// Runs `cases` and returns every failure, bisecting broken batches.
 /// Programs skipped as loud ADR 0133 `ensure:` rejections are collected into `skipped`
 /// as `(index, seed, size)` so the report shows what the draw did not cover
-/// (BT-4018).
+/// (BT-4018). Answers whether this call (or a bisection under it) skipped any
+/// program, so a broken batch whose halves all passed is excused only by a
+/// skip that bisection actually made, never by the batch text merely holding
+/// an ADR 0133 `ensure:` rejection beside some other break (BT-4013).
 #[allow(clippy::too_many_lines)] // one bisecting driver; splitting it would scatter the batch protocol
-fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u64, u32)>) {
+fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u64, u32)>) -> bool {
     if cases.is_empty() {
-        return;
+        return false;
     }
     let programs: Vec<(usize, Program)> =
         cases.iter().map(|c| (c.index, c.program.clone())).collect();
@@ -690,7 +699,7 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u6
         batch => batch,
     };
     match batch {
-        Batch::Pass => {}
+        Batch::Pass => false,
         Batch::Tests(names, text) => {
             for (index, spelling, name) in &pkg.test_names {
                 if names.contains(name) {
@@ -699,6 +708,7 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u6
                     record(c, Failure::Wrong(*spelling, detail), failed);
                 }
             }
+            false
         }
         Batch::Broken { text, .. } => {
             // The compiler names the fixture it stopped at: blame that
@@ -728,30 +738,35 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u6
                 // loud and permanent rejection of an `ensure:` protected block that may
                 // return non-locally is not a disagreement: the program is
                 // never compiled, so no wrong answer is produced.
-                if is_loud_ensure_nlr_rejection(&text, &files_of(owner)) {
+                let skipped_here = is_loud_ensure_nlr_rejection(&text, &files_of(owner));
+                if skipped_here {
                     skipped.push((c.index, c.seed, c.size));
                 } else {
                     record(c, Failure::Compile(headline(&text), tail(&text)), failed);
                 }
                 let rest: Vec<&Case> = cases.iter().copied().filter(|c| c.index != owner).collect();
-                check(&rest, failed, skipped);
+                let skipped_rest = check(&rest, failed, skipped);
+                skipped_here || skipped_rest
             } else if let [only] = cases {
-                if is_loud_ensure_nlr_rejection(&text, &files_of(only.index)) {
+                let skipped_here = is_loud_ensure_nlr_rejection(&text, &files_of(only.index));
+                if skipped_here {
                     skipped.push((only.index, only.seed, only.size));
                 } else {
                     record(only, Failure::Compile(headline(&text), tail(&text)), failed);
                 }
+                skipped_here
             } else {
                 let (a, b) = cases.split_at(cases.len() / 2);
                 let before = failed.len();
-                check(a, failed, skipped);
-                check(b, failed, skipped);
+                let skipped_a = check(a, failed, skipped);
+                let skipped_b = check(b, failed, skipped);
                 // The batch was broken but every half passed (an interaction
                 // between programs, or a flaky run): never let that pass
-                // silently; blame the batch's first case.
-                // (A half that was only the loud ADR 0133 `ensure:` rejection is skipped,
-                // not failed.)
-                if failed.len() == before && !is_loud_ensure_nlr_rejection(&text, &[]) {
+                // silently; blame the batch's first case. A half that skipped
+                // a loud ADR 0133 `ensure:` rejection explains the break (that program
+                // was in the batch), so only a skip bisection really made
+                // excuses it (BT-4013).
+                if failed.len() == before && !skipped_a && !skipped_b {
                     record(
                         cases[0],
                         Failure::Compile(
@@ -765,10 +780,72 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u6
                         failed,
                     );
                 }
+                skipped_a || skipped_b
             }
         }
     }
 }
+
+/// How much of the draw was actually judged once the loud ADR 0133 `ensure:` rejections
+/// are skipped (BT-4013), so the property cannot pass vacuously.
+#[derive(Debug, PartialEq, Eq)]
+struct Coverage {
+    /// Distinct programs drawn.
+    drawn: usize,
+    /// Distinct programs skipped as loud ADR 0133 `ensure:` rejections.
+    skipped: usize,
+    /// Drawn programs that use `ensure:` ([`Shapes::ENSURE`]).
+    ensure_drawn: usize,
+    /// Of those, the ones skipped.
+    ensure_skipped: usize,
+}
+
+impl Coverage {
+    fn of(all: &[Case], skipped: &[(usize, u64, u32)]) -> Coverage {
+        let was_skipped = |c: &Case| skipped.iter().any(|(i, _, _)| *i == c.index);
+        let uses_ensure = |c: &Case| c.program.shapes_used().has(Shapes::ENSURE);
+        Coverage {
+            drawn: all.len(),
+            skipped: all.iter().filter(|c| was_skipped(c)).count(),
+            ensure_drawn: all.iter().filter(|c| uses_ensure(c)).count(),
+            ensure_skipped: all
+                .iter()
+                .filter(|c| uses_ensure(c) && was_skipped(c))
+                .count(),
+        }
+    }
+
+    /// Programs compiled and run (judged against the reference).
+    fn judged(&self) -> usize {
+        self.drawn - self.skipped
+    }
+
+    /// Why the draw judged too little to prove anything, if it did: fewer
+    /// than [`MIN_JUDGED_PERCENT`] of the programs judged, or every
+    /// `ensure:`-bearing program skipped (the shape the ADR 0133 `ensure:` rule rejects).
+    fn vacuous(&self) -> Option<String> {
+        if self.judged() * 100 < self.drawn * MIN_JUDGED_PERCENT {
+            return Some(format!(
+                "only {} of {} programs judged (floor {MIN_JUDGED_PERCENT}%): the `ensure:` \
+                 skip left the property nearly vacuous",
+                self.judged(),
+                self.drawn
+            ));
+        }
+        if self.ensure_drawn > 0 && self.ensure_skipped == self.ensure_drawn {
+            return Some(format!(
+                "all {} `ensure:`-bearing programs were skipped as ADR 0133 `ensure:` rejections: \
+                 the `ensure:` shape went unjudged",
+                self.ensure_drawn
+            ));
+        }
+        None
+    }
+}
+
+/// The least share (percent) of the draw that must be judged, not skipped
+/// as a loud ADR 0133 `ensure:` rejection (BT-4013).
+const MIN_JUDGED_PERCENT: usize = 50;
 
 fn report(
     shapes: Shapes,
@@ -787,6 +864,16 @@ fn report(
         all.len(),
         100 * by_program.len() / all.len().max(1),
         shapes
+    );
+    let cov = Coverage::of(all, skipped);
+    let _ = writeln!(
+        s,
+        "judged {} of {} programs ({} skipped); `ensure:`-bearing: {} judged of {}",
+        cov.judged(),
+        cov.drawn,
+        cov.skipped,
+        cov.ensure_drawn - cov.ensure_skipped,
+        cov.ensure_drawn
     );
     // BT-4018: the loud ADR 0133 `ensure:` rejections the draw did not cover, so the
     // `ensure:` shape cannot silently lose programs to the skip.
@@ -855,6 +942,11 @@ fn property(shapes: Shapes) {
     let text = report(shapes, &all, &failed, &skipped);
     eprintln!("{text}");
     assert!(failed.is_empty(), "{text}");
+    // Not vacuous (BT-4013): passing proves nothing if the `ensure:` rejection skip
+    // swallowed the draw.
+    if let Some(why) = Coverage::of(&all, &skipped).vacuous() {
+        panic!("{why}\n{text}");
+    }
 }
 
 #[test]
@@ -862,6 +954,35 @@ fn class_var_agreement_enabled_shapes() {
     // `CV_CORPUS_SHAPES=do,cond,...` narrows the draw to find which shape a
     // failure belongs to (names: `Shapes::names`); default is every shape.
     property(corpus_shapes_from_env(Shapes::all()));
+}
+
+/// BT-4013: the coverage floor fails a draw the `ensure:` rejection skip hollowed out,
+/// and passes one it did not.
+#[test]
+fn class_var_agreement_coverage_floor() {
+    let cov = |drawn, skipped, ensure_drawn, ensure_skipped| Coverage {
+        drawn,
+        skipped,
+        ensure_drawn,
+        ensure_skipped,
+    };
+    assert_eq!(cov(16, 0, 0, 0).vacuous(), None);
+    assert_eq!(cov(16, 3, 5, 3).vacuous(), None);
+    assert_eq!(cov(16, 8, 9, 8).vacuous(), None);
+    // Under half judged.
+    assert!(
+        cov(16, 9, 10, 9)
+            .vacuous()
+            .unwrap()
+            .contains("only 7 of 16")
+    );
+    // Every `ensure:` program skipped, even with most of the draw judged.
+    assert!(
+        cov(16, 2, 2, 2)
+            .vacuous()
+            .unwrap()
+            .contains("all 2 `ensure:`-bearing")
+    );
 }
 
 /// `MIN_ENVIRONMENT_PROGRAMS` small programs, program `i` from seed

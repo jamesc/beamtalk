@@ -41,12 +41,21 @@ pub enum DynamicReason {
     /// Distinguished from every other reason (all of which mean "we don't
     /// have enough information to give a concrete type") because this one
     /// means the *opposite*: the author explicitly promised the value can be
-    /// anything. `merge_method_local_binding` treats this as authoritative —
-    /// it must survive being unified with any other binding, including a
-    /// concrete one from a sibling argument position — where every other
-    /// `DynamicReason` instead loses to a concrete binding observed
-    /// elsewhere.
+    /// anything. `merge_method_local_binding` and `join_branch_arms` treat
+    /// this as authoritative — it must survive being unified with any other
+    /// binding, including a concrete one from a sibling argument position or
+    /// branch arm — where every other `DynamicReason` instead loses to a
+    /// concrete binding observed elsewhere.
     ExplicitDynamic,
+    /// A branch join (e.g. `ifTrue:ifFalse:`'s shared `R`) where at least
+    /// one arm is `Dynamic` and another is concrete (BT-4207).
+    ///
+    /// The join is soundly `Dynamic` — collapsing it to the concrete arm
+    /// (`Dynamic | Nil` ⇒ `Nil`) would make later sends report spurious
+    /// DNUs. It is not a root cause: the `Dynamic` arm already produced
+    /// its own diagnostic (if any) at its source, so this reason does not
+    /// re-warn "Dynamic in typed class" on the enclosing expression.
+    DynamicBranch,
     /// Fallback — no specific reason available.
     Unknown,
 }
@@ -64,6 +73,7 @@ impl DynamicReason {
             Self::UntypedFfi => Some("untyped FFI"),
             Self::DynamicSpec => Some("FFI spec is Dynamic"),
             Self::ExplicitDynamic => Some("explicitly declared Dynamic"),
+            Self::DynamicBranch => Some("dynamic branch"),
             Self::Unknown => None,
         }
     }
@@ -1533,6 +1543,19 @@ impl InferredType {
 pub(in crate::semantic_analysis) fn is_generic_type_param(name: &str) -> bool {
     let bytes = name.as_bytes();
     bytes.len() == 1 && bytes[0].is_ascii_uppercase()
+}
+
+/// `true` when `name` is a bare type-variable placeholder (`E`, `T`, `V`):
+/// shaped like a generic type param ([`is_generic_type_param`]) and *not* a
+/// real class in the hierarchy. A user class that happens to be named with a
+/// single uppercase letter is a class, judged nominally like any other. The
+/// one rule every "is this an unresolved type variable?" check shares
+/// (BT-4233).
+pub(in crate::semantic_analysis) fn is_type_var_placeholder(
+    name: &str,
+    hierarchy: &ClassHierarchy,
+) -> bool {
+    is_generic_type_param(name) && !hierarchy.has_class(name)
 }
 
 // ── Diagnostic facts ──────────────────────────────────────────────────────
