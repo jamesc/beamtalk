@@ -88,12 +88,31 @@ impl TypeChecker {
     /// other — including the narrowing-assignment escape hatch (declared
     /// assignable to inferred, e.g. `Dictionary := <Object>`, the
     /// type-erasure pattern the annotation exists for).
+    ///
+    /// Also `None` when either side is a bare type-variable placeholder
+    /// (`E`, `T` — a single uppercase letter that is not a real class).
+    /// Inside a method body a method-local or class-level type variable is
+    /// an opaque placeholder with no binding (BT-4210), so it is symbolic
+    /// and compatible with anything — the same rule
+    /// `type_args_compatible` (validation.rs) applies to generic type args.
     pub(in crate::semantic_analysis::type_checker) fn detect_assignment_type_mismatch(
         inferred_ty: &InferredType,
         declared: &InferredType,
         hierarchy: &ClassHierarchy,
     ) -> Option<AssignmentTypeMismatch> {
         if matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
+            return None;
+        }
+        let is_type_var = |ty: &InferredType| {
+            matches!(
+                ty,
+                InferredType::Known { class_name, type_args, .. }
+                    if type_args.is_empty()
+                        && crate::semantic_analysis::type_checker::is_generic_type_param(class_name)
+                        && !hierarchy.has_class(class_name)
+            )
+        };
+        if is_type_var(inferred_ty) || is_type_var(declared) {
             return None;
         }
         let inferred_name = inferred_ty.display_name();

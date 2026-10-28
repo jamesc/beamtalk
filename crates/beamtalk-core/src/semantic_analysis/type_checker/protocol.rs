@@ -402,18 +402,21 @@ impl TypeChecker {
                 }
 
                 // Warn when type args are provided for a class with no type params.
-                // Block is exempt — parameterized Block annotations (e.g., Block(E, Boolean))
-                // are a documentation convention for describing closure signatures.
-                let has_type_params =
-                    if WellKnownClass::from_str(&base.name) == Some(WellKnownClass::Block) {
-                        true // Block uses type args as documentation convention
-                    } else if let Some(class_info) = hierarchy.get_class(&base.name) {
-                        !class_info.type_params.is_empty()
-                    } else if let Some(proto_info) = protocol_registry.get(&base.name) {
-                        !proto_info.type_params.is_empty()
-                    } else {
-                        true // Unknown type — don't warn (may be defined elsewhere)
-                    };
+                // Classes with variadic positional type args are exempt:
+                // `Block(E, Boolean)` describes a closure signature, and
+                // `Tuple(T1, …, Tn)` is the positional tuple type the checker
+                // itself infers for tuple literals and FFI specs (BT-4220).
+                let has_type_params = if WellKnownClass::from_str(&base.name)
+                    .is_some_and(WellKnownClass::has_variadic_type_args)
+                {
+                    true
+                } else if let Some(class_info) = hierarchy.get_class(&base.name) {
+                    !class_info.type_params.is_empty()
+                } else if let Some(proto_info) = protocol_registry.get(&base.name) {
+                    !proto_info.type_params.is_empty()
+                } else {
+                    true // Unknown type — don't warn (may be defined elsewhere)
+                };
 
                 if has_type_params {
                     // Check bounds against the base class's type_param_bounds
