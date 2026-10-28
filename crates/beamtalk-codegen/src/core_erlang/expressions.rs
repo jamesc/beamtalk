@@ -1028,7 +1028,12 @@ impl CoreErlangGenerator {
         // methods: (instance side) and classMethodSource: from classMethods:
         // (class side) — so builder-defined classes are indexable by
         // SystemNavigation on both sides.
-        let augmented = super::class_builder_source::inject_method_source(receiver, messages);
+        let augmented = super::class_builder_source::inject_method_source(
+            receiver,
+            messages,
+            &self.peeled_parens,
+            self.current_peel_scope(),
+        );
         let messages: &[CascadeMessage] = augmented.as_deref().unwrap_or(messages);
 
         if messages.is_empty() {
@@ -1204,14 +1209,9 @@ impl CoreErlangGenerator {
     /// ordinary (non-cascade) argument lists: decide *once*, for the whole
     /// list, whether any argument needs hoisting — if so, hoist every
     /// argument (binding a plain one to a fresh `let` too), never just
-    /// some. Splits every argument first (field assignments via
-    /// [`Self::generate_field_assignment_open`], everything else via
-    /// [`Self::split_subexpr_for_preamble`] — same conversion
-    /// `capture_subexpr_sequence` itself uses) so each argument is compiled
-    /// exactly once regardless of which branch below is taken, then makes
-    /// that same all-or-nothing decision. `capture_subexpr_sequence` isn't
-    /// reused directly here since it has no field-assignment case — cascade
-    /// arguments are the one call site that needs both.
+    /// some. Splits every argument first ([`Self::split_cascade_arg`]) so
+    /// each argument is compiled exactly once regardless of which branch
+    /// below is taken, then makes that same all-or-nothing decision.
     pub(super) fn generate_cascade_args(
         &mut self,
         arguments: &[Expression],
@@ -1229,31 +1229,21 @@ impl CoreErlangGenerator {
         Ok(self.hoist_cascade_splits(splits, docs, span))
     }
 
-    /// Splits one cascade argument into its `(prelude, value)` pair: a field
-    /// assignment via [`Self::generate_field_assignment_open`], anything else
-    /// via [`Self::sequence_call`].
+    /// Splits one cascade argument into its `(prelude, value)` pair through
+    /// [`Self::sequence_call`], whose producer lowering
+    /// (`threaded_expression`) owns every value-position producer in the
+    /// current frame — a field assignment (BT-3803) included, so its `Bind`
+    /// lands in the consumer's frame (BT-4059: a separate field-assignment
+    /// branch here lowered it at `FrameId::ROOT`, a `BindFrameMismatch` once
+    /// the operand-paren normalisation let a bare `self.f := v` reach it
+    /// inside a loop body or arm).
     pub(super) fn split_cascade_arg(
         &mut self,
         arg: &Expression,
     ) -> Result<(Vec<ThreadedStmt>, Document<'static>)> {
-        if self.is_field_assignment(arg) {
-            // BT-3803: a real `Bind` (not an opaque `Statement`), so the
-            // consumer of the cascade continues from the new `State`
-            // version (`state_var_after_prelude` reads the prelude's `Bind`s).
-            let mut prelude = Vec::new();
-            let span = arg.unwrap_parens().span();
-            let val_var = self.lower_field_assignment_bind(
-                arg.unwrap_parens(),
-                threaded_ir::FrameId::ROOT,
-                span,
-                &mut prelude,
-            )?;
-            Ok((prelude, leaf::var(val_var)))
-        } else {
-            let mut seq = self.sequence_call(std::slice::from_ref(&arg), "CascadeArg")?;
-            let doc = seq.next();
-            Ok((seq.into_prelude(), doc))
-        }
+        let mut seq = self.sequence_call(std::slice::from_ref(&arg), "CascadeArg")?;
+        let doc = seq.next();
+        Ok((seq.into_prelude(), doc))
     }
 
     /// The all-or-nothing hoisting decision of [`Self::generate_cascade_args`]

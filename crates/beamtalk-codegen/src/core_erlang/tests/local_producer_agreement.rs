@@ -24,7 +24,7 @@ use beamtalk_core::semantic_analysis::block_facts::{
     sequenced_operand_sites,
 };
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
-use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span, lex_with_eof, parse};
+use beamtalk_core::source_analysis::{DiagnosticCategory, Severity, Span};
 use std::collections::{HashMap, HashSet};
 
 pub(super) const CONSTRUCTS: &[&str] = &[
@@ -215,7 +215,7 @@ fn every_operand_site_the_core_rule_accepts_is_lowered_by_the_producer() {
 /// reject is skipped (nothing is compiled for it). `checked` counts the
 /// producer sites compared.
 fn check_operand_agreement(src: &str, checked: &mut usize) {
-    let (module, parse_diags) = parse(lex_with_eof(src));
+    let (module, parse_diags) = super::parse_normalised(src);
     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
     let analysis = analyse_full(&module, AnalysisContext::default());
     let rejected = analysis.diagnostics.iter().any(|d| {
@@ -694,7 +694,7 @@ pub(super) enum AgreementFailure {
 /// `fold_locals_carried_corpus.rs`), where it must report a
 /// [`AgreementFailure::Disagreement`].
 pub(super) fn loop_body_agreement(src: &str) -> Result<usize, AgreementFailure> {
-    let (module, parse_diags) = parse(lex_with_eof(src));
+    let (module, parse_diags) = super::parse_normalised(src);
     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
     let analysis = analyse_full(&module, AnalysisContext::default());
     let rejected = analysis.diagnostics.iter().any(|d| {
@@ -779,11 +779,15 @@ pub(super) fn loop_body_agreement(src: &str) -> Result<usize, AgreementFailure> 
 // ADR 0131 Phase 2c (BT-3794): statement-position `detect:ifNone:`
 // ---------------------------------------------------------------------------
 
+/// The search blocks: literal ones (a parenthesised literal is the literal,
+/// BT-4059), and a block held in a local, which the producer rule cannot pack
+/// (BT-3794), so a writing handler beside it is rejected.
 const DETECT_PREDICATES: &[&str] = &[
     "[:x | x > 5]",
     "[:x | t := t + 1. x > 5]",
     "([:x | x > 5])",
     "([:x | t := t + 1. x > 5])",
+    "s",
 ];
 
 const DETECT_HANDLERS: &[&str] = &[
@@ -845,7 +849,7 @@ fn a_writing_detect_if_none_is_accepted_exactly_when_the_producer_rule_names_it(
             let construct = format!("#(1, 2) detect: {predicate} ifNone: {handler}");
             for position in DETECT_STATEMENTS {
                 for src in sources(&construct, position) {
-                    let (module, parse_diags) = parse(lex_with_eof(&src));
+                    let (module, parse_diags) = super::parse_normalised(&src);
                     assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
                     let analysis = analyse_full(&module, AnalysisContext::default());
                     let phase0_spans: Vec<Span> = analysis
@@ -972,7 +976,7 @@ fn every_nested_return_value_the_check_accepts_is_lowered_by_the_producer() {
     for construct in CONSTRUCTS {
         for frame in RETURN_FRAMES {
             for src in sources(construct, frame) {
-                let (module, parse_diags) = parse(lex_with_eof(&src));
+                let (module, parse_diags) = super::parse_normalised(&src);
                 assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
                 let analysis = analyse_full(&module, AnalysisContext::default());
                 let rejected = analysis.diagnostics.iter().any(|d| {

@@ -83,10 +83,12 @@
 //! - `class` — Class, protocol, and state declarations
 //! - `method` — Method definitions and parameters
 //! - `well_known` — Compiler-recognised selectors ([`WellKnownSelector`])
+//! - `normalize` — Send-operand parenthesis normalisation (BT-4059)
 
 mod class;
 mod expression;
 mod method;
+pub mod normalize;
 mod pattern;
 pub(crate) mod visitor;
 pub mod well_known;

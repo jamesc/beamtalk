@@ -121,13 +121,21 @@ pub struct SendHit {
 /// send is recorded before the sends in its receiver/argument subtrees, so the
 /// order is not strictly left-to-right by source position.
 ///
+/// Redundant send-operand parentheses are transparent here as they are to
+/// the compiler (BT-4059): the parsed method is peeled
+/// ([`crate::ast::normalize`]) before it is walked, so `(self) foo` records a
+/// [`ReceiverKind::SelfReceiver`] send exactly like `self foo`, while
+/// `(super) foo` — not a super send — stays [`ReceiverKind::Other`]. Peeling
+/// keeps every span, so line numbers are those of the source as written.
+///
 /// Returns an empty vector if the source contains no sends or cannot be parsed
 /// at all.
 #[must_use]
 pub fn find_all_sends_in_source(method_source: &str) -> Vec<SendHit> {
     let wrapped = format!("{SENDS_SYNTHETIC_PREFIX}{method_source}");
     let tokens = lex_with_eof(&wrapped);
-    let (module, _diags) = parse(tokens);
+    let (mut module, _diags) = parse(tokens);
+    crate::ast::normalize::peel_operand_parens(&mut module);
 
     let mut hits = Vec::new();
 
@@ -1393,6 +1401,26 @@ mod tests {
 
     fn slice(source: &str, span: Span) -> &str {
         &source[span.start() as usize..span.end() as usize]
+    }
+
+    // ---- find_all_sends_in_source ----
+
+    /// BT-4059: a redundant operand paren changes no send's receiver kind or
+    /// line; `(super) foo` is an ordinary send to `super`'s value.
+    #[test]
+    fn sends_are_paren_transparent() {
+        let kinds = |src: &str| {
+            find_all_sends_in_source(src)
+                .into_iter()
+                .map(|hit| (hit.selector, hit.line, hit.receiver))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            kinds("m =>\n  ((self)) foo: (1)\n  (Erlang lists) reverse: (#(1))"),
+            kinds("m =>\n  self foo: 1\n  Erlang lists reverse: #(1)")
+        );
+        assert_eq!(kinds("m => (self) foo")[0].2, ReceiverKind::SelfReceiver);
+        assert_eq!(kinds("m => (super) foo")[0].2, ReceiverKind::Other);
     }
 
     // ---- find_selector_send_spans ----

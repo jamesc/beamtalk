@@ -14,7 +14,7 @@
 //!
 //! The analysis produces diagnostics and metadata used by the code generator.
 
-use crate::ast::{Module, ProtocolDefinition};
+use crate::ast::{Module, ProtocolDefinition, normalize};
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -746,18 +746,29 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     result.trait_package = trait_package.map(EcoString::from);
     let expanded_module_storage;
     let trait_origins;
-    let module: &Module = if module.classes.iter().any(|c| !c.uses.is_empty()) {
+    // BT-4059: on the same owned clone, strip redundant parentheses from every
+    // send operand (`ast::normalize`), after expansion so spliced-in
+    // provisions are normalised too, and before anything below reads the
+    // module — `(e) foo` must analyse exactly like `e foo`. Cloned only when
+    // there is something to expand or peel.
+    let has_uses = module.classes.iter().any(|c| !c.uses.is_empty());
+    let module: &Module = if has_uses || normalize::has_parenthesised_operand(module) {
         let mut owned = module.clone();
-        let (expansion_diags, origins, resolved_uses) =
-            trait_expansion::expand_module_with_resolved_uses(
-                &mut owned,
-                &external_protocols,
-                trait_package,
-            );
-        result.stdlib_protocol_uses = trait_expansion::stdlib_uses_of(&resolved_uses);
-        result.protocol_use_packages = resolved_uses;
-        result.diagnostics.extend(expansion_diags);
-        trait_origins = origins;
+        if has_uses {
+            let (expansion_diags, origins, resolved_uses) =
+                trait_expansion::expand_module_with_resolved_uses(
+                    &mut owned,
+                    &external_protocols,
+                    trait_package,
+                );
+            result.stdlib_protocol_uses = trait_expansion::stdlib_uses_of(&resolved_uses);
+            result.protocol_use_packages = resolved_uses;
+            result.diagnostics.extend(expansion_diags);
+            trait_origins = origins;
+        } else {
+            trait_origins = trait_expansion::OriginMap::new();
+        }
+        normalize::peel_operand_parens(&mut owned);
         expanded_module_storage = owned;
         &expanded_module_storage
     } else {

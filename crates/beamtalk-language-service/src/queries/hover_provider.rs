@@ -3425,4 +3425,19 @@ mod tests {
             hover.contents
         );
     }
+
+    /// BT-4059 pin: hover walks the raw AST, which keeps a redundant
+    /// operand's parentheses (only analysis and codegen see the normalised
+    /// tree). Hovering the wrapped operand answers for the operand; the `(`
+    /// itself belongs to no inner node, so it falls through to the enclosing
+    /// binary send, which offers no hover.
+    #[test]
+    fn hover_through_redundant_operand_parens() {
+        let src = "x := 42\ny := (x) + 1";
+        let inner = hover_at(src, pos_at(src, src.rfind("x)").unwrap()))
+            .expect("hover on the parenthesised operand");
+        assert!(inner.contents.contains('x'), "{}", inner.contents);
+        let paren = hover_at(src, pos_at(src, src.rfind('(').unwrap()));
+        assert!(paren.is_none(), "{paren:?}");
+    }
 }
