@@ -415,10 +415,12 @@ impl CoreErlangGenerator {
                         // live cell, like the loop's own exit pack, and the
                         // pre-throw store below keeps those writes instead of
                         // clobbering them with the entry state.
-                        if self.guarded_op_take_reads() {
-                            threaded_ir::cell_take_call()
-                        } else {
-                            leaf::var(self.current_field_read_state_var())
+                        // (BT-4180: decided and recorded by the read choke point.)
+                        match self
+                            .actor_state_source(threaded_ir::StateReadSite::NlrThrowState, *span)
+                        {
+                            synced_call::ActorStateSource::Cell => threaded_ir::cell_take_call(),
+                            synced_call::ActorStateSource::Var(var) => leaf::var(var),
                         }
                     } else {
                         leaf::var(self.current_self_var())

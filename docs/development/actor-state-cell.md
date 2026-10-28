@@ -335,6 +335,41 @@ cost of gate 3. The bracket closes it without threading (BT-4121):
   or `StaleStateSeedInBracketedLoop`), and a loop that does not bracket
   hands its uses outward. So both rules are checked against the bracket
   decision, not against the gates that chose the shapes.
+- An actor closure created inside a bracketing loop captures the cell
+  (`take()`) at creation, bound around its `fun`, not the loop-entry
+  `State`: run away from home it reads the slow paths' writes of the
+  iterations before its creation (BT-4180). A conditional or `on:do:` in a
+  plain closure frame (a loop condition) seeds its scratch map from the cell
+  for the same reason, and so does the exit pack of a loop nested in the
+  region that does not bracket itself (a `detect:ifNone:` in a conditional
+  arm): its plan's initial state is the region's entry `State`.
+
+**Read-side backstop (BT-4180).** Inside a *bracketed region* (the body and
+condition of a stateless loop whose checkout bracketed, plus everything
+lowered inside it, nested loops of any mode included) every actor-state read
+source must be the cell. Every site that hands a lowering the state map to
+read from — a `self.x` or bare field read, a `^`'s carried state, an actor
+closure's creation-time capture, a plain closure's scratch seed or exception
+outer state, a nested loop plan's exit rebuild, repack or hybrid
+pre-extraction — asks one choke point, `actor_state_read_source`
+(`synced_call.rs`), which answers the cell where `guarded_op_take_reads`
+predicts a bracket and otherwise records the source it handed out
+(`StaleStateUseKind::Read`) on the innermost marker, beside the `on:do:` and
+seed uses above. The records travel outward with the marker's other uses and
+the checkout that brackets reports each one as `StaleReadInBracketedLoop`,
+whatever variable it read: the check compares the emitted source with the
+checkout *outcome*, never with the push-time prediction that chose it, so a
+drift between the two is caught too. A read in a whole-`State` frame nested
+in the region (a `StateAcc` loop or fold) records nothing, since that frame's
+state was seeded from the cell and the seed is checked itself. Stores are not
+reads: a loop's pre-store, an `on:do:` pre-region `State` and a loop plan's
+initial state go through the non-recording `state_var_to_store`, and a source
+test (`tests/stale_read_sites.rs`) keeps every other codegen file off the
+accessors the choke point is built from. The check is emitter-recorded, like
+`UnbracketedGuardedOperator`, rather than a `verify()` tree walk: field reads
+are AST-directed `Document`s inside opaque `Statement`/`ValueRef::Doc` nodes
+and the bracket itself is a spliced pre-store `Document`, so the IR cannot see
+either; typing every read into the IR would be a change of its own.
 
 A new `VerifyError`, `UnbracketedGuardedOperator` (`verify.rs`, kept as a
 separate variant for BT-4122), fails the build when a guarded operator

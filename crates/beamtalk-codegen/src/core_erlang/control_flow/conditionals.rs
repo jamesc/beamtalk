@@ -52,10 +52,11 @@
 
 use super::super::gen_server::BodyExprKind;
 use super::super::patterns::MatchThreading;
+use super::super::synced_call::ActorStateSource;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
-    self, BindOp, FrameId, RebindFrame, RebindFrameKind, ThreadedStmt, ThreadedValue,
-    ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, FrameId, RebindFrame, RebindFrameKind, StateReadSite, ThreadedStmt,
+    ThreadedValue, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use super::StateAccFallbackReason;
@@ -425,8 +426,15 @@ impl CoreErlangGenerator {
             ScratchStart::Continue => leaf::var(outer_state.to_string()),
             // A plain closure body in an actor method starts from the `State` it
             // captured (BT-3912): its arms self-send and read fields on it.
+            // BT-4180: inside a bracketed region (a loop-condition closure of
+            // a loop that brackets guarded operators) that is the cell: the
+            // captured entry `State` misses the slow paths' writes.
             ScratchStart::Fresh if self.closure_scratch_continues_state(self.current_frame()) => {
-                leaf::var(self.current_field_read_state_var())
+                let at = blocks.first().map_or_else(Span::default, |b| b.span);
+                match self.actor_state_source(StateReadSite::BranchScratchSeed, at) {
+                    ActorStateSource::Cell => threaded_ir::cell_take_call(),
+                    ActorStateSource::Var(var) => leaf::var(var),
+                }
             }
             ScratchStart::Fresh => Document::Str("call 'maps':'new'()"),
         };

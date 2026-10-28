@@ -115,7 +115,7 @@ impl CoreErlangGenerator {
             ]);
 
             // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.current_field_read_state_var();
+            let prestore_state = self.state_var_to_store();
             self.push_guarded_op_loop(body, None);
             self.push_scope();
             if let Some(param) = body.parameters.first() {
@@ -335,7 +335,7 @@ impl CoreErlangGenerator {
             ]);
 
             // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.current_field_read_state_var();
+            let prestore_state = self.state_var_to_store();
             self.push_guarded_op_loop(body, None);
             self.push_scope();
             if let Some(param) = body.parameters.first() {
@@ -552,7 +552,7 @@ impl CoreErlangGenerator {
             // conditional with a block-local write) must not leak out. It is an
             // actor closure (ADR 0137 §3): it reads the cell, and the call to
             // `lists:foldl` is the bracket.
-            self.with_actor_closure(|this| {
+            self.with_actor_closure(body_block.span, |this| {
                 let body_doc = this.with_closed_fun_scope(|this| {
                     // Bind in swapped order: foldl's first param is Elem, second is Acc
                     if let Some(param) = body_block.parameters.get(1) {
@@ -667,7 +667,7 @@ impl CoreErlangGenerator {
             ]);
 
             // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.current_field_read_state_var();
+            let prestore_state = self.state_var_to_store();
             self.push_guarded_op_loop(body, None);
             self.push_scope();
             if !body.parameters.is_empty() {
@@ -937,7 +937,7 @@ impl CoreErlangGenerator {
             }
             // Unpack state vars starting at position 3 (after AccList and StillTaking).
             // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.current_field_read_state_var();
+            let prestore_state = self.state_var_to_store();
             self.push_guarded_op_loop(body, None);
             let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
@@ -1176,7 +1176,7 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.current_field_read_state_var();
+            let prestore_state = self.state_var_to_store();
             self.push_guarded_op_loop(body, None);
             let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
@@ -1417,7 +1417,7 @@ impl CoreErlangGenerator {
             }
             // State vars start at position 3 (after MatchList and NoMatchList).
             // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.current_field_read_state_var();
+            let prestore_state = self.state_var_to_store();
             self.push_guarded_op_loop(body, None);
             let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
@@ -1690,7 +1690,7 @@ impl CoreErlangGenerator {
             }
             // State vars start at position 2 (after GroupMap).
             // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.current_field_read_state_var();
+            let prestore_state = self.state_var_to_store();
             self.push_guarded_op_loop(body, None);
             let (body_doc, _) = self.generate_foldl_loop_body(
                 body,
