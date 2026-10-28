@@ -123,6 +123,9 @@ impl TypeChecker {
                 self.typed_class_context = Some(class.name.name.clone());
             }
 
+            // Instance methods of a class codegen compiles as a value type
+            // lower through the value-type body path (BT-4235).
+            let value_type_body = !hierarchy.compiles_as_actor(class);
             for method in &class.methods {
                 self.check_method_body(
                     method,
@@ -132,6 +135,7 @@ impl TypeChecker {
                     is_typed,
                     true, // only instance methods check override compatibility
                     true,
+                    value_type_body,
                     hierarchy,
                 );
             }
@@ -144,6 +148,7 @@ impl TypeChecker {
                     is_typed,
                     false,
                     true,
+                    false, // class methods never lower through the value-type body path
                     hierarchy,
                 );
             }
@@ -183,6 +188,10 @@ impl TypeChecker {
             if !standalone.is_class_method {
                 self.check_override_return_compatibility(&standalone.method, class_name, hierarchy);
             }
+            // An instance-side extension lowers through the value-type body
+            // path unless its target is an actor — codegen's rule (BT-4235).
+            let value_type_body =
+                !standalone.is_class_method && !hierarchy.extension_target_is_actor(class_name);
             self.check_method_body(
                 &standalone.method,
                 class_name,
@@ -191,6 +200,7 @@ impl TypeChecker {
                 is_typed,
                 false,
                 false,
+                value_type_body,
                 hierarchy,
             );
 
@@ -254,7 +264,12 @@ impl TypeChecker {
     /// gates the typed-class annotation check independently of `is_typed`
     /// (standalone definitions never ran it, even when `is_typed` was true
     /// for `typed_class_context` purposes — preserved verbatim for
-    /// diagnostic parity).
+    /// diagnostic parity). `value_type_body` says the body lowers through
+    /// codegen's value-type path (an instance method of a class for which
+    /// [`ClassHierarchy::compiles_as_actor`] is `false`, or an instance-side
+    /// extension for which [`ClassHierarchy::extension_target_is_actor`] is
+    /// `false`), where a trailing `self.x := v` answers the updated `self`
+    /// (BT-4235).
     #[allow(clippy::too_many_arguments)] // one flag per axis the 3 call sites differ on
     #[allow(clippy::fn_params_excessive_bools)] // each bool is an independent, named axis
     fn check_method_body(
@@ -266,6 +281,7 @@ impl TypeChecker {
         is_typed: bool,
         check_override: bool,
         check_typed_annotations: bool,
+        value_type_body: bool,
         hierarchy: &ClassHierarchy,
     ) {
         let diagnostics_before = self.diagnostics.len();
@@ -277,6 +293,7 @@ impl TypeChecker {
             is_typed,
             check_override,
             check_typed_annotations,
+            value_type_body,
             hierarchy,
         );
         self.attribute_provision_diagnostics(
@@ -331,14 +348,13 @@ impl TypeChecker {
         is_typed: bool,
         check_override: bool,
         check_typed_annotations: bool,
+        value_type_body: bool,
         hierarchy: &ClassHierarchy,
     ) {
         let mut method_env = TypeEnv::new();
         method_env.in_class_method = is_class_method;
-        method_env.set_local(
-            "self",
-            type_resolver::receiver_type_for_class(class_name, hierarchy),
-        );
+        let receiver_type = type_resolver::receiver_type_for_class(class_name, hierarchy);
+        method_env.set_local("self", receiver_type.clone());
         // Constructed inline rather than via `self.resolution_context()`:
         // this call site also needs `self.protocol_registry` at the same
         // time, and a disjoint field borrow (this) composes with that
@@ -356,6 +372,18 @@ impl TypeChecker {
         );
         self.stash_return_position_block_pushdown(method);
         let body_type = self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
+        // BT-4235: on the value-type body path a trailing `self.x := v` answers
+        // the updated `self` (BT-833), with or without statement-level
+        // parentheses (BT-4092), not `v`. A body that already diverged keeps
+        // its `Never`.
+        let body_type = if value_type_body
+            && !matches!(body_type, InferredType::Never)
+            && crate::semantic_analysis::block_facts::ends_with_self_field_write(&method.body)
+        {
+            receiver_type
+        } else {
+            body_type
+        };
         let body_type =
             self.resolve_self_delegate_return_type(method, body_type, class_name, hierarchy);
         self.check_return_type(method, &body_type, class_name, hierarchy);
