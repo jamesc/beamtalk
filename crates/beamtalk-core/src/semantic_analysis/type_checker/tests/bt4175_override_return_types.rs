@@ -261,6 +261,39 @@ Object subclass: Caller
     );
 }
 
+/// A standalone (`Class >> selector`) override that widens a conforming
+/// inherited return type is reported at its definition too, so dropping
+/// the call-site protocol warning never leaves it unreported.
+#[test]
+fn standalone_override_widening_conforming_parent_warns_at_definition() {
+    let source = format!(
+        r#"{PRINTABLE}
+Object subclass: Base
+  asString -> String => "b"
+
+Base subclass: Derived
+
+Derived >> asString -> Integer => 1
+
+Object subclass: Caller
+  show: p :: Printable -> String => p printString
+  run => self show: Derived new
+"#
+    );
+    let diags = type_diagnostics(&source);
+    let hits = override_return_warnings(&diags);
+    assert_eq!(hits.len(), 1, "expected the override warning: {diags:#?}");
+    assert!(
+        hits[0].message.contains("'asString' in Derived is Integer"),
+        "unexpected message: {}",
+        hits[0].message
+    );
+    assert!(
+        protocol_return_warnings(&diags).is_empty(),
+        "no duplicate call-site warning: {diags:#?}"
+    );
+}
+
 /// The parent itself violating the protocol keeps the call-site warning:
 /// no override site covers that mismatch.
 #[test]

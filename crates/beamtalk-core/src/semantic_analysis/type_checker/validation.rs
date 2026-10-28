@@ -38,7 +38,9 @@ use ecow::EcoString;
 use super::known_remote;
 use super::sendability;
 use super::type_resolver;
-use super::types::{AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass};
+use super::types::{
+    AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass, OverrideReturnWidening,
+};
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
@@ -2302,37 +2304,15 @@ impl TypeChecker {
             return;
         }
         let selector = method.selector.name();
-        let Some(superclass) = hierarchy
-            .get_class(class_name)
-            .and_then(|c| c.superclass.clone())
+        let Some(widening) = Self::override_return_widening(class_name, &selector, hierarchy)
         else {
             return;
         };
-        let Some(parent_method) = hierarchy.find_method(&superclass, &selector) else {
-            return;
-        };
-        let Some(child_method) = hierarchy.find_method(class_name, &selector) else {
-            return;
-        };
-        let (Some(child_rt), Some(parent_rt)) =
-            (&child_method.return_type, &parent_method.return_type)
-        else {
-            return;
-        };
-        // Class type params (possibly multi-letter, which the shared rule's
-        // single-letter heuristic would miss) have no substitution here.
-        let parent_class = &parent_method.defined_in;
-        let type_params: Vec<EcoString> = [class_name, parent_class]
-            .into_iter()
-            .filter_map(|c| hierarchy.get_class(c))
-            .flat_map(|c| c.type_params.iter().cloned())
-            .collect();
-        if child_rt.mentions_any(&type_params)
-            || parent_rt.mentions_any(&type_params)
-            || Self::is_return_type_refinement(child_rt, parent_rt, hierarchy)
-        {
-            return;
-        }
+        let OverrideReturnWidening {
+            child_rt,
+            parent_rt,
+            parent_class,
+        } = widening;
         self.diagnostics.push(
             Diagnostic::warning(
                 format!(
@@ -2345,6 +2325,48 @@ impl TypeChecker {
                 "{parent_class} declares return type {parent_rt}; an override may narrow it but not widen it"
             )),
         );
+    }
+
+    /// The incompatible override `check_override_return_compatibility`
+    /// reports for `class_name>>selector`, if any: the class's declared
+    /// return type does not refine the one inherited from its superclass.
+    /// `None` when there is no inherited declaration, either side is
+    /// unannotated, either side names a class type parameter (no
+    /// substitution here), or the override refines its parent. Shared with
+    /// [`ProtocolRegistry::conformance_return_type_mismatches`], which leaves
+    /// exactly these mismatches to the override site (BT-4175).
+    pub(crate) fn override_return_widening(
+        class_name: &str,
+        selector: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<OverrideReturnWidening> {
+        let superclass = hierarchy.get_class(class_name)?.superclass.clone()?;
+        let parent_method = hierarchy.find_method(&superclass, selector)?;
+        let child_method = hierarchy.find_method(class_name, selector)?;
+        let (Some(child_rt), Some(parent_rt)) =
+            (child_method.return_type, parent_method.return_type)
+        else {
+            return None;
+        };
+        // Class type params (possibly multi-letter, which the shared rule's
+        // single-letter heuristic would miss) have no substitution here.
+        let parent_class = parent_method.defined_in;
+        let type_params: Vec<EcoString> = [class_name, parent_class.as_str()]
+            .into_iter()
+            .filter_map(|c| hierarchy.get_class(c))
+            .flat_map(|c| c.type_params.iter().cloned())
+            .collect();
+        if child_rt.mentions_any(&type_params)
+            || parent_rt.mentions_any(&type_params)
+            || Self::is_return_type_refinement(&child_rt, &parent_rt, hierarchy)
+        {
+            return None;
+        }
+        Some(OverrideReturnWidening {
+            child_rt,
+            parent_rt,
+            parent_class,
+        })
     }
 
     /// Validate binary message operand types for arithmetic and string concatenation.

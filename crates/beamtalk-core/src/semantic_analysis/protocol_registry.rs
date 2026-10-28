@@ -683,17 +683,16 @@ impl ProtocolRegistry {
             }
             // An override that widens an inherited return type which already
             // satisfies the protocol is reported once, at the override's
-            // definition (`check_override_return_compatibility`), where
-            // `@expect type` can suppress a deliberate widening such as
-            // `Binary>>asString`. Re-reporting it at every call site that
-            // passes the class to a protocol-typed parameter would be noise
-            // the caller cannot fix.
-            if Self::widens_conforming_inherited_return(
-                &method.defined_in,
-                &req.selector,
-                &expected,
-                hierarchy,
-            ) {
+            // definition, where `@expect type` can suppress a deliberate
+            // widening such as `Binary>>asString`. Re-reporting it at every
+            // call site that passes the class to a protocol-typed parameter
+            // would be noise the caller cannot fix. Skip only when the
+            // override check reports it (same decision, shared).
+            if TypeChecker::override_return_widening(&method.defined_in, &req.selector, hierarchy)
+                .is_some_and(|w| {
+                    TypeChecker::is_return_type_refinement(&w.parent_rt, &expected, hierarchy)
+                })
+            {
                 continue;
             }
             mismatches.push(ReturnTypeMismatch {
@@ -704,29 +703,6 @@ impl ProtocolRegistry {
             });
         }
         mismatches
-    }
-
-    /// `true` when `defined_in`'s superclass chain declares `selector` with a
-    /// return type that refines `expected` — i.e. the protocol mismatch is
-    /// introduced by `defined_in`'s override alone.
-    fn widens_conforming_inherited_return(
-        defined_in: &str,
-        selector: &str,
-        expected: &DeclaredType,
-        hierarchy: &ClassHierarchy,
-    ) -> bool {
-        let Some(superclass) = hierarchy
-            .get_class(defined_in)
-            .and_then(|c| c.superclass.clone())
-        else {
-            return false;
-        };
-        hierarchy
-            .find_method(&superclass, selector)
-            .and_then(|parent| parent.return_type)
-            .is_some_and(|parent_rt| {
-                TypeChecker::is_return_type_refinement(&parent_rt, expected, hierarchy)
-            })
     }
 
     /// `true` when `class_name`'s *known* method surface resolves every
