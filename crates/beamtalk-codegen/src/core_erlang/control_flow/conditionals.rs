@@ -1175,7 +1175,7 @@ impl CoreErlangGenerator {
     /// Returns `{Result, NewState}`:
     /// - The arm that runs the block: `{block_result, mutated_state}`.
     /// - The non-taken arm: `{<answer>, unchanged_state}`, where `<answer>`
-    ///   comes from [`SoloBoolean::arms`] — the table the pure path reads
+    ///   comes from [`SoloBoolean::non_taken`] — the table the pure path reads
     ///   too — so it matches dynamic dispatch: the receiver for
     ///   `ifTrue:`/`ifFalse:` (`False>>ifTrue: => self`), the literal
     ///   `false`/`true` for `and:`/`or:` (BT-4189).
