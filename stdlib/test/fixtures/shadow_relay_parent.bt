@@ -5,7 +5,7 @@
 // tests (stdlib/test/class_var_nlr_shadow_test.bt). The mutating driver is
 // defined here and reached from ShadowRelayChild via self-dispatch
 // (`self hitRun:over:`), so the foreign NLR relays through the
-// class_self_dispatch chain before it leaves the child's class process.
+// class-side self-dispatch chain before it leaves the child's class process.
 //
 // `classState: hits` is declared on both parent and child — ClassVars storage
 // is per-class (BT-2007), and self-dispatch passes the *caller's* ClassVars
