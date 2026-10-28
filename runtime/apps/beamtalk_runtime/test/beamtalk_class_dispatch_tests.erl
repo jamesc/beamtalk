@@ -2758,6 +2758,132 @@ test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
     end.
 
 %%% ============================================================================
+%%% 19. class_super_dispatch/4 — class-side `super` (BT-4001)
+%%%
+%%% Walks from the sending class's superclass and never consults the sending
+%%% class itself, not even its class-side extensions (an extension override
+%%% that sends `super` must not recurse into itself). At each ancestor a
+%%% class-side extension on that ancestor's tag is checked before the
+%%% ancestor's class methods.
+%%% ============================================================================
+
+class_super_dispatch_test_() ->
+    {setup, fun setup_class_self_extension/0, fun teardown_pids/1, fun(_) ->
+        [
+            {"skips the sending class's own class-side extension",
+                fun test_class_super_dispatch_skips_own_extension/0},
+            {"reaches a superclass method defined only as a class-side extension",
+                fun test_class_super_dispatch_reaches_superclass_extension/0},
+            {"a superclass's extension is checked before its class methods",
+                fun test_class_super_dispatch_superclass_extension_before_method/0},
+            {"runs the found method under the live receiver's tag",
+                fun test_class_super_dispatch_passes_receiver_tag/0},
+            {"raises does_not_understand when no ancestor defines the selector",
+                fun test_class_super_dispatch_dnu/0}
+        ]
+    end}.
+
+%% Parent defines `shared` (a runtime class-method fun); Child does not.
+with_super_parent_child(Prefix, Body) ->
+    ParentName = list_to_atom(Prefix ++ "Parent"),
+    ChildName = list_to_atom(Prefix ++ "Child"),
+    ParentInfo = #{
+        superclass => none,
+        module => list_to_atom(Prefix ++ "_parent_no_module"),
+        class_methods => #{
+            shared => #{block => fun(_ClassSelf) -> from_parent_method end, arity => 1},
+            tagOf => #{
+                block => fun(ClassSelf) -> ClassSelf#beamtalk_object.class end, arity => 1
+            }
+        },
+        class_state => #{}
+    },
+    ChildInfo = #{
+        superclass => ParentName,
+        module => list_to_atom(Prefix ++ "_child_no_module"),
+        class_methods => #{},
+        class_state => #{}
+    },
+    {ok, ParentPid} = beamtalk_object_class:start_link(ParentName, ParentInfo),
+    {ok, ChildPid} = beamtalk_object_class:start_link(ChildName, ChildInfo),
+    try
+        Body(ParentName, ChildName)
+    after
+        catch gen_server:stop(ChildPid, normal, 5000),
+        catch gen_server:stop(ParentPid, normal, 5000)
+    end.
+
+test_class_super_dispatch_skips_own_extension() ->
+    with_super_parent_child("Bt4001SuperOwnExt", fun(_ParentName, ChildName) ->
+        ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
+        %% An extension override on the sending class, as `C class >> shared`.
+        ok = beamtalk_extensions:register(
+            ChildTag, shared, fun(_Args, _Self) -> from_own_extension end, test
+        ),
+        try
+            %% `class_self_dispatch/4` would answer the child's own extension.
+            ?assertEqual(
+                from_parent_method,
+                beamtalk_class_dispatch:class_super_dispatch(ChildName, shared, [], ChildTag)
+            )
+        after
+            beamtalk_extensions:unregister(ChildName, shared, true)
+        end
+    end).
+
+test_class_super_dispatch_reaches_superclass_extension() ->
+    with_super_parent_child("Bt4001SuperParentExt", fun(ParentName, ChildName) ->
+        ParentTag = beamtalk_class_registry:class_object_tag(ParentName),
+        ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
+        ok = beamtalk_extensions:register(
+            ParentTag, extOnly, fun([X], _Self) -> X + 200 end, test
+        ),
+        try
+            ?assertEqual(
+                201,
+                beamtalk_class_dispatch:class_super_dispatch(ChildName, extOnly, [1], ChildTag)
+            )
+        after
+            beamtalk_extensions:unregister(ParentName, extOnly, true)
+        end
+    end).
+
+test_class_super_dispatch_superclass_extension_before_method() ->
+    with_super_parent_child("Bt4001SuperExtFirst", fun(ParentName, ChildName) ->
+        ParentTag = beamtalk_class_registry:class_object_tag(ParentName),
+        ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
+        ok = beamtalk_extensions:register(
+            ParentTag, shared, fun(_Args, _Self) -> from_parent_extension end, test
+        ),
+        try
+            ?assertEqual(
+                from_parent_extension,
+                beamtalk_class_dispatch:class_super_dispatch(ChildName, shared, [], ChildTag)
+            )
+        after
+            beamtalk_extensions:unregister(ParentName, shared, true)
+        end
+    end).
+
+test_class_super_dispatch_passes_receiver_tag() ->
+    with_super_parent_child("Bt4001SuperTag", fun(_ParentName, ChildName) ->
+        ReceiverTag = 'Bt4001SuperTagGrandchild class',
+        ?assertEqual(
+            ReceiverTag,
+            beamtalk_class_dispatch:class_super_dispatch(ChildName, tagOf, [], ReceiverTag)
+        )
+    end).
+
+test_class_super_dispatch_dnu() ->
+    with_super_parent_child("Bt4001SuperDnu", fun(_ParentName, ChildName) ->
+        ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand}},
+            beamtalk_class_dispatch:class_super_dispatch(ChildName, missing, [], ChildTag)
+        )
+    end).
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 

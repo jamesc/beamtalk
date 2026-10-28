@@ -181,6 +181,11 @@ pub(super) mod fault {
         /// the arms thread from the `State` the scrutinee's spliced prelude
         /// has already stepped past (`StaleConstructSeed`).
         SeedBeforeScrutinee,
+        /// BT-4178: a tuple-accumulator fold does not capture its entry
+        /// state for its body, as before BT-4178, so a field read there
+        /// names the loop context's `StateAcc`
+        /// (`TupleAccStateReadNotEntryState`).
+        TupleAccNoEntryCapture,
     }
 
     thread_local! {

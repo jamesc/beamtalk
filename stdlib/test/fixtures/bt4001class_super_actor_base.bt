@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4001: superclass of Bt4001ClassSuperActorChild. The instance-side
+// `peek:` answers something else, so a class-side `super peek:` that wrongly
+// resolved against instance methods would be visible.
+
+Actor subclass: Bt4001ClassSuperActorBase
+
+  class peek: x => x + 100
+
+  peek: x => x + 1000

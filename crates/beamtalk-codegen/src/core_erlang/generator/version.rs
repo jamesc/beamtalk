@@ -82,21 +82,29 @@ impl CoreErlangGenerator {
     /// `expressions.rs`) resolve it, so they can't independently drift
     /// (CLAUDE.md: no duplicate "mirrors" implementations).
     ///
-    /// Identical to [`Self::current_state_var`] except inside a non-hybrid
-    /// direct-params loop with a captured
+    /// Identical to [`Self::current_state_var`] except inside a frame that
+    /// binds no whole `State` and captured
     /// [`crate::core_erlang::control_flow::loop_mode::LoopMode::direct_params_outer_state_var`]
-    /// (BT-3562) — such a loop's `letrec` fun binds no `StateAcc`
-    /// accumulator parameter at all, so `current_state_var`'s blanket
-    /// `in_loop_body` → `StateAcc` rule names a variable that was never
-    /// bound. See that field's own doc comment for why the captured
-    /// pre-loop name is safe to reuse for every iteration.
+    /// on entry: a direct-params letrec loop (BT-3562) or a
+    /// tuple-accumulator fold (BT-4178). Neither binds a `StateAcc` map, so
+    /// `current_state_var`'s blanket `in_loop_body` → `StateAcc` rule names
+    /// a variable that was never bound (or, in a `do:` fold, the fold's own
+    /// tuple accumulator). See that field's own doc comment for why the
+    /// captured pre-loop name is safe to reuse for every iteration.
+    ///
+    /// Inside a tuple-accumulator fold every name answered here is logged
+    /// for the fold's checkout
+    /// ([`crate::core_erlang::threaded_ir::verify_tuple_acc_state_reads`]).
     pub(in crate::core_erlang) fn current_field_read_state_var(&self) -> String {
-        if !self.loop_mode.in_hybrid_loop {
-            if let Some(captured) = &self.loop_mode.direct_params_outer_state_var {
-                return captured.clone();
-            }
+        let name = self
+            .loop_mode
+            .direct_params_outer_state_var
+            .clone()
+            .unwrap_or_else(|| self.current_state_var());
+        if let Some(frame) = self.loop_mode.tuple_acc_state_reads.borrow_mut().last_mut() {
+            frame.push(name.clone());
         }
-        self.current_state_var()
+        name
     }
 
     /// Resets the state version to 0.

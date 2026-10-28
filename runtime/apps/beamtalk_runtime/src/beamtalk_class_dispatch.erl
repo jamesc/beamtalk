@@ -26,6 +26,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     lookup_direct_constructor/3,
     class_self_dispatch/3,
     class_self_dispatch/4,
+    class_super_dispatch/4,
     class_self_send/3,
     class_self_direct_ok/4,
     class_self_dispatch_local/3,
@@ -339,10 +340,11 @@ class_self_dispatch(ClassName, Selector, Args) ->
 
 -doc """
 `class_self_dispatch/3` with the live receiver's metaclass tag
-(`element(2, ClassSelf)`). A ClassBuilder `super` send runs inside a fun whose
-`ClassSelf` may be a subclass of the builder class; the superclass method must
-run with that receiver (so its class-variable key is the receiver's), not with
-a `ClassSelf` rebuilt from the static builder class.
+(`element(2, ClassSelf)`), so a subclass receiver runs the found method under
+its own class-variable key rather than under a `ClassSelf` rebuilt from
+`ClassName`. Like `/3` it checks `ClassName`'s own class-side extensions
+first, so it is not `super`: a class-side `super` uses
+`class_super_dispatch/4`.
 """.
 -spec class_self_dispatch(class_name(), selector(), list(), atom()) -> term() | no_return().
 class_self_dispatch(ClassName, Selector, Args, ReceiverTag) when
@@ -362,6 +364,100 @@ class_self_dispatch(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
             class_self_dispatch_chain(ClassName, Selector, Args, ReceiverTag)
     end.
 
+-doc """
+A class-side `super` send (BT-4001): `super Selector` in a class method (or
+class-side extension, or ClassBuilder class-method fun) of `ClassName`.
+
+The lookup starts at `ClassName`'s superclass and never consults
+`ClassName` itself, so neither its compiled class methods nor its own
+class-side extensions are reached: a `C class >> peek:` extension that sends
+`super peek:` runs the superclass's method instead of recursing into itself.
+At each ancestor, from the superclass up, a class-side extension registered
+on that ancestor's metaclass tag is checked before the ancestor's own class
+methods (the same extension-before-method order a send to that class uses),
+so `super` finds a superclass method whether its body or an extension
+defined it.
+
+`ReceiverTag` is the live receiver's metaclass tag (`element(2, ClassSelf)`),
+so the found method runs under the receiver's class-variable key. Returns the
+plain result (ADR 0130 §3) and raises a structured `does_not_understand` when
+no ancestor defines `Selector`.
+""".
+-spec class_super_dispatch(class_name(), selector(), list(), atom()) -> term() | no_return().
+class_super_dispatch(ClassName, Selector, Args, ReceiverTag) when
+    is_list(Args), is_atom(ReceiverTag)
+->
+    case find_class_super_method(Selector, ClassName) of
+        {extension, AncestorName, AncestorTag} ->
+            case
+                check_class_self_extension(AncestorName, AncestorTag, Selector, Args, ReceiverTag)
+            of
+                {ok, Outcome} ->
+                    Outcome;
+                %% Unregistered between the probe and the call: the ancestor's
+                %% own class methods (then its ancestors') answer instead.
+                not_found ->
+                    class_self_dispatch_chain(
+                        ClassName,
+                        Selector,
+                        Args,
+                        find_class_method_from_class(Selector, AncestorName),
+                        ReceiverTag
+                    )
+            end;
+        {method, AncestorName, AncestorModule} ->
+            class_self_dispatch_chain(
+                ClassName, Selector, Args, {ok, AncestorName, AncestorModule}, ReceiverTag
+            );
+        not_found ->
+            raise_class_self_dnu(ClassName, Selector)
+    end.
+
+-doc """
+The ancestor a class-side `super Selector` from `ClassName` resolves to,
+walked from `ClassName`'s superclass: `{extension, Ancestor, AncestorTag}`
+when a class-side extension on that ancestor's metaclass tag matches first,
+`{method, Ancestor, Module}` when its class-method table does, else
+`not_found`.
+""".
+-spec find_class_super_method(selector(), class_name()) ->
+    {extension, class_name(), atom()} | {method, class_name(), atom()} | not_found.
+find_class_super_method(Selector, ClassName) ->
+    StepFun = fun(AncestorName, _Depth) ->
+        AncestorTag = receiver_tag(AncestorName),
+        case beamtalk_dispatch:check_extension(AncestorTag, Selector) of
+            {ok, _Fun} ->
+                {found, {extension, AncestorName, AncestorTag}};
+            not_found ->
+                case beamtalk_class_metadata:lookup_methods(AncestorName) of
+                    {ok, AncestorModule, Selectors} ->
+                        case lists:member(Selector, Selectors) of
+                            true -> {found, {method, AncestorName, AncestorModule}};
+                            false -> {next, superclass_from_ets(AncestorName)}
+                        end;
+                    not_found ->
+                        not_found
+                end
+        end
+    end,
+    case
+        beamtalk_hierarchy:walk_ancestors(
+            superclass_from_ets(ClassName), StepFun, ?MAX_HIERARCHY_DEPTH
+        )
+    of
+        {found, Found} ->
+            Found;
+        not_found ->
+            not_found;
+        {max_depth_exceeded, CycleAncestor} ->
+            ?LOG_WARNING(
+                "find_class_super_method: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, CycleAncestor, ClassName],
+                #{domain => [beamtalk, runtime]}
+            ),
+            not_found
+    end.
+
 -spec receiver_tag(class_name()) -> atom().
 receiver_tag(ClassName) ->
     beamtalk_class_registry:class_object_tag(ClassName).
@@ -375,8 +471,9 @@ for an inherited class method is a subclass of the class whose code is
 running. Starting at that class means an override of `Selector` (or a
 subclass-only implementation of a template-method hook) is found before the
 inherited definition, exactly as an instance-side self-send resolves.
-`class_self_dispatch/3` keeps its start-at-superclass semantics because
-builder-class `super` sends (ADR 0084) rely on them.
+`class_self_dispatch/3` keeps its start-at-superclass walk (after checking
+`ClassName`'s own extensions); a class-side `super`, builder or compiled,
+uses `class_super_dispatch/4`, which never consults `ClassName` itself.
 """.
 -spec class_self_send(class_name(), selector(), list()) -> term() | no_return().
 class_self_send(ClassName, Selector, Args) ->

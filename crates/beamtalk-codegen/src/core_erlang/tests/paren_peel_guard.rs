@@ -121,7 +121,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ),
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/send/receiver.rs",
-        2,
+        1,
     ),
     (
         "beamtalk-core/src/semantic_analysis/type_checker/known_remote.rs",

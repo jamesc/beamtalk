@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4001: a class-side `super` send in an Object subclass's class method, at
+// method level and inside a closure.
+
+Bt4001ClassSuperObjectBase subclass: Bt4001ClassSuperObjectChild
+
+  class peek: x => x
+
+  class run => super peek: 1
+
+  class runAll => #(1, 2) collect: [:x | super peek: x]

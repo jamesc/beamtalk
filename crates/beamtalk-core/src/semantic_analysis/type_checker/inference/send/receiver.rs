@@ -544,9 +544,10 @@ impl TypeChecker {
             ..
         } = receiver_ty
         {
-            // In class methods, self sends should check class-side methods.
-            // Unwrap parens so `(self) foo:` dispatches class-side.
-            if env.in_class_method && Self::is_self_receiver(receiver.unwrap_parens()) {
+            // In class methods, self sends should check class-side methods,
+            // and so should `super` sends — against the superclass, which is
+            // `receiver_ty` for `super` (BT-4001).
+            if Self::is_class_method_self_or_super(receiver, env) {
                 if !in_abstract_method {
                     self.check_argument_types(
                         class_name,
