@@ -134,6 +134,11 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-core/src/semantic_analysis/type_checker/inference/blocks.rs",
         1,
     ),
+    // A method body's last statement: `ends_with_field_write` (BT-4235).
+    (
+        "beamtalk-core/src/semantic_analysis/type_checker/inference/mod.rs",
+        1,
+    ),
     // A `match:` scrutinee.
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/flow.rs",
