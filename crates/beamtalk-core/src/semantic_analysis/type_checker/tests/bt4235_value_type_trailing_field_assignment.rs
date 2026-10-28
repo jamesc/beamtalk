@@ -93,11 +93,17 @@ fn parenthesised_trailing_field_assignment_in_value_type_infers_receiver_type() 
     );
 }
 
-/// Only the LAST statement counts, and operand-position parentheses keep the
-/// assigned value: neither answers `self`.
+/// Only the LAST statement counts, operand-position parentheses keep the
+/// assigned value, and a write after an early `^` is dead: none answers `self`.
 #[test]
 fn non_trailing_or_operand_field_assignment_keeps_its_value_type() {
-    for last in ["self.m := 5\n    7", "(self.m := 5) + 1"] {
+    // A write after a body-level `^` is dead: the method answers the `^`'s
+    // value, as codegen emits nothing past it.
+    for last in [
+        "self.m := 5\n    7",
+        "(self.m := 5) + 1",
+        "^7\n    self.m := 5",
+    ] {
         let (types, _) = check_source(&value_type_source(last));
         assert_eq!(
             return_type(&types, "Probe", "bump", false),

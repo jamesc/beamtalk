@@ -3152,15 +3152,23 @@ pub fn body_exprs(body: &[ExpressionStatement]) -> impl DoubleEndedIterator<Item
 /// ([`is_self_field_target`]). On codegen's value-type body path such a
 /// method answers its updated `self` (BT-833), and the type checker infers
 /// the receiver type from this; codegen's `generate_vt_body_exprs_in_sites`
-/// makes the same decision on the same leaves.
+/// makes the same decision on the same leaves. A body-level `^` ends the
+/// body where it stands (codegen emits nothing after it, `infer_stmts` stops
+/// there), so a write after one is dead and the answer is `false`.
 #[must_use]
 pub fn ends_with_self_field_write(body: &[ExpressionStatement]) -> bool {
-    body_exprs(body).next_back().is_some_and(|expr| {
-        matches!(
-            expr.unwrap_parens(),
-            Expression::Assignment { target, .. } if is_self_field_target(target)
-        )
-    })
+    let mut last = None;
+    for expr in body_exprs(body) {
+        let expr = expr.unwrap_parens();
+        if matches!(expr, Expression::Return { .. }) {
+            return false;
+        }
+        last = Some(expr);
+    }
+    matches!(
+        last,
+        Some(Expression::Assignment { target, .. }) if is_self_field_target(target)
+    )
 }
 
 /// Whether `target` is `self.<field>`, the target of a field or class-variable
