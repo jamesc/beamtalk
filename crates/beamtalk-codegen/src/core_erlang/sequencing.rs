@@ -463,7 +463,7 @@ impl CoreErlangGenerator {
         let mut prelude: Vec<ThreadedStmt> = Vec::new();
         let mut arg_refs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         for arg in arguments {
-            let span = arg.unwrap_parens().span();
+            let span = arg.span();
             // ADR 0118 phase 5b: see `subexpr_needs_prelude`'s doc
             // comment — an already-precompiled arg is read back via
             // `expression_doc`, never re-threaded.

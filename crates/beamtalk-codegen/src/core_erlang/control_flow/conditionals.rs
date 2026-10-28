@@ -1505,7 +1505,7 @@ impl CoreErlangGenerator {
     ) -> Result<ThreadedValue> {
         let span = not_nil_block
             .or(nil_block)
-            .map_or_else(|| receiver.unwrap_parens().span(), |b| b.span);
+            .map_or_else(|| receiver.span(), |b| b.span);
         let frame = self.current_frame();
         let scratch = self.conditional_scratch(frame);
         let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(

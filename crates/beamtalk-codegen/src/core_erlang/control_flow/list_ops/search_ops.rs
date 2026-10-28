@@ -433,7 +433,7 @@ impl CoreErlangGenerator {
         if_none: &Expression,
         state_var: &str,
     ) -> Result<Document<'static>> {
-        let Expression::Block(block) = if_none.unwrap_parens() else {
+        let Expression::Block(block) = if_none else {
             let none_code = self.non_literal_callable_doc(if_none, "detect:ifNone:", 0)?;
             let none_result = self.fresh_temp_var("NoneResult");
             return Ok(docvec![
@@ -511,7 +511,7 @@ impl CoreErlangGenerator {
                 .is_empty(),
             _ => false,
         };
-        if let Expression::Block(pred_block) = predicate.unwrap_parens() {
+        if let Expression::Block(pred_block) = predicate {
             if self.block_needs_mutation_threading(if_none).is_some() || packs_handler_writes {
                 return self
                     .generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);

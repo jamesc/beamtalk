@@ -114,7 +114,7 @@ pub(super) fn is_character_typed_receiver(expr: &Expression) -> bool {
                         if parts.len() == 1 && parts[0].keyword == "value:"
                 )
                 && matches!(
-                    receiver.unwrap_parens(),
+                    receiver.as_ref(),
                     Expression::ClassReference { name, package: None, .. }
                         if name.name == "Character"
                 );
@@ -169,7 +169,7 @@ fn conditional_result_is_character_typed(
 ) -> bool {
     let true_typed = branch_value_is_character_typed(true_branch);
     let false_typed = branch_value_is_character_typed(false_branch);
-    match condition.unwrap_parens().as_literal_bool() {
+    match condition.as_literal_bool() {
         Some(true) => true_typed,
         Some(false) => false_typed,
         None => true_typed && false_typed,
@@ -212,14 +212,13 @@ fn single_branch_result_is_character_typed(
         },
         _ => return false,
     };
-    receiver.unwrap_parens().as_literal_bool() == Some(taking_receiver)
-        && branch_value_is_character_typed(branch)
+    receiver.as_literal_bool() == Some(taking_receiver) && branch_value_is_character_typed(branch)
 }
 
 /// True if a conditional branch argument — a block literal — answers a
 /// Character: its last body statement's expression is Character-typed.
 fn branch_value_is_character_typed(branch: &Expression) -> bool {
-    match branch.unwrap_parens() {
+    match branch {
         Expression::Block(block) => block
             .body
             .last()

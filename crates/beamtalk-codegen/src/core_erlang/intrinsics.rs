@@ -1495,7 +1495,7 @@ impl CoreErlangGenerator {
         for (i, param) in block.parameters.iter().enumerate() {
             if i < arguments.len() {
                 let arg_var = self.fresh_temp_var(&param.name);
-                if self.is_sync_site(arguments[i].unwrap_parens()) {
+                if self.is_sync_site(&arguments[i]) {
                     let frame = self.current_frame();
                     let tv = self.threaded_expression(&arguments[i], frame)?;
                     let prelude_doc = self.threaded_prelude_doc(&tv.prelude);

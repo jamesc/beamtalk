@@ -448,7 +448,7 @@ impl CoreErlangGenerator {
         } = bare
             && arguments.is_empty()
             && matches!(selector.well_known(), Some(WellKnownSelector::Value))
-            && let Expression::Block(block) = receiver.unwrap_parens()
+            && let Expression::Block(block) = receiver.as_ref()
         {
             return block
                 .body
