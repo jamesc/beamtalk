@@ -137,10 +137,9 @@ pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<
 /// every call-site that previously inlined this `.iter().map().filter()` chain
 /// should call this helper instead.
 pub(super) fn collect_body_exprs(body: &[ExpressionStatement]) -> Vec<&Expression> {
-    body.iter()
-        .map(|s| &s.expression)
-        .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
-        .collect()
+    // The filter is core's, shared with the type checker's
+    // `ends_with_self_field_write` (BT-4235).
+    beamtalk_core::semantic_analysis::block_facts::body_exprs(body).collect()
 }
 
 /// Renders a `usize` index, arity, or size as a Core Erlang integer leaf.
