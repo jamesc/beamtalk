@@ -17,6 +17,9 @@
 //! - [`apply_return_type_writeback_from_map`](crate::semantic_analysis::return_type_writeback::apply_return_type_writeback_from_map)
 //! - [`apply_supervisor_kind_writeback`](crate::semantic_analysis::supervisor_kind_writeback::apply_supervisor_kind_writeback)
 //! - [`apply_class_kind_writeback`](crate::semantic_analysis::class_kind_writeback::apply_class_kind_writeback)
+//! - [`peel_operand_parens`](crate::ast::normalize::peel_operand_parens)
+//!   (BT-4059), last, so the tree codegen reads is the canonical one
+//!   `analyse_full` analysed
 //!
 //! The three writebacks are each a pure application of already-computed
 //! data — no inference or hierarchy construction happens in this module.
@@ -158,6 +161,11 @@ pub fn apply_codegen_writebacks(
     // (TestCase is not literally "Value"/"Actor"), but needs ClassKind::Value
     // so codegen generates auto-slot methods (withX: setters).
     apply_class_kind_writeback(module, hierarchy);
+    // BT-4059: strip redundant send-operand parentheses, after flattening so
+    // spliced-in provisions are normalised too — codegen must see the same
+    // canonical tree `analyse_full` analysed. Idempotent, so a module that
+    // already went through the pass is unchanged.
+    crate::ast::normalize::peel_operand_parens(module);
 }
 
 /// [`lower_module_for_codegen`] for a driver that ran

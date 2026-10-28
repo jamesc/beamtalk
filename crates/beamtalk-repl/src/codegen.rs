@@ -24,11 +24,30 @@ use beamtalk_codegen::core_erlang::module_shell::core_module;
 use beamtalk_codegen::core_erlang::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, GeneratedModule, Result,
 };
+use beamtalk_core::ast::normalize::{expr_has_parenthesised_operand, peel_operand_parens_expr};
 use beamtalk_core::ast::{Expression, Pattern};
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
 use beamtalk_core::source_analysis::Diagnostic;
+use std::borrow::Cow;
 
 // ── Public API ──────────────────────────────────────────────────────────
+
+/// `expressions` with redundant send-operand parentheses stripped
+/// (`ast::normalize`, BT-4059), borrowed when there are none.
+///
+/// The REPL entries build a [`CoreErlangGenerator`] directly rather than
+/// going through `generate_module_with_warnings`, so they normalise here:
+/// every public entry below compiles the peeled form, so `(e) foo` evaluates
+/// exactly like `e foo` in the REPL as it does in compiled modules.
+fn peeled(expressions: &[Expression]) -> Cow<'_, [Expression]> {
+    if expressions.iter().any(expr_has_parenthesised_operand) {
+        let mut owned = expressions.to_vec();
+        owned.iter_mut().for_each(peel_operand_parens_expr);
+        Cow::Owned(owned)
+    } else {
+        Cow::Borrowed(expressions)
+    }
+}
 
 /// Generates Core Erlang for a REPL expression.
 ///
@@ -47,9 +66,10 @@ use beamtalk_core::source_analysis::Diagnostic;
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> Result<String> {
+    let expression = peeled(std::slice::from_ref(expression));
     let mut generator = CoreErlangGenerator::new(module_name);
     let mut assembler = ReplAssembler::new(&mut generator);
-    let doc = assembler.generate_repl_module(expression)?;
+    let doc = assembler.generate_repl_module(&expression[0])?;
     Ok(doc.to_pretty_string())
 }
 
@@ -140,6 +160,7 @@ fn generate_repl_expressions_impl(
             span: None,
         });
     }
+    let expressions = peeled(expressions);
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
@@ -147,7 +168,7 @@ fn generate_repl_expressions_impl(
         generator.set_supervisor_classes_from_hierarchy(hierarchy);
     }
     let mut assembler = ReplAssembler::new(&mut generator);
-    let doc = assembler.generate_repl_module_multi(expressions)?;
+    let doc = assembler.generate_repl_module_multi(&expressions)?;
     let code = doc.to_pretty_string();
     generator.inject_synthetic_verifier_violation(inject_verifier_violation, expressions[0].span());
     Ok(GeneratedModule {
@@ -293,6 +314,7 @@ fn generate_repl_expressions_traced_impl(
         })
         .collect();
 
+    let expressions = peeled(expressions);
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
@@ -300,7 +322,7 @@ fn generate_repl_expressions_traced_impl(
         generator.set_supervisor_classes_from_hierarchy(hierarchy);
     }
     let mut assembler = ReplAssembler::new(&mut generator);
-    let doc = assembler.generate_repl_module_multi_traced(expressions, &source_texts)?;
+    let doc = assembler.generate_repl_module_multi_traced(&expressions, &source_texts)?;
     let code = doc.to_pretty_string();
     generator.inject_synthetic_verifier_violation(inject_verifier_violation, expressions[0].span());
     Ok(GeneratedModule {
@@ -333,9 +355,10 @@ pub fn generate_test_expression_surfacing_verifier(
     expression: &Expression,
     module_name: &str,
 ) -> Result<(String, Vec<Diagnostic>)> {
+    let expression = peeled(std::slice::from_ref(expression));
     let mut generator = CoreErlangGenerator::new(module_name);
     let mut assembler = ReplAssembler::new(&mut generator);
-    let doc = assembler.generate_test_module(expression)?;
+    let doc = assembler.generate_test_module(&expression[0])?;
     let code = doc.to_pretty_string();
     Ok(GeneratedModule {
         code,

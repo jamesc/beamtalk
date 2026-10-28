@@ -16,7 +16,7 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::{
     CodeGenError, CodegenOptions, DirectCallClassInfo, GeneratedModule, Result,
 };
-use beamtalk_core::ast::{ClassKind, Module};
+use beamtalk_core::ast::{ClassKind, Module, normalize};
 use ecow::EcoString;
 
 /// Generates Core Erlang code from a Beamtalk module.
@@ -92,6 +92,21 @@ pub fn generate_module_with_warnings(
     module: &Module,
     options: CodegenOptions,
 ) -> Result<GeneratedModule> {
+    // BT-4059: codegen reads the canonical tree, with redundant send-operand
+    // parentheses stripped (`ast::normalize`). A driver that ran
+    // `lower_module_for_codegen` already peeled its module, so this scan finds
+    // nothing and no clone is made; the self-sufficient path (no analysis
+    // handed off) is normalised here, before semantic facts and the hierarchy
+    // are derived from it.
+    let peeled_storage;
+    let module: &Module = if normalize::has_parenthesised_operand(module) {
+        let mut owned = module.clone();
+        normalize::peel_operand_parens(&mut owned);
+        peeled_storage = owned;
+        &peeled_storage
+    } else {
+        module
+    };
     let mut generator = if let Some(bindings) = options.bindings {
         CoreErlangGenerator::with_bindings(&options.module_name, bindings)
     } else {

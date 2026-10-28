@@ -309,16 +309,17 @@ fn arity_1_block_keeps_runtime_dispatch() {
 }
 
 #[test]
-fn parenthesized_block_keeps_runtime_dispatch() {
-    // The gate matches direct literal blocks only (same as the mutation
-    // gate): `flag ifTrue: ([1])` stays dynamic.
+fn parenthesized_block_inlines_like_a_literal_block() {
+    // BT-4059: redundant parentheses around a send operand are transparent
+    // (`ast::normalize`), so `flag ifTrue: ([1])` pure-inlines exactly like
+    // `flag ifTrue: [1]`.
     let src = "Value subclass: Probe\n  check: flag =>\n    flag ifTrue: ([1])\n";
     let code = compile(src, "bt@probe_paren_block");
     eprintln!("parenthesized-block ifTrue::\n{code}");
 
     assert!(
-        !code.contains("CondNoMatch"),
-        "parenthesized block must not pure-inline. Got:\n{code}"
+        code.contains("CondNoMatch"),
+        "parenthesized block must pure-inline like the bare literal. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt@probe_paren_block", &code);
 }
