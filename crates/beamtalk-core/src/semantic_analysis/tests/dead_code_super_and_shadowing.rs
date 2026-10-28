@@ -400,6 +400,63 @@ fn test_super_in_class_scope_gives_error() {
     assert_eq!(super_errors.len(), 1);
 }
 
+// --- Cascade on `super` (BT-4251) ---
+
+/// The cascade-on-`super` errors `analyse` reports for `src`.
+fn super_cascade_errors(src: &str) -> Vec<Diagnostic> {
+    analyse(&parse_module(src))
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.message.contains("cascade cannot be sent to `super`"))
+        .collect()
+}
+
+#[test]
+fn super_cascade_in_actor_method_is_error() {
+    let src = "Actor subclass: Counter\n  peek => super peek: 1; peek: 2";
+    let errors = super_cascade_errors(src);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert_eq!(errors[0].severity, Severity::Error);
+    // Reported at the whole cascade, not the bare `super`.
+    let start = u32::try_from(src.find("super").unwrap()).unwrap();
+    let end = u32::try_from(src.len()).unwrap();
+    assert_eq!(errors[0].span, Span::new(start, end));
+    assert!(
+        errors[0]
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("separately")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn super_cascade_in_object_method_is_error() {
+    let src = "Object subclass: Point\n  describe => super printString; size";
+    assert_eq!(super_cascade_errors(src).len(), 1);
+}
+
+#[test]
+fn super_cascade_in_class_method_is_error() {
+    let src = "Object subclass: Registry\n  class reset => super reset; yourself";
+    assert_eq!(super_cascade_errors(src).len(), 1);
+}
+
+#[test]
+fn parenthesised_super_cascade_is_error() {
+    // The parser folds `(super) a` as the first send; its shared receiver is
+    // still `super`.
+    let src = "Object subclass: Point\n  describe => (super) printString; size";
+    assert_eq!(super_cascade_errors(src).len(), 1);
+}
+
+#[test]
+fn separate_super_sends_and_other_cascades_are_not_errors() {
+    let src = "Object subclass: Point\n  describe =>\n    super printString.\n    super size.\n    self printString; size.\n    (super printString) size; yourself";
+    let errors = super_cascade_errors(src);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
 // --- Variable shadowing tests ---
 
 #[test]

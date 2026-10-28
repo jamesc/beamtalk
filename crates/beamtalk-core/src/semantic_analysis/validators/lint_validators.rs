@@ -480,18 +480,9 @@ fn check_method_body_for_super_initialize(
                 {
                     diagnostics.push(redundant_super_initialize_diagnostic(*span));
                 }
-                // Also detect `super initialize` as a cascade message, e.g.
-                // `super initialize; foo` — the cascade's receiver is Super,
-                // and each message in the cascade dispatches to that receiver.
-                Expression::Cascade {
-                    receiver, messages, ..
-                } if matches!(receiver.as_ref(), Expression::Super(_)) => {
-                    for msg in messages {
-                        if is_unary_initialize(&msg.selector) {
-                            diagnostics.push(redundant_super_initialize_diagnostic(msg.span));
-                        }
-                    }
-                }
+                // A cascade on `super` (`super initialize; foo`) is a
+                // compile error from the name resolver (BT-4251), so there is
+                // no cascade arm here.
                 _ => {}
             }
         });
@@ -1708,8 +1699,9 @@ mod tests {
         );
     }
 
-    /// `super initialize; foo` (cascade) — the `initialize` cascade message
-    /// also warns.
+    /// `super initialize; foo` (cascade) — the folded first send
+    /// `super initialize` still warns. The cascade itself is a compile error
+    /// from the name resolver (BT-4251); this lint does not double-report it.
     #[test]
     fn super_initialize_in_cascade_warns() {
         let src = "Actor subclass: MyActor\n  initialize =>\n    super initialize; foo";
