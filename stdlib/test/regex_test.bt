@@ -108,6 +108,16 @@ TestCase subclass: RegexTest
     self assert: ([
       "hello" matchesRegex: "("
     ] on: Error do: [:e | e reason at: 2]) equals: 1
+    // element 1 is OTP's charlist (a List), not a String
+    @expect type
+    self assert: (reason at: 1) class equals: List
+    // invalid only under the caller's options: `#` starts a comment in extended mode
+    @expect type
+    self
+      assert: ([
+        "x" matchesRegex: "(#)" options: #(#extended)
+      ] on: Error do: [:e | e reason at: 2])
+      equals: 3
 
   // BT-3271: from:options: error path when pattern is invalid
   testFromOptionsErrorPath =>
