@@ -178,7 +178,9 @@ start_subprocess(Config, Selector) ->
                 Err0,
                 iolist_to_binary(io_lib:format("Failed to start reactive subprocess: ~p", [Reason]))
             ),
-            beamtalk_result:from_tagged_tuple({error, Err1})
+            %% BT-4236: keep the supervisor's term for `Exception>>reason`.
+            Err2 = beamtalk_error:with_details(Err1, #{reason => Reason}),
+            beamtalk_result:from_tagged_tuple({error, Err2})
     end.
 
 %%% ============================================================================
@@ -362,9 +364,12 @@ handle_writeLine(Data, State) ->
                         beamtalk_subprocess_port:write_stdin(Port, ChildId, Line),
                         {reply, nil, State}
                     catch
-                        _:_ ->
-                            Err = beamtalk_error:new(
-                                port_closed, 'ReactiveSubprocess', 'writeLine:'
+                        _:WriteReason ->
+                            Err = beamtalk_error:with_details(
+                                beamtalk_error:new(
+                                    port_closed, 'ReactiveSubprocess', 'writeLine:'
+                                ),
+                                #{reason => WriteReason}
                             ),
                             {reply, {error, Err}, State#{port_closed => true}}
                     end

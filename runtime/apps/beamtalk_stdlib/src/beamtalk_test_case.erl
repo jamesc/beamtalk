@@ -1135,7 +1135,9 @@ spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) -
                             E;
                         _ ->
                             Err0 = beamtalk_error:new(test_execution_failed, ClassName),
-                            beamtalk_error:with_selector(Err0, Selector)
+                            Err1 = beamtalk_error:with_selector(Err0, Selector),
+                            %% BT-4236: keep the raw crash term for `Exception>>reason`.
+                            beamtalk_error:with_details(Err1, #{reason => E})
                     end,
                 ?LOG_ERROR(
                     "Test execution ~p:~p failed: ~p:~p",
