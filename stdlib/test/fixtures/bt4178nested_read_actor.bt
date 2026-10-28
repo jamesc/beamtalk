@@ -13,19 +13,32 @@ Actor subclass: Bt4178NestedReadActor
   // Not nested: a tuple-accumulator `do:` that reads the field.
   flatReading: xs =>
     k := 0
-    xs do: [:j | k := self.n. j]
+    xs
+      do: [:j |
+        k := self.n
+        j
+      ]
     k
 
   // Not nested: a tuple-accumulator `collect:` that reads the field.
   collectReading: xs =>
     k := 0
-    r := xs collect: [:j | k := self.n. j]
+    r := xs
+      collect: [:j |
+        k := self.n
+        j
+      ]
     k + r size
 
   // Not nested: a tuple-accumulator `inject:into:` that reads the field.
   injectFieldReading: xs =>
     k := 0
-    s := xs inject: 0 into: [:a :m | k := self.n. a + m]
+    s := xs
+      inject: 0
+      into: [:a :m |
+        k := self.n
+        a + m
+      ]
     s + (k * 100)
 
   // Dictionary `do:` and `keysAndValuesDo:` folds that read the field.
@@ -40,69 +53,105 @@ Actor subclass: Bt4178NestedReadActor
   firstStatementReading: xs =>
     acc := 0
     k := 0
-    xs do: [:m |
-      #(1) do: [:j | k := self.n. j]
-      acc := acc + m]
+    xs
+      do: [:m |
+        #(1)
+          do: [:j |
+            k := self.n
+            j
+          ]
+        acc := acc + m
+      ]
     acc + (k * 100)
 
   // Integer accumulator; inner `do:` reads the field.
   sumReading: xs =>
     acc := 0
     k := 0
-    xs do: [:m |
-      acc := acc + m
-      #(1) do: [:j | k := self.n. j]]
+    xs
+      do: [:m |
+        acc := acc + m
+        #(1)
+          do: [:j |
+            k := self.n
+            j
+          ]
+      ]
     acc + (k * 100)
 
   // Untyped accumulator dispatching through a guarded operator.
   moneyReading: xs =>
     acc := ((Bt4121TallyMoney new) withCents: 0) withTally: Bt4121TallyActor spawn
     k := 0
-    xs do: [:m |
-      acc := acc + m
-      #(1) do: [:j | k := self.n. j]]
+    xs
+      do: [:m |
+        acc := acc + m
+        #(1)
+          do: [:j |
+            k := self.n
+            j
+          ]
+      ]
     acc cents + (k * 1000)
 
   // Three levels deep.
   deepReading: xs =>
     acc := 0
     k := 0
-    xs do: [:m |
-      acc := acc + m
-      #(1) do: [:j |
-        #(2) do: [:q | k := self.n. q]]]
+    xs
+      do: [:m |
+        acc := acc + m
+        #(1)
+          do: [:j |
+            #(2)
+              do: [:q |
+                k := self.n
+                q
+              ]
+          ]
+      ]
     acc + (k * 100)
 
   // Inner `whileTrue:`.
   whileReading: xs =>
     acc := 0
     k := 0
-    xs do: [:m |
-      acc := acc + m
-      i := 1
-      [i > 0] whileTrue: [
-        k := self.n
-        i := i - 1]]
+    xs
+      do: [:m |
+        acc := acc + m
+        i := 1
+        [i > 0]
+          whileTrue: [
+            k := self.n
+            i := i - 1
+          ]
+      ]
     acc + (k * 100)
 
   // Inner counted loop.
   toDoReading: xs =>
     acc := 0
     k := 0
-    xs do: [:m |
-      acc := acc + m
-      1 to: 2 do: [:j | k := self.n + j]]
+    xs
+      do: [:m |
+        acc := acc + m
+        1 to: 2 do: [:j | k := self.n + j]
+      ]
     acc + (k * 100)
 
   // Inner field write, then read.
   writeReading: xs =>
     acc := 0
     k := 0
-    xs do: [:m |
-      acc := acc + m
-      #(1) do: [:j |
-        self.n := self.n + 1
-        k := self.n]]
+    xs
+      do: [:m |
+        acc := acc + m
+        #(1)
+          do: [:j |
+            self.n := self.n + 1
+            k := self.n
+          ]
+      ]
     acc + (k * 100)
 
   // Outer `whileTrue:` carrying the accumulator.
@@ -110,16 +159,29 @@ Actor subclass: Bt4178NestedReadActor
     acc := 0
     k := 0
     i := 3
-    [i > 0] whileTrue: [
-      acc := acc + i
-      i := i - 1
-      #(1) do: [:j | k := self.n. j]]
+    [i > 0]
+      whileTrue: [
+        acc := acc + i
+        i := i - 1
+        #(1)
+          do: [:j |
+            k := self.n
+            j
+          ]
+      ]
     acc + (k * 100)
 
   // Outer `inject:into:`.
   injectReading: xs =>
     k := 0
-    s := xs inject: 0 into: [:acc :m |
-      #(1) do: [:j | k := self.n. j]
-      acc + m]
+    s := xs
+      inject: 0
+      into: [:acc :m |
+        #(1)
+          do: [:j |
+            k := self.n
+            j
+          ]
+        acc + m
+      ]
     s + (k * 100)

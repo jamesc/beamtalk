@@ -21,8 +21,7 @@ TestCase subclass: Bt4178NestedLoopFieldReadTest
   testFlatInjectReadsField =>
     self assert: (self.a injectFieldReading: #(1, 2, 3)) equals: 706
 
-  testDictionaryFoldsReadField =>
-    self assert: self.a dictReading equals: 16
+  testDictionaryFoldsReadField => self assert: self.a dictReading equals: 16
 
   testFirstStatementInnerDoReadsField =>
     self assert: (self.a firstStatementReading: #(1, 2, 3)) equals: 706
