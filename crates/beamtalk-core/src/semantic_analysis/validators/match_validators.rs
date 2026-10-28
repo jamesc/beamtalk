@@ -960,6 +960,10 @@ mod tests {
             "`:: Binary` codegen assumes String is Binary's only subclass"
         );
         assert!(
+            hierarchy.get_class("String").is_some_and(|c| c.is_sealed),
+            "String must be sealed so no package can add a third `:: Binary` shape"
+        );
+        assert!(
             hierarchy.direct_subclasses("String").is_empty(),
             "`:: Binary` codegen assumes String has no subclasses"
         );
