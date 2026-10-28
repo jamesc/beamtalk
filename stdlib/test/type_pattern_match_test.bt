@@ -338,3 +338,38 @@ TestCase subclass: TypePatternMatchTest
       ])
       equals: #wasSupervisor
     [sup stop] on: Error do: [:e | nil]
+
+  // BT-4222: `s :: String` must agree with `isKindOf: String` for every
+  // binary. Since BT-4173 a String is construction-typed (the
+  // `{'beamtalk_string', bytes}` tag), so a bare binary — valid UTF-8 or
+  // not — is a `Binary` and must fall through a `:: String` arm, while a
+  // String literal matches it.
+  classifyText: x =>
+    x match: [
+      s :: String -> #string;
+      _ -> (x isKindOf: Binary) ifTrue: [#binary] ifFalse: [#other]
+    ]
+
+  testInvalidUtf8BinaryDoesNotMatchStringPattern =>
+    b := Erlang erlang list_to_binary: #(99, 233)
+    self assert: (self classifyText: b) equals: #binary
+    self deny: (b isKindOf: String)
+
+  testValidUtf8BinaryDoesNotMatchStringPattern =>
+    v := Erlang erlang list_to_binary: #(116, 101)
+    self assert: (self classifyText: v) equals: #binary
+    self deny: (v isKindOf: String)
+    self assert: (self classifyText: (Binary fromBytes: #(116, 101))) equals: #binary
+
+  testStringLiteralMatchesStringPattern =>
+    self assert: (self classifyText: "te") equals: #string
+    self assert: ("te" isKindOf: String)
+
+  testStringPatternAgreesWithIsKindOfString =>
+    invalid := Erlang erlang list_to_binary: #(99, 233)
+    valid := Erlang erlang list_to_binary: #(116, 101)
+    values := #("te", "", invalid, valid, Binary fromBytes: #(), #te, 42, nil)
+    values
+      do: [:each |
+        self assert: ((self classifyText: each) =:= #string) equals: (each isKindOf: String)
+      ]

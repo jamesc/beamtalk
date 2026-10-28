@@ -43,6 +43,7 @@ mod bt4102_block_param_annotations;
 mod bt4107_compound_nil_guard_narrowing;
 mod bt4175_override_return_types;
 mod bt4199_false_positives;
+mod bt4210_param_type_variables;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;

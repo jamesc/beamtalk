@@ -1407,7 +1407,8 @@ trace_event_to_map({
 Sanitize metadata map values for JSON serialization.
 JSX requires all values to be JSON-compatible (binaries, numbers, booleans,
 null, lists, maps). Atom values like `normal` from lifecycle events, pid
-values, and tuples must be converted to binary strings.
+values, and tuples must be converted to binary strings. Tagged `String`
+values pass through tagged (BT-4223); `export_traces` unwraps them for JSON.
 """.
 -spec sanitize_metadata(map()) -> map().
 sanitize_metadata(Meta) ->
@@ -1427,8 +1428,9 @@ sanitize_metadata(Meta) ->
 
 -doc """
 Tag sanitized metadata keys as Strings for Beamtalk lookup. Values pass
-through untouched: a user Binary stays a Binary (only generated display text
-would want tagging, and the two are indistinguishable here).
+through untouched: `sanitize_value/1` already kept a recorded `String` tagged
+(BT-4223) and a user Binary stays a Binary. Generated text (atoms and pids
+rendered as binaries) stays a bare binary, as before.
 """.
 -spec tag_metadata_keys(map()) -> map().
 tag_metadata_keys(Meta) ->
@@ -1439,9 +1441,12 @@ tag_metadata_keys(Meta) ->
 
 -doc "Convert a single value to a JSON-safe representation.".
 -spec sanitize_value(term()) -> term().
-sanitize_value({beamtalk_string, Bin}) when is_binary(Bin) ->
-    %% BT-4173: unwrap — without this a String falls into the ~p catch-all.
-    Bin;
+sanitize_value({beamtalk_string, Bin} = String) when is_binary(Bin) ->
+    %% BT-4223: a String stays a String, so `(trace at: "user") = "alice"`
+    %% holds for metadata recorded as a String (a user Binary stays a Binary
+    %% below). `export_traces` deep-unwraps the whole map for the JSON
+    %% encoder. Without this clause a String falls into the ~p catch-all.
+    String;
 sanitize_value(V) when is_binary(V) -> V;
 sanitize_value(V) when is_integer(V) -> V;
 sanitize_value(V) when is_float(V) -> V;

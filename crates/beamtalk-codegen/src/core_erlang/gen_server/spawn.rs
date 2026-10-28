@@ -13,6 +13,107 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::Module;
 
+/// Which family of per-actor-module spawn entry points to generate or call.
+///
+/// `Plain` is `spawn/0,1` (`spawn` / `spawnWith:`); `Monitored` is
+/// `spawn_monitored/0,1` (`spawnMonitored` / `spawnMonitoredWith:`, BT-4104),
+/// which answers `{Actor, MonitorRef}` with the monitor created atomically
+/// with the process (`beamtalk_actor:safe_spawn_monitored/2`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum SpawnVariant {
+    Plain,
+    Monitored,
+}
+
+impl SpawnVariant {
+    /// The variant an anonymous class-side spawn selector belongs to, or
+    /// `None` when the selector/arity is not one.
+    pub(in crate::core_erlang) fn of_selector(selector: &str, arity: usize) -> Option<Self> {
+        match (selector, arity) {
+            ("spawn", 0) | ("spawnWith:", 1) => Some(Self::Plain),
+            ("spawnMonitored", 0) | ("spawnMonitoredWith:", 1) => Some(Self::Monitored),
+            _ => None,
+        }
+    }
+
+    /// The exported per-module function name.
+    pub(in crate::core_erlang) fn function_name(self) -> &'static str {
+        match self {
+            Self::Plain => "spawn",
+            Self::Monitored => "spawn_monitored",
+        }
+    }
+
+    /// The `beamtalk_class_instantiation` helper a class-method self-send
+    /// lowers to.
+    pub(in crate::core_erlang) fn class_self_helper(self) -> &'static str {
+        match self {
+            Self::Plain => "class_self_spawn",
+            Self::Monitored => "class_self_spawn_monitored",
+        }
+    }
+
+    /// The public selector of the no-args form.
+    fn selector(self) -> &'static str {
+        match self {
+            Self::Plain => "spawn",
+            Self::Monitored => "spawnMonitored",
+        }
+    }
+
+    /// The public selector of the init-args form.
+    fn with_args_selector(self) -> &'static str {
+        match self {
+            Self::Plain => "spawnWith:",
+            Self::Monitored => "spawnMonitoredWith:",
+        }
+    }
+
+    /// The `beamtalk_actor` start helper.
+    fn runtime_function(self) -> &'static str {
+        match self {
+            Self::Plain => "safe_spawn",
+            Self::Monitored => "safe_spawn_monitored",
+        }
+    }
+
+    /// The start helper's success pattern.
+    fn ok_pattern(self) -> &'static str {
+        match self {
+            Self::Plain => "<{'ok', Pid}> when 'true' ->",
+            Self::Monitored => "<{'ok', {Pid, MonRef}}> when 'true' ->",
+        }
+    }
+
+    /// The head of an always-raising stub for this variant's no-args
+    /// (`with_args` false) or init-args function, with the public selector
+    /// its error names.
+    fn stub_head(self, with_args: bool) -> (Document<'static>, &'static str) {
+        if with_args {
+            (
+                docvec![
+                    leaf::fname(self.function_name(), 1),
+                    " = fun (_InitArgs) ->"
+                ],
+                self.with_args_selector(),
+            )
+        } else {
+            (
+                docvec![leaf::fname(self.function_name(), 0), " = fun () ->"],
+                self.selector(),
+            )
+        }
+    }
+
+    /// The generated function's answer for the actor object `obj`.
+    fn answer(self, obj: Document<'static>) -> Document<'static> {
+        match self {
+            Self::Plain => obj,
+            Self::Monitored => docvec!["{", obj, ", MonRef}"],
+        }
+    }
+}
+
 impl CoreErlangGenerator {
     /// Generates a Document for registering an actor instance with the hot reload
     /// tracking registry. Uses try-catch to handle cases where the registry isn't
@@ -38,8 +139,20 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// The shared start-failure arm for `spawn/0` and `spawn/1`
-    /// (`selector` pre-quoted, e.g. `"'spawn'"`).
+    /// The `#beamtalk_object{}` a successful spawn of this class answers for
+    /// the started `Pid`.
+    fn spawned_object_doc(&mut self) -> Document<'static> {
+        docvec![
+            "{'beamtalk_object', ",
+            leaf::atom(self.class_name()),
+            ", ",
+            leaf::atom(self.module_name.clone()),
+            ", Pid}",
+        ]
+    }
+
+    /// The shared start-failure arm for `spawn/0,1` and
+    /// `spawn_monitored/0,1` (`selector` unquoted, e.g. `"spawnWith:"`).
     ///
     /// BT-4030: `init/1`'s own `#unknown_field` rejection passes through
     /// unwrapped; every other start failure keeps the `instantiation_error`
@@ -75,7 +188,7 @@ impl CoreErlangGenerator {
                                         Document::Str("SpawnErr2"),
                                         "instantiation_error",
                                         leaf::atom(class_name.to_owned()),
-                                        Document::Str(selector),
+                                        leaf::atom(selector),
                                         Document::Str("Reason"),
                                         line(),
                                     ),
@@ -127,33 +240,35 @@ impl CoreErlangGenerator {
     ///             call 'beamtalk_error':'raise'(SpawnErr1)
     ///     end
     /// ```
+    ///
+    /// `SpawnVariant::Monitored` generates `spawn_monitored/0` (BT-4104)
+    /// the same way over `beamtalk_actor:safe_spawn_monitored/2`, answering
+    /// `{ActorObject, MonRef}`.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_spawn_function(
         &mut self,
         _module: &Module,
+        variant: SpawnVariant,
     ) -> Result<Document<'static>> {
         // initialize is now called inside init/1, not here.
         // This ensures all spawn paths (direct, supervised, named) run initialize.
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
 
-        let ok_body = docvec![
-            "{'beamtalk_object', ",
-            leaf::atom(class_name.clone()),
-            ", ",
-            leaf::atom(module_name.clone()),
-            ", Pid}",
-        ];
+        let ok_body = variant.answer(self.spawned_object_doc());
 
         // Use safe_spawn which handles trap_exit + await_initialize
         let doc = docvec![
-            "'spawn'/0 = fun () ->",
+            leaf::fname(variant.function_name(), 0),
+            " = fun () ->",
             nest(
                 INDENT,
                 docvec![
                     line(),
                     docvec![
-                        "case call 'beamtalk_actor':'safe_spawn'(",
+                        "case call 'beamtalk_actor':",
+                        leaf::atom(variant.runtime_function()),
+                        "(",
                         leaf::atom(module_name.clone()),
                         ", ~{}~) of",
                     ],
@@ -161,7 +276,7 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
-                            "<{'ok', Pid}> when 'true' ->",
+                            variant.ok_pattern(),
                             nest(
                                 INDENT,
                                 docvec![
@@ -173,7 +288,7 @@ impl CoreErlangGenerator {
                                 ]
                             ),
                             line(),
-                            Self::spawn_error_arm_doc(&class_name, "'spawn'"),
+                            Self::spawn_error_arm_doc(&class_name, variant.selector()),
                         ]
                     ),
                     line(),
@@ -211,22 +326,22 @@ impl CoreErlangGenerator {
     ///         end
     ///     end
     /// ```
+    ///
+    /// `SpawnVariant::Monitored` generates `spawn_monitored/1` (BT-4104)
+    /// the same way over `beamtalk_actor:safe_spawn_monitored/2`, answering
+    /// `{ActorObject, MonRef}`.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
         _module: &Module,
+        variant: SpawnVariant,
     ) -> Result<Document<'static>> {
         // initialize is now called inside init/1, not here.
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
+        let selector = variant.with_args_selector();
 
-        let ok_body = docvec![
-            "{'beamtalk_object', ",
-            leaf::atom(class_name.clone()),
-            ", ",
-            leaf::atom(module_name.clone()),
-            ", Pid}",
-        ];
+        let ok_body = variant.answer(self.spawned_object_doc());
 
         // Validate InitArgs is a map before passing to gen_server
         // This is the single source of truth for spawnWith: argument validation.
@@ -236,7 +351,8 @@ impl CoreErlangGenerator {
         // metadata-resolved declared set — own, inherited, and late — is
         // available; the start-failure arm below re-raises it unwrapped.)
         let doc = docvec![
-            "'spawn'/1 = fun (InitArgs) ->",
+            leaf::fname(variant.function_name(), 1),
+            " = fun (InitArgs) ->",
             nest(
                 INDENT,
                 docvec![
@@ -259,10 +375,10 @@ impl CoreErlangGenerator {
                                         Document::Str("TypeErr2"),
                                         "type_error",
                                         leaf::atom(class_name.clone()),
-                                        Document::Str("'spawnWith:'"),
-                                        leaf::binary_lit(
-                                            "spawnWith: expects a Dictionary argument"
-                                        ),
+                                        leaf::atom(selector),
+                                        leaf::binary_lit(format!(
+                                            "{selector} expects a Dictionary argument"
+                                        )),
                                         line(),
                                     ),
                                     "call 'beamtalk_error':'raise'(TypeErr2)",
@@ -276,7 +392,9 @@ impl CoreErlangGenerator {
                                 docvec![
                                     line(),
                                     docvec![
-                                        "case call 'beamtalk_actor':'safe_spawn'(",
+                                        "case call 'beamtalk_actor':",
+                                        leaf::atom(variant.runtime_function()),
+                                        "(",
                                         leaf::atom(module_name.clone()),
                                         ", InitArgs) of",
                                     ],
@@ -284,7 +402,7 @@ impl CoreErlangGenerator {
                                         INDENT,
                                         docvec![
                                             line(),
-                                            "<{'ok', Pid}> when 'true' ->",
+                                            variant.ok_pattern(),
                                             nest(
                                                 INDENT,
                                                 docvec![
@@ -296,7 +414,7 @@ impl CoreErlangGenerator {
                                                 ]
                                             ),
                                             line(),
-                                            Self::spawn_error_arm_doc(&class_name, "'spawnWith:'"),
+                                            Self::spawn_error_arm_doc(&class_name, selector),
                                         ]
                                     ),
                                     line(),
@@ -324,7 +442,7 @@ impl CoreErlangGenerator {
         &self,
     ) -> Result<Document<'static>> {
         Ok(Self::instantiation_error_stub(
-            "'new'/0 = fun () ->",
+            Document::Str("'new'/0 = fun () ->"),
             "Actor",
             "new",
             "Use spawn instead",
@@ -340,41 +458,63 @@ impl CoreErlangGenerator {
         &self,
     ) -> Result<Document<'static>> {
         Ok(Self::instantiation_error_stub(
-            "'new'/1 = fun (_InitArgs) ->",
+            Document::Str("'new'/1 = fun (_InitArgs) ->"),
             "Actor",
             "new:",
             "Use spawnWith: instead",
         ))
     }
 
-    /// Generates the `spawn/0` error method for abstract classes.
+    /// Generates the `spawn/0` (or, `Monitored`, `spawn_monitored/0`) error
+    /// method for abstract classes.
     ///
     /// Abstract classes cannot be instantiated — they must be subclassed first.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_abstract_spawn_error_method(
         &mut self,
+        variant: SpawnVariant,
     ) -> Result<Document<'static>> {
-        let class_name = self.class_name();
+        let (fun_decl, selector) = variant.stub_head(false);
         Ok(Self::instantiation_error_stub(
-            "'spawn'/0 = fun () ->",
-            class_name,
-            "spawn",
+            fun_decl,
+            self.class_name(),
+            selector,
             "Abstract classes cannot be instantiated. Subclass it first.",
         ))
     }
 
-    /// Generates the `spawn/1` error method for abstract classes.
+    /// Generates the `spawn/1` (or, `Monitored`, `spawn_monitored/1`) error
+    /// method for abstract classes.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_abstract_spawn_with_args_error_method(
         &mut self,
+        variant: SpawnVariant,
     ) -> Result<Document<'static>> {
-        let class_name = self.class_name();
+        let (fun_decl, selector) = variant.stub_head(true);
         Ok(Self::instantiation_error_stub(
-            "'spawn'/1 = fun (_InitArgs) ->",
-            class_name,
-            "spawnWith:",
+            fun_decl,
+            self.class_name(),
+            selector,
             "Abstract classes cannot be instantiated. Subclass it first.",
         ))
+    }
+
+    /// Generates `spawn_monitored/0` (`with_args` false) or
+    /// `spawn_monitored/1` for a module that cannot start atomically
+    /// monitored — a `native:` facade, whose backing module owns its own
+    /// start (BT-4104). Raises `instantiation_error` rather than leaving the
+    /// export missing (`undef`).
+    pub(in crate::core_erlang) fn generate_unsupported_spawn_monitored_method(
+        &mut self,
+        with_args: bool,
+    ) -> Document<'static> {
+        let (fun_decl, selector) = SpawnVariant::Monitored.stub_head(with_args);
+        Self::instantiation_error_stub(
+            fun_decl,
+            self.class_name(),
+            selector,
+            "Native actors cannot be spawned monitored. Use spawn, then monitor.",
+        )
     }
 
     /// Builds the 4-step `instantiation_error` let-chain expression that always raises.
@@ -435,7 +575,7 @@ impl CoreErlangGenerator {
     ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
     fn instantiation_error_stub(
-        fun_decl: &'static str,
+        fun_decl: Document<'static>,
         class_name: impl Into<String>,
         selector: impl Into<String>,
         hint: &str,
@@ -488,6 +628,7 @@ impl CoreErlangGenerator {
 
 #[cfg(test)]
 mod tests {
+    use super::SpawnVariant;
     use crate::core_erlang::CoreErlangGenerator;
     use beamtalk_core::ast::{ClassDefinition, ClassKind, CommentAttachment, Identifier, Module};
     use beamtalk_core::source_analysis::Span;
@@ -572,7 +713,10 @@ mod tests {
     fn generate_spawn_function_declares_spawn_0() {
         let mut g = generator();
         let m = empty_module();
-        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        let out = g
+            .generate_spawn_function(&m, SpawnVariant::Plain)
+            .unwrap()
+            .to_pretty_string();
         assert!(
             out.contains("'spawn'/0 = fun ()"),
             "expected spawn/0 decl: {out}"
@@ -583,7 +727,10 @@ mod tests {
     fn generate_spawn_function_uses_safe_spawn() {
         let mut g = generator();
         let m = empty_module();
-        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        let out = g
+            .generate_spawn_function(&m, SpawnVariant::Plain)
+            .unwrap()
+            .to_pretty_string();
         assert!(
             out.contains("beamtalk_actor"),
             "expected beamtalk_actor call: {out}"
@@ -595,7 +742,10 @@ mod tests {
     fn generate_spawn_function_ok_arm_returns_beamtalk_object() {
         let mut g = generator();
         let m = empty_module();
-        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        let out = g
+            .generate_spawn_function(&m, SpawnVariant::Plain)
+            .unwrap()
+            .to_pretty_string();
         assert!(
             out.contains("beamtalk_object"),
             "expected beamtalk_object record: {out}"
@@ -609,7 +759,10 @@ mod tests {
     fn generate_spawn_function_error_arm_raises_instantiation_error() {
         let mut g = generator();
         let m = empty_module();
-        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        let out = g
+            .generate_spawn_function(&m, SpawnVariant::Plain)
+            .unwrap()
+            .to_pretty_string();
         assert!(
             out.contains("instantiation_error"),
             "expected instantiation_error: {out}"
@@ -621,7 +774,10 @@ mod tests {
     fn generate_spawn_function_includes_instance_registration() {
         let mut g = generator();
         let m = empty_module();
-        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        let out = g
+            .generate_spawn_function(&m, SpawnVariant::Plain)
+            .unwrap()
+            .to_pretty_string();
         assert!(
             out.contains("beamtalk_object_instances"),
             "expected instance registration: {out}"
@@ -633,7 +789,7 @@ mod tests {
         let mut g = generator();
         let m = empty_module();
         let out = g
-            .generate_spawn_with_args_function(&m)
+            .generate_spawn_with_args_function(&m, SpawnVariant::Plain)
             .unwrap()
             .to_pretty_string();
         assert!(
@@ -651,7 +807,7 @@ mod tests {
         let mut g = generator();
         let m = empty_module();
         let out = g
-            .generate_spawn_with_args_function(&m)
+            .generate_spawn_with_args_function(&m, SpawnVariant::Plain)
             .unwrap()
             .to_pretty_string();
         assert!(
@@ -678,7 +834,10 @@ mod tests {
         // unknown_field passes through unwrapped there too.
         let mut g = generator();
         let m = empty_module();
-        let out = g.generate_spawn_function(&m).unwrap().to_pretty_string();
+        let out = g
+            .generate_spawn_function(&m, SpawnVariant::Plain)
+            .unwrap()
+            .to_pretty_string();
         assert!(
             out.contains("call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4)"),
             "expected extract_beamtalk_error call: {out}"
@@ -698,7 +857,7 @@ mod tests {
         let mut g = generator();
         let m = empty_module();
         let out = g
-            .generate_spawn_with_args_function(&m)
+            .generate_spawn_with_args_function(&m, SpawnVariant::Plain)
             .unwrap()
             .to_pretty_string();
         assert!(out.contains("type_error"), "expected type_error: {out}");
@@ -710,7 +869,7 @@ mod tests {
         let mut g = generator();
         let m = empty_module();
         let out = g
-            .generate_spawn_with_args_function(&m)
+            .generate_spawn_with_args_function(&m, SpawnVariant::Plain)
             .unwrap()
             .to_pretty_string();
         assert!(
@@ -762,7 +921,7 @@ mod tests {
     fn generate_abstract_spawn_error_method_raises_instantiation_error() {
         let mut g = generator();
         let out = g
-            .generate_abstract_spawn_error_method()
+            .generate_abstract_spawn_error_method(SpawnVariant::Plain)
             .unwrap()
             .to_pretty_string();
         assert!(
@@ -780,7 +939,7 @@ mod tests {
     fn generate_abstract_spawn_with_args_error_method_raises_instantiation_error() {
         let mut g = generator();
         let out = g
-            .generate_abstract_spawn_with_args_error_method()
+            .generate_abstract_spawn_with_args_error_method(SpawnVariant::Plain)
             .unwrap()
             .to_pretty_string();
         assert!(
@@ -791,6 +950,132 @@ mod tests {
             out.contains("instantiation_error"),
             "expected instantiation_error: {out}"
         );
+    }
+
+    // === BT-4104: spawn_monitored/0,1 ===
+
+    #[test]
+    fn generate_spawn_monitored_0_uses_safe_spawn_monitored_and_answers_pair() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g
+            .generate_spawn_function(&m, SpawnVariant::Monitored)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'spawn_monitored'/0 = fun ()"),
+            "expected spawn_monitored/0 decl: {out}"
+        );
+        assert!(
+            out.contains("call 'beamtalk_actor':'safe_spawn_monitored'('counter', ~{}~)"),
+            "expected safe_spawn_monitored: {out}"
+        );
+        assert!(
+            out.contains("<{'ok', {Pid, MonRef}}> when 'true' ->"),
+            "expected the {{Pid, MonRef}} success pattern: {out}"
+        );
+        assert!(
+            out.contains("{{'beamtalk_object', 'Counter', 'counter', Pid}, MonRef}"),
+            "expected the {{Actor, MonRef}} answer: {out}"
+        );
+        assert!(
+            out.contains("beamtalk_object_instances"),
+            "expected hot-reload instance registration: {out}"
+        );
+        assert!(
+            out.contains("'spawnMonitored'"),
+            "start failures must name spawnMonitored: {out}"
+        );
+        assert!(
+            out.contains("instantiation_error"),
+            "expected instantiation_error wrap: {out}"
+        );
+    }
+
+    #[test]
+    fn generate_spawn_monitored_1_validates_map_and_names_selector() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g
+            .generate_spawn_with_args_function(&m, SpawnVariant::Monitored)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'spawn_monitored'/1 = fun (InitArgs)"),
+            "expected spawn_monitored/1 decl: {out}"
+        );
+        assert!(out.contains("is_map"), "expected is_map check: {out}");
+        assert!(
+            out.contains(&beamtalk_cerl_doc::binary::binary_string_literal(
+                "spawnMonitoredWith: expects a Dictionary argument"
+            )),
+            "expected the monitored type_error hint: {out}"
+        );
+        assert!(
+            out.contains("call 'beamtalk_actor':'safe_spawn_monitored'('counter', InitArgs)"),
+            "expected safe_spawn_monitored: {out}"
+        );
+        assert!(
+            out.contains("<'true'> when 'true' -> call 'beamtalk_error':'raise'(InitErr)"),
+            "expected transparent unknown_field re-raise: {out}"
+        );
+        assert!(
+            !out.contains("'spawnWith:'"),
+            "must not name the plain selector: {out}"
+        );
+    }
+
+    #[test]
+    fn generate_abstract_spawn_monitored_stubs_raise() {
+        let mut g = generator();
+        let out0 = g
+            .generate_abstract_spawn_error_method(SpawnVariant::Monitored)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out0.contains("'spawn_monitored'/0 = fun ()"),
+            "expected spawn_monitored/0 stub: {out0}"
+        );
+        assert!(out0.contains("'spawnMonitored'"), "selector: {out0}");
+        assert!(
+            out0.contains(&beamtalk_cerl_doc::binary::binary_string_literal(
+                "Abstract classes cannot be instantiated. Subclass it first."
+            )),
+            "hint: {out0}"
+        );
+        let out1 = g
+            .generate_abstract_spawn_with_args_error_method(SpawnVariant::Monitored)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out1.contains("'spawn_monitored'/1 = fun (_InitArgs)"),
+            "expected spawn_monitored/1 stub: {out1}"
+        );
+        assert!(out1.contains("'spawnMonitoredWith:'"), "selector: {out1}");
+    }
+
+    #[test]
+    fn generate_unsupported_spawn_monitored_stubs_raise() {
+        let mut g = generator();
+        let out0 = g
+            .generate_unsupported_spawn_monitored_method(false)
+            .to_pretty_string();
+        assert!(out0.contains("'spawn_monitored'/0 = fun ()"), "{out0}");
+        assert!(out0.contains("instantiation_error"), "{out0}");
+        assert!(
+            out0.contains(&beamtalk_cerl_doc::binary::binary_string_literal(
+                "Native actors cannot be spawned monitored. Use spawn, then monitor."
+            )),
+            "{out0}"
+        );
+        let out1 = g
+            .generate_unsupported_spawn_monitored_method(true)
+            .to_pretty_string();
+        assert!(
+            out1.contains("'spawn_monitored'/1 = fun (_InitArgs)"),
+            "{out1}"
+        );
+        assert!(out1.contains("'spawnMonitoredWith:'"), "{out1}");
     }
 
     #[test]

@@ -36,6 +36,22 @@ Object subclass: Exception
   /// ```
   class signal: msg :: String -> Never => @primitive "classSignal:"
 
+  /// Create and raise a new exception with a message and a reason term (BT-4159).
+  ///
+  /// `reason` can be any value (a Symbol, a Tuple, ...). Handlers read it back
+  /// with `reason`, and it survives propagation across processes. Uncaught
+  /// reports include it. Use it when callers need machine-readable data (an
+  /// OTP-style reason) rather than only a message string. For an `Error`,
+  /// `Error signal: msg reason: term` is the equivalent of `self error:` with a
+  /// reason; there is no separate `error:reason:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [Error signal: "closed" reason: #econnreset] on: Error do: [:e | e reason]   // => #econnreset
+  /// ```
+  class signal: msg :: String reason: reason :: Object -> Never =>
+    @primitive "classSignal:reason:"
+
   /// Create and raise a new exception with the class name as the message.
   ///
   /// ## Examples
@@ -119,17 +135,23 @@ Object subclass: Exception
   /// (e.g. `badarith`, `{badkey, K}`) or the `Reason` of an `{error, Reason}`
   /// returned from an FFI call (ADR 0076), so handlers can match on the term
   /// itself (`#closed` vs `#econnreset`) instead of string-comparing
-  /// `message`. Exceptions raised by `Error signal:` / `self error:` record
-  /// no term and return nil; some stdlib natives (e.g. File I/O errors) also
-  /// record the underlying OTP reason. FFI results pass through
-  /// the usual boundary coercions first (an Erlang charlist reason arrives as
-  /// a String, a bare `error` return as nil).
+  /// `message`. The rule (BT-3970): a failure that comes from Erlang/OTP
+  /// records its term, and classifying it into a `kind` never drops it, so a
+  /// missing file is `#file_not_found` and its reason is `#enoent`. File and
+  /// Json follow it; other natives are still being brought in line (BT-4236). Failures that start in Beamtalk (`Error signal:`,
+  /// `self error:`, argument validation) record no term and return nil;
+  /// `signal:reason:` records the given term. `Result unwrap` on a plain
+  /// error value answers that value. FFI results pass through the usual
+  /// boundary coercions first (an Erlang charlist reason arrives as a String,
+  /// a bare `error` return as nil). Declared `Object | Nil` because an FFI
+  /// `{error, R}` can carry any term.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (Erlang string to_integer: "abc") error reason   // => #no_integer
   /// [#(1, "x") sum] on: TypeError do: [:e | e reason] // => #badarith
   /// [Error signal: "boom"] on: Error do: [:e | e reason] // => nil
+  /// (File readAll: "missing.txt") error reason            // => #enoent
   /// ```
   reason -> Object | Nil => @primitive
 

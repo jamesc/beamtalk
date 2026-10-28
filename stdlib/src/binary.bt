@@ -214,8 +214,9 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
 
   /// Test whether `needle` occurs as a contiguous byte sequence.
   ///
-  /// Compares raw bytes, so it works on non-UTF-8 haystacks. An empty
-  /// needle is always found (`true`), matching `String>>includesSubstring:`.
+  /// Compares raw bytes, so it works on non-UTF-8 haystacks. A `String`
+  /// needle is searched by its bytes. An empty needle is always found
+  /// (`true`), matching `String>>includesSubstring:`.
   ///
   /// ## Examples
   /// ```beamtalk

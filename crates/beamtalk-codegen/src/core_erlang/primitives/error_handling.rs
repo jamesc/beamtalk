@@ -45,6 +45,17 @@ pub(crate) fn generate_exception_bif(
                 ", ClassSelf)"
             ])
         }
+        "classSignal:reason:" => {
+            let p0 = param(params, 0, "_Msg");
+            let p1 = param(params, 1, "_Reason");
+            Some(docvec![
+                "call 'beamtalk_exception_handler':'class_signal_message_reason'(",
+                leaf::var(p0.to_string()),
+                ", ",
+                leaf::var(p1.to_string()),
+                ", ClassSelf)"
+            ])
+        }
         "classSignal" => Some(Document::Str(
             "call 'beamtalk_exception_handler':'class_signal'(ClassSelf)",
         )),
@@ -206,6 +217,21 @@ mod tests {
             result,
             Some(
                 "call 'beamtalk_exception_handler':'class_signal_message'(Msg, ClassSelf)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_exception_class_signal_with_message_and_reason() {
+        let result = doc_to_string(generate_exception_bif(
+            "classSignal:reason:",
+            &["Msg".to_string(), "Reason".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_exception_handler':'class_signal_message_reason'(Msg, Reason, ClassSelf)"
                     .to_string()
             )
         );

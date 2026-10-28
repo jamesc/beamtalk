@@ -54,6 +54,47 @@ Object subclass: Actor
   class sealed spawnWith: initArgs :: Object -> Self =>
     (Erlang beamtalk_actor) doSpawnWith: self args: initArgs
 
+  /// Spawn a new actor process already monitored by the caller (BT-4104).
+  ///
+  /// Answers `{actor, ref}`: `at: 1` is the actor, `at: 2` the monitor
+  /// reference. The monitor is created together with the process, so the
+  /// `{#DOWN, ref, #process, pid, reason}` message always carries the
+  /// actor's real exit reason — even for an actor that finishes straight
+  /// after `initialize` (a `continueWith:` step ending in
+  /// `self stopWith: #normal`), where `X spawn` followed by `monitor` reports
+  /// `#noproc`. The actor is not linked. Failures raise
+  /// `instantiation_error`, like `spawn`.
+  ///
+  /// **The monitor belongs to the process that runs the spawn.** A static
+  /// `Worker spawnMonitored` in an actor or Server method monitors from that
+  /// actor, so the `#DOWN` reaches its `handleInfo:`. A dynamic send
+  /// (`cls spawnMonitored`, `perform:`) or one inside a class method runs in
+  /// the class's process instead: that process owns the monitor and the
+  /// sender never sees the `#DOWN`. Supervisor classes do not support it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pair := Worker spawnMonitored
+  /// worker := pair at: 1
+  /// ref := pair at: 2
+  /// ```
+  class sealed spawnMonitored -> Tuple =>
+    (Erlang beamtalk_actor) doSpawnMonitored: self
+
+  /// Spawn a new actor process with initialization arguments, already
+  /// monitored by the caller (BT-4104).
+  ///
+  /// Same contract as `spawnMonitored` plus the initialisation arguments
+  /// passed to the actor's `init/1` callback — including where the monitor
+  /// belongs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pair := Counter spawnMonitoredWith: #{#count => 10}
+  /// ```
+  class sealed spawnMonitoredWith: initArgs :: Object -> Tuple =>
+    (Erlang beamtalk_actor) doSpawnMonitoredWith: self args: initArgs
+
   /// Actors cannot be created with `new` — always raises (BT-217).
   ///
   /// Actors are processes with identity and lifecycle, not immutable

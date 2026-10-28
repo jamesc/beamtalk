@@ -32,3 +32,4 @@ mod state;
 
 pub(in crate::core_erlang) use methods::BodyExprKind;
 pub(in crate::core_erlang) use methods::extract_package_from_module_name;
+pub(in crate::core_erlang) use spawn::SpawnVariant;

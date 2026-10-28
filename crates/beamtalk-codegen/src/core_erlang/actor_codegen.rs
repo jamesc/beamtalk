@@ -12,6 +12,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
+use super::gen_server::SpawnVariant;
 use super::method_frame::{MethodBoundary, MethodFrame};
 use super::selector_mangler::{safe_class_method_fn_name, sealed_fn_name};
 use super::spec_codegen;
@@ -148,8 +149,8 @@ impl CoreErlangGenerator {
             dispatch_3_export,
             ", 'safe_dispatch'/3, 'safe_dispatch'/4, \
              'method_table'/0, 'has_method'/1, 'class_name'/0, \
-             'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
-             'superclass'/0",
+             'spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_monitored'/1, \
+             'new'/0, 'new'/1, 'superclass'/0",
             meta_export,
             has_method_local_export,
         ];
@@ -291,12 +292,15 @@ impl CoreErlangGenerator {
         push_fn(self.generate_start_link_doc())?;
         push_fn(self.generate_start_link_named_doc())?;
 
-        if is_abstract {
-            push_fn(self.generate_abstract_spawn_error_method()?)?;
-            push_fn(self.generate_abstract_spawn_with_args_error_method()?)?;
-        } else {
-            push_fn(self.generate_spawn_function(module)?)?;
-            push_fn(self.generate_spawn_with_args_function(module)?)?;
+        // BT-4104: `spawn_monitored/0,1` mirror `spawn/0,1` (abstract stubs included).
+        for variant in [SpawnVariant::Plain, SpawnVariant::Monitored] {
+            if is_abstract {
+                push_fn(self.generate_abstract_spawn_error_method(variant)?)?;
+                push_fn(self.generate_abstract_spawn_with_args_error_method(variant)?)?;
+            } else {
+                push_fn(self.generate_spawn_function(module, variant)?)?;
+                push_fn(self.generate_spawn_with_args_function(module, variant)?)?;
+            }
         }
 
         push_fn(self.generate_actor_new_error_method()?)?;
