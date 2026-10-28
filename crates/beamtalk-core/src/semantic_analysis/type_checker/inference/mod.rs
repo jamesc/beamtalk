@@ -378,7 +378,7 @@ impl TypeChecker {
         // its `Never`.
         let body_type = if value_type_body
             && !matches!(body_type, InferredType::Never)
-            && ends_with_field_write(&method.body)
+            && crate::semantic_analysis::block_facts::ends_with_self_field_write(&method.body)
         {
             receiver_type
         } else {
@@ -986,23 +986,4 @@ impl TypeChecker {
 
         body_type
     }
-}
-
-/// Whether `body`'s last statement (skipping `@expect` directives, which
-/// `infer_stmts` and codegen skip too) is a `self.<field> := …` write, seen
-/// through statement-level parentheses (BT-4235). The type checker reads the
-/// operand-normalised tree (BT-4238), which leaves statement-level
-/// parentheses in place, so `(self.x := v)` is peeled here.
-fn ends_with_field_write(body: &[ExpressionStatement]) -> bool {
-    body.iter()
-        .rev()
-        .map(|stmt| &stmt.expression)
-        .find(|expr| !matches!(expr, Expression::ExpectDirective { .. }))
-        .is_some_and(|expr| {
-            matches!(
-                expr.unwrap_parens(),
-                Expression::Assignment { target, .. }
-                    if crate::semantic_analysis::block_facts::is_self_field_target(target)
-            )
-        })
 }
