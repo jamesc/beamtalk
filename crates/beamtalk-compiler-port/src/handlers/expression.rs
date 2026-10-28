@@ -213,10 +213,11 @@ pub(crate) fn handle_compile_expression_with_options(
         // full `Class >> sel => body` input — it is recorded verbatim in the
         // ChangeLog and written back on flush. Echoing the input would splice a
         // stray `Class >>` extension into the class body on flush.
-        // `canonical_method_source` re-emits the parsed method, comments and
-        // all (redundant send-operand parentheses dropped, BT-4059), so the
-        // recorded source round-trips cleanly and matches what codegen reflects.
-        let method_source = beamtalk_core::unparse::canonical_method_source(&method_def.method);
+        // `unparse_method` re-emits the parsed method, comments, operand
+        // parentheses and all, so the recorded source round-trips cleanly and a
+        // flush never drops parentheses the user wrote (BT-4059: only reflected
+        // `methodSource`, from codegen, is canonical).
+        let method_source = beamtalk_core::unparse::unparse_method(&method_def.method);
         let (return_type, param_types) = method_signature_terms(&method_def.method);
         return method_definition_ok_response(
             &class_name,

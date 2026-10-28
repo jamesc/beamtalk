@@ -397,13 +397,18 @@ fn compile_method_body_diagnostic_is_method_relative() {
 }
 
 #[test]
-fn compile_method_records_canonical_source_without_redundant_operand_parens() {
-    // BT-4059: the recorded method source is `canonical_method_source`, the
-    // same text codegen reflects as `methodSource`: redundant send-operand
-    // parentheses are dropped, needed ones kept.
+fn compile_method_records_source_with_operand_parens_as_written() {
+    // BT-4059: the recorded method source goes to the `ChangeLog` and is
+    // written back on flush, so it keeps the operand parentheses the user
+    // wrote (readability parens included). Only reflected `methodSource`,
+    // emitted by codegen, is canonical.
     for (method_source, expected) in [
-        ("bumped => (self) printString", "bumped => self printString"),
-        ("scaled: a => a * ((a) + 1)", "scaled: a => a * (a + 1)"),
+        (
+            "bumped => (self) printString",
+            "bumped => (self) printString",
+        ),
+        ("scaled: a => a * ((a) + 1)", "scaled: a => a * ((a) + 1)"),
+        ("summed: a => (a * 2) + 1", "summed: a => (a * 2) + 1"),
     ] {
         let request = Term::from(Map::from([
             (atom("command"), atom("compile_method")),
