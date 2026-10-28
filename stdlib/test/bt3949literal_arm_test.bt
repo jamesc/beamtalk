@@ -1,0 +1,56 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3949: see stdlib/test/fixtures/bt3949literal_arm_{class,value,actor}.bt.
+
+TestCase subclass: Bt3949LiteralArmTest
+
+  testIssueRepro =>
+    r := Bt3949LiteralArmActor spawn inBranchMapLiteral
+    self assert: r equals: #(10, 20)
+    self assert: r class equals: List
+
+  testMapIf =>
+    rs := #[(Bt3949LiteralArmClass mapIf: true), ((Bt3949LiteralArmValue new) mapIf: true), ((Bt3949LiteralArmActor spawn) mapIf: true)]
+    self assert: rs equals: #[#(10, 20), #(10, 20), #(10, 20)]
+    self assert: (rs collect: [:r | r class]) equals: #[List, List, List]
+
+  testArrayIf =>
+    rs := #[(Bt3949LiteralArmClass arrayIf: true), ((Bt3949LiteralArmValue new) arrayIf: true), ((Bt3949LiteralArmActor spawn) arrayIf: true)]
+    self assert: rs equals: #[#(10, 20), #(10, 20), #(10, 20)]
+    self assert: (rs collect: [:r | r class]) equals: #[List, List, List]
+
+  testKeywordIf =>
+    rs := #[(Bt3949LiteralArmClass keywordIf: true), ((Bt3949LiteralArmValue new) keywordIf: true), ((Bt3949LiteralArmActor spawn) keywordIf: true)]
+    self assert: rs equals: #[#(10, 20), #(10, 20), #(10, 20)]
+    self assert: (rs collect: [:r | r class]) equals: #[List, List, List]
+
+  testMapIfFalse =>
+    rs := #[(Bt3949LiteralArmClass mapIfFalse: false), ((Bt3949LiteralArmValue new) mapIfFalse: false), ((Bt3949LiteralArmActor spawn) mapIfFalse: false)]
+    self assert: rs equals: #[#(10, 20), #(10, 20), #(10, 20)]
+    self assert: (rs collect: [:r | r class]) equals: #[List, List, List]
+
+  testMapMatch =>
+    rs := #[(Bt3949LiteralArmClass mapMatch: 1), ((Bt3949LiteralArmValue new) mapMatch: 1), ((Bt3949LiteralArmActor spawn) mapMatch: 1)]
+    self assert: rs equals: #[#(10, 20), #(10, 20), #(10, 20)]
+    self assert: (rs collect: [:r | r class]) equals: #[List, List, List]
+
+  testArrayMatch =>
+    rs := #[(Bt3949LiteralArmClass arrayMatch: 1), ((Bt3949LiteralArmValue new) arrayMatch: 1), ((Bt3949LiteralArmActor spawn) arrayMatch: 1)]
+    self assert: rs equals: #[#(10, 20), #(10, 20), #(10, 20)]
+    self assert: (rs collect: [:r | r class]) equals: #[List, List, List]
+
+  testKeywordMatch =>
+    rs := #[(Bt3949LiteralArmClass keywordMatch: 1), ((Bt3949LiteralArmValue new) keywordMatch: 1), ((Bt3949LiteralArmActor spawn) keywordMatch: 1)]
+    self assert: rs equals: #[#(10, 20), #(10, 20), #(10, 20)]
+    self assert: (rs collect: [:r | r class]) equals: #[List, List, List]
+
+  testFieldFoldIf =>
+    a := Bt3949LiteralArmActor spawn
+    self assert: (a fieldFoldIf: true) equals: #[#(1, 2), 3]
+    self assert: a hits equals: 3
+
+  testFieldFoldMatch =>
+    a := Bt3949LiteralArmActor spawn
+    self assert: (a fieldFoldMatch: 1) equals: #[#(1, 2), 3]
+    self assert: a hits equals: 3

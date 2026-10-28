@@ -399,8 +399,21 @@ impl CoreErlangGenerator {
                         // plain-wrap arm gets a chance to hoist it instead of
                         // silently dropping the mutation via a bare
                         // `expression_doc` compile.
-                        || self.conditional_receiver_needs_threading(&arm.body)))
+                        || self.conditional_receiver_needs_threading(&arm.body)
+                        || self.match_arm_has_producer_site(&arm.body)))
         })
+    }
+
+    /// BT-3949: whether the `match:` arm body `body` holds a producer at one of
+    /// its plain-arm producer sites (the rule `generate_plain_arm` registers,
+    /// [`Self::plain_arm_producer_sites`]): a fold that threads `State` in a
+    /// map-literal value, an array element or a keyword argument. Such an arm
+    /// is threaded and lowered as a plain arm frame (the synthetic-block route
+    /// of [`Self::generate_match_arm_body`]); compiled in place, its
+    /// construct's `{Value, State}` carrier became the operand. The one
+    /// predicate both the threading gate and the arm lowering read.
+    fn match_arm_has_producer_site(&self, body: &Expression) -> bool {
+        !self.plain_arm_producer_sites(body).is_empty()
     }
 
     /// BT-3947: whether the arm body `body` of a REPL `match:` writes a REPL
@@ -653,6 +666,7 @@ impl CoreErlangGenerator {
         if self.conditional_receiver_needs_threading(body)
             || self.is_field_assignment(bare_body)
             || self.repl_match_arm_writes_bindings(body)
+            || self.match_arm_has_producer_site(body)
         {
             let synthetic_block = Block::new(
                 Vec::new(),

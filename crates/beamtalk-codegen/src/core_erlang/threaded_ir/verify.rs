@@ -412,6 +412,22 @@ pub(in crate::core_erlang) enum VerifyError {
     /// [`verify_producer_sites_threaded`].
     ProducerSiteNotThreaded { locals: Vec<String>, at: Span },
 
+    /// BT-3949: [`Self::ProducerSiteNotThreaded`] for a producer site whose
+    /// construct writes no outer local but still compiles to a
+    /// `{Value, State}` carrier, because it threads a family (an actor fold
+    /// whose block self-sends, so the fold hands back the next `State`). No
+    /// [`ThreadedStmt::ConstructTuple`] at the site means the construct was
+    /// compiled in place inside the consumer's own document (a map-literal
+    /// value, an array element, a keyword argument): the consumer reads the
+    /// carrier tuple as the construct's value (a `Tuple` where a `List` was
+    /// expected), and the family's next version is dropped with it
+    /// (`erlc`-clean). The repro is an actor method's
+    /// `flag ifTrue: [#{"xs" => (xs collect: [:s | self wrap: s])}]`, whose
+    /// arm registered no producer sites. Checked by
+    /// [`verify_producer_sites_threaded`] at every frame that registers its
+    /// producer sites.
+    ConstructCarrierInPlace { at: Span },
+
     /// An [`ThreadedStmt::NlrThrow`] with no slot version, in **every** scope:
     /// it would render `{'$bt_nlr', Tok, Val, {}}`, an empty tuple no catch
     /// unpacks. A throw always carries the state its boundary hands back (the
@@ -787,13 +803,18 @@ pub(in crate::core_erlang) fn verify_fold_locals_carried(
 
 /// BT-3939, [`VerifyError::ProducerSiteNotThreaded`] over one frame's
 /// statement list: each `(site, locals)` of `sites` (a producer site of the
-/// frame's body that writes `locals`, with `locals` non-empty) must have a
+/// frame's body that writes `locals`) must have a
 /// [`ThreadedStmt::ConstructTuple`] in `body` inside the site's span (a loop's is
 /// at the site's own span, a conditional's or `on:do:`'s at its tail) whose
 /// `threads` lists every one of `locals`. The sites are read off the AST by
 /// the frame's owner before it lowers a statement; the nodes are read off the
 /// lowered IR, so the two cannot agree by construction. Needs no version
 /// history (like [`verify_fold_locals_carried`]).
+///
+/// A site whose `locals` is empty (a construct that writes no outer local but
+/// threads a family, so it still compiles to a carrier tuple, BT-3949) needs a
+/// `ConstructTuple` inside its span all the same; its absence is
+/// [`VerifyError::ConstructCarrierInPlace`].
 pub(in crate::core_erlang) fn verify_producer_sites_threaded(
     body: &[ThreadedStmt],
     sites: &[(Span, Vec<String>)],
@@ -801,19 +822,24 @@ pub(in crate::core_erlang) fn verify_producer_sites_threaded(
     sites
         .iter()
         .filter(|(site, locals)| {
-            !locals.is_empty()
-                && !body.iter().any(|stmt| match stmt {
-                    ThreadedStmt::ConstructTuple { threads, span, .. } => {
-                        span.start() >= site.start()
-                            && span.end() <= site.end()
-                            && locals.iter().all(|l| threads.contains(l))
-                    }
-                    _ => false,
-                })
+            !body.iter().any(|stmt| match stmt {
+                ThreadedStmt::ConstructTuple { threads, span, .. } => {
+                    span.start() >= site.start()
+                        && span.end() <= site.end()
+                        && locals.iter().all(|l| threads.contains(l))
+                }
+                _ => false,
+            })
         })
-        .map(|(site, locals)| VerifyError::ProducerSiteNotThreaded {
-            locals: locals.clone(),
-            at: *site,
+        .map(|(site, locals)| {
+            if locals.is_empty() {
+                VerifyError::ConstructCarrierInPlace { at: *site }
+            } else {
+                VerifyError::ProducerSiteNotThreaded {
+                    locals: locals.clone(),
+                    at: *site,
+                }
+            }
         })
         .collect()
 }
