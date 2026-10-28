@@ -3854,6 +3854,37 @@ fn test_class_method_super_uses_class_self_dispatch() {
     }
 }
 
+/// BT-4001: a `super` send in a class-side extension (`Target class >> sel`)
+/// is keyed on the extension's *target*, not on the class (if any) whose file
+/// hosts the extension, so the walk starts at the target's superclass.
+#[test]
+fn test_class_side_extension_super_is_keyed_on_the_target() {
+    let hosts = ["", "Object subclass: Host\n  foo => 1\n"];
+    let bodies = [
+        "Target class >> run => super peek: 1",
+        "Target class >> run => #(1, 2) collect: [:x | super peek: x]",
+    ];
+    for host in hosts {
+        for body in bodies {
+            let src = format!("{host}{body}\n");
+            let code = super::compile(&src)
+                .unwrap_or_else(|e| panic!("class-side extension super must compile: {e}\n{src}"));
+            assert!(
+                code.contains(
+                    "call 'beamtalk_class_dispatch':'class_self_dispatch'('Target', 'peek:', ["
+                ),
+                "extension `super` must be keyed on the target class:\n{src}\n{code}"
+            );
+            assert!(
+                !code.contains("class_self_dispatch'('Host'")
+                    && !code.contains("'beamtalk_dispatch':'super'"),
+                "extension `super` must not use the host class or the instance path:\n{src}\n{code}"
+            );
+            assert_compiles_through_erlc("test", &code);
+        }
+    }
+}
+
 /// A builder cascade lexically inside a block still lowers the fun as a class
 /// method's own top frame (`block_depth` is reset and restored around it).
 #[test]

@@ -2711,18 +2711,19 @@ impl CoreErlangGenerator {
         let selector_atom = selector.name().to_string();
 
         // A class-side `super` resolves up the metaclass chain via the runtime
-        // helper, keyed on the defining class: the builder class inside a
-        // programmatic ClassBuilder class-method fun (ADR 0084), otherwise the
-        // class whose class method (or class-side extension) is being
-        // compiled (BT-4001). `class_self_dispatch/4` begins the walk at that
-        // class's superclass, which is exactly super semantics. The live
-        // receiver tag (`element(2, ClassSelf)`) is passed so a subclass
-        // receiver runs the superclass method under its own class-variable
-        // key. A class method binds no instance `Self`/`State`, so it must
-        // never reach the `beamtalk_dispatch:super/5` instance path below.
-        let class_side_super_class = self
-            .builder_class_method_class()
-            .or_else(|| self.in_class_method().then(|| self.class_name()));
+        // helper, keyed on the class the method belongs to (`class_var_home`):
+        // the builder class inside a programmatic ClassBuilder class-method
+        // fun (ADR 0084), else a class-side extension's target, else the
+        // class being compiled (BT-4001). `class_self_dispatch/4` begins the
+        // walk at that class's superclass, which is exactly super semantics.
+        // The live receiver tag (`element(2, ClassSelf)`) is passed so a
+        // subclass receiver runs the superclass method under its own
+        // class-variable key. A class method binds no instance `Self`/`State`,
+        // so it must never reach the `beamtalk_dispatch:super/5` instance path
+        // below.
+        let class_side_super_class = (self.builder_class_method_class().is_some()
+            || self.in_class_method())
+        .then(|| self.class_var_home());
         if let Some(defining_class) = class_side_super_class {
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let call_doc = docvec![

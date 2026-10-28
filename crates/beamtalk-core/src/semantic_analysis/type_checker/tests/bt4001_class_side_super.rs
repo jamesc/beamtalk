@@ -66,6 +66,33 @@ Base subclass: C
 }
 
 #[test]
+fn class_side_extension_super_resolves_against_the_target_superclass() {
+    // A class-side extension's `super` starts at the *target's* superclass,
+    // as codegen keys it (`class_var_home`), whatever class hosts the file.
+    for host in ["", "Object subclass: Host\n  foo => 1\n"] {
+        let clean = format!(
+            "Object subclass: Base
+  class peek: x => x + 100
+Base subclass: C
+{host}C class >> run => super peek: 1
+"
+        );
+        let diags = diagnostics_mentioning(&clean, "peek:");
+        assert!(diags.is_empty(), "host {host:?}: got: {diags:#?}");
+
+        let instance_only = format!(
+            "Object subclass: Base
+  peek: x => x + 100
+Base subclass: C
+{host}C class >> run => super peek: 1
+"
+        );
+        let diags = diagnostics_mentioning(&instance_only, "peek:");
+        assert_eq!(diags.len(), 1, "host {host:?}: got: {diags:#?}");
+    }
+}
+
+#[test]
 fn instance_side_super_still_resolves_instance_methods() {
     let diags = diagnostics_mentioning(
         "Object subclass: Base

@@ -36,3 +36,15 @@ TestCase subclass: ClassSideSuperTest
 
   testSealedDirectCalledClassMethodSuperInClosure =>
     self assert: Bt4001ClassSuperSealed runAll equals: #(101, 102)
+
+  testClassSideExtensionSuper =>
+    self assert: Bt4001ClassSuperObjectChild bt4001ExtRun equals: 101
+
+  testClassSideExtensionSuperInClosure =>
+    self assert: Bt4001ClassSuperObjectChild bt4001ExtRunAll equals: #(101, 102)
+
+Bt4001ClassSuperObjectChild class >> // Class-side extensions hosted in this file: `super` starts at the target's
+// superclass (Bt4001ClassSuperObjectBase), not at this TestCase's.
+bt4001ExtRun => super peek: 1
+Bt4001ClassSuperObjectChild class >> bt4001ExtRunAll =>
+  #(1, 2) collect: [:x | super peek: x]
