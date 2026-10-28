@@ -185,6 +185,54 @@ pub(super) fn construct_sources() -> Vec<String> {
     out
 }
 
+/// BT-4180: stateless loops that bracket a guarded operator, wrapping a read
+/// payload `@P` placed after it (nested loops included): every actor-state
+/// read in them must take the cell, or the checkout logs a `stale-read` site.
+const BRACKETED_CONSTRUCTS: &[&str] = &[
+    "xs do: [:e | x := x + e. @P]",
+    "xs collect: [:e | x := x + e. @P]",
+    "xs inject: 0 into: [:acc :e | acc + e. @P]",
+    "[a] whileTrue: [x := x + 1. @P]",
+    "[@P. x < b] whileTrue: [x := x + 1]",
+    "1 to: 3 do: [:i | x := x + i. @P]",
+    "3 timesRepeat: [x := x + b. @P]",
+    "1 to: 3 do: [:i | x := x + i. xs do: [:e | @P]]",
+    "xs do: [:e | xs do: [:f | x := x + f. @P]]",
+    "d keysAndValuesDo: [:k :v | x := x + v. @P]",
+];
+
+/// BT-4180: actor-state reads of every site kind the choke point covers.
+const READ_PAYLOADS: &[&str] = &[
+    "self.n",
+    "n",
+    "t := self.n",
+    "[self.n] on: Error do: [:e | self.n]",
+    "a ifTrue: [self.n]",
+    "a ifTrue: [self.n] ifFalse: [0]",
+    "[:q | self.n]",
+    "t := [:q | self.n]",
+    "^ self.n",
+    "[self.n] ensure: [0]",
+];
+
+/// BT-4180: the bracketed-loop matrix, every read payload x bracketed
+/// construct x prefix, as actor methods.
+pub(super) fn bracketed_read_sources() -> Vec<String> {
+    let mut out = Vec::new();
+    for payload in READ_PAYLOADS {
+        for construct in BRACKETED_CONSTRUCTS {
+            for prefix in PREFIXES {
+                let stmt = construct.replace("@P", payload);
+                let body = format!("{prefix}\n    {stmt}");
+                out.push(format!(
+                    "Actor subclass: ConstructProbe\n  state: n = 0\n\n  bar => 1\n\n  go: o with: a with: b over: xs and: d =>\n    x := 0.\n    {body}\n"
+                ));
+            }
+        }
+    }
+    out
+}
+
 thread_local! {
     /// Sources that did not parse (a probe that parses nothing proves nothing).
     static PARSE_FAILURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -229,6 +277,7 @@ fn observed_sites() -> BTreeMap<String, (usize, String, &'static str, String)> {
         .into_iter()
         .chain(statement_sources())
         .chain(construct_sources())
+        .chain(bracketed_read_sources())
     {
         let records = gaps_of(&src);
         if records.is_empty() {
@@ -322,7 +371,11 @@ fn the_construct_matrix_compiles_through_erlc() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(8);
     let mut failures: Vec<String> = Vec::new();
-    for src in construct_sources().into_iter().step_by(stride) {
+    for src in construct_sources().into_iter().step_by(stride).chain(
+        bracketed_read_sources()
+            .into_iter()
+            .step_by(stride.div_ceil(4)),
+    ) {
         let (module, _) = parse(lex_with_eof(&src));
         let Some(code) = compile(&module) else {
             continue;
@@ -353,6 +406,53 @@ fn the_probe_sees_a_missing_bracket() {
             .any(|g| g.selector == "foo" && g.site.contains(".rs:")),
         "{gaps:?}"
     );
+}
+
+#[test]
+fn the_probe_sees_a_stale_read_in_a_bracketed_loop() {
+    // BT-4180 fault injection: with the read choke point ignoring the bracket,
+    // a field read in a bracketed loop is logged as a `stale-read` site.
+    let src = "Actor subclass: Probe\n  state: n = 0\n\n  run: xs =>\n    x := 0.\n    t := 0.\n    xs do: [:e | x := x + e. t := self.n].\n    t\n";
+    assert!(gaps_of(src).is_empty());
+    crate::core_erlang::synced_call::FAULT_ENTRY_STATE_READS.with(|f| f.set(true));
+    let gaps = gaps_of(src);
+    crate::core_erlang::synced_call::FAULT_ENTRY_STATE_READS.with(|f| f.set(false));
+    assert!(
+        gaps.iter()
+            .any(|g| g.selector == "stale-read field-read" && g.site.contains(".rs:")),
+        "{gaps:?}"
+    );
+    // The bracketed matrix is not vacuous: under the fault every read payload
+    // and every construct logs a stale read somewhere in it.
+    crate::core_erlang::synced_call::FAULT_ENTRY_STATE_READS.with(|f| f.set(true));
+    let logged: Vec<String> = bracketed_read_sources()
+        .into_iter()
+        .filter(|src| {
+            gaps_of(src)
+                .iter()
+                .any(|g| g.selector.starts_with("stale-read "))
+        })
+        .collect();
+    crate::core_erlang::synced_call::FAULT_ENTRY_STATE_READS.with(|f| f.set(false));
+    for payload in READ_PAYLOADS {
+        assert!(
+            logged.iter().any(|src| src.contains(payload)),
+            "payload logs a stale read under the fault: {payload}"
+        );
+    }
+    // (A nested fold reading a field routes the enclosing counted loop to
+    // `StateAcc`, a whole `State`: that construct holds no region today and
+    // stays in the matrix to catch the day it does.)
+    for construct in BRACKETED_CONSTRUCTS
+        .iter()
+        .filter(|c| !c.starts_with("1 to: 3 do: [:i | x := x + i. xs do:"))
+    {
+        let head = construct.split("@P").next().unwrap_or(construct);
+        assert!(
+            logged.iter().any(|src| src.contains(head)),
+            "construct logs a stale read under the fault: {construct}"
+        );
+    }
 }
 
 /// Dev aid, a no-op unless `BT4020_DUMP_SRC=<file>` and `BT4020_DUMP_OUT=<file>` are set:

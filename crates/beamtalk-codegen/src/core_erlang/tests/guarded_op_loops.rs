@@ -8,9 +8,10 @@
 //! [`VerifyError::UnbracketedGuardedOperator`], never silently.
 
 use super::synced_call::{
-    FAULT_NO_BRACKETS, FAULT_STALE_STATE_IN_BRACKETED_LOOP, GuardedOpCheckout, GuardedOpLoopMarker,
-    GuardedOpNeed, StaleStateUseKind, ThreadedStateUse,
+    FAULT_ENTRY_STATE_READS, FAULT_NO_BRACKETS, FAULT_STALE_STATE_IN_BRACKETED_LOOP,
+    GuardedOpCheckout, GuardedOpLoopMarker, GuardedOpNeed, StaleStateUseKind, ThreadedStateUse,
 };
+use super::threaded_ir::{StaleReadDefect, StateReadSite, UserCodeRegion};
 use crate::core_erlang::{CodegenOptions, CoreErlangGenerator, generate_module};
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
@@ -295,9 +296,10 @@ fn take_reads_when_any_enclosing_loop_brackets() {
     // bracketing loop's slow paths write the cell during the iteration, so
     // every read in the iteration must be live — including reads in a
     // nested loop with no guarded operator of its own. The take-reads
-    // decision has no verifier backstop (unlike gaps, which are loud), so
-    // the predicate stays conservative here even though no end-to-end
-    // shape nests a stateless reader inside a bracketing loop today.
+    // decision is the emitter's prediction; its backstop is the checkout
+    // (BT-4180): a read that did not take the cell inside a loop whose
+    // checkout bracketed reports `StaleReadInBracketedLoop`
+    // (`stale_read_fires_for_every_read_site_in_the_corpus`).
     let mut generator = CoreErlangGenerator::new("test");
     generator.loop_mode.in_direct_params_loop = true;
     generator
@@ -751,4 +753,312 @@ fn checkout_hands_state_uses_to_the_enclosing_marker() {
     lone.state_uses.push(state_use);
     generator.checkout_guarded_op_loop(lone, false, Span::new(0, 1));
     assert!(generator.synced.stale_state_gaps.is_empty());
+}
+
+// ─── BT-4180: actor-state reads in a bracketed region ────────────────────────
+
+/// Stateless loops that bracket guarded operators, each holding a read
+/// payload (`{p}`) after the operator: flat folds, letrec loops and nested
+/// loops with no operator of their own.
+const BRACKETED_READ_LOOPS: [&str; 8] = [
+    "xs do: [:e | acc := acc + e. {p}]",
+    "xs collect: [:e | acc := acc + e. {p}]",
+    "xs inject: 0 into: [:a :e | acc := acc + e. {p}. a]",
+    "i := 0. [i < 3] whileTrue: [acc := acc + x. i := i + 1. {p}]",
+    "1 to: 3 do: [:i | acc := acc + x. {p}]",
+    "xs do: [:e | xs do: [:f | acc := acc + f. {p}]]",
+    "3 timesRepeat: [acc := acc + x. i := 0. [i < 2] whileTrue: [i := i + 1. {p}]]",
+    // The condition closure of a bracketing loop.
+    "i := 0. [{p}. i < x] whileTrue: [i := i + 1]",
+];
+
+/// Read payloads, one per read site the choke point covers: `self.x`, a bare
+/// field name, an `on:do:` and a conditional reading a field, an actor
+/// closure's creation-time capture and a `^`'s carried state. None writes a
+/// local inside a nested construct (that routes a fold to `StateAcc`, a
+/// whole `State` bracketed per operator, with no region to check).
+const BRACKETED_READ_PAYLOADS: [&str; 6] = [
+    "k := self.n",
+    "k := n",
+    "[self.n] on: Error do: [:z | self.n]",
+    "(x == 0) ifTrue: [self.n] ifFalse: [0]",
+    "k := [:q | self.n]",
+    "^ self.n",
+];
+
+fn bracketed_read_src(shape: &str, payload: &str) -> String {
+    let body = shape.replace("{p}", payload);
+    format!(
+        "{ACTOR_PREAMBLE}  run: x over: xs =>\n    acc := 0.\n    k := 0.\n    {body}.\n    acc + k\n"
+    )
+}
+
+fn bracketed_read_srcs() -> Vec<String> {
+    BRACKETED_READ_LOOPS
+        .iter()
+        .flat_map(|shape| {
+            BRACKETED_READ_PAYLOADS
+                .iter()
+                // A fold body holding an `on:do:` or a conditional threads
+                // `StateAcc` (a whole `State`, bracketed per operator): no
+                // region to check.
+                .filter(move |payload| {
+                    !(shape.starts_with("xs ")
+                        && (payload.contains("on:") || payload.contains("ifTrue:")))
+                })
+                .map(move |payload| bracketed_read_src(shape, payload))
+        })
+        .collect()
+}
+
+/// Compiles each of `srcs` under [`FAULT_ENTRY_STATE_READS`], answering each
+/// source with its verifier report.
+fn entry_state_read_reports(srcs: Vec<String>) -> Vec<(String, Option<String>)> {
+    FAULT_ENTRY_STATE_READS.with(|f| f.set(true));
+    let reports = srcs
+        .into_iter()
+        .map(|src| {
+            let report = enforce_report(&src);
+            (src, report)
+        })
+        .collect();
+    FAULT_ENTRY_STATE_READS.with(|f| f.set(false));
+    reports
+}
+
+#[test]
+fn reads_in_bracketed_loops_corpus_is_verifier_clean() {
+    // BT-4180: every read site in every bracketing loop shape takes the
+    // cell, so the checkout finds nothing to report.
+    let reported: Vec<String> = bracketed_read_srcs()
+        .into_iter()
+        .filter_map(|src| enforce_report(&src).map(|r| format!("{src}\n{r}")))
+        .collect();
+    assert!(reported.is_empty(), "{}", reported.join("\n---\n"));
+}
+
+#[test]
+fn stale_read_fires_loud_when_reads_ignore_the_bracket() {
+    // BT-4180: with the choke point ignoring the take-reads decision while
+    // the loop still brackets, the checkout reports the read from its own
+    // decision — `StaleReadInBracketedLoop`, not a guarded-operator gap.
+    let src = format!(
+        "{ACTOR_PREAMBLE}  sum: xs =>\n    acc := 0.\n    k := 0.\n    xs do: [:m | acc := acc + m. k := self.n].\n    acc + k\n"
+    );
+    assert_eq!(enforce_report(&src), None);
+    let (_, report) = entry_state_read_reports(vec![src]).remove(0);
+    let report = report.expect("faulted compile should report");
+    assert!(
+        report.contains("StaleReadInBracketedLoop") && report.contains("FieldRead"),
+        "loud stale-read finding:\n{report}"
+    );
+    assert!(
+        !report.contains("UnbracketedGuardedOperator"),
+        "the loop still brackets:\n{report}"
+    );
+}
+
+/// Whether `out` reads the actor state from the cell for a payload: a field
+/// read over `take()` or an actor closure capturing it. A program without one
+/// has no bracketed region around its payload (the mode selection threaded a
+/// whole `State` instead), so the fault changes nothing in it.
+fn reads_from_the_cell(out: &str) -> bool {
+    out.contains("'n', call 'beamtalk_actor_state':'take'()")
+        || out.contains("= call 'beamtalk_actor_state':'take'() in fun")
+}
+
+#[test]
+fn stale_read_fires_for_every_read_site_in_the_corpus() {
+    // BT-4180: under the fault every program of the corpus whose payload
+    // reads the cell reports, so each read site (and each loop shape, nested
+    // ones included) routes through the recording choke point. Every shape
+    // and every payload is reached at least once.
+    let in_region: Vec<String> = bracketed_read_srcs()
+        .into_iter()
+        .filter(|src| reads_from_the_cell(&compile(src)))
+        .collect();
+    for shape in BRACKETED_READ_LOOPS {
+        let head = shape.split("{p}").next().unwrap_or(shape);
+        assert!(
+            in_region.iter().any(|src| src.contains(head)),
+            "shape reaches a bracketed region: {shape}"
+        );
+    }
+    for payload in BRACKETED_READ_PAYLOADS {
+        assert!(
+            in_region.iter().any(|src| src.contains(payload)),
+            "payload reaches a bracketed region: {payload}"
+        );
+    }
+    let silent: Vec<String> = entry_state_read_reports(in_region)
+        .into_iter()
+        .filter(|(_, report)| {
+            !report
+                .as_deref()
+                .is_some_and(|r| r.contains("StaleReadInBracketedLoop"))
+        })
+        .map(|(src, report)| format!("{src}\n{report:?}"))
+        .collect();
+    assert!(
+        silent.is_empty(),
+        "faulted compiles should report StaleReadInBracketedLoop:\n{}",
+        silent.join("\n---\n")
+    );
+}
+
+#[test]
+fn closure_created_in_bracketed_loop_captures_the_cell() {
+    // BT-4180: an actor closure created inside a bracketed loop captures the
+    // cell at creation (its away-from-home reads see the slow paths' writes
+    // of earlier iterations), never the loop-entry `State`.
+    let src = format!(
+        "{ACTOR_PREAMBLE}  run: xs =>\n    acc := 0.\n    xs collect: [:m | acc := acc + m. [self.n]]\n"
+    );
+    let out = compile(&src);
+    assert!(
+        out.contains("ASCapture") && out.contains("= call 'beamtalk_actor_state':'take'() in fun"),
+        "closure capture bound from the cell:\n{out}"
+    );
+    assert!(
+        !out.contains("'n', State)"),
+        "no capture of the loop-entry State:\n{out}"
+    );
+    assert_eq!(enforce_report(&src), None);
+}
+
+#[test]
+fn closure_created_outside_a_bracket_captures_the_threaded_state() {
+    // Gate pin: with no bracket the capture stays the threaded `State`.
+    let out = compile(&format!(
+        "{ACTOR_PREAMBLE}  run: xs =>\n    xs collect: [:m | [self.n]]\n"
+    ));
+    assert!(!out.contains("'take'() in fun"), "{out}");
+}
+
+#[test]
+fn checkout_reports_every_read_use_under_a_bracket() {
+    // A read that did not take the cell is stale under a bracket whatever
+    // variable it read; without a bracket it is handed outward (and dropped
+    // with no marker left).
+    let read = |var: &str, defect| ThreadedStateUse {
+        kind: StaleStateUseKind::Read {
+            site: StateReadSite::FieldRead,
+            defect,
+            region: UserCodeRegion::FoldBody,
+        },
+        var: var.to_string(),
+        at: Span::new(3, 4),
+    };
+    let mut generator = CoreErlangGenerator::new("test");
+    let mut marker = op_marker(true, true);
+    marker.state_uses = vec![
+        read("State", StaleReadDefect::ThreadedState),
+        read("StateAcc", StaleReadDefect::ThreadedState),
+        read("FieldN", StaleReadDefect::PreExtractedParam),
+    ];
+    assert_eq!(
+        generator.checkout_guarded_op_loop(marker, false, Span::new(0, 1)),
+        GuardedOpCheckout::Bracket
+    );
+    assert_eq!(generator.synced.stale_state_gaps.len(), 3);
+
+    let mut generator = CoreErlangGenerator::new("test");
+    let mut marker = op_marker(false, false);
+    marker.state_uses = vec![read("State", StaleReadDefect::ThreadedState)];
+    assert_eq!(
+        generator.checkout_guarded_op_loop(marker, false, Span::new(0, 1)),
+        GuardedOpCheckout::Nothing
+    );
+    assert!(generator.synced.stale_state_gaps.is_empty());
+}
+
+#[test]
+fn stale_reads_finish_as_their_own_variant() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let mut marker = op_marker(true, true);
+    marker.state_uses = vec![ThreadedStateUse {
+        kind: StaleStateUseKind::Read {
+            site: StateReadSite::ClosureCapture,
+            defect: StaleReadDefect::ThreadedState,
+            region: UserCodeRegion::LetrecLoop,
+        },
+        var: "State".to_string(),
+        at: Span::new(3, 4),
+    }];
+    generator.checkout_guarded_op_loop(marker, false, Span::new(0, 1));
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        generator.finish_synced_calls(Span::new(0, 10));
+    }))
+    .expect_err("a stale read is a verifier finding");
+    let report = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| {
+            payload
+                .downcast_ref::<&str>()
+                .map(std::string::ToString::to_string)
+        })
+        .unwrap_or_default();
+    assert!(
+        report.contains("StaleReadInBracketedLoop")
+            && report.contains("ClosureCapture")
+            && report.contains("LetrecLoop"),
+        "{report}"
+    );
+}
+
+#[test]
+fn conditional_in_a_bracketed_loop_condition_seeds_from_the_cell() {
+    // BT-4180: a conditional in the condition closure of a loop that brackets
+    // guarded operators seeds its scratch map from the cell (its arms
+    // dispatch on it), never from the captured loop-entry `State`.
+    let src = format!(
+        "{ACTOR_PREAMBLE}  run: m =>\n    i := 0.\n    [i < m ifTrue: [x := i. x + 1]. i < 4] whileTrue: [i := i + 1].\n    i\n"
+    );
+    let out = compile(&src);
+    assert!(
+        out.split("SeededState@").skip(1).any(|rest| rest
+            .split_once(" = ")
+            .is_some_and(|(_, rhs)| rhs.starts_with("call 'beamtalk_actor_state':'take'()"))),
+        "scratch seeded from the cell:\n{out}"
+    );
+    assert_eq!(enforce_report(&src), None);
+}
+
+#[test]
+fn stale_read_fires_whatever_variable_the_read_resolved_to() {
+    // BT-4180: the check does not compare the read's variable with the
+    // loop-entry `State` — inside a bracket every source but the cell is
+    // stale. With BT-4178's pre-fix fold body as well (no entry capture: the
+    // read resolves to the loop context's `StateAcc`, not the entry `State`)
+    // the nested fold's read is still reported.
+    let src = format!(
+        "{ACTOR_PREAMBLE}  run: xs =>\n    acc := 0.\n    k := 0.\n    xs do: [:e | #(1, 2) do: [:f | acc := acc + f. k := self.n]].\n    acc + k\n"
+    );
+    assert_eq!(enforce_report(&src), None);
+    let (_, report) = crate::core_erlang::threaded_expr::fault::with(
+        crate::core_erlang::threaded_expr::fault::LocalRebindFault::TupleAccNoEntryCapture,
+        || entry_state_read_reports(vec![src.clone()]).remove(0),
+    );
+    let report = report.expect("faulted compile should report");
+    assert!(
+        report.contains("StaleReadInBracketedLoop"),
+        "loud stale-read finding:\n{report}"
+    );
+}
+
+#[test]
+fn pin_bug_bt4255_non_carried_loop_nested_in_a_bracketing_loop() {
+    // PIN-BUG (BT-4255, open): a counted loop carrying no local, nested in a
+    // stateless loop that brackets a guarded operator, lowers to a runtime
+    // `to:do:` send with no `State` in scope to bracket it. The fix flips
+    // this pin to verifier-clean.
+    let src = format!(
+        "{ACTOR_PREAMBLE}  run: x =>\n    acc := 0.\n    1 to: 3 do: [:i | acc := acc + x. 1 to: 2 do: [:j | (x == 0) ifTrue: [self.n] ifFalse: [0]]].\n    acc\n"
+    );
+    let report = enforce_report(&src).expect("PIN-BUG BT-4255: still reported");
+    assert!(
+        report.contains("UnbracketedUserCodeSend") && report.contains("to:do:"),
+        "{report}"
+    );
 }

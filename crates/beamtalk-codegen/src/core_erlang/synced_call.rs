@@ -40,8 +40,8 @@
 //! count-only test mode that records each gap's codegen site instead.
 
 use super::threaded_ir::{
-    FrameId, StateRestoreDefect, ThreadedStmt, ThreadedValue, UserCodeRegion, ValueRef,
-    VerifyError, VersionPrefix, VersionedVar,
+    FrameId, StaleReadDefect, StateReadSite, StateRestoreDefect, ThreadedStmt, ThreadedValue,
+    UserCodeRegion, ValueRef, VerifyError, VersionPrefix, VersionedVar,
 };
 use super::{CodeGenContext, CoreErlangGenerator};
 use crate::core_erlang::docvec;
@@ -97,6 +97,13 @@ thread_local! {
     /// an actor closure) and a nested `StateAcc` producer seeds from it, as
     /// before the fix, so the loop checkout can be shown to report both.
     pub(in crate::core_erlang) static FAULT_STALE_STATE_IN_BRACKETED_LOOP: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+    /// Test-only fault (BT-4180): the read choke point
+    /// ([`CoreErlangGenerator::actor_state_read_source`]) ignores the
+    /// take-reads decision while the loop still brackets, so every read site
+    /// emits the threaded `State` (or a pre-extracted parameter) and the
+    /// checkout can be shown to report `StaleReadInBracketedLoop`.
+    pub(in crate::core_erlang) static FAULT_ENTRY_STATE_READS: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
 }
 
@@ -222,7 +229,9 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// reported as [`VerifyError::CatchWithoutStateRestore`]
     /// ([`StateRestoreDefect::PreStateOverLiveCell`]) for an `on:do:`
     /// boundary and [`VerifyError::StaleStateSeedInBracketedLoop`] for a
-    /// `StateAcc` seed.
+    /// `StateAcc` seed; and actor-state reads not sourced from the cell
+    /// inside one (BT-4180), reported as
+    /// [`VerifyError::StaleReadInBracketedLoop`].
     pub(in crate::core_erlang) stale_state_gaps: Vec<(StaleStateUseKind, UnbracketedSend)>,
     /// One marker per loop lowering in progress (BT-4121), innermost last.
     /// A guarded operator compiled in a stateless loop body flags the
@@ -273,7 +282,8 @@ pub(in crate::core_erlang) struct GuardedOpLoopMarker {
     pub(in crate::core_erlang) entry_state: String,
     /// BT-4179: the threaded-`State` uses built while this marker was
     /// innermost (an `on:do:` boundary storing a `State`, a `StateAcc`
-    /// producer seeding from one). Checked at checkout against the loop's
+    /// producer seeding from one, and — BT-4180 — every actor-state read
+    /// that did not take the cell). Checked at checkout against the loop's
     /// own bracket decision and entry `State`, neither of which comes from
     /// the gates that chose those shapes.
     pub(in crate::core_erlang) state_uses: Vec<ThreadedStateUse>,
@@ -299,6 +309,81 @@ pub(in crate::core_erlang) enum StaleStateUseKind {
     /// A `StateAcc` loop or fold packs its accumulator from it
     /// (`ThreadingPlan::generate_pack_prefix`).
     StateAccSeed,
+    /// BT-4180: an actor-state read at `site` takes the state map from it
+    /// (or, for [`StaleReadDefect::PreExtractedParam`], reads a hybrid
+    /// loop's pre-extracted field parameter), in a frame that holds no
+    /// whole `State` ([`CoreErlangGenerator::actor_state_read_source`]).
+    /// Stale under any bracket, whatever the variable: inside the region
+    /// only the cell is current.
+    Read {
+        site: StateReadSite,
+        defect: StaleReadDefect,
+        /// Where the read was lowered (the checkout's own region is the
+        /// loop's enclosing one).
+        region: UserCodeRegion,
+    },
+}
+
+impl StaleStateUseKind {
+    /// Whether this use, under a loop that brackets with entry `State`
+    /// `entry_state`, reads or stores a version the bracket's slow paths have
+    /// overtaken in the cell.
+    fn is_stale_under_bracket(self, var: &str, entry_state: &str) -> bool {
+        match self {
+            Self::OnDoStore | Self::StateAccSeed => var == entry_state,
+            Self::Read { .. } => true,
+        }
+    }
+
+    /// The finding a stale use of this kind at `at` reports.
+    fn verify_error(self, at: Span) -> VerifyError {
+        match self {
+            Self::OnDoStore => VerifyError::CatchWithoutStateRestore {
+                defect: StateRestoreDefect::PreStateOverLiveCell,
+                at,
+            },
+            Self::StateAccSeed => VerifyError::StaleStateSeedInBracketedLoop { at },
+            Self::Read {
+                site,
+                defect,
+                region,
+            } => VerifyError::StaleReadInBracketedLoop {
+                site,
+                defect,
+                region,
+                at,
+            },
+        }
+    }
+
+    /// The invariant probe's selector prefix for this use.
+    #[cfg(test)]
+    fn probe_prefix(self) -> &'static str {
+        match self {
+            Self::OnDoStore | Self::StateAccSeed => "stale-state",
+            Self::Read { .. } => "stale-read",
+        }
+    }
+
+    /// The gap label naming this use in a report.
+    fn label(self) -> &'static str {
+        match self {
+            Self::OnDoStore => "on:do:",
+            Self::StateAccSeed => "StateAcc seed",
+            Self::Read { site, .. } => site.label(),
+        }
+    }
+}
+
+/// BT-4180: where an actor-state read takes the actor's state map from
+/// ([`CoreErlangGenerator::actor_state_read_source`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ActorStateSource {
+    /// The live cell (`take()`): inside a bracketed region.
+    Cell,
+    /// A variable: a threaded `State` or a hybrid loop's pre-extracted field
+    /// parameter.
+    Var(String),
 }
 
 /// BT-4121: one guarded operator's request for its loop's bracket.
@@ -890,10 +975,10 @@ impl CoreErlangGenerator {
                         region: g.region,
                     }));
                 log.borrow_mut()
-                    .extend(stale_state_gaps.iter().map(|(_, g)| SiteRecord {
+                    .extend(stale_state_gaps.iter().map(|(kind, g)| SiteRecord {
                         site: g.site.site.clone(),
                         chain: g.site.chain.clone(),
-                        selector: format!("stale-state {}", g.selector),
+                        selector: format!("{} {}", kind.probe_prefix(), g.selector),
                         region: g.region,
                     }));
             });
@@ -940,19 +1025,11 @@ impl CoreErlangGenerator {
         );
         let stale_state_errors: Vec<VerifyError> = stale_state_gaps
             .iter()
-            .map(|(kind, g)| match kind {
-                StaleStateUseKind::OnDoStore => VerifyError::CatchWithoutStateRestore {
-                    defect: StateRestoreDefect::PreStateOverLiveCell,
-                    at: g.at,
-                },
-                StaleStateUseKind::StateAccSeed => {
-                    VerifyError::StaleStateSeedInBracketedLoop { at: g.at }
-                }
-            })
+            .map(|(kind, g)| kind.verify_error(g.at))
             .collect();
         self.report_threaded_ir_verify_errors(
             &stale_state_errors,
-            "use of a bracketing loop's entry State inside the loop",
+            "use of a bracketing loop's entry State, or an actor-state read in a bracketed loop not sourced from take()",
             module_span,
         );
     }
@@ -1333,6 +1410,14 @@ impl CoreErlangGenerator {
     /// reported; a use of any other `State` was bound inside the loop, from
     /// the cell. Where the loop does not bracket, the uses pass to the
     /// enclosing marker, whose bracket (if any) covers them too.
+    ///
+    /// BT-4180: the same uses carry every actor-state read that did not take
+    /// the cell ([`StaleStateUseKind::Read`], recorded by
+    /// [`Self::actor_state_read_source`]); under a bracket each one is
+    /// reported, whatever variable it read, as
+    /// [`VerifyError::StaleReadInBracketedLoop`]. The outcome is this
+    /// checkout's, so a drift between the push-time prediction
+    /// ([`Self::guarded_op_take_reads`]) and the decision is caught too.
     pub(in crate::core_erlang) fn checkout_guarded_op_loop(
         &mut self,
         mut marker: GuardedOpLoopMarker,
@@ -1343,12 +1428,12 @@ impl CoreErlangGenerator {
         let entry_state = std::mem::take(&mut marker.entry_state);
         let checkout = self.checkout_guarded_op_loop_decision(marker, hybrid, at);
         if checkout == GuardedOpCheckout::Bracket {
-            for state_use in state_uses.into_iter().filter(|u| u.var == entry_state) {
-                let label = match state_use.kind {
-                    StaleStateUseKind::OnDoStore => "on:do:",
-                    StaleStateUseKind::StateAccSeed => "StateAcc seed",
-                };
-                let gap = self.make_unbracketed_send(label.to_string(), state_use.at);
+            for state_use in state_uses
+                .into_iter()
+                .filter(|u| u.kind.is_stale_under_bracket(&u.var, &entry_state))
+            {
+                let gap =
+                    self.make_unbracketed_send(state_use.kind.label().to_string(), state_use.at);
                 self.synced.stale_state_gaps.push((state_use.kind, gap));
             }
         } else if let Some(outer) = self.synced.guarded_op_loops.borrow_mut().last_mut() {
@@ -1373,6 +1458,104 @@ impl CoreErlangGenerator {
                 var: var.to_string(),
                 at,
             });
+        }
+    }
+
+    /// BT-4180: the one choke point every actor-state read site asks for its
+    /// source (ADR 0137 §4b). Answers [`ActorStateSource::Cell`] inside a
+    /// stateless loop that brackets guarded operators, or nested in one
+    /// ([`Self::guarded_op_take_reads`], the emitter's decision); else, for
+    /// a read of `field` in a hybrid loop that pre-extracted it, that
+    /// parameter. `None` leaves the source to the site's own context rule,
+    /// which for an actor instance method is [`Self::actor_state_read_var`].
+    ///
+    /// A source other than the cell is recorded on the innermost loop
+    /// marker (when the frame holds no whole `State`), so the checkout of a
+    /// loop that brackets reports it from its own decision
+    /// ([`VerifyError::StaleReadInBracketedLoop`]). A site must not call
+    /// `current_field_read_state_var`, `guarded_op_take_reads` or the
+    /// hybrid parameter map itself (`tests/stale_read_sites.rs` checks it).
+    pub(in crate::core_erlang) fn actor_state_read_source(
+        &self,
+        site: StateReadSite,
+        field: Option<&str>,
+        at: Span,
+    ) -> Option<ActorStateSource> {
+        #[cfg(test)]
+        let faulted = FAULT_ENTRY_STATE_READS.with(std::cell::Cell::get);
+        #[cfg(not(test))]
+        let faulted = false;
+        if self.guarded_op_take_reads() && !faulted {
+            return Some(ActorStateSource::Cell);
+        }
+        if let Some(field) = field
+            && self.loop_mode.in_hybrid_loop
+            && let Some(param) = self.loop_mode.hybrid_readonly_field_params.get(field)
+        {
+            self.note_state_read(site, StaleReadDefect::PreExtractedParam, param, at);
+            return Some(ActorStateSource::Var(param.clone()));
+        }
+        None
+    }
+
+    /// BT-4180: the threaded `State` variable an actor-state read at `site`
+    /// reads when [`Self::actor_state_read_source`] left it to the context
+    /// (`current_field_read_state_var`), recorded like every other source
+    /// that is not the cell.
+    pub(in crate::core_erlang) fn actor_state_read_var(
+        &self,
+        site: StateReadSite,
+        at: Span,
+    ) -> String {
+        let var = self.current_field_read_state_var();
+        self.note_state_read(site, StaleReadDefect::ThreadedState, &var, at);
+        var
+    }
+
+    /// BT-4180: [`Self::actor_state_read_source`] for a read of no
+    /// particular field, falling back to [`Self::actor_state_read_var`].
+    pub(in crate::core_erlang) fn actor_state_source(
+        &self,
+        site: StateReadSite,
+        at: Span,
+    ) -> ActorStateSource {
+        self.actor_state_read_source(site, None, at)
+            .unwrap_or_else(|| ActorStateSource::Var(self.actor_state_read_var(site, at)))
+    }
+
+    /// BT-4180: the `State` in scope for a site that stores it rather than
+    /// reads from it, recording nothing: a loop bracket's pre-store (it runs
+    /// at region entry, before any slow path), an `on:do:` boundary's
+    /// pre-region `State` (noted where the boundary picks `PreState`,
+    /// [`Self::on_do_cell_boundary`]) and a loop plan's initial state (noted
+    /// where a lowering emits it as a source).
+    pub(in crate::core_erlang) fn state_var_to_store(&self) -> String {
+        self.current_field_read_state_var()
+    }
+
+    /// BT-4180: records a read source that is not the cell on the innermost
+    /// loop marker. A read in a frame that holds a whole `State` (a
+    /// `StateAcc` loop or fold nested in the region) records nothing: that
+    /// frame's state was seeded from the cell, which the seed's own note
+    /// ([`StaleStateUseKind::StateAccSeed`]) checks.
+    pub(in crate::core_erlang) fn note_state_read(
+        &self,
+        site: StateReadSite,
+        defect: StaleReadDefect,
+        var: &str,
+        at: Span,
+    ) {
+        if self.loop_holds_no_whole_state() {
+            let region = self.user_code_region();
+            self.note_threaded_state_use(
+                StaleStateUseKind::Read {
+                    site,
+                    defect,
+                    region,
+                },
+                var,
+                at,
+            );
         }
     }
 

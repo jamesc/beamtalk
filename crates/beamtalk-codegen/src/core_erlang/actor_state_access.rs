@@ -32,7 +32,8 @@
 
 use super::CoreErlangGenerator;
 use super::erlang_types::ErlangVar;
-use super::threaded_ir::CellBoundary;
+use super::synced_call::ActorStateSource;
+use super::threaded_ir::{CellBoundary, StateReadSite};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Block;
@@ -195,12 +196,20 @@ impl CoreErlangGenerator {
         self.actor_closure.as_ref().map(ActorClosure::capture)
     }
 
-    /// Runs `build_fun` (which generates the `fun` of a block literal) in cell
-    /// mode and binds the closure's capture around the result when it is nested
-    /// in another closure (see the module doc). Outside an actor instance
-    /// method nothing changes.
+    /// Runs `build_fun` (which generates the `fun` of a block literal at
+    /// `at`) in cell mode and binds the closure's capture around the result
+    /// when it is nested in another closure (see the module doc). Outside an
+    /// actor instance method nothing changes.
+    ///
+    /// BT-4180: a closure created inside a stateless loop that brackets
+    /// guarded operators captures the cell (`take()`) at creation, bound
+    /// around the `fun`: the slow paths of earlier iterations wrote the cell
+    /// past the loop-entry `State`, and a capture of that `State` would show
+    /// the closure's away-from-home reads the actor as of loop entry. The
+    /// source is the read choke point's ([`Self::actor_state_source`]).
     pub(in crate::core_erlang) fn with_actor_closure(
         &mut self,
+        at: Span,
         build_fun: impl FnOnce(&mut Self) -> super::Result<Document<'static>>,
     ) -> super::Result<Document<'static>> {
         if !self.cell_closures_apply() {
@@ -229,12 +238,36 @@ impl CoreErlangGenerator {
                 fun
             ]);
         }
-        // The method's own current `State` version, where the `fun` is created.
-        let capture = self.current_field_read_state_var();
-        self.actor_closure = Some(ActorClosure::new(capture));
-        let built = build_fun(self);
-        self.actor_closure = None;
-        built
+        // The method's own current `State` version, where the `fun` is
+        // created — or, in a bracketed region, the cell at creation.
+        match self.actor_state_source(StateReadSite::ClosureCapture, at) {
+            ActorStateSource::Var(capture) => {
+                self.actor_closure = Some(ActorClosure::new(capture));
+                let built = build_fun(self);
+                self.actor_closure = None;
+                built
+            }
+            ActorStateSource::Cell => {
+                let capture = self.fresh_temp_var("ASCapture");
+                let inner = ActorClosure::new(capture.clone());
+                let used = std::rc::Rc::clone(&inner.used);
+                self.actor_closure = Some(inner);
+                let built = build_fun(self);
+                self.actor_closure = None;
+                let fun = built?;
+                if !used.get() {
+                    return Ok(fun);
+                }
+                Ok(docvec![
+                    "let ",
+                    leaf::var(capture),
+                    " = ",
+                    super::threaded_ir::cell_take_call(),
+                    " in ",
+                    fun
+                ])
+            }
+        }
     }
 
     /// `beamtalk_actor_state:view(Self, Capture)`: the state map a read sees,

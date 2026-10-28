@@ -504,7 +504,7 @@ impl ThreadingPlan {
         // (and still valid) variable. Identical to every other
         // `current_state_var()` call site this issue already fixed; falls
         // through to the exact same value as before outside that one case.
-        let initial_state_var = generator.current_field_read_state_var();
+        let initial_state_var = generator.state_var_to_store();
 
         // Pre-analyze body once — reused across all strategy decisions.
         let body_analysis = block_analysis::analyze_block(body);
@@ -1281,6 +1281,19 @@ impl ThreadingPlan {
     /// is the loop's exit state. Without the flag the seed is the entry
     /// `State` exactly as before. Never seeds from the cell in a fresh-map
     /// frame (no callback installed one there).
+    /// BT-4180: notes that a lowering emits [`Self::initial_state_var`] as the
+    /// source of a state map (an exit-arm rebuild, a repack, a hybrid loop's
+    /// pre-extracted fields), for the checkout of an enclosing loop that
+    /// brackets: inside one that `State` is the loop-entry version.
+    pub(in crate::core_erlang) fn note_initial_state_read(&self, generator: &CoreErlangGenerator) {
+        generator.note_state_read(
+            crate::core_erlang::threaded_ir::StateReadSite::LoopPlanInitialState,
+            crate::core_erlang::threaded_ir::StaleReadDefect::ThreadedState,
+            &self.initial_state_var,
+            self.span,
+        );
+    }
+
     pub fn generate_exit_stateacc(
         &self,
         param_names: &[String],
@@ -1293,6 +1306,7 @@ impl ThreadingPlan {
             if seed_from_cell {
                 return docvec!["{'nil', ", super::super::threaded_ir::cell_take_call(), "}",];
             }
+            self.note_initial_state_read(generator);
             return docvec!["{'nil', ", leaf::var(self.initial_state_var.clone()), "}",];
         }
         let mut docs: Vec<Document<'static>> = Vec::new();
@@ -1322,6 +1336,7 @@ impl ThreadingPlan {
             ]);
             exit_var
         } else {
+            self.note_initial_state_read(generator);
             self.initial_state_var.clone()
         };
         for (var_name, param) in self.threaded_locals.iter().zip(param_names.iter()) {
@@ -1581,6 +1596,7 @@ impl ThreadingPlan {
                     self.span,
                 );
             }
+            self.note_initial_state_read(generator);
             self.initial_state_var.clone()
         };
         for var_name in &self.threaded_locals {

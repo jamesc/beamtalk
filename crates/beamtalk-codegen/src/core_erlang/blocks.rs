@@ -173,7 +173,7 @@ impl CoreErlangGenerator {
     /// ADR 0130 §5: a block literal that reads a class variable binds its
     /// creation-time capture around the `fun` ([`Self::with_class_var_capture`]).
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
-        self.with_actor_closure(|this| {
+        self.with_actor_closure(block.span, |this| {
             this.with_class_var_capture(block, |this| this.generate_block_fun(block))
         })
     }
@@ -330,7 +330,9 @@ impl CoreErlangGenerator {
         let analysis = super::block_analysis::analyze_block(block);
         if self.tier2_merged_for_analysis(&analysis) {
             return self.with_class_var_capture(block, |this| {
-                this.with_actor_closure(|this| this.generate_block_merged_fun(block, captured_vars))
+                this.with_actor_closure(block.span, |this| {
+                    this.generate_block_merged_fun(block, captured_vars)
+                })
             });
         }
         self.with_class_var_capture(block, |this| {
