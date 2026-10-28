@@ -53,11 +53,12 @@ use super::super::erlang_types::ErlangVar;
 use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
 };
+use super::super::synced_call::ActorStateSource;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
     self, BindOp, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars,
-    RebindFrame, RebindFrameKind, RenderCtx, ThreadedStmt, TryRegion, ValueRef, VersionPrefix,
-    VersionedVar,
+    RebindFrame, RebindFrameKind, RenderCtx, StateReadSite, ThreadedStmt, TryRegion, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::analysis::ThreadedFamilies;
@@ -590,7 +591,7 @@ impl CoreErlangGenerator {
 
         let handler_apply =
             Self::make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);
-        let pre_region_state = self.current_field_read_state_var();
+        let pre_region_state = self.state_var_to_store();
         let catch_boundary = self.on_do_catch_boundary(
             catch_vars,
             &pre_region_state,
@@ -736,8 +737,9 @@ impl CoreErlangGenerator {
         // the protected body of an `on:do:` producer: a loop, fold, conditional
         // or exception in it rebinds its locals into that frame.
         let arm = self.exception_arm_frame(&[body], true);
-        let current_state = self.exception_body_outer_state();
+        let (outer_prefix, current_state) = self.exception_body_outer_state(body.span);
         let (seed_doc, base_state) = self.seed_conditional_locals(&[body], &current_state);
+        let seed_doc = docvec![outer_prefix, seed_doc];
         let families = ThreadedFamilies::default();
         let outer_self = self.self_version();
         let mut fun_docs: Vec<Document<'static>> = Vec::new();
@@ -840,7 +842,16 @@ impl CoreErlangGenerator {
     /// context, where a real `State` parameter exists; in class-method or
     /// value-type context this produced a reference to a nonexistent
     /// variable (`erlc: unbound variable 'State'`).
-    fn exception_body_outer_state(&mut self) -> String {
+    ///
+    /// BT-4180: answered with a prefix the caller splices ahead of its seed:
+    /// inside a bracketed region (a loop-condition closure of a loop that
+    /// brackets guarded operators) the plain closure's state is the cell,
+    /// bound by the prefix (`let TakeOuter = take() in `), not the captured
+    /// entry `State`. [`Document::Nil`] everywhere else.
+    fn exception_body_outer_state(
+        &mut self,
+        at: beamtalk_core::source_analysis::Span,
+    ) -> (Document<'static>, String) {
         // ADR 0131 §2 (`MethodBody (REPL)` row): the REPL root threads its
         // bindings map, so the construct continues it (as a REPL conditional or
         // loop does) and its element 2 is the next bindings map.
@@ -850,16 +861,29 @@ impl CoreErlangGenerator {
         // ADR 0131 §2): its body has no state effect, so the scratch map is
         // private there as in a class method.
         if self.closure_scratch_continues_state(self.current_frame()) {
-            return self.current_field_read_state_var();
+            return match self.actor_state_source(StateReadSite::ExceptionBodyOuterState, at) {
+                ActorStateSource::Var(var) => (Document::Nil, var),
+                ActorStateSource::Cell => {
+                    let take_var = self.fresh_temp_var("TakeOuter");
+                    let prefix = docvec![
+                        "let ",
+                        leaf::var(take_var.clone()),
+                        " = ",
+                        threaded_ir::cell_take_call(),
+                        " in "
+                    ];
+                    (prefix, take_var)
+                }
+            };
         }
         let state_chain = self
             .rebind_frames
             .get(&self.current_frame())
             .is_none_or(|frame| frame.kind.extends_state_chain());
         if (self.in_actor_instance_context() && state_chain) || self.is_repl_mode() {
-            self.current_state_var()
+            (Document::Nil, self.current_state_var())
         } else {
-            "~{}~".to_string()
+            (Document::Nil, "~{}~".to_string())
         }
     }
 
@@ -912,7 +936,7 @@ impl CoreErlangGenerator {
         // Bind exception class
         let ex_class_code = self.expression_doc(ex_class)?;
         // Rename current state to StateAcc for uniform threading
-        let current_state = self.exception_body_outer_state();
+        let (outer_prefix, current_state) = self.exception_body_outer_state(receiver_block.span);
         // seed `__local__` keys for outer locals mutated by either the
         // try (receiver) block or the handler block — only one of the two ever
         // runs at a given call, so (mirroring `ifTrue:ifFalse:`'s two branches)
@@ -921,6 +945,7 @@ impl CoreErlangGenerator {
         // `maps:get/2` would hit a missing key.
         let (seed_doc, base_state) =
             self.seed_conditional_locals(&[receiver_block, handler_block], &current_state);
+        let seed_doc = docvec![outer_prefix, seed_doc];
         // ADR 0122 / BT-3506: decided from the AST BEFORE either arm is
         // generated, so both arms' return tuples agree on the shape even
         // though only one of them may actually contain the mutation — the
@@ -1011,7 +1036,7 @@ impl CoreErlangGenerator {
         // (A frame with no `State` chain holds a private scratch map as its outer
         // state; the cell's pre-region version is then the enclosing `State`.)
         let pre_region_state = if current_state.starts_with('~') {
-            self.current_field_read_state_var()
+            self.state_var_to_store()
         } else {
             current_state.clone()
         };
@@ -1259,7 +1284,7 @@ impl CoreErlangGenerator {
         let state_after_try = self.fresh_temp_var("StateAfterTry");
 
         // Rename current state to StateAcc
-        let current_state = self.exception_body_outer_state();
+        let (outer_prefix, current_state) = self.exception_body_outer_state(receiver_block.span);
         // seed `__local__` keys for outer locals mutated by the try
         // (receiver) block or the cleanup block — mirrors `on:do:`'s seeding
         // (see `generate_on_do_with_mutations`) so a local written only
@@ -1269,6 +1294,7 @@ impl CoreErlangGenerator {
         // here run sequentially rather than as alternatives.
         let (seed_doc, base_state) =
             self.seed_conditional_locals(&[receiver_block, cleanup_block], &current_state);
+        let seed_doc = docvec![outer_prefix, seed_doc];
         // ADR 0122 / BT-3506: see `generate_on_do_with_mutations` — decided
         // from the AST up front so every arm's return tuple agrees on the
         // shape.

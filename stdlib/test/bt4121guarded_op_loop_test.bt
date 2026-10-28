@@ -140,3 +140,16 @@ TestCase subclass: Bt4121GuardedOpLoopTest
   testFoldInLoopKeepsSlowPathWrites =>
     m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
     self assert: (self.a foldInLoop: m times: 3) equals: 3003
+
+  // BT-4180: a block created inside a bracketed loop and run in another
+  // process reads the slow-path writes made before its creation.
+  testBlockCreatedInBracketedLoopCapturesTheCell =>
+    runner := ClosureCellRunner spawn
+    blocks := self.a blocksWhileAdding: self.a items
+    self assert: (blocks collect: [:b | runner run: b]) equals: #(1, 2, 3)
+
+  testBlockCreatedInBracketedCountedLoopCapturesTheCell =>
+    runner := ClosureCellRunner spawn
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    b := self.a lastBlockWhileAdding: m times: 3
+    self assert: (runner run: b) equals: 3

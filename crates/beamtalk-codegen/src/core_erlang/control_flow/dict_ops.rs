@@ -86,7 +86,7 @@ impl CoreErlangGenerator {
             ]);
 
             // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.current_field_read_state_var();
+            let prestore_state = self.state_var_to_store();
             self.push_guarded_op_loop(body, None);
             self.push_scope();
             if let Some(param) = body.parameters.first() {
@@ -322,7 +322,7 @@ impl CoreErlangGenerator {
             ]);
 
             // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.current_field_read_state_var();
+            let prestore_state = self.state_var_to_store();
             self.push_guarded_op_loop(body, None);
             self.push_scope();
             if let Some(param) = body.parameters.first() {

@@ -444,7 +444,7 @@ impl CoreErlangGenerator {
         // BT-4121: the guarded-operator marker spans the body lowering.
         // `prestore_state` is the loop-entry `State` the pre-store captures
         // when the marker asks for the bracket.
-        let prestore_state = self.current_field_read_state_var();
+        let prestore_state = self.state_var_to_store();
         self.push_guarded_op_loop(body, None);
         self.push_scope();
 
@@ -565,6 +565,8 @@ impl CoreErlangGenerator {
         body: &Block,
         plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
+        // BT-4180: the pre-extraction reads every field from it.
+        plan.note_initial_state_read(self);
         let initial_state = plan.initial_state_var.clone();
 
         // Pre-extract ALL fields (readonly + mutated) before the letrec.

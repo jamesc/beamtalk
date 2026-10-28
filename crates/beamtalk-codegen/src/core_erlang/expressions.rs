@@ -19,7 +19,8 @@
 //! [`super::dispatch_codegen`].
 
 use super::control_flow::{Closure, FieldWriteSite};
-use super::threaded_ir::{self, ThreadedStmt, ValueRef};
+use super::synced_call::ActorStateSource;
+use super::threaded_ir::{self, StateReadSite, ThreadedStmt, ValueRef};
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -346,19 +347,22 @@ impl CoreErlangGenerator {
                     // the slow paths' writes — read the live cell. Checked
                     // before the hybrid params below (like the `self.field`
                     // path): a bracketing loop's parameters are stale too.
-                    if self.guarded_op_take_reads() {
-                        return Ok(guarded_op_live_field_read_doc(id.name.as_str()));
-                    }
-                    // In hybrid mode, check if this is a read-only field
-                    // accessed implicitly (bare name without self. prefix).
-                    if self.loop_mode.in_hybrid_loop {
-                        if let Some(param_var) = self
-                            .loop_mode
-                            .hybrid_readonly_field_params
-                            .get(id.name.as_str())
-                        {
-                            return Ok(leaf::var(param_var.clone()));
+                    // In hybrid mode, a read-only field accessed implicitly
+                    // (bare name without self. prefix) reads its
+                    // pre-extracted parameter. BT-4180: both decided (and
+                    // recorded) by the read choke point.
+                    match self.actor_state_read_source(
+                        StateReadSite::ImplicitFieldRead,
+                        Some(id.name.as_str()),
+                        id.span,
+                    ) {
+                        Some(ActorStateSource::Cell) => {
+                            return Ok(guarded_op_live_field_read_doc(id.name.as_str()));
                         }
+                        Some(ActorStateSource::Var(param_var)) => {
+                            return Ok(leaf::var(param_var));
+                        }
+                        None => {}
                     }
                     // Field access from state/self
                     // Context determines which variable to use
@@ -373,7 +377,7 @@ impl CoreErlangGenerator {
                             // direct-params-capture rules — see its own doc
                             // comment (CLAUDE.md: no duplicate "mirrors" of
                             // that same rule here).
-                            self.current_field_read_state_var()
+                            self.actor_state_read_var(StateReadSite::ImplicitFieldRead, id.span)
                         }
                     };
                     // ADR 0081 Phase 1: in REPL context a free
@@ -683,6 +687,24 @@ impl CoreErlangGenerator {
     /// [`Self::generate_late_field_read`] form — `maps:get`'s `badkey` crash
     /// on the slot's absent key would be strictly worse than the
     /// `UninitializedStateError` ADR 0124 §3 specifies.
+    /// BT-4121: a read of field `name` over the live cell (`take()`), the
+    /// guarded form for a `late` field.
+    fn cell_take_field_read_doc(
+        &mut self,
+        class_name: &str,
+        name: &str,
+        is_late: bool,
+    ) -> Document<'static> {
+        if !is_late {
+            return guarded_op_live_field_read_doc(name);
+        }
+        let declared_type = self
+            .class_hierarchy
+            .as_ref()
+            .and_then(|h| h.state_field_type(class_name, name));
+        self.generate_late_field_read_of(name, super::threaded_ir::cell_take_call(), declared_type)
+    }
+
     pub(super) fn generate_field_access(
         &mut self,
         receiver: &Expression,
@@ -720,34 +742,26 @@ impl CoreErlangGenerator {
                 // operators, the entry `State` is stale for the slow paths'
                 // writes — read the live cell instead. (Never in hybrid
                 // mode: the mode selection routes those loops to `StateAcc`.)
-                if self.guarded_op_take_reads() {
-                    let cell = super::threaded_ir::cell_take_call();
-                    if is_late {
-                        let declared_type = self
-                            .class_hierarchy
-                            .as_ref()
-                            .and_then(|h| h.state_field_type(&class_name, field.name.as_str()));
-                        return Ok(self.generate_late_field_read_of(
-                            field.name.as_str(),
-                            cell,
-                            declared_type,
-                        ));
-                    }
-                    return Ok(guarded_op_live_field_read_doc(field.name.as_str()));
-                }
-                // In hybrid mode, read-only fields are pre-extracted before the letrec.
-                // Use the direct parameter variable instead of generating maps:get every
+                // In hybrid mode, read-only fields are pre-extracted before the letrec:
+                // use the direct parameter variable instead of generating maps:get every
                 // iteration. A `late` field is never pre-extracted this way (loop_mode.rs
                 // withholds it from `hybrid_readonly_field_params`, ADR 0124 §4b), so this
                 // never fires for one — the guarded read below runs instead, per-iteration.
-                if self.loop_mode.in_hybrid_loop {
-                    if let Some(param_var) = self
-                        .loop_mode
-                        .hybrid_readonly_field_params
-                        .get(field.name.as_str())
-                    {
-                        return Ok(leaf::var(param_var.clone()));
+                // BT-4180: both decided (and recorded) by the read choke point.
+                match self.actor_state_read_source(
+                    StateReadSite::FieldRead,
+                    Some(field.name.as_str()),
+                    field.span,
+                ) {
+                    Some(ActorStateSource::Cell) => {
+                        return Ok(self.cell_take_field_read_doc(
+                            &class_name,
+                            field.name.as_str(),
+                            is_late,
+                        ));
                     }
+                    Some(ActorStateSource::Var(param_var)) => return Ok(leaf::var(param_var)),
+                    None => {}
                 }
                 // Use appropriate variable based on context. Actor uses
                 // `current_field_read_state_var` (not `current_state_var`
@@ -775,7 +789,9 @@ impl CoreErlangGenerator {
                 self.note_tier2_fun_body_field_read(field.name.as_str(), field.span);
                 let state_var = match self.context {
                     super::CodeGenContext::ValueType => self.current_self_var(),
-                    super::CodeGenContext::Actor => self.current_field_read_state_var(),
+                    super::CodeGenContext::Actor => {
+                        self.actor_state_read_var(StateReadSite::FieldRead, field.span)
+                    }
                     super::CodeGenContext::Repl => "State".to_string(),
                 };
                 if is_late {

@@ -342,3 +342,26 @@ Actor subclass: Bt4121TallyActor
         #(1) do: [:i | ((k == k) ifTrue: [t := t + 1])]
       ]
     (self.count * 1000) + t
+
+  // BT-4180: a block created in each iteration of a bracketed loop captures
+  // the cell at creation, so run away from home it reads the count the slow
+  // paths had written by then (not the loop-entry `State`).
+  blocksWhileAdding: items =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    items
+      collect: [:m |
+        acc := acc + m
+        [self.count]
+      ]
+
+  // Same, for a counted loop keeping the last iteration's block.
+  lastBlockWhileAdding: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    b := nil
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        b := [self.count]
+      ]
+    b

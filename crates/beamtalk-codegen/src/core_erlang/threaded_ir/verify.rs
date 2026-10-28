@@ -487,6 +487,34 @@ pub(in crate::core_erlang) enum VerifyError {
     /// [`StateRestoreDefect::PreStateOverLiveCell`].
     StaleStateSeedInBracketedLoop { at: Span },
 
+    /// BT-4180 (ADR 0137 §4b): an actor-state read source emitted inside a
+    /// **bracketed region** (the body and condition of a stateless loop
+    /// whose checkout bracketed guarded operators, plus everything lowered
+    /// inside it) was not the cell. The bracket's slow paths write the cell
+    /// past the loop-entry `State`, so a field read, a `^`'s carried state,
+    /// an actor closure's creation-time capture or a nested loop's exit seed
+    /// taken from a threaded `State` variable or a hybrid loop's
+    /// pre-extracted field parameter answers the actor as of loop entry,
+    /// silently dropping earlier iterations' writes.
+    ///
+    /// Each read site records the source it emitted on the innermost loop
+    /// marker through one choke point
+    /// (`CoreErlangGenerator::actor_state_read_source`); the records travel
+    /// outward with the marker's other threaded-`State` uses and the loop
+    /// checkout that brackets reports every one taken in a frame that holds
+    /// no whole `State`, from its own decision (never from the push-time
+    /// prediction `guarded_op_take_reads` that chose the source). A read in
+    /// a whole-`State` frame nested in the region (a `StateAcc` loop or
+    /// fold) is exempt: that frame's seed is the cell, checked as
+    /// [`Self::StaleStateSeedInBracketedLoop`]. A read inside an actor
+    /// closure goes through the cell view and records nothing.
+    StaleReadInBracketedLoop {
+        site: StateReadSite,
+        defect: StaleReadDefect,
+        region: UserCodeRegion,
+        at: Span,
+    },
+
     /// BT-4122 (ADR 0137 Tier 2 merge): a field read from a Tier 2 block's
     /// `StateAcc`. After the merge a Tier 2 `StateAcc` carries only locals —
     /// fields go through the cell — so a Tier 2 fun body accessing fields
@@ -644,6 +672,64 @@ pub(in crate::core_erlang) enum CatchRestoreDefect {
     /// An NLR pass-through shape is missing before the non-NLR clause (it is
     /// absent, or ordered after it): a `^` of that shape would be restored.
     NlrArmNotBeforeRestore(NlrThrowShape),
+}
+
+/// BT-4180: the codegen site that emitted an actor-state read source
+/// ([`VerifyError::StaleReadInBracketedLoop`]). Every site that hands a
+/// lowering the actor's state map to read from routes through
+/// `CoreErlangGenerator::actor_state_read_source`, which records it. (An
+/// `on:do:` boundary's pre-region `State` is a store, noted where the
+/// boundary is chosen and reported as
+/// [`StateRestoreDefect::PreStateOverLiveCell`]; a `StateAcc` producer's
+/// seed is [`VerifyError::StaleStateSeedInBracketedLoop`].)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum StateReadSite {
+    /// `self.x` (a `late` field included).
+    FieldRead,
+    /// A bare field name (the identifier fallback).
+    ImplicitFieldRead,
+    /// A `^`'s carried state and its pre-throw store.
+    NlrThrowState,
+    /// The creation-time capture of an actor closure (`with_actor_closure`):
+    /// what its reads see away from home.
+    ClosureCapture,
+    /// The state an `on:do:`/`ensure:` body continues in a plain closure
+    /// frame (`exception_body_outer_state`).
+    ExceptionBodyOuterState,
+    /// The scratch seed of a conditional in a plain closure frame
+    /// (`seed_scratch_locals`, `ScratchStart::Fresh`).
+    BranchScratchSeed,
+    /// A loop plan's initial state where a lowering emits it as a source: a
+    /// nested loop's exit-arm rebuild or repack seed, or a hybrid loop's
+    /// pre-extracted fields.
+    LoopPlanInitialState,
+}
+
+impl StateReadSite {
+    /// The name the invariant probe and reports use.
+    pub(in crate::core_erlang) const fn label(self) -> &'static str {
+        match self {
+            Self::FieldRead => "field-read",
+            Self::ImplicitFieldRead => "implicit-field-read",
+            Self::NlrThrowState => "nlr-throw-state",
+            Self::ClosureCapture => "closure-capture",
+            Self::ExceptionBodyOuterState => "exception-body-outer-state",
+            Self::BranchScratchSeed => "branch-scratch-seed",
+            Self::LoopPlanInitialState => "loop-plan-initial-state",
+        }
+    }
+}
+
+/// BT-4180: which stale source a [`VerifyError::StaleReadInBracketedLoop`]
+/// read took.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum StaleReadDefect {
+    /// A threaded `State` variable: the loop-entry `State`, the captured
+    /// pre-loop state of a direct-params loop or tuple-accumulator fold
+    /// (BT-3562, BT-4178), or any other state map name.
+    ThreadedState,
+    /// A hybrid loop's pre-extracted field parameter.
+    PreExtractedParam,
 }
 
 /// What is wrong with the cell half of an [`ThreadedStmt::OnDoCatch`] node
