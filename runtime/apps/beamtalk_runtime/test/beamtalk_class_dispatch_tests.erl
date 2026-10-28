@@ -29,7 +29,7 @@ Test groups:
   15. metaclass_send extended — not_found, dead pid
   16. try_class_chain_fallthrough — Class chain dispatch
   17. handle_class_method_call/6 — class-side extension dispatch
-  18. class_self_dispatch/3 & class_self_dispatch_local/3 — self-send
+  18. class_self_send/3 & class_self_dispatch_local/3 — self-send
       class-side extension dispatch
 """.
 
@@ -2575,14 +2575,14 @@ class_send_and_metaclass_extension_e2e_test_() ->
     end}.
 
 %%% ============================================================================
-%%% 18. class_self_dispatch/3 & class_self_dispatch_local/3 — self-send
+%%% 18. class_self_send/3 & class_self_dispatch_local/3 — self-send
 %%%     class-side extension dispatch
 %%%
 %%% External class-side sends (`Target sel` / `Target class sel`) consult
 %%% beamtalk_extensions (see section 17). A `self extensionSel` send from
 %%% inside another class method of the SAME class must reach the same
 %%% registry too, rather than falling straight to the superclass-chain walk
-%%% (`class_self_dispatch/3`) or the local runtime-method lookup
+%%% (`class_self_send/3`) or the local runtime-method lookup
 %%% (`class_self_dispatch_local/3`) and raising does_not_understand. These
 %%% tests drive both functions directly against a real
 %%% beamtalk_extensions:register/4 registration, mirroring section 17's
@@ -2592,9 +2592,9 @@ class_send_and_metaclass_extension_e2e_test_() ->
 class_self_dispatch_extension_test_() ->
     {setup, fun setup_class_self_extension/0, fun teardown_class_self_extension/1, fun(_) ->
         [
-            {"class_self_dispatch/3 finds an extension on the class's own tag",
+            {"class_self_send/3 finds an extension on the class's own tag",
                 fun test_class_self_dispatch_extension_found/0},
-            {"class_self_dispatch/3 extension writes go to the live home",
+            {"class_self_send/3 extension writes go to the live home",
                 fun test_class_self_dispatch_extension_threads_class_vars/0},
             {"a crashing self-dispatched extension surfaces the raised error, not a raw exit",
                 fun test_class_self_dispatch_extension_crash_surfaces_error/0}
@@ -2618,7 +2618,7 @@ teardown_class_self_extension(_) ->
     ),
     ok.
 
-%% class_self_dispatch/3 needs no running class gen_server — the extension
+%% class_self_send/3 needs no running class gen_server — the extension
 %% probe only reads the beamtalk_extensions ETS table and (for the module,
 %% falling back to ClassName) beamtalk_class_metadata, both safe on an
 %% unregistered class name.
@@ -2627,7 +2627,7 @@ test_class_self_dispatch_extension_found() ->
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     Fun = fun(_Args, _Self) -> from_self_ext end,
     ok = beamtalk_extensions:register(ClassTag, selfExt, Fun, test),
-    Result = beamtalk_class_dispatch:class_self_dispatch(ClassName, selfExt, []),
+    Result = beamtalk_class_dispatch:class_self_send(ClassName, selfExt, []),
     %% ADR 0130 §3: the bare result, no class_var_result wrapper.
     ?assertEqual(from_self_ext, Result).
 
@@ -2644,8 +2644,8 @@ test_class_self_dispatch_extension_threads_class_vars() ->
     Key = beamtalk_class_vars:key(ClassName),
     ok = beamtalk_class_vars:install(Key, #{count => 0}),
     try
-        ?assertEqual(1, beamtalk_class_dispatch:class_self_dispatch(ClassName, selfBump, [])),
-        ?assertEqual(2, beamtalk_class_dispatch:class_self_dispatch(ClassName, selfBump, [])),
+        ?assertEqual(1, beamtalk_class_dispatch:class_self_send(ClassName, selfBump, [])),
+        ?assertEqual(2, beamtalk_class_dispatch:class_self_send(ClassName, selfBump, [])),
         ?assertEqual(#{count => 2}, erlang:get(Key))
     after
         beamtalk_class_vars:uninstall(Key)
@@ -2665,13 +2665,13 @@ test_class_self_dispatch_extension_crash_surfaces_error() ->
     ok = beamtalk_extensions:register(ClassTag, crashSelfExt, Fun, test),
     ?assertError(
         bt3198_deliberate_crash,
-        beamtalk_class_dispatch:class_self_dispatch(ClassName, crashSelfExt, [])
+        beamtalk_class_dispatch:class_self_send(ClassName, crashSelfExt, [])
     ).
 
 class_self_dispatch_extension_priority_test_() ->
     {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
         [
-            {"class_self_dispatch/3 checks the extension before walking the superclass chain",
+            {"class_self_send/3 checks the extension before walking the superclass chain",
                 fun test_class_self_dispatch_extension_priority_over_inherited/0},
             {"class_self_dispatch_local/3 checks the extension before its own runtime class method",
                 fun test_class_self_dispatch_local_extension_priority_over_runtime_fun/0}
@@ -2705,7 +2705,7 @@ test_class_self_dispatch_extension_priority_over_inherited() ->
         %% Sanity: without an extension, the inherited method wins via the chain.
         ?assertEqual(
             from_inherited,
-            beamtalk_class_dispatch:class_self_dispatch(ChildName, shared, [])
+            beamtalk_class_dispatch:class_self_send(ChildName, shared, [])
         ),
         ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
         ExtFun = fun(_Args, _Self) -> from_extension end,
@@ -2713,7 +2713,7 @@ test_class_self_dispatch_extension_priority_over_inherited() ->
         try
             ?assertEqual(
                 from_extension,
-                beamtalk_class_dispatch:class_self_dispatch(ChildName, shared, [])
+                beamtalk_class_dispatch:class_self_send(ChildName, shared, [])
             )
         after
             beamtalk_extensions:unregister(ChildName, shared, true)
@@ -2821,7 +2821,8 @@ test_class_super_dispatch_skips_own_extension() ->
             ChildTag, shared, fun(_Args, _Self) -> from_own_extension end, test
         ),
         try
-            %% `class_self_dispatch/4` would answer the child's own extension.
+            %% A self-send (`class_self_send/3`) would answer the child's own
+            %% extension; `super` must not.
             ?assertEqual(
                 from_parent_method,
                 beamtalk_class_dispatch:class_super_dispatch(ChildName, shared, [], ChildTag)

@@ -7,8 +7,8 @@
 // anywhere in this class or its ancestors — the paired test registers it
 // as a class-side extension (via beamtalk_extensions, ADR 0066) before
 // calling this method, so at runtime the self-send resolves through
-// beamtalk_class_dispatch:class_self_dispatch/4. Before BT-3198, that
-// function never consulted the extensions registry and this always raised
+// beamtalk_class_dispatch:class_self_send/3. Before BT-3198, the
+// self-dispatch path never consulted the extensions registry and this always raised
 // does_not_understand.
 //
 // See test/class_self_dispatch_extension_test.bt for the test.

@@ -24,8 +24,6 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     class_send/3,
     lookup_direct_call/3,
     lookup_direct_constructor/3,
-    class_self_dispatch/3,
-    class_self_dispatch/4,
     class_super_dispatch/4,
     class_self_send/3,
     class_self_direct_ok/4,
@@ -296,75 +294,6 @@ handle_class_self_call(Selector) ->
     beamtalk_error:raise(Error1).
 
 -doc """
-Dispatch an inherited class method from inside a class method body.
-
-Codegen emits a call to this helper for every class-method self-send
-whose selector is not a local class method, a slot constructor, an
-instantiation intrinsic, or one of the auto-generated 0-arity exports.
-
-Checks the extension registry (keyed under the metaclass tag,
-`class_object_tag(ClassName)`) BEFORE the superclass chain — mirroring
-`handle_class_method_call/6`'s "extension checked before local
-method table / chain" order, so a class-side extension registered on
-`ClassName`'s own metaclass tag is reachable via `self extensionSel` from
-inside another class method of the same class, not just via an external
-`Target sel` / `Target class sel` send. Extensions are never inherited
-(same rule the external-dispatch path established), so only
-`ClassName`'s own tag is checked here — not walked up the chain.
-
-When the extension registry has no match, walks the superclass chain via
-`find_class_method_in_chain/2`, then applies
-`DefiningModule:class_<Selector>(ClassSelf, Args...)` directly in
-the caller's process — mirroring the gen_server path's `invoke_class_method/7`
-minus the `{reply, ...}` wrapping and the `test_spawn` branch (which only
-fires for `TestCase>>runAll` / `run:` dispatched from an external caller, not
-from inside a class method).
-
-`ClassSelf#beamtalk_object.class_mod` is set to the *defining* module
-so Newspeak-style self-sends inside the inherited method resolve against
-the class that actually contains the code (same rule as the gen_server
-path, `invoke_class_method/7`).
-
-Returns the plain `Result` (ADR 0130 §3: class methods neither take nor
-return class variables; the home installed by the enclosing invocation is
-already live in this process). Raises
-structured `does_not_understand` if no ancestor and no extension defines
-the selector.
-""".
--spec class_self_dispatch(class_name(), selector(), list()) -> term() | no_return().
-class_self_dispatch(ClassName, Selector, Args) ->
-    %% The receiver is `ClassName` itself, so one tag serves as both the
-    %% extension key and the receiver's tag (BT-3766: one derivation per send).
-    Tag = receiver_tag(ClassName),
-    class_self_dispatch(ClassName, Tag, Selector, Args, Tag).
-
--doc """
-`class_self_dispatch/3` with the live receiver's metaclass tag
-(`element(2, ClassSelf)`), so a subclass receiver runs the found method under
-its own class-variable key rather than under a `ClassSelf` rebuilt from
-`ClassName`. Like `/3` it checks `ClassName`'s own class-side extensions
-first, so it is not `super`: a class-side `super` uses
-`class_super_dispatch/4`.
-""".
--spec class_self_dispatch(class_name(), selector(), list(), atom()) -> term() | no_return().
-class_self_dispatch(ClassName, Selector, Args, ReceiverTag) when
-    is_list(Args), is_atom(ReceiverTag)
-->
-    %% `ReceiverTag` can differ from `ClassName`'s own tag here (the ClassBuilder
-    %% `super` path above), so the extension key is derived separately.
-    class_self_dispatch(ClassName, receiver_tag(ClassName), Selector, Args, ReceiverTag).
-
--spec class_self_dispatch(class_name(), atom(), selector(), list(), atom()) ->
-    term() | no_return().
-class_self_dispatch(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
-    case check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) of
-        {ok, Outcome} ->
-            Outcome;
-        not_found ->
-            class_self_dispatch_chain(ClassName, Selector, Args, ReceiverTag)
-    end.
-
--doc """
 A class-side `super` send (BT-4001): `super Selector` in a class method (or
 class-side extension, or ClassBuilder class-method fun) of `ClassName`.
 
@@ -396,6 +325,13 @@ class_super_dispatch(ClassName, Selector, Args, ReceiverTag) when
                     Outcome;
                 %% Unregistered between the probe and the call: the ancestor's
                 %% own class methods (then its ancestors') answer instead.
+                %% `find_class_method_from_class/2` walks class methods only,
+                %% so a higher ancestor's class-side extension is not
+                %% re-probed on this path. That is harmless: the send raced a
+                %% concurrent unregister, so either registry snapshot is a
+                %% valid answer, the walk still starts at `AncestorName`
+                %% (never `ClassName`, so no self-recursion), and the next
+                %% send sees the settled registry through the full probe.
                 not_found ->
                     class_self_dispatch_chain(
                         ClassName,
@@ -463,17 +399,28 @@ receiver_tag(ClassName) ->
     beamtalk_class_registry:class_object_tag(ClassName).
 
 -doc """
-Virtual class-side self-send (BT-3666): like `class_self_dispatch/3`, but the
-hierarchy walk starts at `ClassName` itself instead of its superclass.
+Virtual class-side self-send (BT-3666): `self Selector` from inside a class
+method, when the selector is not bound statically to a direct call.
+
+Checks `ClassName`'s own class-side extensions first (keyed under its
+metaclass tag; extensions are never inherited, so only that tag is checked),
+mirroring `handle_class_method_call/6`'s extension-before-method order, then
+walks the class-method hierarchy starting at `ClassName` itself and applies
+the found `DefiningModule:class_<Selector>` (or runtime class-method fun) in
+the caller's process via `apply_class_method_in_context/6`, with
+`ClassSelf#beamtalk_object.class_mod` set to the defining module.
 
 `ClassName` is the *receiving* class — the class named by `ClassSelf`, which
 for an inherited class method is a subclass of the class whose code is
 running. Starting at that class means an override of `Selector` (or a
 subclass-only implementation of a template-method hook) is found before the
 inherited definition, exactly as an instance-side self-send resolves.
-`class_self_dispatch/3` keeps its start-at-superclass walk (after checking
-`ClassName`'s own extensions); a class-side `super`, builder or compiled,
-uses `class_super_dispatch/4`, which never consults `ClassName` itself.
+A class-side `super`, builder or compiled, uses `class_super_dispatch/4`
+instead, which never consults `ClassName` itself.
+
+Returns the plain result (ADR 0130 §3) and raises a structured
+`does_not_understand` when neither an extension nor any class in the chain
+defines `Selector`.
 """.
 -spec class_self_send(class_name(), selector(), list()) -> term() | no_return().
 class_self_send(ClassName, Selector, Args) ->
@@ -526,10 +473,11 @@ class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
     false.
 
 -doc """
-The superclass-chain half of `class_self_dispatch/3`, factored out
-so `class_self_dispatch_local/3` can fall through to it directly after its
-own single extension check, instead of re-checking the (already-confirmed
-absent) extension a second time via a nested `class_self_dispatch/3` call.
+The superclass-chain walk shared by `class_self_dispatch_local/3`,
+`class_self_send/3` and `class_super_dispatch/4`: each does its own single
+extension check first, then falls through here. The `/4` form walks from
+`ClassName`'s superclass; the `/5` form applies a lookup result the caller
+already has.
 """.
 -spec class_self_dispatch_chain(class_name(), selector(), list(), atom()) ->
     term() | no_return().
@@ -573,7 +521,7 @@ anonymous funs with no `class_<sel>` module export, so a self-send inside such a
 fun cannot use the compiled direct-call path. It routes here instead.
 
 Checks the extension registry first (same tag/priority rule as
-`class_self_dispatch/3` above — extension before local method), then the
+`class_self_send/3` above — extension before local method), then the
 class's own runtime class-method fun (the retrieval store), and only falls
 back to `class_self_dispatch_chain/4` (super + inherited, walked from the
 superclass) when the selector is neither.
@@ -588,8 +536,12 @@ class_self_dispatch_local(ClassName, Selector, Args) ->
     class_self_dispatch_local(ClassName, Tag, Selector, Args, Tag).
 
 -doc """
-`class_self_dispatch_local/3` with the live receiver's metaclass tag; see
-`class_self_dispatch/4`.
+`class_self_dispatch_local/3` with the live receiver's metaclass tag
+(`element(2, ClassSelf)`), so a subclass receiver runs the found method under
+its own class-variable key rather than under a `ClassSelf` rebuilt from
+`ClassName`. Like `/3` it checks `ClassName`'s own class-side extensions
+first, so it is not `super`: a class-side `super` uses
+`class_super_dispatch/4`.
 """.
 -spec class_self_dispatch_local(class_name(), selector(), list(), atom()) ->
     term() | no_return().
@@ -626,10 +578,9 @@ class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
     end.
 
 -doc """
-Shared extension-registry probe for both `class_self_dispatch/3`
-and `class_self_dispatch_local/3` — a `self someSelector` send from inside
-another class method, checking whether `ClassName`'s own metaclass tag has a
-matching class-side extension (`beamtalk_extensions`, ADR 0066) before either
+Shared extension-registry probe for `class_self_send/3`,
+`class_self_dispatch_local/3` and `class_super_dispatch/4` — checking whether
+`ClassName`'s metaclass tag has a matching class-side extension (`beamtalk_extensions`, ADR 0066) before either
 function falls through to its local/inherited-method lookups. Mirrors
 `handle_class_method_call/6`'s priority order (extension before
 local method table).
@@ -651,9 +602,10 @@ check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
     %% `ClassTag` (`ClassName`'s own metaclass tag, derived once by the caller)
     %% picks the extension; `ReceiverTag` is the live receiver's metaclass tag,
     %% so the extension body reads the receiver's class-variable key. The two
-    %% are the same atom except on the ClassBuilder `super` path
-    %% (`class_self_dispatch/4`, `class_self_dispatch_local/4` with a subclass
-    %% receiver), where the caller passes them separately.
+    %% are the same atom except for a subclass receiver
+    %% (`class_self_dispatch_local/4`) or a `super` send that found the
+    %% extension on an ancestor (`class_super_dispatch/4`), where the caller
+    %% passes them separately.
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
         {ok, Fun} ->
             Module = self_dispatch_module(ClassName),
@@ -679,7 +631,8 @@ self_dispatch_module(ClassName) ->
 -doc """
 Adapt a `class_method_outcome()` from `apply_class_method_in_context/6` to the
 self-dispatch caller shape: raw value on success, structured raises on failure.
-Shared by `class_self_dispatch/3` and `class_self_dispatch_local/3`.
+Shared by `class_self_send/3`, `class_self_dispatch_local/3` and
+`class_super_dispatch/4`.
 """.
 -spec unwrap_self_dispatch_outcome(class_name(), selector(), class_method_outcome()) ->
     term() | no_return().
@@ -983,7 +936,7 @@ same function (`beamtalk_object_class:dispatch_class_method/5`).
 
 Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
 `self someSelector` send from inside another class method of the same
-class — `class_self_dispatch/3` / `class_self_dispatch_local/3`, below —
+class — `class_self_send/3` / `class_self_dispatch_local/3`, above —
 goes through `check_class_self_extension/5` instead, which checks the same
 registry under the same priority rule.
 
@@ -1197,7 +1150,7 @@ Shared core of class-method dispatch.
 Handles the TestCase `test_spawn` guard, constructs `ClassSelf` with
 `class_mod = DefiningModule`, applies the method, and classifies any
 errors into the structured variants in `class_method_outcome()`. Both
-`invoke_class_method/7` (gen_server path) and `class_self_dispatch/3`
+`invoke_class_method/7` (gen_server path) and `class_self_dispatch_chain/5`
 (self-send path) adapt the outcome to their own caller shapes.
 
 `{ok, Raw}` carries the method's bare result (ADR 0130 §3).
