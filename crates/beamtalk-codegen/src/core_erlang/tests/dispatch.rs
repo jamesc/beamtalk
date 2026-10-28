@@ -3812,7 +3812,7 @@ fn test_builder_super_and_self_send_pass_live_receiver_tag() {
     );
 }
 
-/// BT-4001: a `super` send in a compiled class method (not only a ClassBuilder
+/// BT-4001: a `super` send in a compiled class method (not only a `ClassBuilder`
 /// fun) walks the metaclass chain through `class_self_dispatch/4`, keyed on the
 /// defining class with the live receiver tag. It must never take the instance
 /// `beamtalk_dispatch:super/5` path, whose `Self`/`State` a class method does
