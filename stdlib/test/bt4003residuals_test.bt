@@ -1,0 +1,113 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// PIN-BUG BT-3947 (BT-4003): the residuals found during BT-3912, measured on a
+// BEAM in class, value-type and actor methods (the REPL column is
+// tests/repl-protocol/cases/bt4003_repl_returns.btscript). The shapes that
+// answered wrong silently or crashed are compile errors now (their rejection
+// tests are the `bt4003_*` tests in
+// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs); every
+// cell here is an accepted shape that answers right:
+//
+// 1. an `ensure:` cleanup reading a local the protected block wrote, when no
+//    error can follow the write (a permanent rule, ADR 0133);
+// 2. a `^` closure that reads only its own locals, or locals written before it;
+// 3. an actor fold that sends to `self` or writes a field, in the positions of
+//    a fold body measured right (class and value-type methods answer right
+//    everywhere; a value-type self-send never changes the caller's `self`);
+// 4. a `^` in a `do:` that threads a local and the actor's state.
+//
+// Fixtures: fixtures/bt4003residuals_actor.bt, fixtures/bt4003residuals_class.bt.
+
+TestCase subclass: Bt4003ResidualsTest
+  field: n = 0
+
+  vEnsureWriteLast: rec =>
+    t := 0
+    [t := 9] ensure: [rec record: t]
+    rec last
+
+  vEnsureRaiseBeforeWrite: rec =>
+    t := 0
+    [
+      [
+        1 / 0
+        t := 9
+      ] ensure: [rec record: t]
+    ] on: Error do: [:e | nil]
+    rec last
+
+  vClosureOwnLocalReturn =>
+    b := [:z |
+      w := z
+      #(1, 2)
+        do: [:k |
+          w := w + k
+          k == 2 ifTrue: [^w]
+        ]
+      -2
+    ]
+    b value: 10
+    -1
+
+  vClosureLocalWrittenBefore =>
+    t := 5
+    b := [^t]
+    b value
+    -1
+
+  vTupleAccDoReturn =>
+    t := 0
+    #(1, 2, 3)
+      do: [:x |
+        t := t + x
+        self.n := self.n + 1
+        x == 2 ifTrue: [^#(t, self.n)]
+      ]
+    -1
+
+  testEnsureWriteLast =>
+    self assert: (self vEnsureWriteLast: ClosureCellRecorder spawn) equals: 9
+    self assert: (Bt4003ResidualsClass ensureWriteLast: ClosureCellRecorder spawn) equals: 9
+    self assert: (Bt4003ResidualsActor spawn ensureWriteLast: ClosureCellRecorder spawn) equals: 9
+
+  testEnsureRaiseBeforeWrite =>
+    self assert: (self vEnsureRaiseBeforeWrite: ClosureCellRecorder spawn) equals: 0
+    self assert: (Bt4003ResidualsClass ensureRaiseBeforeWrite: ClosureCellRecorder spawn) equals: 0
+    self assert: (Bt4003ResidualsActor spawn ensureRaiseBeforeWrite: ClosureCellRecorder spawn) equals: 0
+
+  testClosureOwnLocalReturn =>
+    self assert: self vClosureOwnLocalReturn equals: 13
+    self assert: Bt4003ResidualsClass closureOwnLocalReturn equals: 13
+    self assert: Bt4003ResidualsActor spawn closureOwnLocalReturn equals: 13
+
+  testClosureLocalWrittenBefore =>
+    self assert: self vClosureLocalWrittenBefore equals: 5
+    self assert: Bt4003ResidualsClass closureLocalWrittenBefore equals: 5
+    self assert: Bt4003ResidualsActor spawn closureLocalWrittenBefore equals: 5
+
+  testActorStateFoldPositionsInAFoldBody =>
+    self assert: Bt4003ResidualsActor spawn stmtFoldInFold equals: 4
+    self assert: Bt4003ResidualsActor spawn assignInFold equals: 4
+    self assert: Bt4003ResidualsActor spawn fieldWriteStmtInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn collectReceiverInCollect equals: #(#(3, 4), 4)
+    self assert: Bt4003ResidualsActor spawn collectReceiverInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn selectReceiverInCollect equals: #(#(2, 2), 4)
+    self assert: Bt4003ResidualsActor spawn collectReceiverInTimes equals: 4
+    self assert: Bt4003ResidualsActor spawn collectReceiverInArmInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn injectOperandAtTop equals: #(4, 2)
+
+  testClassStateFoldAsAnOperandInAFoldBody =>
+    self assert: Bt4003ResidualsClass injectOperandInDo equals: 4
+    self assert: Bt4003ResidualsClass doReceiverInDo equals: 4
+    self assert: Bt4003ResidualsClass injectArgInCollect equals: #(#(3, 7), 4)
+
+  testReturnInATupleAccDo =>
+    self assert: self vTupleAccDoReturn equals: #(3, 2)
+    self assert: Bt4003ResidualsClass tupleAccDoReturn equals: 3
+    a := Bt4003ResidualsActor spawn
+    self assert: a tupleAccDoReturn equals: 3
+    self assert: a n equals: 2
+    b := Bt4003ResidualsActor spawn
+    self assert: b tupleAccDoReturnBump equals: #(3, 2)
+    self assert: b n equals: 2

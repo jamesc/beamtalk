@@ -1,0 +1,117 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4003: the actor column of stdlib/test/bt4003residuals_test.bt. Every
+// method is a shape the compiler accepts and that was measured answering right.
+
+Actor subclass: Bt4003ResidualsActor
+  state: n = 0
+  state: items = #(1, 2)
+
+  n => self.n
+
+  bump =>
+    self.n := self.n + 1
+    self.n
+
+  // Item 1: the write is the last thing the protected block does.
+  ensureWriteLast: rec =>
+    t := 0
+    [t := 9] ensure: [rec record: t]
+    rec last
+
+  // Item 1: the raise comes before the write.
+  ensureRaiseBeforeWrite: rec =>
+    t := 0
+    [
+      [
+        1 / 0
+        t := 9
+      ] ensure: [rec record: t]
+    ] on: Error do: [:e | nil]
+    rec last
+
+  // Item 2: a closure that returns its own local.
+  closureOwnLocalReturn =>
+    b := [:z |
+      w := z
+      #(1, 2)
+        do: [:k |
+          w := w + k
+          k == 2 ifTrue: [^w]
+        ]
+      -2
+    ]
+    b value: 10
+    -1
+
+  // Item 2: a closure whose local is written only before it.
+  closureLocalWrittenBefore =>
+    t := 5
+    b := [^t]
+    b value
+    -1
+
+  // Item 3: the accepted positions of a state fold in a fold body.
+  stmtFoldInFold =>
+    #(1, 2) do: [:x | self.items do: [:y | self bump]]
+    self.n
+
+  assignInFold =>
+    #(1, 2)
+      do: [:x |
+        q := self.items inject: 0 into: [:b :y | b + self bump]
+        q
+      ]
+    self.n
+
+  fieldWriteStmtInDo =>
+    #(1, 2) do: [:x | self.items do: [:y | self.n := self.n + 1]]
+    self.n
+
+  collectReceiverInCollect =>
+    r := #(1, 2) collect: [:x | x + (self.items collect: [:y | self bump]) size]
+    #(r, self.n)
+
+  collectReceiverInDo =>
+    #(1, 2) do: [:x | (self.items collect: [:y | self bump]) size]
+    self.n
+
+  selectReceiverInCollect =>
+    r := #(1, 2) collect: [:x | (self.items select: [:y | self bump > 0]) size]
+    #(r, self.n)
+
+  collectReceiverInTimes =>
+    2 timesRepeat: [(self.items collect: [:y | self bump]) size]
+    self.n
+
+  collectReceiverInArmInDo =>
+    #(1, 2) do: [:x |
+      x > 0 ifTrue: [(self.items collect: [:y | self bump]) size]
+    ]
+    self.n
+
+  injectOperandAtTop =>
+    r := 1 + (self.items inject: 0 into: [:b :y | b + self bump])
+    #(r, self.n)
+
+  // Item 4: `^` in a `do:` that threads a local and the state.
+  tupleAccDoReturn =>
+    t := 0
+    #(1, 2, 3)
+      do: [:x |
+        t := t + x
+        self.n := self.n + 1
+        x == 2 ifTrue: [^t]
+      ]
+    -1
+
+  tupleAccDoReturnBump =>
+    t := 0
+    #(1, 2, 3)
+      do: [:x |
+        t := t + x
+        self bump
+        x == 2 ifTrue: [^#(t, self.n)]
+      ]
+    -1

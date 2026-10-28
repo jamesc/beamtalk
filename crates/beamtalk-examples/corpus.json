@@ -584,6 +584,24 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-136",
+      "title": "What Works and What Doesn't (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "exception",
+        "mutate",
+        "mutation",
+        "raise",
+        "set",
+        "throw"
+      ],
+      "source": "// ❌ ERROR: if `self work` raises, the cleanup would see the old `count`\n[count := count + 1. self work] ensure: [log record: count]\n\n// ✅ Assign outside the protected block\ncount := count + 1\n[self work] ensure: [log record: count]\n\n// ✅ The write is the last thing the protected block does\nresult := nil\n[result := self work] ensure: [log record: result]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-137",
       "title": "Actor Blocks See Live State (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -639,7 +657,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-141",
+      "id": "docs-beamtalk-language-features-block-142",
       "title": "Custom Timeouts (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -663,7 +681,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-145",
+      "id": "docs-beamtalk-language-features-block-146",
       "title": "Static Typing of Actor Protocols (ADR 0104) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -678,7 +696,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-146",
+      "id": "docs-beamtalk-language-features-block-147",
       "title": "Caller-Process Class Method Dispatch (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -688,7 +706,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-147",
+      "id": "docs-beamtalk-language-features-block-148",
       "title": "Passing Blocks Through Class Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -712,7 +730,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-148",
+      "id": "docs-beamtalk-language-features-block-149",
       "title": "Class variables and blocks (ADR 0130) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -751,7 +769,33 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-149",
+      "id": "docs-beamtalk-language-features-block-15",
+      "title": "Immutability enforcement (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "exception",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "property",
+        "raise",
+        "set",
+        "subclassing",
+        "throw"
+      ],
+      "source": "// Compile error — rejected before the code runs:\n// Value subclass: BadPoint\n//   field: x = 0\n//   badSetX: v => self.x := v   ← error: Cannot assign to slot\n\n// Runtime error:\np := Point x: 1 y: 2\np fieldAt: #x put: 99   // raises: immutable_value",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-150",
       "title": "Class variables and blocks (ADR 0130) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -790,33 +834,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-15",
-      "title": "Immutability enforcement (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "exception",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "mutate",
-        "mutation",
-        "property",
-        "raise",
-        "set",
-        "subclassing",
-        "throw"
-      ],
-      "source": "// Compile error — rejected before the code runs:\n// Value subclass: BadPoint\n//   field: x = 0\n//   badSetX: v => self.x := v   ← error: Cannot assign to slot\n\n// Runtime error:\np := Point x: 1 y: 2\np fieldAt: #x put: 99   // raises: immutable_value",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-150",
+      "id": "docs-beamtalk-language-features-block-151",
       "title": "Class variables and blocks (ADR 0130) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -853,7 +871,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-151",
+      "id": "docs-beamtalk-language-features-block-152",
       "title": "Class variables and blocks (ADR 0130) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -882,7 +900,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-152",
+      "id": "docs-beamtalk-language-features-block-153",
       "title": "Actor-to-Actor Coordination (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -892,7 +910,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-153",
+      "id": "docs-beamtalk-language-features-block-154",
       "title": "Actor-to-Actor Coordination (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -902,7 +920,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-154",
+      "id": "docs-beamtalk-language-features-block-155",
       "title": "Defining a Server (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -932,7 +950,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-157",
+      "id": "docs-beamtalk-language-features-block-158",
       "title": "Timer Lifecycle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -972,7 +990,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-158",
+      "id": "docs-beamtalk-language-features-block-159",
       "title": "Message Timers (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -987,7 +1005,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-159",
+      "id": "docs-beamtalk-language-features-block-16",
+      "title": "Value equality (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "p1 := Point x: 3 y: 4\np2 := Point x: 3 y: 4\np1 == p2    // => true\n\np3 := Point x: 9 y: 9\np1 == p3    // => false\n\n// with*: result equals a freshly constructed object\n(p1 withX: 10) == (Point x: 10 y: 4)   // => true",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-160",
       "title": "Message Timers (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1017,22 +1050,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-16",
-      "title": "Value equality (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "p1 := Point x: 3 y: 4\np2 := Point x: 3 y: 4\np1 == p2    // => true\n\np3 := Point x: 9 y: 9\np1 == p3    // => false\n\n// with*: result equals a freshly constructed object\n(p1 withX: 10) == (Point x: 10 y: 4)   // => true",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-160",
+      "id": "docs-beamtalk-language-features-block-161",
       "title": "Continuations (continueWith:) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1061,7 +1079,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-161",
+      "id": "docs-beamtalk-language-features-block-162",
       "title": "Deferred Replies (deferReply) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1089,7 +1107,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-163",
+      "id": "docs-beamtalk-language-features-block-164",
       "title": "Static Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1110,7 +1128,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-164",
+      "id": "docs-beamtalk-language-features-block-165",
       "title": "Static Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1128,7 +1146,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-165",
+      "id": "docs-beamtalk-language-features-block-166",
       "title": "Static Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1161,7 +1179,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-166",
+      "id": "docs-beamtalk-language-features-block-167",
       "title": "Configuration Defaults (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1184,7 +1202,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-167",
+      "id": "docs-beamtalk-language-features-block-168",
       "title": "Instance configuration and start args (ADR 0135) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1213,7 +1231,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-168",
+      "id": "docs-beamtalk-language-features-block-169",
       "title": "Instances and arguments (ADR 0135) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1228,35 +1246,6 @@
         "supervision"
       ],
       "source": "a := AcceptorSupervisor spawnWith: cfg1\nb := AcceptorSupervisor spawnWith: cfg2\na == b                                    // => false\nAcceptorSupervisor current                // => nil   (spawned instances are not \"current\")\n(a args at: #port)                        // => cfg1's port\na stop                                    // b keeps running\n\nhttp := (ServerSupervisor spawnWith: cfg as: #http_server) unwrap\n(ServerSupervisor named: #http_server) unwrap == http   // => true",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-169",
-      "title": "Instances and arguments (ADR 0135) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "AcceptorPoolSupervisor",
-        "Supervisor",
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "childSpecs",
-        "extends",
-        "fault tolerance",
-        "inherit",
-        "inheritance",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "object",
-        "restart",
-        "set",
-        "subclassing",
-        "supervision",
-        "transform"
-      ],
-      "source": "Supervisor subclass: AcceptorPoolSupervisor\n  childSpecs =>\n    ((1 to: (self args at: #numAcceptors)) collect: [:i |\n      AcceptorSupervisor supervisionSpec withId: i withArgs: #{#id => i, #parent => self}]) asList\n\npool := AcceptorPoolSupervisor spawnWith: #{#numAcceptors => 3}\npool count       // => 3\npool children    // => #(1, 2, 3)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1289,6 +1278,35 @@
       "title": "Instances and arguments (ADR 0135) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "AcceptorPoolSupervisor",
+        "Supervisor",
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "childSpecs",
+        "extends",
+        "fault tolerance",
+        "inherit",
+        "inheritance",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "object",
+        "restart",
+        "set",
+        "subclassing",
+        "supervision",
+        "transform"
+      ],
+      "source": "Supervisor subclass: AcceptorPoolSupervisor\n  childSpecs =>\n    ((1 to: (self args at: #numAcceptors)) collect: [:i |\n      AcceptorSupervisor supervisionSpec withId: i withArgs: #{#id => i, #parent => self}]) asList\n\npool := AcceptorPoolSupervisor spawnWith: #{#numAcceptors => 3}\npool count       // => 3\npool children    // => #(1, 2, 3)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-171",
+      "title": "Instances and arguments (ADR 0135) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "Actor",
         "Listener",
         "actor",
@@ -1316,7 +1334,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-171",
+      "id": "docs-beamtalk-language-features-block-172",
       "title": "Actor Supervision Policy (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1341,7 +1359,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-174",
+      "id": "docs-beamtalk-language-features-block-175",
       "title": "SupervisionSpec — Per-Child Overrides (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1362,7 +1380,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-176",
+      "id": "docs-beamtalk-language-features-block-177",
       "title": "Dynamic Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1388,7 +1406,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-177",
+      "id": "docs-beamtalk-language-features-block-178",
       "title": "Dynamic Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1420,7 +1438,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-178",
+      "id": "docs-beamtalk-language-features-block-179",
       "title": "Dynamic Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1442,7 +1460,27 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-179",
+      "id": "docs-beamtalk-language-features-block-18",
+      "title": "Reflection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "p := Point x: 3 y: 4\np fieldAt: #x          // => 3\np fieldAt: #y          // => 4\np fieldNames size      // => 2  (contains #x and #y; order is not guaranteed)\np class                // => Point\nPoint superclass       // => Value\n\n// Full chain from self up to (and including) Object (or Object class for metaclass receivers)\nCounter superclassChain        // => [Counter, Actor, Object]\nObject superclassChain         // => [Object]\nCounter class superclassChain  // => [Counter class, Actor class, Object class]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-180",
       "title": "Dynamic Supervisor (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1476,27 +1514,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-18",
-      "title": "Reflection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "p := Point x: 3 y: 4\np fieldAt: #x          // => 3\np fieldAt: #y          // => 4\np fieldNames size      // => 2  (contains #x and #y; order is not guaranteed)\np class                // => Point\nPoint superclass       // => Value\n\n// Full chain from self up to (and including) Object (or Object class for metaclass receivers)\nCounter superclassChain        // => [Counter, Actor, Object]\nObject superclassChain         // => [Object]\nCounter class superclassChain  // => [Counter class, Actor class, Object class]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-181",
+      "id": "docs-beamtalk-language-features-block-182",
       "title": "Nested Supervisors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1514,7 +1532,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-182",
+      "id": "docs-beamtalk-language-features-block-183",
       "title": "Call-site patterns (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1529,7 +1547,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-184",
+      "id": "docs-beamtalk-language-features-block-185",
       "title": "Call-site patterns (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1548,7 +1566,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-185",
+      "id": "docs-beamtalk-language-features-block-186",
       "title": "Actor Named Registration (ADR 0079) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1571,7 +1589,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-186",
+      "id": "docs-beamtalk-language-features-block-187",
       "title": "Introspecting the Live Supervision Tree (ADR 0092) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1606,7 +1624,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-187",
+      "id": "docs-beamtalk-language-features-block-188",
       "title": "Introspecting the Live Supervision Tree (ADR 0092) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1624,7 +1642,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-188",
+      "id": "docs-beamtalk-language-features-block-189",
       "title": "Introspecting the Live Supervision Tree (ADR 0092) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1647,7 +1665,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-190",
+      "id": "docs-beamtalk-language-features-block-191",
       "title": "Before named registration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1675,7 +1693,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-191",
+      "id": "docs-beamtalk-language-features-block-192",
       "title": "After named registration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1697,7 +1715,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-192",
+      "id": "docs-beamtalk-language-features-block-193",
       "title": "Proxy Semantics (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1718,7 +1736,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-193",
+      "id": "docs-beamtalk-language-features-block-194",
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1736,7 +1754,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-194",
+      "id": "docs-beamtalk-language-features-block-195",
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1746,7 +1764,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-195",
+      "id": "docs-beamtalk-language-features-block-196",
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1759,26 +1777,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-196",
+      "id": "docs-beamtalk-language-features-block-197",
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "// direction :: #north | #south | #east | #west\ndirection match: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90\n]\n// ⚠ Warning: non-exhaustive match: `#west` is not handled (residual type: `#west`)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-197",
-      "title": "Match Expression (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "exception",
-        "raise",
-        "throw"
-      ],
-      "source": "// direction :: #north | #south | #east | #west\n\n// Compile error: matchExhaustive: proves this is NOT exhaustive\ndirection matchExhaustive: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90\n]\n// ⛔ Error: non-exhaustive matchExhaustive: `#west` is not handled (residual type: `#west`)\n\n// Fine: all four members covered — silent, no diagnostic\ndirection matchExhaustive: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90;\n  #west  -> 270\n]\n\n// Fine: an unguarded wildcard is still full coverage\ndirection matchExhaustive: [\n  #north -> 0;\n  _      -> -1\n]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1791,22 +1796,20 @@
         "raise",
         "throw"
       ],
-      "source": "x matchExhaustive: [#ok -> 1; _ -> 0]\n// ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type\n//    `Dynamic` is not a closed union of symbol singletons, `nil`, or\n//    concrete leaf classes",
+      "source": "// direction :: #north | #south | #east | #west\n\n// Compile error: matchExhaustive: proves this is NOT exhaustive\ndirection matchExhaustive: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90\n]\n// ⛔ Error: non-exhaustive matchExhaustive: `#west` is not handled (residual type: `#west`)\n\n// Fine: all four members covered — silent, no diagnostic\ndirection matchExhaustive: [\n  #north -> 0;\n  #south -> 180;\n  #east  -> 90;\n  #west  -> 270\n]\n\n// Fine: an unguarded wildcard is still full coverage\ndirection matchExhaustive: [\n  #north -> 0;\n  _      -> -1\n]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
       "id": "docs-beamtalk-language-features-block-199",
-      "title": "Destructuring in Match Arms (beamtalk-language-features)",
+      "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
-        "assign",
-        "assignment",
         "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
+        "exception",
+        "raise",
+        "throw"
       ],
-      "source": "// Variable captures the matched value\n42 match: [x -> x + 1]\n// => 43\n\n// Variable binding with guard\n10 match: [x when: [x > 100] -> \"big\"; x when: [x > 5] -> \"medium\"; _ -> \"small\"]\n// => \"medium\"\n\n// Tuple destructuring in match arms\nt := Erlang erlang list_to_tuple: #(#ok, 42)\nt match: [{#ok, v} -> v; {#error, _} -> 0]\n// => 42",
+      "source": "x matchExhaustive: [#ok -> 1; _ -> 0]\n// ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type\n//    `Dynamic` is not a closed union of symbol singletons, `nil`, or\n//    concrete leaf classes",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1838,7 +1841,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-201",
+      "id": "docs-beamtalk-language-features-block-200",
+      "title": "Destructuring in Match Arms (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Variable captures the matched value\n42 match: [x -> x + 1]\n// => 43\n\n// Variable binding with guard\n10 match: [x when: [x > 100] -> \"big\"; x when: [x > 5] -> \"medium\"; _ -> \"small\"]\n// => \"medium\"\n\n// Tuple destructuring in match arms\nt := Erlang erlang list_to_tuple: #(#ok, 42)\nt match: [{#ok, v} -> v; {#error, _} -> 0]\n// => 42",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-202",
       "title": "Rest Patterns in Destructuring (BT-1251) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1853,7 +1871,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-203",
+      "id": "docs-beamtalk-language-features-block-204",
       "title": "Live Patching (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1889,7 +1907,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-204",
+      "id": "docs-beamtalk-language-features-block-205",
       "title": "Live Patching (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1910,7 +1928,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-208",
+      "id": "docs-beamtalk-language-features-block-209",
       "title": "External-edit conflict — patch, edit on disk, flush (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1938,7 +1956,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-215",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1956,7 +1974,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-215",
+      "id": "docs-beamtalk-language-features-block-216",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1975,7 +1993,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-216",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2017,7 +2035,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-220",
+      "id": "docs-beamtalk-language-features-block-221",
       "title": "Live Re-Checking on Reload (ADR 0105) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2030,7 +2048,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-221",
+      "id": "docs-beamtalk-language-features-block-222",
       "title": "shapeVersion: — declaring a version (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2056,7 +2074,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-222",
+      "id": "docs-beamtalk-language-features-block-223",
       "title": "shapeVersion: — declaring a version (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2066,7 +2084,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-223",
+      "id": "docs-beamtalk-language-features-block-224",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2093,7 +2111,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-224",
+      "id": "docs-beamtalk-language-features-block-225",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2120,7 +2138,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-225",
+      "id": "docs-beamtalk-language-features-block-226",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2142,7 +2160,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-226",
+      "id": "docs-beamtalk-language-features-block-227",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2165,7 +2183,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-227",
+      "id": "docs-beamtalk-language-features-block-228",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2195,7 +2213,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-229",
+      "id": "docs-beamtalk-language-features-block-230",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2205,7 +2223,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-232",
+      "id": "docs-beamtalk-language-features-block-233",
       "title": "Suspend on failure, not resume-on-old-state or kill (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2222,7 +2240,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-233",
+      "id": "docs-beamtalk-language-features-block-234",
       "title": "Extension Methods (Open Classes) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2236,7 +2254,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-234",
+      "id": "docs-beamtalk-language-features-block-235",
       "title": "Type annotations on extensions (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2257,7 +2275,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-235",
+      "id": "docs-beamtalk-language-features-block-236",
       "title": "Cross-file extensions (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2274,7 +2292,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-236",
+      "id": "docs-beamtalk-language-features-block-237",
       "title": "Beamtalk — System reflection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2284,7 +2302,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-237",
+      "id": "docs-beamtalk-language-features-block-238",
       "title": "Workspace — Project operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2299,7 +2317,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-238",
+      "id": "docs-beamtalk-language-features-block-239",
       "title": "Transcript — The REPL's shared log (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2309,7 +2327,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-239",
+      "id": "docs-beamtalk-language-features-block-240",
       "title": "Node introspection (ADR 0129 amendment) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2330,7 +2348,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-240",
+      "id": "docs-beamtalk-language-features-block-241",
       "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2343,7 +2361,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-243",
+      "id": "docs-beamtalk-language-features-block-244",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2353,7 +2371,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-244",
+      "id": "docs-beamtalk-language-features-block-245",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2366,7 +2384,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-247",
+      "id": "docs-beamtalk-language-features-block-248",
       "title": "Destructive flush — flushIncludingDestructive and confirmDestructive (ADR 0113) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2376,7 +2394,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-249",
+      "id": "docs-beamtalk-language-features-block-250",
       "title": "SystemNavigation — Cross-class code queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2399,7 +2417,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-250",
+      "id": "docs-beamtalk-language-features-block-251",
       "title": "Session — a first-class session value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2417,7 +2435,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-252",
+      "id": "docs-beamtalk-language-features-block-253",
       "title": "BindingsView — a live, write-through Dictionary view (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2427,7 +2445,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-254",
+      "id": "docs-beamtalk-language-features-block-255",
       "title": "Cross-session access (read-only) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2451,7 +2469,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-255",
+      "id": "docs-beamtalk-language-features-block-256",
       "title": "Tracing Lifecycle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2466,7 +2484,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-256",
+      "id": "docs-beamtalk-language-features-block-257",
       "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2481,7 +2499,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-257",
+      "id": "docs-beamtalk-language-features-block-258",
       "title": "Trace Event Queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2499,7 +2517,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-258",
+      "id": "docs-beamtalk-language-features-block-259",
       "title": "Analysis Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2511,21 +2529,6 @@
         "process"
       ],
       "source": "// Top N methods by average duration (slowest first)\nTracing slowMethods: 10\n// => #(...)\n\n// Top N methods by call count (most called first)\nTracing hotMethods: 10\n// => #(...)\n\n// Top N methods by error + timeout rate\nTracing errorMethods: 5\n// => #(...)\n\n// Top N actors by message queue length (live snapshot over every\n// registered actor, whether or not tracing is enabled)\nTracing bottlenecks: 5\n// => #(...)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-259",
-      "title": "Live Health (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "process"
-      ],
-      "source": "// Per-actor health: queue depth, memory, reductions, status\nTracing healthFor: myCounter\n// => #{queue_len => 0, memory => 1234, status => #waiting, ...}\n\n// VM overview: schedulers, memory, process count, run queues\nTracing systemHealth\n// => #{scheduler_count => 8, process_count => 42, ...}",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2543,6 +2546,21 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-260",
+      "title": "Live Health (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "process"
+      ],
+      "source": "// Per-actor health: queue depth, memory, reductions, status\nTracing healthFor: myCounter\n// => #{queue_len => 0, memory => 1234, status => #waiting, ...}\n\n// VM overview: schedulers, memory, process count, run queues\nTracing systemHealth\n// => #{scheduler_count => 8, process_count => 42, ...}",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-261",
       "title": "Configuration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2552,7 +2570,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-261",
+      "id": "docs-beamtalk-language-features-block-262",
       "title": "Typical Workflow (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2572,7 +2590,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-262",
+      "id": "docs-beamtalk-language-features-block-263",
       "title": "Application Telemetry Events (ADR 0069 amendment) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2588,7 +2606,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-263",
+      "id": "docs-beamtalk-language-features-block-264",
       "title": "Attaching handlers (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2612,7 +2630,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-264",
+      "id": "docs-beamtalk-language-features-block-265",
       "title": "Events — subclass Announcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2641,7 +2659,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-265",
+      "id": "docs-beamtalk-language-features-block-266",
       "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2672,7 +2690,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-267",
+      "id": "docs-beamtalk-language-features-block-268",
       "title": "Synchronous vs asynchronous (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2691,7 +2709,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-268",
+      "id": "docs-beamtalk-language-features-block-269",
       "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2719,7 +2737,25 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-269",
+      "id": "docs-beamtalk-language-features-block-27",
+      "title": "Comparison (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "exception",
+        "mutate",
+        "mutation",
+        "raise",
+        "set",
+        "throw"
+      ],
+      "source": "#apple < #banana   // => true\nx := nil\nx < 5              // => ERROR: UndefinedObject does not understand '<'",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-270",
       "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2740,25 +2776,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-27",
-      "title": "Comparison (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "exception",
-        "mutate",
-        "mutation",
-        "raise",
-        "set",
-        "throw"
-      ],
-      "source": "#apple < #banana   // => true\nx := nil\nx < 5              // => ERROR: UndefinedObject does not understand '<'",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-271",
+      "id": "docs-beamtalk-language-features-block-272",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2768,7 +2786,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-272",
+      "id": "docs-beamtalk-language-features-block-273",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2783,7 +2801,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-273",
+      "id": "docs-beamtalk-language-features-block-274",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2798,7 +2816,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-274",
+      "id": "docs-beamtalk-language-features-block-275",
       "title": "Node — a first-class value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2813,7 +2831,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-275",
+      "id": "docs-beamtalk-language-features-block-276",
       "title": "Remote spawn and lookup (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2833,7 +2851,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-276",
+      "id": "docs-beamtalk-language-features-block-277",
       "title": "Cluster-unique names — scope: #global (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2881,7 +2899,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-281",
+      "id": "docs-beamtalk-language-features-block-282",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2902,7 +2920,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-282",
+      "id": "docs-beamtalk-language-features-block-283",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2923,7 +2941,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-287",
+      "id": "docs-beamtalk-language-features-block-288",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2947,7 +2965,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-288",
+      "id": "docs-beamtalk-language-features-block-289",
       "title": "Binary vs String at Runtime (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2995,7 +3013,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-290",
+      "id": "docs-beamtalk-language-features-block-291",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3005,7 +3023,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-293",
+      "id": "docs-beamtalk-language-features-block-294",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3024,7 +3042,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-294",
+      "id": "docs-beamtalk-language-features-block-295",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3034,7 +3052,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-296",
+      "id": "docs-beamtalk-language-features-block-297",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3044,7 +3062,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-298",
+      "id": "docs-beamtalk-language-features-block-299",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3054,16 +3072,6 @@
         "search"
       ],
       "source": "#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found\n(1 to: 3) detect: [:x | x > 10]             // raises not_found\n(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found\n\n(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-299",
-      "title": "Lookups That Find Nothing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3097,6 +3105,16 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-300",
+      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-301",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3112,7 +3130,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-301",
+      "id": "docs-beamtalk-language-features-block-302",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3136,7 +3154,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-302",
+      "id": "docs-beamtalk-language-features-block-303",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3155,7 +3173,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-303",
+      "id": "docs-beamtalk-language-features-block-304",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3176,7 +3194,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-304",
+      "id": "docs-beamtalk-language-features-block-305",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3189,7 +3207,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-305",
+      "id": "docs-beamtalk-language-features-block-306",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3205,7 +3223,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-306",
+      "id": "docs-beamtalk-language-features-block-307",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3218,7 +3236,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-307",
+      "id": "docs-beamtalk-language-features-block-308",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3237,34 +3255,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-308",
+      "id": "docs-beamtalk-language-features-block-309",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "File writeAll: \"output.txt\" contents: \"hello\"\nFile readAll: \"output.txt\"              // => \"hello\"\nFile mkdirAll: \"target/data/logs\"\nFile listDirectory: \"target/data\"       // => [\"logs\"]\nFile rename: \"output.txt\" to: \"target/data/output.txt\"\nFile delete: \"target/data/output.txt\"\nFile deleteAll: \"target/data\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-309",
-      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Block scope — the handle is closed however the block exits\n(File open: \"events.log\" mode: #append do: [:handle |\n  handle writeLine: \"an event\".\n  handle sync\n]) unwrap\n\n// Caller-owned handle — you close it\nhandle := (File open: \"data.bin\" mode: #read) unwrap\n(handle seek: 16) unwrap\nheader := (handle read: 4) unwrap\nhandle close",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3287,6 +3284,27 @@
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Block scope — the handle is closed however the block exits\n(File open: \"events.log\" mode: #append do: [:handle |\n  handle writeLine: \"an event\".\n  handle sync\n]) unwrap\n\n// Caller-owned handle — you close it\nhandle := (File open: \"data.bin\" mode: #read) unwrap\n(handle seek: 16) unwrap\nheader := (handle read: 4) unwrap\nhandle close",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-311",
+      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "beamtalk-language-features",
         "exception",
         "for each",
@@ -3302,7 +3320,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-312",
+      "id": "docs-beamtalk-language-features-block-313",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3320,7 +3338,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-313",
+      "id": "docs-beamtalk-language-features-block-314",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3335,7 +3353,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-314",
+      "id": "docs-beamtalk-language-features-block-315",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3345,7 +3363,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-315",
+      "id": "docs-beamtalk-language-features-block-316",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3363,7 +3381,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-318",
+      "id": "docs-beamtalk-language-features-block-319",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3383,16 +3401,6 @@
         "set"
       ],
       "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-319",
-      "title": "Reading and Writing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache at: \"key\" ifPresent: [:v | v + 1]  // => 43 (evaluate block if present; nil if absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false\ncache includes: 42              // => true (scan values)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3416,7 +3424,17 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-322",
+      "id": "docs-beamtalk-language-features-block-320",
+      "title": "Reading and Writing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache at: \"key\" ifPresent: [:v | v + 1]  // => 43 (evaluate block if present; nil if absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false\ncache includes: 42              // => true (scan values)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-323",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3426,7 +3444,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-323",
+      "id": "docs-beamtalk-language-features-block-324",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3449,7 +3467,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-325",
+      "id": "docs-beamtalk-language-features-block-326",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3464,7 +3482,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-326",
+      "id": "docs-beamtalk-language-features-block-327",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3474,7 +3492,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-328",
+      "id": "docs-beamtalk-language-features-block-329",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3487,7 +3505,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-329",
+      "id": "docs-beamtalk-language-features-block-33",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-330",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3510,22 +3543,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-33",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-330",
+      "id": "docs-beamtalk-language-features-block-331",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3553,7 +3571,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-331",
+      "id": "docs-beamtalk-language-features-block-332",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3581,7 +3599,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-334",
+      "id": "docs-beamtalk-language-features-block-335",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3612,7 +3630,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-335",
+      "id": "docs-beamtalk-language-features-block-336",
       "title": "Shared Tests — Abstract Test Cases (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3640,7 +3658,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-336",
+      "id": "docs-beamtalk-language-features-block-337",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -19829,6 +19847,58 @@
       "explanation": "BT-4002: a field write in a `whileTrue:`/`whileFalse:` condition is carried into the body, the next iteration and out of the loop, in a `TestCase` method (this class), a value-type method and an actor method. Before the fix a value-type or `TestCase` condition's write was dropped: Repro A failed to compile (an unbound `State`), Repro B compiled and never ended. The codegen corpus is `while_condition_carrier_corpus.rs`. Fixtures: fixtures/bt4002while_field_condition_{probe,actor}.bt."
     },
     {
+      "id": "stdlib-test-bt4003residuals-test",
+      "title": "Bt4003ResidualsTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "Bt4003ResidualsTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "async",
+        "branch",
+        "bt4003residuals_test",
+        "concurrent",
+        "conditional",
+        "extends",
+        "field",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "if",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "iterate",
+        "iteration",
+        "loop",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "property",
+        "set",
+        "subclassing",
+        "testActorStateFoldPositionsInAFoldBody",
+        "testClassStateFoldAsAnOperandInAFoldBody",
+        "testClosureLocalWrittenBefore",
+        "testClosureOwnLocalReturn",
+        "testEnsureRaiseBeforeWrite",
+        "testEnsureWriteLast",
+        "testReturnInATupleAccDo",
+        "vClosureLocalWrittenBefore",
+        "vClosureOwnLocalReturn",
+        "vEnsureRaiseBeforeWrite:",
+        "vEnsureWriteLast:",
+        "vTupleAccDoReturn"
+      ],
+      "source": "// PIN-BUG BT-3947 (BT-4003): the residuals found during BT-3912, measured on a\n// BEAM in class, value-type and actor methods (the REPL column is\n// tests/repl-protocol/cases/bt4003_repl_returns.btscript). The shapes that\n// answered wrong silently or crashed are compile errors now (their rejection\n// tests are the `bt4003_*` tests in\n// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs); every\n// cell here is an accepted shape that answers right:\n//\n// 1. an `ensure:` cleanup reading a local the protected block wrote, when no\n//    error can follow the write (a permanent rule, ADR 0133);\n// 2. a `^` closure that reads only its own locals, or locals written before it;\n// 3. an actor fold that sends to `self` or writes a field, in the positions of\n//    a fold body measured right (class and value-type methods answer right\n//    everywhere; a value-type self-send never changes the caller's `self`);\n// 4. a `^` in a `do:` that threads a local and the actor's state.\n//\n// Fixtures: fixtures/bt4003residuals_actor.bt, fixtures/bt4003residuals_class.bt.\n\nTestCase subclass: Bt4003ResidualsTest\n  field: n = 0\n\n  vEnsureWriteLast: rec =>\n    t := 0\n    [t := 9] ensure: [rec record: t]\n    rec last\n\n  vEnsureRaiseBeforeWrite: rec =>\n    t := 0\n    [\n      [\n        1 / 0\n        t := 9\n      ] ensure: [rec record: t]\n    ] on: Error do: [:e | nil]\n    rec last\n\n  vClosureOwnLocalReturn =>\n    b := [:z |\n      w := z\n      #(1, 2)\n        do: [:k |\n          w := w + k\n          k == 2 ifTrue: [^w]\n        ]\n      -2\n    ]\n    b value: 10\n    -1\n\n  vClosureLocalWrittenBefore =>\n    t := 5\n    b := [^t]\n    b value\n    -1\n\n  vTupleAccDoReturn =>\n    t := 0\n    #(1, 2, 3)\n      do: [:x |\n        t := t + x\n        self.n := self.n + 1\n        x == 2 ifTrue: [^#(t, self.n)]\n      ]\n    -1\n\n  testEnsureWriteLast =>\n    self assert: (self vEnsureWriteLast: ClosureCellRecorder spawn) equals: 9\n    self assert: (Bt4003ResidualsClass ensureWriteLast: ClosureCellRecorder spawn) equals: 9\n    self assert: (Bt4003ResidualsActor spawn ensureWriteLast: ClosureCellRecorder spawn) equals: 9\n\n  testEnsureRaiseBeforeWrite =>\n    self assert: (self vEnsureRaiseBeforeWrite: ClosureCellRecorder spawn) equals: 0\n    self assert: (Bt4003ResidualsClass ensureRaiseBeforeWrite: ClosureCellRecorder spawn) equals: 0\n    self assert: (Bt4003ResidualsActor spawn ensureRaiseBeforeWrite: ClosureCellRecorder spawn) equals: 0\n\n  testClosureOwnLocalReturn =>\n    self assert: self vClosureOwnLocalReturn equals: 13\n    self assert: Bt4003ResidualsClass closureOwnLocalReturn equals: 13\n    self assert: Bt4003ResidualsActor spawn closureOwnLocalReturn equals: 13\n\n  testClosureLocalWrittenBefore =>\n    self assert: self vClosureLocalWrittenBefore equals: 5\n    self assert: Bt4003ResidualsClass closureLocalWrittenBefore equals: 5\n    self assert: Bt4003ResidualsActor spawn closureLocalWrittenBefore equals: 5\n\n  testActorStateFoldPositionsInAFoldBody =>\n    self assert: Bt4003ResidualsActor spawn stmtFoldInFold equals: 4\n    self assert: Bt4003ResidualsActor spawn assignInFold equals: 4\n    self assert: Bt4003ResidualsActor spawn fieldWriteStmtInDo equals: 4\n    self assert: Bt4003ResidualsActor spawn collectReceiverInCollect equals: #(#(3, 4), 4)\n    self assert: Bt4003ResidualsActor spawn collectReceiverInDo equals: 4\n    self assert: Bt4003ResidualsActor spawn selectReceiverInCollect equals: #(#(2, 2), 4)\n    self assert: Bt4003ResidualsActor spawn collectReceiverInTimes equals: 4\n    self assert: Bt4003ResidualsActor spawn collectReceiverInArmInDo equals: 4\n    self assert: Bt4003ResidualsActor spawn injectOperandAtTop equals: #(4, 2)\n\n  testClassStateFoldAsAnOperandInAFoldBody =>\n    self assert: Bt4003ResidualsClass injectOperandInDo equals: 4\n    self assert: Bt4003ResidualsClass doReceiverInDo equals: 4\n    self assert: Bt4003ResidualsClass injectArgInCollect equals: #(#(3, 7), 4)\n\n  testReturnInATupleAccDo =>\n    self assert: self vTupleAccDoReturn equals: #(3, 2)\n    self assert: Bt4003ResidualsClass tupleAccDoReturn equals: 3\n    a := Bt4003ResidualsActor spawn\n    self assert: a tupleAccDoReturn equals: 3\n    self assert: a n equals: 2\n    b := Bt4003ResidualsActor spawn\n    self assert: b tupleAccDoReturnBump equals: #(3, 2)\n    self assert: b n equals: 2",
+      "explanation": "PIN-BUG BT-3947 (BT-4003): the residuals found during BT-3912, measured on a BEAM in class, value-type and actor methods (the REPL column is tests/repl-protocol/cases/bt4003_repl_returns.btscript). The shapes that answered wrong silently or crashed are compile errors now (their rejection tests are the `bt4003_*` tests in crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs); every cell here is an accepted shape that answers right:  1. an `ensure:` cleanup reading a local the protected block wrote, when no    error can follow the write (a permanent rule, ADR 0133); 2. a `^` closure that reads only its own locals, or locals written before it; 3. an actor fold that sends to `self` or writes a field, in the positions of    a fold body measured right (class and value-type methods answer right    everywhere; a value-type self-send never changes the caller's `self`); 4. a `^` in a `do:` that threads a local and the actor's state.  Fixtures: fixtures/bt4003residuals_actor.bt, fixtures/bt4003residuals_class.bt."
+    },
+    {
       "id": "stdlib-test-bt4014class-side-operand-producer-test",
       "title": "Bt4014ClassSideOperandProducerTest",
       "category": "stdlib-tests",
@@ -21119,7 +21189,7 @@
         "testOnDoNestedInATryBody",
         "testPureOnDoNestedInAPureOnDo"
       ],
-      "source": "// BT-3718: outer locals mutated inside protected blocks of class methods, and a\n// `do:` nested in a loop body. See the fixture for what each method does; the\n// answers below follow from the final value of the local.\n\nTestCase subclass: ClassMethodProtectedLocalsTest\n\n  testEnsureCleanupSeesTheBodysWrite =>\n    self assert: ClassMethodProtectedLocals ensureCleanupSeesTheBodysWrite equals: 11\n\n  testNestedEnsureCleanupsSeeEachOther =>\n    self assert: ClassMethodProtectedLocals nestedEnsureCleanupsSeeEachOther equals: 32\n\n  testOnDoNestedInATryBody =>\n    self assert: ClassMethodProtectedLocals onDoNestedInATryBody equals: 2\n\n  testPureOnDoNestedInAPureOnDo =>\n    self assert: ClassMethodProtectedLocals pureOnDoNestedInAPureOnDo equals: 2\n\n  testOnDoHandlerSeesTheValueBeforeTheTry =>\n    self assert: ClassMethodProtectedLocals onDoHandlerSeesTheValueBeforeTheTry equals: 10\n\n  testNestedDoWritesTheLoopsLocal =>\n    self assert: ClassMethodProtectedLocals nestedDoWritesTheLoopsLocal equals: 15\n\n  testNestedDoInACountedLoop =>\n    self assert: ClassMethodProtectedLocals nestedDoInACountedLoop equals: 153",
+      "source": "// BT-3718: outer locals mutated inside protected blocks of class methods, and a\n// `do:` nested in a loop body. See the fixture for what each method does; the\n// answers below follow from the final value of the local.\n\nTestCase subclass: ClassMethodProtectedLocalsTest\n\n  testEnsureCleanupSeesTheBodysWrite =>\n    self assert: ClassMethodProtectedLocals ensureCleanupSeesTheBodysWrite equals: 11\n\n  testNestedEnsureCleanupsSeeEachOther =>\n    self assert: ClassMethodProtectedLocals nestedEnsureCleanupsSeeEachOther equals: 16\n\n  testOnDoNestedInATryBody =>\n    self assert: ClassMethodProtectedLocals onDoNestedInATryBody equals: 2\n\n  testPureOnDoNestedInAPureOnDo =>\n    self assert: ClassMethodProtectedLocals pureOnDoNestedInAPureOnDo equals: 2\n\n  testOnDoHandlerSeesTheValueBeforeTheTry =>\n    self assert: ClassMethodProtectedLocals onDoHandlerSeesTheValueBeforeTheTry equals: 10\n\n  testNestedDoWritesTheLoopsLocal =>\n    self assert: ClassMethodProtectedLocals nestedDoWritesTheLoopsLocal equals: 15\n\n  testNestedDoInACountedLoop =>\n    self assert: ClassMethodProtectedLocals nestedDoInACountedLoop equals: 153",
       "explanation": "BT-3718: outer locals mutated inside protected blocks of class methods, and a `do:` nested in a loop body. See the fixture for what each method does; the answers below follow from the final value of the local."
     },
     {
@@ -28172,7 +28242,7 @@
         "writeOnlyOnDo",
         "zeroArgHandler"
       ],
-      "source": "// BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer\n// local is a local-threading producer at the method root, whatever position it\n// sits in (statement, last expression, an assignment's value, an operand), in\n// an arm of another producer and in a loop or fold body, and its protected\n// body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional\n// or `on:do:` in one of them rebinds its locals into the frame's own scratch\n// map. A raise discards the protected body's writes (ADR 0131 §\"REPL and error\n// examples\"). The columns are adr0131exc_producer_{class,value,actor}.bt; the\n// expected answers are in stdlib/test/adr0131exc_producer_test.bt.\n\nActor subclass: Adr0131ExcProducerActor\n  state: n = 0\n\n  stA =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | t := t + 100]\n    t\n\n  stRaise =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  stEnsure =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    t\n\n  stEnsureRaise =>\n    t := 0\n    [\n      [\n        t := t + 1\n        Error signal: \"x\"\n      ] ensure: [t := t + 10]\n    ] on: Error do: [:e | nil]\n    t\n\n  last =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] on: Error do: [:e | 0]\n\n  lastRaise =>\n    t := 0\n    [\n      Error signal: \"x\"\n      1\n    ]\n      on: Error\n      do: [:e |\n        t := 5\n        t + 2\n      ]\n\n  assign =>\n    t := 0\n    r := [\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  assignRaise =>\n    t := 0\n    r := [\n      t := t + 1\n      Error signal: \"x\"\n      2\n    ]\n      on: Error\n      do: [:e |\n        t := t + 7\n        3\n      ]\n    #[r, t]\n\n  assignValue =>\n    t := 0\n    r := [t := t + 1] on: Error do: [:e | 0]\n    #[r, t]\n\n  assignEnsureValue =>\n    t := 0\n    r := [t := t + 1] ensure: [nil]\n    #[r, t]\n\n  operand =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]) + 1\n    #[r, t]\n\n  operandRight =>\n    t := 0\n    r := 10 + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  operandEnsure =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] ensure: [t := t + 10]) + 1\n    #[r, t]\n\n  seqRead =>\n    t := 0\n    r := t + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  seqTwo =>\n    t := 0\n    r := ([\n      t := t + 1\n      1\n    ] on: Error do: [:e | 0]) + ([\n      t := t + 10\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  nestedBody =>\n    t := 0\n    [\n      [t := t + 1] on: Error do: [:e | t := t + 100]\n      t := t + 10\n    ] on: Error do: [:e | t := t + 1000]\n    t\n\n  nestedHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | [t := t + 1] ensure: [t := t + 10]]\n    t\n\n  nestedOperand =>\n    t := 0\n    r := [\n      ([\n        t := t + 1\n        1\n      ] on: Error do: [:e | 0]) + 1\n    ] on: Error do: [:e | 9]\n    #[r, t]\n\n  doInBody =>\n    t := 0\n    [\n      #(1, 2) do: [:x | t := t + x]\n      t := t + 10\n    ] on: Error do: [:e | nil]\n    t\n\n  injectInBody =>\n    t := 0\n    r := [\n      #(1, 2)\n        inject: 0\n        into: [:a :x |\n          t := t + x\n          a + x\n        ]\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  whileInBody =>\n    t := 0\n    [[t < 3] whileTrue: [t := t + 1]] on: Error do: [:e | nil]\n    t\n\n  toDoInHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | 1 to: 3 do: [:i | t := t + i]]\n    t\n\n  raiseInDo =>\n    t := 0\n    [\n      #(1, 2)\n        do: [:x |\n          t := t + x\n          x > 1 ifTrue: [Error signal: \"x\"]\n        ]\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  condInBody: c =>\n    t := 0\n    [c ifTrue: [t := t + 1] ifFalse: [t := t + 2]] on: Error do: [:e | nil]\n    t\n\n  condInHandler: c =>\n    t := 0\n    [\n      Error signal: \"x\"\n    ] on: Error do: [:e | c ifTrue: [t := t + 1] ifFalse: [t := t + 2]]\n    t\n\n  inLoopBody =>\n    t := 0\n    #(1, 2) do: [:x | [t := t + x] on: Error do: [:e | nil]]\n    t\n\n  inToDo =>\n    t := 0\n    1 to: 3 do: [:i | [t := t + i] ensure: [t := t + 10]]\n    t\n\n  inWhile =>\n    t := 0\n    i := 0\n    [i < 2]\n      whileTrue: [\n        i := i + 1\n        [t := t + 1] on: Error do: [:e | nil]\n      ]\n    t\n\n  inTimes =>\n    t := 0\n    3 timesRepeat: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  inCollect =>\n    t := 0\n    r := #(1, 2)\n      collect: [:x |\n        [\n          t := t + x\n          x * 2\n        ] on: Error do: [:e | 0]\n      ]\n    #[r, t]\n\n  raiseInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        [\n          t := t + x\n          Error signal: \"x\"\n        ] on: Error do: [:e | t := t + 10]\n      ]\n    t\n\n  inArm: c =>\n    t := 0\n    c ifTrue: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  armOperand: c =>\n    t := 0\n    c\n      ifTrue: [\n        t := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  armEnsure: c =>\n    t := 0\n    c\n      ifTrue: [\n        r := [\n          t := t + 1\n          3\n        ] ensure: [t := t + 10]\n        t := t + r\n      ]\n    t\n\n  returnInBody =>\n    t := 0\n    [\n      t := t + 1\n      ^t\n    ] on: Error do: [:e | 0]\n    9\n\n  returnInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^[\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]\n      ]\n    t\n\n  returnOperandInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^([\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  writeOnlyOnDo =>\n    t := 0\n    [t := 5] on: Error do: [:e | t := 6]\n    t\n\n  writeOnlyEnsure =>\n    t := 0\n    [t := 5] ensure: [t := t + 1]\n    t\n\n  writeOnlyHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | t := 4]\n    t\n\n  zeroArgHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [t := 4]\n    t\n\n  twoLocals =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      u := u + 2\n    ] on: Error do: [:e | nil]\n    #[t, u]\n\n  blockLocal =>\n    t := 0\n    [\n      m := 3\n      t := t + m\n    ] on: Error do: [:e | nil]\n    t\n\n  ensureReads =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] ensure: [t := t * 10]\n    t\n\n  ensureTwice =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    [t := t + 100] ensure: [t := t + 1000]\n    t\n\n  afterEach =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | nil]\n    a := t\n    [t := t + 1] on: Error do: [:e | nil]\n    #[a, t]\n\n  fieldValueInLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:x |\n        self.n := ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0]) + 1\n      ]\n    #[self.n, t]\n\n  fieldValueFoldInLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:x |\n        self.n := #(1, 2)\n          inject: 0\n          into: [:a :y |\n            t := t + y\n            a + y\n          ]\n      ]\n    #[self.n, t]\n\n  fieldAssignOnDoInLoop =>\n    t := 0\n    2\n      to: 3\n      do: [:x |\n        self.n := [\n          t := t + 1\n          x\n        ] on: Error do: [:e | 0]\n      ]\n    #[self.n, t]\n\n  fieldValueInCondArm: c =>\n    t := 0\n    self.n := 0\n    c ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]\n    #[self.n, t]\n\n  fieldValueInArm: c =>\n    t := 0\n    self.n := 0\n    c\n      ifTrue: [\n        self.n := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + 1\n      ]\n    #[self.n, t]\n\n  fieldInBody =>\n    t := 0\n    [\n      self.n := self.n + 1\n      t := t + 1\n    ] on: Error do: [:e | nil]\n    #[self.n, t]\n\n  fieldRaise =>\n    t := 0\n    [\n      self.n := 5\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | nil]\n    #[self.n, t]\n\n  fieldFieldAssign =>\n    t := 0\n    self.n := [\n      t := t + 1\n      4\n    ] on: Error do: [:e | 0]\n    #[self.n, t]\n\n  fieldInHandler =>\n    t := 0\n    [Error signal: \"x\"]\n      on: Error\n      do: [:e |\n        self.n := self.n + 10\n        t := t + 1\n      ]\n    #[self.n, t]\n\n  fieldInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        [\n          self.n := self.n + x\n          t := t + x\n        ] on: Error do: [:e | nil]\n      ]\n    #[self.n, t]",
+      "source": "// BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer\n// local is a local-threading producer at the method root, whatever position it\n// sits in (statement, last expression, an assignment's value, an operand), in\n// an arm of another producer and in a loop or fold body, and its protected\n// body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional\n// or `on:do:` in one of them rebinds its locals into the frame's own scratch\n// map. A raise discards the protected body's writes (ADR 0131 §\"REPL and error\n// examples\"). The columns are adr0131exc_producer_{class,value,actor}.bt; the\n// expected answers are in stdlib/test/adr0131exc_producer_test.bt.\n\nActor subclass: Adr0131ExcProducerActor\n  state: n = 0\n\n  stA =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | t := t + 100]\n    t\n\n  stRaise =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  stEnsure =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    t\n\n  // The cleanup writes `t` but does not read it: a cleanup that read the\n  // protected block's write after the raise is a compile error (BT-4003).\n  stEnsureRaise =>\n    t := 0\n    [\n      [\n        t := t + 1\n        Error signal: \"x\"\n      ] ensure: [t := 10]\n    ] on: Error do: [:e | nil]\n    t\n\n  last =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] on: Error do: [:e | 0]\n\n  lastRaise =>\n    t := 0\n    [\n      Error signal: \"x\"\n      1\n    ]\n      on: Error\n      do: [:e |\n        t := 5\n        t + 2\n      ]\n\n  assign =>\n    t := 0\n    r := [\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  assignRaise =>\n    t := 0\n    r := [\n      t := t + 1\n      Error signal: \"x\"\n      2\n    ]\n      on: Error\n      do: [:e |\n        t := t + 7\n        3\n      ]\n    #[r, t]\n\n  assignValue =>\n    t := 0\n    r := [t := t + 1] on: Error do: [:e | 0]\n    #[r, t]\n\n  assignEnsureValue =>\n    t := 0\n    r := [t := t + 1] ensure: [nil]\n    #[r, t]\n\n  operand =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]) + 1\n    #[r, t]\n\n  operandRight =>\n    t := 0\n    r := 10 + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  operandEnsure =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] ensure: [t := t + 10]) + 1\n    #[r, t]\n\n  seqRead =>\n    t := 0\n    r := t + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  seqTwo =>\n    t := 0\n    r := ([\n      t := t + 1\n      1\n    ] on: Error do: [:e | 0]) + ([\n      t := t + 10\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  nestedBody =>\n    t := 0\n    [\n      [t := t + 1] on: Error do: [:e | t := t + 100]\n      t := t + 10\n    ] on: Error do: [:e | t := t + 1000]\n    t\n\n  nestedHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | [t := t + 1] ensure: [t := t + 10]]\n    t\n\n  nestedOperand =>\n    t := 0\n    r := [\n      ([\n        t := t + 1\n        1\n      ] on: Error do: [:e | 0]) + 1\n    ] on: Error do: [:e | 9]\n    #[r, t]\n\n  doInBody =>\n    t := 0\n    [\n      #(1, 2) do: [:x | t := t + x]\n      t := t + 10\n    ] on: Error do: [:e | nil]\n    t\n\n  injectInBody =>\n    t := 0\n    r := [\n      #(1, 2)\n        inject: 0\n        into: [:a :x |\n          t := t + x\n          a + x\n        ]\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  whileInBody =>\n    t := 0\n    [[t < 3] whileTrue: [t := t + 1]] on: Error do: [:e | nil]\n    t\n\n  toDoInHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | 1 to: 3 do: [:i | t := t + i]]\n    t\n\n  raiseInDo =>\n    t := 0\n    [\n      #(1, 2)\n        do: [:x |\n          t := t + x\n          x > 1 ifTrue: [Error signal: \"x\"]\n        ]\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  condInBody: c =>\n    t := 0\n    [c ifTrue: [t := t + 1] ifFalse: [t := t + 2]] on: Error do: [:e | nil]\n    t\n\n  condInHandler: c =>\n    t := 0\n    [\n      Error signal: \"x\"\n    ] on: Error do: [:e | c ifTrue: [t := t + 1] ifFalse: [t := t + 2]]\n    t\n\n  inLoopBody =>\n    t := 0\n    #(1, 2) do: [:x | [t := t + x] on: Error do: [:e | nil]]\n    t\n\n  inToDo =>\n    t := 0\n    1 to: 3 do: [:i | [t := t + i] ensure: [t := t + 10]]\n    t\n\n  inWhile =>\n    t := 0\n    i := 0\n    [i < 2]\n      whileTrue: [\n        i := i + 1\n        [t := t + 1] on: Error do: [:e | nil]\n      ]\n    t\n\n  inTimes =>\n    t := 0\n    3 timesRepeat: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  inCollect =>\n    t := 0\n    r := #(1, 2)\n      collect: [:x |\n        [\n          t := t + x\n          x * 2\n        ] on: Error do: [:e | 0]\n      ]\n    #[r, t]\n\n  raiseInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        [\n          t := t + x\n          Error signal: \"x\"\n        ] on: Error do: [:e | t := t + 10]\n      ]\n    t\n\n  inArm: c =>\n    t := 0\n    c ifTrue: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  armOperand: c =>\n    t := 0\n    c\n      ifTrue: [\n        t := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  armEnsure: c =>\n    t := 0\n    c\n      ifTrue: [\n        r := [\n          t := t + 1\n          3\n        ] ensure: [t := t + 10]\n        t := t + r\n      ]\n    t\n\n  returnInBody =>\n    t := 0\n    [\n      t := t + 1\n      ^t\n    ] on: Error do: [:e | 0]\n    9\n\n  returnInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^[\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]\n      ]\n    t\n\n  returnOperandInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^([\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  writeOnlyOnDo =>\n    t := 0\n    [t := 5] on: Error do: [:e | t := 6]\n    t\n\n  writeOnlyEnsure =>\n    t := 0\n    [t := 5] ensure: [t := t + 1]\n    t\n\n  writeOnlyHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | t := 4]\n    t\n\n  zeroArgHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [t := 4]\n    t\n\n  twoLocals =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      u := u + 2\n    ] on: Error do: [:e | nil]\n    #[t, u]\n\n  blockLocal =>\n    t := 0\n    [\n      m := 3\n      t := t + m\n    ] on: Error do: [:e | nil]\n    t\n\n  ensureReads =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] ensure: [t := t * 10]\n    t\n\n  ensureTwice =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    [t := t + 100] ensure: [t := t + 1000]\n    t\n\n  afterEach =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | nil]\n    a := t\n    [t := t + 1] on: Error do: [:e | nil]\n    #[a, t]\n\n  fieldValueInLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:x |\n        self.n := ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0]) + 1\n      ]\n    #[self.n, t]\n\n  fieldValueFoldInLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:x |\n        self.n := #(1, 2)\n          inject: 0\n          into: [:a :y |\n            t := t + y\n            a + y\n          ]\n      ]\n    #[self.n, t]\n\n  fieldAssignOnDoInLoop =>\n    t := 0\n    2\n      to: 3\n      do: [:x |\n        self.n := [\n          t := t + 1\n          x\n        ] on: Error do: [:e | 0]\n      ]\n    #[self.n, t]\n\n  fieldValueInCondArm: c =>\n    t := 0\n    self.n := 0\n    c ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]\n    #[self.n, t]\n\n  fieldValueInArm: c =>\n    t := 0\n    self.n := 0\n    c\n      ifTrue: [\n        self.n := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + 1\n      ]\n    #[self.n, t]\n\n  fieldInBody =>\n    t := 0\n    [\n      self.n := self.n + 1\n      t := t + 1\n    ] on: Error do: [:e | nil]\n    #[self.n, t]\n\n  fieldRaise =>\n    t := 0\n    [\n      self.n := 5\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | nil]\n    #[self.n, t]\n\n  fieldFieldAssign =>\n    t := 0\n    self.n := [\n      t := t + 1\n      4\n    ] on: Error do: [:e | 0]\n    #[self.n, t]\n\n  fieldInHandler =>\n    t := 0\n    [Error signal: \"x\"]\n      on: Error\n      do: [:e |\n        self.n := self.n + 10\n        t := t + 1\n      ]\n    #[self.n, t]\n\n  fieldInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        [\n          self.n := self.n + x\n          t := t + x\n        ] on: Error do: [:e | nil]\n      ]\n    #[self.n, t]",
       "explanation": "BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer local is a local-threading producer at the method root, whatever position it sits in (statement, last expression, an assignment's value, an operand), in an arm of another producer and in a loop or fold body, and its protected body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional or `on:do:` in one of them rebinds its locals into the frame's own scratch map. A raise discards the protected body's writes (ADR 0131 §\"REPL and error examples\"). The columns are adr0131exc_producer_{class,value,actor}.bt; the expected answers are in stdlib/test/adr0131exc_producer_test.bt."
     },
     {
@@ -28274,7 +28344,7 @@
         "writeOnlyOnDo",
         "zeroArgHandler"
       ],
-      "source": "// BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer\n// local is a local-threading producer at the method root, whatever position it\n// sits in (statement, last expression, an assignment's value, an operand), in\n// an arm of another producer and in a loop or fold body, and its protected\n// body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional\n// or `on:do:` in one of them rebinds its locals into the frame's own scratch\n// map. A raise discards the protected body's writes (ADR 0131 §\"REPL and error\n// examples\"). The columns are adr0131exc_producer_{class,value,actor}.bt; the\n// expected answers are in stdlib/test/adr0131exc_producer_test.bt.\n\nObject subclass: Adr0131ExcProducerClass\n  classState: n = 0\n\n  class stA =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | t := t + 100]\n    t\n\n  class stRaise =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  class stEnsure =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    t\n\n  class stEnsureRaise =>\n    t := 0\n    [\n      [\n        t := t + 1\n        Error signal: \"x\"\n      ] ensure: [t := t + 10]\n    ] on: Error do: [:e | nil]\n    t\n\n  class last =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] on: Error do: [:e | 0]\n\n  class lastRaise =>\n    t := 0\n    [\n      Error signal: \"x\"\n      1\n    ]\n      on: Error\n      do: [:e |\n        t := 5\n        t + 2\n      ]\n\n  class assign =>\n    t := 0\n    r := [\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  class assignRaise =>\n    t := 0\n    r := [\n      t := t + 1\n      Error signal: \"x\"\n      2\n    ]\n      on: Error\n      do: [:e |\n        t := t + 7\n        3\n      ]\n    #[r, t]\n\n  class assignValue =>\n    t := 0\n    r := [t := t + 1] on: Error do: [:e | 0]\n    #[r, t]\n\n  class assignEnsureValue =>\n    t := 0\n    r := [t := t + 1] ensure: [nil]\n    #[r, t]\n\n  class operand =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]) + 1\n    #[r, t]\n\n  class operandRight =>\n    t := 0\n    r := 10 + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  class operandEnsure =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] ensure: [t := t + 10]) + 1\n    #[r, t]\n\n  class seqRead =>\n    t := 0\n    r := t + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  class seqTwo =>\n    t := 0\n    r := ([\n      t := t + 1\n      1\n    ] on: Error do: [:e | 0]) + ([\n      t := t + 10\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  class nestedBody =>\n    t := 0\n    [\n      [t := t + 1] on: Error do: [:e | t := t + 100]\n      t := t + 10\n    ] on: Error do: [:e | t := t + 1000]\n    t\n\n  class nestedHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | [t := t + 1] ensure: [t := t + 10]]\n    t\n\n  class nestedOperand =>\n    t := 0\n    r := [\n      ([\n        t := t + 1\n        1\n      ] on: Error do: [:e | 0]) + 1\n    ] on: Error do: [:e | 9]\n    #[r, t]\n\n  class doInBody =>\n    t := 0\n    [\n      #(1, 2) do: [:x | t := t + x]\n      t := t + 10\n    ] on: Error do: [:e | nil]\n    t\n\n  class injectInBody =>\n    t := 0\n    r := [\n      #(1, 2)\n        inject: 0\n        into: [:a :x |\n          t := t + x\n          a + x\n        ]\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  class whileInBody =>\n    t := 0\n    [[t < 3] whileTrue: [t := t + 1]] on: Error do: [:e | nil]\n    t\n\n  class toDoInHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | 1 to: 3 do: [:i | t := t + i]]\n    t\n\n  class raiseInDo =>\n    t := 0\n    [\n      #(1, 2)\n        do: [:x |\n          t := t + x\n          x > 1 ifTrue: [Error signal: \"x\"]\n        ]\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  class condInBody: c =>\n    t := 0\n    [c ifTrue: [t := t + 1] ifFalse: [t := t + 2]] on: Error do: [:e | nil]\n    t\n\n  class condInHandler: c =>\n    t := 0\n    [\n      Error signal: \"x\"\n    ] on: Error do: [:e | c ifTrue: [t := t + 1] ifFalse: [t := t + 2]]\n    t\n\n  class inLoopBody =>\n    t := 0\n    #(1, 2) do: [:x | [t := t + x] on: Error do: [:e | nil]]\n    t\n\n  class inLoopOperand =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        t := t + ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0])\n      ]\n    t\n\n  class inLoopAssign =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        y := [\n          t := t + x\n          x\n        ] on: Error do: [:e | 0]\n        t := t + y\n      ]\n    t\n\n  class inToDo =>\n    t := 0\n    1 to: 3 do: [:i | [t := t + i] ensure: [t := t + 10]]\n    t\n\n  class inWhile =>\n    t := 0\n    i := 0\n    [i < 2]\n      whileTrue: [\n        i := i + 1\n        [t := t + 1] on: Error do: [:e | nil]\n      ]\n    t\n\n  class inTimes =>\n    t := 0\n    3 timesRepeat: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  class inCollect =>\n    t := 0\n    r := #(1, 2)\n      collect: [:x |\n        [\n          t := t + x\n          x * 2\n        ] on: Error do: [:e | 0]\n      ]\n    #[r, t]\n\n  class inInject =>\n    t := 0\n    r := #(1, 2)\n      inject: 0\n      into: [:a :x |\n        a + ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0])\n      ]\n    #[r, t]\n\n  class raiseInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        [\n          t := t + x\n          Error signal: \"x\"\n        ] on: Error do: [:e | t := t + 10]\n      ]\n    t\n\n  class inArm: c =>\n    t := 0\n    c ifTrue: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  class armOperand: c =>\n    t := 0\n    c\n      ifTrue: [\n        t := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  class armEnsure: c =>\n    t := 0\n    c\n      ifTrue: [\n        r := [\n          t := t + 1\n          3\n        ] ensure: [t := t + 10]\n        t := t + r\n      ]\n    t\n\n  class returnInBody =>\n    t := 0\n    [\n      t := t + 1\n      ^t\n    ] on: Error do: [:e | 0]\n    9\n\n  class returnInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^[\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]\n      ]\n    t\n\n  class returnOperandInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^([\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  class writeOnlyOnDo =>\n    t := 0\n    [t := 5] on: Error do: [:e | t := 6]\n    t\n\n  class writeOnlyEnsure =>\n    t := 0\n    [t := 5] ensure: [t := t + 1]\n    t\n\n  class writeOnlyHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | t := 4]\n    t\n\n  class zeroArgHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [t := 4]\n    t\n\n  class twoLocals =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      u := u + 2\n    ] on: Error do: [:e | nil]\n    #[t, u]\n\n  class blockLocal =>\n    t := 0\n    [\n      m := 3\n      t := t + m\n    ] on: Error do: [:e | nil]\n    t\n\n  class ensureReads =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] ensure: [t := t * 10]\n    t\n\n  class ensureTwice =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    [t := t + 100] ensure: [t := t + 1000]\n    t\n\n  class afterEach =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | nil]\n    a := t\n    [t := t + 1] on: Error do: [:e | nil]\n    #[a, t]\n\n  class fieldValueInLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:x |\n        self.n := ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0]) + 1\n      ]\n    #[self.n, t]\n\n  class fieldValueFoldInLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:x |\n        self.n := #(1, 2)\n          inject: 0\n          into: [:a :y |\n            t := t + y\n            a + y\n          ]\n      ]\n    #[self.n, t]\n\n  class fieldAssignOnDoInLoop =>\n    t := 0\n    2\n      to: 3\n      do: [:x |\n        self.n := [\n          t := t + 1\n          x\n        ] on: Error do: [:e | 0]\n      ]\n    #[self.n, t]\n\n  class fieldValueInCondArm: c =>\n    t := 0\n    self.n := 0\n    c ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]\n    #[self.n, t]\n\n  class fieldValueInArm: c =>\n    t := 0\n    self.n := 0\n    c\n      ifTrue: [\n        self.n := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + 1\n      ]\n    #[self.n, t]\n\n  class cvarInBody =>\n    t := 0\n    self.n := 0\n    [\n      self.n := self.n + 1\n      t := t + 1\n    ] on: Error do: [:e | nil]\n    #[self.n, t]\n\n  class cvarRaise =>\n    t := 0\n    self.n := 0\n    [\n      self.n := 5\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | nil]\n    #[self.n, t]\n\n  class cvarFieldAssign =>\n    t := 0\n    self.n := [\n      t := t + 1\n      4\n    ] on: Error do: [:e | 0]\n    #[self.n, t]",
+      "source": "// BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer\n// local is a local-threading producer at the method root, whatever position it\n// sits in (statement, last expression, an assignment's value, an operand), in\n// an arm of another producer and in a loop or fold body, and its protected\n// body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional\n// or `on:do:` in one of them rebinds its locals into the frame's own scratch\n// map. A raise discards the protected body's writes (ADR 0131 §\"REPL and error\n// examples\"). The columns are adr0131exc_producer_{class,value,actor}.bt; the\n// expected answers are in stdlib/test/adr0131exc_producer_test.bt.\n\nObject subclass: Adr0131ExcProducerClass\n  classState: n = 0\n\n  class stA =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | t := t + 100]\n    t\n\n  class stRaise =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  class stEnsure =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    t\n\n  // The cleanup writes `t` but does not read it: a cleanup that read the\n  // protected block's write after the raise is a compile error (BT-4003).\n  class stEnsureRaise =>\n    t := 0\n    [\n      [\n        t := t + 1\n        Error signal: \"x\"\n      ] ensure: [t := 10]\n    ] on: Error do: [:e | nil]\n    t\n\n  class last =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] on: Error do: [:e | 0]\n\n  class lastRaise =>\n    t := 0\n    [\n      Error signal: \"x\"\n      1\n    ]\n      on: Error\n      do: [:e |\n        t := 5\n        t + 2\n      ]\n\n  class assign =>\n    t := 0\n    r := [\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  class assignRaise =>\n    t := 0\n    r := [\n      t := t + 1\n      Error signal: \"x\"\n      2\n    ]\n      on: Error\n      do: [:e |\n        t := t + 7\n        3\n      ]\n    #[r, t]\n\n  class assignValue =>\n    t := 0\n    r := [t := t + 1] on: Error do: [:e | 0]\n    #[r, t]\n\n  class assignEnsureValue =>\n    t := 0\n    r := [t := t + 1] ensure: [nil]\n    #[r, t]\n\n  class operand =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]) + 1\n    #[r, t]\n\n  class operandRight =>\n    t := 0\n    r := 10 + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  class operandEnsure =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] ensure: [t := t + 10]) + 1\n    #[r, t]\n\n  class seqRead =>\n    t := 0\n    r := t + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  class seqTwo =>\n    t := 0\n    r := ([\n      t := t + 1\n      1\n    ] on: Error do: [:e | 0]) + ([\n      t := t + 10\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  class nestedBody =>\n    t := 0\n    [\n      [t := t + 1] on: Error do: [:e | t := t + 100]\n      t := t + 10\n    ] on: Error do: [:e | t := t + 1000]\n    t\n\n  class nestedHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | [t := t + 1] ensure: [t := t + 10]]\n    t\n\n  class nestedOperand =>\n    t := 0\n    r := [\n      ([\n        t := t + 1\n        1\n      ] on: Error do: [:e | 0]) + 1\n    ] on: Error do: [:e | 9]\n    #[r, t]\n\n  class doInBody =>\n    t := 0\n    [\n      #(1, 2) do: [:x | t := t + x]\n      t := t + 10\n    ] on: Error do: [:e | nil]\n    t\n\n  class injectInBody =>\n    t := 0\n    r := [\n      #(1, 2)\n        inject: 0\n        into: [:a :x |\n          t := t + x\n          a + x\n        ]\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  class whileInBody =>\n    t := 0\n    [[t < 3] whileTrue: [t := t + 1]] on: Error do: [:e | nil]\n    t\n\n  class toDoInHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | 1 to: 3 do: [:i | t := t + i]]\n    t\n\n  class raiseInDo =>\n    t := 0\n    [\n      #(1, 2)\n        do: [:x |\n          t := t + x\n          x > 1 ifTrue: [Error signal: \"x\"]\n        ]\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  class condInBody: c =>\n    t := 0\n    [c ifTrue: [t := t + 1] ifFalse: [t := t + 2]] on: Error do: [:e | nil]\n    t\n\n  class condInHandler: c =>\n    t := 0\n    [\n      Error signal: \"x\"\n    ] on: Error do: [:e | c ifTrue: [t := t + 1] ifFalse: [t := t + 2]]\n    t\n\n  class inLoopBody =>\n    t := 0\n    #(1, 2) do: [:x | [t := t + x] on: Error do: [:e | nil]]\n    t\n\n  class inLoopOperand =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        t := t + ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0])\n      ]\n    t\n\n  class inLoopAssign =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        y := [\n          t := t + x\n          x\n        ] on: Error do: [:e | 0]\n        t := t + y\n      ]\n    t\n\n  class inToDo =>\n    t := 0\n    1 to: 3 do: [:i | [t := t + i] ensure: [t := t + 10]]\n    t\n\n  class inWhile =>\n    t := 0\n    i := 0\n    [i < 2]\n      whileTrue: [\n        i := i + 1\n        [t := t + 1] on: Error do: [:e | nil]\n      ]\n    t\n\n  class inTimes =>\n    t := 0\n    3 timesRepeat: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  class inCollect =>\n    t := 0\n    r := #(1, 2)\n      collect: [:x |\n        [\n          t := t + x\n          x * 2\n        ] on: Error do: [:e | 0]\n      ]\n    #[r, t]\n\n  class inInject =>\n    t := 0\n    r := #(1, 2)\n      inject: 0\n      into: [:a :x |\n        a + ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0])\n      ]\n    #[r, t]\n\n  class raiseInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        [\n          t := t + x\n          Error signal: \"x\"\n        ] on: Error do: [:e | t := t + 10]\n      ]\n    t\n\n  class inArm: c =>\n    t := 0\n    c ifTrue: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  class armOperand: c =>\n    t := 0\n    c\n      ifTrue: [\n        t := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  class armEnsure: c =>\n    t := 0\n    c\n      ifTrue: [\n        r := [\n          t := t + 1\n          3\n        ] ensure: [t := t + 10]\n        t := t + r\n      ]\n    t\n\n  class returnInBody =>\n    t := 0\n    [\n      t := t + 1\n      ^t\n    ] on: Error do: [:e | 0]\n    9\n\n  class returnInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^[\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]\n      ]\n    t\n\n  class returnOperandInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^([\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  class writeOnlyOnDo =>\n    t := 0\n    [t := 5] on: Error do: [:e | t := 6]\n    t\n\n  class writeOnlyEnsure =>\n    t := 0\n    [t := 5] ensure: [t := t + 1]\n    t\n\n  class writeOnlyHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | t := 4]\n    t\n\n  class zeroArgHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [t := 4]\n    t\n\n  class twoLocals =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      u := u + 2\n    ] on: Error do: [:e | nil]\n    #[t, u]\n\n  class blockLocal =>\n    t := 0\n    [\n      m := 3\n      t := t + m\n    ] on: Error do: [:e | nil]\n    t\n\n  class ensureReads =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] ensure: [t := t * 10]\n    t\n\n  class ensureTwice =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    [t := t + 100] ensure: [t := t + 1000]\n    t\n\n  class afterEach =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | nil]\n    a := t\n    [t := t + 1] on: Error do: [:e | nil]\n    #[a, t]\n\n  class fieldValueInLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:x |\n        self.n := ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0]) + 1\n      ]\n    #[self.n, t]\n\n  class fieldValueFoldInLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:x |\n        self.n := #(1, 2)\n          inject: 0\n          into: [:a :y |\n            t := t + y\n            a + y\n          ]\n      ]\n    #[self.n, t]\n\n  class fieldAssignOnDoInLoop =>\n    t := 0\n    2\n      to: 3\n      do: [:x |\n        self.n := [\n          t := t + 1\n          x\n        ] on: Error do: [:e | 0]\n      ]\n    #[self.n, t]\n\n  class fieldValueInCondArm: c =>\n    t := 0\n    self.n := 0\n    c ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]\n    #[self.n, t]\n\n  class fieldValueInArm: c =>\n    t := 0\n    self.n := 0\n    c\n      ifTrue: [\n        self.n := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + 1\n      ]\n    #[self.n, t]\n\n  class cvarInBody =>\n    t := 0\n    self.n := 0\n    [\n      self.n := self.n + 1\n      t := t + 1\n    ] on: Error do: [:e | nil]\n    #[self.n, t]\n\n  class cvarRaise =>\n    t := 0\n    self.n := 0\n    [\n      self.n := 5\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | nil]\n    #[self.n, t]\n\n  class cvarFieldAssign =>\n    t := 0\n    self.n := [\n      t := t + 1\n      4\n    ] on: Error do: [:e | 0]\n    #[self.n, t]",
       "explanation": "BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer local is a local-threading producer at the method root, whatever position it sits in (statement, last expression, an assignment's value, an operand), in an arm of another producer and in a loop or fold body, and its protected body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional or `on:do:` in one of them rebinds its locals into the frame's own scratch map. A raise discards the protected body's writes (ADR 0131 §\"REPL and error examples\"). The columns are adr0131exc_producer_{class,value,actor}.bt; the expected answers are in stdlib/test/adr0131exc_producer_test.bt."
     },
     {
@@ -28364,7 +28434,7 @@
         "writeOnlyOnDo",
         "zeroArgHandler"
       ],
-      "source": "// BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer\n// local is a local-threading producer at the method root, whatever position it\n// sits in (statement, last expression, an assignment's value, an operand), in\n// an arm of another producer and in a loop or fold body, and its protected\n// body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional\n// or `on:do:` in one of them rebinds its locals into the frame's own scratch\n// map. A raise discards the protected body's writes (ADR 0131 §\"REPL and error\n// examples\"). The columns are adr0131exc_producer_{class,value,actor}.bt; the\n// expected answers are in stdlib/test/adr0131exc_producer_test.bt.\n\nValue subclass: Adr0131ExcProducerValue\n\n  stA =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | t := t + 100]\n    t\n\n  stRaise =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  stEnsure =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    t\n\n  stEnsureRaise =>\n    t := 0\n    [\n      [\n        t := t + 1\n        Error signal: \"x\"\n      ] ensure: [t := t + 10]\n    ] on: Error do: [:e | nil]\n    t\n\n  last =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] on: Error do: [:e | 0]\n\n  lastRaise =>\n    t := 0\n    [\n      Error signal: \"x\"\n      1\n    ]\n      on: Error\n      do: [:e |\n        t := 5\n        t + 2\n      ]\n\n  assign =>\n    t := 0\n    r := [\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  assignRaise =>\n    t := 0\n    r := [\n      t := t + 1\n      Error signal: \"x\"\n      2\n    ]\n      on: Error\n      do: [:e |\n        t := t + 7\n        3\n      ]\n    #[r, t]\n\n  assignValue =>\n    t := 0\n    r := [t := t + 1] on: Error do: [:e | 0]\n    #[r, t]\n\n  assignEnsureValue =>\n    t := 0\n    r := [t := t + 1] ensure: [nil]\n    #[r, t]\n\n  operand =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]) + 1\n    #[r, t]\n\n  operandRight =>\n    t := 0\n    r := 10 + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  operandEnsure =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] ensure: [t := t + 10]) + 1\n    #[r, t]\n\n  seqRead =>\n    t := 0\n    r := t + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  seqTwo =>\n    t := 0\n    r := ([\n      t := t + 1\n      1\n    ] on: Error do: [:e | 0]) + ([\n      t := t + 10\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  nestedBody =>\n    t := 0\n    [\n      [t := t + 1] on: Error do: [:e | t := t + 100]\n      t := t + 10\n    ] on: Error do: [:e | t := t + 1000]\n    t\n\n  nestedHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | [t := t + 1] ensure: [t := t + 10]]\n    t\n\n  nestedOperand =>\n    t := 0\n    r := [\n      ([\n        t := t + 1\n        1\n      ] on: Error do: [:e | 0]) + 1\n    ] on: Error do: [:e | 9]\n    #[r, t]\n\n  doInBody =>\n    t := 0\n    [\n      #(1, 2) do: [:x | t := t + x]\n      t := t + 10\n    ] on: Error do: [:e | nil]\n    t\n\n  injectInBody =>\n    t := 0\n    r := [\n      #(1, 2)\n        inject: 0\n        into: [:a :x |\n          t := t + x\n          a + x\n        ]\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  whileInBody =>\n    t := 0\n    [[t < 3] whileTrue: [t := t + 1]] on: Error do: [:e | nil]\n    t\n\n  toDoInHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | 1 to: 3 do: [:i | t := t + i]]\n    t\n\n  raiseInDo =>\n    t := 0\n    [\n      #(1, 2)\n        do: [:x |\n          t := t + x\n          x > 1 ifTrue: [Error signal: \"x\"]\n        ]\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  condInBody: c =>\n    t := 0\n    [c ifTrue: [t := t + 1] ifFalse: [t := t + 2]] on: Error do: [:e | nil]\n    t\n\n  condInHandler: c =>\n    t := 0\n    [\n      Error signal: \"x\"\n    ] on: Error do: [:e | c ifTrue: [t := t + 1] ifFalse: [t := t + 2]]\n    t\n\n  inLoopBody =>\n    t := 0\n    #(1, 2) do: [:x | [t := t + x] on: Error do: [:e | nil]]\n    t\n\n  inLoopOperand =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        t := t + ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0])\n      ]\n    t\n\n  inLoopAssign =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        y := [\n          t := t + x\n          x\n        ] on: Error do: [:e | 0]\n        t := t + y\n      ]\n    t\n\n  inToDo =>\n    t := 0\n    1 to: 3 do: [:i | [t := t + i] ensure: [t := t + 10]]\n    t\n\n  inWhile =>\n    t := 0\n    i := 0\n    [i < 2]\n      whileTrue: [\n        i := i + 1\n        [t := t + 1] on: Error do: [:e | nil]\n      ]\n    t\n\n  inTimes =>\n    t := 0\n    3 timesRepeat: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  inCollect =>\n    t := 0\n    r := #(1, 2)\n      collect: [:x |\n        [\n          t := t + x\n          x * 2\n        ] on: Error do: [:e | 0]\n      ]\n    #[r, t]\n\n  inInject =>\n    t := 0\n    r := #(1, 2)\n      inject: 0\n      into: [:a :x |\n        a + ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0])\n      ]\n    #[r, t]\n\n  raiseInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        [\n          t := t + x\n          Error signal: \"x\"\n        ] on: Error do: [:e | t := t + 10]\n      ]\n    t\n\n  inArm: c =>\n    t := 0\n    c ifTrue: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  armOperand: c =>\n    t := 0\n    c\n      ifTrue: [\n        t := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  armEnsure: c =>\n    t := 0\n    c\n      ifTrue: [\n        r := [\n          t := t + 1\n          3\n        ] ensure: [t := t + 10]\n        t := t + r\n      ]\n    t\n\n  returnInBody =>\n    t := 0\n    [\n      t := t + 1\n      ^t\n    ] on: Error do: [:e | 0]\n    9\n\n  returnInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^[\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]\n      ]\n    t\n\n  returnOperandInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^([\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  writeOnlyOnDo =>\n    t := 0\n    [t := 5] on: Error do: [:e | t := 6]\n    t\n\n  writeOnlyEnsure =>\n    t := 0\n    [t := 5] ensure: [t := t + 1]\n    t\n\n  writeOnlyHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | t := 4]\n    t\n\n  zeroArgHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [t := 4]\n    t\n\n  twoLocals =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      u := u + 2\n    ] on: Error do: [:e | nil]\n    #[t, u]\n\n  blockLocal =>\n    t := 0\n    [\n      m := 3\n      t := t + m\n    ] on: Error do: [:e | nil]\n    t\n\n  ensureReads =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] ensure: [t := t * 10]\n    t\n\n  ensureTwice =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    [t := t + 100] ensure: [t := t + 1000]\n    t\n\n  afterEach =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | nil]\n    a := t\n    [t := t + 1] on: Error do: [:e | nil]\n    #[a, t]",
+      "source": "// BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer\n// local is a local-threading producer at the method root, whatever position it\n// sits in (statement, last expression, an assignment's value, an operand), in\n// an arm of another producer and in a loop or fold body, and its protected\n// body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional\n// or `on:do:` in one of them rebinds its locals into the frame's own scratch\n// map. A raise discards the protected body's writes (ADR 0131 §\"REPL and error\n// examples\"). The columns are adr0131exc_producer_{class,value,actor}.bt; the\n// expected answers are in stdlib/test/adr0131exc_producer_test.bt.\n\nValue subclass: Adr0131ExcProducerValue\n\n  stA =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | t := t + 100]\n    t\n\n  stRaise =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"x\"\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  stEnsure =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    t\n\n  // The cleanup writes `t` but does not read it: a cleanup that read the\n  // protected block's write after the raise is a compile error (BT-4003).\n  stEnsureRaise =>\n    t := 0\n    [\n      [\n        t := t + 1\n        Error signal: \"x\"\n      ] ensure: [t := 10]\n    ] on: Error do: [:e | nil]\n    t\n\n  last =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] on: Error do: [:e | 0]\n\n  lastRaise =>\n    t := 0\n    [\n      Error signal: \"x\"\n      1\n    ]\n      on: Error\n      do: [:e |\n        t := 5\n        t + 2\n      ]\n\n  assign =>\n    t := 0\n    r := [\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  assignRaise =>\n    t := 0\n    r := [\n      t := t + 1\n      Error signal: \"x\"\n      2\n    ]\n      on: Error\n      do: [:e |\n        t := t + 7\n        3\n      ]\n    #[r, t]\n\n  assignValue =>\n    t := 0\n    r := [t := t + 1] on: Error do: [:e | 0]\n    #[r, t]\n\n  assignEnsureValue =>\n    t := 0\n    r := [t := t + 1] ensure: [nil]\n    #[r, t]\n\n  operand =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0]) + 1\n    #[r, t]\n\n  operandRight =>\n    t := 0\n    r := 10 + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  operandEnsure =>\n    t := 0\n    r := ([\n      t := t + 1\n      2\n    ] ensure: [t := t + 10]) + 1\n    #[r, t]\n\n  seqRead =>\n    t := 0\n    r := t + ([\n      t := t + 1\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  seqTwo =>\n    t := 0\n    r := ([\n      t := t + 1\n      1\n    ] on: Error do: [:e | 0]) + ([\n      t := t + 10\n      2\n    ] on: Error do: [:e | 0])\n    #[r, t]\n\n  nestedBody =>\n    t := 0\n    [\n      [t := t + 1] on: Error do: [:e | t := t + 100]\n      t := t + 10\n    ] on: Error do: [:e | t := t + 1000]\n    t\n\n  nestedHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | [t := t + 1] ensure: [t := t + 10]]\n    t\n\n  nestedOperand =>\n    t := 0\n    r := [\n      ([\n        t := t + 1\n        1\n      ] on: Error do: [:e | 0]) + 1\n    ] on: Error do: [:e | 9]\n    #[r, t]\n\n  doInBody =>\n    t := 0\n    [\n      #(1, 2) do: [:x | t := t + x]\n      t := t + 10\n    ] on: Error do: [:e | nil]\n    t\n\n  injectInBody =>\n    t := 0\n    r := [\n      #(1, 2)\n        inject: 0\n        into: [:a :x |\n          t := t + x\n          a + x\n        ]\n    ] on: Error do: [:e | 0]\n    #[r, t]\n\n  whileInBody =>\n    t := 0\n    [[t < 3] whileTrue: [t := t + 1]] on: Error do: [:e | nil]\n    t\n\n  toDoInHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | 1 to: 3 do: [:i | t := t + i]]\n    t\n\n  raiseInDo =>\n    t := 0\n    [\n      #(1, 2)\n        do: [:x |\n          t := t + x\n          x > 1 ifTrue: [Error signal: \"x\"]\n        ]\n    ] on: Error do: [:e | t := t + 100]\n    t\n\n  condInBody: c =>\n    t := 0\n    [c ifTrue: [t := t + 1] ifFalse: [t := t + 2]] on: Error do: [:e | nil]\n    t\n\n  condInHandler: c =>\n    t := 0\n    [\n      Error signal: \"x\"\n    ] on: Error do: [:e | c ifTrue: [t := t + 1] ifFalse: [t := t + 2]]\n    t\n\n  inLoopBody =>\n    t := 0\n    #(1, 2) do: [:x | [t := t + x] on: Error do: [:e | nil]]\n    t\n\n  inLoopOperand =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        t := t + ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0])\n      ]\n    t\n\n  inLoopAssign =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        y := [\n          t := t + x\n          x\n        ] on: Error do: [:e | 0]\n        t := t + y\n      ]\n    t\n\n  inToDo =>\n    t := 0\n    1 to: 3 do: [:i | [t := t + i] ensure: [t := t + 10]]\n    t\n\n  inWhile =>\n    t := 0\n    i := 0\n    [i < 2]\n      whileTrue: [\n        i := i + 1\n        [t := t + 1] on: Error do: [:e | nil]\n      ]\n    t\n\n  inTimes =>\n    t := 0\n    3 timesRepeat: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  inCollect =>\n    t := 0\n    r := #(1, 2)\n      collect: [:x |\n        [\n          t := t + x\n          x * 2\n        ] on: Error do: [:e | 0]\n      ]\n    #[r, t]\n\n  inInject =>\n    t := 0\n    r := #(1, 2)\n      inject: 0\n      into: [:a :x |\n        a + ([\n          t := t + x\n          x\n        ] on: Error do: [:e | 0])\n      ]\n    #[r, t]\n\n  raiseInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        [\n          t := t + x\n          Error signal: \"x\"\n        ] on: Error do: [:e | t := t + 10]\n      ]\n    t\n\n  inArm: c =>\n    t := 0\n    c ifTrue: [[t := t + 1] on: Error do: [:e | nil]]\n    t\n\n  armOperand: c =>\n    t := 0\n    c\n      ifTrue: [\n        t := ([\n          t := t + 1\n          5\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  armEnsure: c =>\n    t := 0\n    c\n      ifTrue: [\n        r := [\n          t := t + 1\n          3\n        ] ensure: [t := t + 10]\n        t := t + r\n      ]\n    t\n\n  returnInBody =>\n    t := 0\n    [\n      t := t + 1\n      ^t\n    ] on: Error do: [:e | 0]\n    9\n\n  returnInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^[\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]\n      ]\n    t\n\n  returnOperandInArm: c =>\n    t := 0\n    c\n      ifTrue: [\n        ^([\n          t := t + 1\n          7\n        ] on: Error do: [:e | 0]) + t\n      ]\n    t\n\n  writeOnlyOnDo =>\n    t := 0\n    [t := 5] on: Error do: [:e | t := 6]\n    t\n\n  writeOnlyEnsure =>\n    t := 0\n    [t := 5] ensure: [t := t + 1]\n    t\n\n  writeOnlyHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [:e | t := 4]\n    t\n\n  zeroArgHandler =>\n    t := 0\n    [Error signal: \"x\"] on: Error do: [t := 4]\n    t\n\n  twoLocals =>\n    t := 0\n    u := 0\n    [\n      t := t + 1\n      u := u + 2\n    ] on: Error do: [:e | nil]\n    #[t, u]\n\n  blockLocal =>\n    t := 0\n    [\n      m := 3\n      t := t + m\n    ] on: Error do: [:e | nil]\n    t\n\n  ensureReads =>\n    t := 0\n    [\n      t := t + 1\n      t\n    ] ensure: [t := t * 10]\n    t\n\n  ensureTwice =>\n    t := 0\n    [t := t + 1] ensure: [t := t + 10]\n    [t := t + 100] ensure: [t := t + 1000]\n    t\n\n  afterEach =>\n    t := 0\n    [t := t + 1] on: Error do: [:e | nil]\n    a := t\n    [t := t + 1] on: Error do: [:e | nil]\n    #[a, t]",
       "explanation": "BT-3817 (ADR 0131 Phase 3b): an `on:do:` / `ensure:` that writes an outer local is a local-threading producer at the method root, whatever position it sits in (statement, last expression, an assignment's value, an operand), in an arm of another producer and in a loop or fold body, and its protected body, handler and cleanup are `BranchArm` frames: a loop, fold, conditional or `on:do:` in one of them rebinds its locals into the frame's own scratch map. A raise discards the protected body's writes (ADR 0131 §\"REPL and error examples\"). The columns are adr0131exc_producer_{class,value,actor}.bt; the expected answers are in stdlib/test/adr0131exc_producer_test.bt."
     },
     {
@@ -36113,6 +36183,116 @@
       "explanation": "BT-4002: `whileTrue:`/`whileFalse:` loops whose condition writes a field, in value-type methods. The condition's write must be carried into the body, the next iteration and out of the loop. Before BT-4002 it was dropped every iteration (the loop never ended) or the method failed to compile. See stdlib/test/bt4002while_field_condition_test.bt.  A `TestCase` subclass is the instantiable value type whose methods may write a field (a `Value` subclass may not, and an `Object` subclass is not instantiable); its methods compile in the value-type scope. This one holds no tests: the test class calls it on a fresh instance per row."
     },
     {
+      "id": "stdlib-test-fixtures-bt4003residuals-actor",
+      "title": "Bt4003ResidualsActor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "Bt4003ResidualsActor",
+        "actor",
+        "assign",
+        "assignInFold",
+        "assignment",
+        "async",
+        "branch",
+        "bt4003residuals_actor",
+        "bump",
+        "closureLocalWrittenBefore",
+        "closureOwnLocalReturn",
+        "collectReceiverInArmInDo",
+        "collectReceiverInCollect",
+        "collectReceiverInDo",
+        "collectReceiverInTimes",
+        "concurrent",
+        "conditional",
+        "ensureRaiseBeforeWrite:",
+        "ensureWriteLast:",
+        "extends",
+        "field",
+        "fieldWriteStmtInDo",
+        "filter",
+        "filtering",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "if",
+        "inherit",
+        "inheritance",
+        "injectOperandAtTop",
+        "instance variable",
+        "iterate",
+        "iteration",
+        "loop",
+        "map",
+        "mapping",
+        "member",
+        "mutate",
+        "mutation",
+        "n",
+        "process",
+        "property",
+        "selectReceiverInCollect",
+        "set",
+        "stmtFoldInFold",
+        "subclassing",
+        "transform",
+        "tupleAccDoReturn",
+        "tupleAccDoReturnBump",
+        "where"
+      ],
+      "source": "// BT-4003: the actor column of stdlib/test/bt4003residuals_test.bt. Every\n// method is a shape the compiler accepts and that was measured answering right.\n\nActor subclass: Bt4003ResidualsActor\n  state: n = 0\n  state: items = #(1, 2)\n\n  n => self.n\n\n  bump =>\n    self.n := self.n + 1\n    self.n\n\n  // Item 1: the write is the last thing the protected block does.\n  ensureWriteLast: rec =>\n    t := 0\n    [t := 9] ensure: [rec record: t]\n    rec last\n\n  // Item 1: the raise comes before the write.\n  ensureRaiseBeforeWrite: rec =>\n    t := 0\n    [\n      [\n        1 / 0\n        t := 9\n      ] ensure: [rec record: t]\n    ] on: Error do: [:e | nil]\n    rec last\n\n  // Item 2: a closure that returns its own local.\n  closureOwnLocalReturn =>\n    b := [:z |\n      w := z\n      #(1, 2)\n        do: [:k |\n          w := w + k\n          k == 2 ifTrue: [^w]\n        ]\n      -2\n    ]\n    b value: 10\n    -1\n\n  // Item 2: a closure whose local is written only before it.\n  closureLocalWrittenBefore =>\n    t := 5\n    b := [^t]\n    b value\n    -1\n\n  // Item 3: the accepted positions of a state fold in a fold body.\n  stmtFoldInFold =>\n    #(1, 2) do: [:x | self.items do: [:y | self bump]]\n    self.n\n\n  assignInFold =>\n    #(1, 2)\n      do: [:x |\n        q := self.items inject: 0 into: [:b :y | b + self bump]\n        q\n      ]\n    self.n\n\n  fieldWriteStmtInDo =>\n    #(1, 2) do: [:x | self.items do: [:y | self.n := self.n + 1]]\n    self.n\n\n  collectReceiverInCollect =>\n    r := #(1, 2) collect: [:x | x + (self.items collect: [:y | self bump]) size]\n    #(r, self.n)\n\n  collectReceiverInDo =>\n    #(1, 2) do: [:x | (self.items collect: [:y | self bump]) size]\n    self.n\n\n  selectReceiverInCollect =>\n    r := #(1, 2) collect: [:x | (self.items select: [:y | self bump > 0]) size]\n    #(r, self.n)\n\n  collectReceiverInTimes =>\n    2 timesRepeat: [(self.items collect: [:y | self bump]) size]\n    self.n\n\n  collectReceiverInArmInDo =>\n    #(1, 2) do: [:x |\n      x > 0 ifTrue: [(self.items collect: [:y | self bump]) size]\n    ]\n    self.n\n\n  injectOperandAtTop =>\n    r := 1 + (self.items inject: 0 into: [:b :y | b + self bump])\n    #(r, self.n)\n\n  // Item 4: `^` in a `do:` that threads a local and the state.\n  tupleAccDoReturn =>\n    t := 0\n    #(1, 2, 3)\n      do: [:x |\n        t := t + x\n        self.n := self.n + 1\n        x == 2 ifTrue: [^t]\n      ]\n    -1\n\n  tupleAccDoReturnBump =>\n    t := 0\n    #(1, 2, 3)\n      do: [:x |\n        t := t + x\n        self bump\n        x == 2 ifTrue: [^#(t, self.n)]\n      ]\n    -1",
+      "explanation": "BT-4003: the actor column of stdlib/test/bt4003residuals_test.bt. Every method is a shape the compiler accepts and that was measured answering right."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4003residuals-class",
+      "title": "Bt4003ResidualsClass",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4003ResidualsClass",
+        "Object",
+        "assign",
+        "assignment",
+        "branch",
+        "bt4003residuals_class",
+        "bump",
+        "closureLocalWrittenBefore",
+        "closureOwnLocalReturn",
+        "conditional",
+        "doReceiverInDo",
+        "ensureRaiseBeforeWrite:",
+        "ensureWriteLast:",
+        "extends",
+        "field",
+        "for each",
+        "for-each",
+        "forEach",
+        "if",
+        "inherit",
+        "inheritance",
+        "injectArgInCollect",
+        "injectOperandInDo",
+        "instance variable",
+        "iterate",
+        "iteration",
+        "loop",
+        "map",
+        "mapping",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "subclassing",
+        "transform",
+        "tupleAccDoReturn"
+      ],
+      "source": "// BT-4003: the class column of stdlib/test/bt4003residuals_test.bt. Every\n// method is a shape the compiler accepts and that was measured answering right.\n\nObject subclass: Bt4003ResidualsClass\n  classState: n = 0\n  classState: items = #(1, 2)\n\n  class bump =>\n    self.n := self.n + 1\n    self.n\n\n  class ensureWriteLast: rec =>\n    t := 0\n    [t := 9] ensure: [rec record: t]\n    rec last\n\n  class ensureRaiseBeforeWrite: rec =>\n    t := 0\n    [\n      [\n        1 / 0\n        t := 9\n      ] ensure: [rec record: t]\n    ] on: Error do: [:e | nil]\n    rec last\n\n  class closureOwnLocalReturn =>\n    b := [:z |\n      w := z\n      #(1, 2)\n        do: [:k |\n          w := w + k\n          k == 2 ifTrue: [^w]\n        ]\n      -2\n    ]\n    b value: 10\n    -1\n\n  class closureLocalWrittenBefore =>\n    t := 5\n    b := [^t]\n    b value\n    -1\n\n  // Item 3: class variables are written in place, so a state fold answers\n  // right as an operand in a fold body too.\n  class injectOperandInDo =>\n    self.n := 0\n    #(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]\n    self.n\n\n  class doReceiverInDo =>\n    self.n := 0\n    #(1, 2) do: [:x | (self.items do: [:y | self bump]) isNil]\n    self.n\n\n  class injectArgInCollect =>\n    self.n := 0\n    r := #(1, 2) collect: [:x |\n      x max: (self.items inject: 0 into: [:b :y | b + self bump])\n    ]\n    #(r, self.n)\n\n  class tupleAccDoReturn =>\n    t := 0\n    #(1, 2, 3)\n      do: [:x |\n        t := t + x\n        x == 2 ifTrue: [^t]\n      ]\n    -1",
+      "explanation": "BT-4003: the class column of stdlib/test/bt4003residuals_test.bt. Every method is a shape the compiler accepts and that was measured answering right."
+    },
+    {
       "id": "stdlib-test-fixtures-bt4014class-side-operand-producer",
       "title": "Bt4014ClassSideOperandProducer",
       "category": "stdlib-fixtures",
@@ -37577,7 +37757,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// BT-3718: an outer method-level local mutated inside a protected block\n// (`on:do:`, `ensure:`) of a class method, and a `do:` nested\n// in a loop body. Every method answers a number that depends on the local's\n// final value, so a write that is lost or a cleanup that reads a stale local\n// changes the answer. (A threading construct in *operand* position is BT-3738\n// and is not covered here.)\n\nObject subclass: ClassMethodProtectedLocals\n  classState: n = 0\n\n  // The cleanup runs after the body and reads what the body wrote.\n  class ensureCleanupSeesTheBodysWrite =>\n    t := 0\n    [\n      t := t + 1\n      5\n    ] ensure: [t := t + 10]\n    t\n\n  class nestedEnsureCleanupsSeeEachOther =>\n    t := 0\n    [\n      t := t + 1\n      [\n        t := t + 5\n        3\n      ]\n        ensure: [\n          t := t + 10\n          4\n        ]\n    ] ensure: [t := t * 2]\n    t\n\n  // An `on:do:` in the try body of another: erlc rejected the module with\n  // `ambiguous_catch_try_state` until the class filter's `case` had a wildcard.\n  class onDoNestedInATryBody =>\n    t := 0\n    [\n      t := t + 1\n      [\n        t := t + 1\n        2\n      ] on: Error do: [3]\n    ] on: Error do: [4]\n    t\n\n  class pureOnDoNestedInAPureOnDo =>\n    [\n      [\n        Error signal: \"inner\"\n        1\n      ] on: Error do: [2]\n    ] on: Error do: [3]\n\n  // An error crossing the catch discards the writes made inside it.\n  class onDoHandlerSeesTheValueBeforeTheTry =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"boom\"\n    ] on: Error do: [t := t + 10]\n    t\n\n  // A `do:` nested in a loop body writes the same local as the loop.\n  class nestedDoWritesTheLoopsLocal =>\n    t := 0\n    #(1, 2)\n      do: [:i |\n        t := t + i\n        #(1, 2, 3) do: [:j | t := t + j]\n      ]\n    t\n\n  class nestedDoInACountedLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:i |\n        t := t + i\n        #(1, 2, 3)\n          do: [:j |\n            t := t + j\n            self.n := j\n          ]\n      ]\n    t * 10 + self.n\n\n  class n => self.n",
+      "source": "// BT-3718: an outer method-level local mutated inside a protected block\n// (`on:do:`, `ensure:`) of a class method, and a `do:` nested\n// in a loop body. Every method answers a number that depends on the local's\n// final value, so a write that is lost or a cleanup that reads a stale local\n// changes the answer. (A threading construct in *operand* position is BT-3738\n// and is not covered here.)\n\nObject subclass: ClassMethodProtectedLocals\n  classState: n = 0\n\n  // The cleanup runs after the body and reads what the body wrote.\n  class ensureCleanupSeesTheBodysWrite =>\n    t := 0\n    [\n      t := t + 1\n      5\n    ] ensure: [t := t + 10]\n    t\n\n  // The inner cleanup reads the inner body's write. The outer cleanup does not\n  // read `t`: the inner `ensure:` and its cleanup run after the outer body's\n  // write and may raise, and a cleanup that read the write after a raise would\n  // see the old `t`, a compile error (BT-4003).\n  class nestedEnsureCleanupsSeeEachOther =>\n    t := 0\n    [\n      t := t + 1\n      [\n        t := t + 5\n        3\n      ]\n        ensure: [\n          t := t + 10\n          4\n        ]\n    ] ensure: [self.n := 2]\n    t\n\n  // An `on:do:` in the try body of another: erlc rejected the module with\n  // `ambiguous_catch_try_state` until the class filter's `case` had a wildcard.\n  class onDoNestedInATryBody =>\n    t := 0\n    [\n      t := t + 1\n      [\n        t := t + 1\n        2\n      ] on: Error do: [3]\n    ] on: Error do: [4]\n    t\n\n  class pureOnDoNestedInAPureOnDo =>\n    [\n      [\n        Error signal: \"inner\"\n        1\n      ] on: Error do: [2]\n    ] on: Error do: [3]\n\n  // An error crossing the catch discards the writes made inside it.\n  class onDoHandlerSeesTheValueBeforeTheTry =>\n    t := 0\n    [\n      t := t + 1\n      Error signal: \"boom\"\n    ] on: Error do: [t := t + 10]\n    t\n\n  // A `do:` nested in a loop body writes the same local as the loop.\n  class nestedDoWritesTheLoopsLocal =>\n    t := 0\n    #(1, 2)\n      do: [:i |\n        t := t + i\n        #(1, 2, 3) do: [:j | t := t + j]\n      ]\n    t\n\n  class nestedDoInACountedLoop =>\n    t := 0\n    1\n      to: 2\n      do: [:i |\n        t := t + i\n        #(1, 2, 3)\n          do: [:j |\n            t := t + j\n            self.n := j\n          ]\n      ]\n    t * 10 + self.n\n\n  class n => self.n",
       "explanation": "BT-3718: an outer method-level local mutated inside a protected block (`on:do:`, `ensure:`) of a class method, and a `do:` nested in a loop body. Every method answers a number that depends on the local's final value, so a write that is lost or a cleanup that reads a stale local changes the answer. (A threading construct in *operand* position is BT-3738 and is not covered here.)"
     },
     {

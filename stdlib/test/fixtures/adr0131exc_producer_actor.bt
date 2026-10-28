@@ -32,13 +32,15 @@ Actor subclass: Adr0131ExcProducerActor
     [t := t + 1] ensure: [t := t + 10]
     t
 
+  // The cleanup writes `t` but does not read it: a cleanup that read the
+  // protected block's write after the raise is a compile error (BT-4003).
   stEnsureRaise =>
     t := 0
     [
       [
         t := t + 1
         Error signal: "x"
-      ] ensure: [t := t + 10]
+      ] ensure: [t := 10]
     ] on: Error do: [:e | nil]
     t
 

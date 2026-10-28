@@ -3143,7 +3143,28 @@ These combinations are measured and listed in `crates/beamtalk-core/src/semantic
 #[t, (t := 7), t]    // with t = 0: #[0, 7, 7]
 ```
 
-`^t := e` returns `e` after rebinding `t`. Nothing runs after the return that could read `t`, so the write is dead and `beamtalk lint` warns (`dead_returned_assignment`) and suggests `^e`. A `^` out of the protected block of an `ensure:` (`[^t := t + 1] ensure: [t printString]`, and equally `[t := t + 1. ^t] ensure: [t printString]`, or a `^` in a block nested in the protected block) is a compile error for now ([BT-3947](https://linear.app/beamtalk/issue/BT-3947)) when the cleanup reads a local the protected block writes: the throw skips the rebind, so the cleanup would read the old `t`. Assigning before the `ensure:` does not help if the `^` stays inside the protected block; keep the `^` out of it (assign inside, return after the `ensure:`).
+`^t := e` returns `e` after rebinding `t`. Nothing runs after the return that could read `t`, so the write is dead and `beamtalk lint` warns (`dead_returned_assignment`) and suggests `^e`.
+
+**An `ensure:` cleanup cannot read a local its protected block wrote if the block can exit early.** When the protected block leaves by a `^` (`[^t := t + 1] ensure: [t printString]`, and equally `[t := t + 1. ^t] ensure: [t printString]`, a `^` in a block nested in it, or evaluating a block value that may hold one) or by an error raised after the write, the cleanup runs over the locals the protected block was entered with and would read the old `t`. A cleanup that reads a local the protected block writes is therefore a compile error whenever something after the write may exit that way: a `^`, any message send (an arithmetic operator included), a destructuring assignment or `match:`, or the next iteration of a loop or fold body. This is a deliberate restriction ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), Consequences), not a gap to be closed: lowering it would need a new runtime mechanism. A write that is the last thing the protected block does is seen. Assign the local after the `ensure:` (or compute its value outside the protected block), keep the `^` out of the protected block, or do not read the local in the cleanup:
+
+```beamtalk
+// ❌ ERROR: if `self work` raises, the cleanup would see the old `count`
+[count := count + 1. self work] ensure: [log record: count]
+
+// ✅ Assign outside the protected block
+count := count + 1
+[self work] ensure: [log record: count]
+
+// ✅ The write is the last thing the protected block does
+result := nil
+[result := self work] ensure: [log record: result]
+```
+
+An actor's fields and class variables are not affected: an `ensure:` cleanup reads them live.
+
+**A `^` in a stored closure answers what the closure captured.** A block that is not run where it is written (stored in a local, passed to a method, ...) captures the values of the locals it reads when it is created. A `^` in such a block that reads a local the method assigns after the block is created, or inside the body of a loop or fold that creates it, would answer the old value, so it is a compile error ([BT-4003](https://linear.app/beamtalk/issue/BT-4003)); at the REPL, so is one that reads any binding (a later input may assign it). Pass the current value in as an argument (`[:v | ^v] value: t`) or write the block where it is run.
+
+**A `^` in a REPL loop body.** At the REPL, a `^` in the body of a loop or collection operation (`#(1, 2) do: [:x | ^x]`, `[n < 3] whileTrue: [^10]`) is a compile error: the loop would ignore it. Use `detect:ifNone:` or `inject:into:` to answer a value, or move the loop into a method. A `^` at the root of an input, in a conditional arm, an evaluated block, a protected block or a stored closure works.
 
 ### Actor Blocks See Live State
 
@@ -3170,7 +3191,7 @@ Actor subclass: Counter
 
 A block *at home* (running in the actor's own process, inside one of its messages) reads and writes the live fields. A block that has been carried *away* to another process (handed to another actor, or run by a task) reads the fields as they were when the block was created; a **write** from there raises `actor_state_unreachable`, and a send to `self` from there is an ordinary message to the actor. `on:do:` restores the actor's fields to their values on entry to the protected block when it handles an error; `ensure:` cleanups see every write the protected block made before it ended; a `^` stores its writes before it leaves. Blocks that **assign a captured local** are still governed by ADR 0133's rule above.
 
-Two older rejections remain until BT-3947 lowers them: an inlined `[...] value` that writes a field or sends to `self` as the argument of another message in an actor method (BT-3981), and the local-threading rows listed at the end of the [Capturing Variables](#what-works-and-what-doesnt) discussion. Field writes in stored closures of value-type methods stay a compile error. Those messages say so when they fire.
+Three older rejections remain until BT-3947 lowers them: an inlined `[...] value` that writes a field or sends to `self` as the argument of another message in an actor method (BT-3981); a loop or collection operation whose block sends to `self` or writes a field, used as an operand inside the body of another loop or collection operation (BT-4003: only the statement of the body, an assignment's value, and a `collect:`/`select:` that writes no field as a message receiver are accepted; assign the inner value to a local first); and the local-threading rows listed at the end of the [Capturing Variables](#what-works-and-what-doesnt) discussion. Field writes in stored closures of value-type methods stay a compile error. Those messages say so when they fire.
 
 ### Why This Design?
 

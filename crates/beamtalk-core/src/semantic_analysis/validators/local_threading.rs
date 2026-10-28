@@ -42,6 +42,11 @@
 //!   `(construct, position, context)` combinations listed in [`ALLOW_SET`]:
 //!   the ones that answer right today. Anywhere else it is an error naming the
 //!   construct, the position and BT-3743.
+//!
+//! Two body-level checks run after the walk: the `ensure:` cleanup that would
+//! read a stale local after a `^` or an error ([`report_nlr_out_of_ensure`],
+//! permanent, ADR 0133), and the `^` shapes that answer wrong silently
+//! ([`report_stale_returns`], BT-4003).
 
 use std::collections::BTreeSet;
 
@@ -990,6 +995,21 @@ pub(crate) enum Residual {
     /// `to:do:` in a non-rebinding `to:do:` (measured right). Every other
     /// denied shape in the pin test was measured failing or answering wrong.
     InlineBlockLocalInLoop,
+    /// BT-4003: in an actor method, a loop or fold whose block sends to `self`
+    /// or writes a field, and writes no outer local (one that does is a
+    /// local-threading producer, the Phase 0 check's), used as an operand
+    /// inside the body of another loop or fold. Measured on a BEAM: an `inject:into:` as a binary or keyword
+    /// argument crashes (`Tuple does not understand 'plusFromNumber:'`) or
+    /// answers the raw `{Value, State}` pair, a `do:` as a receiver drops
+    /// every write, and a `collect:` whose block writes a field drops half of
+    /// them. Measured right, and accepted: the statement of the body, the
+    /// value of an assignment in it, and a `collect:`/`select:` whose block
+    /// writes no field (only sends to `self`) as the receiver of a message.
+    /// The same folds at the method level, and class and value-type methods,
+    /// answer right (a value-type self-send never changes the caller's
+    /// `self`; a value-type fold that writes a field in a fold body is already
+    /// a codegen error).
+    StateFoldOperandInFold,
 }
 
 /// One [`RESIDUAL_DENY_SET`] row: `shape` is an error in `contexts`.
@@ -1038,6 +1058,12 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         shape: Residual::InlineBlockLocalInLoop,
         contexts: &[Actor],
         issue: "BT-3948",
+        fixed_by: "BT-3947",
+    },
+    ResidualDenied {
+        shape: Residual::StateFoldOperandInFold,
+        contexts: &[Actor],
+        issue: "BT-4003",
         fixed_by: "BT-3947",
     },
 ];
@@ -1348,11 +1374,258 @@ fn check_body(
     walker.body(body);
     walker.finish();
     report_nlr_out_of_ensure(context, params, body, diagnostics);
+    report_stale_returns(context, params, body, diagnostics);
 }
 
-/// BT-3910 / BT-3947 / BT-3993: a non-local return out of the protected block of
-/// an `ensure:` whose cleanup reads a local the protected block writes stays a
-/// compile error for now. The `^` is a throw; the cleanup runs from the `catch`
+/// BT-4003: the two `^` shapes that answer wrong silently.
+///
+/// - **A `^` block that reads a stale local.** A block literal that is not run
+///   in place (a closure: stored, passed to a method, ...) captures the values
+///   of the locals it reads when it is created, so a `^` in it answers a
+///   local's value at creation, not at the throw (measured on a BEAM in a
+///   class, a value type, an actor and the REPL: `t := 0. b := [^t]. t := 5.
+///   b value` answers 0). Such a block that holds a `^` is an error when it
+///   reads a local that the method assigns after the block literal, or inside
+///   the body of a loop or fold that creates the block (a later iteration's
+///   write); at the REPL, when it reads any binding (a later input may assign
+///   it). A block that reads only its own parameters and locals, or locals
+///   written only before it, is measured right.
+/// - **A `^` in a REPL loop or fold body** (a block a loop or collection
+///   operation runs in place, [`local_threading_construct`]) is ignored: the
+///   loop runs on and the expression answers the loop's own value
+///   (`[n < 3] whileTrue: [^10]` never ends). Measured right at the REPL: a
+///   `^` at the root, in a conditional arm, an evaluated block, a protected
+///   block, and a stored closure.
+fn report_stale_returns(
+    context: MethodContext,
+    params: &[EcoString],
+    body: &[ExpressionStatement],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut assigned: Vec<(EcoString, Span)> = Vec::new();
+    for stmt in body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
+            Expression::Assignment { target, .. } => {
+                if let Expression::Identifier(id) = target.as_ref() {
+                    assigned.push((id.name.clone(), e.span()));
+                }
+            }
+            Expression::DestructureAssignment { pattern, .. } => {
+                let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
+                assigned.extend(ids.into_iter().map(|id| (id.name, e.span())));
+            }
+            _ => {}
+        });
+    }
+    let mut scan = StaleReturnScan {
+        context,
+        bindings: params,
+        assigned,
+        loops: Vec::new(),
+        in_loop_body: false,
+        diagnostics,
+    };
+    for stmt in body {
+        scan.expr(&stmt.expression);
+    }
+}
+
+/// The walk of [`report_stale_returns`].
+struct StaleReturnScan<'a> {
+    context: MethodContext,
+    /// At the REPL, the bindings of earlier inputs.
+    bindings: &'a [EcoString],
+    /// Every local assignment of the body, with its span.
+    assigned: Vec<(EcoString, Span)>,
+    /// The spans of the enclosing loop and fold bodies run in place.
+    loops: Vec<Span>,
+    /// Whether the walk is in a loop or fold body run in place, with no
+    /// closure between.
+    in_loop_body: bool,
+    diagnostics: &'a mut Vec<Diagnostic>,
+}
+
+impl StaleReturnScan<'_> {
+    fn body(&mut self, block: &Block) {
+        for stmt in &block.body {
+            self.expr(&stmt.expression);
+        }
+    }
+
+    /// A block literal that is not run in place.
+    fn closure(&mut self, block: &Block) {
+        if block_holds_return(block) {
+            let mut reads: Vec<String> = analyze_block(block).captured_reads.into_iter().collect();
+            reads.sort();
+            if let Some(name) = reads.into_iter().find(|n| self.is_stale(n, block)) {
+                let (what, why) = if self.context == Repl {
+                    (
+                        "the binding",
+                        "a later assignment of it is not seen by the block",
+                    )
+                } else {
+                    (
+                        "the local",
+                        "the method assigns it after the block is created",
+                    )
+                };
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "a block that returns non-locally (`^`) and is not run where it is \
+                             written reads {what} `{name}`, but {why}: the block keeps the value \
+                             `{name}` had when it was created, so its `^` would answer a stale \
+                             `{name}` (BT-4003)"
+                        ),
+                        block.span,
+                    )
+                    .with_hint(format!(
+                        "pass the current value in as a block argument (`[:v | ^v] value: \
+                         {name}`), or write the block where it is run"
+                    ))
+                    .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+                );
+            }
+        }
+        let outer = std::mem::replace(&mut self.in_loop_body, false);
+        self.body(block);
+        self.in_loop_body = outer;
+    }
+
+    fn is_stale(&self, name: &str, block: &Block) -> bool {
+        let inside = |outer: Span, s: Span| outer.start() <= s.start() && s.end() <= outer.end();
+        if self.context == Repl {
+            return self.bindings.iter().any(|b| b == name)
+                || self.assigned.iter().any(|(n, _)| n == name);
+        }
+        self.assigned.iter().any(|(n, s)| {
+            n == name
+                && !inside(block.span, *s)
+                && (s.start() >= block.span.end() || self.loops.iter().any(|l| inside(*l, *s)))
+        })
+    }
+
+    #[allow(clippy::too_many_lines)] // one arm per expression kind
+    fn expr(&mut self, expr: &Expression) {
+        match expr {
+            Expression::Return { value, span } => {
+                if self.context == Repl && self.in_loop_body {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "a non-local return (`^`) in the body of a loop or collection \
+                             operation is not supported in a top-level expression: the loop \
+                             would ignore it and run on (BT-4003)",
+                            *span,
+                        )
+                        .with_hint(
+                            "answer the value with `detect:ifNone:` or `inject:into:`, or move \
+                             the loop into a method and return from there",
+                        )
+                        .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+                    );
+                }
+                self.expr(value);
+            }
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                let construct = local_threading_construct(expr)
+                    .filter(LocalThreadingConstruct::is_threaded_today);
+                for operand in std::iter::once(receiver.as_ref()).chain(arguments) {
+                    let Expression::Block(b) = operand else {
+                        self.expr(operand);
+                        continue;
+                    };
+                    match &construct {
+                        Some(c) if c.blocks.iter().any(|blk| std::ptr::eq(*blk, b)) => {
+                            if matches!(
+                                c.family,
+                                LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+                            ) {
+                                self.loops.push(b.span);
+                                let outer = std::mem::replace(&mut self.in_loop_body, true);
+                                self.body(b);
+                                self.in_loop_body = outer;
+                                self.loops.pop();
+                            } else {
+                                self.body(b);
+                            }
+                        }
+                        _ => self.closure(b),
+                    }
+                }
+            }
+            Expression::Block(b) => self.closure(b),
+            Expression::Parenthesized { expression, .. } => self.expr(expression),
+            Expression::Assignment { target, value, .. } => {
+                self.expr(target);
+                self.expr(value);
+            }
+            Expression::DestructureAssignment { value, .. } => self.expr(value),
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                self.expr(receiver);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        self.expr(arg);
+                    }
+                }
+            }
+            Expression::Match { value, arms, .. } => {
+                self.expr(value);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        self.expr(guard);
+                    }
+                    self.expr(&arm.body);
+                }
+            }
+            Expression::FieldAccess { receiver, .. } => self.expr(receiver),
+            Expression::MapLiteral { pairs, .. } => {
+                for pair in pairs {
+                    self.expr(&pair.key);
+                    self.expr(&pair.value);
+                }
+            }
+            Expression::ListLiteral { elements, tail, .. } => {
+                for e in elements.iter().chain(tail.as_deref()) {
+                    self.expr(e);
+                }
+            }
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
+                for e in elements {
+                    self.expr(e);
+                }
+            }
+            Expression::StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(e) = segment {
+                        self.expr(e);
+                    }
+                }
+            }
+            Expression::Identifier(_)
+            | Expression::Literal(..)
+            | Expression::ClassReference { .. }
+            | Expression::Super(_)
+            | Expression::Primitive { .. }
+            | Expression::ExpectDirective { .. }
+            | Expression::Spread { .. }
+            | Expression::Error { .. } => {}
+        }
+    }
+}
+
+/// BT-3910 / BT-3947 / BT-3993 / BT-4003: an `ensure:` cleanup may not read a
+/// local its protected block writes when the protected block can leave
+/// abruptly after the write, by a non-local return or (BT-4003) by an error.
+/// This is a compile error by design (ADR 0133, Consequences): seeing the new
+/// value would need a runtime mechanism that carries the protected block's
+/// locals out with the throw, which was rejected (BT-4063). The `^` is a throw; the cleanup runs from the `catch`
 /// arm over the entry `StateAcc`, with no `LocalRebind` of the protected body's
 /// writes, so the cleanup would read the old value (the correct answer is the
 /// new one). It makes no difference whether the write is the returned value
@@ -1375,6 +1648,16 @@ fn check_body(
 /// returns. Residuals (BT-3950): a self-send whose method evaluates a stored
 /// `^` block, and a block reached as a call result or collection element that
 /// is passed as an argument or sent a non-`value` message, are not seen.
+///
+/// BT-4003: an error is a throw too, and the cleanup that runs on it reads the
+/// entry locals (measured on a BEAM in a class, a value type, an actor and the
+/// REPL: `[[t := 9. 1 / 0] ensure: [rec record: t]] on: Error do: [...]`
+/// records 0). Without a `^` cause, a protected block is rejected when
+/// something that may raise ([`raise_after_write`]: any send, a destructuring
+/// match, a `match:` or an interpolation) runs after a write the cleanup reads,
+/// in evaluation order, a loop or fold body counting twice (its next iteration
+/// runs after the write). A write that is the last thing the protected block
+/// does, or one only preceded by what may raise, is seen (measured right).
 ///
 /// Every local the cleanup reads counts, except one the cleanup binds itself
 /// before reading it (its own first assignment): a cleanup that binds its own
@@ -1449,19 +1732,31 @@ fn report_nlr_out_of_ensure(
                 && let Expression::Block(protected) = receiver.as_ref()
                 && let [Expression::Block(cleanup)] = arguments.as_slice()
             {
-                if let Some((name, cause)) = nlr_dropped_local(protected, cleanup, &sources) {
+                if let Some(dropped) = nlr_dropped_local(protected, cleanup, &sources) {
+                    let EnsureDroppedLocal { name, cause, exit } = dropped;
+                    let fix = match exit {
+                        AbruptExit::Return => format!(
+                            "assign `{name}` and return after the `ensure:`, or keep the \
+                             non-local return out of the protected block"
+                        ),
+                        AbruptExit::Error => format!(
+                            "assign `{name}` after the `ensure:`, or move what may raise \
+                             before the assignment"
+                        ),
+                    };
                     diagnostics.push(
                         Diagnostic::error(
                             format!(
-                                "an `ensure:` protected block that writes `{name}` {cause}, which \
-                                 is not supported yet in {context}: the cleanup would not see \
-                                 the new `{name}` (BT-3947)"
+                                "an `ensure:` protected block that writes `{name}` {cause}, and \
+                                 its cleanup reads `{name}`: in {context} the cleanup would not \
+                                 see the new `{name}` (ADR 0133)"
                             ),
                             protected.span,
                         )
                         .with_hint(format!(
-                            "assign `{name}` and return after the `ensure:`, or keep the \
-                             non-local return out of the protected block"
+                            "{fix}; or do not read `{name}` in the cleanup (an `ensure:` \
+                             cleanup cannot read a local its protected block writes when the \
+                             block can exit early)"
                         ))
                         .with_category(DiagnosticCategory::UnmigratedLocalThreading),
                     );
@@ -1596,26 +1891,260 @@ fn names_bound_by_cleanup_first(cleanup: &Block) -> BTreeSet<EcoString> {
     own
 }
 
+/// How the protected block of an `ensure:` leaves abruptly
+/// ([`report_nlr_out_of_ensure`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AbruptExit {
+    /// A non-local return (`^`), possibly from a block value.
+    Return,
+    /// An error raised after the write (BT-4003).
+    Error,
+}
+
+/// A local an `ensure:` cleanup would read stale ([`nlr_dropped_local`]).
+struct EnsureDroppedLocal {
+    name: String,
+    /// What makes the protected block leave abruptly, as a phrase.
+    cause: String,
+    exit: AbruptExit,
+}
+
 /// The local `protected` writes and `cleanup` reads (but does not bind itself
-/// first), with what may throw the non-local return, when there is one
-/// (see [`report_nlr_out_of_ensure`]), in name order.
+/// first) when the protected block can leave abruptly after writing it (see
+/// [`report_nlr_out_of_ensure`]): with a non-local return cause, the first such
+/// local in name order; otherwise the first one written before something that
+/// may raise ([`raise_after_write`]).
 fn nlr_dropped_local(
     protected: &Block,
     cleanup: &Block,
     sources: &NlrSources,
-) -> Option<(String, String)> {
-    let cause = nlr_cause(protected, sources)?;
+) -> Option<EnsureDroppedLocal> {
     // The writes that reach the protected block's frame, nested loop, fold and
     // conditional bodies included (ADR 0131 threads those back out, and the `^`
     // drops them too): the one outer-local-writes recognizer, with the locals
     // the cleanup reads, and the enclosing scope binds, as the bound-outside set.
     let read = analyze_block(cleanup).local_reads;
     let own = names_bound_by_cleanup_first(cleanup);
-    outer_local_writes(protected, &|n| read.contains(n) && !own.contains(n))
-        .into_iter()
-        .map(|w| w.name.to_string())
-        .min()
-        .map(|name| (name, cause))
+    let written: BTreeSet<EcoString> =
+        outer_local_writes(protected, &|n| read.contains(n) && !own.contains(n))
+            .into_iter()
+            .map(|w| w.name)
+            .collect();
+    let first = written.iter().next()?;
+    if let Some(cause) = nlr_cause(protected, sources) {
+        return Some(EnsureDroppedLocal {
+            name: first.to_string(),
+            cause,
+            exit: AbruptExit::Return,
+        });
+    }
+    raise_after_write(protected, &written).map(|name| EnsureDroppedLocal {
+        name: name.to_string(),
+        cause: "may raise an error after writing it".to_string(),
+        exit: AbruptExit::Error,
+    })
+}
+
+/// BT-4003: the first local of `tracked` that `protected` writes before
+/// something that may raise an error runs, in evaluation order, or `None`.
+///
+/// Conservative: every message send (binary operators included) may raise, and
+/// so may a destructuring assignment, a `match:` and a string interpolation. A
+/// send's receiver and non-block arguments run before it; the block literals a
+/// local-threading construct runs in place ([`local_threading_construct`], the
+/// one recognizer) run during it: the bodies of a loop or fold twice (a next
+/// iteration runs after a write of this one), each arm of a conditional or
+/// lookup from the state before it, and the blocks of the other constructs in
+/// order. Any other block literal is a closure, whose body does not run here.
+fn raise_after_write(protected: &Block, tracked: &BTreeSet<EcoString>) -> Option<EcoString> {
+    let mut scan = RaiseScan {
+        tracked,
+        shadowed: Vec::new(),
+        written: None,
+        found: None,
+    };
+    scan.block(protected);
+    scan.found
+}
+
+/// The walk of [`raise_after_write`].
+struct RaiseScan<'a> {
+    tracked: &'a BTreeSet<EcoString>,
+    /// The parameters (and pattern variables) of the enclosing in-place blocks
+    /// and `match:` arms, which shadow a tracked local of the same name.
+    shadowed: Vec<BTreeSet<EcoString>>,
+    /// The first tracked local written so far on the path being walked.
+    written: Option<EcoString>,
+    /// The answer: the local written when something that may raise ran.
+    found: Option<EcoString>,
+}
+
+impl RaiseScan<'_> {
+    fn may_raise(&mut self) {
+        if self.found.is_none() {
+            self.found.clone_from(&self.written);
+        }
+    }
+
+    fn write(&mut self, name: &EcoString) {
+        if self.written.is_none()
+            && self.tracked.contains(name)
+            && !self.shadowed.iter().any(|s| s.contains(name))
+        {
+            self.written = Some(name.clone());
+        }
+    }
+
+    fn block(&mut self, block: &Block) {
+        self.shadowed
+            .push(block.parameters.iter().map(|p| p.name.clone()).collect());
+        for stmt in &block.body {
+            self.expr(&stmt.expression);
+        }
+        self.shadowed.pop();
+    }
+
+    /// Each alternative from the state before them; afterwards a local is
+    /// written when some alternative wrote it.
+    fn alternatives(&mut self, count: usize, mut each: impl FnMut(&mut Self, usize)) {
+        let start = self.written.clone();
+        let mut after = start.clone();
+        for i in 0..count {
+            self.written.clone_from(&start);
+            each(self, i);
+            if after.is_none() {
+                after.clone_from(&self.written);
+            }
+        }
+        self.written = after;
+    }
+
+    #[allow(clippy::too_many_lines)] // one arm per expression kind
+    fn expr(&mut self, expr: &Expression) {
+        match expr {
+            Expression::Parenthesized { expression, .. } => self.expr(expression),
+            Expression::Assignment { target, value, .. } => {
+                self.expr(value);
+                match target.as_ref() {
+                    Expression::Identifier(id) => self.write(&id.name),
+                    Expression::FieldAccess { receiver, .. } => self.expr(receiver),
+                    _ => {}
+                }
+            }
+            Expression::DestructureAssignment { pattern, value, .. } => {
+                self.expr(value);
+                self.may_raise();
+                let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
+                for id in ids {
+                    self.write(&id.name);
+                }
+            }
+            Expression::Return { value, .. } => self.expr(value),
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                let construct = local_threading_construct(expr)
+                    .filter(LocalThreadingConstruct::is_threaded_today);
+                let in_place = |e: &Expression| match (e, &construct) {
+                    (Expression::Block(b), Some(c)) => {
+                        c.blocks.iter().any(|blk| std::ptr::eq(*blk, b))
+                    }
+                    _ => false,
+                };
+                for operand in std::iter::once(receiver.as_ref()).chain(arguments) {
+                    if !in_place(operand) {
+                        self.expr(operand);
+                    }
+                }
+                self.may_raise();
+                let Some(c) = construct else {
+                    return;
+                };
+                match c.family {
+                    LocalThreadingFamily::Loop | LocalThreadingFamily::Fold => {
+                        for _ in 0..2 {
+                            for b in &c.blocks {
+                                self.block(b);
+                            }
+                        }
+                    }
+                    LocalThreadingFamily::Conditional | LocalThreadingFamily::Lookup => {
+                        self.alternatives(c.blocks.len(), |s, i| s.block(c.blocks[i]));
+                    }
+                    _ => {
+                        for b in &c.blocks {
+                            self.block(b);
+                        }
+                    }
+                }
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                // No cascade message inlines its blocks (`generate_cascade`).
+                self.expr(receiver);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        self.expr(arg);
+                    }
+                    self.may_raise();
+                }
+            }
+            Expression::Match { value, arms, .. } => {
+                self.expr(value);
+                self.may_raise();
+                self.alternatives(arms.len(), |s, i| {
+                    let arm = &arms[i];
+                    let (ids, _) =
+                        crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+                    s.shadowed.push(ids.into_iter().map(|id| id.name).collect());
+                    if let Some(guard) = &arm.guard {
+                        s.expr(guard);
+                    }
+                    s.expr(&arm.body);
+                    s.shadowed.pop();
+                });
+            }
+            Expression::FieldAccess { receiver, .. } => self.expr(receiver),
+            Expression::MapLiteral { pairs, .. } => {
+                for pair in pairs {
+                    self.expr(&pair.key);
+                    self.expr(&pair.value);
+                }
+            }
+            Expression::ListLiteral { elements, tail, .. } => {
+                for e in elements.iter().chain(tail.as_deref()) {
+                    self.expr(e);
+                }
+            }
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
+                for e in elements {
+                    self.expr(e);
+                }
+            }
+            Expression::StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(e) = segment {
+                        self.expr(e);
+                    }
+                }
+                self.may_raise();
+            }
+            Expression::Primitive { .. } => self.may_raise(),
+            // A block literal here is a closure: creating it runs nothing.
+            Expression::Block(_)
+            | Expression::Identifier(_)
+            | Expression::Literal(..)
+            | Expression::ClassReference { .. }
+            | Expression::Super(_)
+            | Expression::ExpectDirective { .. }
+            | Expression::Spread { .. }
+            | Expression::Error { .. } => {}
+        }
+    }
 }
 
 /// BT-3823: whether `expr` is an evaluated block in the REPL sense
@@ -3028,6 +3557,85 @@ impl<'d> Walker<'d> {
         if let Some(block) = repl_evaluated_block(expr.unwrap_parens()) {
             self.check_evaluated_block_value(expr, block, position);
         }
+        self.check_state_fold_operand_in_fold(expr, position);
+    }
+
+    /// [`Residual::StateFoldOperandInFold`] (BT-4003): see the shape's
+    /// documentation for what was measured.
+    fn check_state_fold_operand_in_fold(&mut self, expr: &Expression, position: Position) {
+        let Some(row) = residual_denied(Residual::StateFoldOperandInFold, self.context) else {
+            return;
+        };
+        if !self.containers.iter().any(|c| {
+            matches!(
+                c,
+                Container::DoBody
+                    | Container::ListOpBody
+                    | Container::LoopBody
+                    | Container::CountedLoopBody
+            )
+        }) {
+            return;
+        }
+        let Some(construct) = local_threading_construct(expr) else {
+            return;
+        };
+        if !matches!(
+            construct.family,
+            LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+        ) {
+            return;
+        }
+        // One that writes an outer local is a local-threading producer, judged
+        // (and measured right where accepted) by the Phase 0 check.
+        if !construct_outer_local_writes(&construct, &|name| self.is_bound(name)).is_empty() {
+            return;
+        }
+        let effects: Vec<_> = construct
+            .blocks
+            .iter()
+            .flat_map(|b| &b.body)
+            .map(|stmt| {
+                crate::semantic_analysis::facts::compute_state_effects_for_expr(
+                    &stmt.expression,
+                    false,
+                )
+            })
+            .collect();
+        if !effects.iter().any(|e| e.any()) {
+            return;
+        }
+        let writes_field = effects.iter().any(|e| e.field_write);
+        let accepted = match position {
+            Position::Statement | Position::AssignValue { .. } => true,
+            Position::Receiver => {
+                !writes_field && matches!(construct.selector.as_str(), "collect:" | "select:")
+            }
+            _ => false,
+        };
+        if accepted {
+            return;
+        }
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "a `{selector}` whose block sends to `self` or writes a field is {position} \
+                     inside the body of another loop or collection operation, which is not \
+                     supported yet in {context}: its state changes would be lost or its value \
+                     would be wrong ({issue}, until {fixed_by})",
+                    selector = construct.selector,
+                    context = self.context,
+                    issue = row.issue,
+                    fixed_by = row.fixed_by,
+                ),
+                expr.span(),
+            )
+            .with_hint(
+                "assign its value to a local in a statement of the body (`r := ...`) and use \
+                 the local here",
+            )
+            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+        );
     }
 
     /// [`Residual::EvaluatedBlockValue`] (BT-3981): an actor evaluated block

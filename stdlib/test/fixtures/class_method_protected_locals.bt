@@ -20,6 +20,10 @@ Object subclass: ClassMethodProtectedLocals
     ] ensure: [t := t + 10]
     t
 
+  // The inner cleanup reads the inner body's write. The outer cleanup does not
+  // read `t`: the inner `ensure:` and its cleanup run after the outer body's
+  // write and may raise, and a cleanup that read the write after a raise would
+  // see the old `t`, a compile error (BT-4003).
   class nestedEnsureCleanupsSeeEachOther =>
     t := 0
     [
@@ -32,7 +36,7 @@ Object subclass: ClassMethodProtectedLocals
           t := t + 10
           4
         ]
-    ] ensure: [t := t * 2]
+    ] ensure: [self.n := 2]
     t
 
   // An `on:do:` in the try body of another: erlc rejected the module with

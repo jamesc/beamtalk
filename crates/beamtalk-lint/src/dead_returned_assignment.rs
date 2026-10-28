@@ -18,8 +18,8 @@
 //! ```
 //!
 //! A `^` out of the protected block of an `ensure:` whose cleanup reads a local
-//! the block writes is a compile error for now (BT-3947: the cleanup would read
-//! the old value). The lint asks the compiler ([`local_threading_diagnostics`])
+//! the block writes is a compile error by design (ADR 0133: the cleanup would
+//! read the old value). The lint asks the compiler ([`local_threading_diagnostics`])
 //! and stays silent inside the span of any error it reports, as
 //! `dead_block_assignment` does; the compile error owns it.
 //!
