@@ -3053,14 +3053,12 @@ impl CoreErlangGenerator {
                         && !self.conditional_needs_mutation_threading(receiver, &[block])
                         && !self.pure_blocks_hold_guarded_operator(&[block])
                     {
-                        return Ok(Some(
-                            self.generate_solo_boolean_pure(
-                                SoloBoolean::IfTrue,
-                                receiver,
-                                block,
-                                arguments,
-                            )?,
-                        ));
+                        return Ok(Some(self.generate_solo_boolean_pure(
+                            SoloBoolean::IfTrue,
+                            receiver,
+                            block,
+                            arguments,
+                        )?));
                     }
                 }
             }
@@ -3070,14 +3068,12 @@ impl CoreErlangGenerator {
                         && !self.conditional_needs_mutation_threading(receiver, &[block])
                         && !self.pure_blocks_hold_guarded_operator(&[block])
                     {
-                        return Ok(Some(
-                            self.generate_solo_boolean_pure(
-                                SoloBoolean::IfFalse,
-                                receiver,
-                                block,
-                                arguments,
-                            )?,
-                        ));
+                        return Ok(Some(self.generate_solo_boolean_pure(
+                            SoloBoolean::IfFalse,
+                            receiver,
+                            block,
+                            arguments,
+                        )?));
                     }
                 }
             }

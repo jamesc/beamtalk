@@ -1161,8 +1161,8 @@ impl CoreErlangGenerator {
         let span = block.span;
         let frame = self.current_frame();
         let scratch = self.conditional_scratch(frame);
-        let tuple_doc =
-            self.generate_solo_boolean_with_mutations_tuple(sel, receiver, block, scratch, producer)?;
+        let tuple_doc = self
+            .generate_solo_boolean_with_mutations_tuple(sel, receiver, block, scratch, producer)?;
         self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
     }
 
@@ -3687,7 +3687,10 @@ mod tests {
             let block = Block::new(Vec::new(), Vec::new(), Span::default());
             let (t, f) = sel.pure_arms(&block);
             let inline = |a: PureArm<'_>| matches!(a, PureArm::Inline(_));
-            assert_eq!((inline(t), inline(f)), (sel.block_on_true(), !sel.block_on_true()));
+            assert_eq!(
+                (inline(t), inline(f)),
+                (sel.block_on_true(), !sel.block_on_true())
+            );
         }
         assert_eq!(SoloBoolean::from_keyword("ifTrue:ifFalse:"), None);
     }

@@ -1,0 +1,92 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4189: a solo `ifTrue:`/`ifFalse:` whose block writes a field or an outer
+// local compiles through the mutation/threading path. Its non-taken branch
+// answers the receiver, as dynamic dispatch does (`False>>ifTrue: => self`,
+// `True>>ifFalse: => self`) and as the pure-inline path does, never `nil`;
+// the write does not happen. Each row is one position (see the fixtures,
+// stdlib/test/fixtures/solo_branch_answer_{class,value,actor}.bt); each test
+// runs it in every context column, and a taken-branch control runs the
+// block.
+
+TestCase subclass: SoloBranchThreadingAnswerTest
+
+  // The columns whose block writes an outer local: [name, receiver].
+  localColumns =>
+    #[
+      #[#classMethod, SoloBranchAnswerClass],
+      #[#valueType, SoloBranchAnswerValue new],
+      #[#actorLocal, SoloBranchAnswerActor spawn]
+    ]
+
+  // Asserts `receiver sel: flag` answers `expected`; the column, selector and
+  // flag are in the compared arrays so a failure names the cell.
+  check: col sel: sel flag: flag expect: expected =>
+    got := (col at: 2) perform: sel withArguments: #(flag)
+    self assert: #[col at: 1, sel, flag, got] equals: #[col at: 1, sel, flag, expected]
+
+  testIfTrueNotTakenAnswersReceiver =>
+    self localColumns do: [:col |
+      #(#assignIfTrue:, #armIfTrue:, #collectIfTrue:, #injectIfTrue:) do: [:sel |
+        self check: col sel: sel flag: false expect: #[false, 0]
+      ]
+      self check: col sel: #operandIfTrue: flag: false expect: #["false", 0]
+      self check: col sel: #tailIfTrue: flag: false expect: false
+    ]
+
+  testIfFalseNotTakenAnswersReceiver =>
+    self localColumns do: [:col |
+      #(#assignIfFalse:, #armIfFalse:, #collectIfFalse:, #injectIfFalse:) do: [:sel |
+        self check: col sel: sel flag: true expect: #[true, 0]
+      ]
+      self check: col sel: #operandIfFalse: flag: true expect: #["true", 0]
+      self check: col sel: #tailIfFalse: flag: true expect: true
+    ]
+
+  testIfTrueTakenRunsBlock =>
+    self localColumns do: [:col |
+      #(#assignIfTrue:, #armIfTrue:, #collectIfTrue:, #injectIfTrue:) do: [:sel |
+        self check: col sel: sel flag: true expect: #[1, 1]
+      ]
+      self check: col sel: #operandIfTrue: flag: true expect: #["1", 1]
+      self check: col sel: #tailIfTrue: flag: true expect: 1
+    ]
+
+  testIfFalseTakenRunsBlock =>
+    self localColumns do: [:col |
+      #(#assignIfFalse:, #armIfFalse:, #collectIfFalse:, #injectIfFalse:) do: [:sel |
+        self check: col sel: sel flag: false expect: #[1, 1]
+      ]
+      self check: col sel: #operandIfFalse: flag: false expect: #["1", 1]
+      self check: col sel: #tailIfFalse: flag: false expect: 1
+    ]
+
+  // The actor field-write column: the field is the observed effect.
+  testActorFieldIfTrue =>
+    a := SoloBranchAnswerActor spawn
+    col := #[#actorField, a]
+    #(#fieldAssignIfTrue:, #fieldArmIfTrue:, #fieldCollectIfTrue:, #fieldInjectIfTrue:) do: [:sel |
+      self check: col sel: sel flag: false expect: #[false, 0]
+      self check: col sel: sel flag: true expect: #[1, 1]
+    ]
+    self check: col sel: #fieldOperandIfTrue: flag: false expect: #["false", 0]
+    self check: col sel: #fieldOperandIfTrue: flag: true expect: #["1", 1]
+    self check: col sel: #fieldTailIfTrue: flag: false expect: false
+    self assert: a x equals: 0
+    self check: col sel: #fieldTailIfTrue: flag: true expect: 1
+    self assert: a x equals: 1
+
+  testActorFieldIfFalse =>
+    a := SoloBranchAnswerActor spawn
+    col := #[#actorField, a]
+    #(#fieldAssignIfFalse:, #fieldArmIfFalse:, #fieldCollectIfFalse:, #fieldInjectIfFalse:) do: [:sel |
+      self check: col sel: sel flag: true expect: #[true, 0]
+      self check: col sel: sel flag: false expect: #[1, 1]
+    ]
+    self check: col sel: #fieldOperandIfFalse: flag: true expect: #["true", 0]
+    self check: col sel: #fieldOperandIfFalse: flag: false expect: #["1", 1]
+    self check: col sel: #fieldTailIfFalse: flag: true expect: true
+    self assert: a x equals: 0
+    self check: col sel: #fieldTailIfFalse: flag: false expect: 1
+    self assert: a x equals: 1
