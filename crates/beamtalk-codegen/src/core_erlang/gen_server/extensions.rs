@@ -207,7 +207,7 @@ impl CoreErlangGenerator {
         let target_is_actor = self
             .class_hierarchy
             .as_ref()
-            .is_some_and(|h| h.is_actor_subclass(ext.class_name.name.as_str()));
+            .is_some_and(|h| h.extension_target_is_actor(ext.class_name.name.as_str()));
 
         // scope the generator's class identity to the extension's
         // TARGET class while generating the body, so a `super` send inside the
