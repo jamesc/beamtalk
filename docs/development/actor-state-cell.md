@@ -340,7 +340,9 @@ cost of gate 3. The bracket closes it without threading (BT-4121):
   `State`: run away from home it reads the slow paths' writes of the
   iterations before its creation (BT-4180). A conditional or `on:do:` in a
   plain closure frame (a loop condition) seeds its scratch map from the cell
-  for the same reason.
+  for the same reason, and so does the exit pack of a loop nested in the
+  region that does not bracket itself (a `detect:ifNone:` in a conditional
+  arm): its plan's initial state is the region's entry `State`.
 
 **Read-side backstop (BT-4180).** Inside a *bracketed region* (the body and
 condition of a stateless loop whose checkout bracketed, plus everything
