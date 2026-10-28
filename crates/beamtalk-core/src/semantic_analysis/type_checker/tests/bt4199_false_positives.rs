@@ -7,6 +7,9 @@
 //! 2. `self.f := C` on a `:: X class` field is covariant (`C` subclass of `X`).
 //! 3. `ifTrue: [...] ifFalse: [^...]` post-guard narrowing (single and `and:`).
 //! 4. `Collection>>includes:` accepts any `Object`.
+//!
+//! BT-4206: per-member metatype checks over a union slot type, the strict
+//! slot rule for a `C class` state default, and `Bag>>occurrencesOf:`.
 
 use super::common::*;
 
@@ -130,4 +133,109 @@ typed Object subclass: N
 ",
     );
     assert!(diags.is_empty(), "got: {diags:#?}");
+}
+
+// ── BT-4206 residuals ────────────────────────────────────────────────────
+
+fn mismatches(diags: &[Diagnostic]) -> usize {
+    diags
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .count()
+}
+
+#[test]
+fn bt4206_metaclass_union_member_is_checked_per_member() {
+    // `Integer` (an `Integer class` value) is not an `Integer`, nor a
+    // `String class`.
+    let rejected = type_diagnostics(
+        r"
+typed Actor subclass: Holder
+  state: kind :: Integer | String class = 1
+  setKind -> Object =>
+    self.kind := Integer
+",
+    );
+    assert_eq!(mismatches(&rejected), 1, "got: {rejected:#?}");
+    let accepted = type_diagnostics(
+        r"
+typed Actor subclass: Holder
+  state: kind :: Integer | String class = 1
+  setKind -> Object =>
+    self.kind := String
+",
+    );
+    assert!(accepted.is_empty(), "got: {accepted:#?}");
+}
+
+#[test]
+fn bt4206_metaclass_or_nil_slot_rejects_an_unrelated_metaclass() {
+    let diags = type_diagnostics(
+        r"
+typed Actor subclass: Holder
+  state: kind :: Number class | Nil = nil
+  setKind -> Object =>
+    self.kind := String
+  setOther -> Object =>
+    self.kind := Integer
+",
+    );
+    assert_eq!(mismatches(&diags), 1, "got: {diags:#?}");
+}
+
+#[test]
+fn bt4206_metaclass_state_default_is_checked() {
+    let rejected = type_diagnostics(
+        r"
+typed Actor subclass: Holder
+  state: kind :: Number class = String
+",
+    );
+    assert_eq!(mismatches(&rejected), 1, "got: {rejected:#?}");
+    let accepted = type_diagnostics(
+        r"
+typed Actor subclass: Holder
+  state: kind :: Number class = Integer
+  state: any :: Class = Integer
+",
+    );
+    assert!(accepted.is_empty(), "got: {accepted:#?}");
+}
+
+#[test]
+fn bt4206_bag_occurrences_of_accepts_any_object() {
+    let diags = type_diagnostics(
+        r"
+typed Object subclass: N
+  class f: b :: Bag(Integer) -> Integer =>
+    b occurrencesOf: 2.0
+",
+    );
+    assert!(diags.is_empty(), "got: {diags:#?}");
+}
+
+#[test]
+fn bt4206_metaclass_into_type_param_union_is_not_judged() {
+    let diags = type_diagnostics(
+        r"
+typed Actor subclass: Holder(T)
+  state: kind :: T | Nil = Integer
+  setKind -> Object =>
+    self.kind := String
+",
+    );
+    assert_eq!(mismatches(&diags), 0, "got: {diags:#?}");
+}
+
+#[test]
+fn bt4206_metaclass_into_type_param_metaclass_is_not_judged() {
+    let diags = type_diagnostics(
+        r"
+typed Actor subclass: Holder(T)
+  state: kind :: T class | Nil = Integer
+  setKind -> Object =>
+    self.kind := String
+",
+    );
+    assert_eq!(mismatches(&diags), 0, "got: {diags:#?}");
 }

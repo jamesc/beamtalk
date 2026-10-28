@@ -925,11 +925,21 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// before the frame moves on. A family advanced inside the tuple's arms
     /// and not merged is a silent loss: every later statement reads the stale
     /// pre-construct version. Empty for a construct whose arms advance none.
+    ///
+    /// BT-4206: `scratch_base` is the `State` version the construct's scratch
+    /// map (its arms' seeded `StateAcc`) starts from, when it continues the
+    /// enclosing frame's `State` — the one input of the opaque `doc` the
+    /// verifier must see, since a seed read before an earlier step of the
+    /// same producer (the scrutinee's or receiver's spliced prelude) drops
+    /// that step's writes
+    /// ([`VerifyError::StaleConstructSeed`](super::verify::VerifyError::StaleConstructSeed)).
+    /// `None` when the scratch map starts fresh or no producer recorded it.
     ConstructTuple {
         carrier: String,
         doc: Document<'static>,
         threads: Vec<String>,
         families: Vec<VersionPrefix>,
+        scratch_base: Option<VersionedVar>,
         span: Span,
     },
 

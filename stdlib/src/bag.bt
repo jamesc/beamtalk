@@ -49,7 +49,7 @@ typed Collection(E) subclass: Bag(E)
   /// (Bag withAll: #(1, 1, 2)) occurrencesOf: 1   // => 2
   /// (Bag withAll: #(1, 1, 2)) occurrencesOf: 3   // => 0
   /// ```
-  occurrencesOf: element :: E -> Integer =>
+  occurrencesOf: element :: Object -> Integer =>
     self.counts at: element ifAbsent: [0]
 
   /// Test if the bag contains at least one occurrence of `element`.

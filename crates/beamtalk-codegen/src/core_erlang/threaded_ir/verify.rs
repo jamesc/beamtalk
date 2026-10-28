@@ -296,6 +296,21 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
+    /// BT-4206: a [`ThreadedStmt::ConstructTuple`]'s scratch map starts from
+    /// `State` version `seed` (`scratch_base`) while an earlier statement of
+    /// the same frame already bound the newer version `newest`: the seed was
+    /// read before a step that precedes it, so every arm threads from the
+    /// stale `State` and the step's field writes are lost when the construct's
+    /// `StateAcc` is adopted as the next `State` (BT-4196: a `match:`
+    /// producer that read its base `State` before compiling its scrutinee).
+    /// Checked over every statement list, at every nesting level.
+    StaleConstructSeed {
+        seed: VersionedVar,
+        newest: VersionedVar,
+        carrier: String,
+        at: Span,
+    },
+
     /// ADR 0133 Phase 3 (BT-3911), [`Self::ConstructFamilyDropped`] extended
     /// to the `Local` family: a [`ThreadedStmt::BranchArm`]'s body writes the
     /// scratch-map slot of a local (a `Put` of its `__local__` key) that the
@@ -939,7 +954,7 @@ struct VerifyWalk<'a> {
 impl VerifyWalk<'_> {
     fn walk(&mut self, stmts: &[ThreadedStmt]) {
         self.check_construct_rebinds(stmts);
-        self.check_held_rebinds(stmts);
+        self.check_frame_state_reads(stmts);
         for stmt in stmts {
             self.walk_stmt(stmt);
         }
@@ -1097,15 +1112,22 @@ impl VerifyWalk<'_> {
         }
     }
 
-    /// [`VerifyError::HeldRebindNotIdentity`] over one statement list: each
-    /// `MapHeld` rebind must read its own `key` through `state_first ==
-    /// map`, `map` must be a bound `State` version of the enclosing frame
-    /// (its entry version 0, or one some step produces), and —
-    /// when this list steps that frame's `State` map before the rebind —
-    /// the last such step's target must be `map`. A list that has not
-    /// stepped the map yet inherits its current version from outside the
-    /// list, which this check does not reconstruct.
-    fn check_held_rebinds(&mut self, stmts: &[ThreadedStmt]) {
+    /// The reads of the enclosing frame's current `State` version over one
+    /// statement list, against the last step of that frame's `State` map the
+    /// list has made so far:
+    ///
+    /// - [`VerifyError::HeldRebindNotIdentity`]: each `MapHeld` rebind must
+    ///   read its own `key` through `state_first == map`, `map` must be a
+    ///   bound `State` version of the enclosing frame (its entry version 0,
+    ///   or one some step produces), and — when this list steps that frame's
+    ///   `State` map before the rebind — the last such step's target must be
+    ///   `map`.
+    /// - [`VerifyError::StaleConstructSeed`]: a `ConstructTuple`'s
+    ///   `scratch_base` in this frame is no older than the last such step.
+    ///
+    /// A list that has not stepped the map yet inherits its current version
+    /// from outside the list, which these checks do not reconstruct.
+    fn check_frame_state_reads(&mut self, stmts: &[ThreadedStmt]) {
         let frame = self.enclosing_frame().frame;
         let own_state = |v: &VersionedVar| v.prefix == VersionPrefix::State && v.frame == frame;
         let mut current: Option<&VersionedVar> = None;
@@ -1118,6 +1140,24 @@ impl VerifyWalk<'_> {
                 ThreadedStmt::TupleAccUnpack { targets, .. } => {
                     if let Some(target) = targets.iter().rev().find(|t| own_state(t)) {
                         current = Some(target);
+                    }
+                }
+                ThreadedStmt::ConstructTuple {
+                    carrier,
+                    scratch_base: Some(seed),
+                    span,
+                    ..
+                } => {
+                    if let Some(newest) = current
+                        && own_state(seed)
+                        && seed.version < newest.version
+                    {
+                        self.errors.push(VerifyError::StaleConstructSeed {
+                            seed: seed.clone(),
+                            newest: newest.clone(),
+                            carrier: carrier.clone(),
+                            at: *span,
+                        });
                     }
                 }
                 ThreadedStmt::LocalRebind {

@@ -58,9 +58,9 @@
 //! lowering read the same rule.
 
 use super::super::threaded_expr::ProducerTail;
-use super::super::threaded_ir::{ThreadedStmt, ThreadedValue};
+use super::super::threaded_ir::{ThreadedStmt, ThreadedValue, VersionedVar};
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
-use super::conditionals::ScratchStart;
+use super::conditionals::{ProducerSeed, ScratchStart};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -133,23 +133,19 @@ impl CoreErlangGenerator {
         let span = handlers[0].span;
         let frame = self.current_frame();
         let scratch = self.conditional_scratch(frame);
-        let (head, tuple_doc) =
+        // ADR 0137: the receiver's and the key's own preludes (a bracketed
+        // call steps `State`) belong to the producer's frame, ahead of the
+        // tuple, not inside the tuple's document where their versions die.
+        let (head, scratch_base, tuple_doc) =
             self.generate_lookup_tuple(receiver, &selector, key, &arms, &handlers, scratch)?;
-        let mut tv = self
+        let tv = self
             .conditional_tuple_to_threaded_value(tuple_doc, frame, span, &handlers, tail, true)?;
-        if !head.is_empty() {
-            // ADR 0137: the receiver's and the key's own preludes (a bracketed
-            // call steps `State`) belong to the producer's frame, ahead of the
-            // tuple, not inside the tuple's document where their versions die.
-            let mut prelude = head;
-            prelude.append(&mut tv.prelude);
-            tv.prelude = prelude;
-        }
-        Ok(Some(tv))
+        Ok(Some(Self::with_producer_head(head, scratch_base, tv)))
     }
 
     /// The raw `{Value, StateAcc}` case of [`Self::generate_lookup_producer`]
-    /// (see the module docs for its shape).
+    /// (see the module docs for its shape), with the operand preludes spliced
+    /// ahead of it and the `State` version its scratch seed reads.
     #[allow(
         clippy::too_many_lines,
         reason = "one linear lowering; the splice branch is the flag-on twin of the original"
@@ -162,7 +158,7 @@ impl CoreErlangGenerator {
         arms: &LookupArms<'_>,
         handlers: &[&Block],
         scratch: ScratchStart,
-    ) -> Result<(Vec<ThreadedStmt>, Document<'static>)> {
+    ) -> Result<(Vec<ThreadedStmt>, Option<VersionedVar>, Document<'static>)> {
         let frame = self.current_frame();
         // The receiver is evaluated first and its value bound before the key's
         // own prelude (an actor self-send in the key) can run.
@@ -178,8 +174,7 @@ impl CoreErlangGenerator {
         let key_var = self.fresh_temp_var("LookupKey");
         // In an actor instance method a non-empty prelude is spliced into the
         // producer's frame (see the caller) instead of rendered into the tuple.
-        let splice = self.synced_calls_active()
-            && !(recv_tv.prelude.is_empty() && key_tv.prelude.is_empty());
+        let splice = self.splices_operand_preludes(&[&recv_tv.prelude, &key_tv.prelude]);
         let mut head: Vec<ThreadedStmt> = Vec::new();
         let (recv_preamble, key_preamble) = if let (Some(r), Some(k)) = (eager_recv, eager_key) {
             (r, k)
@@ -214,11 +209,14 @@ impl CoreErlangGenerator {
             )
         };
         let found_var = self.fresh_temp_var("LookupFound");
-        let outer_state = self.current_state_var();
         // Seed the construct's own locals so every handler arm, the
         // handler-less path and the post-lookup extraction all see every
         // `__local__` key.
-        let (seed_doc, base_state) = self.seed_scratch_locals(handlers, scratch, &outer_state);
+        let ProducerSeed {
+            doc: seed_doc,
+            base_state,
+            base: scratch_base,
+        } = self.producer_scratch_seed(handlers, scratch, frame);
         let arm_frame = self.conditional_arm_frame(handlers, true);
         let found_arm = match arms.found {
             Some(handler) => self.conditional_arm_clause(
@@ -251,6 +249,7 @@ impl CoreErlangGenerator {
         };
         Ok((
             head,
+            scratch_base,
             docvec![
                 recv_preamble,
                 recv_let,

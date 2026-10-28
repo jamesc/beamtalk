@@ -23,7 +23,7 @@
 //!   idempotent (formatter round-trip).
 //!
 //! The Beamtalk leg — `value printString` equals `display` — is asserted by
-//! `stdlib/test/string_printstring_escape_test.bt` over the same file. The two
+//! `stdlib/test/string_print_string_escape_test.bt` over the same file. The two
 //! suites together prove `printString` output re-parses to the identical
 //! string; neither side keeps a second copy of the table.
 
