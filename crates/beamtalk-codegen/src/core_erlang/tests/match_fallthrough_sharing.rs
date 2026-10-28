@@ -52,7 +52,10 @@ fn tuple_wrapped_binary_arms_emit_each_arm_once() {
         .map(|i| format!("{{#ok, <<{i}, r/binary>>}} -> {}", 7_000_000 + i))
         .collect();
     arms.push("_ -> 7999999".to_string());
-    assert_each_arm_once(&method(&arms), (1..=n).map(|i| 7_000_000 + i).chain([7_999_999]));
+    assert_each_arm_once(
+        &method(&arms),
+        (1..=n).map(|i| 7_000_000 + i).chain([7_999_999]),
+    );
 }
 
 /// The issue's acceptance case: a 3-chunk segmented binary arm over N
@@ -60,9 +63,7 @@ fn tuple_wrapped_binary_arms_emit_each_arm_once() {
 #[test]
 fn segmented_binary_arm_emits_trailing_arms_once() {
     let n = 8;
-    let mut arms = vec![
-        "<<k:8, a:k/binary, m:8, b:m/binary, rest/binary>> -> 7100000".to_string(),
-    ];
+    let mut arms = vec!["<<k:8, a:k/binary, m:8, b:m/binary, rest/binary>> -> 7100000".to_string()];
     arms.extend((1..=n).map(|i| format!("<<{i}, r/binary>> -> {}", 7_100_000 + i)));
     arms.push("_ -> 7199999".to_string());
     assert_each_arm_once(
@@ -109,7 +110,10 @@ fn array_and_guarded_arms_emit_each_arm_once() {
         "n :: Integer -> 7300004".to_string(),
         "_ -> 7399999".to_string(),
     ];
-    assert_each_arm_once(&method(&arms), [7_300_001, 7_300_002, 7_300_003, 7_300_004, 7_399_999]);
+    assert_each_arm_once(
+        &method(&arms),
+        [7_300_001, 7_300_002, 7_300_003, 7_300_004, 7_399_999],
+    );
 }
 
 /// The shared label must carry threaded state: a local-threading producer
@@ -121,10 +125,14 @@ fn threaded_matches_over_shared_fallthrough_compile() {
     let actor = format!(
         "Actor subclass: Ctr\n  state: n = 0\n\n  run: x =>\n    t := 0\n    x match: {arms}\n    t\n\n  write: x =>\n    x match: [n :: Integer -> self.n := n; b :: Binary -> self.n := 2; _ -> self.n := 3]\n    self.n\n"
     );
-    let plain = format!("Object subclass: Foo\n  run: x =>\n    t := 0\n    x match: {arms}\n    t\n");
+    let plain =
+        format!("Object subclass: Foo\n  run: x =>\n    t := 0\n    x match: {arms}\n    t\n");
     for src in [actor, plain] {
         let out = codegen(&src);
-        assert!(out.contains("letrec '_Fallthrough"), "expected a shared label:\n{out}");
+        assert!(
+            out.contains("letrec '_Fallthrough"),
+            "expected a shared label:\n{out}"
+        );
         assert_compiles_through_erlc("test", &out);
     }
 }
