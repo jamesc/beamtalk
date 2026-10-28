@@ -2248,8 +2248,8 @@ fn nested_split_span(pattern: &Pattern) -> Option<Span> {
 /// function, and inside a `try` argument it is still in the protected
 /// region. The match lowering only ever places [`Self::apply`] as a clause
 /// body or a catch handler, so every label qualifies; the test suite checks
-/// the tail-position rule over the emitted Core
-/// (`match_fallthrough_sharing::assert_goto_applies_in_tail_position`).
+/// the tail-position rule over the emitted Core of the match shapes and of
+/// the whole stdlib/examples corpus (`tests::match_fallthrough_goto`).
 pub(super) struct SharedRest {
     label: String,
     rest: Document<'static>,

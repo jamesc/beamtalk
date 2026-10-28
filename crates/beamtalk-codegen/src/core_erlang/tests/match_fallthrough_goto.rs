@@ -18,12 +18,13 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
 
-use super::{codegen, erlc_available};
+use super::control_flow::family_detector_differential::{collect_source_files, repo_root};
+use super::{CodegenOptions, codegen, erlc_available, generate_module};
 
 /// Erlang side of the tests: `check/1` counts a Core module's `letrec_goto`
 /// labels and lists every apply of one that is not in tail position of its
-/// `letrec` body; `run/0` does that for the job in `job.term`, then calls
-/// each probe and prints its result.
+/// `letrec` body; `run/0` does that for each Core file of the job in
+/// `job.term`, then calls each probe and prints its result.
 ///
 /// The tail positions are the ones `beam_core_to_ssa` compiles a goto from
 /// correctly: clause bodies of a tail `case` (never its argument or a
@@ -35,9 +36,9 @@ const HARNESS: &str = r#"-module(goto_harness).
 -export([run/0, check/1]).
 
 run() ->
-    {ok, [CoreFile, Mod, Probes]} = file:consult("job.term"),
-    {Labels, Bad} = check(CoreFile),
-    io:format("labels ~w~nbad ~w~n", [Labels, Bad]),
+    {ok, [CoreFiles, Mod, Probes]} = file:consult("job.term"),
+    Labels = lists:sum([check_file(F) || F <- CoreFiles]),
+    io:format("labels ~w~n", [Labels]),
     lists:foreach(fun({Fun, Args}) ->
         Parent = self(),
         Pid = spawn(fun() -> Parent ! {self(), (catch apply(Mod, Fun, Args))} end),
@@ -45,6 +46,11 @@ run() ->
         io:format("probe ~w~n", [R])
     end, Probes),
     halt().
+
+check_file(File) ->
+    {N, Bad} = check(File),
+    [io:format("bad ~s ~w~n", [File, L]) || L <- Bad],
+    N.
 
 check(File) ->
     {ok, Bin} = file:read_file(File),
@@ -99,64 +105,87 @@ nontail(E, L) ->
 is_label(Op, L) -> cerl:is_c_var(Op) andalso cerl:var_name(Op) =:= L.
 "#;
 
-/// What [`run_harness`] observed.
+/// What [`run_job`] observed.
 struct HarnessRun {
-    /// `letrec_goto` labels in the module.
+    /// `letrec_goto` labels across the job's Core files.
     labels: usize,
-    /// Labels with an apply outside tail position, as an Erlang list.
-    bad: String,
+    /// `<file> <label>` for each apply of a label outside tail position.
+    bad: Vec<String>,
     /// Each probe's result, as `~w` prints it.
     results: Vec<String>,
 }
 
-/// Compiles `core` (Core for module `module`), checks its goto labels and
-/// calls each probe: `(function, Erlang argument list)`. `None` without an
-/// Erlang toolchain.
-fn run_harness(module: &str, core: &str, probes: &[(&str, String)]) -> Option<HarnessRun> {
+/// A temp directory holding the compiled harness; `None` without an Erlang
+/// toolchain.
+fn harness_dir() -> Option<tempfile::TempDir> {
     if !erlc_available() || Command::new("erl").arg("-version").output().is_err() {
         return None;
     }
-    // The probes need no Beamtalk runtime; the `on_load` hook would
-    // register the class with it, so the module loads bare.
-    let core = core.replace("'on_load' = [{'register_class', 0}],", "");
     let dir = tempfile::tempdir().expect("temp dir");
-    let core_file = dir.path().join(format!("{module}.core"));
-    std::fs::write(&core_file, &core).expect("write core");
-    erlc(dir.path(), &["+from_core"], &core_file, &core);
     let harness = dir.path().join("goto_harness.erl");
     std::fs::write(&harness, HARNESS).expect("write harness");
     erlc(dir.path(), &[], &harness, HARNESS);
+    Some(dir)
+}
 
-    let mut job = format!("\"{module}.core\".\n'{module}'.\n[");
+/// Checks the goto labels of every Core file in `dir` named by
+/// `core_files`, then calls each probe on `module`: `(function, Erlang
+/// argument list)`.
+fn run_job(
+    dir: &Path,
+    core_files: &[String],
+    module: &str,
+    probes: &[(&str, String)],
+) -> HarnessRun {
+    let quoted: Vec<String> = core_files.iter().map(|f| format!("\"{f}\"")).collect();
+    let mut job = format!("[{}].\n'{module}'.\n[", quoted.join(", "));
     for (i, (fun, args)) in probes.iter().enumerate() {
         let sep = if i == 0 { "" } else { ", " };
         write!(job, "{sep}{{'{fun}', {args}}}").expect("write to String");
     }
     job.push_str("].\n");
-    std::fs::write(dir.path().join("job.term"), job).expect("write job");
+    std::fs::write(dir.join("job.term"), job).expect("write job");
 
     let out = Command::new("erl")
-        .current_dir(dir.path())
+        .current_dir(dir)
         .args(["-noshell", "-pa", ".", "-s", "goto_harness", "run"])
         .output()
         .expect("erl runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let field = |key: &str| {
+    let lines = |key: &str| -> Vec<String> {
         stdout
             .lines()
-            .find_map(|l| l.strip_prefix(key))
-            .unwrap_or_else(|| panic!("harness printed no `{key}`:\n{stdout}\n{core}"))
-            .to_string()
-    };
-    Some(HarnessRun {
-        labels: field("labels ").parse().expect("label count"),
-        bad: field("bad "),
-        results: stdout
-            .lines()
-            .filter_map(|l| l.strip_prefix("probe "))
+            .filter_map(|l| l.strip_prefix(key))
             .map(str::to_string)
-            .collect(),
-    })
+            .collect()
+    };
+    let labels = lines("labels ");
+    assert_eq!(
+        labels.len(),
+        1,
+        "harness failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    HarnessRun {
+        labels: labels[0].parse().expect("label count"),
+        bad: lines("bad "),
+        results: lines("probe "),
+    }
+}
+
+/// Compiles `core` (Core for module `module`), checks its goto labels and
+/// calls each probe. `None` without an Erlang toolchain.
+fn run_harness(module: &str, core: &str, probes: &[(&str, String)]) -> Option<HarnessRun> {
+    let dir = harness_dir()?;
+    // The probes need no Beamtalk runtime; the `on_load` hook would
+    // register the class with it, so the module loads bare.
+    let core = core.replace("'on_load' = [{'register_class', 0}],", "");
+    let file = format!("{module}.core");
+    let core_file = dir.path().join(&file);
+    std::fs::write(&core_file, &core).expect("write core");
+    // `+clint`: the runtime compiles generated Core with `core_lint` on.
+    erlc(dir.path(), &["+from_core", "+clint"], &core_file, &core);
+    Some(run_job(dir.path(), &[file], module, probes))
 }
 
 fn erlc(dir: &Path, opts: &[&str], file: &Path, source: &str) {
@@ -183,9 +212,10 @@ pub(super) fn assert_goto_labels_in_tail_position(core: &str) {
         return;
     };
     assert!(run.labels > 0, "expected a goto fallthrough label:\n{core}");
-    assert_eq!(
-        run.bad, "[]",
-        "goto label applied outside tail position:\n{core}"
+    assert!(
+        run.bad.is_empty(),
+        "goto label applied outside tail position: {:?}\n{core}",
+        run.bad
     );
 }
 
@@ -209,9 +239,10 @@ fn assert_goto_match(src: &str, cases: &[(&str, &str)]) {
         return;
     };
     assert!(run.labels > 0, "no goto label parsed:\n{core}");
-    assert_eq!(
-        run.bad, "[]",
-        "goto label applied outside tail position:\n{core}"
+    assert!(
+        run.bad.is_empty(),
+        "goto label applied outside tail position: {:?}\n{core}",
+        run.bad
     );
     let expected: Vec<String> = cases
         .iter()
@@ -290,7 +321,7 @@ end
     };
     assert_eq!(run.labels, 3);
     // The checker flags exactly the non-tail apply.
-    assert_eq!(run.bad, "[{'L',0}]");
+    assert_eq!(run.bad, ["lgpin.core {'L',0}"]);
     assert_eq!(
         run.results,
         [
@@ -371,5 +402,56 @@ fn binary_and_array_gotos_answer_every_arm() {
             ("#{'$beamtalk_class' => 'Other'}", "6"),
             ("42", "6"),
         ],
+    );
+}
+
+/// Every goto label the stdlib, its tests and the examples compile to is
+/// applied only in tail position: the rule checked over every real
+/// `match:`, not just the shapes above.
+#[test]
+fn corpus_goto_labels_are_applied_in_tail_position() {
+    let Some(dir) = harness_dir() else {
+        return;
+    };
+    let root = repo_root();
+    let mut sources = Vec::new();
+    for corpus_dir in [
+        "stdlib/src",
+        "stdlib/test",
+        "stdlib/bootstrap-test",
+        "examples",
+    ] {
+        collect_source_files(&root.join(corpus_dir), &mut sources);
+    }
+    let mut core_files = Vec::new();
+    for (i, path) in sources.iter().enumerate() {
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let stdlib = path.starts_with(root.join("stdlib/src"));
+        let options = CodegenOptions::new(&format!("goto_corpus_{i}")).with_stdlib_mode(stdlib);
+        // A fixture meant to fail codegen has no Core to check.
+        let Ok(core) = generate_module(&module, options) else {
+            continue;
+        };
+        if core.contains("'letrec_goto'") {
+            let file = format!("goto_corpus_{i}.core");
+            std::fs::write(dir.path().join(&file), core).expect("write core");
+            core_files.push(file);
+        }
+    }
+    let run = run_job(dir.path(), &core_files, "none", &[]);
+    assert!(
+        run.labels > 20,
+        "expected the corpus to compile to well over 20 goto labels, saw {} in {} files",
+        run.labels,
+        core_files.len()
+    );
+    assert!(
+        run.bad.is_empty(),
+        "goto label applied outside tail position: {:?}",
+        run.bad
     );
 }
