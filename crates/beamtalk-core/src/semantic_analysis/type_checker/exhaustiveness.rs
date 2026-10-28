@@ -552,9 +552,8 @@ impl TypeChecker {
         let covered_ty = InferredType::union_of(&covered);
         // Unlike bare singletons, covered members here are nominal classes —
         // pass `hierarchy` so `difference` can reason about subclass
-        // relationships (even though Phase A's leaf-only restriction means
-        // there is none to reason about yet; consistent with every other
-        // nominal-class `difference` call in this file).
+        // relationships: a `b :: Binary` arm covers a `String` member
+        // (BT-4228, `String <: Binary`).
         let residual =
             InferredType::difference(scrutinee_ty, &covered_ty, provenance, Some(hierarchy));
 

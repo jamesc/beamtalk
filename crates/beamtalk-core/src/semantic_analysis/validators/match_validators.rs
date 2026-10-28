@@ -943,6 +943,28 @@ mod tests {
         assert!(!is_concrete_leaf_class("Binary", &hierarchy));
     }
 
+    /// BT-4228: `wrap_binary_test` lowers `b :: Binary` to exactly two runtime
+    /// shapes (a bare binary or the `String` tag). That agrees with
+    /// `isKindOf: Binary` only while `Binary` is sealed and its whole subtree
+    /// is `{Binary, String}`. A new stdlib subclass must fail here first.
+    #[test]
+    fn sealed_closed_hierarchy_binary_subtree_is_exactly_string() {
+        let (_module, hierarchy) = hierarchy_for("x");
+        assert!(
+            hierarchy.get_class("Binary").is_some_and(|c| c.is_sealed),
+            "Binary must be sealed for `:: Binary` to be a closed two-shape test"
+        );
+        assert_eq!(
+            hierarchy.direct_subclasses("Binary"),
+            vec![EcoString::from("String")],
+            "`:: Binary` codegen assumes String is Binary's only subclass"
+        );
+        assert!(
+            hierarchy.direct_subclasses("String").is_empty(),
+            "`:: Binary` codegen assumes String has no subclasses"
+        );
+    }
+
     /// Unknown class name, cross-file metadata loaded → reuses the existing
     /// unresolved-class diagnostic (ADR 0100) verbatim.
     #[test]
