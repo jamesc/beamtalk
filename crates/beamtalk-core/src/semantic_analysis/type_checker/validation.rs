@@ -288,6 +288,16 @@ impl TypeChecker {
                         let class_subst = Self::class_method_substitution(
                             class_name, hierarchy, &method, arg_types,
                         );
+                        // Method-local type params (`inject: initial :: A
+                        // into: Block(A, E, A) -> A`) bind from the arguments
+                        // exactly as on the instance side (BT-4110).
+                        let method_subst = Self::infer_method_local_params(
+                            &method,
+                            arg_types,
+                            &class_subst,
+                            hierarchy,
+                            &method.defined_in,
+                        );
                         // Self resolves to the receiver class. For a generic
                         // receiver (e.g. `Box(T)`) we thread the inferred
                         // type args through `self_type` so nested `Self` in
@@ -329,7 +339,7 @@ impl TypeChecker {
                             ret_ty,
                             &type_resolver::merge_substitutions(
                                 &class_subst,
-                                &type_resolver::SubstitutionMap::new(),
+                                &method_subst,
                                 Some(&self_type),
                             ),
                             self.protocol_registry.as_ref(),
