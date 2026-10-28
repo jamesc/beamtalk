@@ -175,7 +175,7 @@ impl CoreErlangGenerator {
     /// The send / reference data comes from the existing AST walkers
     /// ([`beamtalk_core::method_source_walker::find_all_sends_in_source`] and
     /// [`beamtalk_core::method_source_walker::find_all_references_in_source`]).
-    /// Those operate on a plain `unparse_method(method)` of the method — *not*
+    /// Those operate on a plain `canonical_method_source(method)` of the method — *not*
     /// [`Self::extract_method_source`], which strips any
     /// writeback-inferred `-> Type` annotation for the human-facing browsable
     /// source. xref/`referencesTo:` deliberately keeps such annotations (an

@@ -625,3 +625,149 @@ fn paren_constructs_analysed_corpus() {
         outcome_analysed,
     );
 }
+
+/// Operands that only parse parenthesised — an assignment, a field write, a
+/// keyword send, a cascade, a conditional, a match, a binary send as a unary
+/// receiver — reach codegen *bare* once the wrapper is peeled, a shape the
+/// parser never produced before BT-4059. `@O` is the operand.
+const NEEDED_PAREN_OPERANDS: &[&str] = &[
+    "(y := x + 1)",
+    "(self.n := x)",
+    "(o foo: x)",
+    "(o foo; bar: x)",
+    "(x > 0 ifTrue: [1] ifFalse: [2])",
+    "(x match: [0 -> 1; _ -> 2])",
+    "(x + 1)",
+    "(#(1, 2) inject: 0 into: [:a :e | y := y + e. a + e])",
+];
+
+/// Operand slots `@S` holds `@O` in: unary receiver, both binary operands,
+/// a keyword argument, a cascade argument and a cascade target.
+const NEEDED_PAREN_SLOTS: &[&str] = &[
+    "@O printString",
+    "@O + 1",
+    "1 + @O",
+    "o take: @O",
+    "o foo; take: @O",
+    "@O printString; displayString",
+];
+
+/// Frames the slot's statement `@S` sits in.
+const NEEDED_PAREN_FRAMES: &[&str] = &[
+    "r := @S",
+    "#(1, 2) do: [:e | r := @S]",
+    "[y < 3] whileTrue: [y := y + 1. r := @S]",
+    "x > 0 ifTrue: [r := @S] ifFalse: [r := 0]",
+    "r := [@S] on: Error do: [:e | 0]",
+    "r := #(1, 2) inject: 0 into: [:a :e | @S. a]",
+    "r := #(1, 2) collect: [:e | @S]",
+];
+
+/// Compiles `src` the way a driver does and, when analysis accepts it,
+/// through the `ThreadedIr` verifier and `erlc`: `None` when it is rejected
+/// by analysis, `Some(Ok)` when it compiles, `Some(Err)` with the failure.
+fn compile_accepted(src: &str) -> Option<Result<(), String>> {
+    let (module, diagnostics) = parse(lex_with_eof(src));
+    if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        return Some(Err(format!("PARSE {src}")));
+    }
+    let analysis = analyse_full(&module, AnalysisContext::default());
+    if analysis
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+    {
+        return None;
+    }
+    let mut lowered = module.clone();
+    lower_analysed_module_for_codegen(&mut lowered, &analysis);
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let code = generate_module_with_warnings(
+            &lowered,
+            CodegenOptions::new("needed_paren").with_analysis(analysis),
+        )
+        .map_err(|e| e.to_string())?
+        .code;
+        super::assert_compiles_through_erlc("needed_paren", &code);
+        Ok::<(), String>(())
+    }));
+    Some(match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(format!("ERR {e}\n{src}")),
+        Err(_) => Err(format!("PANIC\n{src}")),
+    })
+}
+
+/// Every needed-parentheses operand, in every slot and frame, in an actor,
+/// an object and a class method: the peeled tree must compile through the
+/// `ThreadedIr` verifier and `erlc` whenever analysis accepts it. The frames
+/// of one operand and slot share a module (one `erlc` run); a failing module
+/// is drilled into method by method.
+#[test]
+fn paren_needed_operand_shapes_corpus() {
+    let hosts = [
+        "Actor subclass: NeededParen\n  state: n = 0\n  foo => 1\n",
+        "Object subclass: NeededParen\n  state: n = 0\n  foo => 1\n",
+        "Object subclass: NeededParen\n  classState: n = 0\n  class foo => 1\n",
+    ];
+    let method = |host: &str, k: usize, stmt: &str| {
+        let side = if host.contains("classState:") {
+            "class "
+        } else {
+            ""
+        };
+        format!("  {side}run{k}: x with: o =>\n    y := 0\n    r := 0\n    {stmt}\n    #[r, y]\n")
+    };
+    let mut compiled = 0;
+    let mut failures = Vec::new();
+    for host in hosts {
+        for operand in NEEDED_PAREN_OPERANDS {
+            for slot in NEEDED_PAREN_SLOTS {
+                let statement = slot.replace("@O", operand);
+                // The frames analysis accepts, alone.
+                let accepted: Vec<String> = NEEDED_PAREN_FRAMES
+                    .iter()
+                    .map(|frame| frame.replace("@S", &statement))
+                    .filter(|stmt| {
+                        let src = format!("{host}{}", method(host, 0, stmt));
+                        let (module, _) = parse(lex_with_eof(&src));
+                        !analyse_full(&module, AnalysisContext::default())
+                            .diagnostics
+                            .iter()
+                            .any(|d| d.severity == Severity::Error)
+                    })
+                    .collect();
+                let batch: String = accepted
+                    .iter()
+                    .enumerate()
+                    .map(|(k, stmt)| method(host, k, stmt))
+                    .collect();
+                if accepted.is_empty()
+                    || compile_accepted(&format!("{host}{batch}")) == Some(Ok(()))
+                {
+                    compiled += accepted.len();
+                    continue;
+                }
+                for stmt in &accepted {
+                    match compile_accepted(&format!("{host}{}", method(host, 0, stmt))) {
+                        Some(Ok(())) => compiled += 1,
+                        Some(Err(e)) => failures.push(e),
+                        None => {}
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of the needed-parentheses operand programs fail:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert!(compiled > 500, "only {compiled} programs compiled");
+}
