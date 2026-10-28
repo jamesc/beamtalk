@@ -467,12 +467,7 @@ mode_hint(<<"reading">>) ->
 mode_hint(_Writing) ->
     <<"Reopen with 'File open: path mode: #write' or #append, or #readWrite to also read">>.
 
--doc """
-The handle's path as a `String`, for the `path` detail of its errors (BT-4229).
-
-The handle stores the raw text of the `String` it was opened with, so the
-bytes are known-valid UTF-8.
-""".
--spec path_of(map()) -> beamtalk_string:t().
+-doc "The handle's path for the `path` detail of its errors (BT-4229).".
+-spec path_of(map()) -> beamtalk_string:t() | binary().
 path_of(Handle) ->
-    beamtalk_primitive:string_from_binary(maps:get(path, Handle, <<"<unknown>">>)).
+    beamtalk_file:text_detail(maps:get(path, Handle, <<"<unknown>">>)).

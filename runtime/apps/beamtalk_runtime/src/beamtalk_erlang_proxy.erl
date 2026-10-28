@@ -595,7 +595,8 @@ selector_to_function(Selector) ->
                 {ok, list_to_existing_atom(FunStr)}
             catch
                 error:badarg ->
-                    {error, list_to_binary(FunStr)}
+                    %% BT-4229: a non-ASCII dynamic selector is Unicode text.
+                    {error, unicode:characters_to_binary(FunStr)}
             end;
         false ->
             %% Unary selector — use as-is (already an atom)

@@ -72,6 +72,9 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
 ]).
 -export([handle_lines/1, handle_has_method/1]).
 
+%% Shared with beamtalk_file_handle for its error details (BT-4229).
+-export([text_detail/1]).
+
 -type file_handle() :: beamtalk_file_handle:t().
 -export_type([file_handle/0]).
 %% How `do_open/4` performs the underlying `file:open/2` (see `open_for_owner/3`).
@@ -797,20 +800,30 @@ file_error_result(Selector, Details, Reason, Classified, DefaultHint) ->
     ).
 
 -doc """
-The `path` detail of a File error, as a `String` (BT-4229).
+The `path` detail of a File error (BT-4229), via `text_detail/1`.
 
-`Path` is the text of the caller's `String` argument (already unwrapped, so
-known-valid UTF-8); recording it tagged makes `e details at: #path` answer a
-`String` equal to the path the caller passed.
+Recording it as a `String` makes `e details at: #path` equal the path the
+caller passed.
 """.
 -spec path_detail(binary()) -> #{path := beamtalk_string:t()}.
 path_detail(Path) ->
     #{path => text_detail(Path)}.
 
--doc "Re-tag the text of a caller's `String` argument for an error detail.".
--spec text_detail(binary()) -> beamtalk_string:t().
+-doc """
+A text error detail: a `String` when the bytes are valid UTF-8, else the raw
+`Binary` (BT-4229).
+
+Usually the bytes are the text of the caller's `String` argument, but every
+File entry point also accepts a bare `Binary` path, which carries no UTF-8
+guarantee; tagging it unchecked would forge an invalid `String` (BT-4170).
+Shared with `beamtalk_file_handle:path_of/1`.
+""".
+-spec text_detail(binary()) -> beamtalk_string:t() | binary().
 text_detail(Text) ->
-    beamtalk_primitive:string_from_binary(Text).
+    case beamtalk_primitive:is_utf8(Text) of
+        true -> beamtalk_primitive:string_from_binary(Text);
+        false -> Text
+    end.
 
 -doc "Classification for operations that read an existing file.".
 -spec read_failures() -> [{atom(), atom(), binary()}].

@@ -118,7 +118,11 @@ policy_refuses_off_host_without_tls_test() ->
         {beamtalk_string, <<"configure TLS distribution (ADR 0091) or use a tunnel">>},
         Error#beamtalk_error.hint
     ),
-    ?assertEqual(?OFF_HOST_NODE, maps:get(node, Error#beamtalk_error.details)).
+    ?assertEqual(?OFF_HOST_NODE, maps:get(node, Error#beamtalk_error.details)),
+    %% BT-4229: the host part is recorded as a String, not a charlist.
+    ?assertEqual(
+        {beamtalk_string, <<"192.0.2.1">>}, maps:get(host, Error#beamtalk_error.details)
+    ).
 
 policy_allows_off_host_under_tls_test() ->
     ?assertEqual(ok, beamtalk_node:connect_policy(?OFF_HOST_NODE, true)).
