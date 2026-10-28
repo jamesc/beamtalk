@@ -332,10 +332,11 @@ impl TypeChecker {
             // and lose the nullability in the inferred return. Nil-stripping is
             // only safe for the outer-generic path below (`List(T)` etc.) where
             // the union shape doesn't match the param shape anyway.
-            if crate::semantic_analysis::type_checker::is_generic_type_param(param_type) {
+            if crate::semantic_analysis::type_checker::is_type_var_placeholder(
+                param_type, hierarchy,
+            ) {
                 let param_eco: EcoString = param_type.clone();
                 if !class_type_params.contains(&param_eco)
-                    && !hierarchy.has_class(&param_eco)
                     && matches!(
                         arg_ty,
                         InferredType::Known { .. } | InferredType::Union { .. }
@@ -365,9 +366,8 @@ impl TypeChecker {
                 };
 
                 let is_method_local = |name: &EcoString| {
-                    crate::semantic_analysis::type_checker::is_generic_type_param(name)
+                    crate::semantic_analysis::type_checker::is_type_var_placeholder(name, hierarchy)
                         && !class_type_params.contains(name)
-                        && !hierarchy.has_class(name)
                 };
 
                 if declared_base == "Block" {

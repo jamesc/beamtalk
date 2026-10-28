@@ -1089,7 +1089,9 @@ impl TypeChecker {
         else {
             return true; // Dynamic / Never on either side — skip
         };
-        if super::is_generic_type_param(exp_name) || super::is_generic_type_param(act_name) {
+        if super::is_type_var_placeholder(exp_name, hierarchy)
+            || super::is_type_var_placeholder(act_name, hierarchy)
+        {
             return true;
         }
         if !Self::is_type_compatible(act_name, exp_name, hierarchy) {

@@ -1545,6 +1545,19 @@ pub(in crate::semantic_analysis) fn is_generic_type_param(name: &str) -> bool {
     bytes.len() == 1 && bytes[0].is_ascii_uppercase()
 }
 
+/// `true` when `name` is a bare type-variable placeholder (`E`, `T`, `V`):
+/// shaped like a generic type param ([`is_generic_type_param`]) and *not* a
+/// real class in the hierarchy. A user class that happens to be named with a
+/// single uppercase letter is a class, judged nominally like any other. The
+/// one rule every "is this an unresolved type variable?" check shares
+/// (BT-4233).
+pub(in crate::semantic_analysis) fn is_type_var_placeholder(
+    name: &str,
+    hierarchy: &ClassHierarchy,
+) -> bool {
+    is_generic_type_param(name) && !hierarchy.has_class(name)
+}
+
 // ── Diagnostic facts ──────────────────────────────────────────────────────
 //
 // A shared leaf between `inference/` and `validation.rs` (this module is a
