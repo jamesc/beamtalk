@@ -235,6 +235,7 @@ mod loop_body_self_send_operand_corpus;
 mod match_scrutinee_state_corpus;
 mod module_info;
 mod nlr;
+mod paren_transparency;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
