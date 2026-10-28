@@ -164,7 +164,8 @@ fn value_types_and_class_methods_have_no_guard() {
     );
     // The same holds for a class-side `super` send in a closure: the class
     // method's own `context` is still `Actor`, but it has no instance `State`
-    // (class-side `super` itself is unsupported on a BEAM today: BT-4001).
+    // (class-side `super` walks the metaclass chain via
+    // `class_self_dispatch/4`, BT-4001).
     let class_super = "Actor subclass: C
   state: more = 0
   class run => #(1, 2) collect: [:x | super peek: x]

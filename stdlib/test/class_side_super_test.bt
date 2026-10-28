@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4001: a `super` send in a class method walks the metaclass chain from
+// the defining class's superclass (Smalltalk-80 class-side `super`).
+//
+// Fixtures: stdlib/test/fixtures/bt4001class_super_*.bt
+
+TestCase subclass: ClassSideSuperTest
+
+  testActorClassMethodSuper =>
+    self assert: Bt4001ClassSuperActorChild run equals: 101
+
+  testActorClassMethodSuperInClosure =>
+    self assert: Bt4001ClassSuperActorChild runAll equals: #(101, 102)
+
+  testObjectClassMethodSuper =>
+    self assert: Bt4001ClassSuperObjectChild run equals: 101
+
+  testObjectClassMethodSuperInClosure =>
+    self assert: Bt4001ClassSuperObjectChild runAll equals: #(101, 102)
+
+  testInheritedClassMethodSuperStartsAtDefiningClass =>
+    self assert: Bt4001ClassSuperObjectGrandchild run equals: 101
+
+  testInheritedClassMethodSuperInClosure =>
+    self assert: Bt4001ClassSuperObjectGrandchild runAll equals: #(101, 102)
+
+  testSealedDirectCalledClassMethodSuper =>
+    self assert: Bt4001ClassSuperSealed run equals: 101
+
+  testValueClassSideSuperNew =>
+    v := Bt4001ClassSuperValue make
+    self assert: v class equals: Bt4001ClassSuperValue
+    self assert: v n equals: 1
+
+  testSealedDirectCalledClassMethodSuperInClosure =>
+    self assert: Bt4001ClassSuperSealed runAll equals: #(101, 102)

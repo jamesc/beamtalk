@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4001: `super new` from a Value subclass's class-side constructor.
+
+Value subclass: Bt4001ClassSuperValue
+  field: n = 1
+
+  class make => super new

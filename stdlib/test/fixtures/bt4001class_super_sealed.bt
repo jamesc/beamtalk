@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4001: a class-side `super` send from `class sealed` methods of a sealed,
+// stateless class, which are direct-called in the caller (ADR 0129 Phase 0b)
+// and so may be entered without a class object.
+
+sealed Bt4001ClassSuperObjectBase subclass: Bt4001ClassSuperSealed
+
+  class sealed run => super peek: 1
+
+  class sealed runAll => #(1, 2) collect: [:x | super peek: x]

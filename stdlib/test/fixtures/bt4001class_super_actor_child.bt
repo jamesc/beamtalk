@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4001: a class-side `super` send in an Actor subclass's class method, at
+// method level and inside a closure. The class overrides `class peek:`, so
+// answering 101 (not 1) shows `super` skipped it for the superclass's.
+
+Bt4001ClassSuperActorBase subclass: Bt4001ClassSuperActorChild
+
+  class peek: x => x
+
+  class run => super peek: 1
+
+  class runAll => #(1, 2) collect: [:x | super peek: x]

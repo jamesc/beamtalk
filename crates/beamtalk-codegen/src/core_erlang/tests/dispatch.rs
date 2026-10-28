@@ -3812,6 +3812,48 @@ fn test_builder_super_and_self_send_pass_live_receiver_tag() {
     );
 }
 
+/// BT-4001: a `super` send in a compiled class method (not only a ClassBuilder
+/// fun) walks the metaclass chain through `class_self_dispatch/4`, keyed on the
+/// defining class with the live receiver tag. It must never take the instance
+/// `beamtalk_dispatch:super/5` path, whose `Self`/`State` a class method does
+/// not bind (erlc rejected the module with `unbound variable 'Self'`). Covered
+/// at method level and inside a closure, for Actor, Object and Value classes,
+/// and for a sealed class's direct-called `class sealed` method.
+#[test]
+fn test_class_method_super_uses_class_self_dispatch() {
+    let headers = [
+        "Actor subclass: C",
+        "Object subclass: C",
+        "Value subclass: C",
+        "sealed Object subclass: C",
+    ];
+    let bodies = [
+        "class run => super peek: 1",
+        "class run => #(1, 2) collect: [:x | super peek: x]",
+        "class sealed run => super peek: 1",
+        "class sealed run => #(1, 2) collect: [:x | [super peek: x] on: Error do: [:e | 0]]",
+    ];
+    for header in headers {
+        for body in bodies {
+            let src = format!("{header}\n  {body}\n");
+            let code = super::compile(&src)
+                .unwrap_or_else(|e| panic!("class-side super must compile: {e}\n{src}"));
+            assert!(
+                code.contains(
+                    "call 'beamtalk_class_dispatch':'class_self_dispatch'('C', 'peek:', ["
+                ) && code.contains("], call 'erlang':'element'(2, ClassSelf))"),
+                "class-side `super` must route through class_self_dispatch/4:\n{src}\n{code}"
+            );
+            assert!(
+                !code.contains("'beamtalk_dispatch':'super'")
+                    && !code.contains("'beamtalk_dispatch':'super_value'"),
+                "class-side `super` must not take the instance super path:\n{src}\n{code}"
+            );
+            assert_compiles_through_erlc("test", &code);
+        }
+    }
+}
+
 /// A builder cascade lexically inside a block still lowers the fun as a class
 /// method's own top frame (`block_depth` is reset and restored around it).
 #[test]

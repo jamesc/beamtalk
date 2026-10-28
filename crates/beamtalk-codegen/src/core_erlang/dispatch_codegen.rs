@@ -2710,19 +2710,24 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let selector_atom = selector.name().to_string();
 
-        // ADR 0084: `super` inside a builder class-method fun resolves
-        // up the metaclass chain via the runtime helper, keyed on the builder
-        // class name — `class_self_dispatch/4` begins the walk at that class's
-        // superclass, which is exactly super semantics. The live receiver tag
-        // (`element(2, ClassSelf)`) is passed so a subclass receiver runs the
-        // superclass method under its own class-variable key. The fun has no module
-        // export, so this must not use the compiled `beamtalk_dispatch:super/5`
-        // instance path below.
-        if let Some(builder_class) = self.builder_class_method_class() {
+        // A class-side `super` resolves up the metaclass chain via the runtime
+        // helper, keyed on the defining class: the builder class inside a
+        // programmatic ClassBuilder class-method fun (ADR 0084), otherwise the
+        // class whose class method (or class-side extension) is being
+        // compiled (BT-4001). `class_self_dispatch/4` begins the walk at that
+        // class's superclass, which is exactly super semantics. The live
+        // receiver tag (`element(2, ClassSelf)`) is passed so a subclass
+        // receiver runs the superclass method under its own class-variable
+        // key. A class method binds no instance `Self`/`State`, so it must
+        // never reach the `beamtalk_dispatch:super/5` instance path below.
+        let class_side_super_class = self
+            .builder_class_method_class()
+            .or_else(|| self.in_class_method().then(|| self.class_name()));
+        if let Some(defining_class) = class_side_super_class {
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch'(",
-                leaf::atom(builder_class),
+                leaf::atom(defining_class),
                 ", ",
                 leaf::atom(selector_atom),
                 ", [",
