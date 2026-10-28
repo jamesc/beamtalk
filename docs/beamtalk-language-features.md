@@ -3575,6 +3575,25 @@ A `match:` arm body is an expression, so an arm that needs more than one stateme
     ]
   ```
 
+### onLinkedExit:reason: Semantics
+
+By default a `Server` that traps exits (see `Actor>>terminate:`) treats a linked process's `EXIT` like an untrapped link would: a non-`#normal` reason stops the server with that reason, and `#normal` is ignored. A server that links worker processes on purpose (for example `Erlang erlang spawn_link:`) can handle their exits itself by overriding `onLinkedExit: source reason: reason`:
+
+- Defined on `Server` with a **default no-op**. Overriding it (in the class or any ancestor other than `Server`) is the opt-in; there is no class-side flag.
+- **All** non-parent `EXIT`s — normal (`reason` is `#normal`) and abnormal — go to the hook, and only to the hook: they are never also delivered to `handleInfo:`. `EXIT` from the server's parent (supervisor/spawner) stays with the `gen_server` loop: `terminate:` runs and the server stops.
+- Overriding the hook makes the server trap exits; no `terminate:` override is needed.
+- **Error handling** is the same as `handleInfo:` (ADR 0134): a raise crashes the server. `continueWith:` and `stopWith:` work from the hook.
+- **`source` is a `Pid | Port`**: a trapping server also receives `EXIT` from linked ports (`open_port`, `gen_tcp`/`ssl` sockets), so annotate the parameter `Pid | Port`.
+- **Hot reload**: the server only traps exits from `init/1`, so adding or removing the override by hot reload applies to instances started after the change (same as `terminate:`).
+- **Server-only.** Plain ``Actor`s` keep the default behaviour and never receive the hook.
+
+  ```beamtalk
+  Server subclass: StreamHost
+    state: resets = 0
+    onLinkedExit: _source :: Pid | Port reason: reason :: Object =>
+      reason == #normal ifFalse: [self.resets := self.resets + 1]
+  ```
+
 ### Migration: Actor to Server
 
 Promoting an Actor to a Server is a one-word change. All existing methods continue to work:

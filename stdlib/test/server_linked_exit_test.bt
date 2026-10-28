@@ -1,0 +1,79 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4052: Server>>onLinkedExit:reason: - a Server that overrides the hook
+// receives every non-parent EXIT (normal and abnormal) and stays alive;
+// without it the BT-3596 default holds. Parent EXIT / supervisor shutdown
+// still runs terminate:.
+//
+// Fixtures: stdlib/test/fixtures/bt4052*.bt
+
+TestCase subclass: ServerLinkedExitTest
+
+  testAbnormalLinkedExitFiresHookAndServerSurvives =>
+    server := Bt4052HookServer spawn
+    server linkExiting: #boom
+    50 timesRepeat: [server hookCount == 0 ifTrue: [Timer sleep: 10]]
+    self assert: server hookCount equals: 1
+    self assert: server lastReason equals: #boom
+    self assert: server lastPid isNil equals: false
+    self assert: server isAlive
+    server stop
+
+  testNormalLinkedExitFiresHookWithNormal =>
+    server := Bt4052HookServer spawn
+    server linkNormal
+    50 timesRepeat: [server hookCount == 0 ifTrue: [Timer sleep: 10]]
+    self assert: server hookCount equals: 1
+    self assert: server lastReason equals: #normal
+    self assert: server isAlive
+    server stop
+
+  testLinkedExitIsNotDeliveredToHandleInfo =>
+    server := Bt4052HookServer spawn
+    server linkExiting: #boom
+    50 timesRepeat: [server hookCount == 0 ifTrue: [Timer sleep: 10]]
+    self assert: server infoCount equals: 0
+    server stop
+
+  testNoHookAbnormalLinkedExitStopsServer =>
+    table := Ets new: #bt4052Default type: #set
+    server := Bt4052DefaultServer spawn
+    server onExit: [:reason | table at: #exitReason put: reason]
+    Erlang erlang unlink: server pid
+    server linkExiting: #boom
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #exitReason) equals: #boom
+    self deny: server isAlive
+    table delete
+
+  testNoHookNormalLinkedExitIsIgnored =>
+    server := Bt4052DefaultServer spawn
+    server linkNormal
+    Timer sleep: 100
+    self assert: server isAlive
+    self assert: server infoCount equals: 0
+    server stop
+
+  testRaisingHookCrashesServer =>
+    table := Ets new: #bt4052Raising type: #set
+    server := Bt4052RaisingServer spawn
+    server onExit: [:reason | table at: #exitReason put: reason]
+    Erlang erlang unlink: server pid
+    server linkExiting: #boom
+    50 timesRepeat: [(table at: #exitReason) isNil ifTrue: [Timer sleep: 10]]
+    self deny: server isAlive
+    self assert: ((table at: #exitReason) at: 1) message equals: "deliberate hook error"
+    table delete
+
+  testSupervisorShutdownStillRunsTerminate =>
+    table := Ets new: #bt4052Terminate type: #set
+    sup := (Bt4052Sup supervise) unwrap
+    child :: Bt4052TerminatingServer := (sup which: Bt4052TerminatingServer) unwrap
+    self assert: child isAlive
+    result := sup terminate: Bt4052TerminatingServer
+    self assert: result isOk equals: true
+    50 timesRepeat: [(table at: #called) isNil ifTrue: [Timer sleep: 20]]
+    self assert: (table at: #called) equals: true
+    sup stop
+    table delete

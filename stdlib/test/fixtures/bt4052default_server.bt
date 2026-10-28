@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4052 fixture: trapping Server (overrides terminate:) with NO
+// onLinkedExit:reason: override - the BT-3596 default applies.
+// See stdlib/test/server_linked_exit_test.bt.
+
+Server subclass: Bt4052DefaultServer
+  state: infoCount = 0
+
+  linkExiting: reason =>
+    Erlang erlang spawn_link: [Erlang erlang exit: reason]
+    nil
+
+  linkNormal =>
+    Erlang erlang spawn_link: [nil]
+    nil
+
+  terminate: _reason => nil
+
+  handleInfo: _msg => self.infoCount := self.infoCount + 1
+
+  infoCount => self.infoCount

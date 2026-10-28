@@ -4552,6 +4552,43 @@ bt3596_handle_linked_exit_non_exit_message_passes_through_test() ->
     ?assertEqual(pass, beamtalk_actor:handle_linked_exit({some, other, msg}, State)),
     ?assertEqual(pass, beamtalk_actor:handle_linked_exit(tick, State)).
 
+bt4052_handle_linked_exit_3_flag_true_returns_hook_marker_test() ->
+    State = #{value => 0},
+    Pid = self(),
+    ?assertEqual(
+        {hook, Pid, normal},
+        beamtalk_actor:handle_linked_exit({'EXIT', Pid, normal}, State, true)
+    ),
+    ?assertEqual(
+        {hook, Pid, boom},
+        beamtalk_actor:handle_linked_exit({'EXIT', Pid, boom}, State, true)
+    ).
+
+bt4052_handle_linked_exit_3_flag_true_non_exit_passes_test() ->
+    ?assertEqual(pass, beamtalk_actor:handle_linked_exit(tick, #{}, true)).
+
+bt4052_handle_linked_exit_3_flag_false_matches_default_test() ->
+    State = #{value => 0},
+    ?assertEqual(
+        {noreply, State},
+        beamtalk_actor:handle_linked_exit({'EXIT', self(), normal}, State, false)
+    ),
+    ?assertEqual(
+        {stop, boom, State},
+        beamtalk_actor:handle_linked_exit({'EXIT', self(), boom}, State, false)
+    ),
+    ?assertEqual(pass, beamtalk_actor:handle_linked_exit(tick, State, false)).
+
+bt4052_handle_linked_exit_3_flag_true_port_source_test() ->
+    %% A trapping process also receives 'EXIT' from linked ports.
+    Port = open_port({spawn, "cat"}, []),
+    ?assert(is_port(Port)),
+    ?assertEqual(
+        {hook, Port, normal},
+        beamtalk_actor:handle_linked_exit({'EXIT', Port, normal}, #{}, true)
+    ),
+    port_close(Port).
+
 bt3596_default_handle_info_stops_on_non_parent_abnormal_exit_test() ->
     %% The default ignore-all handle_info/2 (used by every plain Actor
     %% subclass) must not silently swallow a linked child's crash once this
