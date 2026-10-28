@@ -70,8 +70,9 @@ Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid
             );
         {error, {ErrStr, Pos}} ->
             Msg = iolist_to_binary(io_lib:format("~s at position ~p", [ErrStr, Pos])),
-            Error2 = beamtalk_error:new(regex_error, 'Regex', 'from:', Msg),
-            beamtalk_result:from_tagged_tuple({error, Error2})
+            beamtalk_result:from_tagged_tuple(
+                {error, compile_error('Regex', 'from:', Msg, {ErrStr, Pos})}
+            )
     end;
 'from:'(_) ->
     beamtalk_error:raise_type_error('Regex', 'from:', <<"Pattern must be a String">>).
@@ -101,8 +102,9 @@ Unknown options still raise (programming error).
             );
         {error, {ErrStr, Pos}} ->
             Msg = iolist_to_binary(io_lib:format("~s at position ~p", [ErrStr, Pos])),
-            Error2 = beamtalk_error:new(regex_error, 'Regex', 'from:options:', Msg),
-            beamtalk_result:from_tagged_tuple({error, Error2})
+            beamtalk_result:from_tagged_tuple(
+                {error, compile_error('Regex', 'from:options:', Msg, {ErrStr, Pos})}
+            )
     end;
 'from:options:'(_, _) ->
     beamtalk_error:raise_type_error(
@@ -186,7 +188,8 @@ matches_regex_options({beamtalk_string, Str}, {beamtalk_string, Pattern}, Option
     try
         re:run(Str, Pattern, ErlOpts) =:= match
     catch
-        error:badarg -> raise_bad_pattern('matchesRegex:options:', Pattern)
+        error:badarg ->
+            raise_bad_pattern('matchesRegex:options:', Pattern, translate_options(Options))
     end;
 matches_regex_options(_, _, _) ->
     beamtalk_error:raise_type_error(
@@ -380,17 +383,41 @@ validated_match(Selector, Bin) when is_binary(Bin) ->
 -doc "Raise a structured regex_error for invalid patterns in String methods.".
 -spec raise_bad_pattern(atom(), binary()) -> no_return().
 raise_bad_pattern(Selector, Pattern) ->
+    raise_bad_pattern(Selector, Pattern, []).
+
+-doc """
+`raise_bad_pattern/2` for a call that compiled with `CompileOpts`: recompiling
+with the same options reproduces `re:compile`'s error (and its `reason`) for a
+pattern that is only invalid under them, e.g. `(#)` with `extended`.
+""".
+-spec raise_bad_pattern(atom(), binary(), list()) -> no_return().
+raise_bad_pattern(Selector, Pattern, CompileOpts) ->
     %% Try re:compile to get a detailed error message
-    Hint =
-        case re:compile(Pattern) of
-            {error, {ErrStr, Pos}} ->
-                iolist_to_binary(
-                    io_lib:format("Invalid pattern: ~s at position ~p", [ErrStr, Pos])
-                );
-            _ ->
-                <<"Invalid regex pattern">>
-        end,
-    beamtalk_error:raise(beamtalk_error:new(regex_error, 'String', Selector, Hint)).
+    case re:compile(Pattern, CompileOpts) of
+        {error, {ErrStr, Pos}} ->
+            Hint = iolist_to_binary(
+                io_lib:format("Invalid pattern: ~s at position ~p", [ErrStr, Pos])
+            ),
+            beamtalk_error:raise(compile_error('String', Selector, Hint, {ErrStr, Pos}));
+        _ ->
+            beamtalk_error:raise(
+                beamtalk_error:new(regex_error, 'String', Selector, <<"Invalid regex pattern">>)
+            )
+    end.
+
+-doc """
+The `regex_error` for a pattern `re:compile` rejected (BT-4236).
+
+`details.reason` keeps OTP's `{ErrStr, Pos}` unchanged, so `Exception>>reason`
+answers the same term as the FFI call `Erlang re compile:` for that pattern.
+""".
+-spec compile_error(atom(), atom(), binary(), {string(), non_neg_integer()}) ->
+    beamtalk_error:error().
+compile_error(Class, Selector, Hint, {ErrStr, Pos}) ->
+    beamtalk_error:with_details(
+        beamtalk_error:new(regex_error, Class, Selector, Hint),
+        #{reason => {ErrStr, Pos}}
+    ).
 
 -doc "Translate Beamtalk option atoms to Erlang re compile options.".
 -spec translate_options(list()) -> list().

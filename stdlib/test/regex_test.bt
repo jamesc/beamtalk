@@ -95,6 +95,30 @@ TestCase subclass: RegexTest
     // Invalid pattern in String method still raises regex_error
     self should: ["hello" matchesRegex: "[invalid"] raise: #regex_error
 
+  // BT-4236: an invalid pattern keeps re:compile's {ErrStr, Pos} as reason,
+  // the same term the FFI call `Erlang re compile:` answers
+  testInvalidPatternKeepsCompileReason =>
+    reason := (Regex from: "(") error reason
+    self assert: reason class equals: Tuple
+    @expect type
+    self assert: (reason at: 2) equals: 1
+    @expect type
+    self assert: ((Regex from: "(" options: #(#caseless)) error reason at: 2) equals: 1
+    @expect type
+    self assert: ([
+      "hello" matchesRegex: "("
+    ] on: Error do: [:e | e reason at: 2]) equals: 1
+    // element 1 is OTP's charlist (a List), not a String
+    @expect type
+    self assert: (reason at: 1) class equals: List
+    // invalid only under the caller's options: `#` starts a comment in extended mode
+    @expect type
+    self
+      assert: ([
+        "x" matchesRegex: "(#)" options: #(#extended)
+      ] on: Error do: [:e | e reason at: 2])
+      equals: 3
+
   // BT-3271: from:options: error path when pattern is invalid
   testFromOptionsErrorPath =>
     result := Regex from: "[invalid" options: #(#caseless)
