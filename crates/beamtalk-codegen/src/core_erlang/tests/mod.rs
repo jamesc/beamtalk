@@ -255,6 +255,7 @@ mod match_fallthrough_sharing;
 mod match_scrutinee_state_corpus;
 mod module_info;
 mod nlr;
+mod paren_peel_guard;
 mod paren_transparency;
 mod primitives;
 mod protocol_registration_conformance;

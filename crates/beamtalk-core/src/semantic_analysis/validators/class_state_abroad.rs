@@ -192,12 +192,10 @@ fn check_send(
     let receiver = send.receiver;
     let sel = &send.selector.name();
     let blocks = || {
-        send.arguments
-            .iter()
-            .filter_map(|a| match a.unwrap_parens() {
-                Expression::Block(b) => Some(b),
-                _ => None,
-            })
+        send.arguments.iter().filter_map(|a| match a {
+            Expression::Block(b) => Some(b),
+            _ => None,
+        })
     };
     // (a) reads: passed to a send that runs or keeps it elsewhere.
     if let Some(how) = ctx.abroad_send_clause(receiver, sel, send.is_cast, actors) {
@@ -268,7 +266,7 @@ impl ClassCtx<'_> {
     fn is_actor_spawn(&self, receiver: &Expression, selector: &str) -> bool {
         selector.starts_with("spawn")
             && matches!(
-                receiver.unwrap_parens(),
+                receiver,
                 Expression::ClassReference { name, package, .. }
                     if package.is_none() && self.hierarchy.is_actor_subclass(name.name.as_str())
             )

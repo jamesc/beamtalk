@@ -251,21 +251,85 @@ pub fn restore_operand_parens_in_scope(
 /// already canonical.
 #[must_use]
 pub fn has_parenthesised_operand(module: &Module) -> bool {
-    let mut found = false;
-    for_each_root(module, &mut |_, root| {
-        if !found {
-            found = expr_has_parenthesised_operand(root);
-        }
-    });
-    found
+    first_parenthesised_operand(module).is_some()
 }
 
 /// `true` if [`peel_operand_parens_expr_recording`] would change `expr`.
 #[must_use]
 pub fn expr_has_parenthesised_operand(expr: &Expression) -> bool {
-    let mut found = false;
-    visit_operands(expr, &mut |operand| found = found || is_peelable(operand));
+    expr_first_parenthesised_operand(expr).is_some()
+}
+
+/// The span of the first send operand in `module` that
+/// [`peel_operand_parens`] would peel, in root order then walk order; `None`
+/// when `module` is canonical.
+#[must_use]
+pub fn first_parenthesised_operand(module: &Module) -> Option<Span> {
+    let mut found = None;
+    for_each_root(module, &mut |_, root| {
+        if found.is_none() {
+            found = expr_first_parenthesised_operand(root);
+        }
+    });
     found
+}
+
+/// [`first_parenthesised_operand`] for one expression tree.
+#[must_use]
+pub fn expr_first_parenthesised_operand(expr: &Expression) -> Option<Span> {
+    let mut found = None;
+    visit_operands(expr, &mut |operand| {
+        if found.is_none() && is_peelable(operand) {
+            found = Some(operand.span());
+        }
+    });
+    found
+}
+
+/// The normalisation invariant (BT-4232), for tests: panics unless every send
+/// operand of `module` is canonical — no `Parenthesized` wrapper other than
+/// the ones [`peel_operand_parens`] deliberately keeps (`(super)`, and the
+/// cascade's folded first send, which is not an operand).
+///
+/// Codegen and analysis match send operands directly, without peeling, on
+/// the strength of this invariant. Codegen's module entry and the REPL
+/// assembler call it under `#[cfg(test)]` (the gate is the caller's, so the
+/// check costs nothing outside test builds), so a driver that reaches the
+/// generator without running the pass fails the codegen tests instead of
+/// silently compiling `(e) foo` differently from `e foo`.
+///
+/// # Panics
+///
+/// When a send operand of `module` is still parenthesised; the message names
+/// `context` (the entry that broke the invariant) and the operand's span.
+pub fn assert_operands_normalised(module: &Module, context: &str) {
+    if let Some(span) = first_parenthesised_operand(module) {
+        panic!(
+            "{context}: send operand at {}..{} is still `Parenthesized`; \
+             run `ast::normalize::peel_operand_parens` before this point (BT-4059)",
+            span.start(),
+            span.end()
+        );
+    }
+}
+
+/// [`assert_operands_normalised`] for expressions (the REPL entries).
+///
+/// # Panics
+///
+/// When a send operand in `expressions` is still parenthesised.
+pub fn assert_expr_operands_normalised(expressions: &[Expression], context: &str) {
+    if let Some(span) = expressions
+        .iter()
+        .find_map(expr_first_parenthesised_operand)
+    {
+        panic!(
+            "{context}: send operand at {}..{} is still `Parenthesized`; \
+             run `ast::normalize::peel_operand_parens_expr` before this point (BT-4059)",
+            span.start(),
+            span.end()
+        );
+    }
 }
 
 /// `true` if `operand` is a `Parenthesized` wrapper the pass removes: any
@@ -595,6 +659,48 @@ Protocol define: P
         assert_eq!(
             record.layers_of(PeelScope::Module, Span::new(2, 3)),
             Some(&vec![Span::new(1, 4), Span::new(0, 5)])
+        );
+    }
+
+    #[test]
+    fn first_parenthesised_operand_names_the_wrapper_span() {
+        // `x foo: (y)`: the wrapper spans bytes 7..10.
+        let span = first_parenthesised_operand(&parse_bt("x foo: (y)")).expect("an operand");
+        assert_eq!((span.start(), span.end()), (7, 10));
+        assert_eq!(first_parenthesised_operand(&peeled("x foo: (y)")), None);
+        // The positions the pass keeps are not reported.
+        assert_eq!(
+            first_parenthesised_operand(&parse_bt("(a foo); bar\n(x)\nz := (3)")),
+            None
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "still `Parenthesized`")]
+    fn the_invariant_check_rejects_an_unnormalised_module() {
+        assert_operands_normalised(&parse_bt("(self) foo"), "test");
+    }
+
+    #[test]
+    #[should_panic(expected = "still `Parenthesized`")]
+    fn the_expression_invariant_check_rejects_an_unnormalised_expression() {
+        let module = parse_bt("3 + (4)");
+        assert_expr_operands_normalised(&[first_expr(&module).clone()], "test");
+    }
+
+    #[test]
+    fn the_invariant_check_accepts_a_normalised_module() {
+        let module = peeled(
+            "Object subclass: A\n  foo => ((self) bar: (1)); baz: (2)\n  bar => (super) foo\n",
+        );
+        assert_operands_normalised(&module, "test");
+        assert_expr_operands_normalised(
+            &module
+                .expressions
+                .iter()
+                .map(|s| s.expression.clone())
+                .collect::<Vec<_>>(),
+            "test",
         );
     }
 

@@ -275,7 +275,7 @@ impl CoreErlangGenerator {
         // method, which the inline fold must not replace). A receiver core
         // knows is not a `Dictionary` never gets here (the Phase 0 / §6 check
         // keeps its error).
-        let literal_receiver = matches!(receiver.unwrap_parens(), Expression::MapLiteral { .. });
+        let literal_receiver = matches!(receiver, Expression::MapLiteral { .. });
 
         // Get parameter names for key and value
         let key_param = body.parameters.first().map_or("_", |p| p.name.as_str());

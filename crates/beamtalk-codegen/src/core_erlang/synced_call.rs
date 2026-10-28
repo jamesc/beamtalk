@@ -451,7 +451,7 @@ impl CoreErlangGenerator {
             // statements are bracketed where they are compiled); one it does
             // not is `lists:foreach(Closure, List)` with a send fallback: a call.
             SendUserCode::InlinedOrClosureCall => {
-                if arguments.iter().any(|a| match a.unwrap_parens() {
+                if arguments.iter().any(|a| match a {
                     Expression::Block(block) => self.loop_body_has_carried_mutations(block),
                     _ => false,
                 }) {
@@ -505,7 +505,7 @@ impl CoreErlangGenerator {
         }
         let blocks: Vec<&beamtalk_core::ast::Block> = arguments
             .iter()
-            .filter_map(|a| match a.unwrap_parens() {
+            .filter_map(|a| match a {
                 Expression::Block(block) => Some(block),
                 _ => None,
             })
@@ -550,7 +550,7 @@ impl CoreErlangGenerator {
         }
         let blocks: Vec<&beamtalk_core::ast::Block> = std::iter::once(receiver)
             .chain(arguments.iter())
-            .filter_map(|e| match e.unwrap_parens() {
+            .filter_map(|e| match e {
                 Expression::Block(block) => Some(block),
                 _ => None,
             })
@@ -559,7 +559,7 @@ impl CoreErlangGenerator {
             .iter()
             .any(|block| self.loop_body_has_carried_mutations(block))
             || matches!(receiver, Expression::Block(_))
-                && arguments.iter().any(|a| match a.unwrap_parens() {
+                && arguments.iter().any(|a| match a {
                     Expression::Block(body) => {
                         self.while_condition_has_carried_effects(receiver, Some(body))
                     }
@@ -638,7 +638,7 @@ impl CoreErlangGenerator {
         }
         // A send to `self` is noted where its dispatch is built
         // ([`Self::note_self_dispatch`]), once, whichever path reaches it.
-        if super::expr_shape::is_self_identifier(receiver.unwrap_parens())
+        if super::expr_shape::is_self_identifier(receiver)
             || matches!(receiver.unwrap_parens(), Expression::Super(_))
         {
             return;

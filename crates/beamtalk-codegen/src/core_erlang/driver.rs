@@ -338,6 +338,16 @@ pub fn generate_module_with_warnings(
     // typed-no-default field validation).
     generator.class_hierarchy = Some(hierarchy.clone());
 
+    // BT-4232: codegen matches send operands directly, without peeling, so the
+    // module it generates from must be canonical. Test builds check it here,
+    // after every rewrite above (flattening, writebacks), so a path that
+    // skips `ast::normalize` fails the codegen tests.
+    #[cfg(test)]
+    beamtalk_core::ast::normalize::assert_operands_normalised(
+        module,
+        "generate_module_with_warnings",
+    );
+
     // Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?
