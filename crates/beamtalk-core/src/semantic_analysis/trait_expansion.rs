@@ -95,7 +95,7 @@ use crate::ast::{
 };
 use crate::ast_walker::{walk_expression, walk_expression_mut};
 use crate::method_source_walker::collect_self_sends;
-use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::protocol_source::ProtocolSourceMap;
 use crate::semantic_analysis::receiver_knowledge;
@@ -2001,8 +2001,11 @@ fn check_dropped_provision_overrides(
 /// Compares `own_method` (the class body's method) against `dropped` (the
 /// substituted provision it replaced), warning on any parameter or return
 /// type that isn't compatible — [`TypeChecker::is_type_compatible`]'s
-/// nominal-chain rule, the same one `check_override_param_compatibility`
-/// uses for a method overriding an inherited one (ADR 0127 §8).
+/// nominal-chain rule for parameters, the same one
+/// `check_override_param_compatibility` uses for a method overriding an
+/// inherited one (ADR 0127 §8), and [`TypeChecker::is_return_type_refinement`]
+/// for the return type, shared with `check_override_return_compatibility`
+/// (BT-4175).
 fn check_signature_override_compatibility(
     class: &ClassDefinition,
     dropped: &MethodDefinition,
@@ -2049,7 +2052,11 @@ fn check_signature_override_compatibility(
     if let (Some(own_rt), Some(dropped_rt)) = (&own_method.return_type, &dropped.return_type) {
         let own_name = own_rt.type_name();
         let dropped_name = dropped_rt.type_name();
-        if !TypeChecker::is_type_compatible(&own_name, &dropped_name, hierarchy) {
+        if !TypeChecker::is_return_type_refinement(
+            &DeclaredType::from(own_rt),
+            &DeclaredType::from(dropped_rt),
+            hierarchy,
+        ) {
             diagnostics.push(
                 Diagnostic::warning(
                     format!(

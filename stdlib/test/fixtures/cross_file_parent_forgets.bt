@@ -10,11 +10,12 @@ typed Actor subclass: CrossFileParentForgets
   state: required :: String
   state: counter :: Integer = 0
 
-  initialize -> Integer =>
+  initialize -> Nil =>
     // Deliberately does NOT set self.required — the missing field must be
     // caught by the child's post-initialize check, which reads the parent's
     // field metadata from `__beamtalk_meta/0` (no AST available).
     self.counter := 1
+    nil
 
   getRequired -> String => self.required
 

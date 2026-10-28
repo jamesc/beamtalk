@@ -14,10 +14,11 @@ typed Actor subclass: UndefinedObjectUnionStateActor
   state: label :: String | UndefinedObject
   state: count :: Integer = 0
 
-  initialize -> Integer =>
+  initialize -> Nil =>
     // Deliberately does NOT set self.label — UndefinedObject is the
     // canonical nil class, so nil is a legitimate value here.
     self.count := 1
+    nil
 
   getLabel -> String | UndefinedObject => self.label
 

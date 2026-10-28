@@ -7,6 +7,8 @@
 typed E2EInitInheritBase subclass: E2EInitInheritChildUses
   state: cache :: String
 
-  initialize -> String => self.cache := "cache-" ++ self.label
+  initialize -> Nil =>
+    self.cache := "cache-" ++ self.label
+    nil
 
   getCache -> String => self.cache

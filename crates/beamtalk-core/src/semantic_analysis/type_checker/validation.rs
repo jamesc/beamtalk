@@ -27,7 +27,7 @@ use crate::announce_selectors::is_announce_selector;
 use crate::ast::{Expression, Literal, SlotKind, TypeAnnotation};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
-use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::protocol_registry::{ProtocolRegistry, ReturnTypeMismatch};
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{
@@ -38,7 +38,9 @@ use ecow::EcoString;
 use super::known_remote;
 use super::sendability;
 use super::type_resolver;
-use super::types::{AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass};
+use super::types::{
+    AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass, OverrideReturnWidening,
+};
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
@@ -879,6 +881,92 @@ impl TypeChecker {
         chain
             .iter()
             .any(|ancestor| ancestor.as_str() == expected_base)
+    }
+
+    /// Is a *declared* return type `actual` an acceptable refinement of a
+    /// *declared* return type `expected` (BT-4175)?
+    ///
+    /// The one covariance rule shared by every "a method stands in for another
+    /// signature" check: an instance method overriding an inherited one
+    /// (`check_override_return_compatibility`) and a class satisfying a
+    /// protocol requirement
+    /// ([`ProtocolRegistry::conformance_return_type_mismatches`]). Return
+    /// types are covariant, so `actual` must be assignable to `expected`:
+    ///
+    /// - a union `actual` is compatible iff *every* member is (so
+    ///   `String | Result(String, Error)` does not refine `String`);
+    /// - a union `expected` accepts `actual` iff *some* member does;
+    /// - everything else uses [`Self::is_type_compatible`]'s nominal-chain
+    ///   rule (invariant type args, `Nil`/`Never` handling, unknown class ⇒
+    ///   compatible).
+    ///
+    /// Deliberately conservative (answers `true`, i.e. "no warning") for
+    /// shapes the nominal walk cannot judge without the substitution context
+    /// it does not have: anything mentioning a generic type parameter
+    /// (`E`, `T`, `K`, `V` — the parent's binding is not substituted here),
+    /// `Self`/`Self class`/`X class`, `Dynamic`, a difference or
+    /// intersection type, or a protocol name (structural, not nominal).
+    pub(crate) fn is_return_type_refinement(
+        actual: &DeclaredType,
+        expected: &DeclaredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        if Self::declared_type_is_opaque(actual, hierarchy)
+            || Self::declared_type_is_opaque(expected, hierarchy)
+        {
+            return true;
+        }
+        let false_ty = || DeclaredType::simple("False");
+        match (actual, expected) {
+            (DeclaredType::Union(members), _) => members
+                .iter()
+                .all(|m| Self::is_return_type_refinement(m, expected, hierarchy)),
+            (DeclaredType::FalseOr(inner), _) => {
+                Self::is_return_type_refinement(inner, expected, hierarchy)
+                    && Self::is_return_type_refinement(&false_ty(), expected, hierarchy)
+            }
+            (_, DeclaredType::Union(members)) => members
+                .iter()
+                .any(|m| Self::is_return_type_refinement(actual, m, hierarchy)),
+            (_, DeclaredType::FalseOr(inner)) => {
+                Self::is_return_type_refinement(actual, inner, hierarchy)
+                    || Self::is_return_type_refinement(actual, &false_ty(), hierarchy)
+            }
+            _ => {
+                let actual_str: EcoString = actual.to_string().into();
+                let expected_str: EcoString = expected.to_string().into();
+                Self::is_type_compatible(&actual_str, &expected_str, hierarchy)
+            }
+        }
+    }
+
+    /// `true` when `ty` (anywhere inside it) has a shape
+    /// [`Self::is_return_type_refinement`] declines to judge — see that
+    /// function's doc for the list.
+    fn declared_type_is_opaque(ty: &DeclaredType, hierarchy: &ClassHierarchy) -> bool {
+        match ty {
+            DeclaredType::Simple(name) => {
+                super::is_generic_type_param(name)
+                    || WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic)
+                    || hierarchy.is_protocol_class(name)
+            }
+            DeclaredType::Singleton(_) => false,
+            DeclaredType::Generic { base, parameters } => {
+                hierarchy.is_protocol_class(base)
+                    || parameters
+                        .iter()
+                        .any(|p| Self::declared_type_is_opaque(p, hierarchy))
+            }
+            DeclaredType::Union(members) => members
+                .iter()
+                .any(|m| Self::declared_type_is_opaque(m, hierarchy)),
+            DeclaredType::FalseOr(inner) => Self::declared_type_is_opaque(inner, hierarchy),
+            DeclaredType::Difference { .. }
+            | DeclaredType::Intersection { .. }
+            | DeclaredType::SelfType
+            | DeclaredType::SelfClass
+            | DeclaredType::ClassOf(_) => true,
+        }
     }
 
     /// `true` when two same-base, *both*-parameterized positional types
@@ -2227,6 +2315,92 @@ impl TypeChecker {
                 );
             }
         }
+    }
+
+    /// Check that a child method's *declared* return type refines the
+    /// inherited method's declared return type (BT-4175).
+    ///
+    /// Return types are covariant: an override may narrow (`-> Integer` for
+    /// a parent `-> Number`) but not widen or change it — a caller holding a
+    /// parent-typed receiver statically sees the parent's return type. Only
+    /// explicit annotations on the child are compared (an unannotated
+    /// override has nothing declared to contradict), and the rule is
+    /// [`Self::is_return_type_refinement`]. Warning severity, like the
+    /// parameter check (ADR 0025); suppress a deliberate widening with
+    /// `@expect type` on the method.
+    pub(super) fn check_override_return_compatibility(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if method.return_type.is_none() {
+            return;
+        }
+        let selector = method.selector.name();
+        let Some(widening) = Self::override_return_widening(class_name, &selector, hierarchy)
+        else {
+            return;
+        };
+        let OverrideReturnWidening {
+            child_rt,
+            parent_rt,
+            parent_class,
+        } = widening;
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "Return type of '{selector}' in {class_name} is {child_rt}, incompatible with parent's {parent_rt}"
+                ),
+                method.span,
+            )
+            .with_category(DiagnosticCategory::Type)
+            .with_hint(format!(
+                "{parent_class} declares return type {parent_rt}; an override may narrow it but not widen it"
+            )),
+        );
+    }
+
+    /// The incompatible override `check_override_return_compatibility`
+    /// reports for `class_name>>selector`, if any: the class's declared
+    /// return type does not refine the one inherited from its superclass.
+    /// `None` when there is no inherited declaration, either side is
+    /// unannotated, either side names a class type parameter (no
+    /// substitution here), or the override refines its parent. Shared with
+    /// [`ProtocolRegistry::conformance_return_type_mismatches`], which leaves
+    /// exactly these mismatches to the override site (BT-4175).
+    pub(crate) fn override_return_widening(
+        class_name: &str,
+        selector: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<OverrideReturnWidening> {
+        let superclass = hierarchy.get_class(class_name)?.superclass.clone()?;
+        let parent_method = hierarchy.find_method(&superclass, selector)?;
+        let child_method = hierarchy.find_method(class_name, selector)?;
+        let (Some(child_rt), Some(parent_rt)) =
+            (child_method.return_type, parent_method.return_type)
+        else {
+            return None;
+        };
+        // Class type params (possibly multi-letter, which the shared rule's
+        // single-letter heuristic would miss) have no substitution here.
+        let parent_class = parent_method.defined_in;
+        let type_params: Vec<EcoString> = [class_name, parent_class.as_str()]
+            .into_iter()
+            .filter_map(|c| hierarchy.get_class(c))
+            .flat_map(|c| c.type_params.iter().cloned())
+            .collect();
+        if child_rt.mentions_any(&type_params)
+            || parent_rt.mentions_any(&type_params)
+            || Self::is_return_type_refinement(&child_rt, &parent_rt, hierarchy)
+        {
+            return None;
+        }
+        Some(OverrideReturnWidening {
+            child_rt,
+            parent_rt,
+            parent_class,
+        })
     }
 
     /// Validate binary message operand types for arithmetic and string concatenation.
@@ -4035,7 +4209,34 @@ impl TypeChecker {
                 };
 
                 match protocol_registry.check_conformance(class_name, base_protocol, hierarchy) {
-                    Ok(()) => {} // Conforms — no warning
+                    // Conforms by selector — still check the declared
+                    // return types refine the protocol's (BT-4175).
+                    Ok(()) => {
+                        for mismatch in protocol_registry.conformance_return_type_mismatches(
+                            class_name,
+                            base_protocol,
+                            hierarchy,
+                        ) {
+                            let ReturnTypeMismatch {
+                                selector,
+                                defined_in,
+                                actual,
+                                expected,
+                            } = mismatch;
+                            self.diagnostics.push(
+                                Diagnostic::warning(
+                                    format!(
+                                        "{class_name}>>{selector} returns {actual}, incompatible with protocol {base_protocol}'s {expected}"
+                                    ),
+                                    span,
+                                )
+                                .with_category(DiagnosticCategory::Type)
+                                .with_hint(format!(
+                                    "{class_name} responds to every {base_protocol} selector, but `{selector}` (defined in {defined_in}) is declared -> {actual}; code typed `:: {base_protocol}` expects {expected}"
+                                )),
+                            );
+                        }
+                    }
                     Err(missing) => {
                         let missing_list = Self::format_selector_list(&missing);
                         self.diagnostics.push(

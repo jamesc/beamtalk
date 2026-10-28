@@ -264,6 +264,12 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ((Binary fromBytes: #(104, 101, 108, 108, 111)) asString) unwrap   // => "hello"
   /// ((Binary fromBytes: #(255, 254)) asString) isError                 // => true
   /// ```
+  ///
+  /// BT-4175: this deliberately widens `Collection>>asString -> String` (and
+  /// `Printable`'s `asString -> String`) — a known unsoundness, so `:: Printable`
+  /// / `:: Collection` code statically sees `String` but a Binary answers a
+  /// `Result`. Suppress the override return-type warning here.
+  @expect type
   asString -> Result(String, Error) => @primitive
 
   /// Return this binary as a String without UTF-8 validation.
