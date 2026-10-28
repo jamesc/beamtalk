@@ -16,9 +16,12 @@ it in deterministic reductions and words:
 |---|---|---|---|---|
 | 1b / 4c | typed send to an **open** Value (`p x`, `p m: 1`) | 29 red / 28 w, ~160 ns | `p.x` 1.5 ns | full `beamtalk_message_dispatch:send/3` (22 calls) |
 | 5b | self-send inside an open Value | 61 red / 59 w | — | a second full send |
-| 3b | class method, sealed class, method not `class sealed` | 145 red / 444 w, 2.3 µs | `Math.double/1` 0.9 ns | `gen_server:call` into the class process |
-| 3c | class method on an open class | 146 red / 480 w, 2.6 µs | 0.9 ns | same |
-| 12b / 8a | a bare class reference (`Error`, `Point`) | rebuilt per use | a module atom | `binary_to_atom` + `whereis` + 2 ETS reads + a fresh tuple |
+| 3b | class method, sealed class, method not `class sealed` | 145 red / 444 w, 2.3 µs | `Mod.fun(arg)` 2.9 ns | `gen_server:call` into the class process |
+| 3c | class method on an open class | 146 red / 480 w, 2.6 µs | 2.8 ns | same |
+| 12b / 8a | a bare class reference (`Error`, `Point`) | rebuilt per use | a module atom | `binary_to_atom` + `whereis` + 2 ETS reads (`module_name_safe`) + a fresh tuple |
+
+The 12b/8a cause is the current code, after BT-4065. The README's table
+predates that change and still lists a `gen_server:call` for those rows.
 
 The README states the conclusion: "for open classes, late binding is
 structural, but its cost is not: a guarded direct call costs a map-key
@@ -125,15 +128,35 @@ end
 - A subclass instance carries its own tag, misses the guard, and takes the
   dynamic path, so late binding to subclass overrides is untouched.
 
-The candidate is a module name, not a method. That is why hot reload,
-`removeSelector:` and extensions need no invalidation:
+The candidate is a module name, not a method. That is why a same-module
+reload, `removeSelector:` and extensions need no invalidation:
 - A remote call reaches the newest loaded version of `Mod`.
 - Hot reload, `removeSelector:` and extension registration all act inside
   `Mod:dispatch/3` or the registries it reads.
 
+**Accepted caveat: the module name is pinned at compile time.** The dynamic
+path looks the module up at run time (`beamtalk_class_metadata:lookup_module/1`).
+The guarded call names the module the compiler saw. Two cases diverge:
+- A REPL redefinition that moves the class into a *different* module (BT-4200).
+  Stale call sites keep reaching the old module's code.
+- `removeFromSystem`. Stale call sites get a raw `undef` where the dynamic path
+  gives `does_not_understand` (BT-4149).
+
+Both cases already exist for BT-4069's sealed receivers. Dropping `is_sealed`
+widens them to every typed receiver. Both are development-time operations, and
+recompiling the callers fixes them. This ADR accepts the caveat rather than
+pay a registry read on every send. It documents the caveat in the
+language-features hot-reload section. A zero-cost fix is a follow-up issue:
+for example, a retired class module whose `dispatch/3` forwards to
+`beamtalk_message_dispatch:send/3`.
+
 Consequences of the rule:
-- **Self-sends in open Values** are covered. The type checker already types
-  `self` as `Known{C}` (Inferred), so row 5b becomes a guarded direct call.
+- **Self-sends in open Values** are covered when the method runs on an
+  instance of its own class. The type checker types `self` as `Known{C}`
+  (Inferred), so row 5b becomes a guarded direct call. In an *inherited*
+  method running on a subclass instance, `self` is tagged with the subclass.
+  That self-send always misses the guard and stays a full dynamic send, which
+  is correct but not faster.
 - **Unchanged exclusions:**
   - `NON_TAGGED_MAP_CLASSES` (primitives keep their own routing, pinned by
     `tagged_map_routing_conformance.json`);
@@ -161,9 +184,32 @@ input. The flag is true exactly when all of these hold:
 - no class-side extension shadows a compiled method of `C`;
 - the class has finished bootstrap (`mark_ready`).
 
-The selector must also not be a process-creating constructor
-(`new`, `new:`, `startLink`, `startLink:`, unchanged from ADR 0129). Value
-constructors keep their BT-4099 direct path.
+The **defining** class of the resolved method must also have no class
+variables. A class method may only touch the class variables its own class
+declares, and it reads them through the receiver's class-process home (ADR
+0130). Take a method defined on a stateful `Base` and sent to a stateless
+`Sub`:
+- Today it runs in `Sub`'s process and raises `undeclared_class_variable`.
+- Run in the caller, it would raise `class_state_unreachable` instead.
+
+So such a method stays in the class process, with an unchanged error. The
+memo below records the owner's flag together with the owner. Methods run in
+the caller install no class-variable home, so ADR 0130 §1's "no nested home"
+invariant is untouched.
+
+The selector must also not be process-bound. These selectors keep their
+current routing:
+- `new`, `new:`, `startLink` and `startLink:` (ADR 0129). Value constructors
+  keep their BT-4099 direct path.
+- `spawn` and `spawnWith:`, which have dedicated clauses in
+  `beamtalk_class_dispatch`.
+- `Supervisor` `supervise`/`spawn*`, which are routed before `class_send_plain`.
+- `TestCase` run selectors, which answer `test_spawn` and need the
+  gen_server's `noreply`.
+
+Rust owns this list, in `class_info.rs` next to `is_direct_call_eligible`. It
+reaches the runtime as generated metadata, and the `class-state-abroad` lint
+and the migration lint read the same list.
 
 Neither `sealed` nor `class sealed` is part of the test.
 
@@ -172,8 +218,16 @@ by variables, `perform:`, `classNamed:`, a class passed as an argument, and
 Erlang callers):
 - When `direct_call_ok(C)` holds, resolve the defining class and module in
   the caller. Use a memo `{class_method_owner, C, Sel}` in
-  `beamtalk_class_derived_cache` (the BT-4109 `resolve_owner` pattern,
-  invalidated by every metadata write), then apply it in the caller.
+  `beamtalk_class_derived_cache` (the BT-4109 `resolve_owner` pattern), then
+  apply it in the caller if the owner also has no class variables.
+- Deriving the memo walks the chain exactly as the class process does today.
+  A class-side extension or an ADR 0084 runtime fun at each ancestor counts as
+  that ancestor's method. A shadow on an *ancestor* never clears the
+  receiver's flag, so the memo is what keeps it correct. Every change that
+  can alter the answer must therefore invalidate the derived cache:
+  - `beamtalk_extensions:register` and `remove` already do.
+  - `beamtalk_class_metadata:set_runtime_class_methods/2` does not today, and
+    Phase 2 adds it.
 - Otherwise use the class process, as today.
 - A subclass with class variables that inherits a method from a stateless
   parent fails its own flag, so it still runs in its process. ADR 0130
@@ -213,6 +267,17 @@ end
 - `self()`, the process dictionary, links, monitors, timeouts and any
   resource created through FFI (ETS tables, ports, timers) all belong to the
   caller.
+- The services the class process adds around a call become no-ops, because
+  the caller already is the context they recreate:
+  - seeding the caller's session context;
+  - mirroring `beamtalk_dispatch_caller_pid`;
+  - adopting the entry group leader;
+  - the 60 s / 300 s class-call timeouts.
+  
+  One reader needs checking. `File open:mode:`'s handle-ownership rule reads
+  the mirrored caller pid, and Phase 2 must make its no-mirror path resolve to
+  `self()`. A test covers it in the REPL, in `beamtalk run` and in
+  `beamtalk test`.
 
 A class that needs a serialising home declares class state (`classState:`) or
 delegates to an Actor, which is the idiomatic BEAM owner. No new keyword is
@@ -220,21 +285,25 @@ added.
 
 ### 4. Class references: compile-time names, run-time pid
 
-A bare class name compiles to a reference built from compile-time constants
-plus one BIF:
+A bare class name compiles to a reference built from a compile-time atom, one
+BIF and the existing module lookup:
 
 ```erlang
 case call 'erlang':'whereis'('beamtalk_class_Point') of
   <'undefined'> -> <class_not_found, as today>
-  <Pid>         -> {'beamtalk_object', 'Point class', call 'beamtalk_class_registry':'module_of'('Point'), Pid}
+  <Pid>         -> {'beamtalk_object', 'Point class', call 'beamtalk_object_class':'module_name_safe'(Pid), Pid}
 end
 ```
 
-- The registered-name atom is computed at compile time with `leaf::atom`, so
-  there is no `binary_to_atom` per use.
-- `module_of/1` is one `persistent_term` read. It is written by the ADR 0119
-  registry when a class is (re)registered, so the module stays correct when
-  the REPL redefines a class into a new module.
+- The registered-name atom (`beamtalk_class_<Name>`) is computed at compile
+  time with `leaf::atom`. Today `beamtalk_class_registry:registry_name/1` runs
+  `binary_to_atom` on every use.
+- The module stays a run-time lookup. The class gen_server writes it in
+  `init/1` and `merge_identity/5`, so it is still correct when the REPL
+  redefines a class into a new module.
+  - A `persistent_term` would save about one ETS read. But every REPL
+    redefinition would then trigger a global GC scan, so the ETS read stays.
+  - Phase 4 measures both before choosing.
 - The pid is never a constant. A class process can restart, and an
   identifier must mean the same thing in every context (principles §4).
 - Where only the name is needed (an `on:do:` class filter, `isKindOf:` on a
@@ -249,7 +318,8 @@ end
   the instance side they are reached inside `Mod:dispatch/3`; on the class
   side the flag excludes shadowed classes.
 - **Hot reload:**
-  - A reloaded module is reached by remote calls.
+  - A reloaded module is reached by remote calls. The module-identity caveat
+    of §2 still applies.
   - A class that gains class variables, an extension or a runtime fun fails
     its flag before the change is visible.
   - `removeSelector:` is a metadata write, so it erases the flag.
@@ -273,10 +343,10 @@ Value subclass: Point
 ```beamtalk
 (Point x: 3 y: -4) double: (Point x: 1 y: 1)   // => 4
 Point origin                                   // => a Point (0, 0), computed in the caller: no class-process hop
-Point >> norm1 => 42                           // live patch: the guard still lands in Point's dispatch/3
+Point >> norm1 => 42                           // recompiles Point's recorded source; same module, so the guard reaches the new code
 (Point x: 3 y: -4) double: (Point x: 1 y: 1)   // => 84
-Point class >> origin => self x: 9 y: 9        // ADR 0084 runtime fun shadows the compiled method: the flag goes false
-Point origin                                   // => a Point (9, 9), via the slow path until the flag is re-derived
+Point class >> origin => self x: 9 y: 9        // also a recompile: the same guarded direct call reaches the new class_origin
+Point origin                                   // => a Point (9, 9), still in the caller
 ```
 
 ### Error behaviour
@@ -307,7 +377,8 @@ Point new double: "not a point"
   caller. *Adopted:* class methods run where they are called.
 - **Erlang.**
   - Remote calls `Mod:f()` always reach the newest loaded code. That is
-    exactly why a guarded `Mod:dispatch/3` needs no reload invalidation.
+    why a guarded `Mod:dispatch/3` needs no invalidation on a same-module
+    reload.
   - Serialisation is something you ask for by owning a process, never a side
     effect of where code is defined. *Adopted:* the class process exists only
     for class state.
@@ -360,6 +431,8 @@ Point new double: "not a point"
     existing "dynamic dispatch (receiver type unknown)" diagnostic.
 
 ## Steelman Analysis
+
+Option A is the decision above. Options B–E are the alternatives.
 
 ### B. Sealed is the contract (BT-4118's original framing)
 - 🧑‍💻 **Newcomer:** "One rule: seal it to make it fast."
@@ -508,8 +581,11 @@ deterministic reductions and words).
 - Generalise BT-4150's differential test. A fixture runs each send shape,
   guarded-direct versus `beamtalk_message_dispatch:send/3`, over: plain and
   keyword sends, `perform:`, DNU, extensions (including one overriding an
-  inherited method), `removeSelector:`, a live patch, a subclass receiver and
-  a lying annotation.
+  inherited method), `removeSelector:`, a live patch, a subclass receiver, a
+  lying annotation, `perform:withArguments:timeout:` (rewritten in `send/3`
+  before classification), an inherited class method touching a stateful
+  parent's class variables (§3: its error must not change), and an extension
+  or runtime fun on an *ancestor* of the receiving class.
 - Results *and* error shapes must be identical.
 - Add vs-elixir rows for an open-Value typed send, an open-class class
   method, and a class-reference loop.
@@ -530,9 +606,15 @@ deterministic reductions and words).
 - `class_send_plain/3` runs the method in the caller when the flag holds,
   resolving the owner through a `{class_method_owner, C, Sel}` memo in
   `beamtalk_class_derived_cache`.
+- The memo also checks that the owner has no class variables.
+- `set_runtime_class_methods/2` invalidates the derived cache.
+- The process-bound selector list arrives as metadata.
 - Pass the real class reference as `ClassSelf`.
+- `File open:mode:`'s ownership rule resolves to `self()` without the
+  mirrored caller pid.
 - Files: `beamtalk_class_dispatch.erl`, `beamtalk_class_shadow_flags.erl`,
-  `beamtalk_class_derived_cache.erl`, `beamtalk_class_metadata.erl`.
+  `beamtalk_class_derived_cache.erl`, `beamtalk_class_metadata.erl`,
+  `beamtalk_object_class.erl`, `beamtalk_file.erl`.
 - Subsumes BT-4073. Coordinate with BT-4115, whose part A becomes a special
   case.
 - Gate: rows 3b and 3c ≤ 10 red, with no `'$gen_call'` in the profile.
@@ -547,19 +629,31 @@ deterministic reductions and words).
   `register`, timers) or relies on `self()`/the process dictionary. Name the
   fix in the message: an Actor or `classState:`. Reuse the validator and its
   curated table.
-- Update `is_direct_call_eligible` (shared with the `class-state-abroad`
-  lint) to the new rule. There is still one implementation.
+- Update `is_direct_call_eligible` (`class_info.rs`, shared with the
+  `class-state-abroad` lint) to the new rule. There is still one
+  implementation.
+- REPL codegen uses the same rule (`crates/beamtalk-repl/src/codegen.rs`,
+  `set_direct_call_eligible_from_hierarchy`).
 
 **Phase 4 — class references (S).**
-- Use the compile-time registered-name atom and `whereis/1`, plus
-  `beamtalk_class_registry:module_of/1` (a `persistent_term` written by the
-  ADR 0119 registry).
+- Use the compile-time registered-name atom and `whereis/1`, plus the
+  existing `module_name_safe/1` row. Measure it against a `persistent_term`
+  before switching (§4).
 - Pass the bare name where only the name is used.
 - Gate: rows 8a and 12b.
 
 **Phase 5 — docs (S).**
-- Amend ADRs 0025, 0129 (constraint 1), 0013 §4, 0010 (stale
-  "zero-overhead class sends") and 0137 (blocks in class methods).
+- Amend these ADRs:
+  - 0025 ("identical bytecode" becomes "identical results");
+  - 0129 (constraint 1);
+  - 0013 §4;
+  - 0010 (stale "zero-overhead class sends");
+  - 0137 (blocks in class methods);
+  - 0130 (§5's "class sealed, stateless" wording; the in-caller rule adds no
+    class-variable home);
+  - 0109 (§3 generalises its block-scoped `open:do:` exception);
+  - 0084 (runtime funs are applied in the caller when the class has no class
+    variables).
 - Update `docs/beamtalk-language-features.md`: *Class-Side Methods*,
   *Passing Blocks Through Class Methods* and *Self-Sends and Overrides*.
 - Update CLAUDE.md's "Blocks into class methods" rule.
