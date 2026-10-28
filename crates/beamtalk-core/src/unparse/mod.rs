@@ -46,7 +46,7 @@ use crate::ast::{
     StandaloneMethodDefinition, StateDeclaration, StringSegment, TypeAliasDefinition,
     TypeAnnotation,
 };
-use crate::source_analysis::{Severity, lex_with_eof, parse, parse_method};
+use crate::source_analysis::{Severity, binary_binding_power, lex_with_eof, parse, parse_method};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{DEFAULT_LINE_WIDTH, Document, break_, concat, group, line, nest, nil};
 
@@ -86,6 +86,22 @@ pub fn unparse_method(method: &MethodDefinition) -> String {
     // whole-file unparse supplies the prefix from its own context instead.
     unparse_method_definition_inner(method, class_prefix(method), EmitLeadingComments::No)
         .to_pretty_string()
+}
+
+/// The canonical reflected source of `method` (BT-4059): its per-method
+/// source ([`unparse_method`]) with redundant send-operand parentheses
+/// dropped ([`crate::ast::normalize`]).
+///
+/// The one authority for the text a method reflects as (`methodSource`, the
+/// workspace `ChangeLog`, xref), so it is the same whether the method went
+/// through the compiler-port (which holds the raw parse) or codegen (which
+/// holds the normalised tree): `(self) foo` reflects as `self foo`, while
+/// `a * (b + c)` keeps the parentheses its meaning needs.
+#[must_use]
+pub fn canonical_method_source(method: &MethodDefinition) -> String {
+    let mut canonical = method.clone();
+    crate::ast::normalize::peel_method_operand_parens(&mut canonical);
+    unparse_method(&canonical)
 }
 
 /// The signature prefix for a stand-alone per-method render: `class ` for a
@@ -1601,21 +1617,137 @@ fn block_renders_multiline(expr: &Expression) -> bool {
     }
 }
 
+/// The operand slot an expression is unparsed into (BT-4059).
+#[derive(Debug, Clone, Copy)]
+enum OperandSlot<'a> {
+    /// The receiver of a unary send.
+    UnaryReceiver,
+    /// The receiver of a binary send with this operator.
+    BinaryReceiver(&'a str),
+    /// The argument of a binary send with this operator.
+    BinaryArgument(&'a str),
+    /// A keyword send's receiver or argument.
+    KeywordOperand,
+}
+
+impl<'a> OperandSlot<'a> {
+    fn receiver_of(selector: &'a MessageSelector) -> Self {
+        match selector {
+            MessageSelector::Unary(_) => Self::UnaryReceiver,
+            MessageSelector::Binary(op) => Self::BinaryReceiver(op),
+            MessageSelector::Keyword(_) => Self::KeywordOperand,
+        }
+    }
+
+    fn argument_of(selector: &'a MessageSelector) -> Self {
+        match selector {
+            // A unary send has no arguments; keyword is the conservative answer.
+            MessageSelector::Unary(_) | MessageSelector::Keyword(_) => Self::KeywordOperand,
+            MessageSelector::Binary(op) => Self::BinaryArgument(op),
+        }
+    }
+
+    /// Whether `expr` must be parenthesised to re-parse as this slot's
+    /// operand: whether it binds looser than the slot.
+    ///
+    /// Binary sends follow the parser's own operator table
+    /// ([`binary_binding_power`]): Beamtalk binary operators have math
+    /// precedence, not Smalltalk's flat left-to-right order, so `(a + b) * c`
+    /// keeps its parentheses while `(a * b) + c` and `a + (b * c)` do not.
+    fn needs_parens(self, expr: &Expression) -> bool {
+        match expr {
+            // A cast send is statement-only; a keyword send binds loosest.
+            Expression::MessageSend { is_cast: true, .. }
+            | Expression::MessageSend {
+                selector: MessageSelector::Keyword(_),
+                ..
+            } => true,
+            Expression::MessageSend {
+                selector: MessageSelector::Unary(_),
+                ..
+            } => false,
+            Expression::MessageSend {
+                selector: MessageSelector::Binary(inner),
+                ..
+            } => match self {
+                Self::UnaryReceiver => true,
+                Self::KeywordOperand => false,
+                // `inner`'s chain swallows `outer` when `outer` binds its
+                // left operand at least as tightly as `inner` binds its right.
+                Self::BinaryReceiver(outer) => {
+                    match (binary_binding_power(outer), binary_binding_power(inner)) {
+                        (Some(outer), Some(inner)) => outer.left >= inner.right,
+                        _ => true,
+                    }
+                }
+                // The argument is parsed at `outer`'s right binding power, so
+                // it holds `inner` only if `inner` binds at least that tightly.
+                Self::BinaryArgument(outer) => {
+                    match (binary_binding_power(outer), binary_binding_power(inner)) {
+                        (Some(outer), Some(inner)) => inner.left < outer.right,
+                        _ => true,
+                    }
+                }
+            },
+            Expression::Cascade { .. }
+            | Expression::Assignment { .. }
+            | Expression::DestructureAssignment { .. }
+            | Expression::Return { .. }
+            | Expression::Match { .. }
+            | Expression::Primitive { .. }
+            | Expression::ExpectDirective { .. } => true,
+            // Self-delimiting.
+            Expression::Literal(..)
+            | Expression::Identifier(..)
+            | Expression::ClassReference { .. }
+            | Expression::Super(..)
+            | Expression::FieldAccess { .. }
+            | Expression::Block(..)
+            | Expression::Parenthesized { .. }
+            | Expression::MapLiteral { .. }
+            | Expression::ListLiteral { .. }
+            | Expression::ArrayLiteral { .. }
+            | Expression::TupleLiteral { .. }
+            | Expression::StringInterpolation { .. }
+            | Expression::Spread { .. }
+            | Expression::Error { .. } => false,
+        }
+    }
+}
+
+/// Unparses `expr` into `slot`, adding the parentheses a looser node needs —
+/// and no others (BT-4059).
+///
+/// A tree straight from the parser keeps its `Parenthesized` nodes, which are
+/// self-delimiting, and its unparenthesised operands already bind tightly
+/// enough, so this never adds parentheses to it: the formatter's output is
+/// unchanged. A tree whose redundant operand parentheses were peeled
+/// ([`crate::ast::normalize`]) gets back exactly the ones its meaning needs.
+fn unparse_operand(expr: &Expression, slot: OperandSlot<'_>) -> Document<'static> {
+    let doc = unparse_expression(expr);
+    if slot.needs_parens(expr) {
+        docvec!["(", doc, ")"]
+    } else {
+        doc
+    }
+}
+
 fn unparse_message_send(
     receiver: &Expression,
     selector: &MessageSelector,
     arguments: &[Expression],
     is_cast: bool,
 ) -> Document<'static> {
-    let recv_doc = unparse_expression(receiver);
+    let recv_doc = unparse_operand(receiver, OperandSlot::receiver_of(selector));
     let cast_suffix = if is_cast { Document::Str("!") } else { nil() };
+    let arg_doc = |arg: &Expression| unparse_operand(arg, OperandSlot::argument_of(selector));
 
     let msg = match selector {
         MessageSelector::Unary(name) => {
             docvec![recv_doc, " ", leaf::ident(name)]
         }
         MessageSelector::Binary(op) => {
-            let arg = unparse_expression(&arguments[0]);
+            let arg = arg_doc(&arguments[0]);
             docvec![recv_doc, " ", leaf::ident(op), " ", arg]
         }
         MessageSelector::Keyword(parts) => {
@@ -1630,8 +1762,7 @@ fn unparse_message_send(
             // `parts.len() >= 3` guarantees a break regardless).
             let always_break = parts.len() >= 3
                 || arguments.iter().any(|arg| {
-                    block_renders_multiline(arg)
-                        || unparse_expression(arg).to_pretty_string().contains('\n')
+                    block_renders_multiline(arg) || arg_doc(arg).to_pretty_string().contains('\n')
                 });
 
             if always_break {
@@ -1640,7 +1771,7 @@ fn unparse_message_send(
                     kw_docs.push(line());
                     let part_doc = unparse_keyword_part(part);
                     if i < arguments.len() {
-                        kw_docs.push(docvec![part_doc, " ", unparse_expression(&arguments[i])]);
+                        kw_docs.push(docvec![part_doc, " ", arg_doc(&arguments[i])]);
                     } else {
                         kw_docs.push(part_doc);
                     }
@@ -1653,7 +1784,7 @@ fn unparse_message_send(
                     docs.push(unparse_keyword_part(part));
                     if i < arguments.len() {
                         docs.push(Document::Str(" "));
-                        docs.push(unparse_expression(&arguments[i]));
+                        docs.push(arg_doc(&arguments[i]));
                     }
                 }
                 concat(docs)
@@ -1686,8 +1817,20 @@ fn unparse_concat_chain(expr: &Expression) -> Option<Document<'static>> {
         return None;
     }
 
-    // Build the inline version to measure width
-    let seg_docs: Vec<Document<'static>> = segments.iter().map(|s| unparse_expression(s)).collect();
+    // Build the inline version to measure width. The first segment is the
+    // chain's leftmost receiver, every other one a `++` argument.
+    let seg_docs: Vec<Document<'static>> = segments
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let slot = if i == 0 {
+                OperandSlot::BinaryReceiver("++")
+            } else {
+                OperandSlot::BinaryArgument("++")
+            };
+            unparse_operand(s, slot)
+        })
+        .collect();
     let inline = join_docs(seg_docs.clone(), " ++ ");
     let inline_width = inline.to_pretty_string().len();
 
@@ -1840,10 +1983,11 @@ fn unparse_block_param_annotation_opt(ty: Option<&TypeAnnotation>) -> Document<'
 // --- Cascade unparsing ---
 
 fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
+    let arg_doc = |arg: &Expression| unparse_operand(arg, OperandSlot::argument_of(&msg.selector));
     match &msg.selector {
         MessageSelector::Unary(name) => leaf::ident(name),
         MessageSelector::Binary(op) => {
-            let arg = unparse_expression(&msg.arguments[0]);
+            let arg = arg_doc(&msg.arguments[0]);
             docvec![leaf::ident(op), " ", arg]
         }
         MessageSelector::Keyword(parts) => {
@@ -1855,7 +1999,7 @@ fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
                 kw_docs.push(unparse_keyword_part(part));
                 if i < msg.arguments.len() {
                     kw_docs.push(Document::Str(" "));
-                    kw_docs.push(unparse_expression(&msg.arguments[i]));
+                    kw_docs.push(arg_doc(&msg.arguments[i]));
                 }
             }
             concat(kw_docs)

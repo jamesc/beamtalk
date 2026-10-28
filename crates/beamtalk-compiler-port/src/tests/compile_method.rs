@@ -397,6 +397,32 @@ fn compile_method_body_diagnostic_is_method_relative() {
 }
 
 #[test]
+fn compile_method_records_canonical_source_without_redundant_operand_parens() {
+    // BT-4059: the recorded method source is `canonical_method_source`, the
+    // same text codegen reflects as `methodSource`: redundant send-operand
+    // parentheses are dropped, needed ones kept.
+    for (method_source, expected) in [
+        ("bumped => (self) printString", "bumped => self printString"),
+        ("scaled: a => a * ((a) + 1)", "scaled: a => a * (a + 1)"),
+    ] {
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(COMPILE_METHOD_CLASS)),
+            (atom("method_source"), binary(method_source)),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        let ms = response_field_str(&response, "method_source").expect("method_source");
+        assert_eq!(ms.trim(), expected, "{method_source}");
+    }
+}
+
+#[test]
 fn compile_method_rejects_non_method_source() {
     let request = Term::from(Map::from([
         (atom("command"), atom("compile_method")),

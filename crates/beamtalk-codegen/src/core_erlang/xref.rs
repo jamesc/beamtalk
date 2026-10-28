@@ -323,7 +323,7 @@ impl CoreErlangGenerator {
         // is still a real reference the method's compiled behavior carries — only
         // the human-facing source text should hide it, not the xref data derived
         // from the full (annotated) AST.
-        let source = beamtalk_core::unparse::unparse_method(method);
+        let source = beamtalk_core::unparse::canonical_method_source(method);
 
         // The method definition's line within its own (bare) source is line 1:
         // `unparse_method` emits the signature first (after any doc comment /

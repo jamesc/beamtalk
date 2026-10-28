@@ -45,7 +45,7 @@
 //! `generate_module_with_warnings`, the REPL codegen entries). The formatter,
 //! the LSP and the raw parse keep the parenthesised tree. It is idempotent.
 
-use super::{Expression, Module};
+use super::{Expression, MethodDefinition, Module};
 use crate::ast_walker::{walk_expression, walk_expression_mut};
 
 /// Strips redundant parentheses from every send operand in `module`.
@@ -54,6 +54,15 @@ use crate::ast_walker::{walk_expression, walk_expression_mut};
 /// Idempotent: a second run changes nothing.
 pub fn peel_operand_parens(module: &mut Module) {
     for_each_root_mut(module, &mut |root| peel_operand_parens_expr(root));
+}
+
+/// Strips redundant parentheses from every send operand in `method`'s body:
+/// [`peel_operand_parens`] for one method, as
+/// [`crate::unparse::canonical_method_source`] needs it.
+pub fn peel_method_operand_parens(method: &mut MethodDefinition) {
+    for stmt in &mut method.body {
+        peel_operand_parens_expr(&mut stmt.expression);
+    }
 }
 
 /// Strips redundant parentheses from every send operand in `expr`'s tree

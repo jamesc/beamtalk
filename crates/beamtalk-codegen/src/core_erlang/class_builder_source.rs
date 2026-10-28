@@ -114,7 +114,7 @@ fn block_method_source(selector_sym: &str, block: &Block, is_class_method: bool)
     // class-side method, matching a file-defined class method's stored
     // source.
     method.is_class_method = is_class_method;
-    Some(beamtalk_core::unparse::unparse_method(&method))
+    Some(beamtalk_core::unparse::canonical_method_source(&method))
 }
 
 /// Builds a `selector => "source"` map-literal expression from the literal

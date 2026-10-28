@@ -830,7 +830,7 @@ impl CoreErlangGenerator {
                     .iter()
                     .map(|m| {
                         // A provided method's registry row also carries its
-                        // own source (`unparse_method`, the same canonical
+                        // own source (`canonical_method_source`, the same canonical
                         // text `methodSource` uses) and `///` doc, so tooling
                         // can show a trait's real code from the registry
                         // alone, without a compiled class (ADR 0127 §10,
@@ -848,7 +848,9 @@ impl CoreErlangGenerator {
                             &m.return_type,
                             docvec![
                                 ", 'source' => ",
-                                leaf::binary_lit(beamtalk_core::unparse::unparse_method(m)),
+                                leaf::binary_lit(beamtalk_core::unparse::canonical_method_source(
+                                    m
+                                )),
                                 doc_field,
                             ],
                         )

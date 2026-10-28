@@ -113,7 +113,7 @@ pub(crate) fn handle_resolve_method_span(request: &Map) -> Term {
 /// former `beamtalk_workspace_flush:reindent/2`).
 ///
 /// Request fields:
-/// - `source` (binary): the canonical column-0 method body (`unparse_method`)
+/// - `source` (binary): the canonical column-0 method body (`canonical_method_source`)
 /// - `base_indent` (binary, optional): the leading whitespace of the on-disk
 ///   definition's first line (empty = identity)
 ///

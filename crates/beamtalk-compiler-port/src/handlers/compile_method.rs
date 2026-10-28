@@ -34,7 +34,7 @@ use super::inline_definitions::derive_class_module_name;
 /// The method is parsed standalone (so its source round-trips byte-for-byte),
 /// merged into the parsed class via the SAME `merge_method` path the file/`>>`
 /// compile uses, and codegen'd. The response carries the compiled module AND the
-/// canonical method source (`unparse_method`) for the `ChangeLog`. This is the
+/// canonical method source (`canonical_method_source`) for the `ChangeLog`. This is the
 /// rock-solid replacement for the textual `Class >> <source>` wrap.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn handle_compile_method(request: &Map) -> Term {
@@ -72,8 +72,10 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     };
 
     // Canonical stored form + selector come straight from the parsed AST, so the
-    // source the workspace records is exactly what `unparse_method` re-emits.
-    let canonical_method_source = beamtalk_core::unparse::unparse_method(&method);
+    // source the workspace records is exactly what codegen reflects
+    // (`canonical_method_source`: `unparse_method` with redundant send-operand
+    // parentheses dropped, BT-4059).
+    let canonical_method_source = beamtalk_core::unparse::canonical_method_source(&method);
     let selector = method.selector.name().to_string();
 
     // 2. Parse the existing class. Initial parse diagnostics are intentionally

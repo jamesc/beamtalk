@@ -90,12 +90,15 @@ use expressions::parse_integer;
 /// for associativity:
 /// - Left-associative: `left_bp == right_bp - 1` (e.g., `+`, `-`)
 /// - Right-associative: `left_bp == right_bp + 1` (e.g., `**`)
+///
+/// `pub(crate)`: the unparser reads the same table to decide which binary
+/// operands need parentheses (BT-4059), rather than keeping a second copy.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct BindingPower {
+pub(crate) struct BindingPower {
     /// Left binding power (how tightly this operator binds to its left operand).
-    pub(super) left: u8,
+    pub(crate) left: u8,
     /// Right binding power (how tightly this operator binds to its right operand).
-    pub(super) right: u8,
+    pub(crate) right: u8,
 }
 
 impl BindingPower {
@@ -138,7 +141,7 @@ impl BindingPower {
 /// // Bitwise OR (between comparison and additive)
 /// "|" => Some(BindingPower::left_assoc(25)),
 /// ```
-pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
+pub(crate) fn binary_binding_power(op: &str) -> Option<BindingPower> {
     // Equality (ADR 0002: Erlang comparison operators) routes through
     // `is_equality_operator` rather than its own match arm — see that
     // function's doc comment for why it's the single source for this set.
