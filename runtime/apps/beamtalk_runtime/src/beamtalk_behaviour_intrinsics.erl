@@ -902,9 +902,79 @@ restarts it; this answers as if the class were still there.
 A class-object receiver (`Counter isKindOf: X`) still reaches this method by a
 class-side send; only the `includesBehaviour:`/`inheritsFrom:`/
 `allSuperclasses` sends this used to make are gone.
+
+**Instance fast path (BT-4221).** For a receiver that is an ordinary instance
+(a primitive, a Value, an actor — anything but a class object, a metaclass or
+a future), deciding the table above costs four cache lookups plus two
+`class_name_for_pid` reads per call. The decision for an instance of class
+`C` against a given behaviour object is a function of `(C, Behaviour)` and the
+class table alone, so it is memoised in `beamtalk_class_derived_cache` under
+`{is_kind_of, C, Behaviour}` — one lookup per call. Only decided answers
+(both sides canonical) are cached, together with the two class pids, and a
+hit is used only while both pids are alive: the same liveness rule
+`canonical_class_object/1` applies, so a class process killed without a
+restart still falls back to the send. Every class write (definition, reload,
+restart) bumps the cache generation, which drops the entry, exactly as it
+drops the `inherits_from/2` and class-object entries it was derived from.
 """.
 -spec objectIsKindOf(term(), term()) -> boolean().
 objectIsKindOf(Receiver, Behaviour) ->
+    case instance_class(Receiver) of
+        {ok, C} -> instance_is_kind_of(C, Receiver, Behaviour);
+        other -> is_kind_of_by_sides(Receiver, Behaviour)
+    end.
+
+%% The memoised decision for an instance of class `C` (see the doc above).
+-spec instance_is_kind_of(atom(), term(), term()) -> term().
+instance_is_kind_of(C, Receiver, #beamtalk_object{pid = BPid} = Behaviour) when is_pid(BPid) ->
+    case
+        beamtalk_class_derived_cache:fetch(
+            {is_kind_of, C, Behaviour},
+            fun() -> decide_instance_is_kind_of(C, Behaviour) end,
+            fun kind_of_pids_alive/1
+        )
+    of
+        {kind_of, Answer, _, _} -> Answer;
+        undecided -> is_kind_of_by_send(Receiver, Behaviour)
+    end;
+instance_is_kind_of(_C, Receiver, Behaviour) ->
+    is_kind_of_by_send(Receiver, Behaviour).
+
+-spec decide_instance_is_kind_of(atom(), #beamtalk_object{}) ->
+    {cache, {kind_of, boolean(), pid(), pid()}} | {nocache, undecided}.
+decide_instance_is_kind_of(C, #beamtalk_object{pid = BPid} = Behaviour) ->
+    case {canonical_class_object(C), behaviour_side(Behaviour)} of
+        {#beamtalk_object{pid = CPid}, {class, A}} ->
+            {cache, {kind_of, beamtalk_class_derived_cache:inherits_from(C, A), CPid, BPid}};
+        {#beamtalk_object{pid = CPid}, {meta, _}} ->
+            {cache, {kind_of, false, CPid, BPid}};
+        _ ->
+            {nocache, undecided}
+    end.
+
+-spec kind_of_pids_alive({kind_of, boolean(), pid(), pid()}) -> boolean().
+kind_of_pids_alive({kind_of, _, CPid, BPid}) ->
+    is_process_alive(CPid) andalso is_process_alive(BPid).
+
+%% The class an ordinary instance's `class_of_object/1` names (`{ok, C}`),
+%% or `other` for a future, a class object or a metaclass, whose class side
+%% `receiver_class_side/1` works out from the receiver's own pid.
+-spec instance_class(term()) -> {ok, atom()} | other.
+instance_class({beamtalk_future, _}) ->
+    other;
+instance_class(#beamtalk_object{class = 'Metaclass'}) ->
+    other;
+instance_class(#beamtalk_object{class = Tag}) ->
+    case beamtalk_class_registry:is_class_name(Tag) of
+        true -> other;
+        false -> {ok, Tag}
+    end;
+instance_class(Receiver) ->
+    {ok, beamtalk_primitive:class_of(Receiver)}.
+
+%% The decision table above, computed from scratch.
+-spec is_kind_of_by_sides(term(), term()) -> term().
+is_kind_of_by_sides(Receiver, Behaviour) ->
     case {receiver_class_side(Receiver), behaviour_side(Behaviour)} of
         {{class, C}, {class, A}} -> beamtalk_class_derived_cache:inherits_from(C, A);
         {{class, _}, {meta, _}} -> false;
