@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4059 / BT-4091: an actor whose methods parenthesise send operands that
+// the compiler lowers specially — an own-class or `self` receiver, and block
+// arguments of inlined constructs that write a captured local or a field.
+// Each compiled differently from (or failed where) its unparenthesised form
+// did; see paren_transparency_test.bt.
+
+Actor subclass: ParenTransparencyActor
+  state: count = 0
+
+  class + x => x + 100
+
+  class runParenBinary => (ParenTransparencyActor) + 1
+
+  + x => x + 1000
+
+  runParenSelfBinary => (self) + 1
+
+  getCount => self.count
+
+  parenDo =>
+    t := 0
+    #(1, 2) do: ([:k | t := t + 1])
+    t
+
+  parenToDo =>
+    t := 0
+    1 to: 2 do: ([:k | t := t + 1])
+    t
+
+  parenDoWithValue =>
+    t := 0
+    #(1, 2) do: ([:k | t := t + 1. k])
+    t
+
+  class countItems: items =>
+    count := 0
+    items do: ([:item | count := count + 1])
+    count
+
+  doubleAllWithFieldMutation: items =>
+    items collect: ([:item | self.count := self.count + 1. item * 2])
+
+  countLocal: items when: flag =>
+    localCount := 0
+    flag ifTrue: [items collect: ([:item | localCount := localCount + 1. item * 2])]
+    localCount

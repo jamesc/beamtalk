@@ -591,6 +591,15 @@ Transcript show: "Hello"; cr; show: "World"
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
 3. Keyword messages: `dict at: #name`
 
+Parentheses around a send's receiver or argument only group: when they are
+redundant they mean nothing, so `(self) foo`, `(MyClass) + 1` and
+`xs do: ([:x | t := t + x])` compile and run exactly like `self foo`,
+`MyClass + 1` and `xs do: [:x | t := t + x]`. Reflected method source
+(`(MyClass >> #sel) source`, the workspace `ChangeLog`) is canonical and drops
+such redundant operand parentheses — a method written `m => (self) foo`
+reflects as `m => self foo` — while keeping the ones the meaning needs
+(`a * (b + c)`). `beamtalk fmt` leaves the source file as written.
+
 ### Splitting a Message Send Across Lines
 
 A newline acts as a statement separator (see "Core Syntax" above), so whether
