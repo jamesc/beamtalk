@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! BT-4141: a match chain's fallthrough is bound once (a `letrec` label per
-//! multi-site arm, a `letrec_goto` label since BT-4242, whose tail-position
-//! rule every test here also checks) and applied at every miss site, so emitted Core grows
-//! linearly in the number of arms. Before, every Array/Type/binary arm
+//! multi-site arm) and applied at every miss site, so emitted Core grows
+//! linearly in the number of arms. Since BT-4242 the label is a
+//! `letrec_goto` label, and every test here also checks its tail-position
+//! rule (see `match_fallthrough_goto`). Before, every Array/Type/binary arm
 //! embedded a full copy of the later arms at each miss site, and N such arms
 //! emitted O(k^N) copies of the trailing arms.
 //!
