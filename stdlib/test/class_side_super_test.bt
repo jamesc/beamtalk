@@ -8,7 +8,9 @@
 //
 // The class-side extensions at the end of this file check that an
 // extension's `super` starts at the target's superclass
-// (Bt4001ClassSuperObjectBase), not at the superclass of this TestCase.
+// (Bt4001ClassSuperObjectBase), not at the superclass of this TestCase, and
+// that a `super` never re-enters the sending class's own class-side
+// extension (the `Bt4001ClassSuperExtChild class >> peek:` override).
 
 TestCase subclass: ClassSideSuperTest
 
@@ -47,6 +49,18 @@ TestCase subclass: ClassSideSuperTest
   testClassSideExtensionSuperInClosure =>
     self assert: Bt4001ClassSuperObjectChild bt4001ExtRunAll equals: #(101, 102)
 
+  testExtensionOverrideSendingSuperDoesNotRecurse =>
+    self assert: (Bt4001ClassSuperExtChild peek: 1) equals: 102
+
+  testClassMethodSuperSkipsOwnClassExtension =>
+    self assert: Bt4001ClassSuperExtChild run equals: 101
+
+  testClassMethodSuperReachesSuperclassExtension =>
+    self assert: Bt4001ClassSuperExtChild runExt equals: 201
+
 Bt4001ClassSuperObjectChild class >> bt4001ExtRun => super peek: 1
 Bt4001ClassSuperObjectChild class >> bt4001ExtRunAll =>
   #(1, 2) collect: [:x | super peek: x]
+Bt4001ClassSuperExtChild class >> peek: x => (super peek: x) + 1
+Bt4001ClassSuperExtBase class >> extPeek: x => x + 200
+Bt4001ClassSuperExtChild class >> runExt => super extPeek: 1

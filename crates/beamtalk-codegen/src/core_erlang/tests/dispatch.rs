@@ -3798,7 +3798,7 @@ fn test_builder_super_and_self_send_pass_live_receiver_tag() {
     let code = try_codegen(src).expect("builder super/self-send must compile");
     assert!(
         code.contains(
-            "call 'beamtalk_class_dispatch':'class_self_dispatch'('BT3709Sup', 'bump', [], \
+            "call 'beamtalk_class_dispatch':'class_super_dispatch'('BT3709Sup', 'bump', [], \
              call 'erlang':'element'(2, ClassSelf))"
         ),
         "builder `super` must pass the live receiver tag. Got:\n{code}"
@@ -3813,14 +3813,14 @@ fn test_builder_super_and_self_send_pass_live_receiver_tag() {
 }
 
 /// BT-4001: a `super` send in a compiled class method (not only a `ClassBuilder`
-/// fun) walks the metaclass chain through `class_self_dispatch/4`, keyed on the
+/// fun) walks the metaclass chain through `class_super_dispatch/4`, keyed on the
 /// defining class with the live receiver tag. It must never take the instance
 /// `beamtalk_dispatch:super/5` path, whose `Self`/`State` a class method does
 /// not bind (erlc rejected the module with `unbound variable 'Self'`). Covered
 /// at method level and inside a closure, for Actor, Object and Value classes,
 /// and for a sealed class's direct-called `class sealed` method.
 #[test]
-fn test_class_method_super_uses_class_self_dispatch() {
+fn test_class_method_super_uses_class_super_dispatch() {
     let headers = [
         "Actor subclass: C",
         "Object subclass: C",
@@ -3840,9 +3840,9 @@ fn test_class_method_super_uses_class_self_dispatch() {
                 .unwrap_or_else(|e| panic!("class-side super must compile: {e}\n{src}"));
             assert!(
                 code.contains(
-                    "call 'beamtalk_class_dispatch':'class_self_dispatch'('C', 'peek:', ["
+                    "call 'beamtalk_class_dispatch':'class_super_dispatch'('C', 'peek:', ["
                 ) && code.contains("], call 'erlang':'element'(2, ClassSelf))"),
-                "class-side `super` must route through class_self_dispatch/4:\n{src}\n{code}"
+                "class-side `super` must route through class_super_dispatch/4:\n{src}\n{code}"
             );
             assert!(
                 !code.contains("'beamtalk_dispatch':'super'")
@@ -3871,12 +3871,12 @@ fn test_class_side_extension_super_is_keyed_on_the_target() {
                 .unwrap_or_else(|e| panic!("class-side extension super must compile: {e}\n{src}"));
             assert!(
                 code.contains(
-                    "call 'beamtalk_class_dispatch':'class_self_dispatch'('Target', 'peek:', ["
+                    "call 'beamtalk_class_dispatch':'class_super_dispatch'('Target', 'peek:', ["
                 ),
                 "extension `super` must be keyed on the target class:\n{src}\n{code}"
             );
             assert!(
-                !code.contains("class_self_dispatch'('Host'")
+                !code.contains("class_super_dispatch'('Host'")
                     && !code.contains("'beamtalk_dispatch':'super'"),
                 "extension `super` must not use the host class or the instance path:\n{src}\n{code}"
             );

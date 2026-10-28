@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4001: `class_side_super_test.bt` overrides `peek:` on this class with a
+// class-side extension that sends `super peek:`. This class's own `run` sends
+// `super peek:` too and must reach the superclass's method, not that
+// extension.
+
+Bt4001ClassSuperExtBase subclass: Bt4001ClassSuperExtChild
+
+  class run => super peek: 1

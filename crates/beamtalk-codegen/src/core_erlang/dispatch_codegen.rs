@@ -2714,8 +2714,11 @@ impl CoreErlangGenerator {
         // helper, keyed on the class the method belongs to (`class_var_home`):
         // the builder class inside a programmatic ClassBuilder class-method
         // fun (ADR 0084), else a class-side extension's target, else the
-        // class being compiled (BT-4001). `class_self_dispatch/4` begins the
-        // walk at that class's superclass, which is exactly super semantics.
+        // class being compiled (BT-4001). `class_super_dispatch/4` begins the
+        // walk at that class's superclass and never consults the class itself
+        // (not even its own class-side extensions, so an extension override
+        // that sends `super` cannot recurse into itself); at each ancestor it
+        // checks that ancestor's class-side extensions, then its class methods.
         // The live receiver tag (`element(2, ClassSelf)`) is passed so a
         // subclass receiver runs the superclass method under its own
         // class-variable key. A class method binds no instance `Self`/`State`,
@@ -2727,7 +2730,7 @@ impl CoreErlangGenerator {
         if let Some(defining_class) = class_side_super_class {
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             let call_doc = docvec![
-                "call 'beamtalk_class_dispatch':'class_self_dispatch'(",
+                "call 'beamtalk_class_dispatch':'class_super_dispatch'(",
                 leaf::atom(defining_class),
                 ", ",
                 leaf::atom(selector_atom),

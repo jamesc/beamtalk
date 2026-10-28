@@ -21566,8 +21566,11 @@
         "subclassing",
         "testActorClassMethodSuper",
         "testActorClassMethodSuperInClosure",
+        "testClassMethodSuperReachesSuperclassExtension",
+        "testClassMethodSuperSkipsOwnClassExtension",
         "testClassSideExtensionSuper",
         "testClassSideExtensionSuperInClosure",
+        "testExtensionOverrideSendingSuperDoesNotRecurse",
         "testInheritedClassMethodSuperInClosure",
         "testInheritedClassMethodSuperStartsAtDefiningClass",
         "testObjectClassMethodSuper",
@@ -21577,8 +21580,8 @@
         "testValueClassSideSuperNew",
         "transform"
       ],
-      "source": "// BT-4001: a `super` send in a class method walks the metaclass chain from\n// the defining class's superclass (Smalltalk-80 class-side `super`).\n//\n// Fixtures: stdlib/test/fixtures/bt4001class_super_*.bt\n//\n// The class-side extensions at the end of this file check that an\n// extension's `super` starts at the target's superclass\n// (Bt4001ClassSuperObjectBase), not at the superclass of this TestCase.\n\nTestCase subclass: ClassSideSuperTest\n\n  testActorClassMethodSuper =>\n    self assert: Bt4001ClassSuperActorChild run equals: 101\n\n  testActorClassMethodSuperInClosure =>\n    self assert: Bt4001ClassSuperActorChild runAll equals: #(101, 102)\n\n  testObjectClassMethodSuper =>\n    self assert: Bt4001ClassSuperObjectChild run equals: 101\n\n  testObjectClassMethodSuperInClosure =>\n    self assert: Bt4001ClassSuperObjectChild runAll equals: #(101, 102)\n\n  testInheritedClassMethodSuperStartsAtDefiningClass =>\n    self assert: Bt4001ClassSuperObjectGrandchild run equals: 101\n\n  testInheritedClassMethodSuperInClosure =>\n    self assert: Bt4001ClassSuperObjectGrandchild runAll equals: #(101, 102)\n\n  testSealedDirectCalledClassMethodSuper =>\n    self assert: Bt4001ClassSuperSealed run equals: 101\n\n  testValueClassSideSuperNew =>\n    v := Bt4001ClassSuperValue make\n    self assert: v class equals: Bt4001ClassSuperValue\n    self assert: v n equals: 1\n\n  testSealedDirectCalledClassMethodSuperInClosure =>\n    self assert: Bt4001ClassSuperSealed runAll equals: #(101, 102)\n\n  testClassSideExtensionSuper =>\n    self assert: Bt4001ClassSuperObjectChild bt4001ExtRun equals: 101\n\n  testClassSideExtensionSuperInClosure =>\n    self assert: Bt4001ClassSuperObjectChild bt4001ExtRunAll equals: #(101, 102)\n\nBt4001ClassSuperObjectChild class >> bt4001ExtRun => super peek: 1\nBt4001ClassSuperObjectChild class >> bt4001ExtRunAll =>\n  #(1, 2) collect: [:x | super peek: x]",
-      "explanation": "BT-4001: a `super` send in a class method walks the metaclass chain from the defining class's superclass (Smalltalk-80 class-side `super`).  Fixtures: stdlib/test/fixtures/bt4001class_super_*.bt  The class-side extensions at the end of this file check that an extension's `super` starts at the target's superclass (Bt4001ClassSuperObjectBase), not at the superclass of this TestCase."
+      "source": "// BT-4001: a `super` send in a class method walks the metaclass chain from\n// the defining class's superclass (Smalltalk-80 class-side `super`).\n//\n// Fixtures: stdlib/test/fixtures/bt4001class_super_*.bt\n//\n// The class-side extensions at the end of this file check that an\n// extension's `super` starts at the target's superclass\n// (Bt4001ClassSuperObjectBase), not at the superclass of this TestCase, and\n// that a `super` never re-enters the sending class's own class-side\n// extension (the `Bt4001ClassSuperExtChild class >> peek:` override).\n\nTestCase subclass: ClassSideSuperTest\n\n  testActorClassMethodSuper =>\n    self assert: Bt4001ClassSuperActorChild run equals: 101\n\n  testActorClassMethodSuperInClosure =>\n    self assert: Bt4001ClassSuperActorChild runAll equals: #(101, 102)\n\n  testObjectClassMethodSuper =>\n    self assert: Bt4001ClassSuperObjectChild run equals: 101\n\n  testObjectClassMethodSuperInClosure =>\n    self assert: Bt4001ClassSuperObjectChild runAll equals: #(101, 102)\n\n  testInheritedClassMethodSuperStartsAtDefiningClass =>\n    self assert: Bt4001ClassSuperObjectGrandchild run equals: 101\n\n  testInheritedClassMethodSuperInClosure =>\n    self assert: Bt4001ClassSuperObjectGrandchild runAll equals: #(101, 102)\n\n  testSealedDirectCalledClassMethodSuper =>\n    self assert: Bt4001ClassSuperSealed run equals: 101\n\n  testValueClassSideSuperNew =>\n    v := Bt4001ClassSuperValue make\n    self assert: v class equals: Bt4001ClassSuperValue\n    self assert: v n equals: 1\n\n  testSealedDirectCalledClassMethodSuperInClosure =>\n    self assert: Bt4001ClassSuperSealed runAll equals: #(101, 102)\n\n  testClassSideExtensionSuper =>\n    self assert: Bt4001ClassSuperObjectChild bt4001ExtRun equals: 101\n\n  testClassSideExtensionSuperInClosure =>\n    self assert: Bt4001ClassSuperObjectChild bt4001ExtRunAll equals: #(101, 102)\n\n  testExtensionOverrideSendingSuperDoesNotRecurse =>\n    self assert: (Bt4001ClassSuperExtChild peek: 1) equals: 102\n\n  testClassMethodSuperSkipsOwnClassExtension =>\n    self assert: Bt4001ClassSuperExtChild run equals: 101\n\n  testClassMethodSuperReachesSuperclassExtension =>\n    self assert: Bt4001ClassSuperExtChild runExt equals: 201\n\nBt4001ClassSuperObjectChild class >> bt4001ExtRun => super peek: 1\nBt4001ClassSuperObjectChild class >> bt4001ExtRunAll =>\n  #(1, 2) collect: [:x | super peek: x]\nBt4001ClassSuperExtChild class >> peek: x => (super peek: x) + 1\nBt4001ClassSuperExtBase class >> extPeek: x => x + 200\nBt4001ClassSuperExtChild class >> runExt => super extPeek: 1",
+      "explanation": "BT-4001: a `super` send in a class method walks the metaclass chain from the defining class's superclass (Smalltalk-80 class-side `super`).  Fixtures: stdlib/test/fixtures/bt4001class_super_*.bt  The class-side extensions at the end of this file check that an extension's `super` starts at the target's superclass (Bt4001ClassSuperObjectBase), not at the superclass of this TestCase, and that a `super` never re-enters the sending class's own class-side extension (the `Bt4001ClassSuperExtChild class >> peek:` override)."
     },
     {
       "id": "stdlib-test-class-state-supervisor-test",
@@ -36239,6 +36242,42 @@
       ],
       "source": "// BT-4001: a class-side `super` send in an Actor subclass's class method, at\n// method level and inside a closure. The class overrides `class peek:`, so\n// answering 101 (not 1) shows `super` skipped it for the superclass's.\n\nBt4001ClassSuperActorBase subclass: Bt4001ClassSuperActorChild\n\n  class peek: x => x\n\n  class run => super peek: 1\n\n  class runAll => #(1, 2) collect: [:x | super peek: x]",
       "explanation": "BT-4001: a class-side `super` send in an Actor subclass's class method, at method level and inside a closure. The class overrides `class peek:`, so answering 101 (not 1) shows `super` skipped it for the superclass's."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4001class-super-ext-base",
+      "title": "Bt4001ClassSuperExtBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4001ClassSuperExtBase",
+        "Object",
+        "bt4001class_super_ext_base",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "peek:",
+        "subclassing"
+      ],
+      "source": "// BT-4001: superclass for the class-side `super` + extension cases in\n// `class_side_super_test.bt`, which also gives it an extension-only\n// class-side `extPeek:` that a subclass's `super extPeek:` must reach.\n\nObject subclass: Bt4001ClassSuperExtBase\n\n  class peek: x => x + 100",
+      "explanation": "BT-4001: superclass for the class-side `super` + extension cases in `class_side_super_test.bt`, which also gives it an extension-only class-side `extPeek:` that a subclass's `super extPeek:` must reach."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4001class-super-ext-child",
+      "title": "Bt4001ClassSuperExtChild",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4001ClassSuperExtBase",
+        "Bt4001ClassSuperExtChild",
+        "bt4001class_super_ext_child",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "run",
+        "subclassing"
+      ],
+      "source": "// BT-4001: `class_side_super_test.bt` overrides `peek:` on this class with a\n// class-side extension that sends `super peek:`. This class's own `run` sends\n// `super peek:` too and must reach the superclass's method, not that\n// extension.\n\nBt4001ClassSuperExtBase subclass: Bt4001ClassSuperExtChild\n\n  class run => super peek: 1",
+      "explanation": "BT-4001: `class_side_super_test.bt` overrides `peek:` on this class with a class-side extension that sends `super peek:`. This class's own `run` sends `super peek:` too and must reach the superclass's method, not that extension."
     },
     {
       "id": "stdlib-test-fixtures-bt4001class-super-object-base",

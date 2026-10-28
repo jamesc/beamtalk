@@ -3,13 +3,17 @@
 
 //! BT-4001: a `super` send in a class method resolves against the
 //! superclass's *class* methods (the metaclass chain), as codegen's
-//! `class_self_dispatch/4` does — not against its instance methods.
+//! `class_super_dispatch/4` does — not against its instance methods.
 
 use super::common::*;
 
 fn diagnostics_mentioning(source: &str, selector: &str) -> Vec<Diagnostic> {
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    // As the compiler does: the file's own extensions are known methods.
+    let mut extensions = crate::compilation::extension_index::ExtensionIndex::new();
+    extensions.add_module(&module, std::path::Path::new("test.bt"));
+    hierarchy.register_extensions(&extensions);
     run_with_expect(&module, &hierarchy)
         .into_iter()
         .filter(|d| d.message.contains(selector))
@@ -90,6 +94,23 @@ Base subclass: C
         let diags = diagnostics_mentioning(&instance_only, "peek:");
         assert_eq!(diags.len(), 1, "host {host:?}: got: {diags:#?}");
     }
+}
+
+#[test]
+fn class_side_super_reaches_a_superclass_class_side_extension() {
+    // `class_super_dispatch/4` checks each ancestor's class-side extensions,
+    // so a superclass method defined only as an extension is understood, and
+    // an extension override on the sending class that sends `super` is too.
+    let diags = diagnostics_mentioning(
+        "Object subclass: Base
+Base class >> extPeek: x => x + 200
+Base subclass: C
+  class runExt => super extPeek: 1
+C class >> extPeek: x => (super extPeek: x) + 1
+",
+        "extPeek:",
+    );
+    assert!(diags.is_empty(), "got: {diags:#?}");
 }
 
 #[test]
