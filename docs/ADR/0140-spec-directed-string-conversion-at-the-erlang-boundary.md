@@ -117,7 +117,20 @@ An `opaque` parameter that **stores** its argument, such as `ets:insert/2`, `per
 No spec says "this argument is stored", so the boundary can't tell storing apart from comparing. The decision:
 
 * **The contract is the spec.** Data shared with Erlang code is declared as text with a stub (`declare native: ets  insert: tab :: Symbol with: obj :: Tuple(String, Object) -> Boolean`), which converts it. This goes in the native-interop guide as the boundary's rule.
-* **A development-time signal for what's left.** When the runtime setting `beamtalk_ffi_convert` `warn_opaque_strings` is on (default **on** in REPL and test runs, **off** in releases), the boundary logs one `?LOG_WARNING` per MFA when a tagged String reaches an `opaque` argument of `ets`, `dets`, `persistent_term`, `erlang:send`, `gen_server:call/cast`, `gen_statem:call/cast` or `term_to_binary`. The warning names the MFA and the stub fix. This list is **diagnostic only**: it changes no behaviour, and a missing entry only means a missing warning. The data is checked only while the setting is on, so releases pay nothing.
+* **A compile-time lint for what's left: `ffi-stored-strings`.** At a call to a storage or messaging function, the type checker warns when an argument at an `opaque` position has a static type that may contain a String. A `Dynamic` type counts, the same rule as `ffi-untyped-strings`. The functions are `ets:insert/2`, `insert_new/2`, `dets:insert/2`, `persistent_term:put/2`, `erlang:send/2`, `erlang:term_to_binary/1,2`, `gen_server:call/2,3`, `cast/2` and `gen_statem:call/2,3`, `cast/2`:
+
+  ```
+  warning[ffi-stored-strings]: a String passed to ets:insert/2 is stored tagged; Erlang code
+    reading it back by binary key won't find it
+    --> src/cache.bt:8:5
+     |
+   8 |     Erlang ets insert: table with: {key, value}
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     = help: if Erlang code reads this data, declare the parameter as text in a
+       `declare native: ets` stub; if only Beamtalk reads it, add `@expect ffi_stored_strings`
+  ```
+
+  The lint runs at compile time, so it behaves identically in the REPL, `beamtalk run`, `beamtalk test` and releases (CLAUDE.md: no image mechanics) and costs nothing at runtime. A stub that declares the position as text converts the argument and silences the lint, as does a stub that declares it `Object` (the explicit "only Beamtalk reads this"). It also silences with `@expect ffi_stored_strings`, or package-wide with `ffi-stored-strings = "off"` under `[diagnostics]`. The function list only decides **where to warn**: it never changes behaviour, and a missing entry means a missing warning, not a wrong answer. It lives in one table in the type checker, next to the other FFI lints.
 
 ### 6. `native:` delegation
 
@@ -139,8 +152,8 @@ No spec says "this argument is stored", so the boundary can't tell storing apart
 
 * **Newcomer:** `Erlang lists member: "a" with: #("a")` answers `true`, and the tagged representation never comes up. When a library has no specs, the warning says exactly what to add.
 * **Smalltalk developer:** Strings stay Strings when they go out to Erlang and come back. The boundary behaves like a well-typed message send, not a byte bridge.
-* **Erlang/BEAM developer:** `-spec` becomes the interop contract they already maintain. Generated Core shows each conversion explicitly (`beamtalk_ffi_convert:arg('text', S)`), so it's debuggable. The one thing to learn is that sharing stored Strings with Erlang code needs a stub, and the development-time warning points it out.
-* **Production operator:** calls whose arguments are all `opaque` (most of them) get slightly *cheaper*: the top-level unwrap scan is gone. The error-wrapping `try` (ADR 0101) stays. Conversion costs only as much as the spec'd text positions. The storage diagnostic is off in releases.
+* **Erlang/BEAM developer:** `-spec` becomes the interop contract they already maintain. Generated Core shows each conversion explicitly (`beamtalk_ffi_convert:arg('text', S)`), so it's debuggable. The one thing to learn is that sharing stored Strings with Erlang code needs a stub, and the `ffi-stored-strings` lint points it out at compile time.
+* **Production operator:** calls whose arguments are all `opaque` (most of them) get slightly *cheaper*: the top-level unwrap scan is gone. The error-wrapping `try` (ADR 0101) stays. Conversion costs only as much as the spec'd text positions. The storage lint is compile-time only, so it adds no runtime cost.
 * **Tooling developer:** the shape lives in `NativeTypeRegistry`, so the LSP can show "converts to binary" in hover. The warning is an ordinary diagnostic with a span.
 
 ## Steelman Analysis
@@ -152,9 +165,10 @@ No spec says "this argument is stored", so the boundary can't tell storing apart
 | **Explicit `asErlangTerm`** | 🎨 Language designer: "Explicit beats magic; the user controls cost and depth" | 🧑‍💻 The newcomer has to know the String representation to call `lists:member`, which is the abstraction leaking. Forgetting it is still silent |
 | **Pass everything tagged; on `badarg`, unwrap and retry** | 🏭 Operator: "No compile-time machinery, and it's cheap on success" | Any function that accepts any term without raising silently gets the tag (`erlang:size/1` answers 2, `term_to_binary`, `phash2`). It also retries side effects |
 | **E2: warn when a String goes to an `opaque` parameter not reflected in the return type** | 🧑‍💻 Newcomer: "I'm told every time, so nothing is truly silent" | Fires on `lists:member` (`T` isn't in `boolean()`), the very call this ADR fixes. Too many false positives, so users would learn to ignore it |
+| **Runtime storage warning, on in the REPL and tests, off in releases** | ⚙️ BEAM veteran: "It sees the actual values, so it catches Strings inside `Dynamic` data that no static check can" | Its behaviour differs between REPL/test and release, which CLAUDE.md's no-image-mechanics rule rules out, and it costs a per-call check wherever it's on. The compile-time `ffi-stored-strings` lint behaves the same everywhere at no runtime cost. It covers `Dynamic` by warning conservatively instead of inspecting values |
 | **E3: convert `opaque` arguments for a list of storage/messaging MFAs** | 🏭 Operator: "My first ETS table shared with an Erlang library just works" | A hand-kept list that changes behaviour (constraint 3). Beamtalk reads from those stores come back `Binary`, which breaks the round trip (constraint 4) |
 
-**Tension:** operators prefer E3 (sharing works with no stub), and BEAM veterans prefer E1 (specs are the contract). E1 wins because it keeps behaviour derivable from specs alone, and the development-time diagnostic turns the remaining silent case into a visible one before release.
+**Tension:** operators prefer E3 (sharing works with no stub), and BEAM veterans prefer E1 (specs are the contract). E1 wins because it keeps behaviour derivable from specs alone, and the compile-time `ffi-stored-strings` lint turns the remaining silent case into a visible one before the code ever runs.
 
 ## Alternatives Considered
 
@@ -178,11 +192,11 @@ Rejected. `binary()` is the type of `crypto:hash/2` and `term_to_binary/1` too; 
 * Every case the boundary can't resolve gets a diagnostic: the no-signature warning at compile time, the storage warning in development.
 
 ### Negative
-* **Breaking:** a **top-level** String passed to a `term()` parameter used to arrive as a raw binary and now arrives tagged. Examples: `Erlang erlang send: pid with: "hi"`, `Erlang persistent_term put: #k with: "v"`, `Erlang erlang term_to_binary: "x"`. Erlang receivers of such data must be declared through a stub (or the data converted explicitly). The storage diagnostic flags these at development time, and the sibling-repo audit (see Migration Path) finds existing ones.
+* **Breaking:** a **top-level** String passed to a `term()` parameter used to arrive as a raw binary and now arrives tagged. Examples: `Erlang erlang send: pid with: "hi"`, `Erlang persistent_term put: #k with: "v"`, `Erlang erlang term_to_binary: "x"`. Erlang receivers of such data must be declared through a stub (or the data converted explicitly). The `ffi-stored-strings` lint flags these at compile time, and the sibling-repo audit (see Migration Path) finds existing ones.
 * A `string()` result that isn't valid UTF-8 now raises instead of returning bytes.
 * **Behaviour change for list results:** with a signature, a printable list of integers whose spec isn't `string()` stays a List. `Erlang lists seq: 65 with: 70` answers `#(65, 66, 67, 68, 69, 70)` instead of `"ABCDEF"`. This is the correct answer, but code that relied on the old guess changes.
 * One more runtime module (`beamtalk_ffi_convert`) and a shape field in the registry. The shapes cross the Rust/Erlang boundary, so they need a conformance fixture.
-* The storage diagnostic uses a list of MFAs. It's diagnostic-only, but it does need occasional additions.
+* The `ffi-stored-strings` lint uses a list of storage and messaging MFAs. It only decides where to warn, but it does need occasional additions. Like any static check, it can't see a String inside a value it can't type: a `Dynamic` argument is warned conservatively, and that can be noisy in untyped code.
 
 ### Neutral
 * Beamtalk-owned modules (`beamtalk` mode) are unchanged.
@@ -192,9 +206,9 @@ Rejected. `binary()` is the type of `crypto:hash/2` and `term_to_binary/1` too; 
 
 0. **Prove the approach first (S).** Compute shapes for the repro MFAs (`lists:member/2`, `keyfind/3`, `keymember/3`, `maps:get/2`, `maps:is_key/2`, `proplists:get_value/2`) and for `string:uppercase/1` and `lists:seq/2`, straight from the OTP 27 and 28 specs. Hand-write the converted Core for one call of each and run it. This confirms the specs resolve to the shapes in the table above (remote types such as `unicode:chardata()` included) before any of the pipeline is built.
 1. **Spec reader and registry (core + compiler app).** Compute the conversion shape for each parameter and the return type from the raw Erlang spec. Resolve remote and user types (`unicode:chardata()`, `iodata()`) before classifying. Carry it in `FunctionSignature`, and get it from stub declarations as well. Add the shared conformance fixture.
-2. **Runtime.** Add `beamtalk_ffi_convert:arg/2` and `result/2`, with the `#invalid_utf8` error. Add a `typed` mode to `direct_call`/`native_call`, which skips the shallow unwrap and the retry. Add the `warn_opaque_strings` diagnostic setting.
+2. **Runtime.** Add `beamtalk_ffi_convert:arg/2` and `result/2`, with the `#invalid_utf8` error. Add a `typed` mode to `direct_call`/`native_call`, which skips the shallow unwrap and the retry.
 3. **Codegen.** At each FFI and `native:` call site with a signature, wrap each non-`opaque` argument and the result, and emit `typed`. Leave the call unchanged when there's no signature.
-4. **Type checker.** Map `binary()`-family *returns* to `Binary`. Add the `ffi-untyped-strings` warning (with `@expect` and `[diagnostics]` support).
+4. **Type checker.** Map `binary()`-family *returns* to `Binary`. Add the `ffi-untyped-strings` and `ffi-stored-strings` warnings (with `@expect` and `[diagnostics]` support).
 5. **Docs and tests.**
    * Rewrite "Strings at the FFI boundary" in `docs/beamtalk-native-erlang.md`.
    * BUnit tests for the repros, the round trip, chardata results, invalid UTF-8, and the no-signature warning per call shape.
@@ -205,7 +219,7 @@ Rough size: L. Steps 1–2 can land before 3–4 behind the `typed` mode, which 
 ## Migration Path
 
 * **Audit:** before step 3 lands, grep the 8 sibling repos audited by BT-4170 and the stdlib for FFI calls that pass a top-level String to a `term()` parameter of a storage or messaging function: `erlang:send`, `gen_server`/`gen_statem` `call`/`cast`, `ets`, `persistent_term`, `term_to_binary`. For each one, add a stub declaring the parameter as text, or convert explicitly.
-* **Development-time signal:** the storage diagnostic is on by default in REPL and test runs, so any case the audit misses shows up as a `WARNING` naming the MFA.
+* **Compile-time signal:** the `ffi-stored-strings` lint fires on every build, so any case the audit misses shows up as a warning at the call site.
 * **List results:** the same audit greps for FFI results used as Strings that come from a non-`string()` list spec (the old printable-list guess). Each one gets a stub declaring `string()`, or an explicit conversion.
 * The `ffi-untyped-strings` warning is new. Existing code compiles with warnings, not errors.
 
