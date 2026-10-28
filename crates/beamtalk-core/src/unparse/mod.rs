@@ -1655,21 +1655,10 @@ impl<'a> OperandSlot<'a> {
     /// precedence, not Smalltalk's flat left-to-right order, so `(a + b) * c`
     /// keeps its parentheses while `(a * b) + c` and `a + (b * c)` do not.
     fn needs_parens(self, expr: &Expression) -> bool {
-        match expr {
-            // A cast send is statement-only; a keyword send binds loosest.
-            Expression::MessageSend { is_cast: true, .. }
-            | Expression::MessageSend {
-                selector: MessageSelector::Keyword(_),
-                ..
-            } => true,
-            Expression::MessageSend {
-                selector: MessageSelector::Unary(_),
-                ..
-            } => false,
-            Expression::MessageSend {
-                selector: MessageSelector::Binary(inner),
-                ..
-            } => match self {
+        match OperandShape::of(expr) {
+            OperandShape::Tight => false,
+            OperandShape::Loose => true,
+            OperandShape::Binary(inner) => match self {
                 Self::UnaryReceiver => true,
                 Self::KeywordOperand => false,
                 // `inner`'s chain swallows `outer` when `outer` binds its
@@ -1689,15 +1678,31 @@ impl<'a> OperandSlot<'a> {
                     }
                 }
             },
-            Expression::Cascade { .. }
-            | Expression::Assignment { .. }
-            | Expression::DestructureAssignment { .. }
-            | Expression::Return { .. }
-            | Expression::Match { .. }
-            | Expression::Primitive { .. }
-            | Expression::ExpectDirective { .. } => true,
-            // Self-delimiting.
-            Expression::Literal(..)
+        }
+    }
+}
+
+/// How an expression binds as a send operand (BT-4059).
+#[derive(Debug, Clone, Copy)]
+enum OperandShape<'e> {
+    /// Self-delimiting, or a unary send: fits every operand slot.
+    Tight,
+    /// A binary send with this operator: fits depending on the slot.
+    Binary(&'e str),
+    /// A keyword or cast send, cascade, assignment, return, match or other
+    /// statement-shaped node: needs parentheses in every operand slot.
+    Loose,
+}
+
+impl<'e> OperandShape<'e> {
+    fn of(expr: &'e Expression) -> Self {
+        match expr {
+            Expression::MessageSend {
+                selector: MessageSelector::Unary(_),
+                is_cast: false,
+                ..
+            }
+            | Expression::Literal(..)
             | Expression::Identifier(..)
             | Expression::ClassReference { .. }
             | Expression::Super(..)
@@ -1710,7 +1715,20 @@ impl<'a> OperandSlot<'a> {
             | Expression::TupleLiteral { .. }
             | Expression::StringInterpolation { .. }
             | Expression::Spread { .. }
-            | Expression::Error { .. } => false,
+            | Expression::Error { .. } => Self::Tight,
+            Expression::MessageSend {
+                selector: MessageSelector::Binary(op),
+                is_cast: false,
+                ..
+            } => Self::Binary(op),
+            Expression::MessageSend { .. }
+            | Expression::Cascade { .. }
+            | Expression::Assignment { .. }
+            | Expression::DestructureAssignment { .. }
+            | Expression::Return { .. }
+            | Expression::Match { .. }
+            | Expression::Primitive { .. }
+            | Expression::ExpectDirective { .. } => Self::Loose,
         }
     }
 }

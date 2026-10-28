@@ -15,7 +15,6 @@ TestCase subclass: ParenTransparencyTest
   tearDown => self.actor stop
 
   // --- BT-4005's class-method cells, with the receiver parenthesised ---
-
   testParenthesisedOwnClassBinaryReceiver =>
     self assert: ParenTransparencyHost runParenBinary equals: 1
 
@@ -38,7 +37,6 @@ TestCase subclass: ParenTransparencyTest
     self assert: self.actor runParenSelfBinary equals: 1001
 
   // --- BT-4091: parenthesised block arguments to inlined constructs ---
-
   testParenthesisedDoBlockWritesCapturedLocal =>
     self assert: self.actor parenDo equals: 2
 
@@ -60,11 +58,8 @@ TestCase subclass: ParenTransparencyTest
     self assert: (self.actor countLocal: #(1, 2, 3) when: false) equals: 0
 
   // --- Reflected source is canonical ---
-
   testReflectedSourceDropsRedundantOperandParens =>
     self assert: (ParenTransparencyHost >> #reflectSelf) source equals: "reflectSelf => self printString"
 
   testReflectedSourceKeepsNeededParens =>
-    self
-      assert: (ParenTransparencyHost >> #reflectProduct:) source
-      equals: "reflectProduct: a => a * (a + 1)"
+    self assert: (ParenTransparencyHost >> #reflectProduct:) source equals: "reflectProduct: a => a * (a + 1)"

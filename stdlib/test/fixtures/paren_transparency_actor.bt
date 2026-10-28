@@ -14,6 +14,11 @@ Actor subclass: ParenTransparencyActor
 
   class runParenBinary => (ParenTransparencyActor) + 1
 
+  class countItems: items =>
+    count := 0
+    items do: ([:item | count := count + 1])
+    count
+
   + x => x + 1000
 
   runParenSelfBinary => (self) + 1
@@ -32,18 +37,28 @@ Actor subclass: ParenTransparencyActor
 
   parenDoWithValue =>
     t := 0
-    #(1, 2) do: ([:k | t := t + 1. k])
+    #(1, 2)
+      do: ([:k |
+        t := t + 1
+        k
+      ])
     t
 
-  class countItems: items =>
-    count := 0
-    items do: ([:item | count := count + 1])
-    count
-
   doubleAllWithFieldMutation: items =>
-    items collect: ([:item | self.count := self.count + 1. item * 2])
+    items
+      collect: ([:item |
+        self.count := self.count + 1
+        item * 2
+      ])
 
   countLocal: items when: flag =>
     localCount := 0
-    flag ifTrue: [items collect: ([:item | localCount := localCount + 1. item * 2])]
+    flag
+      ifTrue: [
+        items
+          collect: ([:item |
+            localCount := localCount + 1
+            item * 2
+          ])
+      ]
     localCount
