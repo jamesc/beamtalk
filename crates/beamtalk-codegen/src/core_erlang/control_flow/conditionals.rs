@@ -2546,8 +2546,17 @@ impl CoreErlangGenerator {
     /// and a local the frame does not carry (one bound in the arm) is never
     /// written into it. It carries the locals the arm's block threads
     /// ([`Self::branch_threaded_locals`]: none for an arm that writes only
-    /// locals of its own) and registers no producer sites, so a loop or fold
-    /// in it unpacks its own tuple as before.
+    /// locals of its own).
+    ///
+    /// BT-3949: it registers its statements' loop and fold producer sites
+    /// ([`Self::plain_arm_producer_site_exprs`]): a loop or fold that is a
+    /// producer there (the statement itself, or one at a sequenced operand
+    /// site of it — a map-literal value, an array element, a keyword
+    /// argument) is lowered through its `ConstructTuple` and family `Bind`s
+    /// into this frame. Without them a construct that threads a family (an
+    /// actor fold whose block self-sends) at an operand site was compiled in
+    /// place, and its `{Value, State}` carrier became the operand's value
+    /// (`ConstructCarrierInPlace`).
     ///
     /// Must be called inside [`Self::with_branch_context`].
     fn generate_plain_arm(&mut self, block: &Block) -> Result<(Document<'static>, usize)> {
@@ -2559,8 +2568,21 @@ impl CoreErlangGenerator {
             kind: RebindFrameKind::BranchArm,
             threads: arm.threads.clone(),
         };
+        let body = super::super::util::collect_body_exprs(&block.body);
         self.with_rebind_frame(rebind, |this| {
-            this.generate_conditional_arm_statements(block, Some(&arm))
+            // Test-only fault (`PlainArmOpaqueProducers`): the producer sites
+            // BT-3949 registers, withheld.
+            #[cfg(test)]
+            if super::super::threaded_expr::fault::active()
+                == Some(
+                    super::super::threaded_expr::fault::LocalRebindFault::PlainArmOpaqueProducers,
+                )
+            {
+                return this.generate_conditional_arm_statements(block, Some(&arm), true);
+            }
+            this.with_plain_arm_producer_sites(&body, |this| {
+                this.generate_conditional_arm_statements(block, Some(&arm), true)
+            })
         })
     }
 
@@ -2577,7 +2599,7 @@ impl CoreErlangGenerator {
         let body = super::super::util::collect_body_exprs(&block.body);
         self.with_repl_arm_rebind_frame(|this| {
             this.with_repl_arm_producer_sites(&body, |this| {
-                this.generate_conditional_arm_statements(block, None)
+                this.generate_conditional_arm_statements(block, None, false)
             })
         })
     }
@@ -2607,7 +2629,7 @@ impl CoreErlangGenerator {
         let body = super::super::util::collect_body_exprs(&block.body);
         self.with_rebind_frame(rebind, |this| {
             this.with_body_producer_sites(&body, false, true, |this| {
-                this.generate_conditional_arm_statements(block, Some(arm))
+                this.generate_conditional_arm_statements(block, Some(arm), false)
             })
         })
     }
@@ -2616,11 +2638,16 @@ impl CoreErlangGenerator {
     /// (`arm: None`, the legacy arm: its nested constructs unpack their own
     /// tuples) and [`Self::generate_conditional_arm`] (`arm: Some`, a
     /// `BranchArm` frame whose nested producers rebind by it).
+    ///
+    /// `plain` says the arm is a plain arm ([`Self::generate_plain_arm`]), whose
+    /// producer sites are [`Self::plain_arm_producer_site_exprs`], rather than
+    /// a producer's arm, whose sites are every arm-frame site.
     #[allow(clippy::too_many_lines)]
     fn generate_conditional_arm_statements(
         &mut self,
         block: &Block,
         arm: Option<&ArmFrame>,
+        plain: bool,
     ) -> Result<(Document<'static>, usize)> {
         let frame = self.current_branch_frame();
         self.push_scope();
@@ -2646,6 +2673,12 @@ impl CoreErlangGenerator {
 
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
         let mut last_result: Option<ValueRef> = None;
+        // BT-3949: the producer sites of an arm frame's statements, read off the
+        // AST just before the statement that holds them is lowered (a local
+        // bound by an earlier statement is live), and checked against the
+        // lowered arm once it is built: the rule a Tier 2 block body and the
+        // loop and fold bodies apply to their own statements (BT-3939).
+        let mut producer_sites: Vec<(Span, Vec<String>)> = Vec::new();
 
         for (i, expr) in body.iter().enumerate() {
             // BT-3838: a NON-last arm statement's value is discarded, so `(s)` is exactly `s`
@@ -2655,6 +2688,13 @@ impl CoreErlangGenerator {
             } else {
                 &expr.unwrap_parens()
             };
+            if arm.is_some() {
+                producer_sites.extend(if plain {
+                    self.plain_arm_producer_sites(expr)
+                } else {
+                    self.frame_producer_sites(expr, false, true)
+                });
+            }
             // Classified with the shared classifier just before the statement
             // is lowered, so a local bound earlier in this arm is live when a
             // catch boundary or loop in the statement is judged against the
@@ -3453,6 +3493,13 @@ impl CoreErlangGenerator {
                 }
             }
         }
+
+        let errors = threaded_ir::verify_producer_sites_threaded(&stmts, &producer_sites);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "a conditional, match: or handler arm's producer must be lowered as a producer",
+            block.span,
+        );
 
         // C13 — the arm closer: {<result>, <final_state>}.
         let final_version = self.state_version();
