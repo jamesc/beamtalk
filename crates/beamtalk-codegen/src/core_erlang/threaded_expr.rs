@@ -1090,30 +1090,6 @@ impl CoreErlangGenerator {
                     .contains(&expr.unwrap_parens().span()))
     }
 
-    /// Whether `thread_ahead` has already spliced `expr` (paren-unwrapped) as a
-    /// producer when a consumer compiles it: an inline-threaded conditional or
-    /// `match:` ([`Self::inline_control_flow_needs_threading`]) or an
-    /// `on:do:`/`ensure:` producer ([`Self::exception_producer_in_frame`]).
-    /// `expression_doc` then answers the already-unwrapped value, not a
-    /// `{Value, State}` tuple.
-    pub(super) fn inline_producer_construct(&self, expr: &Expression) -> bool {
-        self.inline_control_flow_needs_threading(expr)
-            || self.exception_producer_in_frame(expr)
-            || self.block_value_producer_in_frame(expr)
-    }
-
-    /// Whether [`Self::thread_ahead`] registers `expr`'s value already
-    /// unwrapped, so a consumer must read it back rather than unpack a
-    /// `{Value, State}` tuple: an inline-threaded construct
-    /// ([`Self::inline_producer_construct`]), or (BT-4000) a conditional whose
-    /// receiver is sequenced ahead (`conditional_receiver_is_sequenced`), which
-    /// is then lowered over the sequenced receiver as a producer or as a plain
-    /// send (`(self done) ifTrue: aBlock`).
-    pub(super) fn thread_ahead_unwraps(&self, expr: &Expression) -> bool {
-        self.inline_producer_construct(expr.unwrap_parens())
-            || self.is_conditional_with_sequenced_receiver(expr)
-    }
-
     /// The outer locals the threading construct `expr` (paren-unwrapped)
     /// packs into the construct tuple it compiles to in this context —
     /// possibly none (a value-type loop that threads only `Self`, an actor
