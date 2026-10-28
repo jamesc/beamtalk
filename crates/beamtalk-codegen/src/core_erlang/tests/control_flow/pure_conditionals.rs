@@ -23,11 +23,11 @@ pub(super) fn case_scope(code: &str) -> &str {
     let marker = " in case _Cond";
     let start = code
         .find(marker)
-        .expect("expected a pure-inline `in case _CondN of`");
+        .expect("expected a pure-inline `in case _Cond@N of`");
     &code[start..]
 }
 
-/// The `_CondN` variable the pure-inline case scrutinizes.
+/// The `_Cond@N` variable the pure-inline case scrutinizes.
 pub(super) fn cond_var(scope: &str) -> &str {
     let marker = " in case ";
     let start = scope
@@ -36,7 +36,7 @@ pub(super) fn cond_var(scope: &str) -> &str {
         + marker.len();
     let rest = &scope[start..];
     let end = rest
-        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '@'))
         .unwrap_or(rest.len());
     &scope[start..start + end]
 }

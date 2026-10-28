@@ -880,8 +880,8 @@ fn test_comparison_guard_for_unknown_receiver() {
     let flat: String = output.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         flat.contains(
-            "case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft1), \
-             call 'erlang':'is_binary'(_BinLeft1)) of"
+            "case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@1), \
+             call 'erlang':'is_binary'(_BinLeft@1)) of"
         ),
         "unknown comparison receiver must emit the primitive-comparable guard; got: {output}"
     );
@@ -893,7 +893,7 @@ fn test_comparison_guard_for_unknown_receiver() {
         .find("<'true'> when 'true' -> call 'erlang':'<'(")
         .unwrap_or_else(|| panic!("'true' arm must be the bare comparison BIF; got: {output}"));
     let send = flat
-        .find("<'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft1, '<', [")
+        .find("<'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@1, '<', [")
         .unwrap_or_else(|| panic!("'false' arm must dispatch '<' as a message; got: {output}"));
     assert!(
         bif < send,

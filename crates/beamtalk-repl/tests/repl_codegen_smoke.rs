@@ -361,10 +361,10 @@ fn test_repl_multi_stmt_times_repeat_intermediate() {
     eprintln!("Generated code for `x := 1. 5 timesRepeat: [x := x + 1]. x`:");
     eprintln!("{code}");
 
-    // The loop StateAcc must be extracted and threaded: element(2, _R2) → StateN
+    // The loop StateAcc must be extracted and threaded: element(2, _R@2) → StateN
     assert!(
-        code.contains("'element'(2, _R2)"),
-        "Loop StateAcc must be extracted via element(2, _R2). Got:\n{code}"
+        code.contains("'element'(2, _R@2)"),
+        "Loop StateAcc must be extracted via element(2, _R@2). Got:\n{code}"
     );
 
     // The final `x` lookup must use the updated state (StateN), not a stale State1
@@ -410,8 +410,8 @@ fn test_repl_multi_stmt_while_true_intermediate() {
 
     // The loop StateAcc must be extracted from the intermediate result
     assert!(
-        code.contains("'element'(2, _R2)"),
-        "Loop StateAcc must be extracted via element(2, _R2). Got:\n{code}"
+        code.contains("'element'(2, _R@2)"),
+        "Loop StateAcc must be extracted via element(2, _R@2). Got:\n{code}"
     );
 
     // The final x lookup must NOT read from State1 (which has x=0 from init only)
@@ -457,8 +457,8 @@ fn test_repl_multi_stmt_assignment_then_loop_then_plain() {
 
     // Loop in intermediate position: StateAcc extracted as State2
     assert!(
-        code.contains("'element'(2, _R2)"),
-        "Loop StateAcc must be extracted via element(2, _R2). Got:\n{code}"
+        code.contains("'element'(2, _R@2)"),
+        "Loop StateAcc must be extracted via element(2, _R@2). Got:\n{code}"
     );
 
     // Final count lookup must not use stale State1
@@ -1234,7 +1234,7 @@ fn test_cascade_repl_expression() {
     // free REPL identifier now resolves via a locals maps:find with a runtime
     // resolve_name fallthrough rather than a bare maps:get.
     assert!(
-        code.contains("let _Receiver1 = case call 'maps':'find'('x', State) of"),
+        code.contains("let _Receiver@1 = case call 'maps':'find'('x', State) of"),
         "Should bind receiver x via locals find. Got:\n{code}"
     );
     assert!(

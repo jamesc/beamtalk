@@ -175,7 +175,7 @@ fn test_match_arm_nested_if_true_mutation_without_value_wrapper_threads_actor_st
          before the gen_server reply. Got clause:\n{bump_match_clause}"
     );
     let reply_re =
-        regex::Regex::new(r"\{'reply', (_?[A-Za-z][A-Za-z0-9_]*), (_?[A-Za-z][A-Za-z0-9_]*)\}")
+        regex::Regex::new(r"\{'reply', (_?[A-Za-z][A-Za-z0-9_@]*), (_?[A-Za-z][A-Za-z0-9_@]*)\}")
             .unwrap();
     assert!(
         reply_re.is_match(bump_match_clause),
@@ -230,7 +230,7 @@ fn test_match_two_adjacent_nested_if_true_mutation_arms_thread_from_the_same_bas
     // double-nested `{'reply', {Val, State}, State}` if some other part of
     // the wrap regressed while still happening to contain that substring.
     let reply_re =
-        regex::Regex::new(r"\{'reply', (_?[A-Za-z][A-Za-z0-9_]*), (_?[A-Za-z][A-Za-z0-9_]*)\}")
+        regex::Regex::new(r"\{'reply', (_?[A-Za-z][A-Za-z0-9_@]*), (_?[A-Za-z][A-Za-z0-9_@]*)\}")
             .unwrap();
     assert!(
         reply_re.is_match(run_clause),

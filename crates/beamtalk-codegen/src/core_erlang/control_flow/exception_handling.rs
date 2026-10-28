@@ -2161,7 +2161,7 @@ Actor subclass: Foo
         let src = "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [0]\n";
         let code = codegen(src);
         assert!(
-            code.split("apply _HandlerFun").skip(1).any(|suffix| {
+            code.split("apply _HandlerFun@").skip(1).any(|suffix| {
                 suffix
                     .trim_start_matches(|ch: char| ch.is_ascii_digit())
                     .starts_with(" ()")

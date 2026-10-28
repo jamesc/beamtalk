@@ -1677,7 +1677,11 @@ impl CoreErlangGenerator {
     /// Generates a fresh temporary variable name WITHOUT binding it in scope.
     ///
     /// Use this for internal codegen temporaries (loop variables, function bindings,
-    /// etc.) that should never shadow or be confused with user identifiers.
+    /// etc.). The name is unique among temps and can never alias a variable
+    /// derived from a user identifier (it carries
+    /// [`super::variable_context::TEMP_MARKER`], which no Beamtalk identifier
+    /// can contain — BT-4140); see
+    /// [`super::variable_context::VariableContext::fresh_var`].
     // Public: `beamtalk-repl` mints internal
     // temporaries (e.g. result variables) while assembling a REPL module.
     pub fn fresh_temp_var(&mut self, base: &str) -> String {

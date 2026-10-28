@@ -71,7 +71,7 @@ fn the_repro_threads_the_post_loop_local_and_state_out_of_the_block() {
             })[1]
             .to_string();
     assert!(
-        regex::Regex::new(r"\{_T2Res\w*, StateAcc\d+\}")
+        regex::Regex::new(r"\{_T2Res[\w@]*, StateAcc\d+\}")
             .unwrap()
             .is_match(sums)
             && post_loop_local.starts_with("StateAcc"),

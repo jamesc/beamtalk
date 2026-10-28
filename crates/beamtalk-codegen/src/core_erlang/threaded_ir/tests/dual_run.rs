@@ -258,16 +258,16 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
     let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
 
     assert!(
-        rendered_doc.starts_with("letrec 'while'/1 = fun (Sum) -> let _SD1"),
+        rendered_doc.starts_with("letrec 'while'/1 = fun (Sum) -> let _SD@1"),
         "the condition's own prelude must render INSIDE the loop's fun, \
          before the case. Got:\n{rendered_doc}"
     );
     assert!(
-        rendered_doc.contains("let State1 = call 'erlang':'element'(2, _SD1"),
+        rendered_doc.contains("let State1 = call 'erlang':'element'(2, _SD@1"),
         "the condition's self-send Bind must be real, rendered IR. Got:\n{rendered_doc}"
     );
     assert!(
-        rendered_doc.contains("case call 'erlang':'>'(call 'erlang':'element'(1, _SD1"),
+        rendered_doc.contains("case call 'erlang':'>'(call 'erlang':'element'(1, _SD@1"),
         "the case scrutinee must be condition_value, inlined directly \
          (no CondFun closure). Got:\n{rendered_doc}"
     );
@@ -483,8 +483,8 @@ fn render_loop_letrec_param_list_and_final_args_use_hybrid_context_even_when_nes
 
     assert_eq!(
         rendered,
-        "letrec '_Loop1'/1 = fun (State) -> let State1 = State in \
-         apply '_Loop1'/1 (State1) in apply '_Loop1'/1 (StateAcc)",
+        "letrec '_Loop@1'/1 = fun (State) -> let State1 = State in \
+         apply '_Loop@1'/1 (State1) in apply '_Loop@1'/1 (StateAcc)",
         "the fun declaration, body, and recursive tail call must all \
          agree on State/State1 (the Hybrid loop's own context) — only \
          the outer initial call should reference StateAcc (the outer \

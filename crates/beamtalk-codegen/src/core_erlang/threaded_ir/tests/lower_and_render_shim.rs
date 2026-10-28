@@ -73,7 +73,7 @@ fn lower_and_render_return_renders_tuple() {
 #[test]
 fn lower_and_render_threaded_direct_params_emits_real_letrec() {
     // `Threaded { mode: DirectParams, .. }` renders a real `letrec`
-    // (fresh-named via `fresh_temp_var("Loop")`, hence the `_Loop1` — see
+    // (fresh-named via `fresh_temp_var("Loop")`, hence the `_Loop@1` — see
     // `VariableContext::fresh_var`), not a flattened body.
     let frame = FrameId::new(1);
     let sum_source = local("sum", 0, frame);
@@ -93,7 +93,7 @@ fn lower_and_render_threaded_direct_params_emits_real_letrec() {
     let rendered = lower_and_render(&ir).to_pretty_string();
     assert_eq!(
         rendered,
-        "letrec '_Loop1'/1 = fun (Sum) -> let Sum1 = Sum in \
-         apply '_Loop1'/1 (Sum1) in apply '_Loop1'/1 (Sum)"
+        "letrec '_Loop@1'/1 = fun (Sum) -> let Sum1 = Sum in \
+         apply '_Loop@1'/1 (Sum1) in apply '_Loop@1'/1 (Sum)"
     );
 }

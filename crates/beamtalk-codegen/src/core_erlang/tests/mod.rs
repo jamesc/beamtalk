@@ -237,6 +237,7 @@ mod expect_directive_statement;
 mod expressions;
 mod field_assignment_value_position;
 mod fold_locals_carried_corpus;
+mod fresh_temp_namespace;
 mod gen_server;
 mod guarded_op_loops;
 mod hybrid_field_rebind_corpus;

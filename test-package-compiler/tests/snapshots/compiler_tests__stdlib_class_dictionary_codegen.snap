@@ -23,26 +23,26 @@ call 'maps':'keys'(Self)
 'values'/1 = fun (Self) ->
 call 'maps':'values'(Self)
 
-'at:'/2 = fun (Self, _key1) ->
-call 'maps':'get'(_key1, Self)
+'at:'/2 = fun (Self, _key@1) ->
+call 'maps':'get'(_key@1, Self)
 
-'at:ifAbsent:'/3 = fun (Self, _key2, _block3) ->
-call 'beamtalk_map':'at_if_absent'(Self, _key2, _block3)
+'at:ifAbsent:'/3 = fun (Self, _key@2, _block@3) ->
+call 'beamtalk_map':'at_if_absent'(Self, _key@2, _block@3)
 
-'at:put:'/3 = fun (Self, _key4, _value5) ->
-call 'maps':'put'(_key4, _value5, Self)
+'at:put:'/3 = fun (Self, _key@4, _value@5) ->
+call 'maps':'put'(_key@4, _value@5, Self)
 
-'includesKey:'/2 = fun (Self, _key6) ->
-call 'maps':'is_key'(_key6, Self)
+'includesKey:'/2 = fun (Self, _key@6) ->
+call 'maps':'is_key'(_key@6, Self)
 
-'removeKey:'/2 = fun (Self, _key7) ->
-call 'maps':'remove'(_key7, Self)
+'removeKey:'/2 = fun (Self, _key@7) ->
+call 'maps':'remove'(_key@7, Self)
 
-'merge:'/2 = fun (Self, _other8) ->
-call 'maps':'merge'(Self, _other8)
+'merge:'/2 = fun (Self, _other@8) ->
+call 'maps':'merge'(Self, _other@8)
 
-'keysAndValuesDo:'/2 = fun (Self, _block9) ->
-call 'bt@stdlib@dictionary':'dispatch'('keysAndValuesDo:', [_block9], Self)
+'keysAndValuesDo:'/2 = fun (Self, _block@9) ->
+call 'bt@stdlib@dictionary':'dispatch'('keysAndValuesDo:', [_block@9], Self)
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of

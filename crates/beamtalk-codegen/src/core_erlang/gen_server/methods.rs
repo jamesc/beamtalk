@@ -2582,13 +2582,7 @@ impl CoreErlangGenerator {
     /// `element(2, nil)` badarg), so anything that references `ClassSelf` must
     /// be part of the body document scanned here, never added around it later.
     fn doc_mentions_var(doc: &Document<'static>, var: &str) -> bool {
-        let text = doc.to_pretty_string();
-        let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '@';
-        text.match_indices(var).any(|(at, _)| {
-            let before = text[..at].chars().next_back();
-            let after = text[at + var.len()..].chars().next();
-            !before.is_some_and(is_name_char) && !after.is_some_and(is_name_char)
-        })
+        super::super::variable_context::text_mentions_var(&doc.to_pretty_string(), var)
     }
 
     /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces
