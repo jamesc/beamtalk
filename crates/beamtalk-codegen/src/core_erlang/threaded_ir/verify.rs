@@ -159,7 +159,10 @@ pub(in crate::core_erlang) enum VerifyError {
     /// non-NLR clause must restore the cell to the region's pre-region state
     /// ([`CellBoundary`]) right after the class-variable restore, before the
     /// exception is wrapped and the handler runs. Without it a closure or
-    /// callee in the handler reads the writes the failed region made.
+    /// callee in the handler reads the writes the failed region made. Where
+    /// the cell is live (BT-4179, [`StateRestoreDefect::PreStateOverLiveCell`])
+    /// the boundary must snapshot the cell, not store a threaded `State`
+    /// that is stale for the writes the cell holds.
     ///
     /// **What it guards:** like [`Self::CatchWithoutClassVarRestore`], the one
     /// builder (`on_do_catch_boundary`) cannot trip it; the check is for a
@@ -589,6 +592,13 @@ pub(in crate::core_erlang) enum StateRestoreDefect {
     NotAfterClassVarRestore,
     /// The cell restore reads a different variable than the node's entry binds.
     RestoresWrongVariable,
+    /// BT-4179: the node sits where the cell is live (`cell_is_live`: an actor
+    /// closure, or a stateless loop that brackets guarded operators) but
+    /// stores a threaded `State` ([`CellBoundary::PreState`]) instead of
+    /// snapshotting the cell. That `State` is stale for the writes the cell
+    /// holds (the loop-entry version), so the entry store and the catch
+    /// restore both drop them.
+    PreStateOverLiveCell,
 }
 
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
@@ -1521,6 +1531,7 @@ impl VerifyWalk<'_> {
                 vars,
                 entry,
                 cell,
+                cell_is_live,
                 clauses,
                 span,
                 ..
@@ -1529,7 +1540,7 @@ impl VerifyWalk<'_> {
                     self.errors
                         .push(VerifyError::CatchWithoutClassVarRestore { defect, at: *span });
                 }
-                if let Some(defect) = check_cell_restore(cell.as_ref(), clauses) {
+                if let Some(defect) = check_cell_restore(cell.as_ref(), *cell_is_live, clauses) {
                     self.errors
                         .push(VerifyError::CatchWithoutStateRestore { defect, at: *span });
                 }
@@ -1621,12 +1632,18 @@ fn check_catch_restore(
 
 /// ADR 0137 §5 obligation of one [`ThreadedStmt::OnDoCatch`] that carries a
 /// [`CellBoundary`]: its non-NLR clause has the matching cell restore as its
-/// second step, right after the class-variable restore.
+/// second step, right after the class-variable restore, and where the cell is
+/// live (`cell_is_live`) the boundary snapshots it rather than storing a
+/// threaded `State` (BT-4179).
 fn check_cell_restore(
     cell: Option<&CellBoundary>,
+    cell_is_live: bool,
     clauses: &[CatchClause],
 ) -> Option<StateRestoreDefect> {
     let boundary = cell?;
+    if cell_is_live && matches!(boundary, CellBoundary::PreState(_)) {
+        return Some(StateRestoreDefect::PreStateOverLiveCell);
+    }
     let steps = clauses.iter().find_map(|c| match c {
         CatchClause::NonNlr { steps } => Some(steps),
         CatchClause::NlrPassThrough(_) => None,

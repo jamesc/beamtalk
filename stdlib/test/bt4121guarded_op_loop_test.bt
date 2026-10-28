@@ -78,3 +78,20 @@ TestCase subclass: Bt4121GuardedOpLoopTest
   testDirectReturnKeepsSlowPathWrites =>
     self assert: (self.a sumFirst: self.a items) cents equals: 100
     self assert: self.a count equals: 1
+
+  // BT-4179: catch-and-continue keeps earlier-iteration slow-path writes.
+  testOnDoCatchKeepsSlowPathWrites =>
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self assert: (self.a sumCatching: m times: 3) equals: 3
+    self assert: self.a count equals: 3
+
+  testWhileLoopOnDoCatchKeepsSlowPathWrites =>
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self assert: (self.a repeatAddCatching: m times: 3) equals: 3
+    self assert: self.a count equals: 3
+
+  // BT-4179: the protected block's own slow-path writes still roll back.
+  testOnDoCatchRollsBackProtectedWrites =>
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self assert: (self.a sumRollingBack: m times: 3) equals: 3
+    self assert: self.a count equals: 3

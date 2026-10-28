@@ -53,6 +53,7 @@ fn node_with_entry(entry: Option<CatchEntry>, clauses: Vec<CatchClause>) -> Thre
         vars: Box::new(vars()),
         entry,
         cell: None,
+        cell_is_live: false,
         try_region: TryRegion {
             body: beamtalk_cerl_doc::Document::Str("apply Block1 () "),
             result_var: "Result1".to_string(),
@@ -306,4 +307,63 @@ fn a_filter_closed_without_its_handler_fails() {
 #[test]
 fn a_well_formed_catch_boundary_closes_its_filter() {
     assert!(!filter_defect(&[node(well_formed())]));
+}
+
+/// A node carrying the cell half `boundary`, restored right after the
+/// class-variable restore, at a site where the cell is (or is not) live.
+fn cell_node(boundary: CellBoundary, cell_is_live: bool) -> ThreadedStmt {
+    let mut steps = restore_steps("ExClass1Snap");
+    steps.insert(1, CatchStep::CellRestore(boundary.clone()));
+    ThreadedStmt::OnDoCatch {
+        vars: Box::new(vars()),
+        entry: Some(CatchEntry::ClassVarSnapshot),
+        cell: Some(boundary),
+        cell_is_live,
+        try_region: TryRegion {
+            body: beamtalk_cerl_doc::Document::Str("apply Block1 () "),
+            result_var: "Result1".to_string(),
+        },
+        clauses: vec![
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
+            CatchClause::NlrPassThrough(NlrThrowShape::Tuple3),
+            CatchClause::NonNlr { steps },
+        ],
+        span: span(),
+    }
+}
+
+/// BT-4179: where the cell is live (a stateless loop bracketing guarded
+/// operators, or an actor closure) the threaded `State` is stale for the
+/// writes the cell holds; a boundary that stores it drops them.
+#[test]
+fn a_pre_state_boundary_over_a_live_cell_fails() {
+    let ir = [cell_node(
+        CellBoundary::PreState(ErlangVar::new("State")),
+        true,
+    )];
+    assert_eq!(
+        verify(&ir),
+        vec![VerifyError::CatchWithoutStateRestore {
+            defect: StateRestoreDefect::PreStateOverLiveCell,
+            at: span(),
+        }]
+    );
+}
+
+#[test]
+fn a_snapshot_boundary_over_a_live_cell_verifies_clean() {
+    let ir = [cell_node(
+        CellBoundary::Snapshot(ErlangVar::new("ExClass1CellSnap")),
+        true,
+    )];
+    assert_eq!(verify(&ir), Vec::new());
+}
+
+#[test]
+fn a_pre_state_boundary_where_state_is_current_verifies_clean() {
+    let ir = [cell_node(
+        CellBoundary::PreState(ErlangVar::new("State")),
+        false,
+    )];
+    assert_eq!(verify(&ir), Vec::new());
 }

@@ -898,6 +898,16 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// has the matching [`CatchStep::CellRestore`] right after the
         /// class-variable restore.
         cell: Option<CellBoundary>,
+        /// Whether the code at the `on:do:` site runs against the live cell
+        /// rather than a threaded `State`: an actor closure, or a stateless
+        /// loop that brackets guarded operators (BT-4121), whose slow paths
+        /// write the cell past the loop-entry `State`. There the cell is the
+        /// only current copy, so the boundary must snapshot it
+        /// ([`CellBoundary::Snapshot`]); [`CellBoundary::PreState`] would
+        /// store the stale entry `State` over those writes (BT-4179) and
+        /// [`verify`](super::verify::verify) reports it as
+        /// [`VerifyError::CatchWithoutStateRestore`].
+        cell_is_live: bool,
         try_region: TryRegion,
         clauses: Vec<CatchClause>,
         span: Span,
@@ -1498,8 +1508,11 @@ pub(in crate::core_erlang) enum CellBoundary {
     /// region's closures run against it, and stored again by the catch, so a
     /// closure or callee in the handler sees the pre-region state.
     PreState(ErlangVar),
-    /// Inside an actor closure there is no threaded `State`: the cell is
-    /// snapshotted on entry (the named variable) and the catch restores it.
+    /// Where the cell is live (inside an actor closure there is no threaded
+    /// `State`; inside a stateless loop that brackets guarded operators the
+    /// threaded `State` is the stale loop entry, BT-4179): the cell is
+    /// snapshotted on entry (the named variable) and the catch restores it,
+    /// so writes made before the region survive and the region's own roll back.
     Snapshot(ErlangVar),
 }
 

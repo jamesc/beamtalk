@@ -420,3 +420,101 @@ fn gaps_finish_as_their_own_variant() {
         "not folded into the send rule:\n{report}"
     );
 }
+
+/// BT-4179: the stateless loop shapes that bracket guarded operators, each
+/// holding an `on:do:` in its body. `{op}` is the protected block's body and
+/// `{h}` the handler block.
+const ON_DO_LOOPS: [&str; 3] = [
+    "i := 0. [i < 3] whileTrue: [acc := acc + x. [{op}] on: Error do: {h}. i := i + 1]",
+    "1 to: 3 do: [:i | acc := acc + x. [{op}] on: Error do: {h}]",
+    "3 timesRepeat: [acc := acc + x. [{op}] on: Error do: {h}]",
+];
+
+/// The protected bodies and handlers the corpus crosses with each loop. None
+/// sends a message that runs user code: one would make the loop thread `State`
+/// (a `StateAcc` loop, where the pre-region `State` is current) instead of
+/// staying stateless and bracketing.
+const ON_DO_PROTECTED: [&str; 3] = ["x - x", "x + x. x - x", "x - x. 0"];
+const ON_DO_HANDLERS: [&str; 3] = ["[:e | nil]", "[nil]", "[:e | e]"];
+
+fn on_do_loop_src(shape: &str, op: &str, handler: &str) -> String {
+    let body = shape.replace("{op}", op).replace("{h}", handler);
+    format!("{ACTOR_PREAMBLE}  run: x =>\n    acc := 0.\n    {body}.\n    acc\n")
+}
+
+/// Every cell-boundary entry in `out`: the text between each class-variable
+/// snapshot and the `try` that follows it.
+fn on_do_entries(out: &str) -> Vec<&str> {
+    out.match_indices("'beamtalk_class_vars':'snapshot'()")
+        .map(|(i, _)| {
+            let rest = &out[i..];
+            &rest[..rest.find("try ").expect("on:do: entry precedes its try")]
+        })
+        .collect()
+}
+
+#[test]
+fn on_do_in_bracketed_loop_snapshots_the_live_cell() {
+    // BT-4179: in a stateless loop that brackets guarded operators the
+    // loop-entry `State` is stale for the slow paths' cell writes. The
+    // `on:do:` boundary snapshots the live cell on entry to the protected
+    // block and restores that snapshot on catch — it never stores the
+    // loop-entry `State` (which dropped every earlier slow-path write).
+    for shape in ON_DO_LOOPS {
+        let src = on_do_loop_src(shape, "x - x", "[:e | nil]");
+        let out = compile(&src);
+        let entries = on_do_entries(&out);
+        assert_eq!(entries.len(), 1, "one on:do: boundary in {shape}:\n{out}");
+        assert!(
+            entries[0].contains("CellSnap = call 'beamtalk_actor_state':'snapshot'()"),
+            "entry snapshots the live cell in {shape}:\n{}",
+            entries[0]
+        );
+        assert!(
+            !entries[0].contains("'store'("),
+            "entry stores no threaded State in {shape}:\n{}",
+            entries[0]
+        );
+        assert!(
+            out.contains("do call 'beamtalk_actor_state':'restore'(Self, _ExClass"),
+            "catch restores the entry snapshot in {shape}:\n{out}"
+        );
+    }
+}
+
+#[test]
+fn on_do_outside_bracketed_loop_keeps_the_pre_state_store() {
+    // Gate pin: at method level the threaded `State` is current, so the
+    // boundary keeps storing the pre-region version.
+    let out = compile(&format!(
+        "{ACTOR_PREAMBLE}  run: x =>\n    acc := x + x.\n    [x - x] on: Error do: [:e | nil].\n    acc\n"
+    ));
+    let entries = on_do_entries(&out);
+    assert_eq!(entries.len(), 1, "{out}");
+    assert!(
+        entries[0].contains("'beamtalk_actor_state':'store'("),
+        "method-level entry stores the pre-region State:\n{}",
+        entries[0]
+    );
+    assert!(!entries[0].contains("CellSnap"), "{}", entries[0]);
+}
+
+#[test]
+fn on_do_in_bracketed_loops_corpus_is_verifier_clean() {
+    // BT-4179: the generated corpus (every bracketing loop shape × protected
+    // body × handler) compiles with no verifier finding —
+    // `PreStateOverLiveCell` fires on each of them when the boundary stores
+    // the loop-entry `State` — and every boundary snapshots the cell.
+    for shape in ON_DO_LOOPS {
+        for op in ON_DO_PROTECTED {
+            for handler in ON_DO_HANDLERS {
+                let src = on_do_loop_src(shape, op, handler);
+                assert_eq!(enforce_report(&src), None, "{src}");
+                let out = compile(&src);
+                for entry in on_do_entries(&out) {
+                    assert!(entry.contains("CellSnap"), "{src}\n{entry}");
+                }
+            }
+        }
+    }
+}

@@ -474,6 +474,7 @@ impl CoreErlangGenerator {
             vars: Box::new(vars),
             entry: Some(CatchEntry::ClassVarSnapshot),
             cell,
+            cell_is_live: self.cell_is_live(),
             try_region,
             clauses: vec![
                 CatchClause::NlrPassThrough(NlrThrowShape::Tuple4),
