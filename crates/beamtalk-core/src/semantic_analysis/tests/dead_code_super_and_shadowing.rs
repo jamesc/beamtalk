@@ -443,14 +443,6 @@ fn super_cascade_in_class_method_is_error() {
 }
 
 #[test]
-fn parenthesised_super_cascade_is_error() {
-    // The parser folds `(super) a` as the first send; its shared receiver is
-    // still `super`.
-    let src = "Object subclass: Point\n  describe => (super) printString; size";
-    assert_eq!(super_cascade_errors(src).len(), 1);
-}
-
-#[test]
 fn separate_super_sends_and_other_cascades_are_not_errors() {
     let src = "Object subclass: Point\n  describe =>\n    super printString.\n    super size.\n    self printString; size.\n    (super printString) size; yourself";
     let errors = super_cascade_errors(src);

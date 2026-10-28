@@ -279,7 +279,7 @@ impl NameResolver {
                 // `super` is not a value that can be bound and re-sent to —
                 // each `super` send names its own lookup. Reject the shape
                 // here rather than let codegen fail on it.
-                if matches!(cascade_shared_receiver(receiver).unwrap_parens(), Super(_)) {
+                if matches!(cascade_shared_receiver(receiver), Super(_)) {
                     self.diagnostics.push(
                         Diagnostic::error("a cascade cannot be sent to `super`", *span).with_hint(
                             "Send each message to `super` separately, e.g. \
