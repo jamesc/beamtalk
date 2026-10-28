@@ -28,7 +28,7 @@ BT-4223 (PR #4609) documented this in `docs/beamtalk-native-erlang.md` ("Strings
 * **Call sites.** Codegen lowers every inline `Erlang mod fn:` send to `beamtalk_erlang_proxy:direct_call(Mod, Fn, Args, Mode)`, and every `native:` delegation to `native_call(Mod, Fn, [Self | Args], {Class, Sel}, Mode)`. `Mode` is `stock` or `beamtalk`, precomputed per module (BT-4153). Beamtalk-owned modules (`beamtalk_*`, `bt@*`) get `beamtalk` mode and receive arguments untouched; they own the representation.
 * **Signatures.** ADR 0075 gives every `(module, function, arity)` a `FunctionSignature` in `NativeTypeRegistry`, with one `ParamType` per argument. Signatures come from `-spec`s extracted from `.beam` abstract code (`beamtalk_spec_reader`), or from hand-written `declare native:` stubs in `stubs/`, which take priority. **Codegen already receives the registry** (`CodegenOptions::native_type_registry`, `driver.rs`).
 * **The spec→type mapping is lossy for this purpose.** `binary()` maps to `String | Binary`, `string()` to `String | List`, and `term()`/`any()` to `Dynamic`. But `iodata()`/`iolist()` also map to `Dynamic`, and a map's key and value types collapse to plain `Dictionary`. The Beamtalk type alone therefore can't say which positions of an argument the callee reads as text.
-* **Results.** `coerce_ffi_result/3` returns any binary untouched, so a callee spec'd `-> binary()` returns a `Binary` at runtime while the checker types it `String | Binary`. Charlist results are converted separately (`coerce_charlist_result/1`).
+* **Results.** `coerce_ffi_result/3` returns any binary untouched, so a callee spec'd `-> binary()` returns a `Binary` at runtime while the checker types it `String | Binary`. Charlist results are converted by **content**: `coerce_charlist_result/1` turns any list that `io_lib:printable_unicode_list/1` accepts into a `String`. So `Erlang lists seq: 65 with: 70` answers `"ABCDEF"`, not a List of Integers, which is the same kind of content sniffing BT-4170 removed for binaries.
 
 ### Constraints
 
@@ -90,6 +90,7 @@ Erlang string uppercase: "abc"                       // => "ABC"  (see section 3
 The return type gets a shape too, read in the other direction:
 
 * A `unicode:chardata()`, `unicode:unicode_binary()` or `string()` result is tagged `String` (charlists are converted first). If it isn't valid UTF-8, the boundary **raises** `#invalid_utf8` naming the MFA, so it never quietly returns a `Binary`. These types are text by declaration, so this follows the spec rather than guessing from content.
+* A list result is converted by its spec, not by its content. `[integer()]`, `[char()]` inside a non-text position, or any other non-text list stays a List. Only a `string()` result becomes a `String`. For calls with a signature this **replaces** the `printable_unicode_list` heuristic of `coerce_charlist_result/1`. Calls without a signature keep it (section 4).
 * A `binary()`/`iodata()` result stays a `Binary` (bytes, as today). Its **static** type becomes `Binary` instead of `String | Binary`, so the checker stops promising a String the runtime never returns.
 * `opaque` positions are untouched, so tagged values handed in come back tagged.
 
@@ -115,7 +116,7 @@ An `opaque` parameter that **stores** its argument, such as `ets:insert/2`, `per
 
 No spec says "this argument is stored", so the boundary can't tell storing apart from comparing. The decision:
 
-* **The contract is the spec.** Data shared with Erlang code is declared as text with a stub (`declare native: ets  insert: tab :: Symbol with: obj :: {String, Object} -> Boolean`), which converts it. This goes in the native-interop guide as the boundary's rule.
+* **The contract is the spec.** Data shared with Erlang code is declared as text with a stub (`declare native: ets  insert: tab :: Symbol with: obj :: Tuple(String, Object) -> Boolean`), which converts it. This goes in the native-interop guide as the boundary's rule.
 * **A development-time signal for what's left.** When the runtime setting `beamtalk_ffi_convert` `warn_opaque_strings` is on (default **on** in REPL and test runs, **off** in releases), the boundary logs one `?LOG_WARNING` per MFA when a tagged String reaches an `opaque` argument of `ets`, `dets`, `persistent_term`, `erlang:send`, `gen_server:call/cast`, `gen_statem:call/cast` or `term_to_binary`. The warning names the MFA and the stub fix. This list is **diagnostic only**: it changes no behaviour, and a missing entry only means a missing warning. The data is checked only while the setting is on, so releases pay nothing.
 
 ### 6. `native:` delegation
@@ -126,6 +127,7 @@ No spec says "this argument is stored", so the boundary can't tell storing apart
 
 | System | Approach | What we take |
 |---|---|---|
+| **Pharo uFFI** | `self ffiCall: #(int strlen(String s))`: the declared C signature drives marshalling, so a Smalltalk `String` becomes a `char*` only where the signature says `String`. `void*`/`ExternalAddress` parameters pass through untouched | The direct ancestor of this decision: the foreign function's declared signature, not the value, decides the conversion |
 | **Gleam** `@external` | The user declares the Erlang function's Gleam types. No conversion happens, because Gleam `String` *is* an Erlang binary | Declared signatures as the boundary contract. Gleam doesn't need conversion only because its representation coincides with Erlang's; ours doesn't since BT-4173 |
 | **Elixir** | Strings are binaries; charlist interop is explicit (`String.to_charlist/1`) | The `charlist` shape automates exactly the conversion Elixir developers write by hand for `string()` APIs |
 | **Python ctypes / PyO3** | Marshalling is driven by the declared signature (`argtypes`, `FromPyObject` per parameter type), never by inspecting the value | The core idea: **conversion follows the declared parameter type**. An undeclared function gets the conservative default plus a warning |
@@ -145,6 +147,7 @@ No spec says "this argument is stored", so the boundary can't tell storing apart
 
 | Alternative | Best case for it | Why not |
 |---|---|---|
+| **Status quo: shallow unwrap plus docs (BT-4223)** | 🎩 Smalltalk purist: "Interop is the edge of the system. Keep the core simple; the guide already says use `includes:`/`at:`, which are the Smalltalk way anyway" | The wrong answers stay silent. A user who reaches for `lists:keyfind` (or any third-party library) gets `false` with no signal, which breaks constraint 1 |
 | **Per-function deep-unwrap table** | ⚙️ BEAM veteran: "The five lookups people actually write just work, and nothing else changes" | Open-ended. `maps:get` becomes O(n). Every function missing from the table stays silently wrong, breaking constraints 1–3 |
 | **Explicit `asErlangTerm`** | 🎨 Language designer: "Explicit beats magic; the user controls cost and depth" | 🧑‍💻 The newcomer has to know the String representation to call `lists:member`, which is the abstraction leaking. Forgetting it is still silent |
 | **Pass everything tagged; on `badarg`, unwrap and retry** | 🏭 Operator: "No compile-time machinery, and it's cheap on success" | Any function that accepts any term without raising silently gets the tag (`erlang:size/1` answers 2, `term_to_binary`, `phash2`). It also retries side effects |
@@ -177,6 +180,7 @@ Rejected. `binary()` is the type of `crypto:hash/2` and `term_to_binary/1` too; 
 ### Negative
 * **Breaking:** a **top-level** String passed to a `term()` parameter used to arrive as a raw binary and now arrives tagged. Examples: `Erlang erlang send: pid with: "hi"`, `Erlang persistent_term put: #k with: "v"`, `Erlang erlang term_to_binary: "x"`. Erlang receivers of such data must be declared through a stub (or the data converted explicitly). The storage diagnostic flags these at development time, and the sibling-repo audit (see Migration Path) finds existing ones.
 * A `string()` result that isn't valid UTF-8 now raises instead of returning bytes.
+* **Behaviour change for list results:** with a signature, a printable list of integers whose spec isn't `string()` stays a List. `Erlang lists seq: 65 with: 70` answers `#(65, 66, 67, 68, 69, 70)` instead of `"ABCDEF"`. This is the correct answer, but code that relied on the old guess changes.
 * One more runtime module (`beamtalk_ffi_convert`) and a shape field in the registry. The shapes cross the Rust/Erlang boundary, so they need a conformance fixture.
 * The storage diagnostic uses a list of MFAs. It's diagnostic-only, but it does need occasional additions.
 
@@ -186,6 +190,7 @@ Rejected. `binary()` is the type of `crypto:hash/2` and `term_to_binary/1` too; 
 
 ## Implementation
 
+0. **Prove the approach first (S).** Compute shapes for the repro MFAs (`lists:member/2`, `keyfind/3`, `keymember/3`, `maps:get/2`, `maps:is_key/2`, `proplists:get_value/2`) and for `string:uppercase/1` and `lists:seq/2`, straight from the OTP 27 and 28 specs. Hand-write the converted Core for one call of each and run it. This confirms the specs resolve to the shapes in the table above (remote types such as `unicode:chardata()` included) before any of the pipeline is built.
 1. **Spec reader and registry (core + compiler app).** Compute the conversion shape for each parameter and the return type from the raw Erlang spec. Resolve remote and user types (`unicode:chardata()`, `iodata()`) before classifying. Carry it in `FunctionSignature`, and get it from stub declarations as well. Add the shared conformance fixture.
 2. **Runtime.** Add `beamtalk_ffi_convert:arg/2` and `result/2`, with the `#invalid_utf8` error. Add a `typed` mode to `direct_call`/`native_call`, which skips the shallow unwrap and the retry. Add the `warn_opaque_strings` diagnostic setting.
 3. **Codegen.** At each FFI and `native:` call site with a signature, wrap each non-`opaque` argument and the result, and emit `typed`. Leave the call unchanged when there's no signature.
@@ -201,6 +206,7 @@ Rough size: L. Steps 1–2 can land before 3–4 behind the `typed` mode, which 
 
 * **Audit:** before step 3 lands, grep the 8 sibling repos audited by BT-4170 and the stdlib for FFI calls that pass a top-level String to a `term()` parameter of a storage or messaging function: `erlang:send`, `gen_server`/`gen_statem` `call`/`cast`, `ets`, `persistent_term`, `term_to_binary`. For each one, add a stub declaring the parameter as text, or convert explicitly.
 * **Development-time signal:** the storage diagnostic is on by default in REPL and test runs, so any case the audit misses shows up as a `WARNING` naming the MFA.
+* **List results:** the same audit greps for FFI results used as Strings that come from a non-`string()` list spec (the old printable-list guess). Each one gets a stub declaring `string()`, or an explicit conversion.
 * The `ffi-untyped-strings` warning is new. Existing code compiles with warnings, not errors.
 
 ## References
