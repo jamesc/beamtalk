@@ -73,6 +73,14 @@ static TYPE_TESTS: &[(&str, TypeTest)] = &[
     ("Dictionary", TypeTest::UntaggedMap),
 ];
 
+fn true_doc() -> Document<'static> {
+    Document::Str("'true'")
+}
+
+fn false_doc() -> Document<'static> {
+    Document::Str("'false'")
+}
+
 impl CoreErlangGenerator {
     /// Compiles a single `Pattern::Type` match arm (`binding :: ClassName ->
     /// body`) — ADR 0107 Phase A.
@@ -371,13 +379,21 @@ impl CoreErlangGenerator {
         success: Document<'static>,
         rest: &Document<'static>,
     ) -> Document<'static> {
-        let is_string =
-            self.wrap_string_test(match_var, Document::Str("'true'"), &Document::Str("'false'"));
-        let is_binary =
-            Self::wrap_bif_test(match_var, "is_binary", Document::Str("'true'"), &is_string);
+        let is_string = self.wrap_string_test(match_var, true_doc(), &false_doc());
+        let is_binary = Self::wrap_bif_test(match_var, "is_binary", true_doc(), &is_string);
+        Self::branch_on_test(is_binary, success, rest)
+    }
+
+    /// `case <test> of <'true'> -> success <'false'> -> rest end`, for a
+    /// test shape rendered with `'true'`/`'false'` at its sites (BT-4141).
+    fn branch_on_test(
+        test: Document<'static>,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
         docvec![
             "case ",
-            is_binary,
+            test,
             " of ",
             "<'true'> when 'true' -> ",
             success,
@@ -637,7 +653,22 @@ impl CoreErlangGenerator {
     /// [`Self::wrap_supervisor_class_tag_test`] above — this exclusion
     /// still applies to an *unrelated* `x :: Tuple` arm that could see one
     /// of these values flow through.)
+    ///
+    /// The test reaches a match from three sites, so it computes one
+    /// `'true'`/`'false'` and `success` is emitted once (BT-4141).
     fn wrap_tuple_test(
+        &mut self,
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let is_tuple = self.tuple_shape_test(match_var, true_doc(), &false_doc());
+        Self::branch_on_test(is_tuple, success, rest)
+    }
+
+    /// The `Tuple` test's shape ([`Self::wrap_tuple_test`]), with `success`
+    /// at each of its three matching sites.
+    fn tuple_shape_test(
         &mut self,
         match_var: &str,
         success: Document<'static>,
