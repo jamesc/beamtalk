@@ -67,6 +67,9 @@ pub enum ExpectCategory {
     /// its actor's state used where it runs outside the actor's process
     /// (ADR 0137).
     ActorStateAbroad,
+    /// Suppress ffi-nested-string hints — a `String` nested in a collection
+    /// argument to a stock Erlang call reaches it tagged (BT-4243).
+    FfiNestedString,
     /// Deprecated, parse-only (ADR 0130 §Migration Path): the stored-closure
     /// advisory it suppressed no longer exists, so nothing produces a matching
     /// diagnostic. The name is still accepted so existing
@@ -102,6 +105,7 @@ impl ExpectCategory {
             "class_state_abroad" => Some(Self::ClassStateAbroad),
             "class_process_ffi" => Some(Self::ClassProcessFfi),
             "actor_state_abroad" => Some(Self::ActorStateAbroad),
+            "ffi_nested_string" => Some(Self::FfiNestedString),
             "stored_closure" => Some(Self::StoredClosure),
             "all" => Some(Self::All),
             _ => None,
@@ -131,6 +135,7 @@ impl ExpectCategory {
             Self::ClassStateAbroad => "class_state_abroad",
             Self::ClassProcessFfi => "class_process_ffi",
             Self::ActorStateAbroad => "actor_state_abroad",
+            Self::FfiNestedString => "ffi_nested_string",
             Self::StoredClosure => "stored_closure",
             Self::All => "all",
         }
@@ -160,6 +165,7 @@ impl ExpectCategory {
             "class_state_abroad",
             "class_process_ffi",
             "actor_state_abroad",
+            "ffi_nested_string",
             "all",
         ]
     }

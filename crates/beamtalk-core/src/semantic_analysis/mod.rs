@@ -1183,13 +1183,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
-    // BT-4092 (one-release migration warning): a parenthesised trailing field
-    // assignment in a value-type method now answers the updated `self`.
-    validators::check_parenthesised_trailing_field_assignment(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
     // ADR 0103: `handleScope:` is only meaningful on Object-kind classes.
     validators::check_handle_scope_on_object(
         module,
