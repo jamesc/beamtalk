@@ -1368,6 +1368,20 @@ opts := #({#local, path}, {#nodelay, true},)  // trailing comma is allowed
   assignment; `{a, b} size` is an expression. `{a, b} := {b, a}` swaps.
 - A tuple literal infers the positional type `Tuple(T1, …, Tn)`, so `at:` with a
   literal index is typed (see above). `{}` infers as bare `Tuple`.
+- The same positional type can be written as an annotation — parameter, return,
+  `state:` and local — with any number of element types (`Tuple()` is bare
+  `Tuple`). An annotated tuple behaves exactly like an inferred one:
+
+  ```beamtalk
+  marker -> Tuple(Symbol, Reference | Nil) => {#emitted, self.spanContext}
+
+  countOf: entry :: Tuple(Symbol, Integer) -> Integer => entry at: 2   // inferred Integer
+  ```
+
+  `Tuple(A, B)` is assignable to bare `Tuple`, and a bare `Tuple` (or `Dynamic`)
+  flows into `Tuple(A, B)` gradually. Element types are checked slot by slot, and
+  an arity mismatch between two positional tuple types (`Tuple(A, B)` vs
+  `Tuple(A, B, C)`) is a type error.
 - **`{#ok, x}` is a `Tuple`, not a `Result`.** FFI `ok`/`error` conversion
   (ADR 0076) applies only to values *returned* from Erlang; arguments pass
   through unchanged. Use `Result ok:` / `Result error:` to build a `Result`.
