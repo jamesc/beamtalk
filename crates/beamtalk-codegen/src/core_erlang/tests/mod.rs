@@ -232,6 +232,7 @@ mod local_producer_agreement_repl;
 mod local_rebind_verifier_corpus;
 mod loop_body_conditional_receiver_corpus;
 mod loop_body_self_send_operand_corpus;
+mod match_fallthrough_goto;
 mod match_fallthrough_sharing;
 mod match_scrutinee_state_corpus;
 mod module_info;

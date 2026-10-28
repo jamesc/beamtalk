@@ -174,7 +174,8 @@ impl CoreErlangGenerator {
         // Rest is generated AFTER the current arm to prevent state leakage,
         // and bound once: every test shape below falls through from several
         // sites (BT-4141).
-        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
+        let shared = self.generate_shared_rest(match_var, rest_arms, threading)?;
+        let rest_doc = shared.apply();
 
         // Use `case 'true' of <'true'> when GUARD -> body <'true'> when
         // 'true' -> rest end` (Core Erlang guard position) so guard
@@ -210,7 +211,7 @@ impl CoreErlangGenerator {
 
         let test_doc =
             self.dispatch_type_pattern_strategy(match_var, &class.name, bound_success, &rest_doc);
-        Ok(docvec![rest_bind, test_doc])
+        Ok(shared.bind_around(test_doc))
     }
 
     /// Picks (and applies) one of `generate_type_pattern`'s per-class
