@@ -175,3 +175,31 @@ fn trailing_field_assignment_in_extension_follows_extension_target_rule() {
         );
     }
 }
+
+/// The other side of the fix: a value-type method that declares a
+/// non-receiver return type and ends in a field write now draws a
+/// return-type mismatch, since it answers `self`. Declaring the receiver
+/// type (`Self` or the class) stays silent.
+#[test]
+fn declared_return_type_is_checked_against_the_receiver() {
+    let mismatches = |ret: &str| {
+        let src =
+            format!("Value subclass: Probe\n  field: m = 0\n  bump -> {ret} => self.m := 5\n");
+        let (_, diagnostics) = check_source(&src);
+        diagnostics
+            .into_iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .map(|d| d.message)
+            .collect::<Vec<_>>()
+    };
+    let integer = mismatches("Integer");
+    assert_eq!(integer.len(), 1, "{integer:?}");
+    assert!(integer[0].contains("Probe"), "{integer:?}");
+    for ret in ["Self", "Probe"] {
+        assert!(
+            mismatches(ret).is_empty(),
+            "`-> {ret}`: {:?}",
+            mismatches(ret)
+        );
+    }
+}
