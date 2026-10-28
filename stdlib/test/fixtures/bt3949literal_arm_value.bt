@@ -1,0 +1,57 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3949: the value-type column of bt3949literal_arm_actor.bt. A value-type
+// method's self-call `collect:` threads no `Self` (it writes no field), so it
+// is a plain value here; these pin that it answers the same in every literal
+// and keyword position of an `ifTrue:`/`ifFalse:` or `match:` arm. The
+// expected answers are in stdlib/test/bt3949literal_arm_test.bt.
+
+Value subclass: Bt3949LiteralArmValue
+
+  wrap: x => x * 10
+
+  mapIf: flag =>
+    data := flag ifTrue: [
+      #{"xs" => (#(1, 2) asList collect: [:s | self wrap: s])}
+    ] ifFalse: [#{"xs" => #()}]
+    data at: "xs"
+
+  arrayIf: flag =>
+    data := flag ifTrue: [
+      #[0, (#(1, 2) asList collect: [:s | self wrap: s])]
+    ] ifFalse: [#[0, #()]]
+    data at: 2
+
+  keywordIf: flag =>
+    data := flag ifTrue: [
+      #{} at: "xs" put: (#(1, 2) asList collect: [:s | self wrap: s])
+    ] ifFalse: [#{"xs" => #()}]
+    data at: "xs"
+
+  mapIfFalse: flag =>
+    data := flag ifTrue: [
+      #{"xs" => #()}
+    ] ifFalse: [#{"xs" => (#(1, 2) asList collect: [:s | self wrap: s])}]
+    data at: "xs"
+
+  mapMatch: x =>
+    data := x match: [
+      1 -> #{"xs" => (#(1, 2) asList collect: [:s | self wrap: s])};
+      _ -> #{"xs" => #()}
+    ]
+    data at: "xs"
+
+  arrayMatch: x =>
+    data := x match: [
+      1 -> #[0, (#(1, 2) asList collect: [:s | self wrap: s])];
+      _ -> #[0, #()]
+    ]
+    data at: 2
+
+  keywordMatch: x =>
+    data := x match: [
+      1 -> (#{} at: "xs" put: (#(1, 2) asList collect: [:s | self wrap: s]));
+      _ -> #{"xs" => #()}
+    ]
+    data at: "xs"

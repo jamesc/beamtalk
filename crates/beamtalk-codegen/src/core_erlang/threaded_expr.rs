@@ -138,6 +138,13 @@ pub(super) mod fault {
         /// instead of as a producer (`ProducerSiteNotThreaded`): the shape that
         /// answered the pre-loop value of a block-local the loop rebinds.
         Tier2OpaqueProducers,
+        /// BT-3949: the arm of a construct that is not a local-threading
+        /// producer (`generate_plain_arm`: a conditional, `match:` or
+        /// `detect:ifNone:` arm) registers no producer sites, as before
+        /// BT-3949, so an actor fold that self-sends at an operand site of an
+        /// arm statement (a map-literal value) is compiled in place and its
+        /// carrier tuple becomes the operand (`ConstructCarrierInPlace`).
+        PlainArmOpaqueProducers,
         /// BT-4002: a `Letrec` loop takes its families from its body only, as
         /// before BT-4002, so the `Self` a `whileTrue:`/`whileFalse:` condition
         /// writes is not carried (`ConditionFamilyNotCarried`).
@@ -1642,7 +1649,22 @@ impl CoreErlangGenerator {
         if self.is_repl_mode() {
             return Vec::new();
         }
-        self.body_producer_site_exprs(stmt, fold, arm)
+        self.producer_sites_of(self.body_producer_site_exprs(stmt, fold, arm))
+    }
+
+    /// BT-3949: [`Self::frame_producer_sites`] for a statement of a plain arm,
+    /// over its [`Self::plain_arm_producer_site_exprs`].
+    pub(super) fn plain_arm_producer_sites(&self, stmt: &Expression) -> Vec<(Span, Vec<String>)> {
+        if self.is_repl_mode() {
+            return Vec::new();
+        }
+        self.producer_sites_of(self.plain_arm_producer_site_exprs(stmt))
+    }
+
+    /// The `(site span, locals)` of each of `sites` that
+    /// [`Self::producer_site_locals`] names a producer.
+    fn producer_sites_of(&self, sites: Vec<&Expression>) -> Vec<(Span, Vec<String>)> {
+        sites
             .into_iter()
             .filter_map(|site| {
                 self.producer_site_locals(site)
@@ -1689,7 +1711,6 @@ impl CoreErlangGenerator {
         arm: bool,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let outer_fold = self.in_fold_frame;
         let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
         for stmt in body {
             sites.extend(
@@ -1698,6 +1719,62 @@ impl CoreErlangGenerator {
                     .map(Expression::span),
             );
         }
+        self.with_producer_site_set(sites, fold, f)
+    }
+
+    /// BT-3949: the producer sites of `stmt`, a statement of a *plain* arm (the
+    /// arm of a construct that is not a local-threading producer,
+    /// `generate_plain_arm`): its arm-frame sites
+    /// ([`Self::body_producer_site_exprs`] with `arm`) that are a loop or fold
+    /// (`producer_body_block`). A loop or fold is a producer of whatever frame
+    /// lowers it, so one at an operand site of a plain arm's statement (a
+    /// map-literal value, an array element, a keyword argument) is lowered
+    /// through its `ConstructTuple` and never leaves its `{Value, State}`
+    /// carrier as the operand. A nested conditional, `match:` or exception
+    /// construct is not: whether it is a producer is the core rule's
+    /// arm-frame question (`conditional_producer_writes`), which a plain arm
+    /// does not ask, so it keeps its own lowering there. The one rule behind
+    /// the plain arm's registration ([`Self::with_plain_arm_producer_sites`])
+    /// and its `ConstructCarrierInPlace` / `ProducerSiteNotThreaded` check.
+    pub(super) fn plain_arm_producer_site_exprs<'a>(
+        &self,
+        stmt: &'a Expression,
+    ) -> Vec<&'a Expression> {
+        self.body_producer_site_exprs(stmt, false, true)
+            .into_iter()
+            .filter(|site| {
+                beamtalk_core::semantic_analysis::block_facts::producer_body_block(site).is_some()
+            })
+            .collect()
+    }
+
+    /// [`Self::with_body_producer_sites`] for a plain arm's statements `body`:
+    /// registers their [`Self::plain_arm_producer_site_exprs`].
+    pub(super) fn with_plain_arm_producer_sites<T>(
+        &mut self,
+        body: &[&Expression],
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
+        for stmt in body {
+            sites.extend(
+                self.plain_arm_producer_site_exprs(stmt)
+                    .into_iter()
+                    .map(Expression::span),
+            );
+        }
+        self.with_producer_site_set(sites, false, f)
+    }
+
+    /// Runs `f` with [`Self::local_producer_sites`] set to `sites` (and the
+    /// fold-frame flag widened by `fold`), restoring both afterwards.
+    fn with_producer_site_set<T>(
+        &mut self,
+        sites: std::collections::HashSet<Span>,
+        fold: bool,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let outer_fold = self.in_fold_frame;
         let saved = std::mem::replace(&mut self.local_producer_sites, sites);
         let saved_fold = std::mem::replace(&mut self.in_fold_frame, outer_fold || fold);
         let out = f(self);

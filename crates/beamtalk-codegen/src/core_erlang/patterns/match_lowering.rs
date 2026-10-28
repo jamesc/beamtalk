@@ -151,7 +151,7 @@ impl CoreErlangGenerator {
             for arm in arms {
                 if let Some((field, span)) = self.vt_match_arm_field_write(arm) {
                     return Err(CodeGenError::ValueSelfFieldAssignmentInMatchArm {
-                        field: field.to_string(),
+                        field,
                         location: self.location_label(span),
                     });
                 }
@@ -399,8 +399,21 @@ impl CoreErlangGenerator {
                         // plain-wrap arm gets a chance to hoist it instead of
                         // silently dropping the mutation via a bare
                         // `expression_doc` compile.
-                        || self.conditional_receiver_needs_threading(&arm.body)))
+                        || self.conditional_receiver_needs_threading(&arm.body)
+                        || self.match_arm_has_producer_site(&arm.body)))
         })
+    }
+
+    /// BT-3949: whether the `match:` arm body `body` holds a producer at one of
+    /// its plain-arm producer sites (the rule `generate_plain_arm` registers,
+    /// [`Self::plain_arm_producer_sites`]): a fold that threads `State` in a
+    /// map-literal value, an array element or a keyword argument. Such an arm
+    /// is threaded and lowered as a plain arm frame (the synthetic-block route
+    /// of [`Self::generate_match_arm_body`]); compiled in place, its
+    /// construct's `{Value, State}` carrier became the operand. The one
+    /// predicate both the threading gate and the arm lowering read.
+    fn match_arm_has_producer_site(&self, body: &Expression) -> bool {
+        !self.plain_arm_producer_sites(body).is_empty()
     }
 
     /// BT-3947: whether the arm body `body` of a REPL `match:` writes a REPL
@@ -429,7 +442,7 @@ impl CoreErlangGenerator {
     /// gates on (a value-type INSTANCE method): a `[...] value`-wrapped
     /// field write is a separate, pre-existing gap this detector does not
     /// (yet) cover — see BT-3493's own follow-up notes.
-    fn vt_match_arm_field_write<'a>(&self, arm: &'a MatchArm) -> Option<(&'a str, Span)> {
+    fn vt_match_arm_field_write(&self, arm: &MatchArm) -> Option<(String, Span)> {
         let bare = arm.body.unwrap_parens();
         // BT-3495: a field write nested inside a `[...] value` block's own
         // statements (bare, or local-assign-wrapped) — `arm.body` alone is
@@ -454,10 +467,46 @@ impl CoreErlangGenerator {
                 .body
                 .iter()
                 .find_map(|stmt| self.field_write_shape(&stmt.expression))
-                .map(Self::field_write_name_and_span);
+                .map(Self::field_write_name_and_span)
+                .map(|(field, span)| (field.to_string(), span));
         }
-        self.field_write_shape(bare)
+        if let Some((field, span)) = self
+            .field_write_shape(bare)
             .map(Self::field_write_name_and_span)
+        {
+            return Some((field.to_string(), span));
+        }
+        self.vt_match_arm_producer_field_write(bare)
+    }
+
+    /// BT-3949: a field write inside a loop or fold that threads the value-type
+    /// `Self` family (`vt_loop_threaded_families`) at one of the arm body's
+    /// plain-arm producer sites ([`Self::plain_arm_producer_site_exprs`]: the
+    /// body itself, a map-literal value, an array element, a keyword argument).
+    /// Such a construct compiles to a `{Value, Self}` carrier whose `Self` a
+    /// `match:` arm has no merge for (`MATCH_ARM_FAMILIES` excludes `SelfVt`),
+    /// so it is rejected here with the `match:`-arm diagnostic, like a bare
+    /// field-write arm, rather than left to a generic closed-block rejection
+    /// further down (or, at worst, compiled in place with its carrier as the
+    /// operand: `ConstructCarrierInPlace`).
+    fn vt_match_arm_producer_field_write(&self, body: &Expression) -> Option<(String, Span)> {
+        self.plain_arm_producer_site_exprs(body)
+            .into_iter()
+            .filter(|site| {
+                self.vt_loop_threaded_families(site)
+                    .contains(&VersionPrefix::SelfVt)
+            })
+            .find_map(|site| {
+                let mut found = None;
+                beamtalk_core::ast_walker::walk_expression(site, &mut |e| {
+                    if found.is_none() {
+                        if let Some(field) = self.field_assignment_name(e) {
+                            found = Some((field.to_string(), e.span()));
+                        }
+                    }
+                });
+                found
+            })
     }
 
     /// The field write nested in `expr` for exactly the two shapes
@@ -653,6 +702,7 @@ impl CoreErlangGenerator {
         if self.conditional_receiver_needs_threading(body)
             || self.is_field_assignment(bare_body)
             || self.repl_match_arm_writes_bindings(body)
+            || self.match_arm_has_producer_site(body)
         {
             let synthetic_block = Block::new(
                 Vec::new(),
