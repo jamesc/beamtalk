@@ -189,7 +189,7 @@ Rejected. `binary()` is the type of `crypto:hash/2` and `term_to_binary/1` too; 
 * Strings round-trip through opaque Erlang code.
 * Most calls get slightly cheaper: no top-level unwrap scan when the signature is known, and no `badarg` charlist retry, since `string()` parameters are converted up front.
 * The static types of FFI results become honest (`binary()` → `Binary`).
-* Every case the boundary can't resolve gets a diagnostic: the no-signature warning at compile time, the storage warning in development.
+* Every case the boundary can't resolve gets a diagnostic at compile time: `ffi-untyped-strings` for calls with no signature, `ffi-stored-strings` for Strings passed to storage or messaging functions.
 
 ### Negative
 * **Breaking:** a **top-level** String passed to a `term()` parameter used to arrive as a raw binary and now arrives tagged. Examples: `Erlang erlang send: pid with: "hi"`, `Erlang persistent_term put: #k with: "v"`, `Erlang erlang term_to_binary: "x"`. Erlang receivers of such data must be declared through a stub (or the data converted explicitly). The `ffi-stored-strings` lint flags these at compile time, and the sibling-repo audit (see Migration Path) finds existing ones.
@@ -212,7 +212,7 @@ Rejected. `binary()` is the type of `crypto:hash/2` and `term_to_binary/1` too; 
 5. **Docs and tests.**
    * Rewrite "Strings at the FFI boundary" in `docs/beamtalk-native-erlang.md`.
    * BUnit tests for the repros, the round trip, chardata results, invalid UTF-8, and the no-signature warning per call shape.
-   * Record the new warning in `docs/development/surface-parity.md`.
+   * Record the new warnings (`ffi-untyped-strings`, `ffi-stored-strings`) in `docs/development/surface-parity.md`.
 
 Rough size: L. Steps 1–2 can land before 3–4 behind the `typed` mode, which nothing emits until step 3.
 
