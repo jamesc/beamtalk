@@ -12,7 +12,8 @@
 //! - Effect-free statements
 
 use crate::ast::{
-    Expression, Identifier, MessageSelector, Module, TypeAnnotation, WellKnownSelector,
+    Expression, Identifier, MessageSelector, MethodDefinition, Module, TypeAnnotation,
+    WellKnownSelector,
 };
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
@@ -820,6 +821,89 @@ fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
          send — so the updated fields carry forward",
     )
     .with_category(DiagnosticCategory::Lint)
+}
+
+// ── Parenthesised trailing field assignment (BT-4092 migration) ──────────────
+
+/// Warn when a value-type instance method's last statement is a
+/// parenthesised field assignment, `(self.x := v)`.
+///
+/// BT-4092 made statement-level parentheses transparent: a trailing field
+/// assignment in a value-type method answers the updated `self` whether or
+/// not it is parenthesised. Before, `(self.x := v)` as the last statement
+/// answered `v`, so code written for that meaning now answers something
+/// else. This is a one-release migration warning (category
+/// [`DiagnosticCategory::Deprecation`], so `beamtalk build` shows it but
+/// `--warnings-as-errors` does not promote it); BT-4234 removes it
+/// after the next release.
+///
+/// Fires only on instance methods of classes codegen compiles as value
+/// types ([`ClassHierarchy::compiles_as_actor`] is `false`), and on
+/// instance-side standalone extensions whose target is not an actor
+/// ([`ClassHierarchy::extension_target_is_actor`] is `false`). An actor
+/// method's trailing field assignment answers the assigned value with or
+/// without parentheses, so nothing changed there. A bare trailing field
+/// assignment, a non-last one, an operand-position one
+/// (`(self.x := v) + 1`) and a parenthesised local assignment are all
+/// unaffected.
+pub(crate) fn check_parenthesised_trailing_field_assignment(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        if hierarchy.compiles_as_actor(class) {
+            continue;
+        }
+        for method in &class.methods {
+            check_method_parenthesised_trailing_field_assignment(method, diagnostics);
+        }
+    }
+    // Instance-side standalone extensions (`Point >> resetX => (self.x := 0)`)
+    // lower through the same value-type body path unless their target is an
+    // actor, so they changed meaning too. Class-side extensions do not.
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method
+            || hierarchy.extension_target_is_actor(standalone.class_name.name.as_str())
+        {
+            continue;
+        }
+        check_method_parenthesised_trailing_field_assignment(&standalone.method, diagnostics);
+    }
+}
+
+/// Warns when `method`'s last statement is a parenthesised `self.x := v`.
+fn check_method_parenthesised_trailing_field_assignment(
+    method: &MethodDefinition,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(last) = method.body.last() else {
+        return;
+    };
+    if matches!(last.expression, Expression::Parenthesized { .. })
+        && is_self_field_assignment(&last.expression)
+    {
+        diagnostics.push(parenthesised_trailing_field_assignment_diagnostic(
+            last.expression.span(),
+        ));
+    }
+}
+
+/// Builds the BT-4092 migration diagnostic for a parenthesised trailing
+/// field assignment.
+fn parenthesised_trailing_field_assignment_diagnostic(span: Span) -> Diagnostic {
+    Diagnostic::warning(
+        "parentheses no longer change this statement's value: a trailing field \
+         assignment in a value-type method answers the updated `self`, with or \
+         without parentheses"
+            .to_string(),
+        span,
+    )
+    .with_hint(
+        "Remove the parentheses to keep answering the updated `self`; to answer \
+         the assigned value instead, write `self.x := v. v`",
+    )
+    .with_category(DiagnosticCategory::Deprecation)
 }
 
 // ── Redundant local-variable type annotation ──────────────────────────────────
@@ -2237,5 +2321,127 @@ mod tests {
             2,
             "Expected one lint per redundant annotation, got: {diags:?}"
         );
+    }
+
+    // ── BT-4092 parenthesised trailing field assignment tests ──────────────────
+
+    /// Runs the BT-4092 migration check over `src` and returns its diagnostics.
+    fn paren_trailing_field_diagnostics(src: &str) -> Vec<Diagnostic> {
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_parenthesised_trailing_field_assignment(&module, &hierarchy, &mut diagnostics);
+        diagnostics
+    }
+
+    const PAREN_VT: &str = "Value subclass: ParenVt\n  field: m = 0\n";
+
+    /// A value-type method ending in `(self.m := 5)` warns, in the
+    /// `Deprecation` category, at the parenthesised statement.
+    #[test]
+    fn paren_trailing_field_assignment_in_value_type_warns() {
+        let src = format!("{PAREN_VT}  probe =>\n    t := 1.\n    (self.m := 5)\n");
+        let diagnostics = paren_trailing_field_diagnostics(&src);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+        let d = &diagnostics[0];
+        assert_eq!(d.severity, Severity::Warning);
+        assert_eq!(d.category, Some(DiagnosticCategory::Deprecation));
+        assert!(
+            d.message.contains("parentheses no longer change"),
+            "got: {}",
+            d.message
+        );
+        assert!(
+            d.hint
+                .as_deref()
+                .is_some_and(|h| h.contains("self.x := v. v")),
+            "got: {:?}",
+            d.hint
+        );
+        let span = d.span;
+        assert_eq!(
+            &src[span.start() as usize..span.end() as usize],
+            "(self.m := 5)"
+        );
+    }
+
+    /// A single-statement method ending in a parenthesised field assignment
+    /// also warns.
+    #[test]
+    fn paren_trailing_field_assignment_single_statement_warns() {
+        let src = format!("{PAREN_VT}  probe => (self.m := self.m + 1)\n");
+        assert_eq!(paren_trailing_field_diagnostics(&src).len(), 1);
+    }
+
+    /// The bare form already answered the updated `self`: no warning.
+    #[test]
+    fn bare_trailing_field_assignment_does_not_warn() {
+        let src = format!("{PAREN_VT}  probe =>\n    t := 1.\n    self.m := 5\n");
+        let diagnostics = paren_trailing_field_diagnostics(&src);
+        assert!(diagnostics.is_empty(), "got: {diagnostics:?}");
+    }
+
+    /// A parenthesised NON-last field assignment's value was always
+    /// discarded: no warning.
+    #[test]
+    fn paren_non_last_field_assignment_does_not_warn() {
+        let src = format!("{PAREN_VT}  probe =>\n    (self.m := 5).\n    self.m\n");
+        let diagnostics = paren_trailing_field_diagnostics(&src);
+        assert!(diagnostics.is_empty(), "got: {diagnostics:?}");
+    }
+
+    /// Operand position (`(self.m := 5) + 1`) keeps the assigned value and
+    /// the parenthesised local assignment never changed: no warning.
+    #[test]
+    fn paren_operand_and_local_assignment_do_not_warn() {
+        for last in ["(self.m := 5) + 1", "(t := t + 1)"] {
+            let src = format!("{PAREN_VT}  probe =>\n    t := 1.\n    {last}\n");
+            let diagnostics = paren_trailing_field_diagnostics(&src);
+            assert!(diagnostics.is_empty(), "`{last}` got: {diagnostics:?}");
+        }
+    }
+
+    /// An actor method's trailing field assignment answers the assigned value
+    /// with or without parentheses, so nothing changed there: no warning.
+    #[test]
+    fn paren_trailing_field_assignment_in_actor_does_not_warn() {
+        let src = "Actor subclass: ParenActor\n  state: m = 0\n  probe =>\n    t := 1.\n    (self.m := 5)\n";
+        let diagnostics = paren_trailing_field_diagnostics(src);
+        assert!(diagnostics.is_empty(), "got: {diagnostics:?}");
+    }
+
+    /// Class-side methods are not value-type instance methods: no warning.
+    #[test]
+    fn paren_trailing_class_variable_assignment_does_not_warn() {
+        let src = "Object subclass: ParenClassSide\n  classState: m = 0\n  class probe =>\n    t := 1.\n    (self.m := 5)\n";
+        let diagnostics = paren_trailing_field_diagnostics(src);
+        assert!(diagnostics.is_empty(), "got: {diagnostics:?}");
+    }
+
+    /// An instance-side standalone extension on a value type lowers through
+    /// the same value-type body path, so it changed meaning too: it warns.
+    #[test]
+    fn paren_trailing_field_assignment_in_value_type_extension_warns() {
+        let src = format!("{PAREN_VT}\nParenVt >> probe => (self.m := 5)\n");
+        let diagnostics = paren_trailing_field_diagnostics(&src);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+        let span = diagnostics[0].span;
+        assert_eq!(
+            &src[span.start() as usize..span.end() as usize],
+            "(self.m := 5)"
+        );
+    }
+
+    /// Extensions on an actor target, and class-side extensions, are not
+    /// lowered through the value-type body path: no warning.
+    #[test]
+    fn paren_trailing_field_assignment_in_actor_or_class_side_extension_does_not_warn() {
+        for src in [
+            "Actor subclass: ParenActorExt\n  state: m = 0\n\nParenActorExt >> probe => (self.m := 5)\n"
+                .to_string(),
+            format!("{PAREN_VT}\nParenVt class >> probe => (self.m := 5)\n"),
+        ] {
+            let diagnostics = paren_trailing_field_diagnostics(&src);
+            assert!(diagnostics.is_empty(), "{src}\ngot: {diagnostics:?}");
+        }
     }
 }

@@ -10,7 +10,9 @@ typed Actor subclass: TypedNoDefaultActor
   state: label :: String
   state: count :: Integer = 0
 
-  initialize -> String => self.label := "initialized"
+  initialize -> Nil =>
+    self.label := "initialized"
+    nil
 
   getLabel -> String => self.label
 

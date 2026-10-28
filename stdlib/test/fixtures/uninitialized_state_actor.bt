@@ -10,9 +10,10 @@ typed Actor subclass: UninitializedStateActor
   state: connection :: String
   state: count :: Integer = 0
 
-  initialize -> Integer =>
+  initialize -> Nil =>
     // Deliberately does NOT set self.connection
     self.count := 1
+    nil
 
   getConnection -> String => self.connection
 

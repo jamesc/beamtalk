@@ -161,6 +161,15 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Actor")
     }
 
+    /// Whether a standalone extension method (`Target >> sel => ...`) on
+    /// `class_name` compiles with the actor method boundary. Anything else
+    /// lowers through the value-type body path. Single authority for codegen's
+    /// extension lowering and the BT-4092 migration warning.
+    #[must_use]
+    pub fn extension_target_is_actor(&self, class_name: &str) -> bool {
+        self.is_actor_subclass(class_name)
+    }
+
     /// Returns true if the named class is Supervisor or a subclass of Supervisor.
     ///
     /// Same cross-file-stub-chain invariant as
@@ -211,6 +220,30 @@ impl ClassHierarchy {
         self.classes
             .get(class_name)
             .is_some_and(|info| info.is_native)
+    }
+
+    /// Whether codegen compiles `class` as an actor (`gen_server`) module rather
+    /// than a value-type module — the single authority for that routing, read
+    /// by codegen's `is_actor_class` and by semantic checks that apply only to
+    /// value-type method bodies (BT-4092).
+    ///
+    /// - A concrete (non-abstract) `Supervisor`/`DynamicSupervisor` subclass is
+    ///   an actor (supervisor codegen is routed through the actor path).
+    /// - Otherwise [`Self::resolve_class_kind`] decides: `Actor` is an actor,
+    ///   `Value` is not, and `Object` is not on a fully-known chain. A chain
+    ///   with an unregistered ancestor ([`Self::has_cross_file_parent`])
+    ///   defaults to an actor, for independent per-file compilation.
+    #[must_use]
+    pub fn compiles_as_actor(&self, class: &ClassDefinition) -> bool {
+        if class.supervisor_kind.is_some() && !class.is_abstract {
+            return true;
+        }
+        let name = class.name.name.as_str();
+        match self.resolve_class_kind(name) {
+            ClassKind::Actor => true,
+            ClassKind::Value => false,
+            ClassKind::Object => self.has_cross_file_parent(name),
+        }
     }
 
     /// Returns true if any ancestor in the class's superclass chain is not in

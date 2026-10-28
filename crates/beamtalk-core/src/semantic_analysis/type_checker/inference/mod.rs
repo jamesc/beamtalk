@@ -161,7 +161,12 @@ impl TypeChecker {
             // `typed_class_context` (the Dynamic-in-typed-class warning) for
             // this call site, not `check_typed_method_annotations`.
             // `check_override_param_compatibility` is likewise never run for
-            // standalone definitions.
+            // standalone definitions. `check_override_return_compatibility`
+            // is: protocol conformance leaves inherited-widening mismatches to
+            // it, so an extension override must be checked too (BT-4175).
+            if !standalone.is_class_method {
+                self.check_override_return_compatibility(&standalone.method, class_name, hierarchy);
+            }
             self.check_method_body(
                 &standalone.method,
                 class_name,
@@ -227,8 +232,9 @@ impl TypeChecker {
     /// and selects which half of the `(class, selector, is_class_method)`
     /// key the inferred return type is cached under.
     /// `check_override` gates the override-compatibility check (instance
-    /// methods only — a class method or standalone definition has no
-    /// override relationship to validate here). `check_typed_annotations`
+    /// methods only — a class method has no override relationship to
+    /// validate; a standalone definition runs only the return-type half,
+    /// from its own call site). `check_typed_annotations`
     /// gates the typed-class annotation check independently of `is_typed`
     /// (standalone definitions never ran it, even when `is_typed` was true
     /// for `typed_class_context` purposes — preserved verbatim for
@@ -339,6 +345,7 @@ impl TypeChecker {
         self.check_return_type(method, &body_type, class_name, hierarchy);
         if check_override {
             self.check_override_param_compatibility(method, class_name, hierarchy);
+            self.check_override_return_compatibility(method, class_name, hierarchy);
         }
         self.check_no_self_in_params(method, class_name);
         if is_typed && check_typed_annotations {

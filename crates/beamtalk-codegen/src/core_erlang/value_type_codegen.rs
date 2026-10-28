@@ -1183,17 +1183,6 @@ impl CoreErlangGenerator {
             return false;
         }
         match stmt.unwrap_parens() {
-            // BT-3838: a PARENTHESISED field assignment as the last statement
-            // (`(self.m := 5)`, the method's value is the assigned value, not the updated
-            // `Self`) is classified `Pure`, so no body kind owns it: it is a producer itself,
-            // exactly as in any other value position. (A bare one is `FieldAssignment`, and a
-            // non-last one is unwrapped by the body loop, so neither reaches this arm.)
-            inner @ Expression::Assignment { .. }
-                if matches!(stmt, Expression::Parenthesized { .. })
-                    && self.is_field_assignment(inner) =>
-            {
-                true
-            }
             Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
                 self.subexpr_has_field_write_producer(value)
             }
@@ -1480,17 +1469,16 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.iter().enumerate() {
             let is_last = i == body_len - 1;
-            // BT-3830: INVARIANT - classification and emission see the same node.
-            // `classify_vt_body_expr` and most of its predicates do not look through
-            // parentheses, while others (`is_vt_field_conditional_producer`) do, so a
-            // parenthesised statement was classified `Pure` while its bare form got a
-            // threading kind: `(t := t + 1)` and `([t < 3] whileTrue: [t := t + 1])` dropped
-            // the local write, `(self.m := 5)` trapped its `Self` rebind in a closed
-            // expression. A NON-last statement's value is discarded, so `(s)` is exactly
-            // `s`: unwrap it once here, for every kind. The last statement is the method
-            // value (a bare last field assignment answers the updated `Self`, a
-            // parenthesised one its value), so it is left as written.
-            let expr = if is_last { expr } else { expr.unwrap_parens() };
+            // BT-3830/BT-4092: INVARIANT - classification and emission see the same node,
+            // and a statement means the same with or without parentheses. Most of
+            // `classify_vt_body_expr`'s predicates do not look through parentheses, while
+            // others (`is_vt_field_conditional_producer`) do, so a parenthesised statement
+            // was classified `Pure` while its bare form got a threading kind. `(s)` is
+            // exactly `s` in every statement position, last included: a trailing field
+            // assignment answers the updated `Self` whether or not it is parenthesised
+            // (BT-4092; write `self.x := v. v` to answer the value). Unwrap it once here,
+            // for every kind and every position.
+            let expr = expr.unwrap_parens();
             let kind = self.classify_vt_body_expr(expr);
 
             // ADR 0131 Phase 2: a local-threading producer in this statement

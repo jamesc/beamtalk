@@ -484,6 +484,7 @@ pub(in crate::core_erlang) fn build_family_construct_tuple(
         doc,
         threads,
         families,
+        scratch_base: None,
         span,
     }
 }

@@ -363,6 +363,18 @@ pub(in crate::core_erlang) enum ScratchStart {
     Fresh,
 }
 
+/// A local-threading producer's scratch seed
+/// ([`CoreErlangGenerator::producer_scratch_seed`]).
+pub(in crate::core_erlang) struct ProducerSeed {
+    /// The `let SeededState = ... in` binding (`Document::Nil` when nothing is
+    /// seeded).
+    pub(in crate::core_erlang) doc: Document<'static>,
+    /// The variable every arm's scratch map starts from.
+    pub(in crate::core_erlang) base_state: String,
+    /// The `State` version `base_state` continues, when it continues one.
+    pub(in crate::core_erlang) base: Option<VersionedVar>,
+}
+
 impl CoreErlangGenerator {
     /// Seeds the `__local__` keys for the outer locals a conditional's
     /// branches thread, returning `(seed_doc, base_state_var)`.
@@ -441,6 +453,72 @@ impl CoreErlangGenerator {
             " in "
         ];
         (seed_doc, seeded_state)
+    }
+
+    /// BT-4206: [`Self::seed_scratch_locals`] for a local-threading producer
+    /// whose operands may splice a prelude into its frame (`match:`, a
+    /// lookup), seeding from the frame's current `State` and recording, in
+    /// [`ProducerSeed::base`], the `State` version that seed reads — the
+    /// input of the opaque tuple the verifier checks against the steps
+    /// spliced ahead of it ([`threaded_ir::VerifyError::StaleConstructSeed`]).
+    /// `base` is `None` where the scratch map does not continue the `State`
+    /// family (a fresh map; a frame with no `State` family).
+    pub(in crate::core_erlang::control_flow) fn producer_scratch_seed(
+        &mut self,
+        blocks: &[&Block],
+        scratch: ScratchStart,
+        frame: FrameId,
+    ) -> ProducerSeed {
+        let continues_state = scratch == ScratchStart::Continue
+            && !self.conditional_families(frame).as_slice().is_empty();
+        let base = continues_state
+            .then(|| VersionedVar::new(VersionPrefix::State, self.state_version(), frame));
+        let outer_state = self.current_state_var();
+        let (doc, base_state) = self.seed_scratch_locals(blocks, scratch, &outer_state);
+        ProducerSeed {
+            doc,
+            base_state,
+            base,
+        }
+    }
+
+    /// ADR 0137: whether a local-threading producer's operand `preludes` (a
+    /// `match:` scrutinee's; a lookup's receiver and key) are spliced into
+    /// the producer's own frame, ahead of its construct tuple, so `verify()`
+    /// sees their `Bind`s — in an actor instance method, when any is
+    /// non-empty — rather than rendered inside the tuple's document. The one
+    /// placement rule for every such producer.
+    pub(in crate::core_erlang::control_flow) fn splices_operand_preludes(
+        &self,
+        preludes: &[&[ThreadedStmt]],
+    ) -> bool {
+        self.synced_calls_active() && preludes.iter().any(|p| !p.is_empty())
+    }
+
+    /// Finishes a local-threading producer whose operands spliced `head` into
+    /// its frame ([`Self::splices_operand_preludes`]): `head` runs ahead of
+    /// the construct tuple, and the tuple records the `State` version its
+    /// scratch seed read (`scratch_base`, BT-4206) so the verifier can check
+    /// it against `head`'s steps.
+    pub(in crate::core_erlang::control_flow) fn with_producer_head(
+        mut head: Vec<ThreadedStmt>,
+        scratch_base: Option<VersionedVar>,
+        mut tv: ThreadedValue,
+    ) -> ThreadedValue {
+        if let Some(ThreadedStmt::ConstructTuple {
+            scratch_base: slot, ..
+        }) = tv
+            .prelude
+            .iter_mut()
+            .find(|stmt| matches!(stmt, ThreadedStmt::ConstructTuple { .. }))
+        {
+            *slot = scratch_base;
+        }
+        if !head.is_empty() {
+            head.append(&mut tv.prelude);
+            tv.prelude = head;
+        }
+        tv
     }
 
     /// ADR 0118 phase 2a: compiles a
@@ -900,31 +978,38 @@ impl CoreErlangGenerator {
         let scratch = self.conditional_scratch(frame);
         let blocks: Vec<Block> = arms.iter().map(match_arm_block).collect();
         let block_refs: Vec<&Block> = blocks.iter().collect();
+        // Test-only: the pre-BT-4196 ordering, seeding before the scrutinee
+        // (`StaleConstructSeed`).
+        #[cfg(test)]
+        let early_seed = (super::super::threaded_expr::fault::active()
+            == Some(super::super::threaded_expr::fault::LocalRebindFault::SeedBeforeScrutinee))
+        .then(|| self.producer_scratch_seed(&block_refs, scratch, frame));
+        #[cfg(not(test))]
+        let early_seed: Option<ProducerSeed> = None;
         // BT-4196: the scrutinee compiles FIRST, so its State steps (a field
         // write, a bracket reload) are in the base State the scratch seed and
         // the arms thread from, like `ifTrue:`'s receiver and the lookup
         // producer's receiver/key.
         let recv_tv = self.compile_match_scrutinee(value)?;
         let value_doc = self.threaded_value_doc(&recv_tv.value);
-        // ADR 0137: in an actor method the scrutinee's prelude belongs to the
-        // producer's frame (so `verify()` sees its `Bind`s), ahead of the
-        // tuple; otherwise it renders inside the tuple, before the seed.
-        let splice = self.synced_calls_active() && !recv_tv.prelude.is_empty();
+        let splice = self.splices_operand_preludes(&[&recv_tv.prelude]);
         let (head, inline_prelude): (Vec<ThreadedStmt>, Document<'static>) = if splice {
             (recv_tv.prelude, Document::Nil)
         } else {
             (Vec::new(), self.threaded_prelude_doc(&recv_tv.prelude))
         };
-        let outer_state = self.current_state_var();
-        let (seed_doc, base_state) = self.seed_scratch_locals(&block_refs, scratch, &outer_state);
+        let seed = match early_seed {
+            Some(seed) => seed,
+            None => self.producer_scratch_seed(&block_refs, scratch, frame),
+        };
         let arm_frame = self.conditional_arm_frame(&block_refs, true);
         let threading = MatchThreading {
-            base_state: &base_state,
+            base_state: &seed.base_state,
             arm: arm_frame.as_ref(),
         };
         let match_doc = self.generate_match_after_scrutinee(arms, &value_doc, Some(&threading))?;
-        let tuple_doc = docvec![inline_prelude, seed_doc, match_doc];
-        let mut tv = self.conditional_tuple_to_threaded_value(
+        let tuple_doc = docvec![inline_prelude, seed.doc, match_doc];
+        let tv = self.conditional_tuple_to_threaded_value(
             tuple_doc,
             frame,
             span,
@@ -932,12 +1017,7 @@ impl CoreErlangGenerator {
             tail,
             true,
         )?;
-        if !head.is_empty() {
-            let mut prelude = head;
-            prelude.append(&mut tv.prelude);
-            tv.prelude = prelude;
-        }
-        Ok(tv)
+        Ok(Self::with_producer_head(head, seed.base, tv))
     }
 
     /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag

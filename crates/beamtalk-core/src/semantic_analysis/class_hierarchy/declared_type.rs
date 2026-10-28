@@ -294,6 +294,32 @@ impl DeclaredType {
         DeclaredType::Union(members)
     }
 
+    /// `true` when any bare name anywhere inside this type (a `Simple`
+    /// name or a generic base) is one of `names` — e.g. a class's or
+    /// protocol's own type parameters, which a caller without a substitution
+    /// context must not judge nominally (BT-4175).
+    #[must_use]
+    pub fn mentions_any(&self, names: &[EcoString]) -> bool {
+        if names.is_empty() {
+            return false;
+        }
+        match self {
+            Self::Simple(name) => names.contains(name),
+            Self::Generic { base, parameters } => {
+                names.contains(base) || parameters.iter().any(|p| p.mentions_any(names))
+            }
+            Self::Union(members) => members.iter().any(|m| m.mentions_any(names)),
+            Self::FalseOr(inner) => inner.mentions_any(names),
+            Self::Difference { base, excluded } => {
+                base.mentions_any(names) || excluded.mentions_any(names)
+            }
+            Self::Intersection { left, right } => {
+                left.mentions_any(names) || right.mentions_any(names)
+            }
+            Self::Singleton(_) | Self::SelfType | Self::SelfClass | Self::ClassOf(_) => false,
+        }
+    }
+
     /// `true` when `self`, used as an operand of `\`, must be parenthesised
     /// for the printed form to re-parse to the same value — mirrors
     /// [`TypeAnnotation::needs_parens_in_difference`].

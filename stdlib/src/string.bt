@@ -176,6 +176,11 @@ sealed typed Binary subclass: String
   /// "hello" at: 1        // => "h"
   /// "hello" at: 5        // => "o"
   /// ```
+  ///
+  /// BT-4175: answers a grapheme (`String`), not `Binary>>at:`'s byte
+  /// (`Integer`) — a deliberate incompatible override; suppress the
+  /// override return-type warning.
+  @expect type
   at: index :: Integer -> String => @primitive
 
   /// Return the first grapheme cluster.
@@ -640,6 +645,11 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello" asString             // => "hello"
   /// ```
+  ///
+  /// BT-4175: `String` restores the `Printable` contract (`-> String`) that
+  /// `Binary>>asString -> Result(String, Error)` widens, so this override is
+  /// "incompatible" with its parent's declared type; suppress that warning.
+  @expect type
   asString -> String => self
 
   /// Return the string itself for user-facing display (no surrounding quotes).

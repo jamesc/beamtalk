@@ -236,8 +236,10 @@ impl TypeChecker {
     /// exact sense a `Type` pattern arm is already restricted to
     /// ([`is_concrete_leaf_class`](crate::semantic_analysis::validators::is_concrete_leaf_class) —
     /// the same check `validate_type_pattern_class`'s "has subclasses"
-    /// compile error enforces, factored out so the two mechanisms can never
-    /// disagree about which classes are "closed").
+    /// compile error enforces, factored out so every class treated as
+    /// "closed" here is one a `Type` arm may legally test; the sealed
+    /// `Binary` hierarchy is a legal arm but deliberately not a closed leaf,
+    /// BT-4228).
     ///
     /// Disjoint from [`is_closed_singleton_union`](Self::is_closed_singleton_union)
     /// by construction: `is_concrete_leaf_class` never accepts a `#`-prefixed
@@ -550,9 +552,8 @@ impl TypeChecker {
         let covered_ty = InferredType::union_of(&covered);
         // Unlike bare singletons, covered members here are nominal classes —
         // pass `hierarchy` so `difference` can reason about subclass
-        // relationships (even though Phase A's leaf-only restriction means
-        // there is none to reason about yet; consistent with every other
-        // nominal-class `difference` call in this file).
+        // relationships: a `b :: Binary` arm covers a `String` member
+        // (BT-4228, `String <: Binary`).
         let residual =
             InferredType::difference(scrutinee_ty, &covered_ty, provenance, Some(hierarchy));
 

@@ -10,7 +10,9 @@ typed Actor subclass: InheritedInitializeBase
   state: label :: String
   state: count :: Integer = 0
 
-  initialize -> String => self.label := "parent-initialized"
+  initialize -> Nil =>
+    self.label := "parent-initialized"
+    nil
 
   getLabel -> String => self.label
 

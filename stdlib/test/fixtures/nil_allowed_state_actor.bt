@@ -10,9 +10,10 @@ typed Actor subclass: NilAllowedStateActor
   state: label :: String | Nil
   state: count :: Integer = 0
 
-  initialize -> Integer =>
+  initialize -> Nil =>
     // Deliberately does NOT set self.label — nil is valid for String | Nil
     self.count := 1
+    nil
 
   getLabel -> String | Nil => self.label
 

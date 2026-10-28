@@ -36,10 +36,17 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 ]).
 
 %% BT-4200: the conformance test pins the routing arms against the shared
-%% fixture the compiler's sealed-dispatch exclusion set is checked against.
+%% fixture the compiler's sealed-dispatch exclusion set is checked against;
+%% BT-4206: `proxy_routes/0` lets it enumerate every class-to-fixed-module
+%% arm, so a new one fails the test until the fixture names it.
 -ifdef(TEST).
--export([tagged_map_dispatch/1]).
+-export([tagged_map_dispatch/1, proxy_routes/0]).
 -endif.
+
+%% The tagged-map classes `tagged_map_dispatch/1` routes to a fixed native
+%% module instead of their class's own module. Every such route lives here:
+%% this map is the one source the routing conformance test enumerates.
+-define(PROXY_ROUTES, #{'ErlangModule' => beamtalk_erlang_proxy}).
 
 -include("beamtalk.hrl").
 
@@ -984,19 +991,19 @@ Resolve how a map is dispatched: `{module, Mod}` to call `Mod:dispatch/3`
 (or `Mod:has_method/1`) directly, or `{value, Class, Module}` for a Value
 class that goes through `value_type_send/5`.
 
-Only the two genuine exceptions are hardcoded — 'ErlangModule' dispatches to
-a hand-written native proxy module, not a compiled `.bt` class, and an
-untagged map (no '$beamtalk_class') is Dictionary by convention, not by class
-name. Every other tagged-map class resolves through
-`tagged_class_dispatch/1`.
+Only the two genuine exceptions are hardcoded — a class in `?PROXY_ROUTES`
+('ErlangModule') dispatches to a hand-written native proxy module, not a
+compiled `.bt` class, and an untagged map (no '$beamtalk_class') is
+Dictionary by convention, not by class name. Every other tagged-map class
+resolves through `tagged_class_dispatch/1`.
 """.
 -spec tagged_map_dispatch(map()) -> {module, atom()} | {value, atom(), atom()}.
 tagged_map_dispatch(X) ->
     case beamtalk_tagged_map:class_of(X) of
-        'ErlangModule' ->
-            {module, beamtalk_erlang_proxy};
         undefined ->
             {module, 'bt@stdlib@dictionary'};
+        Class when is_map_key(Class, ?PROXY_ROUTES) ->
+            {module, map_get(Class, ?PROXY_ROUTES)};
         Class ->
             case tagged_class_dispatch(Class) of
                 exception -> {module, 'bt@stdlib@exception'};
@@ -1004,6 +1011,11 @@ tagged_map_dispatch(X) ->
                 {value, Module} -> {value, Class, Module}
             end
     end.
+
+-ifdef(TEST).
+-spec proxy_routes() -> #{atom() => module()}.
+proxy_routes() -> ?PROXY_ROUTES.
+-endif.
 
 -doc """
 How instances of the tagged-map class `Class` are dispatched:

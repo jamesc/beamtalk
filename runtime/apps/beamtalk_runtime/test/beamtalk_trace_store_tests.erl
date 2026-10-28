@@ -2974,14 +2974,47 @@ sweep_remote_pid_test_() ->
                 %% Remote pids get no per-actor row (class aggregate only).
                 beamtalk_trace_store:record_dispatch(Remote, ping, 10, ok, sync, 'Counter'),
                 ?assertEqual(0, pid_row_count()),
-                %% Even a remote row that got in (older data) must not crash the sweep.
-                Ref = atomics:new(8, [{signed, true}]),
-                true = ets:insert(beamtalk_agg_pid, {{Remote, ping}, Ref, 1, 'Counter'}),
+                %% A remote row older code left (moved onto a real slot of a
+                %% local row) does not crash the sweep, and is reclaimed
+                %% (BT-4206): it can never be live data, and would otherwise
+                %% count toward ?MAX_PID_KEYS forever.
+                Local = idle_process(),
+                beamtalk_trace_store:record_dispatch(Local, ping, 10, ok, sync, 'Counter'),
+                [{_, Ref, Base, _}] = ets:take(beamtalk_agg_pid, {Local, ping}),
+                true = ets:delete(beamtalk_agg_pid_keys, Local),
+                true = ets:insert(beamtalk_agg_pid, {{Remote, ping}, Ref, Base, 'Counter'}),
                 true = ets:insert(beamtalk_agg_pid_keys, {Remote, ping}),
                 Store = whereis(beamtalk_trace_store),
                 sweep_and_sync(),
                 ?assertEqual(Store, whereis(beamtalk_trace_store)),
-                ?assert(is_process_alive(Store))
+                ?assert(is_process_alive(Store)),
+                ?assertEqual(0, pid_row_count()),
+                ?assertEqual([], ets:lookup(beamtalk_agg_pid_keys, Remote)),
+                Local ! stop
+            end)
+        ]
+    end}.
+
+sweep_restores_live_pid_keys_entry_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                Live = idle_process(),
+                beamtalk_trace_store:record_dispatch(Live, ping, 10, ok, sync, 'Counter'),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(Live))},
+                ?assertMatch(#{PidKey := _}, beamtalk_trace_store:get_stats(Live)),
+                %% Simulate the clear/0 race for a live actor: row present,
+                %% keys entry gone, so its stats are invisible to get_stats/1.
+                true = ets:delete(beamtalk_agg_pid_keys, Live),
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats(Live)),
+                %% The sweep keeps the row and re-indexes it (BT-4206).
+                sweep_and_sync(),
+                ?assertEqual(1, pid_row_count()),
+                ?assertEqual([{Live, ping}], ets:lookup(beamtalk_agg_pid_keys, Live)),
+                ?assertMatch(#{PidKey := _}, beamtalk_trace_store:get_stats(Live)),
+                Live ! stop
             end)
         ]
     end}.

@@ -6,6 +6,7 @@
 //! **DDD Context:** Semantic Analysis
 
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::class_hierarchy::DeclaredType;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::Span;
 use ecow::{EcoString, eco_format};
@@ -1558,6 +1559,16 @@ pub(in crate::semantic_analysis) fn is_generic_type_param(name: &str) -> bool {
 // already had this split, via `InferredType::improper_cons_tail_display`'s
 // existing `Option<EcoString>` — that one carries no new struct here, only
 // its `validation.rs` renderer moved.)
+
+/// An instance-method override whose declared return type does not refine
+/// the one it inherits. Found by `validation.rs::override_return_widening`,
+/// rendered by `check_override_return_compatibility`, and consulted by
+/// `ProtocolRegistry::conformance_return_type_mismatches` (BT-4175).
+pub(crate) struct OverrideReturnWidening {
+    pub(crate) child_rt: DeclaredType,
+    pub(crate) parent_rt: DeclaredType,
+    pub(crate) parent_class: EcoString,
+}
 
 /// A declared-vs-inferred type mismatch on an assignment's type annotation
 /// (`x :: Declared := value`). Detected in `inference/assignment.rs`,
