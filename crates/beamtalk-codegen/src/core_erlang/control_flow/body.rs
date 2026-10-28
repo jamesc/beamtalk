@@ -103,6 +103,87 @@ impl CoreErlangGenerator {
         // Letrec loops do (`ThreadingPlan::capture_loop_family_params`).
         let family_params = plan.capture_loop_family_params(self);
 
+        // BT-4178: a tuple-acc lambda binds no state map (its accumulator is
+        // a tuple of locals) and its body writes no field, so every
+        // actor-state name its body resolves is the fold's entry state —
+        // captured here, like a direct-params loop's (BT-3562), and logged
+        // for the check below.
+        let tuple_acc_capture = plan.use_tuple_acc && !Self::tuple_acc_capture_faulted();
+        let prev_outer_state = if tuple_acc_capture {
+            self.loop_mode
+                .direct_params_outer_state_var
+                .replace(plan.initial_state_var.clone())
+        } else {
+            self.loop_mode.direct_params_outer_state_var.clone()
+        };
+        if plan.use_tuple_acc {
+            self.loop_mode
+                .tuple_acc_state_reads
+                .borrow_mut()
+                .push(Vec::new());
+        }
+        let lowered = self.generate_foldl_threaded_node(
+            body,
+            plan,
+            kind,
+            unpack_stmts,
+            &family_params,
+            mode.clone(),
+        );
+        self.loop_mode.direct_params_outer_state_var = prev_outer_state;
+        if plan.use_tuple_acc {
+            let reads = self
+                .loop_mode
+                .tuple_acc_state_reads
+                .borrow_mut()
+                .pop()
+                .unwrap_or_default();
+            let errors = threaded_ir::verify_tuple_acc_state_reads(
+                &mode,
+                acc_param_name,
+                &plan.initial_state_var,
+                &reads,
+                span,
+            );
+            self.report_threaded_ir_verify_errors(
+                &errors,
+                "tuple-acc fold body state read off its entry state",
+                span,
+            );
+        }
+        lowered
+    }
+
+    /// Test-only fault injection (BT-4178): whether a tuple-acc fold skips
+    /// its entry-state capture
+    /// ([`LocalRebindFault::TupleAccNoEntryCapture`](super::super::threaded_expr::fault::LocalRebindFault::TupleAccNoEntryCapture)),
+    /// so `TupleAccStateReadNotEntryState` is shown to fire on a real compile.
+    fn tuple_acc_capture_faulted() -> bool {
+        #[cfg(test)]
+        {
+            super::super::threaded_expr::fault::active()
+                == Some(
+                    super::super::threaded_expr::fault::LocalRebindFault::TupleAccNoEntryCapture,
+                )
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
+    }
+
+    /// The body half of [`Self::generate_foldl_loop_body`]: lowers the fold
+    /// body into one `Threaded` node with the unpack, verifies and renders it.
+    fn generate_foldl_threaded_node(
+        &mut self,
+        body: &beamtalk_core::ast::Block,
+        plan: &ThreadingPlan,
+        kind: &BodyKind,
+        unpack_stmts: Vec<ThreadedStmt>,
+        family_params: &[super::plan::LoopFamilyParam],
+        mode: threaded_ir::ThreadingMode,
+    ) -> Result<(Document<'static>, usize)> {
+        let span = body.span;
         self.with_branch_context(|this| {
             let frame = this.current_branch_frame();
             let mut stmts = unpack_stmts;
@@ -111,7 +192,7 @@ impl CoreErlangGenerator {
             // accumulator in the `Self` family's `Return`.
             let locals_errors =
                 threaded_ir::verify_fold_locals_carried(&stmts, &mode, &plan.threaded_locals, span);
-            Self::carry_fold_families(&mut stmts, &family_params, frame)?;
+            Self::carry_fold_families(&mut stmts, family_params, frame)?;
             let final_state_version = this.state_version();
             let node = ThreadedStmt::Threaded {
                 mode: mode.clone(),
@@ -338,7 +419,11 @@ impl CoreErlangGenerator {
         );
         self.loop_mode.in_hybrid_loop = true;
         self.loop_mode.in_direct_params_loop = true;
+        // A hybrid body binds its own `State`: an enclosing frame's captured
+        // entry state does not name it (`LoopMode::direct_params_outer_state_var`).
+        let prev_outer_state = self.loop_mode.direct_params_outer_state_var.take();
         let result = self.generate_letrec_body_ir(body, plan);
+        self.loop_mode.direct_params_outer_state_var = prev_outer_state;
         self.loop_mode.hybrid_readonly_field_params = prev_readonly_field_params;
         self.loop_mode.hybrid_mutated_fields = prev_mutated_fields;
         self.loop_mode.in_hybrid_loop = prev_hybrid;

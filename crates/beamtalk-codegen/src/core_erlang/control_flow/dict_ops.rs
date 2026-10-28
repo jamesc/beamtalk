@@ -62,6 +62,9 @@ impl CoreErlangGenerator {
 
         if plan.use_tuple_acc {
             let init_tuple_doc = plan.initial_vars_tuple_doc(self);
+            // BT-4178: a fresh accumulator name that cannot shadow an
+            // enclosing `StateAcc` map the body reads.
+            let acc_var = self.fresh_temp_var("AccSt");
 
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(docvec![
@@ -77,7 +80,9 @@ impl CoreErlangGenerator {
                 leaf::var(lambda_var.clone()),
                 " = fun (",
                 leaf::var(item_var.clone()),
-                ", StateAcc) -> ",
+                ", ",
+                leaf::var(acc_var.clone()),
+                ") -> ",
             ]);
 
             // BT-4121: the guarded-operator marker spans the body lowering.
@@ -88,7 +93,7 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &item_var);
             }
             let (body_doc, _) =
-                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
+                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, &acc_var, 0)?;
             docs.push(body_doc);
             self.pop_scope();
             // BT-4121: check out the marker; splice the pre-store (nil
@@ -285,6 +290,9 @@ impl CoreErlangGenerator {
 
         if plan.use_tuple_acc {
             let init_tuple_doc = plan.initial_vars_tuple_doc(self);
+            // BT-4178: a fresh accumulator name that cannot shadow an
+            // enclosing `StateAcc` map the body reads.
+            let acc_var = self.fresh_temp_var("AccSt");
 
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(docvec![
@@ -300,7 +308,9 @@ impl CoreErlangGenerator {
                 leaf::var(lambda_var.clone()),
                 " = fun (",
                 leaf::var(pair_var.clone()),
-                ", StateAcc) -> let ",
+                ", ",
+                leaf::var(acc_var.clone()),
+                ") -> let ",
                 leaf::var(key_var.clone()),
                 " = call 'erlang':'element'(1, ",
                 leaf::var(pair_var.clone()),
@@ -322,7 +332,7 @@ impl CoreErlangGenerator {
                 self.bind_var(&param.name, &val_var);
             }
             let (body_doc, _) =
-                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
+                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, &acc_var, 0)?;
             docs.push(body_doc);
             self.pop_scope();
             // BT-4121: check out the marker; splice the pre-store (nil

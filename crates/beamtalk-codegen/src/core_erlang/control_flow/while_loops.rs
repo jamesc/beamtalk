@@ -1337,6 +1337,9 @@ impl CoreErlangGenerator {
         let cond_result = self.with_loop_condition_context(false, |this, frame| {
             let prev_hybrid = this.loop_mode.in_hybrid_loop;
             this.loop_mode.in_hybrid_loop = true;
+            // The hybrid condition binds its own `State` (see
+            // `generate_letrec_hybrid_body_ir`).
+            let prev_outer_state = this.loop_mode.direct_params_outer_state_var.take();
             let result =
                 this.with_rebind_frame(ThreadingPlan::closure_rebind_frame(frame), |this| {
                     if let Expression::Block(cond_block) = condition {
@@ -1345,6 +1348,7 @@ impl CoreErlangGenerator {
                         this.generate_expression(condition)
                     }
                 });
+            this.loop_mode.direct_params_outer_state_var = prev_outer_state;
             this.loop_mode.in_hybrid_loop = prev_hybrid;
             result
         });

@@ -63,6 +63,9 @@ impl CoreErlangGenerator {
             // Tuple-accumulator path — no StateAcc map allocation per iteration.
             // Initial fold accumulator: {Var1, ..., VarN} built from outer-scope bindings.
             let init_tuple_doc = plan.initial_vars_tuple_doc(self);
+            // BT-4178: the accumulator is a tuple, so it gets a fresh name
+            // that cannot shadow an enclosing `StateAcc` map the body reads.
+            let acc_var = self.fresh_temp_var("AccSt");
 
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
@@ -76,7 +79,9 @@ impl CoreErlangGenerator {
                 leaf::var(lambda_var.clone()),
                 " = fun (",
                 leaf::var(item_var.clone()),
-                ", StateAcc) -> ",
+                ", ",
+                leaf::var(acc_var.clone()),
+                ") -> ",
             ]);
 
             // BT-4121: the guarded-operator marker spans the body lowering
@@ -89,10 +94,10 @@ impl CoreErlangGenerator {
             if let Some(param) = body.parameters.first() {
                 self.bind_var(&param.name, &item_var);
             }
-            // Unpack vars from the tuple accumulator (element(1..N, StateAcc))
+            // Unpack vars from the tuple accumulator (element(1..N, AccSt))
             // and lower the body, merged into ONE verified `Threaded` node.
             let (body_doc, _) =
-                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
+                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, &acc_var, 0)?;
             docs.push(body_doc);
             self.pop_scope();
             // BT-4121: check out the marker; splice the pre-store (nil

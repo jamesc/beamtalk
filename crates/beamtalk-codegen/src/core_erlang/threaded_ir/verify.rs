@@ -511,6 +511,55 @@ pub(in crate::core_erlang) enum VerifyError {
     /// by [`ThreadedStmt::SyncedCall::on_private_scratch`], since a node is
     /// verified without its ancestor frames.
     SyncedCallOnPrivateScratch { at: Span },
+
+    /// BT-4178: a tuple-accumulator fold body resolved the actor-state map
+    /// (a field read, a `^`'s carried state, a closure's capture, a nested
+    /// loop's seed) to `read_from`, which is not the fold's entry state
+    /// `entry_state`, or is the lambda's own accumulator parameter. The
+    /// lambda binds no `StateAcc` map, only a tuple of locals, so the loop
+    /// context's `StateAcc` name is unbound there (or, in a `do:` whose
+    /// accumulator is named `StateAcc`, is the tuple itself: `badmap`). Its
+    /// body writes no field, so the entry state is the one map every
+    /// iteration reads. Checked by the fold's own lowering
+    /// ([`verify_tuple_acc_state_reads`]) over every name the generator's
+    /// field-read accessor answered inside it.
+    TupleAccStateReadNotEntryState {
+        read_from: String,
+        entry_state: String,
+        at: Span,
+    },
+}
+
+/// BT-4178, [`VerifyError::TupleAccStateReadNotEntryState`] over one fold
+/// body: in [`ThreadingMode::TupleAcc`] mode every actor-state name the body
+/// resolved (`reads`) must be the fold's `entry_state` and must not be the
+/// lambda's accumulator parameter `acc_param` (which would shadow it). Any
+/// other mode binds a whole state map and is not constrained here.
+pub(in crate::core_erlang) fn verify_tuple_acc_state_reads(
+    mode: &ThreadingMode,
+    acc_param: &str,
+    entry_state: &str,
+    reads: &[String],
+    at: Span,
+) -> Vec<VerifyError> {
+    if !matches!(mode, ThreadingMode::TupleAcc(_)) {
+        return Vec::new();
+    }
+    let mut errors: Vec<VerifyError> = Vec::new();
+    for read in reads {
+        let bad = read != entry_state || read == acc_param;
+        let seen = errors.iter().any(|e| {
+            matches!(e, VerifyError::TupleAccStateReadNotEntryState { read_from, .. } if read_from == read)
+        });
+        if bad && !seen {
+            errors.push(VerifyError::TupleAccStateReadNotEntryState {
+                read_from: read.clone(),
+                entry_state: entry_state.to_string(),
+                at,
+            });
+        }
+    }
+    errors
 }
 
 /// What a [`ThreadedStmt`] tree is lowered *for*: decides which families the

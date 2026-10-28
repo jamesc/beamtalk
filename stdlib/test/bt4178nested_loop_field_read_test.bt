@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4178: a field read inside a loop nested in an accumulator-carrying
+// loop reads the actor state, not the outer accumulator.
+// Fixture: fixtures/bt4178nested_read_actor.bt.
+
+TestCase subclass: Bt4178NestedLoopFieldReadTest
+  field: a = nil
+
+  setUp =>
+    self.a := Bt4178NestedReadActor spawn
+    self
+
+  testFlatDoReadsField =>
+    self assert: (self.a flatReading: #(1, 2, 3)) equals: 7
+
+  testFlatCollectReadsField =>
+    self assert: (self.a collectReading: #(1, 2, 3)) equals: 10
+
+  testFlatInjectReadsField =>
+    self assert: (self.a injectFieldReading: #(1, 2, 3)) equals: 706
+
+  testDictionaryFoldsReadField =>
+    self assert: self.a dictReading equals: 16
+
+  testFirstStatementInnerDoReadsField =>
+    self assert: (self.a firstStatementReading: #(1, 2, 3)) equals: 706
+
+  testInnerDoReadsField =>
+    self assert: (self.a sumReading: #(1, 2, 3)) equals: 706
+
+  testGuardedOperatorAccInnerDoReadsField =>
+    t := Bt4121TallyActor spawn
+    xs := #((((Bt4121TallyMoney new) withCents: 1) withTally: t), (((Bt4121TallyMoney new) withCents: 2) withTally: t))
+    self assert: (self.a moneyReading: xs) equals: 7003
+
+  testDeeperNestingReadsField =>
+    self assert: (self.a deepReading: #(1, 2, 3)) equals: 706
+
+  testInnerWhileReadsField =>
+    self assert: (self.a whileReading: #(1, 2, 3)) equals: 706
+
+  testInnerToDoReadsField =>
+    self assert: (self.a toDoReading: #(1, 2, 3)) equals: 906
+
+  testInnerWriteThenReadSeesWrite =>
+    self assert: (self.a writeReading: #(1, 2, 3)) equals: 1006
+    self assert: self.a n equals: 10
+
+  testOuterWhileInnerDoReadsField =>
+    self assert: self.a outerWhileReading equals: 706
+
+  testOuterInjectInnerDoReadsField =>
+    self assert: (self.a injectReading: #(1, 2, 3)) equals: 706
