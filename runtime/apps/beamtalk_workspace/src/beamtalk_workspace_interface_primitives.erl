@@ -1850,7 +1850,11 @@ handle_load(Path) when is_list(Path) ->
                     Path
                 ])
             ),
-            Err3 = beamtalk_error:with_details(Err2, #{path => Path, errors => NativeErrors}),
+            Err3 = beamtalk_error:with_details(Err2, #{
+                %% BT-4229: `Path` is a charlist here; record it as a String.
+                path => beamtalk_primitive:string_from_binary(unicode:characters_to_binary(Path)),
+                errors => NativeErrors
+            }),
             {error, Err3}
     end;
 handle_load(Other) ->
