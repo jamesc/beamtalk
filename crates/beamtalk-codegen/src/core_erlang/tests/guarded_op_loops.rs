@@ -8,7 +8,8 @@
 //! [`VerifyError::UnbracketedGuardedOperator`], never silently.
 
 use super::synced_call::{
-    FAULT_NO_BRACKETS, GuardedOpCheckout, GuardedOpLoopMarker, GuardedOpNeed,
+    FAULT_NO_BRACKETS, FAULT_STALE_STATE_IN_BRACKETED_LOOP, GuardedOpCheckout, GuardedOpLoopMarker,
+    GuardedOpNeed, StaleStateUseKind, ThreadedStateUse,
 };
 use crate::core_erlang::{CodegenOptions, CoreErlangGenerator, generate_module};
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
@@ -283,6 +284,8 @@ fn op_marker(will_bracket: bool, need: bool) -> GuardedOpLoopMarker {
             selector: "+".to_string(),
             at: Span::new(0, 1),
         }),
+        entry_state: "State".to_string(),
+        state_uses: Vec::new(),
     }
 }
 
@@ -419,4 +422,333 @@ fn gaps_finish_as_their_own_variant() {
         !report.contains("UnbracketedUserCodeSend"),
         "not folded into the send rule:\n{report}"
     );
+}
+
+/// BT-4179: the stateless loop shapes that bracket guarded operators, each
+/// holding an `on:do:` in its body — directly, or nested in an inner
+/// direct-params loop (which hands its need to the bracketing outer loop).
+/// `{op}` is the protected block's body and `{h}` the handler block.
+const ON_DO_LOOPS: [&str; 6] = [
+    "i := 0. [i < 3] whileTrue: [acc := acc + x. [{op}] on: Error do: {h}. i := i + 1]",
+    "1 to: 3 do: [:i | acc := acc + x. [{op}] on: Error do: {h}]",
+    "3 timesRepeat: [acc := acc + x. [{op}] on: Error do: {h}]",
+    "1 to: 3 do: [:i | acc := acc + x. 1 to: 2 do: [:j | k := j. [{op}] on: Error do: {h}]]",
+    "i := 0. [i < 3] whileTrue: [acc := acc + x. 2 timesRepeat: [k := k. [{op}] on: Error do: {h}]. i := i + 1]",
+    "3 timesRepeat: [acc := acc + x. i := 0. [i < 2] whileTrue: [[{op}] on: Error do: {h}. i := i + 1]]",
+];
+
+/// The protected bodies and handlers the corpus crosses with each loop. None
+/// sends a message that runs user code: one would make the loop thread `State`
+/// (a `StateAcc` loop, where the pre-region `State` is current) instead of
+/// staying stateless and bracketing. A protected body or handler that writes
+/// a local keeps the loop stateless too.
+const ON_DO_PROTECTED: [&str; 4] = ["x - x", "x + x. x - x", "x - x. 0", "k := x - x"];
+const ON_DO_HANDLERS: [&str; 4] = ["[:e | nil]", "[nil]", "[:e | e]", "[:e | k := 1]"];
+
+const ON_DO_PREAMBLE: &str = "Actor subclass: Probe\n  state: n = 0\n  state: m = 0\n\n";
+
+fn on_do_loop_src(shape: &str, op: &str, handler: &str) -> String {
+    let body = shape.replace("{op}", op).replace("{h}", handler);
+    format!("{ON_DO_PREAMBLE}  run: x =>\n    acc := 0.\n    k := 0.\n    {body}.\n    acc + k\n")
+}
+
+/// BT-4179: hybrid loops (a field written in the body is held in a fun
+/// parameter) holding an `on:do:`, at method level and nested in a loop that
+/// brackets guarded operators. A hybrid body holds no guarded operator, no
+/// self-send and no send that may run user code (each routes the loop to
+/// `StateAcc`), so its `on:do:` cannot run user code that would read the cell,
+/// and it never sits under a marker that brackets: no loop that brackets
+/// (direct-params, tuple-accumulator) admits a field write in its body. Its
+/// boundary stores the threaded `State` (`PreState`).
+const ON_DO_HYBRID_LOOPS: [&str; 6] = [
+    // Field write.
+    "1 to: 2 do: [:j | k := j. self.n := j. [{op}] on: Error do: {h}]",
+    // Field read (a read-only field parameter) and write.
+    "1 to: 2 do: [:j | k := j. self.n := self.m. [{op}] on: Error do: {h}]",
+    "[true] whileTrue: [k := nil. self.n := k. [{op}] on: Error do: {h}]",
+    // Nested in a bracketing loop.
+    "1 to: 3 do: [:i | acc := acc + x. 1 to: 2 do: [:j | k := j. self.n := j. [{op}] on: Error do: {h}]]",
+    "1 to: 3 do: [:i | acc := acc + x. 1 to: 2 do: [:j | k := j. self.n := self.m. [{op}] on: Error do: {h}]]",
+    "i := 0. [i < 3] whileTrue: [acc := acc + x. 2 timesRepeat: [k := nil. self.n := k. [{op}] on: Error do: {h}]. i := i + 1]",
+];
+
+/// Protected bodies and handlers that keep a hybrid loop hybrid: no operator,
+/// no send that may run user code.
+const ON_DO_HYBRID_PROTECTED: [&str; 2] = ["0 error: \"boom\"", "0"];
+const ON_DO_HYBRID_HANDLERS: [&str; 3] = ["[:e | nil]", "[nil]", "[:e | e]"];
+
+/// Every cell-boundary entry in `out`: the text between each class-variable
+/// snapshot and the `try` that follows it.
+fn on_do_entries(out: &str) -> Vec<&str> {
+    out.match_indices("'beamtalk_class_vars':'snapshot'()")
+        .map(|(i, _)| {
+            let rest = &out[i..];
+            &rest[..rest.find("try ").expect("on:do: entry precedes its try")]
+        })
+        .collect()
+}
+
+#[test]
+fn on_do_in_bracketed_loop_snapshots_the_live_cell() {
+    // BT-4179: in a stateless loop that brackets guarded operators the
+    // loop-entry `State` is stale for the slow paths' cell writes. The
+    // `on:do:` boundary snapshots the live cell on entry to the protected
+    // block and restores that snapshot on catch — it never stores the
+    // loop-entry `State` (which dropped every earlier slow-path write).
+    for shape in ON_DO_LOOPS {
+        let src = on_do_loop_src(shape, "x - x", "[:e | nil]");
+        let out = compile(&src);
+        let entries = on_do_entries(&out);
+        assert_eq!(entries.len(), 1, "one on:do: boundary in {shape}:\n{out}");
+        assert!(
+            entries[0].contains("CellSnap = call 'beamtalk_actor_state':'snapshot'()"),
+            "entry snapshots the live cell in {shape}:\n{}",
+            entries[0]
+        );
+        assert!(
+            !entries[0].contains("'store'("),
+            "entry stores no threaded State in {shape}:\n{}",
+            entries[0]
+        );
+        assert!(
+            out.contains("do call 'beamtalk_actor_state':'restore'(Self, _ExClass"),
+            "catch restores the entry snapshot in {shape}:\n{out}"
+        );
+    }
+}
+
+#[test]
+fn on_do_outside_bracketed_loop_keeps_the_pre_state_store() {
+    // Gate pin: at method level the threaded `State` is current, so the
+    // boundary keeps storing the pre-region version.
+    let out = compile(&format!(
+        "{ACTOR_PREAMBLE}  run: x =>\n    acc := x + x.\n    [x - x] on: Error do: [:e | nil].\n    acc\n"
+    ));
+    let entries = on_do_entries(&out);
+    assert_eq!(entries.len(), 1, "{out}");
+    assert!(
+        entries[0].contains("'beamtalk_actor_state':'store'("),
+        "method-level entry stores the pre-region State:\n{}",
+        entries[0]
+    );
+    assert!(!entries[0].contains("CellSnap"), "{}", entries[0]);
+}
+
+#[test]
+fn on_do_in_bracketed_loops_corpus_is_verifier_clean() {
+    // BT-4179: the generated corpus (every bracketing loop shape × protected
+    // body × handler) compiles with no verifier finding, and every boundary
+    // snapshots the cell.
+    for shape in ON_DO_LOOPS {
+        for op in ON_DO_PROTECTED {
+            for handler in ON_DO_HANDLERS {
+                let src = on_do_loop_src(shape, op, handler);
+                assert_eq!(enforce_report(&src), None, "{src}");
+                let out = compile(&src);
+                let entries = on_do_entries(&out);
+                assert!(!entries.is_empty(), "{src}\n{out}");
+                for entry in entries {
+                    assert!(entry.contains("CellSnap"), "{src}\n{entry}");
+                }
+            }
+        }
+    }
+}
+
+/// Compiles each of `srcs` under [`FAULT_STALE_STATE_IN_BRACKETED_LOOP`],
+/// answering each source with its verifier report.
+fn faulted_reports(srcs: Vec<String>) -> Vec<(String, Option<String>)> {
+    FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(|f| f.set(true));
+    let reports = srcs
+        .into_iter()
+        .map(|src| {
+            let report = enforce_report(&src);
+            (src, report)
+        })
+        .collect();
+    FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(|f| f.set(false));
+    reports
+}
+
+#[test]
+fn checkout_reports_a_pre_state_boundary_in_a_bracketing_loop() {
+    // BT-4179: under the pre-fix gate (`Snapshot` only in an actor closure)
+    // every bracketing shape of the corpus stores the loop-entry `State`.
+    // The loop checkout reports each one from its own bracket decision and
+    // entry `State`, so the rule holds even if the gate regresses.
+    let srcs = ON_DO_LOOPS
+        .iter()
+        .flat_map(|shape| {
+            ON_DO_PROTECTED
+                .iter()
+                .map(move |op| on_do_loop_src(shape, op, "[:e | nil]"))
+        })
+        .collect();
+    for (src, report) in faulted_reports(srcs) {
+        let report = report.unwrap_or_else(|| panic!("faulted compile should report:\n{src}"));
+        assert!(
+            report.contains("PreStateOverLiveCell"),
+            "loud live-cell finding for\n{src}\n{report}"
+        );
+    }
+}
+
+#[test]
+fn on_do_in_hybrid_loops_corpus_keeps_the_pre_state_boundary() {
+    // BT-4179 review: a hybrid loop holds the fields it writes in fun
+    // parameters, not the cell. Every shape here reaches hybrid mode (a
+    // `Field` parameter), compiles verifier-clean — under the pre-fix gate
+    // too, since no enclosing loop brackets — and stores the threaded `State`.
+    let mut srcs = Vec::new();
+    for shape in ON_DO_HYBRID_LOOPS {
+        for op in ON_DO_HYBRID_PROTECTED {
+            for handler in ON_DO_HYBRID_HANDLERS {
+                let src = on_do_loop_src(shape, op, handler);
+                assert_eq!(enforce_report(&src), None, "{src}");
+                let out = compile(&src);
+                assert!(out.contains("Field"), "hybrid loop reached:\n{src}\n{out}");
+                let entries = on_do_entries(&out);
+                assert_eq!(entries.len(), 1, "{src}\n{out}");
+                assert!(
+                    entries[0].contains("'store'(State"),
+                    "{src}\n{}",
+                    entries[0]
+                );
+                srcs.push(src);
+            }
+        }
+    }
+    for (src, report) in faulted_reports(srcs) {
+        assert_eq!(report, None, "no bracket overtakes the State:\n{src}");
+    }
+}
+
+/// BT-4179: stateless loops that bracket guarded operators, each holding a
+/// nested `StateAcc` producer (`{inner}`): a fold whose body holds a
+/// parenthesised conditional writing an outer local, which lowers through
+/// the fold's `StateAcc` while the enclosing loop keeps direct parameters.
+const STATEACC_IN_BRACKETED_LOOPS: [&str; 3] = [
+    "1 to: 2 do: [:q | acc := acc + x. {inner}]",
+    "i := 0. [i < 2] whileTrue: [acc := acc + x. {inner}. i := i + 1]",
+    "2 timesRepeat: [acc := acc + x. {inner}]",
+];
+
+const NESTED_STATEACC_PRODUCERS: [&str; 4] = [
+    "#(1, 2) do: [:e | ((e == 1) ifTrue: [t := t + 1])]",
+    "#(1, 2) do: [:e | ((e == 1) ifTrue: [[t := t + 1] on: Error do: [:z | 0]])]",
+    "#(1, 2) collect: [:e | ((e == 1) ifTrue: [t := t + 1]). e]",
+    "#(1, 2) do: [:e | ((e == 1) ifTrue: [t := t + 1] ifFalse: [t := t - 1])]",
+];
+
+fn stateacc_in_loop_src(shape: &str, inner: &str) -> String {
+    let body = shape.replace("{inner}", inner);
+    format!("{ON_DO_PREAMBLE}  run: x =>\n    acc := 0.\n    t := 0.\n    {body}.\n    acc + t\n")
+}
+
+#[test]
+fn stateacc_producer_in_bracketed_loop_seeds_from_the_cell() {
+    // BT-4179: a `StateAcc` fold nested in a bracketing loop packs its
+    // accumulator from the cell, which holds the slow paths' writes, never
+    // from the loop-entry `State` (whose every store would drop them); an
+    // `on:do:` in it stores that cell-derived accumulator. Verifier-clean;
+    // under the pre-fix fault the checkout reports the stale seed.
+    let mut srcs = Vec::new();
+    for shape in STATEACC_IN_BRACKETED_LOOPS {
+        for inner in NESTED_STATEACC_PRODUCERS {
+            let src = stateacc_in_loop_src(shape, inner);
+            assert_eq!(enforce_report(&src), None, "{src}");
+            let out = compile(&src);
+            assert!(
+                out.contains("TakeSeed")
+                    && out.contains("= call 'beamtalk_actor_state':'take'() in"),
+                "nested StateAcc seeds from the cell:\n{src}\n{out}"
+            );
+            assert!(
+                !out.contains("'maps':'put'('__local__t', T, State)"),
+                "no seed from the loop-entry State:\n{src}\n{out}"
+            );
+            srcs.push(src);
+        }
+    }
+    for (src, report) in faulted_reports(srcs) {
+        let report = report.unwrap_or_else(|| panic!("faulted compile should report:\n{src}"));
+        assert!(
+            report.contains("StaleStateSeedInBracketedLoop"),
+            "loud stale-seed finding for\n{src}\n{report}"
+        );
+    }
+}
+
+#[test]
+fn checkout_reports_only_uses_of_its_entry_state() {
+    // A bracketing checkout reports a use of its own entry `State`, and
+    // ignores one of a `State` bound inside the loop (from the cell).
+    let use_of = |var: &str, kind| ThreadedStateUse {
+        kind,
+        var: var.to_string(),
+        at: Span::new(3, 4),
+    };
+    let mut generator = CoreErlangGenerator::new("test");
+    let mut marker = op_marker(true, true);
+    marker.state_uses = vec![
+        use_of("State", StaleStateUseKind::OnDoStore),
+        use_of("StateAcc", StaleStateUseKind::OnDoStore),
+        use_of("State", StaleStateUseKind::StateAccSeed),
+    ];
+    assert_eq!(
+        generator.checkout_guarded_op_loop(marker, false, Span::new(0, 1)),
+        GuardedOpCheckout::Bracket
+    );
+    let kinds: Vec<StaleStateUseKind> = generator
+        .synced
+        .stale_state_gaps
+        .iter()
+        .map(|(kind, _)| *kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            StaleStateUseKind::OnDoStore,
+            StaleStateUseKind::StateAccSeed
+        ]
+    );
+}
+
+#[test]
+fn checkout_hands_state_uses_to_the_enclosing_marker() {
+    // A loop that does not bracket passes its uses outward; the enclosing
+    // loop's bracket reports them, and with no bracket anywhere they are
+    // dropped.
+    let state_use = ThreadedStateUse {
+        kind: StaleStateUseKind::OnDoStore,
+        var: "State".to_string(),
+        at: Span::new(3, 4),
+    };
+    let mut generator = CoreErlangGenerator::new("test");
+    generator
+        .synced
+        .guarded_op_loops
+        .borrow_mut()
+        .push(op_marker(true, true));
+    let mut inner = op_marker(false, false);
+    inner.state_uses.push(state_use.clone());
+    assert_eq!(
+        generator.checkout_guarded_op_loop(inner, false, Span::new(0, 1)),
+        GuardedOpCheckout::Nothing
+    );
+    assert!(generator.synced.stale_state_gaps.is_empty());
+    let outer = generator.pop_guarded_op_loop();
+    assert_eq!(outer.state_uses, vec![state_use.clone()]);
+    assert_eq!(
+        generator.checkout_guarded_op_loop(outer, false, Span::new(0, 1)),
+        GuardedOpCheckout::Bracket
+    );
+    assert_eq!(generator.synced.stale_state_gaps.len(), 1);
+    assert_eq!(generator.synced.stale_state_gaps[0].1.at, state_use.at);
+
+    let mut generator = CoreErlangGenerator::new("test");
+    let mut lone = op_marker(false, false);
+    lone.state_uses.push(state_use);
+    generator.checkout_guarded_op_loop(lone, false, Span::new(0, 1));
+    assert!(generator.synced.stale_state_gaps.is_empty());
 }

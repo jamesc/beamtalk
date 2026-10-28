@@ -40,8 +40,8 @@
 //! count-only test mode that records each gap's codegen site instead.
 
 use super::threaded_ir::{
-    FrameId, ThreadedStmt, ThreadedValue, UserCodeRegion, ValueRef, VerifyError, VersionPrefix,
-    VersionedVar,
+    FrameId, StateRestoreDefect, ThreadedStmt, ThreadedValue, UserCodeRegion, ValueRef,
+    VerifyError, VersionPrefix, VersionedVar,
 };
 use super::{CodeGenContext, CoreErlangGenerator};
 use crate::core_erlang::docvec;
@@ -91,6 +91,12 @@ thread_local! {
     /// through `StateAcc`, callers rebinding `State` from its return), so
     /// the `FieldReadFromStateAcc` rule can be shown to fire on it.
     pub(in crate::core_erlang) static FAULT_LEGACY_TIER2: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+    /// Test-only fault (BT-4179): inside a loop that brackets guarded
+    /// operators, an `on:do:` stores the threaded `State` (`Snapshot` only in
+    /// an actor closure) and a nested `StateAcc` producer seeds from it, as
+    /// before the fix, so the loop checkout can be shown to report both.
+    pub(in crate::core_erlang) static FAULT_STALE_STATE_IN_BRACKETED_LOOP: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
 }
 
@@ -212,6 +218,12 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// [`VerifyError::FieldReadFromStateAcc`], separately from both lists
     /// above so the three rules stay cleanly separable.
     pub(in crate::core_erlang) tier2_stateacc_gaps: Vec<UnbracketedSend>,
+    /// Uses of a bracketing loop's entry `State` inside the loop (BT-4179),
+    /// reported as [`VerifyError::CatchWithoutStateRestore`]
+    /// ([`StateRestoreDefect::PreStateOverLiveCell`]) for an `on:do:`
+    /// boundary and [`VerifyError::StaleStateSeedInBracketedLoop`] for a
+    /// `StateAcc` seed.
+    pub(in crate::core_erlang) stale_state_gaps: Vec<(StaleStateUseKind, UnbracketedSend)>,
     /// One marker per loop lowering in progress (BT-4121), innermost last.
     /// A guarded operator compiled in a stateless loop body flags the
     /// innermost marker instead of bracketing (there is no `State` in scope
@@ -233,6 +245,7 @@ impl SyncedCallState {
             gaps: Vec::new(),
             guarded_op_gaps: Vec::new(),
             tier2_stateacc_gaps: Vec::new(),
+            stale_state_gaps: Vec::new(),
             guarded_op_loops: std::cell::RefCell::default(),
             inlined_classes: std::cell::RefCell::default(),
         }
@@ -253,6 +266,39 @@ pub(in crate::core_erlang) struct GuardedOpLoopMarker {
     /// was lowered (its operator and span, for the report when no enclosing
     /// loop brackets). `None` until one fires.
     pub(in crate::core_erlang) need: Option<GuardedOpNeed>,
+    /// BT-4179: the `State` variable in scope when the loop began (the one a
+    /// bracket stores before the loop). Once the loop brackets, the slow
+    /// paths in its body write the cell past it, so a use of it inside the
+    /// loop is stale.
+    pub(in crate::core_erlang) entry_state: String,
+    /// BT-4179: the threaded-`State` uses built while this marker was
+    /// innermost (an `on:do:` boundary storing a `State`, a `StateAcc`
+    /// producer seeding from one). Checked at checkout against the loop's
+    /// own bracket decision and entry `State`, neither of which comes from
+    /// the gates that chose those shapes.
+    pub(in crate::core_erlang) state_uses: Vec<ThreadedStateUse>,
+}
+
+/// BT-4179: one use of a threaded `State` variable in a loop body, noted on
+/// the innermost loop marker for its checkout
+/// ([`CoreErlangGenerator::checkout_guarded_op_loop`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct ThreadedStateUse {
+    pub(in crate::core_erlang) kind: StaleStateUseKind,
+    /// The `State` variable used.
+    pub(in crate::core_erlang) var: String,
+    pub(in crate::core_erlang) at: Span,
+}
+
+/// BT-4179: what a [`ThreadedStateUse`] does with the `State` variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum StaleStateUseKind {
+    /// An `on:do:` boundary stores it on entry and on catch
+    /// (`CellBoundary::PreState`).
+    OnDoStore,
+    /// A `StateAcc` loop or fold packs its accumulator from it
+    /// (`ThreadingPlan::generate_pack_prefix`).
+    StateAccSeed,
 }
 
 /// BT-4121: one guarded operator's request for its loop's bracket.
@@ -819,6 +865,7 @@ impl CoreErlangGenerator {
         // above).
         let guarded_op_gaps = std::mem::take(&mut self.synced.guarded_op_gaps);
         let tier2_stateacc_gaps = std::mem::take(&mut self.synced.tier2_stateacc_gaps);
+        let stale_state_gaps = std::mem::take(&mut self.synced.stale_state_gaps);
         #[cfg(test)]
         if COUNT_ONLY.with(std::cell::Cell::get) {
             SITE_LOG.with(|log| {
@@ -840,6 +887,13 @@ impl CoreErlangGenerator {
                         site: g.site.site.clone(),
                         chain: g.site.chain.clone(),
                         selector: format!("tier2 {}", g.selector),
+                        region: g.region,
+                    }));
+                log.borrow_mut()
+                    .extend(stale_state_gaps.iter().map(|(_, g)| SiteRecord {
+                        site: g.site.site.clone(),
+                        chain: g.site.chain.clone(),
+                        selector: format!("stale-state {}", g.selector),
                         region: g.region,
                     }));
             });
@@ -882,6 +936,23 @@ impl CoreErlangGenerator {
         self.report_threaded_ir_verify_errors(
             &tier2_errors,
             "field read from a Tier 2 block's StateAcc",
+            module_span,
+        );
+        let stale_state_errors: Vec<VerifyError> = stale_state_gaps
+            .iter()
+            .map(|(kind, g)| match kind {
+                StaleStateUseKind::OnDoStore => VerifyError::CatchWithoutStateRestore {
+                    defect: StateRestoreDefect::PreStateOverLiveCell,
+                    at: g.at,
+                },
+                StaleStateUseKind::StateAccSeed => {
+                    VerifyError::StaleStateSeedInBracketedLoop { at: g.at }
+                }
+            })
+            .collect();
+        self.report_threaded_ir_verify_errors(
+            &stale_state_errors,
+            "use of a bracketing loop's entry State inside the loop",
             module_span,
         );
     }
@@ -1205,12 +1276,15 @@ impl CoreErlangGenerator {
         let will_bracket = self.synced_calls_active()
             && (self.block_contains_guarded_operator(body)
                 || condition.is_some_and(|c| self.expr_contains_guarded_operator(c)));
+        let entry_state = self.current_field_read_state_var();
         self.synced
             .guarded_op_loops
             .borrow_mut()
             .push(GuardedOpLoopMarker {
                 will_bracket,
                 need: None,
+                entry_state,
+                state_uses: Vec::new(),
             });
     }
 
@@ -1225,6 +1299,8 @@ impl CoreErlangGenerator {
             return GuardedOpLoopMarker {
                 will_bracket: false,
                 need: None,
+                entry_state: String::new(),
+                state_uses: Vec::new(),
             };
         }
         self.synced
@@ -1234,6 +1310,8 @@ impl CoreErlangGenerator {
             .unwrap_or(GuardedOpLoopMarker {
                 will_bracket: false,
                 need: None,
+                entry_state: String::new(),
+                state_uses: Vec::new(),
             })
     }
 
@@ -1247,13 +1325,79 @@ impl CoreErlangGenerator {
     /// both. Anything else that cannot bracket —
     /// [`GuardedOpCheckout::Nothing`] is not returned for it — reports a
     /// [`VerifyError::UnbracketedGuardedOperator`], never silently.
+    ///
+    /// BT-4179: the marker's `state_uses` are checked against the decision.
+    /// Where the loop brackets, a use of its entry `State` reads a version
+    /// the bracket's slow paths have overtaken in the cell (an `on:do:` that
+    /// stores it, a `StateAcc` seeded from it, both drop those writes), and is
+    /// reported; a use of any other `State` was bound inside the loop, from
+    /// the cell. Where the loop does not bracket, the uses pass to the
+    /// enclosing marker, whose bracket (if any) covers them too.
     pub(in crate::core_erlang) fn checkout_guarded_op_loop(
+        &mut self,
+        mut marker: GuardedOpLoopMarker,
+        hybrid: bool,
+        at: Span,
+    ) -> GuardedOpCheckout {
+        let state_uses = std::mem::take(&mut marker.state_uses);
+        let entry_state = std::mem::take(&mut marker.entry_state);
+        let checkout = self.checkout_guarded_op_loop_decision(marker, hybrid, at);
+        if checkout == GuardedOpCheckout::Bracket {
+            for state_use in state_uses.into_iter().filter(|u| u.var == entry_state) {
+                let label = match state_use.kind {
+                    StaleStateUseKind::OnDoStore => "on:do:",
+                    StaleStateUseKind::StateAccSeed => "StateAcc seed",
+                };
+                let gap = self.make_unbracketed_send(label.to_string(), state_use.at);
+                self.synced.stale_state_gaps.push((state_use.kind, gap));
+            }
+        } else if let Some(outer) = self.synced.guarded_op_loops.borrow_mut().last_mut() {
+            outer.state_uses.extend(state_uses);
+        }
+        checkout
+    }
+
+    /// BT-4179: notes a use of the threaded `State` variable `var` at `at` on
+    /// the innermost loop marker, for its checkout to check
+    /// ([`Self::checkout_guarded_op_loop`]). Outside every loop marker there
+    /// is no bracket to overtake that `State`.
+    pub(in crate::core_erlang) fn note_threaded_state_use(
+        &self,
+        kind: StaleStateUseKind,
+        var: &str,
+        at: Span,
+    ) {
+        if let Some(marker) = self.synced.guarded_op_loops.borrow_mut().last_mut() {
+            marker.state_uses.push(ThreadedStateUse {
+                kind,
+                var: var.to_string(),
+                at,
+            });
+        }
+    }
+
+    /// BT-4179: whether a construct lowered right now must take the actor's
+    /// state from the cell rather than the threaded `State` in scope: inside
+    /// a stateless loop that brackets guarded operators, whose slow paths
+    /// write the cell past that `State` ([`Self::guarded_op_take_reads`]).
+    pub(in crate::core_erlang) fn state_seeds_from_cell(&self) -> bool {
+        #[cfg(test)]
+        if FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(std::cell::Cell::get) {
+            return false;
+        }
+        self.guarded_op_take_reads()
+    }
+
+    /// The bracket decision of [`Self::checkout_guarded_op_loop`].
+    fn checkout_guarded_op_loop_decision(
         &mut self,
         marker: GuardedOpLoopMarker,
         hybrid: bool,
         at: Span,
     ) -> GuardedOpCheckout {
-        let GuardedOpLoopMarker { will_bracket, need } = marker;
+        let GuardedOpLoopMarker {
+            will_bracket, need, ..
+        } = marker;
         if !will_bracket && need.is_none() {
             return GuardedOpCheckout::Nothing;
         }

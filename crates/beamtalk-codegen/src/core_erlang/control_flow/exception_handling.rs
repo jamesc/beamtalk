@@ -458,7 +458,7 @@ impl CoreErlangGenerator {
         span: beamtalk_core::source_analysis::Span,
         handler: Document<'static>,
     ) -> Document<'static> {
-        let cell = self.on_do_cell_boundary(&vars.ex_class_var, pre_region_state);
+        let cell = self.on_do_cell_boundary(&vars.ex_class_var, pre_region_state, span);
         let snapshot = vars.snapshot_var.clone();
         let mut steps = vec![CatchStep::ClassVarRestore { snapshot }];
         // ADR 0137 §5: the cell's half, restored right after the class

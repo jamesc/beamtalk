@@ -1498,8 +1498,14 @@ pub(in crate::core_erlang) enum CellBoundary {
     /// region's closures run against it, and stored again by the catch, so a
     /// closure or callee in the handler sees the pre-region state.
     PreState(ErlangVar),
-    /// Inside an actor closure there is no threaded `State`: the cell is
-    /// snapshotted on entry (the named variable) and the catch restores it.
+    /// Where the cell is live (inside an actor closure there is no threaded
+    /// `State`; inside a stateless loop that brackets guarded operators the
+    /// threaded `State` is the stale loop entry, BT-4179): the cell is
+    /// snapshotted on entry (the named variable) and the catch restores it,
+    /// so writes made before the region survive and the region's own roll back.
+    /// A `PreState` boundary inside a loop whose checkout brackets is reported
+    /// there as `VerifyError::CatchWithoutStateRestore`
+    /// (`StateRestoreDefect::PreStateOverLiveCell`).
     Snapshot(ErlangVar),
 }
 

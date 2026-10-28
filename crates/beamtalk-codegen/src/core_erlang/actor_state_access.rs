@@ -36,6 +36,7 @@ use super::threaded_ir::CellBoundary;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::Block;
+use beamtalk_core::source_analysis::Span;
 
 /// The actor closure being lowered: the Core Erlang variable holding the
 /// creation-time capture its field reads fall back to away from home.
@@ -327,21 +328,50 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// The cell obligation an `on:do:` built here carries: `PreState` (the
-    /// version in scope before the region) in an actor instance method,
-    /// `Snapshot` inside an actor closure, none anywhere else.
+    /// Whether code compiled right now runs against the live cell rather than
+    /// a threaded `State`: inside an actor closure (no threaded `State`), or
+    /// inside a stateless loop that brackets guarded operators (BT-4121),
+    /// whose slow paths write the cell past the loop-entry `State` — the same
+    /// fact that routes the loop's field reads and `^` state through `take()`
+    /// ([`Self::guarded_op_take_reads`]).
+    pub(in crate::core_erlang) fn cell_is_live(&self) -> bool {
+        self.in_cell_closure() || self.state_seeds_from_cell()
+    }
+
+    /// The cell obligation an `on:do:` built here carries: `Snapshot` where
+    /// the cell is live ([`Self::cell_is_live`]: an actor closure, or a
+    /// bracketed stateless loop — BT-4179: the loop-entry `State` is stale
+    /// there, so storing it would drop the slow paths' writes), `PreState`
+    /// (the version in scope before the region) elsewhere in an actor
+    /// instance method, none anywhere else.
+    ///
+    /// A `PreState` boundary is noted on the innermost loop marker
+    /// ([`Self::note_threaded_state_use`]): the checkout of a loop that
+    /// brackets reports it when it stores that loop's entry `State`, a
+    /// decision reached from the loop's mode and operators rather than from
+    /// this gate.
     pub(in crate::core_erlang) fn on_do_cell_boundary(
         &self,
         ex_class_var: &str,
         pre_region_state: &str,
+        at: Span,
     ) -> Option<CellBoundary> {
-        if self.in_cell_closure() {
+        if self.cell_is_live() {
             return Some(CellBoundary::Snapshot(ErlangVar::new(
                 [ex_class_var, "CellSnap"].concat(),
             )));
         }
-        self.synced_calls_active()
-            .then(|| CellBoundary::PreState(ErlangVar::new(pre_region_state.to_string())))
+        if !self.synced_calls_active() {
+            return None;
+        }
+        self.note_threaded_state_use(
+            super::synced_call::StaleStateUseKind::OnDoStore,
+            pre_region_state,
+            at,
+        );
+        Some(CellBoundary::PreState(ErlangVar::new(
+            pre_region_state.to_string(),
+        )))
     }
 
     /// A write of field `name` inside an actor closure to the value `value_doc`

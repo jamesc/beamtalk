@@ -10,10 +10,13 @@
 Actor subclass: Bt4121TallyActor
   state: count = 0
   state: total = 0
+  state: hits = 0
 
   count => self.count
 
   total => self.total
+
+  hits => self.hits
 
   noteAdd: sum =>
     self.count := self.count + 1
@@ -140,3 +143,202 @@ Actor subclass: Bt4121TallyActor
         ^acc
       ]
     acc
+
+  // BT-4179: an `on:do:` in a bracketed counted loop whose handler catches
+  // and lets the loop continue (`m - m` is a guarded operator whose slow path
+  // raises does_not_understand). The boundary snapshots the live cell on
+  // entry to the protected block, so the slow-path writes of earlier
+  // iterations (and of this one, before the `try`) survive the catch.
+  sumCatching: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        [m - m] on: Error do: [:e | nil]
+      ]
+    self.count
+
+  // Same, for a `whileTrue:` direct-params loop.
+  repeatAddCatching: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    i := n
+    [i > 0]
+      whileTrue: [
+        acc := acc + m
+        [m - m] on: Error do: [:e | nil]
+        i := i - 1
+      ]
+    self.count
+
+  // BT-4179: the protected block's own slow-path write (`m + m`) still rolls
+  // back when the block raises (ADR 0130 §4), while the loop's writes survive.
+  sumRollingBack: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        [
+          m + m
+          m - m
+        ] on: Error do: [:e | nil]
+      ]
+    self.count
+
+  // BT-4179: a hybrid inner loop (it holds `hits`, which it writes, and
+  // `total`, which it reads, in fun parameters) with a caught `on:do:`,
+  // nested in a loop that brackets guarded operators. A hybrid body runs no
+  // user code, so its boundary stores the threaded `State`; the pre-`try`
+  // write and the slow paths' writes both survive.
+  hybridCatching: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    k := 0
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        1
+          to: 2
+          do: [:j |
+            k := self.total
+            self.hits := k
+            [0 error: "boom"] on: Error do: [:e | nil]
+          ]
+      ]
+    (self.count * 1000) + self.hits
+
+  // Same, the hybrid loop reading the field the slow paths write.
+  hybridReadingCatching: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    k := 0
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        1
+          to: 2
+          do: [:j |
+            k := self.count
+            self.hits := k
+            [0 error: "boom"] on: Error do: [:e | nil]
+          ]
+      ]
+    (self.count * 1000) + self.hits
+
+  // The hybrid inner loop's `on:do:` does not match, so the error escapes the
+  // method: the failed call rolls back every write, like the same method
+  // without the boundary (`hybridEscapingBare:`).
+  hybridEscaping: m =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    k := 0
+    self.total := 7
+    1
+      to: 1
+      do: [:i |
+        acc := acc + m
+        1
+          to: 2
+          do: [:j |
+            k := j
+            self.hits := j
+            [0 error: "boom"] on: TypeError do: [:e | nil]
+          ]
+      ]
+    k
+
+  hybridEscapingBare: m =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    k := 0
+    self.total := 7
+    1
+      to: 1
+      do: [:i |
+        acc := acc + m
+        1
+          to: 2
+          do: [:j |
+            k := j
+            self.hits := j
+            0 error: "boom"
+          ]
+      ]
+    k
+
+  // An inner loop whose protected block writes a field and then raises (the
+  // write keeps it out of hybrid mode, so it threads `State`), nested in a
+  // bracketing loop: the protected write rolls back, the others survive.
+  nestedRollingBack: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        j := 2
+        [j > 0]
+          whileTrue: [
+            self.hits := self.hits + 1
+            [
+              self.hits := self.hits + 100
+              Error signal: "boom"
+            ] on: Error do: [:e | nil]
+            j := j - 1
+          ]
+      ]
+    (self.count * 1000) + self.hits
+
+  // An `on:do:` in an inner direct-params loop nested in a bracketing loop.
+  nestedCatching: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        k := 0
+        1
+          to: 2
+          do: [:j |
+            k := k + 1
+            [m - m] on: Error do: [:e | nil]
+          ]
+      ]
+    self.count
+
+  // An `ensure:` in a bracketed loop keeps the slow paths' writes too.
+  sumEnsuring: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        [0] ensure: [nil]
+      ]
+    self.count
+
+  // BT-4179: a fold nested in a bracketing loop, whose body holds a
+  // parenthesised conditional writing an outer local, threads its own
+  // `StateAcc` while the loop keeps direct parameters. It seeds that
+  // accumulator from the cell, so its stores (the bracket around `t + 1`,
+  // the `on:do:` boundary) keep the slow paths' writes.
+  foldInLoopCatching: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    t := 0
+    1
+      to: n
+      do: [:k |
+        acc := acc + m
+        #(1) do: [:i | ((k == k) ifTrue: [[t := t + 1] on: Error do: [:e | 0]])]
+      ]
+    (self.count * 1000) + t
+
+  // Same, without the `on:do:`.
+  foldInLoop: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    t := 0
+    1
+      to: n
+      do: [:k |
+        acc := acc + m
+        #(1) do: [:i | ((k == k) ifTrue: [t := t + 1])]
+      ]
+    (self.count * 1000) + t

@@ -1092,6 +1092,15 @@ impl ThreadingPlan {
     /// "unbound variable 'State'" compile crash. Such a loop packs from a
     /// fresh `maps:new()` too, exactly like the has-locals value-type case
     /// immediately below.
+    ///
+    /// BT-4179: nested in a stateless loop that brackets guarded operators
+    /// ([`CoreErlangGenerator::state_seeds_from_cell`]) the `State` in scope is
+    /// the loop's entry version, which the slow paths have overtaken in the
+    /// cell, so the accumulator is seeded from the cell (`take()`), like the
+    /// loop's own exit pack ([`Self::generate_exit_stateacc`]); every store
+    /// this construct makes would otherwise put the stale entry back. A seed
+    /// from the `State` in scope is noted for the loop checkout, which
+    /// reports one taken from a bracketing loop's entry `State`.
     pub fn generate_pack_prefix(
         &self,
         generator: &mut CoreErlangGenerator,
@@ -1099,13 +1108,13 @@ impl ThreadingPlan {
         if self.use_direct_params || self.use_hybrid_params {
             return (Document::Nil, self.initial_state_var.clone());
         }
-        if self.threaded_locals.is_empty() && !self.threads_value_self() {
-            return (Document::Nil, self.initial_state_var.clone());
-        }
         let mut pack_docs: Vec<Document<'static>> = Vec::new();
         // Value-type methods and class methods have no actor State
         // to pack from — start from a fresh empty map instead.
         let mut current = if self.packs_from_fresh_map(generator) {
+            if self.threaded_locals.is_empty() && !self.threads_value_self() {
+                return (Document::Nil, self.initial_state_var.clone());
+            }
             let init_map_var = generator.fresh_temp_var("InitMap");
             pack_docs.push(docvec![
                 "let ",
@@ -1113,7 +1122,25 @@ impl ThreadingPlan {
                 " = call 'maps':'new'() in ",
             ]);
             init_map_var
+        } else if generator.state_seeds_from_cell() {
+            let take_var = generator.fresh_temp_var("TakeSeed");
+            pack_docs.push(docvec![
+                "let ",
+                leaf::var(take_var.clone()),
+                " = ",
+                super::super::threaded_ir::cell_take_call(),
+                " in ",
+            ]);
+            take_var
         } else {
+            generator.note_threaded_state_use(
+                crate::core_erlang::synced_call::StaleStateUseKind::StateAccSeed,
+                &self.initial_state_var,
+                self.span,
+            );
+            if self.threaded_locals.is_empty() && !self.threads_value_self() {
+                return (Document::Nil, self.initial_state_var.clone());
+            }
             self.initial_state_var.clone()
         };
         for var_name in &self.threaded_locals {

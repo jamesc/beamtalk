@@ -159,7 +159,13 @@ pub(in crate::core_erlang) enum VerifyError {
     /// non-NLR clause must restore the cell to the region's pre-region state
     /// ([`CellBoundary`]) right after the class-variable restore, before the
     /// exception is wrapped and the handler runs. Without it a closure or
-    /// callee in the handler reads the writes the failed region made.
+    /// callee in the handler reads the writes the failed region made. Inside a
+    /// loop that brackets guarded operators (BT-4179,
+    /// [`StateRestoreDefect::PreStateOverLiveCell`]) the boundary must
+    /// snapshot the cell, not store a threaded `State` that is stale for the
+    /// writes the cell holds; that half is checked at the loop's checkout,
+    /// against its own bracket decision, and reported through the same
+    /// `report_threaded_ir_verify_errors` path as the loop's other findings.
     ///
     /// **What it guards:** like [`Self::CatchWithoutClassVarRestore`], the one
     /// builder (`on_do_catch_boundary`) cannot trip it; the check is for a
@@ -470,6 +476,17 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
+    /// BT-4179 (ADR 0137): a `StateAcc` loop or fold nested in a stateless
+    /// loop that brackets guarded operators packs its accumulator from that
+    /// loop's entry `State`. The bracket's slow paths have written the cell
+    /// past it, so every store the nested construct makes (a bracket, an
+    /// `on:do:` or `ensure:` boundary) puts the stale entry back and drops
+    /// those writes. The seed must come from the cell (`take()`), as the
+    /// loop's own exit pack does. Reported by the loop checkout from its own
+    /// bracket decision and entry `State`, like
+    /// [`StateRestoreDefect::PreStateOverLiveCell`].
+    StaleStateSeedInBracketedLoop { at: Span },
+
     /// BT-4122 (ADR 0137 Tier 2 merge): a field read from a Tier 2 block's
     /// `StateAcc`. After the merge a Tier 2 `StateAcc` carries only locals —
     /// fields go through the cell — so a Tier 2 fun body accessing fields
@@ -589,6 +606,15 @@ pub(in crate::core_erlang) enum StateRestoreDefect {
     NotAfterClassVarRestore,
     /// The cell restore reads a different variable than the node's entry binds.
     RestoresWrongVariable,
+    /// BT-4179: the node sits inside a loop whose checkout brackets guarded
+    /// operators but stores a threaded `State` ([`CellBoundary::PreState`])
+    /// instead of snapshotting the cell. That `State` is stale for the writes
+    /// the bracket's slow paths leave in the cell (the loop-entry version), so
+    /// the entry store and the catch restore both drop them. Reported by the
+    /// loop checkout (`checkout_guarded_op_loop`), whose decision comes from
+    /// the loop's mode and operators, not from the gate that picked the
+    /// boundary.
+    PreStateOverLiveCell,
 }
 
 /// Checks `ir` against the invariants documented on each [`VerifyError`]

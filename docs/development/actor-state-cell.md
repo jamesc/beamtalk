@@ -313,6 +313,28 @@ cost of gate 3. The bracket closes it without threading (BT-4121):
   stale at once. Mode selection routes a hybrid body carrying a guarded
   operator to the `StateAcc` fallback instead, and a hybrid checkout that
   still reaches the bracket reports loud (below).
+- An `on:do:` inside a bracketing loop (directly, or in a stateless loop
+  nested in one) snapshots the cell on entry to the protected block and
+  restores that snapshot on catch (`CellBoundary::Snapshot`, as in an actor
+  closure), because the loop-entry `State` is stale for the slow paths'
+  writes (BT-4179). Elsewhere it stores the threaded `State`
+  (`CellBoundary::PreState`). A hybrid loop keeps `PreState`: its body runs
+  no user code (an operator, self-send or user-code send, handler included,
+  routes it to `StateAcc`), and it is never nested in a bracketing loop,
+  since no loop that brackets admits a field write in its body.
+- A `StateAcc` loop or fold nested in a bracketing loop (a fold whose body
+  holds a parenthesised conditional writing an outer local keeps the
+  enclosing loop's direct parameters) seeds its accumulator from the cell
+  (`take()`), like the loop's exit pack, not from the loop-entry `State`:
+  every store the nested construct makes (a bracket, an `on:do:` boundary)
+  would otherwise put that stale `State` back (BT-4179).
+- Each marker records the loop-entry `State`, and each threaded-`State` use
+  in its body (an `on:do:` `PreState` boundary, a `StateAcc` seed) is noted
+  on the innermost marker. A loop whose checkout brackets reports a use of
+  its entry `State` (`CatchWithoutStateRestore` with `PreStateOverLiveCell`,
+  or `StaleStateSeedInBracketedLoop`), and a loop that does not bracket
+  hands its uses outward. So both rules are checked against the bracket
+  decision, not against the gates that chose the shapes.
 
 A new `VerifyError`, `UnbracketedGuardedOperator` (`verify.rs`, kept as a
 separate variant for BT-4122), fails the build when a guarded operator
