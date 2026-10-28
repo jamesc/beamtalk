@@ -1367,6 +1367,69 @@ mod tests {
 
     // ── generate_repl_expressions_with_index ──────────────────────────
 
+    /// BT-4059: every REPL entry compiles the peeled tree, so a redundant
+    /// operand paren — around a block argument to an inlined construct, a
+    /// receiver, an argument — generates exactly the unparenthesised code.
+    #[test]
+    fn repl_entries_compile_redundant_operand_parens_like_bare_ones() {
+        let parse_exprs = |src: &str| -> Vec<Expression> {
+            let (module, _) = beamtalk_core::source_analysis::parse(
+                beamtalk_core::source_analysis::lex_with_eof(src),
+            );
+            module
+                .expressions
+                .into_iter()
+                .map(|s| s.expression)
+                .collect()
+        };
+        let wrapped = parse_exprs("t := 0\n#(1, 2) do: ([:k | t := t + (k)])\n(t) + (1)");
+        let bare = parse_exprs("t := 0\n#(1, 2) do: [:k | t := t + k]\nt + 1");
+        assert_eq!(
+            generate_repl_expressions(&wrapped, "repl_paren").unwrap(),
+            generate_repl_expressions(&bare, "repl_paren").unwrap()
+        );
+        let wrapped = parse_exprs("(3) max: ((4))");
+        let bare = parse_exprs("3 max: 4");
+        assert_eq!(
+            generate_repl_expression(&wrapped[0], "repl_paren1").unwrap(),
+            generate_repl_expression(&bare[0], "repl_paren1").unwrap()
+        );
+        assert_eq!(
+            generate_test_expression(&wrapped[0], "test_paren").unwrap(),
+            generate_test_expression(&bare[0], "test_paren").unwrap()
+        );
+        // Trace mode echoes each statement's own source text (a binary), so
+        // only the code around it is compared.
+        let without_binaries = |code: String| -> Vec<String> {
+            code.lines()
+                .filter(|line| !line.contains("#{"))
+                .map(str::to_string)
+                .collect()
+        };
+        let src = "t := 0\n#(1, 2) do: ([:k | t := t + (k)])\n(t) + (1)";
+        let bare_src = "t := 0\n#(1, 2) do: [:k | t := t + k]\nt + 1";
+        assert_eq!(
+            without_binaries(
+                generate_repl_expressions_traced(
+                    &parse_exprs(src),
+                    src,
+                    "repl_trace",
+                    HashMap::new()
+                )
+                .unwrap()
+            ),
+            without_binaries(
+                generate_repl_expressions_traced(
+                    &parse_exprs(bare_src),
+                    bare_src,
+                    "repl_trace",
+                    HashMap::new()
+                )
+                .unwrap()
+            )
+        );
+    }
+
     #[test]
     fn repl_with_empty_class_index() {
         let result =
