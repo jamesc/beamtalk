@@ -627,6 +627,31 @@ code.
   > as is a value type (its fields never change). The idiom is to pass the
   > value in: `[:v | ...]` with the callee doing `block value: self.total`.
   > Live read may be revisited after BT-3950 if real code needs it.
+- **An `ensure:` cleanup cannot read a local its protected block wrote when
+  the block can exit abruptly** (BT-3910, BT-3993, BT-4003). The cleanup runs
+  from the `catch` of the `^` or the error, over the locals the protected
+  block was entered with, so it would read the old value. When the protected
+  block can leave by a `^` (or by evaluating a block value that might hold
+  one), or by an error raised after the write (any send, a destructuring or
+  `match:`, a loop body's next iteration), a cleanup that reads the written
+  local is a compile error, by design: seeing the new value would need a new
+  runtime mechanism that carries the protected block's locals out with the
+  throw, and that was rejected (BT-4063). A write that is the last thing the
+  protected block does is seen. The idiom is to assign the local after the
+  `ensure:` (or compute the value outside the protected block), or not to read
+  it in the cleanup:
+
+  ```beamtalk
+  // ❌ ERROR: the cleanup would not see the new `count` if `self work` raises
+  [count := count + 1. self work] ensure: [log record: count]
+
+  // ✅ The write comes first, outside the protected block
+  count := count + 1
+  [self work] ensure: [log record: count]
+  ```
+
+  An actor's fields and class variables are not affected: the cleanup reads
+  them live (ADR 0137, ADR 0130).
 
 ### Neutral
 - Reading captured variables in escaping blocks is unchanged (an actor's
@@ -725,7 +750,9 @@ protocol tests.
 **Epic:** BT-3901
 **Issues:** BT-3902, BT-3903 (Phase 1); BT-3904, BT-3905, BT-3906, BT-3907,
 BT-3908 (Phase 2); BT-3909 (Phase 2/3 boundary); BT-3910, BT-3911, BT-3912,
-BT-3913 (Phase 3); BT-3914 (LSP code action)
+BT-3913 (Phase 3); BT-3914 (LSP code action); BT-4003 (the BT-3912
+residuals made compile errors, among them the permanent `ensure:` rule under
+Consequences)
 **Status:** Planned
 
 The ADR 0131 residuals epic BT-3883 is cancelled and replaced by BT-3901:

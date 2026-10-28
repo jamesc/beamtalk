@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4003: the class column of stdlib/test/bt4003residuals_test.bt. Every
+// method is a shape the compiler accepts and that was measured answering right.
+
+Object subclass: Bt4003ResidualsClass
+  classState: n = 0
+  classState: items = #(1, 2)
+
+  class bump =>
+    self.n := self.n + 1
+    self.n
+
+  class ensureWriteLast: rec =>
+    t := 0
+    [t := 9] ensure: [rec record: t]
+    rec last
+
+  class ensureRaiseBeforeWrite: rec =>
+    t := 0
+    [
+      [
+        1 / 0
+        t := 9
+      ] ensure: [rec record: t]
+    ] on: Error do: [:e | nil]
+    rec last
+
+  class closureOwnLocalReturn =>
+    b := [:z |
+      w := z
+      #(1, 2)
+        do: [:k |
+          w := w + k
+          k == 2 ifTrue: [^w]
+        ]
+      -2
+    ]
+    b value: 10
+    -1
+
+  class closureLocalWrittenBefore =>
+    t := 5
+    b := [^t]
+    b value
+    -1
+
+  // Item 3: class variables are written in place, so a state fold answers
+  // right as an operand in a fold body too.
+  class injectOperandInDo =>
+    self.n := 0
+    #(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]
+    self.n
+
+  class doReceiverInDo =>
+    self.n := 0
+    #(1, 2) do: [:x | (self.items do: [:y | self bump]) isNil]
+    self.n
+
+  class injectArgInCollect =>
+    self.n := 0
+    r := #(1, 2) collect: [:x |
+      x max: (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
+    #(r, self.n)
+
+  class tupleAccDoReturn =>
+    t := 0
+    #(1, 2, 3)
+      do: [:x |
+        t := t + x
+        x == 2 ifTrue: [^t]
+      ]
+    -1

@@ -621,17 +621,19 @@ t
 t := 0
 // => 0
 
-r := [4 =:= 4 ifTrue: [[nil ifNil: [(#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]) + 1]] ensure: [t := t + 10]] ifFalse: [0]] on: Error do: [:e | 9]
+// (The cleanup does not read `t`: the `+ 1` after the fold's write may raise,
+// and a cleanup that read the write after a raise is a compile error, BT-4003.)
+r := [4 =:= 4 ifTrue: [[nil ifNil: [(#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]) + 1]] ensure: [t := 10]] ifFalse: [0]] on: Error do: [:e | 9]
 // => 4
 
 t
-// => 13
+// => 10
 
 r := [4 =:= 4 ifTrue: [(#(1, 2) collect: [:x | t := t + x. x]) size. 1 / 0] ifFalse: [0]] on: Error do: [:e | 9]
 // => 9
 
 t
-// => 13
+// => 10
 
 // The other arm kinds: `ifFalse:`, `and:`, `or:` and the parameter arms of
 // the nil family, with a producer at an operand site of the arm.

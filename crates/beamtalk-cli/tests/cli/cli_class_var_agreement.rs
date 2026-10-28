@@ -24,7 +24,7 @@
 //! compile (a rejected program, or a `ThreadedIr` verifier `internal:` error
 //! or debug panic) the batch is bisected to find the offending programs.
 //!
-//! Programs the compiler loudly rejects under the BT-3947 `ensure:` rule are
+//! Programs the compiler loudly rejects under the ADR 0133 `ensure:` rule are
 //! skipped, not judged. The report counts them, and the property fails when
 //! under [`MIN_JUDGED_PERCENT`] of the draw was judged or every
 //! `ensure:`-bearing program was skipped, so it cannot pass vacuously
@@ -460,8 +460,8 @@ fn headline(text: &str) -> String {
     normalize_cause(line)
 }
 
-/// Whether the compile errors of the fixtures `text` rejects with the BT-3947
-/// message are only that rejection (loud, not a wrong answer): an `ensure:`
+/// Whether the compile errors of the fixtures `text` rejects with the ADR 0133
+/// `ensure:` message are only that rejection (loud, not a wrong answer): an `ensure:`
 /// protected block whose cleanup would read a stale local. Matched on the exact
 /// message, whitespace-normalised since the diagnostic is line-wrapped. The
 /// errors of a fixture with such a rejection may also be the "Failed to compile
@@ -478,9 +478,9 @@ fn is_loud_ensure_nlr_rejection(text: &str, case_files: &[String]) -> bool {
     let errors: Vec<&str> = flat.split('×').skip(1).map(str::trim).collect();
     let is_pin = |e: &str| {
         e.starts_with("an `ensure:` protected block that writes `")
-            && e.contains("which is not supported yet in")
+            && e.contains("and its cleanup reads `")
             && e.contains("the cleanup would not see the new `")
-            && e.contains("(BT-3947)")
+            && e.contains("(ADR 0133)")
     };
     // BT-4018: warnings (`Diagnostic::warning`), never the compile
     // failure: an unused local or parameter, or a block that reads class
@@ -634,12 +634,12 @@ fn run_alone(case: &Case) -> (Package, Run) {
 }
 
 /// Runs `cases` and returns every failure, bisecting broken batches.
-/// Programs skipped as loud BT-3947 rejections are collected into `skipped`
+/// Programs skipped as loud ADR 0133 `ensure:` rejections are collected into `skipped`
 /// as `(index, seed, size)` so the report shows what the draw did not cover
 /// (BT-4018). Answers whether this call (or a bisection under it) skipped any
 /// program, so a broken batch whose halves all passed is excused only by a
 /// skip that bisection actually made, never by the batch text merely holding
-/// a BT-3947 rejection beside some other break (BT-4013).
+/// an ADR 0133 `ensure:` rejection beside some other break (BT-4013).
 #[allow(clippy::too_many_lines)] // one bisecting driver; splitting it would scatter the batch protocol
 fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u64, u32)>) -> bool {
     if cases.is_empty() {
@@ -734,8 +734,8 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u6
             };
             if let Some((_, owner)) = offender {
                 let c = cases.iter().find(|c| c.index == owner).expect("case");
-                // PIN-BUG BT-3947 (BT-3993): the compiler's conservative,
-                // loud rejection of an `ensure:` protected block that may
+                // ADR 0133 (BT-3993, BT-4003): the compiler's conservative,
+                // loud and permanent rejection of an `ensure:` protected block that may
                 // return non-locally is not a disagreement: the program is
                 // never compiled, so no wrong answer is produced.
                 let skipped_here = is_loud_ensure_nlr_rejection(&text, &files_of(owner));
@@ -763,7 +763,7 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u6
                 // The batch was broken but every half passed (an interaction
                 // between programs, or a flaky run): never let that pass
                 // silently; blame the batch's first case. A half that skipped
-                // a loud BT-3947 rejection explains the break (that program
+                // a loud ADR 0133 `ensure:` rejection explains the break (that program
                 // was in the batch), so only a skip bisection really made
                 // excuses it (BT-4013).
                 if failed.len() == before && !skipped_a && !skipped_b {
@@ -786,13 +786,13 @@ fn check(cases: &[&Case], failed: &mut Vec<Failed>, skipped: &mut Vec<(usize, u6
     }
 }
 
-/// How much of the draw was actually judged once the loud BT-3947 rejections
+/// How much of the draw was actually judged once the loud ADR 0133 `ensure:` rejections
 /// are skipped (BT-4013), so the property cannot pass vacuously.
 #[derive(Debug, PartialEq, Eq)]
 struct Coverage {
     /// Distinct programs drawn.
     drawn: usize,
-    /// Distinct programs skipped as loud BT-3947 rejections.
+    /// Distinct programs skipped as loud ADR 0133 `ensure:` rejections.
     skipped: usize,
     /// Drawn programs that use `ensure:` ([`Shapes::ENSURE`]).
     ensure_drawn: usize,
@@ -822,11 +822,11 @@ impl Coverage {
 
     /// Why the draw judged too little to prove anything, if it did: fewer
     /// than [`MIN_JUDGED_PERCENT`] of the programs judged, or every
-    /// `ensure:`-bearing program skipped (the shape the BT-3947 rule rejects).
+    /// `ensure:`-bearing program skipped (the shape the ADR 0133 `ensure:` rule rejects).
     fn vacuous(&self) -> Option<String> {
         if self.judged() * 100 < self.drawn * MIN_JUDGED_PERCENT {
             return Some(format!(
-                "only {} of {} programs judged (floor {MIN_JUDGED_PERCENT}%): the BT-3947 \
+                "only {} of {} programs judged (floor {MIN_JUDGED_PERCENT}%): the `ensure:` \
                  skip left the property nearly vacuous",
                 self.judged(),
                 self.drawn
@@ -834,7 +834,7 @@ impl Coverage {
         }
         if self.ensure_drawn > 0 && self.ensure_skipped == self.ensure_drawn {
             return Some(format!(
-                "all {} `ensure:`-bearing programs were skipped as BT-3947 rejections: \
+                "all {} `ensure:`-bearing programs were skipped as ADR 0133 `ensure:` rejections: \
                  the `ensure:` shape went unjudged",
                 self.ensure_drawn
             ));
@@ -844,7 +844,7 @@ impl Coverage {
 }
 
 /// The least share (percent) of the draw that must be judged, not skipped
-/// as a loud BT-3947 rejection (BT-4013).
+/// as a loud ADR 0133 `ensure:` rejection (BT-4013).
 const MIN_JUDGED_PERCENT: usize = 50;
 
 fn report(
@@ -875,7 +875,7 @@ fn report(
         cov.ensure_drawn - cov.ensure_skipped,
         cov.ensure_drawn
     );
-    // BT-4018: the loud BT-3947 rejections the draw did not cover, so the
+    // BT-4018: the loud ADR 0133 `ensure:` rejections the draw did not cover, so the
     // `ensure:` shape cannot silently lose programs to the skip.
     if !skipped.is_empty() {
         let mut ids: Vec<(usize, u64, u32)> = skipped.to_vec();
@@ -887,7 +887,7 @@ fn report(
             .collect();
         let _ = writeln!(
             s,
-            "skipped {} programs as loud BT-3947 rejections (index, seed, size): {}",
+            "skipped {} programs as loud ADR 0133 ensure: rejections (index, seed, size): {}",
             ids.len(),
             pairs.join(" ")
         );
@@ -942,7 +942,7 @@ fn property(shapes: Shapes) {
     let text = report(shapes, &all, &failed, &skipped);
     eprintln!("{text}");
     assert!(failed.is_empty(), "{text}");
-    // Not vacuous (BT-4013): passing proves nothing if the BT-3947 skip
+    // Not vacuous (BT-4013): passing proves nothing if the `ensure:` rejection skip
     // swallowed the draw.
     if let Some(why) = Coverage::of(&all, &skipped).vacuous() {
         panic!("{why}\n{text}");
@@ -956,7 +956,7 @@ fn class_var_agreement_enabled_shapes() {
     property(corpus_shapes_from_env(Shapes::all()));
 }
 
-/// BT-4013: the coverage floor fails a draw the BT-3947 skip hollowed out,
+/// BT-4013: the coverage floor fails a draw the `ensure:` rejection skip hollowed out,
 /// and passes one it did not.
 #[test]
 fn class_var_agreement_coverage_floor() {
@@ -1267,7 +1267,7 @@ fn class_var_agreement_classifies_runner_output_confirm() {
     assert!(!environment_confirmed_by(&crashed, &[]));
 }
 
-/// The BT-3947 pin is loud (skipped, not a disagreement) with warning-only
+/// The ADR 0133 `ensure:` rejection is loud (skipped, not a disagreement) with warning-only
 /// company: the `beamtalk test` output renders warnings with the same `×`
 /// marker as errors, so an unused local or parameter and a block that reads
 /// class state and escapes ride along. A real error in the judged program's
@@ -1277,7 +1277,7 @@ fn class_var_agreement_classifies_runner_output_confirm() {
 fn class_var_agreement_skips_loud_ensure_rejection_with_warnings() {
     let pin = |file: &str| {
         format!(
-            "beamtalk::compile\n\n  × an `ensure:` protected block that writes `t` may return non-locally (`m`\n  │ may be a block it runs), which is not supported yet in a class method: the\n  │ cleanup would not see the new `t` (BT-3947)\n    ╭─[{file}:25:371]\n"
+            "beamtalk::compile\n\n  × an `ensure:` protected block that writes `t` may return non-locally (`m`\n  │ may be a block it runs), and its cleanup reads `t`: in a class method the\n  │ cleanup would not see the new `t` (ADR 0133)\n    ╭─[{file}:25:371]\n"
         )
     };
     let trailer = |file: &str| format!("  × Failed to compile fixture '{file}'\n");

@@ -3686,14 +3686,14 @@ fn a_match_arm_write_to_an_outer_local_is_reported_once() {
     assert_eq!(at_arm.len(), 1, "{at_arm:?}");
 }
 
-/// PIN-BUG BT-3947: a `^` out of the protected block of an `ensure:` whose
-/// cleanup reads a local the block writes is rejected: the cleanup would read
+/// A `^` out of the protected block of an `ensure:` whose cleanup reads a
+/// local the block writes is rejected, by design (ADR 0133; lowering it would
+/// need a new runtime mechanism, rejected in BT-4063): the cleanup would read
 /// the old `t`, silently (measured on a BEAM in a class, a value type and an
 /// actor: `t := 0. [t := t + 1. ^t] ensure: [sink record: t]` records 0; the
 /// correct answer is 1). It is the same whether the write is the returned
 /// value (`^t := t + 1`) or a statement before the `^`, and whether the `^` is
-/// in the protected block or a block nested in it. BT-3947 lowers it and flips
-/// this to an acceptance test. Without a `^` in the protected block, with a
+/// in the protected block or a block nested in it. Without a `^` in the protected block, with a
 /// cleanup that does not read the written local, or for `on:do:` and the
 /// cleanup itself, it is accepted.
 #[test]
@@ -3716,7 +3716,7 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
             let errors = analysis_errors(&src, &[]);
             assert_eq!(errors.len(), 1, "{src}: {errors:?}");
             assert!(
-                errors[0].message.contains("BT-3947"),
+                errors[0].message.contains("ADR 0133"),
                 "{}",
                 errors[0].message
             );
@@ -3731,7 +3731,7 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
         }
         let errors = analysis_errors(&format!("{body}\n"), &["t"]);
         assert!(
-            errors.iter().any(|e| e.message.contains("BT-3947")),
+            errors.iter().any(|e| e.message.contains("ADR 0133")),
             "REPL {body}: {errors:?}"
         );
     }
@@ -3754,7 +3754,7 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
     }
 }
 
-/// PIN-BUG BT-3947 (BT-3993): the throw out of an `ensure:` protected block can
+/// BT-3993: the throw out of an `ensure:` protected block can
 /// come from a block value created elsewhere, not only a `^` written in it.
 /// Measured on a BEAM in a class, a value type and an actor: `b := [^0]`
 /// evaluated as `[t := 1. b value] ensure: [sink record: t]`, a parameter
@@ -3763,8 +3763,8 @@ fn a_returned_assignment_inside_an_ensure_protected_block_is_rejected() {
 /// `^`. Fully conservative where the static view cannot tell which value is a
 /// block: any `value`-family send to a non-literal receiver (a call result, a
 /// collection element, an `at:` result), and any local, parameter or field
-/// passed as a keyword-send argument, is a possible non-local return. BT-3947
-/// lowers the protected block and flips these to acceptance tests.
+/// passed as a keyword-send argument, is a possible non-local return. The
+/// rejection is permanent (ADR 0133, BT-4063).
 #[test]
 fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
     let rejected = [
@@ -3810,7 +3810,7 @@ fn an_ensure_protected_block_evaluating_a_returning_block_value_is_rejected() {
             let errors = analysis_errors(&src, &[]);
             assert_eq!(errors.len(), 1, "{src}: {errors:?}");
             assert!(
-                errors[0].message.contains("BT-3947"),
+                errors[0].message.contains("ADR 0133"),
                 "{}",
                 errors[0].message
             );
@@ -3866,7 +3866,7 @@ fn an_ensure_in_a_match_arm_reading_a_pattern_variable_is_rejected() {
     for src in [in_class(body), in_value(body), in_actor(body)] {
         let errors = analysis_errors(&src, &[]);
         assert!(
-            errors.iter().any(|e| e.message.contains("BT-3947")),
+            errors.iter().any(|e| e.message.contains("ADR 0133")),
             "{src}: {errors:?}"
         );
     }
@@ -4637,4 +4637,256 @@ fn evaluated_block_nested_in_a_bt3948_site_is_reported_once() {
     );
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages[0].contains("BT-3948"), "{messages:?}");
+}
+
+// ---------------------------------------------------------------------------
+// BT-4003: the residuals found during BT-3912, made loud
+// ---------------------------------------------------------------------------
+
+/// BT-4003 item 1: an error leaving an `ensure:` protected block after it
+/// wrote a local its cleanup reads. Measured on a BEAM in a class, a value
+/// type, an actor and the REPL: `[[t := 9. 1 / 0] ensure: [rec record: t]] on:
+/// Error do: [:e | nil]` records 0 (the entry `t`), silently, and so does a
+/// raise in a later iteration of a loop that wrote `t`. Rejected, by design
+/// (ADR 0133): anything that may raise after the write, in evaluation order.
+/// Accepted (measured right): a write that is the last thing the protected
+/// block does, one only preceded by what may raise, and a cleanup that does
+/// not read the write.
+#[test]
+fn bt4003_an_ensure_protected_block_that_may_raise_after_a_write_is_rejected() {
+    let rejected = [
+        "[t := 9. 1 / 0] ensure: [t printString]\nt",
+        "[t := 9. self foo] ensure: [t printString]\nt",
+        "[#(1, 2, 3) do: [:i | t := t + i. i == 2 ifTrue: [1 / 0]]] ensure: [t printString]\nt",
+        // A loop body's next iteration runs after this one's write.
+        "[#(1, 2) do: [:i | t := t + i]] ensure: [t printString]\nt",
+        "[t := t + 1. #(1, 2) size] ensure: [t printString]\nt",
+        "[t := 1. #[1, 2] printString] ensure: [t printString]\nt",
+        "[true ifTrue: [t := 1]. t printString] ensure: [t printString]\nt",
+        "[t := 1. [3] ensure: [4]] ensure: [t printString]\nt",
+        "[t := 1. #(1, 2) match: [_ -> 0]] ensure: [t printString]\nt",
+    ];
+    for body in rejected {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+            let e = &errors[0];
+            assert!(
+                e.message.contains("may raise an error after writing it"),
+                "{}",
+                e.message
+            );
+            assert!(e.message.contains("(ADR 0133)"), "{}", e.message);
+            assert!(
+                e.hint
+                    .as_deref()
+                    .is_some_and(|h| h.contains("after the `ensure:`")
+                        && h.contains("do not read `t` in the cleanup")),
+                "{:?}",
+                e.hint
+            );
+        }
+        // (At the REPL `t` is a binding that may hold a block, so a send to
+        // it may be the non-local-return cause instead.)
+        let errors = analysis_errors(&format!("{body}\n"), &["t"]);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("the cleanup would not see the new `t`")),
+            "REPL {body}: {errors:?}"
+        );
+    }
+    let accepted = [
+        "[t := 9] ensure: [t printString]\nt",
+        "[t := t + 1] ensure: [t printString]\nt",
+        "[1 / 0. t := 9] ensure: [t printString]\nt",
+        "[t := self foo] ensure: [t printString]\nt",
+        "[t := 1. 7] ensure: [t printString]\nt",
+        "[true ifTrue: [t := 1] ifFalse: [t := 2]] ensure: [t printString]\nt",
+        "[t := 9. 1 / 0] ensure: [0]\nt",
+        "[t := 9. 1 / 0] ensure: [t := 0]\nt",
+        "[t := 9. 1 / 0] on: Error do: [:e | t printString]\nt",
+        "#(1, 2) do: [:k | [t := t + k] ensure: [t printString]]\nt",
+        "[#(1, 2) do: [:t | t printString]] ensure: [t printString]\nt",
+    ];
+    for body in accepted {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert!(errors.is_empty(), "{src}: {errors:?}");
+        }
+    }
+}
+
+/// BT-4003 item 2: a `^` in a block that is not run where it is written (a
+/// closure) answers the values of the locals it captured when it was created.
+/// Measured on a BEAM in a class, a value type, an actor and the REPL: `t := 0.
+/// b := [^t]. t := 5. b value` answers 0, silently, and so does a closure
+/// created before a loop that writes `t`. Rejected when the closure reads a
+/// local assigned after it (or in a loop or fold body around it); at the REPL,
+/// when it reads any binding. Accepted (measured right): a closure that reads
+/// only its own parameters and locals (`[:z | w := z. ... ^w]`), and one whose
+/// locals are written only before it.
+#[test]
+fn bt4003_a_returning_closure_that_reads_a_local_assigned_later_is_rejected() {
+    let rejected = [
+        "b := [^t]\nt := 5\nb value\n0",
+        "b := [^t]\n#(1, 2) do: [:x | t := t + x. x == 2 ifTrue: [b value]]\n0",
+        "b := [:x | t > 0 ifTrue: [^t]. x]\nt := 5\nb value: 1",
+        "#(1, 2) do: [:x | CvA ap: [^t]. t := t + x]\n0",
+        "[t < 3] whileTrue: [t := t + 1. CvA ap: [^t]]\n0",
+    ];
+    for body in rejected {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+            let e = &errors[0];
+            assert!(e.message.contains("returns non-locally"), "{}", e.message);
+            assert!(e.message.contains("`t`"), "{}", e.message);
+            assert!(e.message.contains("BT-4003"), "{}", e.message);
+        }
+    }
+    let accepted = [
+        "b := [:z | w := z. #(1, 2) do: [:k | w := w + k. k == 2 ifTrue: [^w]]. -2]\nb value: 10\n0",
+        "t := 5\nb := [^t]\nb value\n0",
+        "b := [:x | ^x]\nt := 5\nb value: t",
+        "b := [^0]\nt := 5\nb value",
+        "t := 5\nCvA ap: [^t]\n0",
+        // Run in place: the block sees the current `t`.
+        "#(1, 2) do: [:x | t := t + x. x == 2 ifTrue: [^t]]\n0",
+        "t := 5\n[^t] value",
+        "b := [t]\nt := 5\nb value",
+    ];
+    for body in accepted {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let errors = analysis_errors(&src, &[]);
+            assert!(errors.is_empty(), "{src}: {errors:?}");
+        }
+    }
+    // The REPL: any binding the closure reads may be assigned by a later input.
+    for (input, known) in [
+        ("b := [^u]\n", &["u"][..]),
+        ("u := 0\nb := [^u]\n", &[][..]),
+    ] {
+        let errors = analysis_errors(input, known);
+        assert!(
+            errors.iter().any(|e| e.message.contains("the binding `u`")),
+            "REPL {input}: {errors:?}"
+        );
+    }
+    for (input, known) in [("b2 := [:x | ^x]\n", &[][..]), ("[^u] value\n", &["u"][..])] {
+        let errors = analysis_errors(input, known);
+        assert!(errors.is_empty(), "REPL {input}: {errors:?}");
+    }
+}
+
+/// An actor method holding `probe`'s body, with the fields and the
+/// state-changing method the BT-4003 item 3 shapes send to.
+fn in_items_actor(body: &str) -> String {
+    format!(
+        "Actor subclass: Ac\n  state: n = 0\n  state: items = #(1, 2)\n\n  bump =>\n    self.n := self.n + 1\n    self.n\n\n  probe =>\n    t := 0\n{}\n",
+        indent(body)
+    )
+}
+
+/// PIN-BUG BT-3947 (BT-4003 item 3): in an actor method, a loop or fold whose
+/// block sends to `self` or writes a field (and writes no outer local), as an
+/// operand inside another loop or fold body, loses its state changes, answers
+/// the raw `{Value, State}` pair or crashes. Measured on a BEAM
+/// (`stdlib/test/bt4003residuals_test.bt` pins the right answers): rejected
+/// unless it is the statement of the body, an assignment's value, or a
+/// `collect:`/`select:` that writes no field as the receiver of a message.
+/// Class and value-type methods answer right, and so does the same fold at the
+/// method level.
+#[test]
+fn bt4003_an_actor_state_fold_as_an_operand_in_a_fold_body_is_rejected() {
+    let rejected = [
+        "r := #(1, 2) inject: 0 into: [:a :x | a + (self.items inject: 0 into: [:b :y | b + self bump])]\nr",
+        "#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]\nself.n",
+        "r := #(1, 2) collect: [:x | x max: (self.items inject: 0 into: [:b :y | b + self bump])]\nr",
+        "#(1, 2) do: [:x | (self.items do: [:y | self bump]) isNil]\nself.n",
+        "#(1, 2) do: [:x | (self.items collect: [:y | self.n := self.n + 1]) size]\nself.n",
+        "r := #(1, 2) collect: [:x | x + (self.items collect: [:y | self.n := self.n + 1]) size]\nr",
+        "2 timesRepeat: [#[self.items do: [:y | self bump]]]\nself.n",
+    ];
+    for body in rejected {
+        let src = in_items_actor(body);
+        let errors = analysis_errors(&src, &[]);
+        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+        assert!(
+            errors[0].message.contains("BT-4003, until BT-3947"),
+            "{}",
+            errors[0].message
+        );
+    }
+    let accepted = [
+        "#(1, 2) do: [:x | self.items do: [:y | self bump]]\nself.n",
+        "#(1, 2) do: [:x | q := self.items inject: 0 into: [:b :y | b + self bump]. q]\nself.n",
+        "#(1, 2) do: [:x | self.items do: [:y | self.n := self.n + 1]]\nself.n",
+        "r := #(1, 2) collect: [:x | x + (self.items collect: [:y | self bump]) size]\nr",
+        "#(1, 2) do: [:x | (self.items collect: [:y | self bump]) size]\nself.n",
+        "r := #(1, 2) collect: [:x | (self.items select: [:y | self bump > 0]) size]\nr",
+        "2 timesRepeat: [(self.items collect: [:y | self bump]) size]\nself.n",
+        "#(1, 2) do: [:x | x > 0 ifTrue: [(self.items collect: [:y | self bump]) size]]\nself.n",
+        // At the method level, and with a pure inner fold.
+        "r := 1 + (self.items inject: 0 into: [:b :y | b + self bump])\nr",
+        "#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + y])]\nself.n",
+        // One that writes an outer local is the Phase 0 check's.
+        "1 to: 2 do: [:i | t := #[#(1, 2) do: [:x | t := t + 1. self.n := self.n + 1], t] size]\nt",
+    ];
+    for body in accepted {
+        let src = in_items_actor(body);
+        let errors = analysis_errors(&src, &[]);
+        assert!(errors.is_empty(), "{src}: {errors:?}");
+    }
+    // Class methods answer right.
+    let class = "Object subclass: Cm\n  classState: n = 0\n  classState: items = #(1, 2)\n\n  class bump =>\n    self.n := self.n + 1\n    self.n\n\n  class probe =>\n    #(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]\n    self.n\n";
+    let errors = analysis_errors(class, &[]);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// PIN-BUG BT-3947 (BT-4003 item 5): a `^` in the body of a loop or collection
+/// operation at the REPL is ignored (measured: `#(1, 2) do: [:x | ^x]` answers
+/// the loop's value, and `[n < 3] whileTrue: [^10]` never ends). Rejected.
+/// Accepted (measured right): a `^` at the root, in a conditional arm, an
+/// evaluated block, a protected block and a stored closure; and every `^` in a
+/// method (item 4: `^` in an actor's tuple-accumulator `do:` answers right).
+#[test]
+fn bt4003_a_return_in_a_repl_loop_body_is_rejected() {
+    for input in [
+        "#(1, 2) do: [:x | ^x]\n",
+        "#(1, 2) collect: [:x | ^x]\n",
+        "3 timesRepeat: [^8]\n",
+        "1 to: 3 do: [:i | ^i]\n",
+        "#(1, 2) inject: 0 into: [:a :x | ^x]\n",
+        "[n < 3] whileTrue: [^10]\n",
+        "[^10] whileFalse\n",
+        "#(1, 2) do: [:x | true ifTrue: [^x]]\n",
+        "true ifTrue: [#(1, 2) do: [:x | ^x]]\n",
+        "w := 0\n#(1, 2, 3) do: [:x | w := w + x. x == 2 ifTrue: [^w]]\n",
+    ] {
+        let errors = analysis_errors(input, &["n"]);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("loop would ignore it")),
+            "REPL {input}: {errors:?}"
+        );
+    }
+    for input in [
+        "^7\n",
+        "true ifTrue: [^3]\n",
+        "[^4] value\n",
+        "[^5] on: Error do: [:e | 0]\n",
+        "[^55] ensure: [0]\n",
+        "b2 := [:x | ^x]\n",
+        "#(1, 2) do: [:x | b2 := [:y | ^y]]\n",
+    ] {
+        let errors = analysis_errors(input, &[]);
+        assert!(errors.is_empty(), "REPL {input}: {errors:?}");
+    }
+    let body = "#(1, 2, 3) do: [:x | t := t + x. x == 2 ifTrue: [^t]]\n-1";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        let errors = analysis_errors(&src, &[]);
+        assert!(errors.is_empty(), "{src}: {errors:?}");
+    }
 }
