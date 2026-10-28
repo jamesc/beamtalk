@@ -398,6 +398,7 @@ fn setup_json_class_side_fixture(
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_variables: vec![],
         type_params: vec![],
@@ -855,6 +856,7 @@ fn setup_intersection_param_fixture() -> (
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
             MethodInfo {
                 selector: "store:".into(),
@@ -869,6 +871,7 @@ fn setup_intersection_param_fixture() -> (
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
             MethodInfo {
                 selector: "describe:".into(),
@@ -883,6 +886,7 @@ fn setup_intersection_param_fixture() -> (
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
         ],
         class_methods: vec![],
@@ -1003,6 +1007,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
             MethodInfo {
                 selector: "serialize".into(),
@@ -1017,6 +1022,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
         ],
         class_methods: vec![],
@@ -1093,6 +1099,7 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
             doc: None,
 
             origin: None,
+            primitive: None,
         })
         .collect();
 

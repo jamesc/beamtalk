@@ -107,6 +107,7 @@ fn test_actor_inheriting_terminate_override_from_cross_file_ancestor_traps_exit(
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

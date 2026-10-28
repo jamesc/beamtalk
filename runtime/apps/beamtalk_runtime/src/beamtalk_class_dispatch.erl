@@ -1056,7 +1056,9 @@ apply_class_extension_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
             ),
             {error, undef_in_body};
         ErrClass:Error:ErrST ->
-            ?LOG_ERROR(
+            %% Relayed to the caller, so debug-level: see
+            %% apply_compiled_class_method/6 (BT-4115).
+            ?LOG_DEBUG(
                 "Class-side extension ~p:~p failed",
                 [ClassName, Selector],
                 #{
@@ -1240,7 +1242,9 @@ apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
             ),
             {error, undef_in_body};
         ErrClass:Error:ErrST ->
-            ?LOG_ERROR(
+            %% Relayed to the caller, so debug-level: see
+            %% apply_compiled_class_method/6 (BT-4115).
+            ?LOG_DEBUG(
                 "Runtime class method ~p:~p failed",
                 [ClassName, Selector],
                 #{
@@ -1284,7 +1288,13 @@ apply_compiled_class_method(
         error:undef:ST ->
             classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST);
         ErrClass:Error:ErrST ->
-            ?LOG_ERROR(
+            %% BT-4115: debug, not error. The error is relayed as {raised, ...}
+            %% and re-raised in the calling process, which owns reporting it
+            %% (an uncaught one still reaches the caller's crash/REPL report).
+            %% At error level every caught `Error signal:` built a formatted
+            %% event here only for the domain filter to drop it; ?LOG_DEBUG's
+            %% level check skips building it.
+            ?LOG_DEBUG(
                 "Class method ~p:~p failed",
                 [ClassName, Selector],
                 #{

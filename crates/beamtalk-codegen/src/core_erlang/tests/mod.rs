@@ -228,6 +228,7 @@ mod arm_local_slot_verifier_corpus;
 mod arm_operand_carrier_corpus;
 mod block_value_arity_agreement;
 mod branch_context;
+mod caller_safe_class_primitive;
 mod cascade_operand_state_corpus;
 mod class_side_operand_producer_corpus;
 mod closed_fun_state_version;

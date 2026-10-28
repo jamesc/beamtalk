@@ -260,12 +260,20 @@ over Elixir from the table.
 - **`on:do:` (8a)** builds the `Error` class object on every entry (a
   `gen_server:call` for its module name) and snapshots class variables: +48
   reductions, +101 words, about 1 µs, for a `try` that costs Elixir nothing.
-- **A raise (8b)**: `Error signal:` is a class send into the Error class
-  process, the method raises there, the class process logs it with
-  `?LOG_ERROR` (dropped by a domain filter after the event is built), the
-  error is relayed back and rewrapped, and building the Beamtalk stack frames
-  scans the whole class table (`module_to_class_map/0`, 128 ETS rows) per
-  raise: +2,645 reductions, +22,347 words, 61 µs, 360x `raise`/`rescue`.
+- **A raise (8b)**: before BT-4115, `Error signal:` was a class send into
+  the Error class process, the method raised there, the class process logged
+  it with `?LOG_ERROR` (dropped by a domain filter after the event was
+  built), the error was relayed back and rewrapped, and building the
+  Beamtalk stack frames scanned the whole class table
+  (`module_to_class_map/0`, 128 ETS rows) per raise: +2,645 reductions,
+  +22,347 words, 61 µs, 360x `raise`/`rescue`. BT-4115 removed all three: a
+  class-literal `Error signal:` calls its caller-safe primitive
+  (`beamtalk_exception_handler:class_signal_message/2`) in the caller, a
+  relayed class-method error is logged at debug level, and the stack frames
+  are built only when `e stackTrace` reads them. A raise now costs about
+  123 reductions and 171 words per operation (8b, single-row diagnosis run),
+  most of it wrapping the caught error and matching it against the handler's
+  class.
 
 ### The five largest costs for a Catalina-like workload
 
@@ -286,7 +294,8 @@ weighted by how often each appears on the path:
 | 5 | Map-threaded locals in iteration blocks | +4 words per element, 8x time | 6b | allocation | Yes: thread as a fold accumulator, as `inject:into:` already does. |
 
 Rarer on a message path but very expensive when hit: a raise (+2,645 red,
-+22,347 words), `self hasField:` in an actor (+812 red, +3,209 words), and
++22,347 words before BT-4115, about +110 red and +135 words after),
+`self hasField:` in an actor (+812 red, +3,209 words), and
 `isKindOf:` (+415 red, +1,358 words).
 
 **Structural vs fixable.** Structural: a sync actor send cannot be cheaper

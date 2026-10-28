@@ -27,6 +27,7 @@ through `beamtalk_class_vars`, never passed or returned.)
     'class_testWith:'/2,
     class_testInternalUndef/1,
     class_testRaise/1,
+    class_testSignal/1,
     class_testScriptExit/1,
     class_testNlrThrow/1,
     class_testWriteThenRaise/1,
@@ -115,6 +116,14 @@ Exercises the ErrClass:Error:ErrST catch branch in invoke_class_method.
 -spec class_testRaise(term()) -> no_return().
 class_testRaise(_ClassSelf) ->
     error(test_deliberate_error).
+
+-doc """
+Zero-argument class method that raises a Beamtalk exception exactly as a
+compiled `Error signal: "boom"` does (BT-4115).
+""".
+-spec class_testSignal(term()) -> no_return().
+class_testSignal(_ClassSelf) ->
+    beamtalk_exception_handler:class_signal_message(<<"boom">>, 'Error').
 
 -doc """
 Zero-argument class method that raises the connected `Program exit:` signal
