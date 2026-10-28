@@ -77,7 +77,7 @@ fn field_assignment_rejection_field(src: &str, module_name: &str) -> String {
 
 mod conditionals;
 mod exception_handling;
-mod family_detector_differential;
+pub(super) mod family_detector_differential;
 mod family_slots;
 mod list_and_loop_value_threading;
 mod match_arm_state_threading;

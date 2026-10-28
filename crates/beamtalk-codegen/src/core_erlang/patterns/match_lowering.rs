@@ -806,36 +806,32 @@ impl CoreErlangGenerator {
 
     /// Compiles the later arms of a match chain once and binds them to a
     /// zero-arity `letrec` label, for an arm that falls through from several
-    /// sites (BT-4141). Returns the label's binding prefix (ending in `in `,
-    /// wrapped around the arm by the caller) and the `apply` every miss site
-    /// uses in place of a copy of the later arms.
+    /// sites (BT-4141). The caller places [`SharedRest::apply`] at every miss
+    /// site in place of a copy of the later arms, then wraps the finished
+    /// arm with [`SharedRest::bind_around`].
     ///
     /// Without it each such arm embedded a full copy of the rest of the
     /// chain at every miss site, so N consecutive Array/Type/binary arms
-    /// emitted O(k^N) Core. `erlc` shares a fallthrough the same way. A
-    /// `letrec` that is only applied is lambda-lifted to a local function
-    /// (no closure is allocated, unlike a `let`-bound fun). The label is
-    /// defined outside the arm's own `case`s, so the later arms' free
-    /// variables resolve exactly as before: the arm's pattern bindings are
-    /// popped before the rest is generated, and threading state (`StateAcc`,
-    /// the producer's base map) is bound outside the whole chain.
+    /// emitted O(k^N) Core. `erlc` shares a fallthrough the same way. The
+    /// label is defined outside the arm's own `case`s, so the later arms'
+    /// free variables resolve exactly as before: the arm's pattern bindings
+    /// are popped before the rest is generated, and threading state
+    /// (`StateAcc`, the producer's base map) is bound outside the whole
+    /// chain.
+    ///
+    /// BT-4242: the label is a `letrec_goto` label, so each miss is a jump
+    /// rather than a local call. This is decided here, once per label, and
+    /// it holds for every label because every miss site the match lowering
+    /// emits is a clause tail (see [`SharedRest`] for the valid-site rule).
     pub(super) fn generate_shared_rest(
         &mut self,
         match_var: &str,
         rest_arms: &[MatchArm],
         threading: Option<&MatchThreading<'_>>,
-    ) -> Result<(Document<'static>, Document<'static>)> {
-        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+    ) -> Result<SharedRest> {
+        let rest = self.generate_match_chain(match_var, rest_arms, threading)?;
         let label = self.fresh_temp_var("Fallthrough");
-        let bind = docvec![
-            "letrec ",
-            leaf::fname(label.clone(), 0),
-            " = fun () -> ",
-            rest_doc,
-            " in "
-        ];
-        let apply = docvec!["apply ", leaf::fname(label, 0), " ()"];
-        Ok((bind, apply))
+        Ok(SharedRest { label, rest })
     }
 
     /// Compiles a single `Pattern::Array` match arm.
@@ -872,7 +868,8 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         // Generate rest AFTER the current arm body to prevent state leakage.
-        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
+        let shared = self.generate_shared_rest(match_var, rest_arms, threading)?;
+        let rest_doc = shared.apply();
 
         // Build body section: element extractions + optional guard check.
         // Use `case 'true' of <'true'> when GUARD ->` (Core Erlang guard position) so that
@@ -907,8 +904,7 @@ impl CoreErlangGenerator {
         let no_match_size = self.fresh_temp_var("NoMatch");
         let no_match_class = self.fresh_temp_var("NoMatch");
 
-        Ok(docvec![
-            rest_bind,
+        Ok(shared.bind_around(docvec![
             "case call 'erlang':'is_map'(",
             leaf::var(match_var.to_string()),
             ") of ",
@@ -937,7 +933,7 @@ impl CoreErlangGenerator {
             "<'false'> when 'true' -> ",
             rest_doc,
             " end"
-        ])
+        ]))
     }
 
     /// Compiles a top-level binary arm with dependent sizes (BT-4096).
@@ -1079,7 +1075,8 @@ impl CoreErlangGenerator {
         let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
-        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
+        let shared = self.generate_shared_rest(match_var, rest_arms, threading)?;
+        let rest_doc = shared.apply();
 
         // Each level runs after the outer pattern and every earlier hoisted
         // binary have matched, so a segment size may name their variables
@@ -1131,8 +1128,7 @@ impl CoreErlangGenerator {
         }
 
         let fallthrough = self.fresh_temp_var("NoMatch");
-        Ok(docvec![
-            rest_bind,
+        Ok(shared.bind_around(docvec![
             "case ",
             leaf::var(match_var.to_string()),
             " of <",
@@ -1144,7 +1140,7 @@ impl CoreErlangGenerator {
             "> when 'true' -> ",
             rest_doc,
             " end"
-        ])
+        ]))
     }
 
     fn generate_segmented_binary_arm(
@@ -1170,7 +1166,8 @@ impl CoreErlangGenerator {
         let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
-        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
+        let shared = self.generate_shared_rest(match_var, rest_arms, threading)?;
+        let rest_doc = shared.apply();
 
         let plan = plan_binary_split(segments);
         debug_assert!(
@@ -1183,11 +1180,8 @@ impl CoreErlangGenerator {
         let (scrutinee_prefix, scrutinee) = self.binary_match_scrutinee(match_var);
         let levels =
             self.build_segmented_levels(&scrutinee, arm.pattern.span(), segments, &plan)?;
-        Ok(docvec![
-            rest_bind,
-            scrutinee_prefix,
-            self.assemble_segmented_levels(levels, guard_part, body_doc, &rest_doc)
-        ])
+        let arm_doc = self.assemble_segmented_levels(levels, guard_part, body_doc, &rest_doc);
+        Ok(shared.bind_around(docvec![scrutinee_prefix, arm_doc]))
     }
 
     /// Emits one [`SegmentedLevel`] per chunk of a split plan (BT-4096).
@@ -2232,6 +2226,55 @@ fn nested_split_span(pattern: &Pattern) -> Option<Span> {
         | Pattern::Nil(_)
         | Pattern::Variable(_)
         | Pattern::Type { .. } => None,
+    }
+}
+
+/// A match arm's shared fallthrough label
+/// ([`CoreErlangGenerator::generate_shared_rest`]): the later arms, compiled
+/// once, bound as a `letrec_goto` label (BT-4242).
+///
+/// `erlc` lowers a `letrec` annotated `letrec_goto` (`beam_core_to_ssa`,
+/// which replaced `v3_kernel`/`beam_kernel_to_ssa` in OTP 27, the oldest
+/// supported major) into a block label, and every `apply` of it into an
+/// unconditional branch, so a miss costs a jump instead of a local call
+/// with the label's free variables passed as arguments. It does not check
+/// where the `apply` sits, so the annotation is only sound when every apply
+/// is in tail position of the `letrec` body: a clause body of a tail
+/// `case`, the body of a tail `let`/`do`, the `of` body or the catch
+/// handler of a tail `try` (the handler runs after the protected region
+/// has ended). An apply anywhere else is silently miscompiled: one under a
+/// `let` argument makes the label's value the value of the whole `letrec`,
+/// skipping the rest of the `let`. Inside a `fun` it is a different
+/// function, and inside a `try` argument it is still in the protected
+/// region. The match lowering only ever places [`Self::apply`] as a clause
+/// body or a catch handler, so every label qualifies; the test suite checks
+/// the tail-position rule over the emitted Core of the match shapes and of
+/// the whole stdlib/examples corpus (`tests::match_fallthrough_goto`).
+pub(super) struct SharedRest {
+    label: String,
+    rest: Document<'static>,
+}
+
+impl SharedRest {
+    /// The miss-site jump to the later arms. Only valid in tail position of
+    /// the arm passed to [`Self::bind_around`] (see [`SharedRest`]).
+    pub(super) fn apply(&self) -> Document<'static> {
+        docvec!["apply ", leaf::fname(self.label.clone(), 0), " ()"]
+    }
+
+    /// Binds the label around the finished arm:
+    /// `( letrec 'L'/0 = fun () -> <rest> in <arm> -| ['letrec_goto','no_inline'] )`,
+    /// the annotation `erlc`'s own `v3_core` emits for its labels.
+    pub(super) fn bind_around(self, arm: Document<'static>) -> Document<'static> {
+        docvec![
+            "( letrec ",
+            leaf::fname(self.label, 0),
+            " = fun () -> ",
+            self.rest,
+            " in ",
+            arm,
+            " -| ['letrec_goto', 'no_inline'] )"
+        ]
     }
 }
 

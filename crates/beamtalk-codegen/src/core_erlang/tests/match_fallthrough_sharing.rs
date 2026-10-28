@@ -3,13 +3,16 @@
 
 //! BT-4141: a match chain's fallthrough is bound once (a `letrec` label per
 //! multi-site arm) and applied at every miss site, so emitted Core grows
-//! linearly in the number of arms. Before, every Array/Type/binary arm
+//! linearly in the number of arms. Since BT-4242 the label is a
+//! `letrec_goto` label, and every test here also checks its tail-position
+//! rule (see `match_fallthrough_goto`). Before, every Array/Type/binary arm
 //! embedded a full copy of the later arms at each miss site, and N such arms
 //! emitted O(k^N) copies of the trailing arms.
 //!
 //! Each arm body is a distinct integer literal, so counting it in the output
 //! counts how many copies of that arm the chain emitted.
 
+use super::match_fallthrough_goto::assert_goto_labels_in_tail_position;
 use super::{assert_compiles_through_erlc, codegen};
 
 /// Occurrences of the integer literal `n` as a whole token in `out`.
@@ -42,6 +45,7 @@ fn assert_each_arm_once(src: &str, bodies: impl IntoIterator<Item = u32>) {
         );
     }
     assert_compiles_through_erlc("test", &out);
+    assert_goto_labels_in_tail_position(&out);
 }
 
 /// The #4609 review case: tuple-wrapped binary arms (HTTP-method dispatch).
@@ -134,5 +138,6 @@ fn threaded_matches_over_shared_fallthrough_compile() {
             "expected a shared label:\n{out}"
         );
         assert_compiles_through_erlc("test", &out);
+        assert_goto_labels_in_tail_position(&out);
     }
 }
