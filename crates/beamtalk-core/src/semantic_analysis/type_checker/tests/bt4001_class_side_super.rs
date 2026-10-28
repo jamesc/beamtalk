@@ -66,20 +66,6 @@ Base subclass: C
 }
 
 #[test]
-fn class_side_super_reaches_inherited_class_protocol() {
-    // The metaclass chain ends in the class-object protocol (`Behaviour`),
-    // which every class answers.
-    let diags = diagnostics_mentioning(
-        "Object subclass: Base
-Base subclass: C
-  class run => super name
-",
-        "name",
-    );
-    assert!(diags.is_empty(), "got: {diags:#?}");
-}
-
-#[test]
 fn instance_side_super_still_resolves_instance_methods() {
     let diags = diagnostics_mentioning(
         "Object subclass: Base

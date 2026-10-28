@@ -91,15 +91,15 @@ impl TypeChecker {
     /// Returns true if `expr` is `self` or `super` inside a class method — a
     /// send to it resolves against class-side methods (BT-4001: a class-side
     /// `super` walks the superclass's class methods, so its receiver type is
-    /// the superclass and the same class-side check applies). Unwraps
-    /// parentheses so `(self) foo:` is treated like `self foo:`.
+    /// the superclass and the same class-side check applies). A send
+    /// receiver is already peeled of parentheses by `ast::normalize`
+    /// (BT-4059), so `(self) foo:` arrives as `self foo:`.
     pub(in crate::semantic_analysis::type_checker) fn is_class_method_self_or_super(
         expr: &Expression,
         env: &TypeEnv,
     ) -> bool {
-        let unwrapped = expr.unwrap_parens();
         env.in_class_method
-            && (Self::is_self_receiver(unwrapped) || matches!(unwrapped, Expression::Super(_)))
+            && (Self::is_self_receiver(expr) || matches!(expr, Expression::Super(_)))
     }
 
     /// Returns true if `expr` resolves to a class-side receiver — either a
@@ -110,8 +110,9 @@ impl TypeChecker {
         expr: &Expression,
         env: &TypeEnv,
     ) -> bool {
-        matches!(expr.unwrap_parens(), Expression::ClassReference { .. })
-            || Self::is_class_method_self_or_super(expr, env)
+        let unwrapped = expr.unwrap_parens();
+        matches!(unwrapped, Expression::ClassReference { .. })
+            || Self::is_class_method_self_or_super(unwrapped, env)
     }
 }
 /// Class-protocol selectors that must NOT be intercepted as FFI module lookups.

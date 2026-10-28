@@ -36204,7 +36204,7 @@
         "process",
         "subclassing"
       ],
-      "source": "// BT-4001: superclass of Bt4001ClassSuperActorChild. The instance-side\n// `peek:` answers something else, so a class-side `super peek:` that wrongly\n// resolved against instance methods would be visible.\n\nActor subclass: Bt4001ClassSuperActorBase\n\n  peek: x => x + 1000\n\n  class peek: x => x + 100",
+      "source": "// BT-4001: superclass of Bt4001ClassSuperActorChild. The instance-side\n// `peek:` answers something else, so a class-side `super peek:` that wrongly\n// resolved against instance methods would be visible.\n\nActor subclass: Bt4001ClassSuperActorBase\n\n  class peek: x => x + 100\n\n  peek: x => x + 1000",
       "explanation": "BT-4001: superclass of Bt4001ClassSuperActorChild. The instance-side `peek:` answers something else, so a class-side `super peek:` that wrongly resolved against instance methods would be visible."
     },
     {
@@ -36250,7 +36250,7 @@
         "peek:",
         "subclassing"
       ],
-      "source": "// BT-4001: superclass of the Object-kind class-side `super` fixtures.\n\nObject subclass: Bt4001ClassSuperObjectBase\n\n  peek: x => x + 1000\n\n  class peek: x => x + 100",
+      "source": "// BT-4001: superclass of the Object-kind class-side `super` fixtures.\n\nObject subclass: Bt4001ClassSuperObjectBase\n\n  class peek: x => x + 100\n\n  peek: x => x + 1000",
       "explanation": "BT-4001: superclass of the Object-kind class-side `super` fixtures."
     },
     {
