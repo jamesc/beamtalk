@@ -24,9 +24,11 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
 /// Collection classes whose instances reach Erlang as plain terms (lists,
-/// maps, tuples, sets), so a `String` element inside one is visible to — and
+/// maps, tuples), so a `String` element inside one is visible to — and
 /// compared by — the Erlang callee (BT-4243, [`TypeChecker::nests_string`]).
-const ERLANG_TERM_COLLECTIONS: &[&str] = &["List", "Dictionary", "Tuple", "Set"];
+/// `Set` is not one: it is the tagged map `#{'$beamtalk_class' => 'Set', …}`,
+/// not an OTP `sets` value, so no stock function compares into it.
+const ERLANG_TERM_COLLECTIONS: &[&str] = &["List", "Dictionary", "Tuple"];
 
 fn is_erlang_term_collection(class_name: &str) -> bool {
     ERLANG_TERM_COLLECTIONS.contains(&class_name)
@@ -236,8 +238,8 @@ impl TypeChecker {
     /// unwrap does not reach.
     ///
     /// The collections are the ones that reach Erlang as plain terms:
-    /// `List(E)`, `Dictionary(K, V)` (keys and values), `Tuple(T1, …, Tn)`
-    /// and `Set(E)`. Nesting is followed recursively through those same
+    /// `List(E)`, `Dictionary(K, V)` (keys and values) and `Tuple(T1, …, Tn)`.
+    /// Nesting is followed recursively through those same
     /// collections (`List(List(String))`, `Dictionary(Symbol, Tuple(String,
     /// Integer))` both count), and through unions (`List(String | Nil)`,
     /// `List(String) | Nil`), since one `String` member is evidence enough.
@@ -245,7 +247,7 @@ impl TypeChecker {
     /// A bare `String` is *not* nested: the boundary unwraps it. `Dynamic`
     /// or missing element types never count (ADR 0100 Rule 1: no warning
     /// without evidence), and neither do Strings inside other classes
-    /// (`Result(String, E)`, user objects) — those are Beamtalk objects, not
+    /// (`Result(String, E)`, `Set(String)`, user objects) — those are Beamtalk objects, not
     /// collections an Erlang function compares against.
     pub(in crate::semantic_analysis::type_checker) fn nests_string(ty: &InferredType) -> bool {
         match ty {

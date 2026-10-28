@@ -147,14 +147,6 @@ fn tuple_with_string_element_hints() {
 }
 
 #[test]
-fn set_of_string_hints() {
-    assert_one_hint(
-        &probe("Set(String)", "Erlang sets is_element: \"a\" with: xs"),
-        "sets:is_element/2",
-    );
-}
-
-#[test]
 fn deeper_nesting_hints() {
     // Recursive: a String two collections down is still tagged.
     assert_one_hint(
@@ -277,6 +269,8 @@ fn non_string_elements_are_silent() {
 fn strings_inside_non_collection_generics_are_silent() {
     // A Result is a Beamtalk object, not a collection Erlang compares into.
     assert_no_hint(&probe("Result(String, Error)", "Erlang erlang phash2: xs"));
+    // A Set is a tagged Beamtalk map, not an OTP `sets` value.
+    assert_no_hint(&probe("Set(String)", "Erlang erlang phash2: xs"));
 }
 
 #[test]

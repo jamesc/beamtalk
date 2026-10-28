@@ -634,8 +634,8 @@ same message at the same span. No operation is surface-specific.
 ### `ffi-nested-string` diagnostic (ADR 0140 Rejection, BT-4243)
 
 An argument of an inline `Erlang <mod> <fn>:` call to a stock module whose
-static type nests a `String` inside a `List`, `Dictionary` (keys or values),
-`Tuple` or `Set` (at any depth, including through unions) gets an
+static type nests a `String` inside a `List`, `Dictionary` (keys or values)
+or `Tuple` (at any depth, including through unions) gets an
 `ffi-nested-string` hint at the argument: the FFI boundary unwraps only
 top-level `String` arguments, so the nested ones reach Erlang tagged and an
 Erlang comparison against raw binaries silently misses. A `native:` `Object`'s

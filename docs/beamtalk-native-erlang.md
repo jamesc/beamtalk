@@ -110,7 +110,7 @@ Erlang maps get: "k" with: #{"k" => 1}                 // raises RuntimeError: k
 
 For lookups like these, use the Beamtalk-side operations (`includes:`, `detect:`, `at:`), which compare `String`s by value. If an Erlang API must see raw binaries throughout, convert them in a native module you write.
 
-The compiler points these calls out. When an argument's static type nests a `String` inside a `List`, `Dictionary` (keys or values), `Tuple` or `Set`, at any depth, the call gets an `ffi-nested-string` hint at that argument:
+The compiler points these calls out. When an argument's static type nests a `String` inside a `List`, `Dictionary` (keys or values) or `Tuple`, at any depth, the call gets an `ffi-nested-string` hint at that argument:
 
 ```text
 hint[ffi-nested-string]: Strings nested in this argument reach lists:member/2 as tagged Beamtalk Strings; an Erlang comparison against raw binaries won't match

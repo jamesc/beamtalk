@@ -683,7 +683,7 @@ pub enum DiagnosticCategory {
     /// guarantee.
     ActorStateAbroad,
     /// A `String` nested inside a collection argument (`List(String)`,
-    /// `Dictionary` keys or values, `Tuple(…, String, …)`, `Set(String)`, at
+    /// `Dictionary` keys or values, `Tuple(…, String, …)`, at
     /// any depth) of an inline `Erlang <mod> <fn>:` call or a `native:`
     /// `Object` `self delegate` to a stock (non-Beamtalk-owned) module
     /// (BT-4243). The FFI boundary unwraps only top-level `String`s, so the
