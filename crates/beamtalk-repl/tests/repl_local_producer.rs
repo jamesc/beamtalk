@@ -102,7 +102,7 @@ fn expected_producers(expressions: &[Expression]) -> usize {
 
 /// The distinct construct-tuple carrier variables of `code`.
 fn carriers(code: &str) -> usize {
-    code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+    code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '@'))
         .filter(|word| word.starts_with("_ThreadedResult"))
         .collect::<HashSet<_>>()
         .len()

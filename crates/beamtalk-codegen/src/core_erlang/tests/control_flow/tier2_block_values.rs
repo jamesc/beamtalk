@@ -167,24 +167,24 @@ fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
     // shift whenever unrelated codegen changes the counter sequence before
     // this point).
     assert!(
-        regex::Regex::new(r"let Blk = fun \(_\w+, StateAcc\) ->")
+        regex::Regex::new(r"let Blk = fun \(_[\w@]+, StateAcc\) ->")
             .unwrap()
             .is_match(&code),
         "blk must compile to a 2-arity Tier 2 fun (block param + trailing \
          state accumulator). Got: {code}"
     );
     assert!(
-        regex::Regex::new(r"apply _Fun\w* \(_item\w*, State\)")
+        regex::Regex::new(r"apply _Fun[\w@]* \(_item[\w@]*, State\)")
             .unwrap()
             .is_match(&code),
         "the `blk value: item` call site must apply the block with the \
          outer method's State as a trailing argument. Got: {code}"
     );
     assert!(
-        regex::Regex::new(r"call 'erlang':'element'\(1, _T2Tuple\w*\)")
+        regex::Regex::new(r"call 'erlang':'element'\(1, _T2Tuple[\w@]*\)")
             .unwrap()
             .is_match(&code)
-            && regex::Regex::new(r"call 'erlang':'element'\(2, _T2Tuple\w*\)")
+            && regex::Regex::new(r"call 'erlang':'element'\(2, _T2Tuple[\w@]*\)")
                 .unwrap()
                 .is_match(&code),
         "the call site must unpack the returned {{Result, NewState}} tuple \
@@ -449,7 +449,7 @@ fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
          Tier 2 stateful protocol. Got: {code}"
     );
     assert!(
-        regex::Regex::new(r"is_function'\(_ValRecv\w*\) of")
+        regex::Regex::new(r"is_function'\(_ValRecv[\w@]*\) of")
             .unwrap()
             .is_match(&code),
         "must use the plain is_function/1 guard on the hoisted receiver \
@@ -493,7 +493,7 @@ fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() 
     // the `try` now instead of inlined directly as `erlang:'+'`'s 2nd arg.
     assert!(
         regex::Regex::new(
-            r"let _Synced\w* = let _T2SubTuple\w* = .*apply.*in call 'erlang':'element'\(1, _T2SubTuple\w*\) in .*let _BinRight\w* = _Synced\w* in try call 'erlang':'\+'\("
+            r"let _Synced[\w@]* = let _T2SubTuple[\w@]* = .*apply.*in call 'erlang':'element'\(1, _T2SubTuple[\w@]*\) in .*let _BinRight[\w@]* = _Synced[\w@]* in try call 'erlang':'\+'\("
         )
         .unwrap()
         .is_match(&code),
@@ -530,7 +530,7 @@ fn test_bt2815_named_local_var_captured_mutation_rebinds_after_call() {
 
     assert!(
         regex::Regex::new(
-            r"let State1 = call 'erlang':'element'\(2, _T2Tuple\w*\) in let Outer\w* = call 'maps':'get'\('__local__outer', State1\)"
+            r"let State1 = call 'erlang':'element'\(2, _T2Tuple[\w@]*\) in let Outer[\w@]* = call 'maps':'get'\('__local__outer', State1\)"
         )
         .unwrap()
         .is_match(&code),
@@ -558,7 +558,7 @@ fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
 
     assert!(
         regex::Regex::new(
-            r"let Outer\w* = call 'maps':'get'\('__local__outer', State\w*\) in let _Result = Outer"
+            r"let Outer[\w@]* = call 'maps':'get'\('__local__outer', State[\w@]*\) in let _Result = Outer"
         )
         .unwrap()
         .is_match(&code),

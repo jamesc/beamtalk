@@ -2911,7 +2911,7 @@ fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
     // literal quoted atom like 'Srv', so a successful match here already
     // proves 'class' is a variable, not a compile-time literal.
     let reraise_with_breadcrumb = regex::Regex::new(
-        r"call 'beamtalk_exception_handler':'reraise'\(\w+, \w+, \w+, ~\{'selector' => 'setup', 'class' => (\w+)\}~\)",
+        r"call 'beamtalk_exception_handler':'reraise'\([\w@]+, [\w@]+, [\w@]+, ~\{'selector' => 'setup', 'class' => ([\w@]+)\}~\)",
     )
     .unwrap();
     let captures = reraise_with_breadcrumb.captures(&code).unwrap_or_else(|| {
@@ -2971,7 +2971,7 @@ fn test_self_call_error_branch_sealed_direct_call_breadcrumb() {
          breadcrumb 'class' via a runtime lookup_class(self()) call. Got:\n{code}"
     );
     let reraise_with_breadcrumb = regex::Regex::new(
-        r"call 'beamtalk_exception_handler':'reraise'\(\w+, \w+, \w+, ~\{'selector' => 'setup', 'class' => \w+\}~\)",
+        r"call 'beamtalk_exception_handler':'reraise'\([\w@]+, [\w@]+, [\w@]+, ~\{'selector' => 'setup', 'class' => [\w@]+\}~\)",
     )
     .unwrap();
     assert!(
@@ -3058,7 +3058,7 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
          breadcrumb 'class' via a runtime lookup_class(self()) call. Got:\n{code}"
     );
     let reraise_with_breadcrumb = regex::Regex::new(
-        r"call 'beamtalk_exception_handler':'reraise'\(\w+, \w+, \w+, ~\{'selector' => 'eachItem:', 'class' => \w+\}~\)",
+        r"call 'beamtalk_exception_handler':'reraise'\([\w@]+, [\w@]+, [\w@]+, ~\{'selector' => 'eachItem:', 'class' => [\w@]+\}~\)",
     )
     .unwrap();
     assert!(
