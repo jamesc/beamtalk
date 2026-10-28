@@ -19,21 +19,11 @@
 //! a character no Beamtalk identifier can contain.
 
 use super::{assert_compiles_through_erlc, codegen};
-use crate::core_erlang::variable_context::{TEMP_MARKER, VariableContext};
+use crate::core_erlang::variable_context::{TEMP_MARKER, VariableContext, text_mentions_var};
 
 /// Counter values swept by the repros: wide enough to cover every counter a
 /// `_` in these small methods can be allocated.
 const SWEEP: std::ops::RangeInclusive<usize> = 1..=40;
-
-/// Whether `name` occurs in `out` as a whole Core Erlang variable token.
-fn mentions(out: &str, name: &str) -> bool {
-    let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '@';
-    out.match_indices(name).any(|(at, _)| {
-        let before = out[..at].chars().next_back();
-        let after = out[at + name.len()..].chars().next();
-        !before.is_some_and(is_name_char) && !after.is_some_and(is_name_char)
-    })
-}
 
 /// A user `_WildcardN` beside a `_` in the same pattern binds its own Core
 /// variable: the module compiles and the arm body returns the user binding.
@@ -51,7 +41,7 @@ fn user_wildcard_name_beside_wildcard_is_distinct_in_pattern() {
             "`_` aliased user `{user}` in one pattern.\nCore:\n{out}"
         );
         assert!(
-            mentions(&out, &user),
+            text_mentions_var(&out, &user),
             "user `{user}` must stay bound.\nCore:\n{out}"
         );
         assert_compiles_through_erlc("test", &out);

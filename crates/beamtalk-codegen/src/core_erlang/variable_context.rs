@@ -36,6 +36,19 @@ use std::fmt::Write;
 /// the user names it. Pinned by `tests::fresh_temp_namespace`.
 pub(super) const TEMP_MARKER: char = '@';
 
+/// Whether `text` (rendered Core Erlang) references variable `var` as a whole
+/// token, not as part of a longer name. A name character is anything a Core
+/// variable this compiler emits can contain: ASCII alphanumerics, `_`, and
+/// [`TEMP_MARKER`]. A match inside a string or atom literal still counts.
+pub(super) fn text_mentions_var(text: &str, var: &str) -> bool {
+    let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == TEMP_MARKER;
+    text.match_indices(var).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + var.len()..].chars().next();
+        !before.is_some_and(is_name_char) && !after.is_some_and(is_name_char)
+    })
+}
+
 /// Variable binding and scope management for code generation.
 ///
 /// This aggregate encapsulates all variable-related state and operations,
