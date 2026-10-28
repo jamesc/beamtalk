@@ -385,6 +385,33 @@ impl ExpressionStatement {
 
 // --- Shared Kernel: Name Conversions ---
 
+/// Whether an Erlang module atom names a Beamtalk-owned module (BT-4153):
+/// `beamtalk_*` hand-written runtime helpers and `bt@*` compiler-generated
+/// class modules. Every other module is *stock*: the FFI boundary unwraps
+/// its top-level `String` arguments and charlist-coerces its results.
+///
+/// **DDD Context:** Shared Kernel — the one Rust copy of this rule. Code
+/// generation emits the `stock`/`beamtalk` coercion mode from it, and the
+/// type checker's `ffi-nested-string` hint (BT-4243) stays silent for the
+/// modules it names. The Erlang side is
+/// `beamtalk_erlang_proxy:is_beamtalk_module/1`; the conformance pair
+/// `test_is_beamtalk_module` (`beamtalk-codegen` `core_erlang/util.rs`) and
+/// `is_beamtalk_module_conformance_test`
+/// (`beamtalk_erlang_proxy_tests.erl`) assert the same table on both sides.
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::ast::is_beamtalk_erlang_module;
+/// assert!(is_beamtalk_erlang_module("beamtalk_stream"));
+/// assert!(is_beamtalk_erlang_module("bt@stdlib@list"));
+/// assert!(!is_beamtalk_erlang_module("lists"));
+/// ```
+#[must_use]
+pub fn is_beamtalk_erlang_module(module_name: &str) -> bool {
+    module_name.starts_with("beamtalk_") || module_name.starts_with("bt@")
+}
+
 /// Converts a `CamelCase` class name to a `snake_case` Erlang module name.
 ///
 /// **DDD Context:** Shared Kernel — used by both Code Generation and Language Service.

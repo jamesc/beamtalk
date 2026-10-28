@@ -631,6 +631,31 @@ same message at the same span. No operation is surface-specific.
 - A tuple-pattern arm (`{a, b}`) is never a catch-all, even when every element
   is a variable.
 
+### `ffi-nested-string` diagnostic (ADR 0140 Rejection, BT-4243)
+
+An argument of an inline `Erlang <mod> <fn>:` call to a stock module whose
+static type nests a `String` inside a `List`, `Dictionary` (keys or values),
+`Tuple` or `Set` (at any depth, including through unions) gets an
+`ffi-nested-string` hint at the argument: the FFI boundary unwraps only
+top-level `String` arguments, so the nested ones reach Erlang tagged and an
+Erlang comparison against raw binaries silently misses. A `native:` `Object`'s
+`self delegate` method gets the same hint at each such declared parameter. It
+is computed by the `beamtalk-core` type checker (`inference/send/ffi.rs`), so
+every surface that reports semantic diagnostics (CLI `build`/`check`/`lint`/
+`test`, REPL eval and load, LSP `textDocument/publishDiagnostics`, MCP `lint`/
+`diagnostic_summary`) reports the same message at the same span. No operation
+is surface-specific.
+
+- Severity `Hint`, category `FfiNestedString`; site- or method-level `@expect
+  ffi_nested_string`, `[diagnostics]` key `ffi-nested-string` (`"off"` drops
+  it).
+- Silent on a top-level `String`, on `Dynamic`/unknown element types (ADR 0100
+  Rule 1), on Strings inside non-collection generics (`Result(String, E)`), and
+  on Beamtalk-owned modules (`beamtalk_*`, `bt@*`, the shared
+  `is_beamtalk_erlang_module` rule). A `native:` `Actor` (delegates via
+  `gen_server:call`) and a standalone `Cls >> sel => self delegate` definition
+  are not checked.
+
 ### Outer-local threading errors (ADR 0131 §6 and Phase 0, BT-3745)
 
 Three compile errors, computed in `beamtalk-core` semantic analysis

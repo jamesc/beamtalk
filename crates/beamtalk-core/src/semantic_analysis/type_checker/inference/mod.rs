@@ -148,6 +148,28 @@ impl TypeChecker {
                 );
             }
 
+            // BT-4243: a `native:` Object's `self delegate` methods pass their
+            // parameters through the stock-mode FFI boundary, like inline FFI
+            // (ADR 0101). A `native:` Actor delegates through
+            // `gen_server:call` to the module's own callbacks instead, so it
+            // is not covered.
+            if let Some(backing) = class.backing_module.as_ref() {
+                if !hierarchy.is_actor_subclass(&class.name.name) {
+                    for (method, is_class_method) in class
+                        .methods
+                        .iter()
+                        .map(|m| (m, false))
+                        .chain(class.class_methods.iter().map(|m| (m, true)))
+                    {
+                        self.check_native_delegate_nested_string_params(
+                            backing.name.as_str(),
+                            method,
+                            is_class_method,
+                        );
+                    }
+                }
+            }
+
             // Infer state field default-value types once, before validating
             // them — see `state_default_types`'s doc on `TypeChecker` (BT-3481).
             self.infer_state_default_types(class, hierarchy);

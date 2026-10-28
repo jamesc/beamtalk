@@ -1817,6 +1817,8 @@ pub fn to_module_name(class_name: &str) -> String {
 
 /// Whether an Erlang module atom names a Beamtalk-owned module (BT-4153).
 ///
+/// Delegates to [`beamtalk_core::ast::is_beamtalk_erlang_module`] (Shared
+/// Kernel), which the type checker's `ffi-nested-string` hint also uses.
 /// Mirrors `beamtalk_erlang_proxy:is_beamtalk_module/1`: `beamtalk_*`
 /// hand-written runtime helpers and `bt@*` compiler-generated class modules.
 /// Codegen precomputes this for statically-known FFI targets and emits the
@@ -1830,7 +1832,7 @@ pub fn to_module_name(class_name: &str) -> String {
 /// its own test) stays green on both sides while codegen and runtime
 /// diverge — so update both tables together, never one alone.
 pub(super) fn is_beamtalk_module(module_name: &str) -> bool {
-    module_name.starts_with("beamtalk_") || module_name.starts_with("bt@")
+    beamtalk_core::ast::is_beamtalk_erlang_module(module_name)
 }
 
 /// The `stock`/`beamtalk` coercion-mode atom to emit for an FFI call to
