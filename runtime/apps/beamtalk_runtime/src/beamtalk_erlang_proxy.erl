@@ -1005,6 +1005,13 @@ cannot handle the `{beamtalk_string, Bin}` representation. Shallow by
 design — one `map` over the arg list, no traversal — so the common case
 (binaries, numbers, atoms) pays almost nothing; nested tags are handled
 by `deep_unwrap_strings/1` on the `badarg` retry path instead.
+
+Shallow is also what lets a container round-trip: `lists:reverse/1` of a
+list of Strings answers Strings, where a deep unwrap would answer Binaries
+(BT-4223). The cost is that a callee comparing a top-level arg against
+nested elements (`lists:member/2`, `maps:get/2`) sees a raw binary against
+tagged Strings; that hazard is documented for users in
+`docs/beamtalk-native-erlang.md` (Strings at the FFI boundary).
 """.
 -spec unwrap_string_args(list()) -> list().
 unwrap_string_args(Args) ->

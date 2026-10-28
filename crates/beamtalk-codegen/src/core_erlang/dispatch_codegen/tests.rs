@@ -4,9 +4,10 @@
 use super::{class_self_send_reflective_primitive, is_class_auto_export_selector};
 use crate::core_erlang::CoreErlangGenerator;
 use crate::core_erlang::expr_shape::is_character_typed_receiver;
+use crate::core_erlang::gen_server::SpawnVariant;
 use beamtalk_core::ast::{
-    Block, Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector,
-    MethodDefinition, TypeAnnotation,
+    Block, ClassDefinition, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
+    MessageSelector, MethodDefinition, TypeAnnotation,
 };
 use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
 use std::collections::BTreeSet;
@@ -299,7 +300,7 @@ fn test_generate_super_send_value_context_uses_super_value() {
 fn test_generate_actor_spawn_non_repl() {
     let mut generator = CoreErlangGenerator::new("test");
     let doc = generator
-        .generate_actor_spawn_qualified("Counter", None, None)
+        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Plain)
         .unwrap();
     let output = doc.to_pretty_string();
     assert!(
@@ -310,6 +311,100 @@ fn test_generate_actor_spawn_non_repl() {
         output.contains("counter"),
         "spawn should reference module. Got: {output}"
     );
+}
+
+#[test]
+fn test_generate_actor_spawn_monitored_non_repl() {
+    // BT-4104: `Counter spawnMonitored` calls the module's own
+    // `spawn_monitored/0` in the sender's process.
+    let mut generator = CoreErlangGenerator::new("test");
+    let doc = generator
+        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Monitored)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains(":'spawn_monitored'()"),
+        "spawnMonitored should call spawn_monitored/0. Got: {output}"
+    );
+    assert!(
+        !output.contains("'spawn'("),
+        "spawnMonitored must not call spawn/0. Got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_actor_spawn_monitored_repl_registers_pair_actor() {
+    // BT-4104: in the REPL the registry gets the pid of the pair's actor
+    // (element 4 of element 1), and the whole pair is answered.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.bind_var("__bindings__", "Bindings");
+    let doc = generator
+        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Monitored)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.matches(":'spawn_monitored'()").count() == 2,
+        "both REPL arms should call spawn_monitored/0. Got: {output}"
+    );
+    assert!(
+        output.contains(
+            "let SpawnPid = call 'erlang':'element'(4, call 'erlang':'element'(1, SpawnResult)) in"
+        ),
+        "REPL registration must take the pid from the pair's actor. Got: {output}"
+    );
+    assert!(
+        output.contains("register_spawned"),
+        "REPL variant must register the actor. Got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_actor_spawn_repl_registers_plain_result() {
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.bind_var("__bindings__", "Bindings");
+    let doc = generator
+        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Plain)
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("let SpawnPid = call 'erlang':'element'(4, SpawnResult) in"),
+        "plain REPL spawn takes the pid from the actor itself. Got: {output}"
+    );
+}
+
+#[test]
+fn test_spawn_variant_of_selector() {
+    assert_eq!(
+        SpawnVariant::of_selector("spawn", 0),
+        Some(SpawnVariant::Plain)
+    );
+    assert_eq!(
+        SpawnVariant::of_selector("spawnWith:", 1),
+        Some(SpawnVariant::Plain)
+    );
+    assert_eq!(
+        SpawnVariant::of_selector("spawnMonitored", 0),
+        Some(SpawnVariant::Monitored)
+    );
+    assert_eq!(
+        SpawnVariant::of_selector("spawnMonitoredWith:", 1),
+        Some(SpawnVariant::Monitored)
+    );
+    assert_eq!(SpawnVariant::of_selector("spawnAs:", 1), None);
+    assert_eq!(SpawnVariant::of_selector("spawnMonitored", 1), None);
+}
+
+#[test]
+fn test_supervisor_spawn_selector_includes_monitored() {
+    // BT-4104: a supervisor receiver of the monitored selectors is routed to
+    // `beamtalk_supervisor:class_start/4` (which raises unsupported), never
+    // to a `spawn_monitored` export supervisor modules do not have.
+    assert!(super::is_supervisor_spawn_selector("spawnMonitored", 0));
+    assert!(super::is_supervisor_spawn_selector(
+        "spawnMonitoredWith:",
+        1
+    ));
+    assert!(!super::is_supervisor_spawn_selector("spawnMonitored", 1));
 }
 
 #[test]
@@ -813,9 +908,8 @@ fn if_true_if_false_recurses_through_nested_branches() {
 
 /// BT-4161: shapes that must NOT be transparent. An empty block answers
 /// `nil`; a non-block branch argument cannot be inspected (whatever its
-/// `value` answers is dynamically typed); a cast (`!`) always evaluates to
-/// `'ok'`; and single-branch `ifTrue:`/`ifFalse:` answer the receiver
-/// boolean on the untaken path, so they stay conservatively unrecognized.
+/// `value` answers is dynamically typed); and a cast (`!`) always evaluates
+/// to `'ok'`. (Single-branch forms are covered by the BT-4181 tests below.)
 #[test]
 fn if_true_if_false_rejects_untyped_shapes() {
     // Empty taken branch answers nil.
@@ -844,17 +938,193 @@ fn if_true_if_false_rejects_untyped_shapes() {
     };
     *is_cast = true;
     assert!(!is_character_typed_receiver(&cast));
+}
 
-    // Single-branch conditionals are out of scope (boolean self, not a
-    // Character, on the untaken path).
-    let if_true_only = Expression::MessageSend {
-        receiver: Box::new(bool_ident("true")),
-        selector: MessageSelector::Keyword(vec![KeywordPart::new("ifTrue:", s())]),
-        arguments: vec![block_answering(character_value_call(int_lit(54)))],
+/// Builds `<receiver> <keyword> <block>` — a single-block boolean send
+/// (`ifTrue:`, `ifFalse:`, `and:`, `or:`).
+fn single_branch(receiver: Expression, keyword: &str, block: Expression) -> Expression {
+    Expression::MessageSend {
+        receiver: Box::new(receiver),
+        selector: MessageSelector::Keyword(vec![KeywordPart::new(keyword, s())]),
+        arguments: vec![block],
+        is_cast: false,
+        span: s(),
+    }
+}
+
+/// BT-4181: a single-block boolean send whose literal receiver takes the
+/// block — `true ifTrue:`, `false ifFalse:`, `true and:`, `false or:` —
+/// answers the block's value, so a Character-answering block makes the
+/// whole send Character-typed (including through parens and nesting).
+#[test]
+fn single_branch_constant_taken_is_character_typed() {
+    let char_branch = || block_answering(character_value_call(int_lit(54)));
+    for (receiver, keyword) in [
+        ("true", "ifTrue:"),
+        ("false", "ifFalse:"),
+        ("true", "and:"),
+        ("false", "or:"),
+    ] {
+        assert!(
+            is_character_typed_receiver(&single_branch(
+                bool_ident(receiver),
+                keyword,
+                char_branch(),
+            )),
+            "`{receiver} {keyword} [Character value: 54]` must be Character-typed"
+        );
+
+        // Parenthesized receiver, block and whole send all see through.
+        let parenthesized = Expression::Parenthesized {
+            expression: Box::new(single_branch(
+                Expression::Parenthesized {
+                    expression: Box::new(bool_ident(receiver)),
+                    span: s(),
+                },
+                keyword,
+                Expression::Parenthesized {
+                    expression: Box::new(block_answering(Expression::Literal(
+                        Literal::Character('A'),
+                        s(),
+                    ))),
+                    span: s(),
+                },
+            )),
+            span: s(),
+        };
+        assert!(
+            is_character_typed_receiver(&parenthesized),
+            "parenthesized `{receiver} {keyword} [$A]` must be Character-typed"
+        );
+    }
+
+    // Composes with the other arms: a nested single-branch send as the
+    // block's answer, and `uppercase` applied to one.
+    let nested = single_branch(
+        bool_ident("true"),
+        "and:",
+        block_answering(single_branch(
+            bool_ident("false"),
+            "ifFalse:",
+            block_answering(Expression::Literal(Literal::Character('B'), s())),
+        )),
+    );
+    assert!(is_character_typed_receiver(&nested));
+    let uppercased = Expression::MessageSend {
+        receiver: Box::new(Expression::Parenthesized {
+            expression: Box::new(nested),
+            span: s(),
+        }),
+        selector: MessageSelector::Unary("uppercase".into()),
+        arguments: vec![],
         is_cast: false,
         span: s(),
     };
-    assert!(!is_character_typed_receiver(&if_true_only));
+    assert!(is_character_typed_receiver(&uppercased));
+}
+
+/// BT-4181: everything else stays conservatively Integer-dispatched. A
+/// constant receiver that skips the block answers a Boolean
+/// (`False>>ifTrue:`/`True>>ifFalse:` answer `self`, `false and:` answers
+/// `false`, `true or:` answers `true`) — never `nil`, never a Character; a
+/// non-constant receiver may take either path; and a non-Character block,
+/// an empty block (`nil`), a non-block argument, a cast, or another
+/// single-keyword selector never qualify.
+#[test]
+fn single_branch_untaken_or_non_constant_is_not_character_typed() {
+    let char_branch = || block_answering(Expression::Literal(Literal::Character('A'), s()));
+
+    // Constant-untaken.
+    for (receiver, keyword) in [
+        ("false", "ifTrue:"),
+        ("true", "ifFalse:"),
+        ("false", "and:"),
+        ("true", "or:"),
+    ] {
+        assert!(
+            !is_character_typed_receiver(&single_branch(
+                bool_ident(receiver),
+                keyword,
+                char_branch(),
+            )),
+            "`{receiver} {keyword} [$A]` answers a Boolean and must not be Character-typed"
+        );
+    }
+
+    // Non-constant receiver.
+    for keyword in ["ifTrue:", "ifFalse:", "and:", "or:"] {
+        assert!(
+            !is_character_typed_receiver(&single_branch(
+                Expression::Identifier(Identifier::new("flag", s())),
+                keyword,
+                char_branch(),
+            )),
+            "`flag {keyword} [$A]` has an unknown path and must not be Character-typed"
+        );
+    }
+
+    // Taken, but the block does not answer a Character.
+    assert!(!is_character_typed_receiver(&single_branch(
+        bool_ident("true"),
+        "ifTrue:",
+        block_answering(int_lit(65)),
+    )));
+    assert!(!is_character_typed_receiver(&single_branch(
+        bool_ident("true"),
+        "and:",
+        Expression::Block(Block::new(vec![], vec![], s())),
+    )));
+    assert!(!is_character_typed_receiver(&single_branch(
+        bool_ident("false"),
+        "or:",
+        Expression::Identifier(Identifier::new("someBlock", s())),
+    )));
+
+    // A cast evaluates to 'ok'.
+    let mut cast = single_branch(bool_ident("true"), "ifTrue:", char_branch());
+    let Expression::MessageSend { is_cast, .. } = &mut cast else {
+        panic!("single_branch must build a MessageSend");
+    };
+    *is_cast = true;
+    assert!(!is_character_typed_receiver(&cast));
+
+    // Some other single-keyword selector on a literal Boolean.
+    assert!(!is_character_typed_receiver(&single_branch(
+        bool_ident("true"),
+        "xor:",
+        char_branch(),
+    )));
+}
+
+/// BT-4181: the issue's surface expressions parse to shapes the recognizer
+/// accepts (and the untaken mirror to one it rejects) — guards against
+/// precedence surprises between the surface syntax and the hand-built ASTs.
+#[test]
+fn single_branch_issue_expressions_parse_to_expected_shapes() {
+    for (source, expected) in [
+        ("(true ifTrue: [$A]) asString", true),
+        ("(false ifFalse: [$A]) asString", true),
+        ("(true and: [$A]) asString", true),
+        ("(false or: [$A]) asString", true),
+        ("(false ifTrue: [$A]) asString", false),
+        ("(true ifFalse: [$A]) asString", false),
+        ("(false and: [$A]) asString", false),
+        ("(true or: [$A]) asString", false),
+    ] {
+        let (module, diags) = parse(lex_with_eof(source));
+        assert!(
+            diags.iter().all(|d| d.severity != Severity::Error),
+            "{source} must parse without errors: {diags:?}"
+        );
+        let Expression::MessageSend { receiver, .. } = &module.expressions[0].expression else {
+            panic!("expected an outer asString send for {source}");
+        };
+        assert_eq!(
+            is_character_typed_receiver(receiver),
+            expected,
+            "recognizer verdict for the receiver of {source}"
+        );
+    }
 }
 
 /// BT-4161: the issue's exact expression parses to a shape the recognizer
@@ -887,74 +1157,199 @@ fn if_true_if_false_issue_expression_parses_to_character_typed_shape() {
 /// misroute a genuinely Integer-typed answer through Character dispatch.
 #[test]
 fn true_false_if_true_if_false_bodies_match_codegen_recognizer() {
+    for (file, class_name, taken_param) in [
+        ("stdlib/src/true.bt", "True", "trueBlock"),
+        ("stdlib/src/false.bt", "False", "falseBlock"),
+    ] {
+        let Some(method) = stdlib_instance_method(file, class_name, "ifTrue:ifFalse:") else {
+            return;
+        };
+        assert_body_answers_param_value(&method, class_name, taken_param);
+    }
+}
+
+/// Parses `stdlib/<file>` off disk and answers a clone of
+/// `<class_name>>><selector>` (instance side), or `None` — after logging a
+/// skip — when the file is absent from this checkout. Panics if the file
+/// fails to parse or lacks the class/method: the sync tests below must fail
+/// loudly on drift.
+fn stdlib_instance_method(
+    file: &str,
+    class_name: &str,
+    selector: &str,
+) -> Option<MethodDefinition> {
+    let class = stdlib_class(file, class_name)?;
+    let method = class
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == selector)
+        .unwrap_or_else(|| panic!("{file} must define {class_name}>>{selector}"));
+    Some(method.clone())
+}
+
+/// Parses `stdlib/<file>` off disk and answers a clone of its `<class_name>`
+/// class, or `None` — after logging a skip — when the file is absent from
+/// this checkout. Panics if the file fails to parse or lacks the class.
+fn stdlib_class(file: &str, class_name: &str) -> Option<ClassDefinition> {
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("crates/")
         .parent()
         .expect("repo root")
         .to_path_buf();
+    let path = repo_root.join(file);
+    let Ok(source) = std::fs::read_to_string(&path) else {
+        eprintln!("skipping: {} not present in this checkout", path.display());
+        return None;
+    };
 
-    for (file, class_name, taken_param) in [
-        ("stdlib/src/true.bt", "True", "trueBlock"),
-        ("stdlib/src/false.bt", "False", "falseBlock"),
+    let (module, diags) = parse(lex_with_eof(&source));
+    assert!(
+        diags.iter().all(|d| d.severity != Severity::Error),
+        "{file} must parse without errors: {diags:?}"
+    );
+    let class = module
+        .classes
+        .iter()
+        .find(|c| c.name.name == class_name)
+        .unwrap_or_else(|| panic!("{file} must define the {class_name} class"));
+    Some(class.clone())
+}
+
+/// Asserts `method`'s body is the single statement `<param> value` — it
+/// answers exactly the block parameter's value. Shared by the
+/// `is_character_typed_receiver` sync tests (BT-4161, BT-4181).
+fn assert_body_answers_param_value(method: &MethodDefinition, class_name: &str, param: &str) {
+    let selector = method.selector.name();
+    let [stmt] = method.body.as_slice() else {
+        panic!(
+            "{class_name}>>{selector} must be a single statement (the recognizer \
+             assumes it answers exactly the taken block's value) — update \
+             is_character_typed_receiver to match"
+        );
+    };
+    let Expression::MessageSend {
+        receiver,
+        selector: sent,
+        arguments,
+        is_cast: false,
+        ..
+    } = &stmt.expression
+    else {
+        panic!(
+            "{class_name}>>{selector} must evaluate a block — update \
+             is_character_typed_receiver to match"
+        );
+    };
+    assert!(
+        matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == param)
+            && matches!(sent, MessageSelector::Unary(name) if name == "value")
+            && arguments.is_empty(),
+        "{class_name}>>{selector} must answer `{param} value` (the recognizer \
+         routes on the taken block's value) — update is_character_typed_receiver \
+         to match"
+    );
+}
+
+/// BT-4181: enforces the stdlib bodies the single-branch arm of
+/// `is_character_typed_receiver` (`single_branch_result_is_character_typed`)
+/// depends on. On the taken path, `True>>ifTrue:` and `False>>ifFalse:`
+/// must answer `<block> value`, and `Boolean>>and:`/`or:` must delegate to
+/// `self ifTrue:ifFalse:` with the argument block in the taken position
+/// (`and:` → `self ifTrue: aBlock ifFalse: [false]`, `or:` → `self ifTrue:
+/// [true] ifFalse: aBlock`), so with the `True`/`False>>ifTrue:ifFalse:`
+/// rule pinned above `true and: B` / `false or: B` answer `B value`. On the
+/// untaken path, `True>>ifFalse:` and `False>>ifTrue:` must answer `self` —
+/// a Boolean, never a Character — which is why the recognizer only accepts
+/// a constant-taken receiver; if that ever changes, revisit the arm.
+#[test]
+fn single_branch_boolean_bodies_match_codegen_recognizer() {
+    // Taken path: `<block> value`.
+    for (file, class_name, selector, param) in [
+        ("stdlib/src/true.bt", "True", "ifTrue:", "trueBlock"),
+        ("stdlib/src/false.bt", "False", "ifFalse:", "falseBlock"),
     ] {
-        let path = repo_root.join(file);
-        let Ok(source) = std::fs::read_to_string(&path) else {
-            eprintln!("skipping: {} not present in this checkout", path.display());
+        let Some(method) = stdlib_instance_method(file, class_name, selector) else {
             return;
         };
+        assert_body_answers_param_value(&method, class_name, param);
+    }
 
-        let (module, diags) = parse(lex_with_eof(&source));
-        assert!(
-            diags.iter().all(|d| d.severity != Severity::Error),
-            "{file} must parse without errors: {diags:?}"
-        );
-
-        let class = module
-            .classes
-            .iter()
-            .find(|c| c.name.name == class_name)
-            .unwrap_or_else(|| panic!("{file} must define the {class_name} class"));
-        let method = class
-            .methods
-            .iter()
-            .find(|m| m.selector.name() == "ifTrue:ifFalse:")
-            .unwrap_or_else(|| panic!("{file} must define {class_name}>>ifTrue:ifFalse:"));
-
-        let [stmt] = method.body.as_slice() else {
-            panic!(
-                "{class_name}>>ifTrue:ifFalse: must be a single statement \
-                 (the recognizer assumes it answers exactly the taken branch's \
-                 value) — update is_character_typed_receiver to match"
-            );
+    // Untaken path: `self`.
+    for (file, class_name, selector) in [
+        ("stdlib/src/true.bt", "True", "ifFalse:"),
+        ("stdlib/src/false.bt", "False", "ifTrue:"),
+    ] {
+        let Some(method) = stdlib_instance_method(file, class_name, selector) else {
+            return;
         };
-        let Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
-        } = &stmt.expression
+        assert!(
+            matches!(
+                method.body.as_slice(),
+                [stmt] if matches!(&stmt.expression, Expression::Identifier(id) if id.name == "self")
+            ),
+            "{class_name}>>{selector} must answer `self` on the untaken path — \
+             update is_character_typed_receiver to match"
+        );
+    }
+
+    // BT-4231: `true and:` / `false or:` resolve to the `Boolean` bodies
+    // pinned below only while `True`/`False` do not override them. An
+    // override answering a Boolean (a fast path such as
+    // `and: aBlock => aBlock value == true`) would otherwise leave this test
+    // green while the recognizer routes a Boolean through Character dispatch.
+    for (file, class_name, selector) in [
+        ("stdlib/src/true.bt", "True", "and:"),
+        ("stdlib/src/false.bt", "False", "or:"),
+    ] {
+        let Some(class) = stdlib_class(file, class_name) else {
+            return;
+        };
+        assert!(
+            !class.methods.iter().any(|m| m.selector.name() == selector),
+            "{class_name} must not override {selector}: the recognizer assumes it \
+             inherits Boolean>>{selector} — pin the override's body here and \
+             update is_character_typed_receiver to match"
+        );
+    }
+
+    // `and:`/`or:` delegate to `self ifTrue:ifFalse:` with the argument
+    // block as the taken arm (index 0 for `and:`, 1 for `or:`).
+    for (selector, taken_index) in [("and:", 0usize), ("or:", 1usize)] {
+        let Some(method) = stdlib_instance_method("stdlib/src/boolean.bt", "Boolean", selector)
         else {
-            panic!(
-                "{class_name}>>ifTrue:ifFalse: must evaluate a block — update \
-                 is_character_typed_receiver to match"
-            );
+            return;
+        };
+        let param = method.parameters.first().map(|p| p.name.name.to_string());
+        let ok = match method.body.as_slice() {
+            [stmt] => match &stmt.expression {
+                Expression::MessageSend {
+                    receiver,
+                    selector: sent,
+                    arguments,
+                    is_cast: false,
+                    ..
+                } => {
+                    matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+                        && sent.name() == "ifTrue:ifFalse:"
+                        && matches!(
+                            arguments.get(taken_index),
+                            Some(Expression::Identifier(id)) if Some(id.name.to_string()) == param
+                        )
+                }
+                _ => false,
+            },
+            _ => false,
         };
         assert!(
-            matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == taken_param),
-            "{class_name}>>ifTrue:ifFalse: must answer `{taken_param} value` \
-             (the recognizer routes on the taken branch) — update \
-             is_character_typed_receiver to match"
-        );
-        assert!(
-            matches!(selector, MessageSelector::Unary(name) if name == "value"),
-            "{class_name}>>ifTrue:ifFalse: must send unary `value` — update \
-             is_character_typed_receiver to match"
-        );
-        assert!(
-            arguments.is_empty(),
-            "{class_name}>>ifTrue:ifFalse: must take the branch's plain value — update \
-             is_character_typed_receiver to match"
+            ok,
+            "Boolean>>{selector} must be `self ifTrue:ifFalse:` with its block \
+             argument as the {} arm — update is_character_typed_receiver to match",
+            if taken_index == 0 {
+                "ifTrue:"
+            } else {
+                "ifFalse:"
+            }
         );
     }
 }
@@ -1028,6 +1423,42 @@ fn conditional_character_receiver_dispatches_to_character_module() {
     // test above): the INNER `ifTrue:ifFalse:` send itself still compiles
     // through generic runtime dispatch — only the OUTER send's routing
     // changes, from Integer-misrouted to Character-direct.
+}
+
+/// BT-4181: codegen for a constant-taken single-block boolean send used as a
+/// receiver — `(true ifTrue: [$A]) asString`, `(false ifFalse: [$A])
+/// asString`, `(true and: [$A]) asString`, `(false or: [$A]) asString` —
+/// must emit a direct call to `bt@stdlib@character:dispatch/3` for the
+/// outer send, while the constant-untaken mirror (`(false ifTrue: [$A])
+/// asString`, which answers `false`) must not.
+#[test]
+fn single_branch_character_receiver_dispatches_to_character_module() {
+    let selector = MessageSelector::Unary("asString".into());
+    let char_block = || block_answering(Expression::Literal(Literal::Character('A'), s()));
+    for (receiver, keyword, expect_character) in [
+        ("true", "ifTrue:", true),
+        ("false", "ifFalse:", true),
+        ("true", "and:", true),
+        ("false", "or:", true),
+        ("false", "ifTrue:", false),
+        ("true", "or:", false),
+    ] {
+        let mut generator = CoreErlangGenerator::new("test");
+        let send = Expression::Parenthesized {
+            expression: Box::new(single_branch(bool_ident(receiver), keyword, char_block())),
+            span: s(),
+        };
+        let output = generator
+            .generate_message_send(&send, &selector, &[])
+            .unwrap()
+            .to_pretty_string();
+        assert_eq!(
+            output.contains("'bt@stdlib@character':'dispatch'"),
+            expect_character,
+            "`({receiver} {keyword} [$A]) asString`: expected Character dispatch = \
+             {expect_character}, got: {output}"
+        );
+    }
 }
 
 // ─── generate_field_assignment_open (Closure::Open) × FieldWriteSite ─

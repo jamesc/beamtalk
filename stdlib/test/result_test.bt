@@ -238,6 +238,12 @@ TestCase subclass: ResultTest
   // =========================================================================
   // printString
   // =========================================================================
+  testUnwrapOfPlainErrorRecordsReason =>
+    // BT-3970: unwrap of a non-exception error records that value as reason
+    self assert: ([
+      (Result error: #closed) unwrap
+    ] on: Error do: [:e | e reason]) equals: #closed
+
   testPrintStringOk =>
     self assert: (Result ok: 42) printString equals: "Result ok: 42"
 

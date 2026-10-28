@@ -57,6 +57,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     signal_from_class/1,
     class_signal/1,
     class_signal_message/2,
+    class_signal_message_reason/3,
     class_signal_kind/4,
     kind_to_class/1,
     class_to_kind/1,
@@ -684,7 +685,8 @@ dispatch('reason', [], _) ->
     nil;
 dispatch('details', [], #{error := #beamtalk_error{details = Details}}) ->
     %% BT-4174: a nested raw record answers as an Exception object.
-    maps:map(fun(_Key, Value) -> wrap_detail(Value) end, Details);
+    %% BT-4159: `signal_reason` is surfaced by `reason`, not `details`.
+    maps:map(fun(_Key, Value) -> wrap_detail(Value) end, maps:remove(signal_reason, Details));
 dispatch('details', [], _) ->
     #{};
 dispatch('printString', [], #{error := Error}) ->
@@ -782,6 +784,7 @@ The raw Erlang term an exception wraps, for `Exception>>reason` (BT-3954).
 
 Producers record it under different `details` keys, checked in order:
 
+* `signal_reason` — `signal:reason:` (BT-4159), any term, including `nil`;
 * `reason` — `wrap_raw/2` (raw `error:` via `on:do:`, the `R` of an FFI
   `{error, R}`) and `ensure_wrapped/3` (`exit:`/`throw:`/`undef`);
 * `erlang_error` — the FFI proxy's specific `badarg`/`badarith`/
@@ -795,6 +798,10 @@ not a raw Erlang term, so it answers `nil`, as does an exception with no
 recorded term.
 """.
 -spec raw_reason(map()) -> term().
+raw_reason(#{signal_reason := Reason}) ->
+    %% BT-4159: the caller-supplied term, answered as-is (a raw record, or an
+    %% Exception passed as the reason, comes back as an Exception).
+    wrap_detail(Reason);
 raw_reason(Details) ->
     raw_reason_from(Details, [reason, erlang_error, original_reason]).
 
@@ -881,7 +888,11 @@ Used when signal: is called on a user-defined exception instance.
 The exception class is taken from the signaling object's $beamtalk_class.
 """.
 -spec signal_message(term(), atom()) -> no_return().
-signal_message({beamtalk_string, _} = Message, ExceptionClass) ->
+signal_message(Message, ExceptionClass) ->
+    signal_message(Message, ExceptionClass, #{}).
+
+-spec signal_message(term(), atom(), map()) -> no_return().
+signal_message({beamtalk_string, _} = Message, ExceptionClass, Details) ->
     %% BT-4170: a `String` message stores tagged, as-is.
     Error = #beamtalk_error{
         kind = class_to_kind(ExceptionClass),
@@ -889,15 +900,15 @@ signal_message({beamtalk_string, _} = Message, ExceptionClass) ->
         selector = undefined,
         message = Message,
         hint = undefined,
-        details = #{}
+        details = Details
     },
     beamtalk_error:raise(Error);
-signal_message(Message, ExceptionClass) when is_binary(Message) ->
-    signal_message(beamtalk_primitive:string_from_binary(Message), ExceptionClass);
-signal_message(Message, ExceptionClass) when is_atom(Message) ->
-    signal_message(atom_to_binary(Message, utf8), ExceptionClass);
-signal_message(Message, ExceptionClass) ->
-    signal_message(iolist_to_binary(io_lib:format("~p", [Message])), ExceptionClass).
+signal_message(Message, ExceptionClass, Details) when is_binary(Message) ->
+    signal_message(beamtalk_primitive:string_from_binary(Message), ExceptionClass, Details);
+signal_message(Message, ExceptionClass, Details) when is_atom(Message) ->
+    signal_message(atom_to_binary(Message, utf8), ExceptionClass, Details);
+signal_message(Message, ExceptionClass, Details) ->
+    signal_message(iolist_to_binary(io_lib:format("~p", [Message])), ExceptionClass, Details).
 
 -doc """
 Raise a new exception from a class instance without a message.
@@ -930,6 +941,19 @@ class_signal_message(Message, #beamtalk_object{class = ClassTag}) ->
 class_signal_message(Message, _ClassSelf) ->
     %% Fallback: if ClassSelf is not a beamtalk_object, signal as generic Exception
     signal_message(Message, 'Exception').
+
+-doc """
+Class-side `signal:reason:` (BT-4159): like `class_signal_message/2` but records
+`Reason` (any term) under `details.signal_reason`, which `Exception>>reason`
+answers (checked before the FFI-wrapper keys) and `beamtalk_error:format/1`
+shows in uncaught reports. Being plain data in the record, it survives
+cross-process propagation.
+""".
+-spec class_signal_message_reason(term(), term(), #beamtalk_object{} | term()) -> no_return().
+class_signal_message_reason(Message, Reason, #beamtalk_object{class = ClassTag}) ->
+    signal_message(Message, strip_class_suffix(ClassTag), #{signal_reason => Reason});
+class_signal_message_reason(Message, Reason, _ClassSelf) ->
+    signal_message(Message, 'Exception', #{signal_reason => Reason}).
 
 -doc """
 Class-side signal: raise an exception from a class object (no message).

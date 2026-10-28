@@ -525,3 +525,56 @@ fn destructure_unsupported_outer_pattern_returns_error() {
         "a bare Wildcard at top level should be an unsupported-pattern error"
     );
 }
+
+// ── BT-4223: binary sub-patterns nested in a composite pattern ───────────────
+
+/// `name/binary` segment.
+fn binary_rest_segment(name: &str) -> beamtalk_core::ast::BinarySegment {
+    beamtalk_core::ast::BinarySegment {
+        value: Pattern::Variable(Identifier::new(name, s())),
+        size: None,
+        segment_type: Some(beamtalk_core::ast::BinarySegmentType::Binary),
+        signedness: None,
+        endianness: None,
+        unit: None,
+        span: s(),
+    }
+}
+
+#[test]
+fn test_nested_binary_in_tuple_unwraps_string_element() {
+    // `{#ok, <<rest/binary>>} -> rest. _ -> 0`: the binary is hoisted out
+    // of the tuple pattern and matched after the `beamtalk_string` unwrap,
+    // so a `String` element matches like the `Binary` it encodes.
+    let mut generator = CoreErlangGenerator::new("test");
+    let value = ident_expr("x");
+    let arms = vec![
+        MatchArm::new(
+            Pattern::Tuple {
+                elements: vec![
+                    Pattern::Literal(Literal::Symbol("ok".into()), s()),
+                    Pattern::Binary {
+                        segments: vec![binary_rest_segment("rest")],
+                        span: s(),
+                    },
+                ],
+                span: s(),
+            },
+            ident_expr("rest"),
+            s(),
+        ),
+        wildcard_arm(int_expr(0)),
+    ];
+    let output = generator
+        .generate_match(&value, &arms)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("{'ok', _BinNested"),
+        "Nested binary should be hoisted to a fresh variable. Got: {output}"
+    );
+    assert!(
+        output.contains("<{'beamtalk_string', _BinInner"),
+        "Hoisted binary should unwrap a String element. Got: {output}"
+    );
+}

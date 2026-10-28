@@ -245,3 +245,54 @@ TestCase subclass: BinaryPatternsTest
         _ -> -1
       ])
       equals: 10
+
+  // BT-4223: a binary pattern nested inside a composite pattern unwraps a
+  // `String` element to its bytes, like a top-level binary arm does.
+  testMatchNestedBinaryInTupleMatchesString =>
+    result := {#ok, "GET /x"} match: [
+      {#ok, <<71, 69, 84, 32, rest/binary>>} -> rest toBytes;
+      _ -> nil
+    ]
+    self assert: result equals: #(47, 120)
+
+  testMatchNestedBinaryInTupleMatchesBareBinary =>
+    pair := {#ok, Binary fromBytes: #(71, 69, 84, 32, 47)}
+    result := pair match: [
+      {#ok, <<71, 69, 84, 32, rest/binary>>} -> rest toBytes;
+      _ -> nil
+    ]
+    self assert: result equals: #(47)
+
+  testMatchNestedBinaryNoMatchFallsThrough =>
+    result := {#ok, "PUT /x"} match: [
+      {#ok, <<71, 69, 84, 32, rest/binary>>} -> rest toBytes;
+      {#ok, <<80, 85, 84, 32, _/binary>>} -> #put;
+      _ -> nil
+    ]
+    self assert: result equals: #put
+
+  testMatchNestedBinaryNonBinaryFallsThrough =>
+    result := {#ok, 42} match: [
+      {#ok, <<_:8, _/binary>>} -> #binary;
+      {#ok, n} -> n
+    ]
+    self assert: result equals: 42
+
+  testMatchNestedBinaryGuardSeesSegments =>
+    // The guard runs after every nested binary has matched.
+    result := {"A", "B"} match: [
+      {<<a:8>>, <<b:8>>} when: [a > b] -> #descending;
+      {<<a:8>>, <<b:8>>} -> {a, b};
+      _ -> nil
+    ]
+    self assert: result equals: {65, 66}
+
+  testMatchNestedBinarySizeNamesOuterVariable =>
+    // A nested binary matches after the enclosing tuple, so its segment
+    // size may name a variable the tuple bound.
+    pair := {2, "hello"}
+    result := pair match: [
+      {n, <<head:n/binary, _/binary>>} -> head toBytes;
+      _ -> nil
+    ]
+    self assert: result equals: #(104, 101)
