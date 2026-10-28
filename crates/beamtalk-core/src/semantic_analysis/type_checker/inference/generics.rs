@@ -441,19 +441,31 @@ impl TypeChecker {
     /// Split an argument passed to a `Block(...)` param into its parameter
     /// types and its result type (the last type arg). A bare `Block` or a
     /// `Dynamic` argument has no parameter types and an unknown
-    /// (`Dynamic(Unknown)`) result; any other argument contributes nothing.
+    /// (`Dynamic(Unknown)`) result. A union with at least one `Block` member
+    /// (`Block(Integer) | Block(Nil)`, `Block | Handler`) has no aligned
+    /// parameter types; its result is the branch join of each member's
+    /// result, a non-`Block` member counting as unknown (BT-4240). Any other
+    /// argument contributes nothing.
     fn split_block_arg(arg: &InferredType) -> (&[InferredType], Option<InferredType>) {
-        let unknown = || Some(InferredType::Dynamic(DynamicReason::Unknown));
+        let is_block = |ty: &InferredType| matches!(ty, InferredType::Known { class_name, .. } if class_name.as_str() == "Block");
         match arg {
-            InferredType::Known {
-                class_name,
-                type_args,
-                ..
-            } if class_name.as_str() == "Block" => match type_args.split_last() {
-                Some((result, params)) => (params, Some(result.clone())),
-                None => (&[], unknown()),
-            },
-            InferredType::Dynamic(_) => (&[], unknown()),
+            InferredType::Known { type_args, .. } if is_block(arg) => {
+                match type_args.split_last() {
+                    Some((result, params)) => (params, Some(result.clone())),
+                    None => (&[], Some(InferredType::Dynamic(DynamicReason::Unknown))),
+                }
+            }
+            InferredType::Dynamic(_) => (&[], Some(InferredType::Dynamic(DynamicReason::Unknown))),
+            InferredType::Union { members, .. } if members.iter().any(is_block) => {
+                let results: Vec<InferredType> = members
+                    .iter()
+                    .map(|member| match Self::split_block_arg(member) {
+                        (_, Some(result)) if is_block(member) => result,
+                        _ => InferredType::Dynamic(DynamicReason::Unknown),
+                    })
+                    .collect();
+                (&[], Some(Self::join_branch_arms(&results)))
+            }
             _ => (&[], None),
         }
     }
