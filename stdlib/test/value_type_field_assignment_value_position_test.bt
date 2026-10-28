@@ -24,6 +24,26 @@ TestCase subclass: ValueTypeFieldAssignmentValuePositionTest
     ] value
     99
 
+  mValue => self.m
+
+  nValue => self.n
+
+  // BT-4092: a trailing field assignment answers the updated `self` with or without
+  // parentheses. The parenthesised form draws a one-release migration warning.
+  parenthesisedLastFieldWrite =>
+    self.n := 1
+    @expect deprecation
+    (self.m := 5)
+
+  bareLastFieldWrite =>
+    self.n := 1
+    self.m := 5
+
+  // To answer the assigned value, write it explicitly.
+  lastFieldWriteThenValue =>
+    self.m := 5
+    5
+
   conditionalReturn =>
     #(1) do: [:e | e]
     ^((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]
@@ -117,3 +137,28 @@ TestCase subclass: ValueTypeFieldAssignmentValuePositionTest
     ] value
     self assert: self.n equals: 5
     self assert: self.m equals: 9
+
+  // The type checker infers a trailing field assignment's type as the assigned value's
+  // (Integer here), not the updated `self` the method answers, so each send to the answer
+  // carries `@expect dnu` (BT-4235).
+  testParenthesisedLastFieldWriteAnswersUpdatedSelf =>
+    r := self parenthesisedLastFieldWrite
+    self assert: r class equals: ValueTypeFieldAssignmentValuePositionTest
+    @expect dnu
+    self assert: r mValue equals: 5
+    @expect dnu
+    self assert: r nValue equals: 1
+    self assert: self.m equals: 0
+
+  testParenthesisedLastFieldWriteMatchesBareForm =>
+    bare := self bareLastFieldWrite
+    paren := self parenthesisedLastFieldWrite
+    @expect dnu
+    self assert: paren mValue equals: bare mValue
+    @expect dnu
+    self assert: paren nValue equals: bare nValue
+    @expect dnu
+    self assert: bare mValue equals: 5
+
+  testLastFieldWriteThenValueAnswersTheValue =>
+    self assert: self lastFieldWriteThenValue equals: 5
