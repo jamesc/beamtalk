@@ -26,6 +26,16 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
+/// The character every compiler temporary from [`VariableContext::fresh_var`]
+/// carries, and no user-derived Core Erlang variable can (BT-4140).
+///
+/// Core Erlang admits `@` in variable names, but a Beamtalk identifier is
+/// ASCII alphanumerics and `_` only (the lexer's identifier rule), and
+/// [`VariableContext::to_core_var`] and `util::versioned_var` add only a
+/// capital letter or digits. So a temp can never spell a user binding, however
+/// the user names it. Pinned by `tests::fresh_temp_namespace`.
+pub(super) const TEMP_MARKER: char = '@';
+
 /// Variable binding and scope management for code generation.
 ///
 /// This aggregate encapsulates all variable-related state and operations,
@@ -94,25 +104,37 @@ impl VariableContext {
 
     /// Generates a fresh, unique variable name with the given base.
     ///
-    /// The base is used as a prefix, with underscores removed and a counter appended:
+    /// The result is `_` + the base with underscores removed + [`TEMP_MARKER`]
+    /// + a counter:
     ///
-    /// - `fresh_var("temp")` → `"_temp1"`, `"_temp2"`, etc.
-    /// - `fresh_var("my_var")` → `"_myvar3"`, `"_myvar4"`, etc.
+    /// - `fresh_var("temp")` → `"_temp@1"`, `"_temp@2"`, etc.
+    /// - `fresh_var("my_var")` → `"_myvar@3"`, `"_myvar@4"`, etc.
     ///
-    /// Note: temps share a namespace with user `_`-prefixed identifiers,
-    /// which map into Core unchanged — a user variable spelling the counter
-    /// value would alias the temp (BT-4140 tracks making this impossible).
+    /// Guarantees:
+    ///
+    /// - **Unique among temps:** the text after the last [`TEMP_MARKER`] is
+    ///   the counter, so two calls never return the same name whatever their
+    ///   bases (without the separator, base `a1` at counter 1 and base `a` at
+    ///   counter 11 both spelled `_a11`).
+    /// - **Disjoint from user bindings:** no name derived from a Beamtalk
+    ///   identifier contains [`TEMP_MARKER`], so a temp never aliases a user
+    ///   variable — including `_`-prefixed ones, which
+    ///   [`Self::to_core_var`] maps into Core unchanged.
+    ///
+    /// It does not guard hand-written internal names (`State`, `Self`, …);
+    /// those are outside this allocator.
     pub(super) fn fresh_var(&mut self, base: &str) -> String {
         self.var_counter += 1;
         let counter = self.var_counter;
-        // Pre-allocate: underscore + base (minus underscores) + counter digits.
-        let mut result = String::with_capacity(1 + base.len() + 4);
+        // Pre-allocate: underscore + base (minus underscores) + marker + counter digits.
+        let mut result = String::with_capacity(2 + base.len() + 4);
         result.push('_');
         for ch in base.chars() {
             if ch != '_' {
                 result.push(ch);
             }
         }
+        result.push(TEMP_MARKER);
         // Write the counter directly instead of using format!.
         let _ = write!(result, "{counter}");
         result
@@ -220,16 +242,31 @@ mod tests {
         let var2 = ctx.fresh_var("temp");
         let var3 = ctx.fresh_var("loop");
 
-        assert_eq!(var1, "_temp1");
-        assert_eq!(var2, "_temp2");
-        assert_eq!(var3, "_loop3");
+        assert_eq!(var1, "_temp@1");
+        assert_eq!(var2, "_temp@2");
+        assert_eq!(var3, "_loop@3");
+    }
+
+    #[test]
+    fn test_fresh_var_unique_across_bases_ending_in_digits() {
+        // Base `a1` at counter 1 and base `a` at counter 11 used to both
+        // spell `_a11`; the marker separates base from counter.
+        let mut ctx = VariableContext::new();
+        let first = ctx.fresh_var("a1");
+        for _ in 2..11 {
+            ctx.fresh_var("x");
+        }
+        let eleventh = ctx.fresh_var("a");
+        assert_eq!(first, "_a1@1");
+        assert_eq!(eleventh, "_a@11");
+        assert_ne!(first, eleventh);
     }
 
     #[test]
     fn test_fresh_var_removes_underscores() {
         let mut ctx = VariableContext::new();
         let var = ctx.fresh_var("my_var");
-        assert_eq!(var, "_myvar1");
+        assert_eq!(var, "_myvar@1");
     }
 
     #[test]
