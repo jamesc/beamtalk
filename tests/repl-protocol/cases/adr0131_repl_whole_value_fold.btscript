@@ -124,8 +124,9 @@ t := 0. u := 0. r := true ifTrue: [u := u + 1. 5] ifFalse: [6]. #[r, u]
 t := 0. u := 0. r := (t == 0) ifTrue: [u := 7] ifFalse: [u := 8]. #[r, u]
 // => #[7, 7]
 
+// A skipped solo `ifTrue:` answers its receiver, not nil (BT-4189).
 t := 0. u := 0. r := (t == 1) ifTrue: [u := 7]. #[r, u]
-// => #[nil, 0]
+// => #[false, 0]
 
 t := 0. u := 0. r := true ifTrue: [u := u + 1. 5] ifFalse: [6]
 // => 5
