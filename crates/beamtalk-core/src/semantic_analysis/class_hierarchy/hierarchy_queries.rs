@@ -164,7 +164,8 @@ impl ClassHierarchy {
     /// Whether a standalone extension method (`Target >> sel => ...`) on
     /// `class_name` compiles with the actor method boundary. Anything else
     /// lowers through the value-type body path. Single authority for codegen's
-    /// extension lowering.
+    /// extension lowering and the type checker's value-type method rules
+    /// (BT-4235).
     #[must_use]
     pub fn extension_target_is_actor(&self, class_name: &str) -> bool {
         self.is_actor_subclass(class_name)
@@ -224,8 +225,9 @@ impl ClassHierarchy {
 
     /// Whether codegen compiles `class` as an actor (`gen_server`) module rather
     /// than a value-type module — the single authority for that routing, read
-    /// by codegen's `is_actor_class` and by semantic checks that apply only to
-    /// value-type method bodies (BT-4092).
+    /// by codegen's `is_actor_class` and by the type checker's value-type
+    /// method rules (BT-4235: a trailing `self.x := v` answers the updated
+    /// `self`).
     ///
     /// - A concrete (non-abstract) `Supervisor`/`DynamicSupervisor` subclass is
     ///   an actor (supervisor codegen is routed through the actor path).

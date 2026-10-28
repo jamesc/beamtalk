@@ -137,26 +137,20 @@ TestCase subclass: ValueTypeFieldAssignmentValuePositionTest
     self assert: self.n equals: 5
     self assert: self.m equals: 9
 
-  // The type checker infers a trailing field assignment's type as the assigned value's
-  // (Integer here), not the updated `self` the method answers, so each send to the answer
-  // carries `@expect dnu` (BT-4235).
+  // A trailing field assignment's answer types as the updated `self`, so sends to it
+  // resolve (BT-4235).
   testParenthesisedLastFieldWriteAnswersUpdatedSelf =>
     r := self parenthesisedLastFieldWrite
     self assert: r class equals: ValueTypeFieldAssignmentValuePositionTest
-    @expect dnu
     self assert: r mValue equals: 5
-    @expect dnu
     self assert: r nValue equals: 1
     self assert: self.m equals: 0
 
   testParenthesisedLastFieldWriteMatchesBareForm =>
     bare := self bareLastFieldWrite
     paren := self parenthesisedLastFieldWrite
-    @expect dnu
     self assert: paren mValue equals: bare mValue
-    @expect dnu
     self assert: paren nValue equals: bare nValue
-    @expect dnu
     self assert: bare mValue equals: 5
 
   testLastFieldWriteThenValueAnswersTheValue =>
