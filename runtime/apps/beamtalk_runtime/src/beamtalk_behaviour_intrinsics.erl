@@ -919,12 +919,21 @@ drops the `inherits_from/2` and class-object entries it was derived from.
 """.
 -spec objectIsKindOf(term(), term()) -> boolean().
 objectIsKindOf(Receiver, Behaviour) ->
-    case instance_class(Receiver) of
-        {ok, C} -> instance_is_kind_of(C, Receiver, Behaviour);
-        other -> is_kind_of_by_sides(Receiver, Behaviour)
+    case receiver_class_side(Receiver) of
+        {instance, C} ->
+            instance_is_kind_of(C, Receiver, Behaviour);
+        {meta, C} ->
+            case behaviour_side(Behaviour) of
+                {meta, A} -> beamtalk_class_derived_cache:inherits_from(C, A);
+                {class, A} -> beamtalk_class_derived_cache:inherits_from('Class', A);
+                other -> is_kind_of_by_send(Receiver, Behaviour)
+            end;
+        other ->
+            is_kind_of_by_send(Receiver, Behaviour)
     end.
 
-%% The memoised decision for an instance of class `C` (see the doc above).
+%% The memoised decision for an instance of class `C` (see the doc above):
+%% the `class C` rows of the table.
 -spec instance_is_kind_of(atom(), term(), term()) -> term().
 instance_is_kind_of(C, Receiver, #beamtalk_object{pid = BPid} = Behaviour) when is_pid(BPid) ->
     case
@@ -940,6 +949,8 @@ instance_is_kind_of(C, Receiver, #beamtalk_object{pid = BPid} = Behaviour) when 
 instance_is_kind_of(_C, Receiver, Behaviour) ->
     is_kind_of_by_send(Receiver, Behaviour).
 
+%% Decided (and cacheable) only when `C` is a live registered class and
+%% `Behaviour` is a canonical class or metaclass object.
 -spec decide_instance_is_kind_of(atom(), #beamtalk_object{}) ->
     {cache, {kind_of, boolean(), pid(), pid()}} | {nocache, undecided}.
 decide_instance_is_kind_of(C, #beamtalk_object{pid = BPid} = Behaviour) ->
@@ -956,33 +967,6 @@ decide_instance_is_kind_of(C, #beamtalk_object{pid = BPid} = Behaviour) ->
 kind_of_pids_alive({kind_of, _, CPid, BPid}) ->
     is_process_alive(CPid) andalso is_process_alive(BPid).
 
-%% The class an ordinary instance's `class_of_object/1` names (`{ok, C}`),
-%% or `other` for a future, a class object or a metaclass, whose class side
-%% `receiver_class_side/1` works out from the receiver's own pid.
--spec instance_class(term()) -> {ok, atom()} | other.
-instance_class({beamtalk_future, _}) ->
-    other;
-instance_class(#beamtalk_object{class = 'Metaclass'}) ->
-    other;
-instance_class(#beamtalk_object{class = Tag}) ->
-    case beamtalk_class_registry:is_class_name(Tag) of
-        true -> other;
-        false -> {ok, Tag}
-    end;
-instance_class(Receiver) ->
-    {ok, beamtalk_primitive:class_of(Receiver)}.
-
-%% The decision table above, computed from scratch.
--spec is_kind_of_by_sides(term(), term()) -> term().
-is_kind_of_by_sides(Receiver, Behaviour) ->
-    case {receiver_class_side(Receiver), behaviour_side(Behaviour)} of
-        {{class, C}, {class, A}} -> beamtalk_class_derived_cache:inherits_from(C, A);
-        {{class, _}, {meta, _}} -> false;
-        {{meta, C}, {meta, A}} -> beamtalk_class_derived_cache:inherits_from(C, A);
-        {{meta, _}, {class, A}} -> beamtalk_class_derived_cache:inherits_from('Class', A);
-        _ -> is_kind_of_by_send(Receiver, Behaviour)
-    end.
-
 %% The original `self class includesBehaviour: aClass`.
 -spec is_kind_of_by_send(term(), term()) -> term().
 is_kind_of_by_send(Receiver, Behaviour) ->
@@ -990,10 +974,12 @@ is_kind_of_by_send(Receiver, Behaviour) ->
         beamtalk_primitive:class_of_object(Receiver), 'includesBehaviour:', [Behaviour]
     ).
 
-%% Which behaviour `class_of_object(Receiver)` is, when it is the canonical
-%% class (`{class, Name}`) or metaclass (`{meta, Name}`) object of a live
-%% registered class; `other` otherwise.
--spec receiver_class_side(term()) -> {class | meta, atom()} | other.
+%% Which behaviour `class_of_object(Receiver)` is: `{instance, C}` for an
+%% ordinary instance, whose class `C` is named by the receiver alone;
+%% `{meta, Name}` for a class object or metaclass whose class is the
+%% canonical metaclass of a live registered class; `other` otherwise (a
+%% future, a stale or non-canonical class object).
+-spec receiver_class_side(term()) -> {instance | meta, atom()} | other.
 receiver_class_side({beamtalk_future, _}) ->
     other;
 receiver_class_side(#beamtalk_object{
@@ -1003,14 +989,14 @@ receiver_class_side(#beamtalk_object{
     canonical_meta(Pid);
 receiver_class_side(#beamtalk_object{class = 'Metaclass'}) ->
     other;
-receiver_class_side(#beamtalk_object{class = Tag, pid = Pid} = Receiver) ->
+receiver_class_side(#beamtalk_object{class = Tag, pid = Pid}) ->
     case beamtalk_class_registry:is_class_name(Tag) of
         %% A class object: its class is the metaclass on the same pid.
         true -> canonical_meta(Pid);
-        false -> registered_class(beamtalk_primitive:class_of(Receiver))
+        false -> {instance, Tag}
     end;
 receiver_class_side(Receiver) ->
-    registered_class(beamtalk_primitive:class_of(Receiver)).
+    {instance, beamtalk_primitive:class_of(Receiver)}.
 
 %% `{class, Name}` when `Behaviour` is `==` to the registry's class object
 %% for its name, `{meta, Name}` when it is that class's metaclass object.
@@ -1043,13 +1029,6 @@ canonical_meta(Pid) when is_pid(Pid) ->
     end;
 canonical_meta(_) ->
     other.
-
--spec registered_class(atom()) -> {class, atom()} | other.
-registered_class(Name) ->
-    case canonical_class_object(Name) of
-        undefined -> other;
-        _ -> {class, Name}
-    end.
 
 %% `beamtalk_class_registry:resolve_class_object/1` — the tuple a class
 %% reference, `class_of_object/1` and `classAllSuperclasses/1` all build —
