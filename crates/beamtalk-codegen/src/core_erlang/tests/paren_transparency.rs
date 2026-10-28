@@ -10,7 +10,10 @@
 //! (what the parser builds for `( … )`), with the wrapper's span equal to the
 //! wrapped expression's so no location can leak into the output. The variant's
 //! Core Erlang (or its codegen error, or its debug-verifier panic) must be
-//! byte-identical to the unwrapped module's.
+//! byte-identical to the unwrapped module's, apart from what derives from the
+//! method's reflected source text (`without_reflected_text`): reflected source
+//! is the text as written, so a wrapped variant's legitimately shows the added
+//! parentheses.
 //!
 //! A `super` receiver is never wrapped: `(super) foo` is not a super send.
 //!
@@ -233,12 +236,74 @@ fn wrapped(module: &Module, id: MethodId, pick: &dyn Fn(usize) -> bool) -> Modul
     copy
 }
 
-/// Codegen's whole observable outcome: the Core Erlang, the error, or the
-/// panic.
+/// Blanks what a module derives from its methods' reflected source text, and
+/// nothing else. Reflected source is the text as written, so a wrapped
+/// variant's legitimately shows the added parentheses; a `( … )` can change
+/// none of it but by changing that text, so it carries no codegen decision
+/// this property tests. Two things are derived from it:
 ///
-/// The Core Erlang is compared whole, embedded method-source binaries
-/// included: reflected source is `canonical_method_source`, which drops the
-/// redundant parentheses, so a wrapped slot cannot change it either.
+/// - every Core Erlang binary literal (`#{…}#`): the embedded method source;
+/// - the `'line'` numbers in `'methodXref'`, which are positions in that
+///   source (an added `( … )` can move a line break when it is re-printed).
+///   The rest of each xref row — selectors, receiver kinds, types — is
+///   compared: the xref walk peels operand parentheses like the compiler.
+fn without_reflected_text(code: &str) -> String {
+    without_xref_lines(&without_binaries(code))
+}
+
+fn without_binaries(code: &str) -> String {
+    let mut out = String::with_capacity(code.len());
+    let mut rest = code;
+    while let Some(start) = rest.find("#{") {
+        out.push_str(&rest[..start]);
+        let Some(len) = rest[start..].find("}#") else {
+            rest = &rest[start..];
+            break;
+        };
+        out.push_str("#{}#");
+        rest = &rest[start + len + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Blanks each `'line' => N` inside a `'methodXref' => [ … ]` list.
+fn without_xref_lines(code: &str) -> String {
+    const XREF: &str = "'methodXref' => [";
+    const LINE: &str = "'line' => ";
+    let mut out = String::with_capacity(code.len());
+    let mut rest = code;
+    while let Some(start) = rest.find(XREF) {
+        let body = start + XREF.len();
+        let mut depth = 1;
+        let end = rest[body..]
+            .char_indices()
+            .find_map(|(i, c)| {
+                match c {
+                    '[' => depth += 1,
+                    ']' => depth -= 1,
+                    _ => {}
+                }
+                (depth == 0).then_some(body + i)
+            })
+            .unwrap_or(rest.len());
+        out.push_str(&rest[..body]);
+        let mut pieces = rest[body..end].split(LINE);
+        out.push_str(pieces.next().unwrap_or_default());
+        for piece in pieces {
+            out.push_str(LINE);
+            out.push('_');
+            out.push_str(piece.trim_start_matches(|c: char| c.is_ascii_digit()));
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Codegen's whole observable outcome: the Core Erlang (with what derives
+/// from the reflected source text blanked, [`without_reflected_text`]), the
+/// error, or the panic.
 fn outcome(module: &Module) -> String {
     outcome_of(|| generate_module_with_warnings(module, CodegenOptions::new("paren_probe")))
 }
@@ -266,7 +331,7 @@ fn outcome_of(
     let compiled = catch_unwind(AssertUnwindSafe(compile));
     match compiled {
         Ok(Ok(out)) => {
-            let mut s = out.code;
+            let mut s = without_reflected_text(&out.code);
             for w in &out.warnings {
                 s.push_str("\n%% warning: ");
                 s.push_str(&w.message);
@@ -770,4 +835,66 @@ fn paren_needed_operand_shapes_corpus() {
             .join("\n")
     );
     assert!(compiled > 500, "only {compiled} programs compiled");
+}
+
+/// BT-4059: compiled code is paren-transparent, but a method's reflected
+/// source (`methodSource`, which the IDE method editor is seeded from and the
+/// workspace compares with the file) is its text as written — through
+/// self-sufficient codegen and through the driver path, whose lowering leaves
+/// the parentheses for codegen's own recorded peel.
+#[test]
+fn reflected_method_source_keeps_operand_parens_as_written() {
+    let written =
+        "Object subclass: Summer\n  summed: a => (a * 2) + 1\n  m => (self) foo\n  foo => 1\n";
+    // The same program with each parenthesis blanked, so every node keeps
+    // its byte offsets.
+    let bare = written.replace(['(', ')'], " ");
+    let (module, diagnostics) = parse(lex_with_eof(written));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let (bare_module, _) = parse(lex_with_eof(&bare));
+
+    let self_sufficient = generate_module_with_warnings(&module, CodegenOptions::new("summer"))
+        .expect("compiles")
+        .code;
+    let analysis = analyse_full(&module, AnalysisContext::default());
+    let mut lowered = module.clone();
+    lower_analysed_module_for_codegen(&mut lowered, &analysis);
+    assert!(
+        beamtalk_core::ast::normalize::has_parenthesised_operand(&lowered),
+        "lowering must leave the written parentheses for codegen"
+    );
+    let analysed = generate_module_with_warnings(
+        &lowered,
+        CodegenOptions::new("summer").with_analysis(analysis),
+    )
+    .expect("compiles")
+    .code;
+
+    for (path, code) in [
+        ("self-sufficient", &self_sufficient),
+        ("analysed", &analysed),
+    ] {
+        for (selector, source) in [
+            ("summed:", "summed: a => (a * 2) + 1"),
+            ("m", "m => (self) foo"),
+        ] {
+            let entry = format!(
+                "'{selector}' => #{{{}}}#",
+                beamtalk_cerl_doc::binary::binary_byte_segments(source)
+            );
+            assert!(
+                code.contains(&entry),
+                "{path}: `{selector}` should reflect `{source}` as written. Got:\n{code}"
+            );
+        }
+    }
+    // Everything but the reflected source compiles as the bare program does.
+    assert_eq!(
+        without_reflected_text(&self_sufficient),
+        without_reflected_text(
+            &generate_module_with_warnings(&bare_module, CodegenOptions::new("summer"))
+                .expect("compiles")
+                .code
+        )
+    );
 }

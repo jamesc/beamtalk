@@ -92,16 +92,18 @@ pub fn generate_module_with_warnings(
     module: &Module,
     options: CodegenOptions,
 ) -> Result<GeneratedModule> {
-    // BT-4059: codegen reads the canonical tree, with redundant send-operand
-    // parentheses stripped (`ast::normalize`). A driver that ran
-    // `lower_module_for_codegen` already peeled its module, so this scan finds
-    // nothing and no clone is made; the self-sufficient path (no analysis
-    // handed off) is normalised here, before semantic facts and the hierarchy
-    // are derived from it.
+    // BT-4059: codegen compiles the canonical tree, with redundant
+    // send-operand parentheses stripped (`ast::normalize`), so `(e) foo`
+    // compiles exactly like `e foo`. This is the one place codegen's tree is
+    // peeled (lowering leaves the driver's module as written): on a clone,
+    // before semantic facts and the hierarchy are derived from it, and only
+    // when there is something to strip. The removed wrappers are recorded on
+    // the generator, so reflected method source keeps them as written.
     let peeled_storage;
+    let mut peeled_parens = normalize::PeeledParens::default();
     let module: &Module = if normalize::has_parenthesised_operand(module) {
         let mut owned = module.clone();
-        normalize::peel_operand_parens(&mut owned);
+        peeled_parens = normalize::peel_operand_parens_recording(&mut owned);
         peeled_storage = owned;
         &peeled_storage
     } else {
@@ -112,6 +114,7 @@ pub fn generate_module_with_warnings(
     } else {
         CoreErlangGenerator::new(&options.module_name)
     };
+    generator.peeled_parens = peeled_parens;
     generator.source_text = options.source_text;
     generator.set_stdlib_mode(options.stdlib_mode);
     generator.protocol_sources = options.protocol_sources;
@@ -353,7 +356,8 @@ pub fn generate_module_with_warnings(
 /// Flattens `uses:` on a clone of `module` for the self-sufficient path
 /// (no `AnalysisResult` handed off), returning `None` for the clone when no
 /// class has a `uses:` line. Cross-file protocols are unavailable here, so
-/// `uses:` only resolves same-module.
+/// `uses:` only resolves same-module. Spliced-in provisions have their
+/// redundant operand parentheses peeled, like the rest of codegen's tree.
 ///
 /// Also records on `generator` which `uses:` lines resolved to the stdlib's
 /// own protocols (BT-3915), from the same flattening — what `analyse_full`
@@ -378,6 +382,13 @@ fn flatten_uses_self_sufficient(
             self_sufficient_package(generator),
         );
     generator.set_stdlib_protocol_uses(stdlib_uses);
+    // BT-4059: `module` was peeled at codegen's entry, but the provisions just
+    // spliced in were not; peel them too, adding what is removed to the
+    // generator's record.
+    if normalize::has_parenthesised_operand(&owned) {
+        let spliced = normalize::peel_operand_parens_recording(&mut owned);
+        generator.peeled_parens.extend(spliced);
+    }
     (Some(owned), origins, diagnostics)
 }
 

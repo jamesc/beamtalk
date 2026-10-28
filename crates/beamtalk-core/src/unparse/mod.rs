@@ -88,22 +88,6 @@ pub fn unparse_method(method: &MethodDefinition) -> String {
         .to_pretty_string()
 }
 
-/// The canonical reflected source of `method` (BT-4059): its per-method
-/// source ([`unparse_method`]) with redundant send-operand parentheses
-/// dropped ([`crate::ast::normalize`]).
-///
-/// The one authority for the text a method reflects as (`methodSource`, the
-/// workspace `ChangeLog`, xref), so it is the same whether the method went
-/// through the compiler-port (which holds the raw parse) or codegen (which
-/// holds the normalised tree): `(self) foo` reflects as `self foo`, while
-/// `a * (b + c)` keeps the parentheses its meaning needs.
-#[must_use]
-pub fn canonical_method_source(method: &MethodDefinition) -> String {
-    let mut canonical = method.clone();
-    crate::ast::normalize::peel_method_operand_parens(&mut canonical);
-    unparse_method(&canonical)
-}
-
 /// The signature prefix for a stand-alone per-method render: `class ` for a
 /// class-side method, nothing otherwise. Whole-file unparse passes its own
 /// prefix and does not use this.

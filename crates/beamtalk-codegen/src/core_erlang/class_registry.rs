@@ -830,8 +830,8 @@ impl CoreErlangGenerator {
                     .iter()
                     .map(|m| {
                         // A provided method's registry row also carries its
-                        // own source (`canonical_method_source`, the same canonical
-                        // text `methodSource` uses) and `///` doc, so tooling
+                        // own source (`as_written_method_source`, the same
+                        // as-written text `methodSource` uses) and `///` doc, so tooling
                         // can show a trait's real code from the registry
                         // alone, without a compiled class (ADR 0127 §10,
                         // "Protocol module"). Categories: methods carry none
@@ -848,9 +848,7 @@ impl CoreErlangGenerator {
                             &m.return_type,
                             docvec![
                                 ", 'source' => ",
-                                leaf::binary_lit(beamtalk_core::unparse::canonical_method_source(
-                                    m
-                                )),
+                                leaf::binary_lit(self.as_written_method_source(m)),
                                 doc_field,
                             ],
                         )

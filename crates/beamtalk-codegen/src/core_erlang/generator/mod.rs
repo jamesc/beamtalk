@@ -501,9 +501,52 @@ pub struct CoreErlangGenerator {
         beamtalk_core::semantic_analysis::MethodReturnKey,
         beamtalk_core::semantic_analysis::InferredType,
     >,
+    /// The redundant send-operand parentheses removed from the tree this
+    /// generator compiles (BT-4059): codegen compiles the peeled tree, but a
+    /// method's reflected source is its text as written, so
+    /// [`Self::as_written_method_source`] puts these back on a clone before
+    /// unparsing. Recorded by `generate_module_with_warnings` (and the REPL
+    /// entries via [`Self::set_peeled_parens`]); empty when nothing was
+    /// peeled.
+    pub(in crate::core_erlang) peeled_parens: beamtalk_core::ast::normalize::PeeledParens,
+}
+
+/// `method`'s reflected source: its text as written, with the operand
+/// parentheses `peeled` recorded removing put back (BT-4059). Equal to
+/// `unparse_method(method)` when nothing was recorded.
+///
+/// The one place reflected method source is produced from codegen's
+/// (peeled) tree; [`CoreErlangGenerator::as_written_method_source`] is this
+/// with the generator's own record.
+pub(in crate::core_erlang) fn as_written_method_source(
+    method: &beamtalk_core::ast::MethodDefinition,
+    peeled: &beamtalk_core::ast::normalize::PeeledParens,
+) -> String {
+    if peeled.is_empty() {
+        return beamtalk_core::unparse::unparse_method(method);
+    }
+    let mut written = method.clone();
+    beamtalk_core::ast::normalize::restore_operand_parens(&mut written, peeled);
+    beamtalk_core::unparse::unparse_method(&written)
 }
 
 impl CoreErlangGenerator {
+    /// `method`'s reflected source, as written: see the free
+    /// [`as_written_method_source`].
+    pub(in crate::core_erlang) fn as_written_method_source(
+        &self,
+        method: &beamtalk_core::ast::MethodDefinition,
+    ) -> String {
+        as_written_method_source(method, &self.peeled_parens)
+    }
+
+    /// Records the operand parentheses peeled from the tree this generator
+    /// compiles, so reflected method source keeps them as written (BT-4059).
+    // `pub` — `beamtalk-repl` peels its expressions before building a generator.
+    pub fn set_peeled_parens(&mut self, peeled: beamtalk_core::ast::normalize::PeeledParens) {
+        self.peeled_parens = peeled;
+    }
+
     /// Creates a new code generator for the given module name.
     // widened from `pub(crate)` — `beamtalk-repl` constructs its
     // own generator.
@@ -569,6 +612,7 @@ impl CoreErlangGenerator {
             alias_registry: beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::new(),
             type_map: beamtalk_core::semantic_analysis::TypeMap::new(),
             method_return_types_written_back: std::collections::HashMap::new(),
+            peeled_parens: beamtalk_core::ast::normalize::PeeledParens::default(),
         }
     }
 

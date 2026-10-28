@@ -400,8 +400,8 @@ fn compile_method_body_diagnostic_is_method_relative() {
 fn compile_method_records_source_with_operand_parens_as_written() {
     // BT-4059: the recorded method source goes to the `ChangeLog` and is
     // written back on flush, so it keeps the operand parentheses the user
-    // wrote (readability parens included). Only reflected `methodSource`,
-    // emitted by codegen, is canonical.
+    // wrote (readability parens included), exactly as reflected
+    // `methodSource`, emitted by codegen, does.
     for (method_source, expected) in [
         (
             "bumped => (self) printString",

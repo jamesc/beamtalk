@@ -24,7 +24,9 @@ use beamtalk_codegen::core_erlang::module_shell::core_module;
 use beamtalk_codegen::core_erlang::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, GeneratedModule, Result,
 };
-use beamtalk_core::ast::normalize::{expr_has_parenthesised_operand, peel_operand_parens_expr};
+use beamtalk_core::ast::normalize::{
+    PeeledParens, expr_has_parenthesised_operand, peel_operand_parens_expr_recording,
+};
 use beamtalk_core::ast::{Expression, Pattern};
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
 use beamtalk_core::source_analysis::Diagnostic;
@@ -33,19 +35,26 @@ use std::borrow::Cow;
 // ── Public API ──────────────────────────────────────────────────────────
 
 /// `expressions` with redundant send-operand parentheses stripped
-/// (`ast::normalize`, BT-4059), borrowed when there are none.
+/// (`ast::normalize`, BT-4059), borrowed when there are none, and a record of
+/// the wrappers removed.
 ///
 /// The REPL entries build a [`CoreErlangGenerator`] directly rather than
 /// going through `generate_module_with_warnings`, so they normalise here:
 /// every public entry below compiles the peeled form, so `(e) foo` evaluates
-/// exactly like `e foo` in the REPL as it does in compiled modules.
-fn peeled(expressions: &[Expression]) -> Cow<'_, [Expression]> {
+/// exactly like `e foo` in the REPL as it does in compiled modules. The record
+/// goes to the generator ([`CoreErlangGenerator::set_peeled_parens`]) so a
+/// method source it reflects (a `ClassBuilder` block method) keeps the
+/// parentheses as written.
+fn peeled(expressions: &[Expression]) -> (Cow<'_, [Expression]>, PeeledParens) {
+    let mut record = PeeledParens::default();
     if expressions.iter().any(expr_has_parenthesised_operand) {
         let mut owned = expressions.to_vec();
-        owned.iter_mut().for_each(peel_operand_parens_expr);
-        Cow::Owned(owned)
+        for expression in &mut owned {
+            peel_operand_parens_expr_recording(expression, &mut record);
+        }
+        (Cow::Owned(owned), record)
     } else {
-        Cow::Borrowed(expressions)
+        (Cow::Borrowed(expressions), record)
     }
 }
 
@@ -66,8 +75,9 @@ fn peeled(expressions: &[Expression]) -> Cow<'_, [Expression]> {
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> Result<String> {
-    let expression = peeled(std::slice::from_ref(expression));
+    let (expression, peeled_parens) = peeled(std::slice::from_ref(expression));
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.set_peeled_parens(peeled_parens);
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_repl_module(&expression[0])?;
     Ok(doc.to_pretty_string())
@@ -160,8 +170,9 @@ fn generate_repl_expressions_impl(
             span: None,
         });
     }
-    let expressions = peeled(expressions);
+    let (expressions, peeled_parens) = peeled(expressions);
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.set_peeled_parens(peeled_parens);
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
@@ -314,8 +325,9 @@ fn generate_repl_expressions_traced_impl(
         })
         .collect();
 
-    let expressions = peeled(expressions);
+    let (expressions, peeled_parens) = peeled(expressions);
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.set_peeled_parens(peeled_parens);
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
@@ -355,8 +367,9 @@ pub fn generate_test_expression_surfacing_verifier(
     expression: &Expression,
     module_name: &str,
 ) -> Result<(String, Vec<Diagnostic>)> {
-    let expression = peeled(std::slice::from_ref(expression));
+    let (expression, peeled_parens) = peeled(std::slice::from_ref(expression));
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.set_peeled_parens(peeled_parens);
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_test_module(&expression[0])?;
     let code = doc.to_pretty_string();

@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-4059: precedence-aware unparse and canonical reflected method source.
+//! BT-4059: precedence-aware unparse of the peeled tree, and restoring the
+//! peeled operand parentheses to recover a method's text as written.
 //!
 //! The send-operand normalisation pass (`ast::normalize`) removes redundant
 //! `Parenthesized` wrappers, so the unparser can no longer rely on the tree
@@ -13,13 +14,18 @@
 //! every stdlib and example source.
 //!
 //! Unparse only *adds* parentheses, so on a raw parse (the formatter's tree)
-//! its output is unchanged.
+//! its output is unchanged. Restoring the wrappers a recording peel removed
+//! (`restore_operand_parens`) gives back the as-written method: its
+//! `unparse_method` is that of the raw parse, which is what a method reflects
+//! as.
 
 use proptest::prelude::*;
 
-use super::super::{canonical_method_source, format_source, unparse_module};
-use crate::ast::Module;
-use crate::ast::normalize::peel_operand_parens;
+use super::super::{format_source, unparse_method, unparse_module};
+use crate::ast::normalize::{
+    PeeledParens, peel_operand_parens, peel_operand_parens_recording, restore_operand_parens,
+};
+use crate::ast::{MethodDefinition, Module};
 use crate::source_analysis::corpus_test_support::{read_corpus_file, repo_root};
 use crate::source_analysis::{Severity, lex_with_eof, parse};
 use crate::test_helpers::test_support::{arb_program, parse_bt, proptest_config_default};
@@ -88,8 +94,56 @@ proptest! {
     }
 }
 
+/// Every method of `module` (class and class side, standalone extensions,
+/// protocol provisions), in a fixed order.
+fn methods_of(module: &Module) -> Vec<&MethodDefinition> {
+    let mut methods = Vec::new();
+    for class in &module.classes {
+        methods.extend(class.methods.iter().chain(&class.class_methods));
+    }
+    methods.extend(module.method_definitions.iter().map(|s| &s.method));
+    for protocol in &module.protocols {
+        methods.extend(&protocol.provided_methods);
+    }
+    methods
+}
+
+/// `method` with the wrappers `peeled` recorded put back.
+fn restored(method: &MethodDefinition, peeled: &PeeledParens) -> MethodDefinition {
+    let mut restored = method.clone();
+    restore_operand_parens(&mut restored, peeled);
+    restored
+}
+
+/// Checks that restoring the recorded wrappers on each peeled method gives
+/// back its as-written source (`unparse_method` of the raw parse), and that
+/// a second restore changes nothing, returning a description of each failure.
+fn restore_failures(raw: &Module) -> Vec<String> {
+    let mut peeled = raw.clone();
+    let record = peel_operand_parens_recording(&mut peeled);
+    let (raw_methods, peeled_methods) = (methods_of(raw), methods_of(&peeled));
+    assert_eq!(raw_methods.len(), peeled_methods.len());
+    let mut failures = Vec::new();
+    for (raw_method, peeled_method) in raw_methods.into_iter().zip(peeled_methods) {
+        let written = unparse_method(raw_method);
+        let once = restored(peeled_method, &record);
+        let got = unparse_method(&once);
+        if got != written {
+            failures.push(format!(
+                "restored source differs:\n--- restored:\n{got}\n--- as written:\n{written}"
+            ));
+        }
+        if restored(&once, &record) != once {
+            failures.push(format!("a second restore changes:\n{written}"));
+        }
+    }
+    failures
+}
+
 /// Every `.bt` source of the stdlib (sources and tests, with fixtures) and the
 /// examples: the hand-written programs, parenthesised every way people write.
+/// The peeled tree round-trips through unparse, and restoring what the peel
+/// recorded gives back every method as written.
 #[test]
 fn peeled_stdlib_and_examples_round_trip() {
     let root = repo_root();
@@ -111,6 +165,9 @@ fn peeled_stdlib_and_examples_round_trip() {
                 continue;
             }
             checked += 1;
+            for failure in restore_failures(&module) {
+                failures.push(format!("{}: {failure}", path.display()));
+            }
             if let Some(failure) = round_trip_failure(module) {
                 failures.push(format!("{}: {failure}", path.display()));
             }
@@ -132,13 +189,17 @@ fn peeled_stdlib_and_examples_round_trip() {
     );
 }
 
-/// `canonical_method_source` of the first method of `source`'s first class.
-fn reflected(source: &str) -> String {
-    canonical_method_source(&parse_bt(source).classes[0].methods[0])
+/// `unparse_method` of the first method of `source`'s first class, peeled:
+/// the text the compiled tree unparses as, with only the parentheses its
+/// meaning needs.
+fn peeled_source(source: &str) -> String {
+    let mut module = parse_bt(source);
+    peel_operand_parens(&mut module);
+    unparse_method(&module.classes[0].methods[0])
 }
 
 #[test]
-fn reflected_source_drops_redundant_operand_parens() {
+fn unparse_of_the_peeled_tree_keeps_only_needed_parens() {
     let cases = [
         ("(self) foo", "self foo"),
         ("((self)) foo: (1) bar: ((2))", "self foo: 1 bar: 2"),
@@ -167,12 +228,15 @@ fn reflected_source_drops_redundant_operand_parens() {
     ];
     for (body, expected) in cases {
         let source = format!("Object subclass: A\n  m: a b: b c: c x: x y: y =>\n    {body}\n");
-        let reflected = reflected(&source);
-        let reflected_body = reflected
+        let unparsed = peeled_source(&source);
+        let unparsed_body = unparsed
             .split_once("=>")
             .map_or("", |(_, body)| body)
             .trim();
-        assert_eq!(reflected_body, expected, "{body}\n{reflected}");
+        assert_eq!(unparsed_body, expected, "{body}\n{unparsed}");
+        // Restoring what the peel recorded gives back the body as written.
+        let failures = restore_failures(&parse_bt(&source));
+        assert!(failures.is_empty(), "{body}: {failures:?}");
     }
 }
 

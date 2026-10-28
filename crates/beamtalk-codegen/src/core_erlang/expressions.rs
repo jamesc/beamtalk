@@ -1028,7 +1028,11 @@ impl CoreErlangGenerator {
         // methods: (instance side) and classMethodSource: from classMethods:
         // (class side) — so builder-defined classes are indexable by
         // SystemNavigation on both sides.
-        let augmented = super::class_builder_source::inject_method_source(receiver, messages);
+        let augmented = super::class_builder_source::inject_method_source(
+            receiver,
+            messages,
+            &self.peeled_parens,
+        );
         let messages: &[CascadeMessage] = augmented.as_deref().unwrap_or(messages);
 
         if messages.is_empty() {
