@@ -102,6 +102,18 @@ const POSITIONS: &[(&str, &str)] = &[
     ("after_self_send_sibling", "self take: self bump with: EXPR"),
 ];
 
+/// The value-position expressions spliced at `EXPR`: the parenthesized field
+/// assignment, and (BT-3982) an evaluated literal block that writes a field,
+/// with an argument that writes one too, unary, and with two arguments. Each
+/// is a producer wherever it sits, so its `{Value, State}` carrier never
+/// becomes the value and its `State` reaches the next statement.
+const EXPRS: &[&str] = &[
+    "(self.n := 5)",
+    "([:y | self.m := y] value: (self.n := 5))",
+    "[self.n := 5] value",
+    "([:a :b | self.n := a + b] value: 2 value: 3)",
+];
+
 /// How the position's statement is embedded in the method, and what follows it.
 const SHAPES: &[(&str, &str)] = &[
     ("then_read", "    STMT.\n    self.n\n"),
@@ -266,15 +278,20 @@ fn field_assignment_value_position_corpus(shapes: &[(&str, &str)]) {
     };
     let mut failures: Vec<String> = Vec::new();
     for (shape_name, shape) in shapes {
-        let cases: Vec<(&str, String)> = POSITIONS
+        let cases: Vec<(String, String)> = EXPRS
             .iter()
             .enumerate()
-            .map(|(i, (position_name, position))| {
-                let stmt = position.replace("EXPR", "(self.n := 5)");
-                (
-                    *position_name,
-                    format!("  probe{i} =>\n{}", shape.replace("STMT", &stmt)),
-                )
+            .flat_map(|(e, expr)| {
+                POSITIONS
+                    .iter()
+                    .enumerate()
+                    .map(move |(i, (position_name, position))| {
+                        let stmt = position.replace("EXPR", expr);
+                        (
+                            format!("{position_name} / {expr}"),
+                            format!("  probe{e}x{i} =>\n{}", shape.replace("STMT", &stmt)),
+                        )
+                    })
             })
             .collect();
         // One `erlc` run per shape over every position at once...

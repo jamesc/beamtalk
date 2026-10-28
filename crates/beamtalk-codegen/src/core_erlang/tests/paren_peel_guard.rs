@@ -157,7 +157,7 @@ const CEILINGS: &[(&str, usize)] = &[
     // Raw-AST reachable: `local_threading_diagnostics` (`beamtalk-lint`).
     (
         "beamtalk-core/src/semantic_analysis/validators/local_threading.rs",
-        19,
+        16,
     ),
     // Raw-AST reachable: `send_user_code`, which `block_facts`'
     // `analyze_block` reads (see `block_facts.rs` above).

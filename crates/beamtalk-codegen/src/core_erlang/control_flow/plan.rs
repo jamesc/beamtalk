@@ -315,21 +315,15 @@ impl BodyEffects {
         // fall back to StateAcc mode so `lower_local_var_assignment_bind`
         // can properly unpack the {Result, NewStateAcc} tuple. BT-3982: an
         // evaluated literal block inlined with its writes threaded is one
-        // too, whichever lowering takes it (the producer, read off the
-        // enclosing frame here, or the Tier 2 path in the body's own frame):
-        // either runs on the body's `StateAcc`.
+        // too, whichever lowering takes it (the producer, or the Tier 2 path
+        // in a body frame with a private scratch map): either runs on the
+        // body's `StateAcc`.
         let has_tier2_threaded_assign = body.body.iter().any(|s| {
             if let Expression::Assignment { target, value, .. } = &s.expression {
                 if let Expression::Identifier(id) = target.as_ref() {
                     if threaded_locals.contains(&id.name.to_string()) {
                         return generator.is_tier2_value_call(value)
-                            || !generator.is_repl_mode()
-                                && beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(
-                                value,
-                            )
-                            .is_some_and(|(block, _)| {
-                                generator.evaluated_block_inlines_with_mutations(block)
-                            });
+                            || generator.is_inlined_evaluated_block(value);
                     }
                 }
             }
@@ -373,10 +367,18 @@ impl BodyEffects {
         // control flow with mutations like the statement itself: its carrier
         // threads the `State` (or a hybrid body's pre-extracted field
         // parameters, which it cannot reach).
+        //
+        // BT-3982: an evaluated literal block (a producer wherever it sits)
+        // counts like a conditional: only when it writes a field or sends to
+        // `self`. One that writes only locals runs on a private scratch map
+        // in a direct-params or tuple-acc body.
         let has_cf_mutations = body.body.iter().any(|s| {
             Self::statement_and_producer_sites(&s.expression)
                 .into_iter()
-                .any(|e| generator.control_flow_has_mutations(e))
+                .any(|e| {
+                    generator.control_flow_has_mutations(e)
+                        && !generator.is_locals_only_evaluated_block(e)
+                })
         });
 
         // Guard: inline conditionals that write threaded locals (e.g.

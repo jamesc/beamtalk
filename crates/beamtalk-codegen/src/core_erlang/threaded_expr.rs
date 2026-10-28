@@ -1010,9 +1010,7 @@ impl CoreErlangGenerator {
     /// tuple.
     pub(super) fn evaluated_block_is_producer(&self, expr: &Expression) -> bool {
         self.block_value_producer_in_frame(expr)
-            || self
-                .actor_evaluated_block_producer_parts(expr.unwrap_parens())
-                .is_some()
+            || self.actor_evaluated_block_producer_parts(expr).is_some()
     }
 
     /// The kind of method body being lowered, `None` outside a class,

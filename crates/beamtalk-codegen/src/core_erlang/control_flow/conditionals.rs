@@ -624,7 +624,7 @@ impl CoreErlangGenerator {
             // BT-3982: an actor evaluated block that threads `State` is a
             // producer in every arm.
             || self
-                .actor_evaluated_block_producer_parts(expr.unwrap_parens())
+                .actor_evaluated_block_producer_parts(expr)
                 .is_some()
     }
 
@@ -2917,11 +2917,13 @@ impl CoreErlangGenerator {
             // BT-4000: `self.f := <conditional whose receiver is sequenced>` is
             // lowered by C1, whose `lower_field_assignment_bind` threads the
             // value ahead, so the receiver's `Bind`s are this arm's own
-            // statements rather than text inside C6's raw tuple.
+            // statements rather than text inside C6's raw tuple. BT-3982: so is
+            // `self.f := <evaluated block that is a producer>`.
             let kind = match kind {
                 BodyExprKind::FieldAssignmentControlFlow
                     if matches!(expr, Expression::Assignment { value, .. }
-                        if self.is_conditional_with_sequenced_receiver(value)) =>
+                        if self.is_conditional_with_sequenced_receiver(value)
+                            || self.evaluated_block_is_producer(value)) =>
                 {
                     BodyExprKind::FieldAssignment
                 }
