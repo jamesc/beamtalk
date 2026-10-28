@@ -526,6 +526,12 @@ impl<'a> ReplAssembler<'a> {
         &mut self,
         expression: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-4232: codegen matches send operands without peeling them.
+        #[cfg(test)]
+        beamtalk_core::ast::normalize::assert_expr_operands_normalised(
+            std::slice::from_ref(expression),
+            "generate_repl_module",
+        );
         let previous_is_repl_mode = self.generator.is_repl_mode();
         let previous_context = self.generator.context;
         self.generator.context = CodeGenContext::Repl;
@@ -551,6 +557,12 @@ impl<'a> ReplAssembler<'a> {
         expressions: &[Expression],
         source_texts: &[String],
     ) -> Result<Document<'static>> {
+        // BT-4232: codegen matches send operands without peeling them.
+        #[cfg(test)]
+        beamtalk_core::ast::normalize::assert_expr_operands_normalised(
+            expressions,
+            "generate_repl_module_multi_traced",
+        );
         let previous_is_repl_mode = self.generator.is_repl_mode();
         let previous_context = self.generator.context;
         self.generator.context = CodeGenContext::Repl;
@@ -799,6 +811,12 @@ impl<'a> ReplAssembler<'a> {
         if expressions.len() == 1 {
             return self.generate_repl_module(&expressions[0]);
         }
+        // BT-4232: codegen matches send operands without peeling them.
+        #[cfg(test)]
+        beamtalk_core::ast::normalize::assert_expr_operands_normalised(
+            expressions,
+            "generate_repl_module_multi",
+        );
 
         let previous_is_repl_mode = self.generator.is_repl_mode();
         let previous_context = self.generator.context;
