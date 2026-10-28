@@ -69,7 +69,9 @@ pub struct CorpusFile {
     pub path: String,
     /// Source text (for line numbers).
     pub source: String,
-    /// Parsed module.
+    /// Parsed module, operand-normalised (BT-4238): the shape recognizers in
+    /// `block_facts` read the tree analysis reads, so `(self.x) foo` counts
+    /// like `self.x foo`.
     pub module: Module,
 }
 
@@ -85,10 +87,11 @@ pub struct CorpusScan {
 /// Parses one source text; `None` when it has parse errors.
 #[must_use]
 pub fn parse_corpus_source(path: &str, source: &str) -> Option<CorpusFile> {
-    let (module, diagnostics) = parse(lex_with_eof(source));
+    let (mut module, diagnostics) = parse(lex_with_eof(source));
     if diagnostics.iter().any(|d| d.severity == Severity::Error) {
         return None;
     }
+    crate::ast::normalize::peel_operand_parens(&mut module);
     Some(CorpusFile {
         path: path.to_string(),
         source: source.to_string(),

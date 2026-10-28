@@ -20,7 +20,9 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: `textDocument/signatureHelp`
 
+use crate::queries::type_of_parsed;
 use crate::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
+use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{ClassDefinition, Expression, MessageSelector, Module};
 use beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo;
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
@@ -344,7 +346,7 @@ fn resolve_ffi_signature_help(
     };
 
     // Check if receiver is typed as ErlangModule
-    let receiver_ty = type_map.get(receiver.span())?;
+    let receiver_ty = type_of_parsed(type_map, receiver)?;
     let InferredType::Known {
         class_name,
         type_args,
@@ -509,7 +511,9 @@ fn resolve_receiver_class(
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
 ) -> Option<(EcoString, bool)> {
-    match receiver {
+    // The receiver as analysis sees it (BT-4237): `(self) foo:` resolves like
+    // `self foo:`, while `(super) foo:` stays an ordinary send.
+    match canonical_operand(receiver) {
         Expression::ClassReference { name, .. } => Some((name.name.clone(), true)),
         Expression::Super(_) => match context {
             SigHelpClassContext::InstanceMethod(class) => {
@@ -539,8 +543,7 @@ fn resolve_receiver_class(
             }
             SigHelpClassContext::TopLevel => None,
         },
-        _ => type_map
-            .get(receiver.span())
+        _ => type_of_parsed(type_map, receiver)
             .and_then(InferredType::as_known)
             .cloned()
             .map(|name| (name, false)),

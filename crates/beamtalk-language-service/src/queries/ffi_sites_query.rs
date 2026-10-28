@@ -93,7 +93,11 @@ pub fn find_ffi_sites_in_source(
 ) -> Vec<u32> {
     let wrapped = format!("{SYNTHETIC_PREFIX}{method_source}");
     let tokens = lex_with_eof(&wrapped);
-    let (parsed, _diags) = parse(tokens);
+    let (mut parsed, _diags) = parse(tokens);
+    // Redundant operand parentheses are transparent, as they are to the
+    // compiler and `find_all_sends_in_source` (BT-4059, BT-4238): the FFI
+    // receiver recognizer matches canonical operands.
+    beamtalk_core::ast::normalize::peel_operand_parens(&mut parsed);
 
     let target = FfiTarget {
         module,

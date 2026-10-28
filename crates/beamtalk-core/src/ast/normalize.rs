@@ -63,10 +63,17 @@
 //!
 //! The pass runs where analysis and codegen take ownership of a module
 //! (`analyse_full` on its own clone; `generate_module_with_warnings` and the
-//! REPL codegen entries, recording, on theirs). The formatter, the LSP, the raw
-//! parse and the module a driver hands to codegen keep the parenthesised tree.
+//! REPL codegen entries, recording, on theirs). Every other reader of
+//! `semantic_analysis` that starts from a parsed module goes through
+//! [`normalised`] (BT-4238): the type checker's module entries
+//! (`TypeChecker::check_module`, so `infer_types` and the LSP's hover and
+//! completion), `local_threading_diagnostics`, `beamtalk-lint`'s pass runner,
+//! the FFI-site query and the class-variable census. The formatter, the LSP's
+//! position lookups, the `unnecessary_parens` lint, the raw parse and the
+//! module a driver hands to codegen keep the parenthesised tree.
 //! It is idempotent.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
@@ -193,6 +200,25 @@ fn visit_operands_mut(expr: &mut Expression, visit: &mut dyn FnMut(&mut Expressi
 /// Idempotent: a second run changes nothing.
 pub fn peel_operand_parens(module: &mut Module) {
     let _ = peel_operand_parens_recording(module);
+}
+
+/// `module` with every redundant send-operand wrapper removed: borrowed as it
+/// is when it is already canonical (one [`has_parenthesised_operand`] scan),
+/// otherwise a peeled clone.
+///
+/// The one entry for a reader that holds a parsed module by shared reference
+/// and must see what analysis sees (BT-4238): `(e) foo` then reads exactly
+/// like `e foo`. A node's span is the same in both trees, so a span taken
+/// from the result names the same source text in the parsed module.
+#[must_use]
+pub fn normalised(module: &Module) -> Cow<'_, Module> {
+    if has_parenthesised_operand(module) {
+        let mut owned = module.clone();
+        peel_operand_parens(&mut owned);
+        Cow::Owned(owned)
+    } else {
+        Cow::Borrowed(module)
+    }
 }
 
 /// [`peel_operand_parens`], returning what it removed so
@@ -339,6 +365,24 @@ fn is_peelable(operand: &Expression) -> bool {
         && !matches!(operand.unwrap_parens(), Expression::Super(_))
 }
 
+/// The node the normalised tree holds in place of `operand`, a send operand
+/// (receiver or argument) of the parsed module: its innermost
+/// non-`Parenthesized` node when the pass peels it, `operand` itself
+/// otherwise (`(super)`, or no wrapper at all).
+///
+/// For a reader that walks the parsed tree (the language service's position
+/// lookups, BT-4237) but matches an operand's shape the way analysis does,
+/// so `(self) foo` resolves like `self foo` while `(super) foo` stays an
+/// ordinary send.
+#[must_use]
+pub fn canonical_operand(operand: &Expression) -> &Expression {
+    if is_peelable(operand) {
+        operand.unwrap_parens()
+    } else {
+        operand
+    }
+}
+
 /// A throwaway node to swap into a slot while its content is moved.
 fn placeholder() -> Expression {
     Expression::Error {
@@ -481,6 +525,51 @@ mod tests {
             assert!(!has_parenthesised_operand(&module), "{src}");
             assert_eq!(unparse_module(&module).trim(), expected, "{src}");
         }
+    }
+
+    #[test]
+    fn canonical_operand_is_the_node_the_peel_leaves() {
+        for (src, keeps_wrapper) in [
+            ("(self) foo", false),
+            ("((x)) foo", false),
+            ("x foo", false),
+            ("(super) foo", true),
+            ("((super)) foo", true),
+        ] {
+            let module = parse_bt(src);
+            let Expression::MessageSend { receiver, .. } = first_expr(&module) else {
+                panic!("expected a send: {src}");
+            };
+            let canonical = canonical_operand(receiver);
+            assert_eq!(
+                matches!(canonical, Expression::Parenthesized { .. }),
+                keeps_wrapper,
+                "{src}"
+            );
+            let peeled = peeled(src);
+            let Expression::MessageSend {
+                receiver: peeled_receiver,
+                ..
+            } = first_expr(&peeled)
+            else {
+                panic!("expected a send: {src}");
+            };
+            assert_eq!(canonical, peeled_receiver.as_ref(), "{src}");
+        }
+    }
+
+    #[test]
+    fn normalised_borrows_a_canonical_module_and_peels_a_clone_otherwise() {
+        let canonical = parse_bt("x foo. (y bar)");
+        assert!(matches!(normalised(&canonical), Cow::Borrowed(_)));
+
+        let raw = parse_bt("(x) foo: (1)");
+        let module = normalised(&raw);
+        assert!(matches!(module, Cow::Owned(_)));
+        assert!(!has_parenthesised_operand(&module));
+        assert_eq!(unparse_module(&module).trim(), "x foo: 1");
+        // The input is untouched.
+        assert!(has_parenthesised_operand(&raw));
     }
 
     #[test]
