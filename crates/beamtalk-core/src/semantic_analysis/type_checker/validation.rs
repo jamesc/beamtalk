@@ -2344,11 +2344,15 @@ impl TypeChecker {
         class_name: &EcoString,
         hierarchy: &ClassHierarchy,
     ) {
-        if method.return_type.is_none() {
+        // Judge *this* definition's own annotation: a class body and a
+        // standalone `Class >> sel` can both define `sel`, and the hierarchy
+        // keeps only one of them (BT-4239).
+        let Some(own_rt) = method.return_type.as_ref().map(DeclaredType::from) else {
             return;
-        }
+        };
         let selector = method.selector.name();
-        let Some(widening) = Self::override_return_widening(class_name, &selector, hierarchy)
+        let Some(widening) =
+            Self::override_return_widening(class_name, &selector, &own_rt, hierarchy)
         else {
             return;
         };
@@ -2372,26 +2376,22 @@ impl TypeChecker {
     }
 
     /// The incompatible override `check_override_return_compatibility`
-    /// reports for `class_name>>selector`, if any: the class's declared
-    /// return type does not refine the one inherited from its superclass.
-    /// `None` when there is no inherited declaration, either side is
-    /// unannotated, either side names a class type parameter (no
-    /// substitution here), or the override refines its parent. Shared with
+    /// reports for a `class_name>>selector` declared `-> child_rt`, if any:
+    /// `child_rt` does not refine the return type inherited from the
+    /// superclass. `None` when there is no annotated inherited declaration,
+    /// either side names a class type parameter (no substitution here), or
+    /// the override refines its parent. Shared with
     /// [`ProtocolRegistry::conformance_return_type_mismatches`], which leaves
     /// exactly these mismatches to the override site (BT-4175).
     pub(crate) fn override_return_widening(
         class_name: &str,
         selector: &str,
+        child_rt: &DeclaredType,
         hierarchy: &ClassHierarchy,
     ) -> Option<OverrideReturnWidening> {
         let superclass = hierarchy.get_class(class_name)?.superclass.clone()?;
         let parent_method = hierarchy.find_method(&superclass, selector)?;
-        let child_method = hierarchy.find_method(class_name, selector)?;
-        let (Some(child_rt), Some(parent_rt)) =
-            (child_method.return_type, parent_method.return_type)
-        else {
-            return None;
-        };
+        let parent_rt = parent_method.return_type?;
         // Class type params (possibly multi-letter, which the shared rule's
         // single-letter heuristic would miss) have no substitution here.
         let parent_class = parent_method.defined_in;
@@ -2402,12 +2402,12 @@ impl TypeChecker {
             .collect();
         if child_rt.mentions_any(&type_params)
             || parent_rt.mentions_any(&type_params)
-            || Self::is_return_type_refinement(&child_rt, &parent_rt, hierarchy)
+            || Self::is_return_type_refinement(child_rt, &parent_rt, hierarchy)
         {
             return None;
         }
         Some(OverrideReturnWidening {
-            child_rt,
+            child_rt: child_rt.clone(),
             parent_rt,
             parent_class,
         })
