@@ -127,13 +127,15 @@ pub(in crate::core_erlang) struct ClassContext {
     /// ADR 0084: When `Some(ClassName)`, we are lowering a programmatic
     /// `ClassBuilder` class-method block into an anonymous fun. Such a fun has no
     /// `class_<sel>` module export, so self-sends and `super` route through the
-    /// runtime dispatch helpers (`class_self_dispatch_local`/`class_self_dispatch`)
-    /// keyed on this class name, not through a direct module call.
+    /// runtime dispatch helpers (`class_self_dispatch_local` for self-sends,
+    /// `class_super_dispatch` for `super`) keyed on this class name, not
+    /// through a direct module call.
     pub builder_class_method_class: Option<String>,
     /// BT-3762: the class-side extension's *target* class while its method is
     /// lowered (the extension module's own class identity is not the target).
-    /// Used only to name the class in the "class variables are per class"
-    /// diagnostic; see [`CoreErlangGenerator::class_var_home`].
+    /// Read through [`CoreErlangGenerator::class_var_home`]: it names the class
+    /// in the "class variables are per class" diagnostic and keys a class-side
+    /// `super` send (BT-4001).
     pub extension_target_class: Option<String>,
 }
 

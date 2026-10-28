@@ -3798,7 +3798,7 @@ fn test_builder_super_and_self_send_pass_live_receiver_tag() {
     let code = try_codegen(src).expect("builder super/self-send must compile");
     assert!(
         code.contains(
-            "call 'beamtalk_class_dispatch':'class_self_dispatch'('BT3709Sup', 'bump', [], \
+            "call 'beamtalk_class_dispatch':'class_super_dispatch'('BT3709Sup', 'bump', [], \
              call 'erlang':'element'(2, ClassSelf))"
         ),
         "builder `super` must pass the live receiver tag. Got:\n{code}"
@@ -3810,6 +3810,79 @@ fn test_builder_super_and_self_send_pass_live_receiver_tag() {
         ),
         "builder self-send must pass the live receiver tag. Got:\n{code}"
     );
+}
+
+/// BT-4001: a `super` send in a compiled class method (not only a `ClassBuilder`
+/// fun) walks the metaclass chain through `class_super_dispatch/4`, keyed on the
+/// defining class with the live receiver tag. It must never take the instance
+/// `beamtalk_dispatch:super/5` path, whose `Self`/`State` a class method does
+/// not bind (erlc rejected the module with `unbound variable 'Self'`). Covered
+/// at method level and inside a closure, for Actor, Object and Value classes,
+/// and for a sealed class's direct-called `class sealed` method.
+#[test]
+fn test_class_method_super_uses_class_super_dispatch() {
+    let headers = [
+        "Actor subclass: C",
+        "Object subclass: C",
+        "Value subclass: C",
+        "sealed Object subclass: C",
+    ];
+    let bodies = [
+        "class run => super peek: 1",
+        "class run => #(1, 2) collect: [:x | super peek: x]",
+        "class sealed run => super peek: 1",
+        "class sealed run => #(1, 2) collect: [:x | [super peek: x] on: Error do: [:e | 0]]",
+    ];
+    for header in headers {
+        for body in bodies {
+            let src = format!("{header}\n  {body}\n");
+            let code = super::compile(&src)
+                .unwrap_or_else(|e| panic!("class-side super must compile: {e}\n{src}"));
+            assert!(
+                code.contains(
+                    "call 'beamtalk_class_dispatch':'class_super_dispatch'('C', 'peek:', ["
+                ) && code.contains("], call 'erlang':'element'(2, ClassSelf))"),
+                "class-side `super` must route through class_super_dispatch/4:\n{src}\n{code}"
+            );
+            assert!(
+                !code.contains("'beamtalk_dispatch':'super'")
+                    && !code.contains("'beamtalk_dispatch':'super_value'"),
+                "class-side `super` must not take the instance super path:\n{src}\n{code}"
+            );
+            assert_compiles_through_erlc("test", &code);
+        }
+    }
+}
+
+/// BT-4001: a `super` send in a class-side extension (`Target class >> sel`)
+/// is keyed on the extension's *target*, not on the class (if any) whose file
+/// hosts the extension, so the walk starts at the target's superclass.
+#[test]
+fn test_class_side_extension_super_is_keyed_on_the_target() {
+    let hosts = ["", "Object subclass: Host\n  foo => 1\n"];
+    let bodies = [
+        "Target class >> run => super peek: 1",
+        "Target class >> run => #(1, 2) collect: [:x | super peek: x]",
+    ];
+    for host in hosts {
+        for body in bodies {
+            let src = format!("{host}{body}\n");
+            let code = super::compile(&src)
+                .unwrap_or_else(|e| panic!("class-side extension super must compile: {e}\n{src}"));
+            assert!(
+                code.contains(
+                    "call 'beamtalk_class_dispatch':'class_super_dispatch'('Target', 'peek:', ["
+                ),
+                "extension `super` must be keyed on the target class:\n{src}\n{code}"
+            );
+            assert!(
+                !code.contains("class_super_dispatch'('Host'")
+                    && !code.contains("'beamtalk_dispatch':'super'"),
+                "extension `super` must not use the host class or the instance path:\n{src}\n{code}"
+            );
+            assert_compiles_through_erlc("test", &code);
+        }
+    }
 }
 
 /// A builder cascade lexically inside a block still lowers the fun as a class

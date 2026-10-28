@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4001: superclass for the class-side `super` + extension cases in
+// `class_side_super_test.bt`, which also gives it an extension-only
+// class-side `extPeek:` that a subclass's `super extPeek:` must reach.
+
+Object subclass: Bt4001ClassSuperExtBase
+
+  class peek: x => x + 100

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4001: inherits Bt4001ClassSuperObjectChild's `class run`, whose `super`
+// still starts at the defining class's superclass, not the receiver's.
+
+Bt4001ClassSuperObjectChild subclass: Bt4001ClassSuperObjectGrandchild
+
+  class peek: x => x - 100
