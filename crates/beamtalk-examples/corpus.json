@@ -935,7 +935,7 @@
         "subclassing",
         "unless"
       ],
-      "source": "Server subclass: StreamHost\n  state: resets = 0\n  onLinkedExit: _pid :: Pid reason: reason :: Object =>\n    reason == #normal ifFalse: [self.resets := self.resets + 1]",
+      "source": "Server subclass: StreamHost\n  state: resets = 0\n  onLinkedExit: _source :: Pid | Port reason: reason :: Object =>\n    reason == #normal ifFalse: [self.resets := self.resets + 1]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -36573,7 +36573,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// BT-4052 fixture: Server that overrides onLinkedExit:reason: (and so traps\n// exits without a terminate: override). Records the last hook call and never\n// sees an EXIT in handleInfo:. See stdlib/test/server_linked_exit_test.bt.\n\nServer subclass: Bt4052HookServer\n  state: hookCount = 0\n  state: lastReason = nil\n  state: lastPid = nil\n  state: infoCount = 0\n\n  linkExiting: reason =>\n    Erlang erlang spawn_link: [Erlang erlang exit: reason]\n    nil\n\n  linkNormal =>\n    Erlang erlang spawn_link: [nil]\n    nil\n\n  onLinkedExit: pid :: Pid reason: reason :: Object =>\n    self.hookCount := self.hookCount + 1\n    self.lastPid := pid\n    self.lastReason := reason\n\n  handleInfo: _msg => self.infoCount := self.infoCount + 1\n\n  hookCount => self.hookCount\n\n  lastReason => self.lastReason\n\n  lastPid => self.lastPid\n\n  infoCount => self.infoCount",
+      "source": "// BT-4052 fixture: Server that overrides onLinkedExit:reason: (and so traps\n// exits without a terminate: override). Records the last hook call and never\n// sees an EXIT in handleInfo:. See stdlib/test/server_linked_exit_test.bt.\n\nServer subclass: Bt4052HookServer\n  state: hookCount = 0\n  state: lastReason = nil\n  state: lastPid = nil\n  state: infoCount = 0\n\n  linkExiting: reason =>\n    Erlang erlang spawn_link: [Erlang erlang exit: reason]\n    nil\n\n  linkNormal =>\n    Erlang erlang spawn_link: [nil]\n    nil\n\n  onLinkedExit: pid :: Pid | Port reason: reason :: Object =>\n    self.hookCount := self.hookCount + 1\n    self.lastPid := pid\n    self.lastReason := reason\n\n  handleInfo: _msg => self.infoCount := self.infoCount + 1\n\n  hookCount => self.hookCount\n\n  lastReason => self.lastReason\n\n  lastPid => self.lastPid\n\n  infoCount => self.infoCount",
       "explanation": "BT-4052 fixture: Server that overrides onLinkedExit:reason: (and so traps exits without a terminate: override). Records the last hook call and never sees an EXIT in handleInfo:. See stdlib/test/server_linked_exit_test.bt."
     },
     {
@@ -36592,7 +36592,7 @@
         "onLinkedExit:reason:",
         "subclassing"
       ],
-      "source": "// BT-4052 fixture: Server whose onLinkedExit:reason: raises - the server\n// crashes per ADR 0134. See stdlib/test/server_linked_exit_test.bt.\n\nServer subclass: Bt4052RaisingServer\n\n  linkExiting: reason =>\n    Erlang erlang spawn_link: [Erlang erlang exit: reason]\n    nil\n\n  onLinkedExit: _pid :: Pid reason: _reason :: Object =>\n    Error signal: \"deliberate hook error\"",
+      "source": "// BT-4052 fixture: Server whose onLinkedExit:reason: raises - the server\n// crashes per ADR 0134. See stdlib/test/server_linked_exit_test.bt.\n\nServer subclass: Bt4052RaisingServer\n\n  linkExiting: reason =>\n    Erlang erlang spawn_link: [Erlang erlang exit: reason]\n    nil\n\n  onLinkedExit: _pid :: Pid | Port reason: _reason :: Object =>\n    Error signal: \"deliberate hook error\"",
       "explanation": "BT-4052 fixture: Server whose onLinkedExit:reason: raises - the server crashes per ADR 0134. See stdlib/test/server_linked_exit_test.bt."
     },
     {
@@ -36653,7 +36653,7 @@
         "terminate:",
         "unless"
       ],
-      "source": "// BT-4052 fixture: Server with both terminate: and onLinkedExit:reason:,\n// supervised by Bt4052Sup - supervisor shutdown must still run terminate:.\n// See stdlib/test/server_linked_exit_test.bt.\n\nServer subclass: Bt4052TerminatingServer\n  state: tableName = nil\n\n  onLinkedExit: _pid :: Pid reason: _reason :: Object => nil\n\n  terminate: reason =>\n    self.tableName isNil\n      ifFalse: [\n        table := Ets named: self.tableName\n        table at: #called put: true; at: #reason put: reason\n      ]",
+      "source": "// BT-4052 fixture: Server with both terminate: and onLinkedExit:reason:,\n// supervised by Bt4052Sup - supervisor shutdown must still run terminate:.\n// See stdlib/test/server_linked_exit_test.bt.\n\nServer subclass: Bt4052TerminatingServer\n  state: tableName = nil\n\n  onLinkedExit: _pid :: Pid | Port reason: _reason :: Object => nil\n\n  terminate: reason =>\n    self.tableName isNil\n      ifFalse: [\n        table := Ets named: self.tableName\n        table at: #called put: true; at: #reason put: reason\n      ]",
       "explanation": "BT-4052 fixture: Server with both terminate: and onLinkedExit:reason:, supervised by Bt4052Sup - supervisor shutdown must still run terminate:. See stdlib/test/server_linked_exit_test.bt."
     },
     {

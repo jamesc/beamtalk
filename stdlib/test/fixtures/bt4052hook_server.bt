@@ -19,7 +19,7 @@ Server subclass: Bt4052HookServer
     Erlang erlang spawn_link: [nil]
     nil
 
-  onLinkedExit: pid :: Pid reason: reason :: Object =>
+  onLinkedExit: pid :: Pid | Port reason: reason :: Object =>
     self.hookCount := self.hookCount + 1
     self.lastPid := pid
     self.lastReason := reason

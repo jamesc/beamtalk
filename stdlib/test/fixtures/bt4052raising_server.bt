@@ -10,5 +10,5 @@ Server subclass: Bt4052RaisingServer
     Erlang erlang spawn_link: [Erlang erlang exit: reason]
     nil
 
-  onLinkedExit: _pid :: Pid reason: _reason :: Object =>
+  onLinkedExit: _pid :: Pid | Port reason: _reason :: Object =>
     Error signal: "deliberate hook error"

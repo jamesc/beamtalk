@@ -4579,6 +4579,16 @@ bt4052_handle_linked_exit_3_flag_false_matches_default_test() ->
     ),
     ?assertEqual(pass, beamtalk_actor:handle_linked_exit(tick, State, false)).
 
+bt4052_handle_linked_exit_3_flag_true_port_source_test() ->
+    %% A trapping process also receives 'EXIT' from linked ports.
+    Port = open_port({spawn, "cat"}, []),
+    ?assert(is_port(Port)),
+    ?assertEqual(
+        {hook, Port, normal},
+        beamtalk_actor:handle_linked_exit({'EXIT', Port, normal}, #{}, true)
+    ),
+    port_close(Port).
+
 bt3596_default_handle_info_stops_on_non_parent_abnormal_exit_test() ->
     %% The default ignore-all handle_info/2 (used by every plain Actor
     %% subclass) must not silently swallow a linked child's crash once this

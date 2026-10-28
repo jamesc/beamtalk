@@ -8,7 +8,7 @@
 Server subclass: Bt4052TerminatingServer
   state: tableName = nil
 
-  onLinkedExit: _pid :: Pid reason: _reason :: Object => nil
+  onLinkedExit: _pid :: Pid | Port reason: _reason :: Object => nil
 
   terminate: reason =>
     self.tableName isNil
