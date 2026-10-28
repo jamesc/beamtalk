@@ -164,7 +164,7 @@ impl ClassHierarchy {
     /// Whether a standalone extension method (`Target >> sel => ...`) on
     /// `class_name` compiles with the actor method boundary. Anything else
     /// lowers through the value-type body path. Single authority for codegen's
-    /// extension lowering and the BT-4092 migration warning.
+    /// extension lowering.
     #[must_use]
     pub fn extension_target_is_actor(&self, class_name: &str) -> bool {
         self.is_actor_subclass(class_name)

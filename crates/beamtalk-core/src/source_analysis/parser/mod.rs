@@ -588,9 +588,7 @@ pub enum DiagnosticCategory {
     DeadAssignment,
     /// Duplicate extension method conflict.
     ExtensionConflict,
-    /// Deprecation warning — wrong keyword/class-kind combination, or a
-    /// one-release migration warning for a changed meaning (BT-4092:
-    /// a parenthesised trailing field assignment in a value-type method).
+    /// Deprecation warning — wrong keyword/class-kind combination.
     ///
     /// Excluded from `--warnings-as-errors` to allow gradual migration.
     Deprecation,

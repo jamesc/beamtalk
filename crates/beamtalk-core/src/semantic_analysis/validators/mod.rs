@@ -62,8 +62,7 @@ pub(crate) use local_threading::check_local_threading;
 // crate's `effect_free_statement` pass calls this directly.
 pub use lint_validators::check_effect_free_statements;
 pub(crate) use lint_validators::{
-    check_empty_method_bodies, check_literal_boolean_condition,
-    check_parenthesised_trailing_field_assignment, check_redundant_assignment,
+    check_empty_method_bodies, check_literal_boolean_condition, check_redundant_assignment,
     check_redundant_local_type_annotation, check_redundant_super_initialize,
     check_testcase_setup_drops_field_assignments,
 };
