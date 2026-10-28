@@ -148,10 +148,12 @@ Actor subclass: Bt4121TallyActor
   // iterations (and of this one, before the `try`) survive the catch.
   sumCatching: m times: n =>
     acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
-    1 to: n do: [:i |
-      acc := acc + m
-      [m - m] on: Error do: [:e | nil]
-    ]
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        [m - m] on: Error do: [:e | nil]
+      ]
     self.count
 
   // Same, for a `whileTrue:` direct-params loop.
@@ -170,11 +172,13 @@ Actor subclass: Bt4121TallyActor
   // back when the block raises (ADR 0130 §4), while the loop's writes survive.
   sumRollingBack: m times: n =>
     acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
-    1 to: n do: [:i |
-      acc := acc + m
-      [
-        m + m
-        m - m
-      ] on: Error do: [:e | nil]
-    ]
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        [
+          m + m
+          m - m
+        ] on: Error do: [:e | nil]
+      ]
     self.count
