@@ -22,6 +22,7 @@
 //! at runtime), these intrinsics generate efficient inline code because they are
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
+use super::control_flow::SoloBoolean;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -1531,7 +1532,7 @@ impl CoreErlangGenerator {
     /// instead of generating a Tier 2 fun + apply (which would produce a fun with an extra
     /// `StateAcc` parameter, causing a badarity crash when called with `value`).
     ///
-    /// Returns a `{Result, NewState}` tuple (same contract as `generate_if_true_with_mutations`).
+    /// Returns a `{Result, NewState}` tuple (same contract as `generate_solo_boolean_with_mutations`).
     /// Callers must unpack via `is_inline_tier2_block_value` / `repl_loop_mutated`.
     ///
     /// For `value:` variants, block parameters are bound to the provided arguments
@@ -2855,21 +2856,18 @@ impl CoreErlangGenerator {
                             if self.is_repl_mode() {
                                 self.set_repl_loop_mutated(true);
                             }
-                            let doc = if kw == "and:" {
-                                self.generate_and_with_mutations_tuple(
-                                    receiver,
-                                    block,
-                                    self.conditional_scratch(self.current_frame()),
-                                    false,
-                                )?
+                            let sel = if kw == "and:" {
+                                SoloBoolean::And
                             } else {
-                                self.generate_or_with_mutations_tuple(
-                                    receiver,
-                                    block,
-                                    self.conditional_scratch(self.current_frame()),
-                                    false,
-                                )?
+                                SoloBoolean::Or
                             };
+                            let doc = self.generate_solo_boolean_with_mutations_tuple(
+                                sel,
+                                receiver,
+                                block,
+                                self.conditional_scratch(self.current_frame()),
+                                false,
+                            )?;
                             return Ok(Some(doc));
                         }
                     }
@@ -2885,7 +2883,7 @@ impl CoreErlangGenerator {
                     // (the outer loop has already determined which locals need threading).
                     // also inline when the branch contains a nested list op that
                     // mutates an outer local — otherwise the conditional falls through to a
-                    // runtime `send` whose `nil`-on-false result breaks the `{Value, State}`
+                    // runtime `send` whose plain (untupled) result breaks the `{Value, State}`
                     // contract the method-body sequencer expects (badarg on element/2).
                     // also inline when the RECEIVER itself is an actor self-send
                     // (`(self recordOnce: x) ifTrue:...`) — its own state mutation must be
@@ -2902,7 +2900,8 @@ impl CoreErlangGenerator {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
                         }
-                        let doc = self.generate_if_true_with_mutations_tuple(
+                        let doc = self.generate_solo_boolean_with_mutations_tuple(
+                            SoloBoolean::IfTrue,
                             receiver,
                             block,
                             self.conditional_scratch(self.current_frame()),
@@ -2923,7 +2922,8 @@ impl CoreErlangGenerator {
                         if self.is_repl_mode() {
                             self.set_repl_loop_mutated(true);
                         }
-                        let doc = self.generate_if_false_with_mutations_tuple(
+                        let doc = self.generate_solo_boolean_with_mutations_tuple(
+                            SoloBoolean::IfFalse,
                             receiver,
                             block,
                             self.conditional_scratch(self.current_frame()),
@@ -3032,11 +3032,13 @@ impl CoreErlangGenerator {
                             && !self.and_or_needs_mutation_threading(receiver, block)
                             && !self.pure_blocks_hold_guarded_operator(&[block])
                         {
-                            let doc = if kw == "and:" {
-                                self.generate_and_pure(receiver, block, arguments)?
+                            let sel = if kw == "and:" {
+                                SoloBoolean::And
                             } else {
-                                self.generate_or_pure(receiver, block, arguments)?
+                                SoloBoolean::Or
                             };
+                            let doc =
+                                self.generate_solo_boolean_pure(sel, receiver, block, arguments)?;
                             return Ok(Some(doc));
                         }
                     }
@@ -3052,7 +3054,12 @@ impl CoreErlangGenerator {
                         && !self.pure_blocks_hold_guarded_operator(&[block])
                     {
                         return Ok(Some(
-                            self.generate_if_true_pure(receiver, block, arguments)?,
+                            self.generate_solo_boolean_pure(
+                                SoloBoolean::IfTrue,
+                                receiver,
+                                block,
+                                arguments,
+                            )?,
                         ));
                     }
                 }
@@ -3064,7 +3071,12 @@ impl CoreErlangGenerator {
                         && !self.pure_blocks_hold_guarded_operator(&[block])
                     {
                         return Ok(Some(
-                            self.generate_if_false_pure(receiver, block, arguments)?,
+                            self.generate_solo_boolean_pure(
+                                SoloBoolean::IfFalse,
+                                receiver,
+                                block,
+                                arguments,
+                            )?,
                         ));
                     }
                 }
@@ -3132,7 +3144,7 @@ impl CoreErlangGenerator {
     /// [`super::control_flow::conditionals::CoreErlangGenerator::compile_conditional_receiver`]
     /// (deciding whether a NESTED `and:`/`or:` sub-expression — e.g. `((self
     /// recordOnce: x) and: [y]) ifTrue:...` — must be compiled through
-    /// [`Self::generate_and_with_mutations`]/[`Self::generate_or_with_mutations`]
+    /// [`Self::generate_solo_boolean_with_mutations`] (`and:`/`or:`)
     /// and its `{Result, NewState}` tuple unwrapped, rather than through the
     /// generic self-send-hoisting walk).
     ///
