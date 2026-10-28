@@ -1044,8 +1044,15 @@ fn find_hover_in_expr(
             alias_registry,
         )
         // On the parentheses themselves (BT-4237): the wrapper means
-        // nothing, so it hovers as its inner expression's type.
-        .or_else(|| parenthesized_hover_info(expr, *span, type_map)),
+        // nothing, so it hovers as its inner expression's type. Only outside
+        // the inner expression: a position inside it that finds no hover of
+        // its own keeps giving none, as it does without the parentheses.
+        .or_else(|| {
+            let inner = expression.span();
+            (offset < inner.start() || offset >= inner.end())
+                .then(|| parenthesized_hover_info(expr, *span, type_map))
+                .flatten()
+        }),
         Expression::FieldAccess {
             receiver, field, ..
         } => {
@@ -3471,6 +3478,33 @@ mod tests {
                 u32::try_from(close + 1).unwrap()
             )
         );
+    }
+
+    /// BT-4237: only the `(` / `)` themselves fall back to the wrapper's hover.
+    /// Every position inside the parentheses hovers exactly as it does without
+    /// them: no `Expression — Type: …` over the whole wrapper.
+    #[test]
+    fn positions_inside_parens_hover_as_without_them() {
+        let bare = "x := 42\ny := x + 1 \ny abs";
+        let wrapped = "x := 42\ny := (x + 1)\ny abs";
+        let inner_start = wrapped.find("(x").unwrap() + 1;
+        let bare_start = bare.find("x +").unwrap();
+        for i in 0.."x + 1".len() {
+            let w = hover_at(wrapped, pos_at(wrapped, inner_start + i));
+            let b = hover_at(bare, pos_at(bare, bare_start + i));
+            assert_eq!(
+                w.as_ref().map(|h| &h.contents),
+                b.as_ref().map(|h| &h.contents),
+                "offset {i} into `x + 1`"
+            );
+            assert!(
+                w.is_none_or(|h| !h.contents.starts_with("Expression — ")),
+                "offset {i} must not fall back to the wrapper's hover"
+            );
+        }
+        let close = hover_at(wrapped, pos_at(wrapped, wrapped.find(')').unwrap()))
+            .expect("hover on the operand's `)`");
+        assert_eq!(close.contents, "Expression — Type: Integer");
     }
 
     /// The `Type: …` part of a hover's contents.
