@@ -39,9 +39,9 @@ TestCase subclass: FileIoTest
     result := File readAll: "target/bt-test-tmp/no_such_file_xyz.txt"
     self assert: result isError
     self assert: (result error printString includesSubstring: "file not found")
-    // BT-4174: details answers the recorded path as-is (a Binary)
-    self assert: (result error details at: #path) equals: (Binary fromBytes: "target/bt-test-tmp/no_such_file_xyz.txt" toBytes)
-    self assert: (result error details at: #path) class equals: Binary
+    // BT-4229: the path detail is the caller's text, as a String
+    self assert: (result error details at: #path) equals: "target/bt-test-tmp/no_such_file_xyz.txt"
+    self assert: (result error details at: #path) class equals: String
     // readAll: non-string path
     @expect type
     self should: [File readAll: 42] raise: #type_error
@@ -93,3 +93,7 @@ TestCase subclass: FileIoTest
     listed := (File listDirectory: "target/bt-test-tmp/no_such_reason_dir") error
     self assert: listed kind equals: #directory_not_found
     self assert: listed reason equals: #enoent
+    self assert: (listed details at: #path) equals: "target/bt-test-tmp/no_such_reason_dir"
+    renamed := (File rename: missing to: "target/bt-test-tmp/renamed_xyz.txt") error
+    self assert: (renamed details at: #from) equals: missing
+    self assert: (renamed details at: #to) equals: "target/bt-test-tmp/renamed_xyz.txt"

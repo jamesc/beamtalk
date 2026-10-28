@@ -2483,7 +2483,11 @@ open_mode_read_missing_file_test() ->
 open_mode_read_missing_file_keeps_reason_test() ->
     #{'errReason' := #{error := #beamtalk_error{details = Details}}} =
         beamtalk_file:'open:mode:'(<<"_bt_test_open_mode_absent.txt">>, read),
-    ?assertMatch(#{reason := enoent, path := <<"_bt_test_open_mode_absent.txt">>}, Details).
+    %% BT-4229: the path detail is the caller's text, as a String.
+    ?assertMatch(
+        #{reason := enoent, path := {beamtalk_string, <<"_bt_test_open_mode_absent.txt">>}},
+        Details
+    ).
 
 file_error_classified_keeps_reason_test() ->
     Classified = [{eacces, permission_denied, <<"Check file permissions">>}],

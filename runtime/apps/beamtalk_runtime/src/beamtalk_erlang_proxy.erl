@@ -167,7 +167,8 @@ dispatch(Selector, Args, Self) ->
                     Error2 = beamtalk_error:with_hint(Error1, Hint),
                     Error3 = beamtalk_error:with_details(Error2, #{
                         module => Module,
-                        function => FunStr,
+                        %% BT-4229: the name as typed is text, so a String.
+                        function => beamtalk_primitive:string_from_binary(FunStr),
                         arity => length(Args)
                     }),
                     beamtalk_error:raise(Error3)

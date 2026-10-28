@@ -150,7 +150,7 @@ Result error map if the file cannot be read.
                     Error0 = beamtalk_error:new(parse_error, 'File'),
                     Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
                     Error2 = beamtalk_error:with_details(
-                        Error1, #{path => Path, offset => Offset}
+                        Error1, (path_detail(Path))#{offset => Offset}
                     ),
                     Error3 = beamtalk_error:with_hint(
                         Error2, <<"File contents are not valid UTF-8; use readBinary: for bytes">>
@@ -159,7 +159,7 @@ Result error map if the file cannot be read.
             end;
         {error, Reason} ->
             file_error_result(
-                'readAll:', #{path => Path}, Reason, read_failures(), undefined
+                'readAll:', path_detail(Path), Reason, read_failures(), undefined
             )
     end;
 'readAll:'(Path) when is_binary(Path) -> 'readAll:'({beamtalk_string, Path});
@@ -188,12 +188,16 @@ Returns a Result ok map on success, Result error map on failure.
                     beamtalk_result:from_tagged_tuple({ok, nil});
                 {error, Reason} ->
                     file_error_result(
-                        'writeAll:contents:', #{path => Path}, Reason, write_failures(), undefined
+                        'writeAll:contents:', path_detail(Path), Reason, write_failures(), undefined
                     )
             end;
         {error, Reason} ->
             file_error_result(
-                'writeAll:contents:', #{path => Path}, Reason, [], <<"Could not create directory">>
+                'writeAll:contents:',
+                path_detail(Path),
+                Reason,
+                [],
+                <<"Could not create directory">>
             )
     end;
 'writeAll:contents:'(Path, Contents) when is_binary(Path), is_binary(Contents) ->
@@ -225,7 +229,7 @@ does not assume the contents are a UTF-8 string.
             beamtalk_result:from_tagged_tuple({ok, Contents});
         {error, Reason} ->
             file_error_result(
-                'readBinary:', #{path => Path}, Reason, read_failures(), undefined
+                'readBinary:', path_detail(Path), Reason, read_failures(), undefined
             )
     end;
 'readBinary:'(Path) when is_binary(Path) -> 'readBinary:'({beamtalk_string, Path});
@@ -271,7 +275,7 @@ Returns a Result ok map on success, Result error map on failure.
                 {error, Reason} ->
                     file_error_result(
                         'writeBinary:contents:',
-                        #{path => Path},
+                        path_detail(Path),
                         Reason,
                         write_failures(),
                         undefined
@@ -280,7 +284,7 @@ Returns a Result ok map on success, Result error map on failure.
         {error, Reason} ->
             file_error_result(
                 'writeBinary:contents:',
-                #{path => Path},
+                path_detail(Path),
                 Reason,
                 [],
                 <<"Could not create directory">>
@@ -314,7 +318,7 @@ Returns a Result ok map on success, Result error map on failure.
                 {error, Reason} ->
                     file_error_result(
                         'appendBinary:contents:',
-                        #{path => Path},
+                        path_detail(Path),
                         Reason,
                         write_failures(),
                         undefined
@@ -323,7 +327,7 @@ Returns a Result ok map on success, Result error map on failure.
         {error, Reason} ->
             file_error_result(
                 'appendBinary:contents:',
-                #{path => Path},
+                path_detail(Path),
                 Reason,
                 [],
                 <<"Could not create directory">>
@@ -371,7 +375,7 @@ process that created them (BEAM file handles are process-local).
             beamtalk_result:from_tagged_tuple({ok, make_line_stream(Fd, Path)});
         {error, Reason} ->
             file_error_result(
-                'lines:', #{path => Path}, Reason, read_failures(), undefined
+                'lines:', path_detail(Path), Reason, read_failures(), undefined
             )
     end;
 'lines:'(Path) when is_binary(Path) -> 'lines:'({beamtalk_string, Path});
@@ -399,7 +403,7 @@ Returns a Result ok map with the result of the block.
             end;
         {error, Reason} ->
             file_error_result(
-                'open:do:', #{path => Path}, Reason, read_failures(), undefined
+                'open:do:', path_detail(Path), Reason, read_failures(), undefined
             )
     end;
 'open:do:'(Path, Block) when is_binary(Path) -> 'open:do:'({beamtalk_string, Path}, Block);
@@ -622,7 +626,7 @@ do_open(Path, Mode, Selector, Open) ->
                                     {error,
                                         file_error(
                                             Selector,
-                                            #{path => Path},
+                                            path_detail(Path),
                                             Reason,
                                             read_failures(),
                                             undefined
@@ -634,13 +638,17 @@ do_open(Path, Mode, Selector, Open) ->
                 {error, Reason} ->
                     {error,
                         file_error(
-                            Selector, #{path => Path}, Reason, [], <<"Could not create directory">>
+                            Selector,
+                            path_detail(Path),
+                            Reason,
+                            [],
+                            <<"Could not create directory">>
                         )}
             end;
         error ->
             Error0 = beamtalk_error:new(type_error, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_details(Error1, #{path => Path, mode => Mode}),
+            Error2 = beamtalk_error:with_details(Error1, (path_detail(Path))#{mode => Mode}),
             {error,
                 beamtalk_error:with_hint(
                     Error2, <<"Mode must be #read, #write, #append, or #readWrite">>
@@ -737,7 +745,7 @@ check_regular(PathStr, Selector, Path) ->
             Error2 = beamtalk_error:with_message(
                 Error1, <<"FileHandle path is not a regular file">>
             ),
-            Error3 = beamtalk_error:with_details(Error2, #{path => Path}),
+            Error3 = beamtalk_error:with_details(Error2, path_detail(Path)),
             {error,
                 beamtalk_error:with_hint(
                     Error3,
@@ -787,6 +795,22 @@ file_error_result(Selector, Details, Reason, Classified, DefaultHint) ->
     beamtalk_result:from_tagged_tuple(
         {error, file_error(Selector, Details, Reason, Classified, DefaultHint)}
     ).
+
+-doc """
+The `path` detail of a File error, as a `String` (BT-4229).
+
+`Path` is the text of the caller's `String` argument (already unwrapped, so
+known-valid UTF-8); recording it tagged makes `e details at: #path` answer a
+`String` equal to the path the caller passed.
+""".
+-spec path_detail(binary()) -> #{path := beamtalk_string:t()}.
+path_detail(Path) ->
+    #{path => text_detail(Path)}.
+
+-doc "Re-tag the text of a caller's `String` argument for an error detail.".
+-spec text_detail(binary()) -> beamtalk_string:t().
+text_detail(Text) ->
+    beamtalk_primitive:string_from_binary(Text).
 
 -doc "Classification for operations that read an existing file.".
 -spec read_failures() -> [{atom(), atom(), binary()}].
@@ -844,7 +868,7 @@ Returns a Result ok map on success, Result error map on failure.
         {error, Reason} ->
             file_error_result(
                 'mkdir:',
-                #{path => Path},
+                path_detail(Path),
                 Reason,
                 [
                     {enoent, directory_not_found, <<"Parent directory does not exist">>},
@@ -872,7 +896,7 @@ Returns a Result ok map on success, Result error map on failure.
         {error, Reason} ->
             file_error_result(
                 'mkdirAll:',
-                #{path => Path},
+                path_detail(Path),
                 Reason,
                 [{eacces, permission_denied, <<"Check directory permissions">>}],
                 undefined
@@ -899,7 +923,7 @@ if the directory does not exist or cannot be read.
         true ->
             Error0 = beamtalk_error:new(not_a_directory, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error2 = beamtalk_error:with_details(Error1, path_detail(Path)),
             Error3 = beamtalk_error:with_hint(Error2, <<"Path is not a directory">>),
             beamtalk_result:from_tagged_tuple({error, Error3});
         false ->
@@ -916,7 +940,7 @@ if the directory does not exist or cannot be read.
                 {error, Reason} ->
                     file_error_result(
                         'listDirectory:',
-                        #{path => Path},
+                        path_detail(Path),
                         Reason,
                         [
                             {enoent, directory_not_found, <<"Check that the directory exists">>},
@@ -953,7 +977,7 @@ file:delete/1 returns {error, eperm} for directories on Linux
                     NotEmptyHint = <<"Directory is not empty; use deleteAll:">>,
                     file_error_result(
                         'delete:',
-                        #{path => Path},
+                        path_detail(Path),
                         DirReason,
                         [
                             {enotempty, not_empty, NotEmptyHint},
@@ -971,7 +995,7 @@ file:delete/1 returns {error, eperm} for directories on Linux
                 {error, Reason} ->
                     file_error_result(
                         'delete:',
-                        #{path => Path},
+                        path_detail(Path),
                         Reason,
                         [
                             {enoent, file_not_found, <<"File or directory does not exist">>},
@@ -998,7 +1022,7 @@ Returns a Result ok map on success, Result error map on failure.
         {error, Reason} ->
             file_error_result(
                 'deleteAll:',
-                #{path => Path},
+                path_detail(Path),
                 Reason,
                 [
                     {enoent, file_not_found, <<"Path does not exist">>},
@@ -1025,7 +1049,7 @@ Returns a Result ok map on success, Result error map on failure.
         {error, Reason} ->
             file_error_result(
                 'rename:to:',
-                #{from => From, to => To},
+                #{from => text_detail(From), to => text_detail(To)},
                 Reason,
                 [
                     {enoent, file_not_found, <<"Source path does not exist">>},
@@ -1083,7 +1107,7 @@ if the file does not exist.
         0 ->
             Error0 = beamtalk_error:new(file_not_found, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, 'lastModified:'),
-            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+            Error2 = beamtalk_error:with_details(Error1, path_detail(Path)),
             Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
             beamtalk_result:from_tagged_tuple({error, Error3});
         LocalTime ->

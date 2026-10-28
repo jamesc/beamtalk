@@ -163,13 +163,14 @@ Object subclass: Exception
   /// with `at:` instead of parsing `message`. Answers an empty Dictionary when
   /// nothing was recorded. A nested Beamtalk error answers as an Exception,
   /// and an absent (Erlang `undefined`) value as nil. Other values are the
-  /// recorded terms as-is: text a native records as raw bytes, such as a File
-  /// error's `#path`, answers a `Binary`; send it `asString` for a `String`.
+  /// recorded terms as-is; text details such as a File error's `#path` are
+  /// recorded as `String`s (BT-4229).
   ///
   /// ## Examples
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 255)) asString error details   // => #{#offset => 1}
   /// [Error signal: "boom"] on: Error do: [:e | e details]     // => #{}
+  /// (File readAll: "missing.txt") error details at: #path    // => "missing.txt"
   /// ```
   details -> Dictionary(Symbol, Object) => @primitive
 
