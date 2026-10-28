@@ -134,8 +134,9 @@ TestCase subclass: VtThreadingConstructsTest
   testConditionalReadWriteLastTrueReturnsBranchValue =>
     self assert: (self condReadWriteLast: true) equals: 7
 
-  testConditionalReadWriteLastFalseReturnsNil =>
-    self assert: (self condReadWriteLast: false) equals: nil
+  // BT-4189: a skipped solo `ifTrue:` answers the receiver, not nil.
+  testConditionalReadWriteLastFalseAnswersReceiver =>
+    self assert: (self condReadWriteLast: false) equals: false
 
   // ── C. local-assignment of a loop threads back the mutated local ───────────
   testLocalAssignFromWhileLoop =>
@@ -179,8 +180,9 @@ TestCase subclass: VtThreadingConstructsTest
   testBranchNonLastThreadingVisibleLater =>
     self assert: (self branchNestedCollect: true) equals: 3
 
-  testBranchNonLastThreadingFalseReturnsNil =>
-    self assert: (self branchNestedCollect: false) equals: nil
+  // BT-4189: a skipped solo `ifTrue:` answers the receiver, not nil.
+  testBranchNonLastThreadingFalseAnswersReceiver =>
+    self assert: (self branchNestedCollect: false) equals: false
 
   // collect: as an assignment RHS inside the branch: `r` must be the reconstructed
   // Array (so `r size` works) and `n` must thread back, not bind to a raw tuple.

@@ -83,10 +83,11 @@ TestCase subclass: ClassMethodBlockTest
     result := ClassMethodBlock condLast: true
     self assert: result equals: 7
 
-  // BT-2349: last-position read+write conditional returns nil when the branch is skipped.
+  // BT-2349: last-position read+write conditional answers the receiver when
+  // the branch is skipped (`False>>ifTrue: => self`, BT-4189).
   testClassMethodConditionalLastFalse =>
     result := ClassMethodBlock condLast: false
-    self assert: result equals: nil
+    self assert: result equals: false
 
   // BT-2349: last-position ifTrue:ifFalse: read+write conditional returns the true branch.
   testClassMethodConditionalBothTrue =>
@@ -146,7 +147,8 @@ TestCase subclass: ClassMethodBlockTest
     result := ClassMethodBlock condRet: true
     self assert: result equals: 7
 
-  // BT-2358: explicit `^` return of a read+write conditional returns nil when skipped.
+  // BT-2358: explicit `^` return of a read+write conditional answers the
+  // receiver when skipped (BT-4189).
   testClassMethodReturnConditionalFalse =>
     result := ClassMethodBlock condRet: false
-    self assert: result equals: nil
+    self assert: result equals: false
