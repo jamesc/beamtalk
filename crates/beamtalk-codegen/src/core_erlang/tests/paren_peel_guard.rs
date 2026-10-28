@@ -88,9 +88,9 @@ const CEILINGS: &[(&str, usize)] = &[
     ),
     ("beamtalk-codegen/src/core_erlang/sequencing.rs", 3),
     ("beamtalk-codegen/src/core_erlang/synced_call.rs", 8),
-    ("beamtalk-codegen/src/core_erlang/threaded_expr.rs", 15),
+    ("beamtalk-codegen/src/core_erlang/threaded_expr.rs", 14),
     ("beamtalk-codegen/src/core_erlang/threading_analysis.rs", 3),
-    ("beamtalk-codegen/src/core_erlang/util.rs", 8),
+    ("beamtalk-codegen/src/core_erlang/util.rs", 9),
     ("beamtalk-codegen/src/core_erlang/value_type_codegen.rs", 11),
     // Expression helpers in the AST leaf (`as_literal_bool`).
     ("beamtalk-core/src/ast/expression.rs", 1),
@@ -105,7 +105,7 @@ const CEILINGS: &[(&str, usize)] = &[
     // parsed module (`infer_types`, `infer_method_return_types`).
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/blocks.rs",
-        12,
+        11,
     ),
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/flow.rs",

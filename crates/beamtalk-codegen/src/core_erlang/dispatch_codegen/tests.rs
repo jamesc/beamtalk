@@ -905,7 +905,10 @@ fn if_true_if_false_recurses_through_nested_branches() {
         )),
         span: s(),
     };
-    beamtalk_core::ast::normalize::peel_operand_parens_expr(&mut parenthesized);
+    beamtalk_core::ast::normalize::peel_operand_parens_expr_recording(
+        &mut parenthesized,
+        &mut beamtalk_core::ast::normalize::PeeledParens::default(),
+    );
     assert!(is_character_typed_receiver(&parenthesized));
 }
 
@@ -997,7 +1000,10 @@ fn single_branch_constant_taken_is_character_typed() {
             )),
             span: s(),
         };
-        beamtalk_core::ast::normalize::peel_operand_parens_expr(&mut parenthesized);
+        beamtalk_core::ast::normalize::peel_operand_parens_expr_recording(
+            &mut parenthesized,
+            &mut beamtalk_core::ast::normalize::PeeledParens::default(),
+        );
         assert!(
             is_character_typed_receiver(&parenthesized),
             "parenthesized `{receiver} {keyword} [$A]` must be Character-typed"
