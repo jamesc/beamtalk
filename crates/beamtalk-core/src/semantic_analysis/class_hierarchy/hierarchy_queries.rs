@@ -161,6 +161,15 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Actor")
     }
 
+    /// Whether a standalone extension method (`Target >> sel => ...`) on
+    /// `class_name` compiles with the actor method boundary. Anything else
+    /// lowers through the value-type body path. Single authority for codegen's
+    /// extension lowering and the BT-4092 migration warning.
+    #[must_use]
+    pub fn extension_target_is_actor(&self, class_name: &str) -> bool {
+        self.is_actor_subclass(class_name)
+    }
+
     /// Returns true if the named class is Supervisor or a subclass of Supervisor.
     ///
     /// Same cross-file-stub-chain invariant as

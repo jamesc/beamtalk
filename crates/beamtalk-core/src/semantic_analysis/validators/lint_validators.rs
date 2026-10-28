@@ -12,7 +12,8 @@
 //! - Effect-free statements
 
 use crate::ast::{
-    Expression, Identifier, MessageSelector, Module, TypeAnnotation, WellKnownSelector,
+    Expression, Identifier, MessageSelector, MethodDefinition, Module, TypeAnnotation,
+    WellKnownSelector,
 };
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
@@ -837,7 +838,9 @@ fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
 /// after the next release.
 ///
 /// Fires only on instance methods of classes codegen compiles as value
-/// types ([`ClassHierarchy::compiles_as_actor`] is `false`). An actor
+/// types ([`ClassHierarchy::compiles_as_actor`] is `false`), and on
+/// instance-side standalone extensions whose target is not an actor
+/// ([`ClassHierarchy::extension_target_is_actor`] is `false`). An actor
 /// method's trailing field assignment answers the assigned value with or
 /// without parentheses, so nothing changed there. A bare trailing field
 /// assignment, a non-last one, an operand-position one
@@ -853,17 +856,36 @@ pub(crate) fn check_parenthesised_trailing_field_assignment(
             continue;
         }
         for method in &class.methods {
-            let Some(last) = method.body.last() else {
-                continue;
-            };
-            if matches!(last.expression, Expression::Parenthesized { .. })
-                && is_self_field_assignment(&last.expression)
-            {
-                diagnostics.push(parenthesised_trailing_field_assignment_diagnostic(
-                    last.expression.span(),
-                ));
-            }
+            check_method_parenthesised_trailing_field_assignment(method, diagnostics);
         }
+    }
+    // Instance-side standalone extensions (`Point >> resetX => (self.x := 0)`)
+    // lower through the same value-type body path unless their target is an
+    // actor, so they changed meaning too. Class-side extensions do not.
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method
+            || hierarchy.extension_target_is_actor(standalone.class_name.name.as_str())
+        {
+            continue;
+        }
+        check_method_parenthesised_trailing_field_assignment(&standalone.method, diagnostics);
+    }
+}
+
+/// Warns when `method`'s last statement is a parenthesised `self.x := v`.
+fn check_method_parenthesised_trailing_field_assignment(
+    method: &MethodDefinition,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(last) = method.body.last() else {
+        return;
+    };
+    if matches!(last.expression, Expression::Parenthesized { .. })
+        && is_self_field_assignment(&last.expression)
+    {
+        diagnostics.push(parenthesised_trailing_field_assignment_diagnostic(
+            last.expression.span(),
+        ));
     }
 }
 
@@ -2393,5 +2415,33 @@ mod tests {
         let src = "Object subclass: ParenClassSide\n  classState: m = 0\n  class probe =>\n    t := 1.\n    (self.m := 5)\n";
         let diagnostics = paren_trailing_field_diagnostics(src);
         assert!(diagnostics.is_empty(), "got: {diagnostics:?}");
+    }
+
+    /// An instance-side standalone extension on a value type lowers through
+    /// the same value-type body path, so it changed meaning too: it warns.
+    #[test]
+    fn paren_trailing_field_assignment_in_value_type_extension_warns() {
+        let src = format!("{PAREN_VT}\nParenVt >> probe => (self.m := 5)\n");
+        let diagnostics = paren_trailing_field_diagnostics(&src);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+        let span = diagnostics[0].span;
+        assert_eq!(
+            &src[span.start() as usize..span.end() as usize],
+            "(self.m := 5)"
+        );
+    }
+
+    /// Extensions on an actor target, and class-side extensions, are not
+    /// lowered through the value-type body path: no warning.
+    #[test]
+    fn paren_trailing_field_assignment_in_actor_or_class_side_extension_does_not_warn() {
+        for src in [
+            "Actor subclass: ParenActorExt\n  state: m = 0\n\nParenActorExt >> probe => (self.m := 5)\n"
+                .to_string(),
+            format!("{PAREN_VT}\nParenVt class >> probe => (self.m := 5)\n"),
+        ] {
+            let diagnostics = paren_trailing_field_diagnostics(&src);
+            assert!(diagnostics.is_empty(), "{src}\ngot: {diagnostics:?}");
+        }
     }
 }
