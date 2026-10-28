@@ -5,6 +5,10 @@
 // the defining class's superclass (Smalltalk-80 class-side `super`).
 //
 // Fixtures: stdlib/test/fixtures/bt4001class_super_*.bt
+//
+// The class-side extensions at the end of this file check that an
+// extension's `super` starts at the target's superclass
+// (Bt4001ClassSuperObjectBase), not at the superclass of this TestCase.
 
 TestCase subclass: ClassSideSuperTest
 
@@ -43,8 +47,6 @@ TestCase subclass: ClassSideSuperTest
   testClassSideExtensionSuperInClosure =>
     self assert: Bt4001ClassSuperObjectChild bt4001ExtRunAll equals: #(101, 102)
 
-Bt4001ClassSuperObjectChild class >> // Class-side extensions hosted in this file: `super` starts at the target's
-// superclass (Bt4001ClassSuperObjectBase), not at this TestCase's.
-bt4001ExtRun => super peek: 1
+Bt4001ClassSuperObjectChild class >> bt4001ExtRun => super peek: 1
 Bt4001ClassSuperObjectChild class >> bt4001ExtRunAll =>
   #(1, 2) collect: [:x | super peek: x]
