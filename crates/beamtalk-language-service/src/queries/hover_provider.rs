@@ -26,8 +26,9 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol hover requests
 
-use crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases;
+use crate::queries::{enrich_hierarchy_with_inferred_returns_and_aliases, type_of_parsed};
 use crate::{HoverInfo, Position};
+use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{
     ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, Pattern,
     SlotKind, StateDeclaration, declared_shape_migrations,
@@ -1033,7 +1034,7 @@ fn find_hover_in_expr(
                 )
             })
         }
-        Expression::Parenthesized { expression, .. } => find_hover_in_expr(
+        Expression::Parenthesized { expression, span } => find_hover_in_expr(
             expression,
             offset,
             context,
@@ -1041,7 +1042,10 @@ fn find_hover_in_expr(
             type_map,
             native_types,
             alias_registry,
-        ),
+        )
+        // On the parentheses themselves (BT-4237): the wrapper means
+        // nothing, so it hovers as its inner expression's type.
+        .or_else(|| parenthesized_hover_info(expr, *span, type_map)),
         Expression::FieldAccess {
             receiver, field, ..
         } => {
@@ -1388,6 +1392,9 @@ fn resolved_selector_hover_info(
     type_map: &TypeMap,
     native_types: Option<&NativeTypeRegistry>,
 ) -> Option<HoverInfo> {
+    // The receiver as analysis sees it (BT-4237): `(self) foo` resolves like
+    // `self foo`, and its type is the type map's entry for that node.
+    let receiver = canonical_operand(receiver);
     let selector_name = selector.name();
     let (receiver_class, class_side) =
         resolve_receiver_class(receiver, context, hierarchy, type_map)?;
@@ -1511,7 +1518,7 @@ fn ffi_selector_hover_info(
 /// reference (for direct `Erlang lists reverse:` patterns).
 fn extract_erlang_module_name(receiver: &Expression, type_map: &TypeMap) -> Option<String> {
     // First try the type map
-    if let Some(InferredType::Known { type_args, .. }) = type_map.get(receiver.span()) {
+    if let Some(InferredType::Known { type_args, .. }) = type_of_parsed(type_map, receiver) {
         if let Some(InferredType::Known { class_name, .. }) = type_args.first() {
             return Some(class_name.to_string());
         }
@@ -1654,12 +1661,23 @@ fn resolve_receiver_class(
             }
             HoverClassContext::TopLevel => None,
         },
-        _ => type_map
-            .get(receiver.span())
+        _ => type_of_parsed(type_map, receiver)
             .and_then(InferredType::as_known)
             .cloned()
             .map(|name| (name, false)),
     }
+}
+
+/// Hover for a position on a `Parenthesized` node's own `(` or `)`: the
+/// inner expression's type (BT-4237), the same type hovering the inner
+/// expression shows. `None` when that type is not known.
+fn parenthesized_hover_info(
+    parenthesized: &Expression,
+    span: Span,
+    type_map: &TypeMap,
+) -> Option<HoverInfo> {
+    let ty = type_of_parsed(type_map, parenthesized)?.display_for_diagnostic()?;
+    Some(HoverInfo::new(format!("Expression — Type: {ty}"), span))
 }
 
 /// Creates hover info for `self` based on the class context.
@@ -3426,18 +3444,61 @@ mod tests {
         );
     }
 
-    /// BT-4059 pin: hover walks the raw AST, which keeps a redundant
-    /// operand's parentheses (only analysis and codegen see the normalised
-    /// tree). Hovering the wrapped operand answers for the operand; the `(`
-    /// itself belongs to no inner node, so it falls through to the enclosing
-    /// binary send, which offers no hover.
+    /// BT-4059/BT-4237 pin: hover walks the parsed tree, which keeps a
+    /// redundant operand's parentheses, while the type map comes from the
+    /// operand-normalised tree. Hovering the wrapped operand answers for the
+    /// operand; the `(` itself hovers as the inner expression's type.
     #[test]
     fn hover_through_redundant_operand_parens() {
         let src = "x := 42\ny := (x) + 1";
         let inner = hover_at(src, pos_at(src, src.rfind("x)").unwrap()))
             .expect("hover on the parenthesised operand");
         assert!(inner.contents.contains('x'), "{}", inner.contents);
-        let paren = hover_at(src, pos_at(src, src.rfind('(').unwrap()));
-        assert!(paren.is_none(), "{paren:?}");
+        assert!(
+            inner.contents.contains("Type: Integer"),
+            "{}",
+            inner.contents
+        );
+        let paren = hover_at(src, pos_at(src, src.rfind('(').unwrap()))
+            .expect("hover on the operand's `(`");
+        assert_eq!(paren.contents, "Expression — Type: Integer");
+        let open = src.rfind('(').unwrap();
+        let close = src.rfind(')').unwrap();
+        assert_eq!(
+            paren.span,
+            Span::new(
+                u32::try_from(open).unwrap(),
+                u32::try_from(close + 1).unwrap()
+            )
+        );
+    }
+
+    /// The `Type: …` part of a hover's contents.
+    fn hover_type(hover: &HoverInfo) -> &str {
+        let contents = hover.contents.as_str();
+        let at = contents.find("Type: ").expect("hover shows a type");
+        contents[at..].split(" — ").next().unwrap_or_default()
+    }
+
+    /// BT-4237: hovering `x` in `(x) foo` and in `x foo` gives the same type,
+    /// the selector resolves on the same class, and the `(` shows that type
+    /// too.
+    #[test]
+    fn hover_on_parenthesised_receiver_matches_the_bare_receiver() {
+        let bare = "x := 42\ny := x abs";
+        let wrapped = "x := 42\ny := (x) abs";
+        let at = |src: &str, needle: &str| {
+            hover_at(src, pos_at(src, src.rfind(needle).unwrap()))
+                .unwrap_or_else(|| panic!("hover on {needle:?} in {src:?}"))
+        };
+        let bare_x = at(bare, "x abs");
+        let wrapped_x = at(wrapped, "x) abs");
+        assert_eq!(hover_type(&bare_x), "Type: Integer");
+        assert_eq!(hover_type(&wrapped_x), hover_type(&bare_x));
+        assert_eq!(hover_type(&at(wrapped, "(x)")), hover_type(&bare_x));
+        let bare_selector = at(bare, "abs");
+        let wrapped_selector = at(wrapped, "abs");
+        assert_eq!(wrapped_selector.contents, bare_selector.contents);
+        assert_eq!(wrapped_selector.documentation, bare_selector.documentation);
     }
 }

@@ -25,9 +25,10 @@
 //!
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
-use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
+use crate::queries::{enrich_hierarchy_with_inferred_returns, type_of_parsed};
 use crate::{Completion, CompletionKind, Position};
+use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{
     ClassDefinition, ClassKind, Expression, MethodDefinition, Module, declared_shape_migrations,
 };
@@ -964,7 +965,7 @@ fn find_receiver_in_expr(
             if offset >= span.end() && offset <= span.end() + 1 {
                 // `SomeClass class <TAB>` — `class` sent to a ClassReference stays on class-side
                 if selector.name() == "class" {
-                    if let Expression::ClassReference { name, .. } = receiver.as_ref() {
+                    if let Expression::ClassReference { name, .. } = canonical_operand(receiver) {
                         return Some(ReceiverSide::Class(name.name.clone()));
                     }
                 }
@@ -1004,7 +1005,9 @@ fn find_receiver_in_expr(
         // Recurse into parenthesized
         Expression::Parenthesized { expression, span } => {
             if offset >= span.end() && offset <= span.end() + 1 {
-                type_map.get(*span).and_then(receiver_side_of_type)
+                // A removed operand wrapper has no type-map entry of its own
+                // (BT-4237): it completes as its inner expression.
+                type_of_parsed(type_map, expr).and_then(receiver_side_of_type)
             } else {
                 find_receiver_in_expr(expression, offset, type_map)
             }
@@ -1375,10 +1378,9 @@ pub fn resolve_expression_type(
     let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
     let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
     let last_expr = module.expressions.last()?;
-    let span = last_expr.expression.span();
     let type_map =
         beamtalk_core::semantic_analysis::infer_types(&module, hierarchy, native_type_registry);
-    match type_map.get(span) {
+    match type_of_parsed(&type_map, &last_expr.expression) {
         Some(InferredType::Known { class_name, .. }) => Some(class_name.to_string()),
         _ => None,
     }
@@ -3153,6 +3155,41 @@ mod tests {
             completions.iter().any(|c| c.label == "LocalKey"),
             "Same-package internal alias should still be offered, got: {:?}",
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+    /// BT-4237/BT-4238 pin: type inference reads the operand-normalised tree,
+    /// so a receiver written `(x)` completes exactly like `x`, both after the
+    /// whole send and right after the `)` (whose wrapper has no type-map
+    /// entry of its own).
+    #[test]
+    fn parenthesised_receiver_completes_like_the_bare_receiver() {
+        fn labels(source: &str, offset: usize) -> Vec<EcoString> {
+            let offset = u32::try_from(offset).expect("small test source");
+            let position =
+                Position::from_byte_offset(source, crate::ByteOffset::new(offset)).unwrap();
+            let mut labels: Vec<EcoString> = completions_at(source, position)
+                .into_iter()
+                .map(|c| c.label)
+                .collect();
+            labels.sort();
+            labels
+        }
+        let bare = "x := \"hello\".\nx size ";
+        let wrapped = "x := \"hello\".\n(x) size ";
+        let bare_labels = labels(bare, bare.len());
+        assert!(
+            bare_labels.iter().any(|l| l == "abs"),
+            "Integer methods after `x size`: {bare_labels:?}"
+        );
+        assert_eq!(labels(wrapped, wrapped.len()), bare_labels);
+
+        // Right after the `)` of a wrapped receiver: the String methods `x`
+        // itself offers.
+        let src = "x := \"hello\".\n(x) size";
+        let after_paren = labels(src, src.find(')').unwrap() + 1);
+        assert!(
+            after_paren.iter().any(|l| l == "size") && !after_paren.iter().any(|l| l == "abs"),
+            "String methods after `(x)`: {after_paren:?}"
         );
     }
 }

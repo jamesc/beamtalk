@@ -26,6 +26,7 @@
 //! - LSP specification: Language Server Protocol textDocument/definition
 
 use crate::{Location, ProjectIndex};
+use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{Expression, MessageSelector, Module};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use beamtalk_core::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
@@ -819,6 +820,10 @@ fn find_selector_lookup_in_cascade(
 }
 
 fn receiver_hint_for_expr(receiver: &Expression) -> ReceiverHint {
+    // The receiver as analysis sees it (BT-4237): `(self) foo` goes to the
+    // same definition as `self foo`, and an expression receiver's span is
+    // that node's, which the (operand-normalised) type map has an entry for.
+    let receiver = canonical_operand(receiver);
     match receiver {
         Expression::ClassReference { name, .. } => ReceiverHint::ClassReference(name.name.clone()),
         Expression::Identifier(ident) if ident.name == "self" => ReceiverHint::SelfReceiver,
