@@ -63,3 +63,27 @@ typed Object subclass: M
     );
     assert!(mismatches(&diags).is_empty(), "got: {diags:#?}");
 }
+
+/// The string-level type-args comparison (`is_type_compatible` on
+/// `List(Integer)` vs `List(E)`) uses the same predicate as
+/// `type_args_compatible`: a real class `E` is judged nominally, an unbound
+/// `E` stays symbolic.
+#[test]
+fn string_level_type_args_use_the_shared_predicate() {
+    use crate::semantic_analysis::type_checker::TypeChecker;
+    let module = parse_source("Object subclass: E\n");
+    let with_class = ClassHierarchy::build(&module).0.unwrap();
+    let without_class = ClassHierarchy::with_builtins();
+    let actual: EcoString = "List(Integer)".into();
+    let expected: EcoString = "List(E)".into();
+    assert!(!TypeChecker::is_type_compatible(
+        &actual,
+        &expected,
+        &with_class
+    ));
+    assert!(TypeChecker::is_type_compatible(
+        &actual,
+        &expected,
+        &without_class
+    ));
+}
