@@ -167,6 +167,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0138](0138-string-literal-escape-sequences.md) | String Literal Escape Sequences | Accepted | 2026-10-25 |
 | [0139](0139-beam-abstraction-boundaries.md) | BEAM Abstraction Boundaries — What Leaks and What Doesn't | Accepted (amended 2026-10-26: post-acceptance review fixes) | 2026-10-26 |
 | [0140](0140-text-default-binaries.md) | Text-Default Binaries — a String Is the Raw Binary, Binary Is Explicit | Rejected | 2026-10-28 |
+| [0141](0141-guarded-static-dispatch.md) | Guarded Static Dispatch — the Guard Is the Contract, and the Class Process Only Owns Class State | Proposed | 2026-10-28 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
