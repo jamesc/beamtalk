@@ -91,7 +91,9 @@ Actor subclass: SoloBranchAnswerActor
 
   fieldArmIfTrue: flag =>
     self.x := 0
-    r := flag isNil ifTrue: [#none] ifFalse: [flag ifTrue: [self.x := self.x + 1]]
+    r := flag isNil ifTrue: [
+      #none
+    ] ifFalse: [flag ifTrue: [self.x := self.x + 1]]
     #[r, self.x]
 
   fieldCollectIfTrue: flag =>
@@ -101,7 +103,9 @@ Actor subclass: SoloBranchAnswerActor
 
   fieldInjectIfTrue: flag =>
     self.x := 0
-    r := #(1) inject: #none into: [:_acc :_i | flag ifTrue: [self.x := self.x + 1]]
+    r := #(1) inject: #none into: [:_acc :_i |
+      flag ifTrue: [self.x := self.x + 1]
+    ]
     #[r, self.x]
 
   fieldTailIfFalse: flag =>
@@ -120,7 +124,9 @@ Actor subclass: SoloBranchAnswerActor
 
   fieldArmIfFalse: flag =>
     self.x := 0
-    r := flag isNil ifTrue: [#none] ifFalse: [flag ifFalse: [self.x := self.x + 1]]
+    r := flag isNil ifTrue: [
+      #none
+    ] ifFalse: [flag ifFalse: [self.x := self.x + 1]]
     #[r, self.x]
 
   fieldCollectIfFalse: flag =>
@@ -130,5 +136,7 @@ Actor subclass: SoloBranchAnswerActor
 
   fieldInjectIfFalse: flag =>
     self.x := 0
-    r := #(1) inject: #none into: [:_acc :_i | flag ifFalse: [self.x := self.x + 1]]
+    r := #(1) inject: #none into: [:_acc :_i |
+      flag ifFalse: [self.x := self.x + 1]
+    ]
     #[r, self.x]
