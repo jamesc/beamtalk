@@ -509,24 +509,30 @@ pub struct CoreErlangGenerator {
     /// entries via [`Self::set_peeled_parens`]); empty when nothing was
     /// peeled.
     pub(in crate::core_erlang) peeled_parens: beamtalk_core::ast::normalize::PeeledParens,
+    /// The span of the method whose body is being generated (set by
+    /// `MethodFrame::enter`, restored on drop); `None` outside any method.
+    /// The [`PeelScope`](beamtalk_core::ast::normalize::PeelScope) a
+    /// `ClassBuilder` block method's operands were recorded under (BT-4059).
+    pub(in crate::core_erlang) current_method_span: Option<beamtalk_core::source_analysis::Span>,
 }
 
 /// `method`'s reflected source: its text as written, with the operand
-/// parentheses `peeled` recorded removing put back (BT-4059). Equal to
-/// `unparse_method(method)` when nothing was recorded.
+/// parentheses `peeled` recorded removing in `scope` put back (BT-4059).
+/// Equal to `unparse_method(method)` when nothing was recorded.
 ///
 /// The one place reflected method source is produced from codegen's
 /// (peeled) tree; [`CoreErlangGenerator::as_written_method_source`] is this
-/// with the generator's own record.
+/// with the generator's own record and the method's own scope.
 pub(in crate::core_erlang) fn as_written_method_source(
     method: &beamtalk_core::ast::MethodDefinition,
     peeled: &beamtalk_core::ast::normalize::PeeledParens,
+    scope: beamtalk_core::ast::normalize::PeelScope,
 ) -> String {
     if peeled.is_empty() {
         return beamtalk_core::unparse::unparse_method(method);
     }
     let mut written = method.clone();
-    beamtalk_core::ast::normalize::restore_operand_parens(&mut written, peeled);
+    beamtalk_core::ast::normalize::restore_operand_parens_in_scope(&mut written, peeled, scope);
     beamtalk_core::unparse::unparse_method(&written)
 }
 
@@ -537,7 +543,22 @@ impl CoreErlangGenerator {
         &self,
         method: &beamtalk_core::ast::MethodDefinition,
     ) -> String {
-        as_written_method_source(method, &self.peeled_parens)
+        as_written_method_source(
+            method,
+            &self.peeled_parens,
+            beamtalk_core::ast::normalize::PeelScope::of_method(method),
+        )
+    }
+
+    /// The [`PeelScope`](beamtalk_core::ast::normalize::PeelScope) of the
+    /// code being generated: the current method's, or the module level.
+    pub(in crate::core_erlang) fn current_peel_scope(
+        &self,
+    ) -> beamtalk_core::ast::normalize::PeelScope {
+        self.current_method_span
+            .map_or(beamtalk_core::ast::normalize::PeelScope::Module, |span| {
+                beamtalk_core::ast::normalize::PeelScope::Method(span)
+            })
     }
 
     /// Records the operand parentheses peeled from the tree this generator
@@ -613,6 +634,7 @@ impl CoreErlangGenerator {
             type_map: beamtalk_core::semantic_analysis::TypeMap::new(),
             method_return_types_written_back: std::collections::HashMap::new(),
             peeled_parens: beamtalk_core::ast::normalize::PeeledParens::default(),
+            current_method_span: None,
         }
     }
 

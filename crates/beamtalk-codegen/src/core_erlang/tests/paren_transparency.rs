@@ -878,12 +878,8 @@ fn reflected_method_source_keeps_operand_parens_as_written() {
             ("summed:", "summed: a => (a * 2) + 1"),
             ("m", "m => (self) foo"),
         ] {
-            let entry = format!(
-                "'{selector}' => #{{{}}}#",
-                beamtalk_cerl_doc::binary::binary_byte_segments(source)
-            );
             assert!(
-                code.contains(&entry),
+                code.contains(&source_entry(selector, source)),
                 "{path}: `{selector}` should reflect `{source}` as written. Got:\n{code}"
             );
         }
@@ -897,4 +893,88 @@ fn reflected_method_source_keeps_operand_parens_as_written() {
                 .code
         )
     );
+}
+
+/// `'selector' => #{source}#`: how `source` appears as a reflected-source map
+/// entry in generated Core Erlang.
+fn source_entry(selector: &str, source: &str) -> String {
+    format!(
+        "'{selector}' => #{{{}}}#",
+        beamtalk_cerl_doc::binary::binary_byte_segments(source)
+    )
+}
+
+/// BT-4059: the peel record is scoped by method. A flattened module holds a
+/// cross-file protocol provision whose byte offsets index its own file, so its
+/// parenthesised operand `(x)` can sit at the very span of the class method's
+/// bare `x`; neither may take the other's parentheses.
+#[test]
+fn a_cross_file_provision_and_a_class_method_with_colliding_operand_spans_reflect_as_written() {
+    let protocol_src = format!(
+        "// {}\nProtocol define: P\n  pro: x => (x) + 1\n",
+        "=".repeat(60)
+    );
+    let target = protocol_src.find("(x)").unwrap() + 1;
+    let body = "Object subclass: C\n  uses: P\n  foo: x => x + 1\n";
+    let base = body.find("=> x").unwrap() + 3;
+    let class_src = format!("//{}\n{body}", "-".repeat(target - base - 3));
+    assert_eq!(
+        class_src.find("=> x").unwrap() + 3,
+        target,
+        "spans must collide"
+    );
+
+    let protocol = {
+        let (module, _) = parse(lex_with_eof(&protocol_src));
+        module.protocols.into_iter().next().expect("a protocol")
+    };
+    let (mut module, _) = parse(lex_with_eof(&class_src));
+    let analysis = analyse_full(
+        &module,
+        AnalysisContext::default().with_pre_loaded_protocol_defs(vec![protocol]),
+    );
+    assert!(
+        !analysis
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error),
+        "{:?}",
+        analysis.diagnostics
+    );
+    lower_analysed_module_for_codegen(&mut module, &analysis);
+    assert!(
+        module.classes[0]
+            .methods
+            .iter()
+            .any(|m| m.selector.name() == "pro:"),
+        "the provision is flattened into C"
+    );
+    let code =
+        generate_module_with_warnings(&module, CodegenOptions::new("c").with_analysis(analysis))
+            .expect("compiles")
+            .code;
+    for (selector, source) in [("foo:", "foo: x => x + 1"), ("pro:", "pro: x => (x) + 1")] {
+        assert!(
+            code.contains(&source_entry(selector, source)),
+            "`{selector}` should reflect `{source}` as written. Got:\n{code}"
+        );
+    }
+}
+
+/// A `ClassBuilder` block method inside a class method reflects its operand
+/// parentheses as written: the block's operands are recorded under the
+/// enclosing method's scope, which codegen restores them from.
+#[test]
+fn a_class_builder_block_method_inside_a_method_reflects_as_written() {
+    let src = "Object subclass: Maker\n  class make =>\n    Object classBuilder name: #Made; methods: #{ #m => [:self | (self) foo] }; register\n";
+    let (module, diagnostics) = parse(lex_with_eof(src));
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("maker"))
+        .expect("compiles")
+        .code;
+    let entry = format!(
+        "#{{{}}}#",
+        beamtalk_cerl_doc::binary::binary_byte_segments("m => (self) foo")
+    );
+    assert!(code.contains(&entry), "Got:\n{code}");
 }
