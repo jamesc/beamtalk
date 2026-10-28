@@ -253,3 +253,118 @@ fn the_fault_is_reported_over_the_generated_corpus() {
         "only {reported} programs reported the fault"
     );
 }
+
+// ── Value-type field-writing folds (BT-3949 review) ─────────────────────────────────────────
+//
+// In a value-type instance method a fold whose block writes a field threads the `Self`
+// family, so it compiles to a `{Value, Self}` carrier too. A conditional arm merges `Self`
+// back (the arm frame's fold producer, BT-3912), so at every operand site of an arm statement
+// it must answer the fold's value with the fold's writes after the conditional; this half runs
+// them on a BEAM against an oracle. A `match:` arm has no `Self` merge (`MATCH_ARM_FAMILIES`
+// excludes `SelfVt`, ADR 0122), so the same fold there is rejected with the `match:`-arm
+// diagnostic (`ValueSelfFieldAssignmentInMatchArm`), never compiled in place.
+
+use super::field_assignment_value_position::VT_HEADER;
+use super::value_type_fold_family_corpus::run_probes;
+
+/// `(fold, the value it answers as `~w` prints it)`; each adds 1 + 2 to `self.n`.
+const VT_FIELD_FOLDS: &[(&str, &str)] = &[
+    ("(#(1, 2) collect: [:s | self.n := self.n + s. s])", "[1,2]"),
+    (
+        "(#(1, 2) inject: 0 into: [:a :s | self.n := self.n + s. a + s])",
+        "3",
+    ),
+];
+
+/// `(operand position, the value it answers given the fold's printed value)`. The keyword
+/// argument is a fold's seed, compiled inline, so the probe needs no runtime dispatcher.
+const VT_POSITIONS: &[(&str, &str)] = &[
+    ("#(1, {c})", "[1,{v}]"),
+    ("#{#k => {c}}", "#{k => {v}}"),
+    ("#(9) inject: {c} into: [:a :x | a]", "{v}"),
+    ("#(#(0, {c}))", "[[0,{v}]]"),
+];
+
+/// Conditional arms, taken (`self.m` starts at 0): the `{p}` arm runs. (`ifFalse:ifTrue:`
+/// has no value-type `Self` merge at all, whatever the arm holds, so it is not a column here.)
+const VT_CONDITIONAL_ARMS: &[&str] = &[
+    "(self.m == 0) ifTrue: [{p}] ifFalse: [nil]",
+    "(self.m > 0) ifTrue: [nil] ifFalse: [{p}]",
+    "(self.m == 0) ifTrue: [{p}]",
+];
+
+fn vt_method(name: &str, arm: &str, position: &str, fold: &str) -> String {
+    let value = arm.replace("{p}", &position.replace("{c}", fold));
+    format!("  {name} =>\n    data := {value}\n    #(self.n, data)\n")
+}
+
+#[test]
+fn value_type_field_writing_folds_in_conditional_arms_agree_with_the_oracle_when_run() {
+    let mut methods = Vec::new();
+    let mut expected = Vec::new();
+    let mut rejected = Vec::new();
+    for arm in VT_CONDITIONAL_ARMS {
+        for (position, answer) in VT_POSITIONS {
+            for (fold, value) in VT_FIELD_FOLDS {
+                let name = format!("probe{}", methods.len());
+                let method = vt_method(&name, arm, position, fold);
+                if let Err(err) = super::compile(&format!("{VT_HEADER}\n{method}")) {
+                    rejected.push(format!("{err}\n{method}"));
+                    continue;
+                }
+                methods.push(method);
+                expected.push((name, format!("[3,{}]", answer.replace("{v}", value))));
+            }
+        }
+    }
+    assert!(
+        rejected.is_empty(),
+        "{} rejected:\n{}",
+        rejected.len(),
+        rejected.join("\n")
+    );
+    let src = format!("{VT_HEADER}\n{}", methods.join("\n"));
+    // Debug codegen: the `ThreadedIr` verifier is on and panics on any finding.
+    let core = codegen(&src);
+    let names: Vec<String> = expected.iter().map(|(n, _)| n.clone()).collect();
+    let Some(observed) = run_probes(&core, &names, "#{m => 0, n => 0}") else {
+        println!("skipping the oracle run: erlc/erl not available");
+        return;
+    };
+    let mismatches: Vec<String> = expected
+        .iter()
+        .zip(&methods)
+        .filter(|((name, want), _)| observed.get(name) != Some(want))
+        .map(|((name, want), method)| {
+            format!(
+                "{name}: expected {want}, ran to {:?}\n{method}",
+                observed.get(name)
+            )
+        })
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "{} of {} value-type programs disagree with the oracle:\n\n{}",
+        mismatches.len(),
+        expected.len(),
+        mismatches.join("\n")
+    );
+}
+
+#[test]
+fn value_type_field_writing_folds_in_match_arms_are_rejected_with_the_match_arm_diagnostic() {
+    let mut checked = 0;
+    for (position, _) in VT_POSITIONS {
+        for (fold, _) in VT_FIELD_FOLDS {
+            let arm = "self.m match: [0 -> {p}; _ -> nil]";
+            let src = format!("{VT_HEADER}\n{}", vt_method("probe", arm, position, fold));
+            let err = super::compile(&src).expect_err(&format!("should be rejected:\n{src}"));
+            assert!(
+                err.contains("inside a match: arm"),
+                "expected the match:-arm diagnostic, got {err}\n{src}"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, VT_POSITIONS.len() * VT_FIELD_FOLDS.len());
+}

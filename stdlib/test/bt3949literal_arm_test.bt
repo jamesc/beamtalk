@@ -4,6 +4,47 @@
 // BT-3949: see stdlib/test/fixtures/bt3949literal_arm_{class,value,actor}.bt.
 
 TestCase subclass: Bt3949LiteralArmTest
+  field: n = 0
+
+  // A TestCase method is a value-type method: a fold whose block writes a field
+  // threads `Self`, so it is a carrier construct here too (BT-3949 review).
+  vtFieldFoldMap: flag =>
+    data := flag
+      ifTrue: [
+        #{"xs" => (#(1, 2)
+            collect: [:s |
+              self.n := self.n + s
+              s
+            ])}
+      ]
+      ifFalse: [#{"xs" => #()}]
+    #[data at: "xs", self.n]
+
+  vtFieldFoldArray: flag =>
+    data := flag
+      ifTrue: [
+        #[0, (#(1, 2)
+          collect: [:s |
+            self.n := self.n + s
+            s
+          ])]
+      ]
+      ifFalse: [#[0, #()]]
+    #[data at: 2, self.n]
+
+  vtFieldFoldKeyword: flag =>
+    data := flag
+      ifTrue: [
+        #{}
+          at: "xs"
+          put: (#(1, 2)
+            collect: [:s |
+              self.n := self.n + s
+              s
+            ])
+      ]
+      ifFalse: [#{"xs" => #()}]
+    #[data at: "xs", self.n]
 
   testIssueRepro =>
     r := Bt3949LiteralArmActor spawn inBranchMapLiteral
@@ -54,3 +95,12 @@ TestCase subclass: Bt3949LiteralArmTest
     a := Bt3949LiteralArmActor spawn
     self assert: (a fieldFoldMatch: 1) equals: #[#(1, 2), 3]
     self assert: a hits equals: 3
+
+  testValueTypeFieldWritingFoldInMapLiteral =>
+    self assert: (self vtFieldFoldMap: true) equals: #[#(1, 2), 3]
+
+  testValueTypeFieldWritingFoldInArrayLiteral =>
+    self assert: (self vtFieldFoldArray: true) equals: #[#(1, 2), 3]
+
+  testValueTypeFieldWritingFoldInKeywordArgument =>
+    self assert: (self vtFieldFoldKeyword: true) equals: #[#(1, 2), 3]
