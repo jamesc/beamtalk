@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-4059: a redundant pair of parentheses around a send operand means
-// nothing — `(e) foo` compiles and runs exactly like `e foo` — and reflected
-// method source drops it. BT-4091: a parenthesised block argument to an
-// inlined construct that writes a captured local or a field compiles and
-// threads the write like the bare block.
+// nothing — `(e) foo` compiles and runs exactly like `e foo` — while
+// reflected method source keeps it as written. BT-4091: a parenthesised block
+// argument to an inlined construct that writes a captured local or a field
+// compiles and threads the write like the bare block.
 
 TestCase subclass: ParenTransparencyTest
   field: actor = nil
@@ -57,9 +57,12 @@ TestCase subclass: ParenTransparencyTest
     self assert: (self.actor countLocal: #(1, 2, 3) when: true) equals: 3
     self assert: (self.actor countLocal: #(1, 2, 3) when: false) equals: 0
 
-  // --- Reflected source is canonical ---
-  testReflectedSourceDropsRedundantOperandParens =>
-    self assert: (ParenTransparencyHost >> #reflectSelf) source equals: "reflectSelf => self printString"
+  // --- Reflected source is the text as written ---
+  testReflectedSourceKeepsRedundantOperandParens =>
+    self assert: (ParenTransparencyHost >> #reflectSelf) source equals: "reflectSelf => (self) printString"
 
-  testReflectedSourceKeepsNeededParens =>
-    self assert: (ParenTransparencyHost >> #reflectProduct:) source equals: "reflectProduct: a => a * (a + 1)"
+  testReflectedSourceKeepsNestedOperandParens =>
+    self assert: (ParenTransparencyHost >> #reflectProduct:) source equals: "reflectProduct: a => a * ((a) + 1)"
+
+  testReflectedSourceKeepsBinaryOperandParens =>
+    self assert: (ParenTransparencyHost >> #summed:) source equals: "summed: a => (a * 2) + 1"

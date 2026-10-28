@@ -24,8 +24,10 @@ Object subclass: ParenTransparencyHost
 
   class runParenKeyword => (ParenTransparencyHost) add: (3) to: ((4))
 
-  // Reflected source drops the redundant operand parentheses and keeps the
-  // ones the meaning needs.
+  // Reflected source keeps the operand parentheses as written, redundant or
+  // not.
   reflectSelf => (self) printString
 
   reflectProduct: a => a * ((a) + 1)
+
+  summed: a => (a * 2) + 1
