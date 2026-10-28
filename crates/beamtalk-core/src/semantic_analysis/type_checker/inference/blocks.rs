@@ -1063,7 +1063,7 @@ impl TypeChecker {
         for arg in arguments {
             if matches!(arg, Expression::Block(_)) {
                 // Placeholder — will be re-inferred in Phase 2
-                arg_types.push(InferredType::known("Block"));
+                arg_types.push(Self::phase1_block_placeholder());
             } else {
                 arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
             }
@@ -1140,6 +1140,19 @@ impl TypeChecker {
         arg_types
     }
 
+    /// The Phase-1 stand-in for a literal block argument, before Phase 2
+    /// re-infers it with pushed-down parameter types (both callers overwrite
+    /// every literal block's slot).
+    ///
+    /// It must contribute *nothing* to `infer_method_local_params`. A bare
+    /// `Block` would be read as an opaque block argument, which BT-4207 counts
+    /// as an unknown branch arm, turning a sibling arm's Known binding into
+    /// `DynamicBranch` and losing precision in the Phase-2 push-down. `Never`
+    /// is neither a `Block` nor `Dynamic`, so `split_block_arg` skips it.
+    fn phase1_block_placeholder() -> InferredType {
+        InferredType::Never
+    }
+
     /// Resolve declared block-parameter types for each block-typed
     /// argument in a message sent to a `Union`-typed receiver, mirroring the
     /// `Known`-receiver push-down above but merged across the union's members.
@@ -1190,7 +1203,7 @@ impl TypeChecker {
         let mut arg_types: Vec<InferredType> = Vec::with_capacity(arguments.len());
         for arg in arguments {
             if matches!(arg, Expression::Block(_)) {
-                arg_types.push(InferredType::known("Block"));
+                arg_types.push(Self::phase1_block_placeholder());
             } else {
                 arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
             }

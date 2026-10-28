@@ -40,11 +40,11 @@ pub enum DynamicReason {
     /// Distinguished from every other reason (all of which mean "we don't
     /// have enough information to give a concrete type") because this one
     /// means the *opposite*: the author explicitly promised the value can be
-    /// anything. `merge_method_local_binding` treats this as authoritative —
-    /// it must survive being unified with any other binding, including a
-    /// concrete one from a sibling argument position — where every other
-    /// `DynamicReason` instead loses to a concrete binding observed
-    /// elsewhere.
+    /// anything. `merge_method_local_binding` and `join_branch_arms` treat
+    /// this as authoritative — it must survive being unified with any other
+    /// binding, including a concrete one from a sibling argument position or
+    /// branch arm — where every other `DynamicReason` instead loses to a
+    /// concrete binding observed elsewhere.
     ExplicitDynamic,
     /// A branch join (e.g. `ifTrue:ifFalse:`'s shared `R`) where at least
     /// one arm is `Dynamic` and another is concrete (BT-4207).

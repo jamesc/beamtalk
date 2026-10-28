@@ -240,3 +240,27 @@ typed Object subclass: M
 ",
     );
 }
+
+/// Phase 1 of block push-down stands literal blocks in with a placeholder
+/// that must not count as an opaque (unknown) branch arm (BT-4207 review):
+/// `R`'s only Known binding comes from the typed block variable `first`;
+/// the literal `[2]` in the other `Block(R)` slot must not turn that into
+/// `DynamicBranch`, so the last literal block's `:v` is still pushed down as
+/// `Integer` and an unknown send on it reports against `Integer`.
+#[test]
+fn literal_block_placeholder_is_not_an_unknown_arm() {
+    let diags = type_diagnostics(
+        r"
+typed Object subclass: M
+  pick: a :: Block(R) or: b :: Block(R) then: c :: Block(R, Nil) -> Nil => nil
+  run: first :: Block(Integer) -> Nil =>
+    self pick: first or: [2] then: [:v | v fooBarBaz. nil]
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("Integer") && d.message.contains("fooBarBaz")),
+        "`:v` should be pushed down as Integer: {diags:#?}"
+    );
+}
