@@ -104,7 +104,7 @@ fn test_field_assignment_closed_actor_threads_state() {
     let output = closed_write(&mut generator, &value);
     assert_eq!(
         output,
-        "let _Val1 = 42 in let State1 = call 'maps':'put'('count', _Val1, State) in _Val1"
+        "let _Val@1 = 42 in let State1 = call 'maps':'put'('count', _Val@1, State) in _Val@1"
     );
 }
 
@@ -162,7 +162,7 @@ fn test_field_assignment_closed_value_type_threads_self() {
     let output = closed_write(&mut generator, &value);
     assert_eq!(
         output,
-        "let _Val1 = 42 in let Self1 = call 'maps':'put'('count', _Val1, Self) in _Val1"
+        "let _Val@1 = 42 in let Self1 = call 'maps':'put'('count', _Val@1, Self) in _Val@1"
     );
     assert!(
         !output.contains("State"),
@@ -184,16 +184,16 @@ fn test_field_assignment_closed_class_var_is_an_in_place_put_answering_the_value
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.starts_with("let _CVVal1 = 42 in case call 'erlang':'get'({'$bt_class_vars', "),
+        output.starts_with("let _CVVal@1 = 42 in case call 'erlang':'get'({'$bt_class_vars', "),
         "the value is evaluated first, then the class key is probed. Got: {output}"
     );
     assert!(
         output.contains("call 'erlang':'put'({'$bt_class_vars', ")
-            && output.contains("call 'maps':'put'('total', _CVVal1, "),
+            && output.contains("call 'maps':'put'('total', _CVVal@1, "),
         "class-var write should put the new map back in place. Got: {output}"
     );
     assert!(
-        output.contains("call 'beamtalk_class_vars':'put'(ClassSelf, 'total', _CVVal1)"),
+        output.contains("call 'beamtalk_class_vars':'put'(ClassSelf, 'total', _CVVal@1)"),
         "a miss falls back to the runtime helper. Got: {output}"
     );
     assert!(

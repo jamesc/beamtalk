@@ -1487,9 +1487,9 @@ fn test_field_assignment_open_actor_threads_state() {
     let output = doc.to_pretty_string();
     assert_eq!(
         output,
-        "let _Val1 = 42 in let State1 = call 'maps':'put'('count', _Val1, State) in "
+        "let _Val@1 = 42 in let State1 = call 'maps':'put'('count', _Val@1, State) in "
     );
-    assert_eq!(val_var, "_Val1");
+    assert_eq!(val_var, "_Val@1");
 }
 
 /// `generate_field_assignment_open`'s `ValueType` arm: a value-type field
@@ -1505,9 +1505,9 @@ fn test_field_assignment_open_value_type_threads_self() {
     let output = doc.to_pretty_string();
     assert_eq!(
         output,
-        "let _Val1 = 42 in let Self1 = call 'maps':'put'('count', _Val1, Self) in "
+        "let _Val@1 = 42 in let Self1 = call 'maps':'put'('count', _Val@1, Self) in "
     );
-    assert_eq!(val_var, "_Val1");
+    assert_eq!(val_var, "_Val@1");
     assert!(
         !output.contains("State"),
         "value-type field write must never reference State. Got: {output}"

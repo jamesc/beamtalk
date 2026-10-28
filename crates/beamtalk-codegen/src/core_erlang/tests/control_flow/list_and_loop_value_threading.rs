@@ -48,11 +48,11 @@ fn test_value_type_field_write_in_to_do_threads_self_through_tail_call() {
         .expect("value-type field write inside to:do: must compile");
 
     assert!(
-        code.contains("fun (_loopidx3, StateAcc, Self)"),
+        code.contains("fun (_loopidx@3, StateAcc, Self)"),
         "the loop's letrec fun must take `Self` as an extra trailing parameter. Got:\n{code}"
     );
     assert!(
-        code.contains("apply 'loop'/3 (call 'erlang':'+'(_loopidx3, 1), StateAcc1, Self1)"),
+        code.contains("apply 'loop'/3 (call 'erlang':'+'(_loopidx@3, 1), StateAcc1, Self1)"),
         "the recursive tail call must carry the body's own mutated Self1 forward. Got:\n{code}"
     );
     assert!(

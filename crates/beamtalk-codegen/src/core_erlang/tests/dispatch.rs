@@ -638,7 +638,7 @@ fn test_block_value_message_no_args() {
         .unwrap();
     let output = doc.to_pretty_string();
     assert!(
-        output.contains("let _Fun1 = fun () -> 42 in apply _Fun1 ()"),
+        output.contains("let _Fun@1 = fun () -> 42 in apply _Fun@1 ()"),
         "Should generate let binding with apply. Got: {output}"
     );
     // Should NOT use async protocol
@@ -1028,7 +1028,7 @@ fn test_cascade_unary_messages() {
 
     // Should bind the underlying receiver (x) once
     assert!(
-        output.contains("let _Receiver1 = call 'maps':'get'('x', State) in"),
+        output.contains("let _Receiver@1 = call 'maps':'get'('x', State) in"),
         "Should bind the underlying receiver x. Got: {output}"
     );
 
@@ -1104,7 +1104,7 @@ fn test_cascade_keyword_messages() {
 
     // Should bind the underlying receiver (collection) once
     assert!(
-        output.contains("let _Receiver1 = call 'maps':'get'('collection', State) in"),
+        output.contains("let _Receiver@1 = call 'maps':'get'('collection', State) in"),
         "Should bind the underlying receiver collection. Got: {output}"
     );
 
@@ -1209,19 +1209,19 @@ fn test_cascade_field_assignment_arg_hoisted() {
     let output = doc.to_pretty_string();
 
     // The state binding must appear BEFORE the send call, not inside it.
-    // _Receiver1 takes temp var 1, so the val var is _Val2.
+    // _Receiver@1 takes temp var 1, so the val var is _Val@2.
     // Correct pattern:
-    //   let _Val2 = 5 in let State1 = call 'maps':'put'('x', _Val2, State) in
-    //   let _ = call 'beamtalk_message_dispatch':'send'(..., [_Val2]) in ...
+    //   let _Val@2 = 5 in let State1 = call 'maps':'put'('x', _Val@2, State) in
+    //   let _ = call 'beamtalk_message_dispatch':'send'(..., [_Val@2]) in ...
     assert!(
-        output.contains("let _Val2 = 5 in let State1 = call 'maps':'put'('x', _Val2, State) in"),
+        output.contains("let _Val@2 = 5 in let State1 = call 'maps':'put'('x', _Val@2, State) in"),
         "State binding should be hoisted before send call. Got:\n{output}"
     );
 
     // The argument to the send call should be the val var, not the full assignment
     assert!(
-        output.contains("'msg1:', [_Val2]"),
-        "Argument should be the val var _Val2. Got:\n{output}"
+        output.contains("'msg1:', [_Val@2]"),
+        "Argument should be the val var _Val@2. Got:\n{output}"
     );
 
     // The second message should be able to reference State1 (it's in scope)
@@ -1296,16 +1296,16 @@ fn test_cascade_multiple_field_assignments_state_threading() {
     let doc = render_threaded(&mut generator, &cascade);
     let output = doc.to_pretty_string();
 
-    // _Receiver1 takes temp var 1, so val vars are _Val2 and _Val3.
+    // _Receiver@1 takes temp var 1, so val vars are _Val@2 and _Val@3.
     // First field assignment: State → State1
     assert!(
-        output.contains("let State1 = call 'maps':'put'('x', _Val2, State) in"),
+        output.contains("let State1 = call 'maps':'put'('x', _Val@2, State) in"),
         "First assignment should produce State1. Got:\n{output}"
     );
 
     // Second field assignment: State1 → State2
     assert!(
-        output.contains("let State2 = call 'maps':'put'('y', _Val3, State1) in"),
+        output.contains("let State2 = call 'maps':'put'('y', _Val@3, State1) in"),
         "Second assignment should reference State1 and produce State2. Got:\n{output}"
     );
 
@@ -2673,21 +2673,21 @@ fn test_block_value_keyword_field_assignment_arg_hoisted() {
     let output = doc.to_pretty_string();
 
     // State binding must appear before the apply, not nested inside it.
-    // _Fun1 = fun_var, _x2 = block param (from receiver codegen), _Val3 = hoisted val.
+    // _Fun@1 = fun_var, _x@2 = block param (from receiver codegen), _Val@3 = hoisted val.
     // Receiver is evaluated first, then args are hoisted.
     assert!(
-        output.contains("let _Val3 = 5 in let State1 = call 'maps':'put'('y', _Val3, State) in"),
+        output.contains("let _Val@3 = 5 in let State1 = call 'maps':'put'('y', _Val@3, State) in"),
         "State binding should be hoisted before apply. Got:\n{output}"
     );
     // The apply argument must be the val var, not the full assignment expression.
     assert!(
-        output.contains("apply _Fun1 (_Val3)"),
-        "Apply argument should be val var _Val3. Got:\n{output}"
+        output.contains("apply _Fun@1 (_Val@3)"),
+        "Apply argument should be val var _Val@3. Got:\n{output}"
     );
     // Receiver must be evaluated before arguments: Fun binding precedes State binding.
     assert!(
-        output.contains("let _Fun1 = ") && output.find("let _Fun1 = ") < output.find("State1"),
-        "Receiver (_Fun1) must be bound before State1 mutation. Got:\n{output}"
+        output.contains("let _Fun@1 = ") && output.find("let _Fun@1 = ") < output.find("State1"),
+        "Receiver (_Fun@1) must be bound before State1 mutation. Got:\n{output}"
     );
 
     generator.pop_scope();
@@ -2731,21 +2731,21 @@ fn test_value_keyword_guard_field_assignment_arg_hoisted() {
     let output = doc.to_pretty_string();
 
     // State binding must be hoisted before the _ValArgN binding.
-    // _ValRecv1 is first, _ValArg2 allocated next (before field_assignment_open),
-    // then _Val3 + State1 from hoisting, then _ValArg2 = _Val3.
+    // _ValRecv@1 is first, _ValArg@2 allocated next (before field_assignment_open),
+    // then _Val@3 + State1 from hoisting, then _ValArg@2 = _Val@3.
     assert!(
-        output.contains("let _Val3 = 5 in let State1 = call 'maps':'put'('y', _Val3, State) in"),
+        output.contains("let _Val@3 = 5 in let State1 = call 'maps':'put'('y', _Val@3, State) in"),
         "State binding should be hoisted before _ValArgN binding. Got:\n{output}"
     );
     // The _ValArgN should be bound to the val var, not the full assignment expression.
     assert!(
-        output.contains("let _ValArg2 = _Val3 in"),
-        "_ValArg2 should be bound to _Val3. Got:\n{output}"
+        output.contains("let _ValArg@2 = _Val@3 in"),
+        "_ValArg@2 should be bound to _Val@3. Got:\n{output}"
     );
-    // The is_function guard must reference _ValRecv1.
+    // The is_function guard must reference _ValRecv@1.
     assert!(
-        output.contains("call 'erlang':'is_function'(_ValRecv1)"),
-        "Guard should check _ValRecv1. Got:\n{output}"
+        output.contains("call 'erlang':'is_function'(_ValRecv@1)"),
+        "Guard should check _ValRecv@1. Got:\n{output}"
     );
 
     generator.pop_scope();

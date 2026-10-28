@@ -458,6 +458,31 @@ TestCase subclass: PatternMatchingTest
       ])
       equals: 101
 
+  testUserWildcardNamesAreNotCompilerTemps =>
+    // BT-4140: a user `_WildcardN` binds its own variable — the temp a `_`
+    // compiles to never aliases it, beside it in a pattern or outside the match
+    self
+      assert: ({1, 2} match: [
+        {_Wildcard1, _} -> _Wildcard1;
+        _ -> 0
+      ])
+      equals: 1
+    self
+      assert: ({1, 2, 3, 4} match: [
+        {_, _Wildcard2, _, _Wildcard4} -> _Wildcard2 + _Wildcard4;
+        _ -> 0
+      ])
+      equals: 6
+    _Wildcard3 := 100
+    _Wildcard5 := 200
+    _Wildcard6 := 300
+    self
+      assert: ({7, 8} match: [
+        {_, _} -> _Wildcard3 + _Wildcard5 + _Wildcard6;
+        _ -> 0
+      ])
+      equals: 600
+
   testMultipleWildcardsInMapPattern =>
     // BT-4098: several _ across one map pattern's bindings
     self

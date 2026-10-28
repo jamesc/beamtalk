@@ -258,7 +258,7 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
     let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
 
     assert!(
-        rendered_doc.starts_with("letrec 'while'/1 = fun (Sum) -> let _SD1"),
+        rendered_doc.starts_with("letrec 'while'/1 = fun (Sum) -> let _SD@1"),
         "the condition's own prelude must render INSIDE the loop's fun, \
          before the case. Got:\n{rendered_doc}"
     );
