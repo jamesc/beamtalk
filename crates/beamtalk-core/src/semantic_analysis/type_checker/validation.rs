@@ -27,7 +27,7 @@ use crate::announce_selectors::is_announce_selector;
 use crate::ast::{Expression, Literal, SlotKind, TypeAnnotation};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
-use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::protocol_registry::{ProtocolRegistry, ReturnTypeMismatch};
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{
@@ -38,7 +38,9 @@ use ecow::EcoString;
 use super::known_remote;
 use super::sendability;
 use super::type_resolver;
-use super::types::{AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass};
+use super::types::{
+    AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass, OverrideReturnWidening,
+};
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
@@ -286,6 +288,16 @@ impl TypeChecker {
                         let class_subst = Self::class_method_substitution(
                             class_name, hierarchy, &method, arg_types,
                         );
+                        // Method-local type params (`inject: initial :: A
+                        // into: Block(A, E, A) -> A`) bind from the arguments
+                        // exactly as on the instance side (BT-4110).
+                        let method_subst = Self::infer_method_local_params(
+                            &method,
+                            arg_types,
+                            &class_subst,
+                            hierarchy,
+                            &method.defined_in,
+                        );
                         // Self resolves to the receiver class. For a generic
                         // receiver (e.g. `Box(T)`) we thread the inferred
                         // type args through `self_type` so nested `Self` in
@@ -327,7 +339,7 @@ impl TypeChecker {
                             ret_ty,
                             &type_resolver::merge_substitutions(
                                 &class_subst,
-                                &type_resolver::SubstitutionMap::new(),
+                                &method_subst,
                                 Some(&self_type),
                             ),
                             self.protocol_registry.as_ref(),
@@ -881,6 +893,108 @@ impl TypeChecker {
             .any(|ancestor| ancestor.as_str() == expected_base)
     }
 
+    /// Is a *declared* return type `actual` an acceptable refinement of a
+    /// *declared* return type `expected` (BT-4175)?
+    ///
+    /// The one covariance rule shared by every "a method stands in for another
+    /// signature" check: an instance method overriding an inherited one
+    /// (`check_override_return_compatibility`) and a class satisfying a
+    /// protocol requirement
+    /// ([`ProtocolRegistry::conformance_return_type_mismatches`]). Return
+    /// types are covariant, so `actual` must be assignable to `expected`:
+    ///
+    /// - a union `actual` is compatible iff *every* member is (so
+    ///   `String | Result(String, Error)` does not refine `String`);
+    /// - a union `expected` accepts `actual` iff *some* member does;
+    /// - everything else uses [`Self::is_type_compatible`]'s nominal-chain
+    ///   rule (invariant type args, `Nil`/`Never` handling, unknown class ⇒
+    ///   compatible).
+    ///
+    /// Deliberately conservative (answers `true`, i.e. "no warning") for
+    /// shapes the nominal walk cannot judge without the substitution context
+    /// it does not have: anything mentioning a generic type parameter
+    /// (`E`, `T`, `K`, `V` — the parent's binding is not substituted here),
+    /// `Self`/`Self class`/`X class`, `Dynamic`, a difference or
+    /// intersection type, or a protocol name (structural, not nominal).
+    pub(crate) fn is_return_type_refinement(
+        actual: &DeclaredType,
+        expected: &DeclaredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        if Self::declared_type_is_opaque(actual, hierarchy)
+            || Self::declared_type_is_opaque(expected, hierarchy)
+        {
+            return true;
+        }
+        let false_ty = || DeclaredType::simple("False");
+        match (actual, expected) {
+            (DeclaredType::Union(members), _) => members
+                .iter()
+                .all(|m| Self::is_return_type_refinement(m, expected, hierarchy)),
+            (DeclaredType::FalseOr(inner), _) => {
+                Self::is_return_type_refinement(inner, expected, hierarchy)
+                    && Self::is_return_type_refinement(&false_ty(), expected, hierarchy)
+            }
+            (_, DeclaredType::Union(members)) => members
+                .iter()
+                .any(|m| Self::is_return_type_refinement(actual, m, hierarchy)),
+            (_, DeclaredType::FalseOr(inner)) => {
+                Self::is_return_type_refinement(actual, inner, hierarchy)
+                    || Self::is_return_type_refinement(actual, &false_ty(), hierarchy)
+            }
+            _ => {
+                let actual_str: EcoString = actual.to_string().into();
+                let expected_str: EcoString = expected.to_string().into();
+                Self::is_type_compatible(&actual_str, &expected_str, hierarchy)
+            }
+        }
+    }
+
+    /// `true` when `ty` (anywhere inside it) has a shape
+    /// [`Self::is_return_type_refinement`] declines to judge — see that
+    /// function's doc for the list.
+    fn declared_type_is_opaque(ty: &DeclaredType, hierarchy: &ClassHierarchy) -> bool {
+        match ty {
+            DeclaredType::Simple(name) => {
+                super::is_generic_type_param(name)
+                    || WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic)
+                    || hierarchy.is_protocol_class(name)
+            }
+            DeclaredType::Singleton(_) => false,
+            DeclaredType::Generic { base, parameters } => {
+                hierarchy.is_protocol_class(base)
+                    || parameters
+                        .iter()
+                        .any(|p| Self::declared_type_is_opaque(p, hierarchy))
+            }
+            DeclaredType::Union(members) => members
+                .iter()
+                .any(|m| Self::declared_type_is_opaque(m, hierarchy)),
+            DeclaredType::FalseOr(inner) => Self::declared_type_is_opaque(inner, hierarchy),
+            DeclaredType::Difference { .. }
+            | DeclaredType::Intersection { .. }
+            | DeclaredType::SelfType
+            | DeclaredType::SelfClass
+            | DeclaredType::ClassOf(_) => true,
+        }
+    }
+
+    /// `true` when two same-base, *both*-parameterized positional types
+    /// disagree on arity — `Tuple(A, B)` vs `Tuple(A, B, C)` (BT-4220).
+    ///
+    /// For a class with a fixed type-param list an arity difference is a
+    /// malformed annotation (reported elsewhere), so the arg comparisons stay
+    /// conservative about it. A positional tuple's arity *is* its shape, though:
+    /// a 2-tuple is never a 3-tuple, so the mismatch is a definite type error.
+    /// A bare (unparameterized) side has length 0 and never mismatches — it
+    /// flows either way per the gradual rules.
+    fn is_positional_arity_mismatch(base: &str, actual_len: usize, expected_len: usize) -> bool {
+        WellKnownClass::from_str(base) == Some(WellKnownClass::Tuple)
+            && actual_len != 0
+            && expected_len != 0
+            && actual_len != expected_len
+    }
+
     /// Compare the *type arguments* of two same-base generic type
     /// strings (e.g. `"Array(Integer)"` vs `"Array(String)"`).
     ///
@@ -888,14 +1002,19 @@ impl TypeChecker {
     /// same arity and at least one arg pair is incompatible. When either side is
     /// unparameterized (bare `Array`, which may stand for any `Array(_)`) or the
     /// arities differ, we stay conservative and return `true` so this never
-    /// introduces a false positive on its own.
+    /// introduces a false positive on its own — except for a positional tuple,
+    /// where an arity difference is a definite mismatch
+    /// ([`Self::is_positional_arity_mismatch`]).
     ///
     /// Args are compared invariantly via [`is_type_compatible`], recursing into
     /// nested generics (so `Array(Array(Integer))` vs `Array(Array(String))`
     /// is also caught).
     fn type_args_match(actual: &str, expected: &str, hierarchy: &ClassHierarchy) -> bool {
-        let (_, actual_args) = Self::parse_generic_type_string(actual);
+        let (base, actual_args) = Self::parse_generic_type_string(actual);
         let (_, expected_args) = Self::parse_generic_type_string(expected);
+        if Self::is_positional_arity_mismatch(&base, actual_args.len(), expected_args.len()) {
+            return false;
+        }
         if actual_args.is_empty()
             || expected_args.is_empty()
             || actual_args.len() != expected_args.len()
@@ -976,13 +1095,39 @@ impl TypeChecker {
         if !Self::is_type_compatible(act_name, exp_name, hierarchy) {
             return false;
         }
-        // Base classes match — recurse into inner type args when arity lines up.
-        if exp_inner.is_empty() || act_inner.is_empty() || exp_inner.len() != act_inner.len() {
+        // Base classes match — recurse into inner type args.
+        Self::same_base_type_args_compatible(exp_name, exp_inner, act_inner, hierarchy)
+    }
+
+    /// Compare the type-arg lists of two compatible-base `Known` types
+    /// (`expected_base` is the expected side's class name), slot by slot via
+    /// [`Self::type_args_compatible`].
+    ///
+    /// Conservative (`true`) when either side is unparameterized (bare `Array`
+    /// may stand for any `Array(_)`) or the arities differ — except for a
+    /// positional tuple, whose arity is its shape, so `Tuple(A, B)` vs
+    /// `Tuple(A, B, C)` is a mismatch ([`Self::is_positional_arity_mismatch`],
+    /// BT-4220). The single home of this rule for every `Known`-vs-`Known`
+    /// return/arg comparison in this file.
+    fn same_base_type_args_compatible(
+        expected_base: &str,
+        expected_args: &[InferredType],
+        actual_args: &[InferredType],
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        if Self::is_positional_arity_mismatch(expected_base, actual_args.len(), expected_args.len())
+        {
+            return false;
+        }
+        if expected_args.is_empty()
+            || actual_args.is_empty()
+            || expected_args.len() != actual_args.len()
+        {
             return true;
         }
-        exp_inner
+        expected_args
             .iter()
-            .zip(act_inner.iter())
+            .zip(actual_args.iter())
             .all(|(e, a)| Self::type_args_compatible(e, a, hierarchy))
     }
 
@@ -1520,8 +1665,12 @@ impl TypeChecker {
                     // We model the metatype's own type as `Class` for the
                     // hierarchy walk, so e.g. `:: Behaviour` accepts it but
                     // `:: Integer` does not.
-                    let compat =
-                        Self::metatype_assignable_to(meta_class, &expected_structural, hierarchy);
+                    let compat = Self::metatype_assignable_to(
+                        meta_class,
+                        &expected_structural,
+                        hierarchy,
+                        Self::is_type_compatible,
+                    );
                     if !compat {
                         let param_pos = i + 1;
                         let actual_display: EcoString = format!("{meta_class} class").into();
@@ -1743,19 +1892,18 @@ impl TypeChecker {
                 // Check base class compatibility, then inner type args.
                 let base_mismatch = !Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
                 // When the base class matches, also verify inner type args
-                // match. Recurse into nested generics so mismatches like
-                // `Result(Array(Integer), Error)` vs `Result(Array(String), Error)`
-                // are caught (Copilot review on PR #2059).
+                // match. `same_base_type_args_compatible` recurses into nested generics so
+                // mismatches like `Result(Array(Integer), Error)` vs
+                // `Result(Array(String), Error)` are caught (Copilot review on
+                // PR #2059), and rejects a positional-tuple arity mismatch
+                // (`-> Tuple(A, B)` with body `Tuple(A, B, C)`, BT-4220).
                 let args_mismatch = !base_mismatch
-                    && !expected_args.is_empty()
-                    && !actual_args.is_empty()
-                    && expected_args.len() == actual_args.len()
-                    && expected_args
-                        .iter()
-                        .zip(actual_args.iter())
-                        .any(|(exp_arg, act_arg)| {
-                            !Self::type_args_compatible(exp_arg, act_arg, hierarchy)
-                        });
+                    && !Self::same_base_type_args_compatible(
+                        expected_ty,
+                        expected_args,
+                        actual_args,
+                        hierarchy,
+                    );
                 if base_mismatch || args_mismatch {
                     let expected_display = expected.display_for_diagnostic().unwrap_or_else(|| {
                         InferredType::class_name_for_diagnostic(expected_ty.as_str())
@@ -1878,21 +2026,13 @@ impl TypeChecker {
                 type_args: expected_args,
                 ..
             } => {
-                if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
-                    return false;
-                }
-                if expected_args.is_empty()
-                    || actual_args.is_empty()
-                    || expected_args.len() != actual_args.len()
-                {
-                    return true;
-                }
-                expected_args
-                    .iter()
-                    .zip(actual_args.iter())
-                    .all(|(exp_arg, act_arg)| {
-                        Self::type_args_compatible(exp_arg, act_arg, hierarchy)
-                    })
+                Self::is_type_compatible(actual_ty, expected_ty, hierarchy)
+                    && Self::same_base_type_args_compatible(
+                        expected_ty,
+                        expected_args,
+                        actual_args,
+                        hierarchy,
+                    )
             }
             // Delegate to `known_type_compatible_with_union_member`,
             // which also compares generic type args instead of stopping at
@@ -1954,15 +2094,7 @@ impl TypeChecker {
             return true;
         };
         Self::is_type_compatible(actual_ty, member_ty, hierarchy)
-            && (member_args.is_empty()
-                || actual_args.is_empty()
-                || member_args.len() != actual_args.len()
-                || member_args
-                    .iter()
-                    .zip(actual_args.iter())
-                    .all(|(exp_arg, act_arg)| {
-                        Self::type_args_compatible(exp_arg, act_arg, hierarchy)
-                    }))
+            && Self::same_base_type_args_compatible(member_ty, member_args, actual_args, hierarchy)
     }
 
     /// Part A: validate a `Union` method body against the declared
@@ -2193,6 +2325,92 @@ impl TypeChecker {
                 );
             }
         }
+    }
+
+    /// Check that a child method's *declared* return type refines the
+    /// inherited method's declared return type (BT-4175).
+    ///
+    /// Return types are covariant: an override may narrow (`-> Integer` for
+    /// a parent `-> Number`) but not widen or change it — a caller holding a
+    /// parent-typed receiver statically sees the parent's return type. Only
+    /// explicit annotations on the child are compared (an unannotated
+    /// override has nothing declared to contradict), and the rule is
+    /// [`Self::is_return_type_refinement`]. Warning severity, like the
+    /// parameter check (ADR 0025); suppress a deliberate widening with
+    /// `@expect type` on the method.
+    pub(super) fn check_override_return_compatibility(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if method.return_type.is_none() {
+            return;
+        }
+        let selector = method.selector.name();
+        let Some(widening) = Self::override_return_widening(class_name, &selector, hierarchy)
+        else {
+            return;
+        };
+        let OverrideReturnWidening {
+            child_rt,
+            parent_rt,
+            parent_class,
+        } = widening;
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "Return type of '{selector}' in {class_name} is {child_rt}, incompatible with parent's {parent_rt}"
+                ),
+                method.span,
+            )
+            .with_category(DiagnosticCategory::Type)
+            .with_hint(format!(
+                "{parent_class} declares return type {parent_rt}; an override may narrow it but not widen it"
+            )),
+        );
+    }
+
+    /// The incompatible override `check_override_return_compatibility`
+    /// reports for `class_name>>selector`, if any: the class's declared
+    /// return type does not refine the one inherited from its superclass.
+    /// `None` when there is no inherited declaration, either side is
+    /// unannotated, either side names a class type parameter (no
+    /// substitution here), or the override refines its parent. Shared with
+    /// [`ProtocolRegistry::conformance_return_type_mismatches`], which leaves
+    /// exactly these mismatches to the override site (BT-4175).
+    pub(crate) fn override_return_widening(
+        class_name: &str,
+        selector: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<OverrideReturnWidening> {
+        let superclass = hierarchy.get_class(class_name)?.superclass.clone()?;
+        let parent_method = hierarchy.find_method(&superclass, selector)?;
+        let child_method = hierarchy.find_method(class_name, selector)?;
+        let (Some(child_rt), Some(parent_rt)) =
+            (child_method.return_type, parent_method.return_type)
+        else {
+            return None;
+        };
+        // Class type params (possibly multi-letter, which the shared rule's
+        // single-letter heuristic would miss) have no substitution here.
+        let parent_class = parent_method.defined_in;
+        let type_params: Vec<EcoString> = [class_name, parent_class.as_str()]
+            .into_iter()
+            .filter_map(|c| hierarchy.get_class(c))
+            .flat_map(|c| c.type_params.iter().cloned())
+            .collect();
+        if child_rt.mentions_any(&type_params)
+            || parent_rt.mentions_any(&type_params)
+            || Self::is_return_type_refinement(&child_rt, &parent_rt, hierarchy)
+        {
+            return None;
+        }
+        Some(OverrideReturnWidening {
+            child_rt,
+            parent_rt,
+            parent_class,
+        })
     }
 
     /// Validate binary message operand types for arithmetic and string concatenation.
@@ -2594,7 +2812,12 @@ impl TypeChecker {
                 // metaclass tower). Model the metatype as `Class` for the
                 // assignability walk.
                 let value_display: EcoString = format!("{meta_class} class").into();
-                if !Self::metatype_assignable_to(meta_class, &declared_type, hierarchy) {
+                if !Self::metatype_assignable_to(
+                    meta_class,
+                    &declared_type,
+                    hierarchy,
+                    Self::is_assignable_to,
+                ) {
                     let declared_display = declared_display.clone();
                     self.diagnostics.push(
                         Diagnostic::warning(
@@ -3328,12 +3551,36 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
+                // A class object as the default (`state: k :: Foo class =
+                // Bar`): the slot rule `check_field_assignment` applies
+                // (BT-4206).
+                InferredType::Meta {
+                    class_name: meta_class,
+                    ..
+                } if !Self::metatype_assignable_to(
+                    meta_class,
+                    &declared_type,
+                    hierarchy,
+                    Self::is_assignable_to,
+                ) =>
+                {
+                    let value_display: EcoString = format!("{meta_class} class").into();
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Type mismatch: state `{}` declared as {declared_display}, default is {value_display}",
+                                decl.name.name
+                            ),
+                            decl.span,
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!(
+                            "Default value type {value_display} is not compatible with {declared_display}"
+                        )),
+                    );
+                }
                 // Dynamic / Never / Negation / Intersection defaults — skip
-                // conservatively, matching `check_field_assignment`. `Meta`
-                // (`C class` as a default value) is left unchecked here too;
-                // `check_field_assignment`'s explicit `Meta` handling (ADR
-                // 0083, metatype-vs-`Class` assignability) is out of scope
-                // here, which only adds the `Union` arm.
+                // conservatively, matching `check_field_assignment`.
                 _ => {}
             }
         }
@@ -3342,21 +3589,46 @@ impl TypeChecker {
     /// Whether a class object `C class` (`Meta{C}`) may flow into a slot or
     /// parameter declared `declared_type` (BT-4199).
     ///
-    /// A declared `X class` is covariant: `C class` is accepted iff `C` is `X`
-    /// or a subclass of it. Otherwise the metatype is modelled as `Class` for
-    /// the metaclass-tower walk (ADR 0083): `Class` / `Behaviour` / `Object`
-    /// accept it, `Integer` does not.
+    /// A union declared type accepts it iff some top-level member does
+    /// (BT-4206: `:: Integer | Foo class` does not accept `Integer class`).
+    /// A declared `X class` member is covariant: `C class` is accepted iff
+    /// `C` is `X` or a subclass of it. Any other member models the metatype
+    /// as `Class` for the metaclass-tower walk (ADR 0083) — `Class` /
+    /// `Behaviour` / `Object` accept it, `Integer` does not — judged by
+    /// `tower`: [`Self::is_assignable_to`] for a slot (a field or a state
+    /// default, which has no unknown-class escape), [`Self::is_type_compatible`]
+    /// for an argument, as for every other argument type. A type-parameter
+    /// member accepts it.
     pub(super) fn metatype_assignable_to(
         meta_class: &EcoString,
         declared_type: &EcoString,
         hierarchy: &ClassHierarchy,
+        tower: fn(&EcoString, &EcoString, &ClassHierarchy) -> bool,
     ) -> bool {
-        if let Some(declared_base) = declared_type.strip_suffix(" class") {
-            let declared_base: EcoString = declared_base.into();
-            return Self::is_assignable_to(meta_class, &declared_base, hierarchy);
-        }
-        let class_name_ty: EcoString = "Class".into();
-        Self::is_type_compatible(&class_name_ty, declared_type, hierarchy)
+        let members = crate::semantic_analysis::string_utils::split_top_level(declared_type, '|');
+        let union = members.len() > 1;
+        members.iter().any(|member| {
+            let member = member.trim();
+            if let Some(declared_base) = member.strip_suffix(" class") {
+                if super::is_generic_type_param(declared_base.trim()) {
+                    return true;
+                }
+                let declared_base: EcoString = declared_base.into();
+                return Self::is_assignable_to(meta_class, &declared_base, hierarchy);
+            }
+            // A type-parameter member (`T | Nil`, `T class`) cannot be judged until the
+            // class is instantiated: accept, as `is_type_compatible` does.
+            if super::is_generic_type_param(member) {
+                return true;
+            }
+            let member: EcoString = if union {
+                Self::resolve_type_keyword_static(member)
+            } else {
+                member.into()
+            };
+            let class_name_ty: EcoString = "Class".into();
+            tower(&class_name_ty, &member, hierarchy)
+        })
     }
 
     /// Returns true if `value_type` is assignable to `declared_type`.
@@ -3480,6 +3752,11 @@ impl TypeChecker {
         // Same base, same args — trivially compatible
         if value_args == declared_args {
             return true;
+        }
+
+        if Self::is_positional_arity_mismatch(&declared_base, value_args.len(), declared_args.len())
+        {
+            return false;
         }
 
         // Same base, different args — check variance
@@ -3942,7 +4219,34 @@ impl TypeChecker {
                 };
 
                 match protocol_registry.check_conformance(class_name, base_protocol, hierarchy) {
-                    Ok(()) => {} // Conforms — no warning
+                    // Conforms by selector — still check the declared
+                    // return types refine the protocol's (BT-4175).
+                    Ok(()) => {
+                        for mismatch in protocol_registry.conformance_return_type_mismatches(
+                            class_name,
+                            base_protocol,
+                            hierarchy,
+                        ) {
+                            let ReturnTypeMismatch {
+                                selector,
+                                defined_in,
+                                actual,
+                                expected,
+                            } = mismatch;
+                            self.diagnostics.push(
+                                Diagnostic::warning(
+                                    format!(
+                                        "{class_name}>>{selector} returns {actual}, incompatible with protocol {base_protocol}'s {expected}"
+                                    ),
+                                    span,
+                                )
+                                .with_category(DiagnosticCategory::Type)
+                                .with_hint(format!(
+                                    "{class_name} responds to every {base_protocol} selector, but `{selector}` (defined in {defined_in}) is declared -> {actual}; code typed `:: {base_protocol}` expects {expected}"
+                                )),
+                            );
+                        }
+                    }
                     Err(missing) => {
                         let missing_list = Self::format_selector_list(&missing);
                         self.diagnostics.push(

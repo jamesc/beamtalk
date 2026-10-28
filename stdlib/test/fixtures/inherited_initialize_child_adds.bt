@@ -10,8 +10,9 @@
 typed InheritedInitializeBase subclass: InheritedInitializeChildAdds
   state: cache :: String
 
-  initialize -> String =>
+  initialize -> Nil =>
     // parent's initialize already ran; self.label is set
     self.cache := "cache-" ++ self.label
+    nil
 
   getCache -> String => self.cache

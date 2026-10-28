@@ -2594,14 +2594,12 @@ pub fn match_producer_writes(
     kind: RootMethodKind,
 ) -> Option<Vec<OuterLocalWrite>> {
     let arms = match_arms(expr)?;
-    // The subject is evaluated before the arms' scratch map is seeded, so a
-    // subject that assigns a local would be lost to an arm that also writes it:
-    // such a `match:` stays the loud `MatchArmWrite` error.
-    // Any assignment in the subject keeps the `match:` the loud error: codegen
-    // seeds the arms' scratch map before the subject is evaluated and, unlike a
-    // conditional's receiver, does not sequence the subject's writes first, so
-    // even an unrelated local assigned there is an unthreaded assignment (the
-    // verifier's `UnthreadedLocalAssignment`).
+    // Any assignment in the subject keeps the `match:` the loud `MatchArmWrite`
+    // error. Codegen compiles the subject before it seeds the arms' scratch map
+    // (BT-4196), but, unlike a conditional's receiver, the subject is not a
+    // producer site: a local assigned there is not lowered as a `LocalRebind`,
+    // so even an unrelated one is an unthreaded assignment (the verifier's
+    // `UnthreadedLocalAssignment`).
     if let Expression::Match { value, .. } = expr.unwrap_parens() {
         let mut assigns = false;
         crate::ast_walker::walk_expression(value, &mut |e| {

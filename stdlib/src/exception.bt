@@ -135,17 +135,23 @@ Object subclass: Exception
   /// (e.g. `badarith`, `{badkey, K}`) or the `Reason` of an `{error, Reason}`
   /// returned from an FFI call (ADR 0076), so handlers can match on the term
   /// itself (`#closed` vs `#econnreset`) instead of string-comparing
-  /// `message`. Exceptions raised by `Error signal:` / `self error:` record
-  /// no term and return nil (`signal:reason:` records the given term); some stdlib natives (e.g. File I/O errors) also
-  /// record the underlying OTP reason. FFI results pass through
-  /// the usual boundary coercions first (an Erlang charlist reason arrives as
-  /// a String, a bare `error` return as nil).
+  /// `message`. Stdlib natives follow one rule (BT-3970, BT-4236): a
+  /// failure that comes from Erlang/OTP records its term, and classifying it
+  /// into a `kind` never drops it, so a missing file is `#file_not_found` and
+  /// its reason is `#enoent`. Failures that start in Beamtalk (`Error signal:`,
+  /// `self error:`, argument validation) record no term and return nil;
+  /// `signal:reason:` records the given term. `Result unwrap` on a plain
+  /// error value answers that value. FFI results pass through the usual
+  /// boundary coercions first (an Erlang charlist reason arrives as a String,
+  /// a bare `error` return as nil). Declared `Object | Nil` because an FFI
+  /// `{error, R}` can carry any term.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (Erlang string to_integer: "abc") error reason   // => #no_integer
   /// [#(1, "x") sum] on: TypeError do: [:e | e reason] // => #badarith
   /// [Error signal: "boom"] on: Error do: [:e | e reason] // => nil
+  /// (File readAll: "missing.txt") error reason            // => #enoent
   /// ```
   reason -> Object | Nil => @primitive
 

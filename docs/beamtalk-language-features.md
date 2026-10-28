@@ -832,7 +832,7 @@ self.total := self.total * factor
 
 **Note:** `self.field` compiles to direct map access, not a message send. For external access to another actor's state, use message sends.
 
-**Parenthesized assignment:** Field assignments can be used as expressions when wrapped in parentheses — `(self.x := 5)` returns the assigned value:
+**Parenthesized assignment:** A field assignment used as an operand (the receiver or argument of a send, an element of a literal, an assigned value) must be wrapped in parentheses. There, `(self.x := 5)` answers the assigned value:
 
 ```beamtalk
 // Assignment as expression (returns 6)
@@ -843,6 +843,21 @@ self.x := 5
 self.y := self.x + 1
 self.y
 ```
+
+Parentheses only matter in operand position. Around a whole statement they change nothing. In a value-type method, a trailing field assignment answers the updated `self` whether or not it is parenthesised: `(self.x := 5)` and `self.x := 5` as the last statement both answer the updated `self`. To answer the assigned value, write it explicitly (BT-4092):
+
+```beamtalk
+// Value-type method answering the updated self (with or without parentheses)
+withX5 =>
+  self.x := 5
+
+// Value-type method answering 5
+setXTo5 =>
+  self.x := 5
+  5
+```
+
+Before BT-4092, a parenthesised trailing field assignment answered the assigned value. For one release, the compiler warns on that form (category `deprecation`) so code written for the old meaning can be found.
 
 **Limitation:** In an actor instance method a block reads and writes the actor's fields live, wherever it is made and run (see [Actor Blocks See Live State](#actor-blocks-see-live-state)), and in a class method a block may assign class variables wherever it is written (they live in the class process, [ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md)). In a value-type method, field assignments (`self.x :=`) in stored closures are still a compile error — they require control-flow context for state threading. A closure that assigns an outer local may not be stored at all: a block may assign a captured variable only where it is written directly as the argument of a control-flow construct or a compiler-known collection message (`do:`, `inject:into:`, `on:do:`, ...), and a block that is stored, returned, placed in a collection literal or passed to any other method is rejected at the assignment ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), see [What Works and What Doesn't](#what-works-and-what-doesnt)). Have the block answer the new value and assign it where the block is called.
 
@@ -1226,7 +1241,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // e is typed as BEAMError — `e message` type-checks without warnings
 ```
 
-**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
+**The raw error term (`Exception>>reason`, BT-3954).** `message` is a rendered string. To match on the underlying Erlang term, ask for `reason`. It returns the `R` of an FFI `{error, R}` (the exception that `Result error:` wraps) or the reason of a raw `error:`/`exit:`/`throw:` caught via `on:do:`, as an atom or tuple. FFI values pass through the usual boundary coercions first, so a charlist reason arrives as a `String`. When no underlying term was recorded, as for `Error signal:` and `self error:`, `reason` returns `nil`. Stdlib natives follow the same rule (BT-3970, BT-4236): a failure that comes from Erlang/OTP keeps its term after it is classified into a `kind`, so `(File readAll: "missing.txt") error` is a `#file_not_found` whose `reason` is `#enoent`, a failed `Json parse:` keeps the parser's term (e.g. `#unexpected_end`), and an invalid `Regex from:` pattern keeps `re:compile`'s `{ErrCharlist, Position}`, the same term `Erlang re compile:` answers (element 1 is OTP's charlist, a `List`, not a `String`). The one non-OTP case is `Result unwrap` on a plain error value, whose `reason` is that value. Only a `Result error:` produced at the FFI boundary holds an Exception. A `Result error: #sym` built in Beamtalk holds the value itself, so read it with `error`, not `error reason`:
 
 ```beamtalk
 (Erlang string to_integer: "abc") ifError: [:e | e reason]
@@ -1237,6 +1252,8 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 // => #badarith  (classified as type_error, original term still available)
 [Error signal: "boom"] on: Error do: [:e | e reason]
 // => nil
+(File readAll: "missing.txt") error reason
+// => #enoent  (classified as file_not_found, posix term still available)
 ```
 
 **Carrying a reason: `signal:reason:` (BT-4159).** Beamtalk exceptions have no instance fields, so to attach machine-readable data when signalling, use the class-side `signal: message reason: term`. The term can be any value; `reason` answers it in `on:do:` (type `Object | Nil`, so narrow with `isKindOf:` or match), it survives propagation across processes, and uncaught reports print it as a `Reason:` line. There is no separate `error:reason:`; `Error signal: msg reason: term` is the equivalent.
@@ -1366,6 +1383,20 @@ opts := #({#local, path}, {#nodelay, true},)  // trailing comma is allowed
   assignment; `{a, b} size` is an expression. `{a, b} := {b, a}` swaps.
 - A tuple literal infers the positional type `Tuple(T1, …, Tn)`, so `at:` with a
   literal index is typed (see above). `{}` infers as bare `Tuple`.
+- The same positional type can be written as an annotation — parameter, return,
+  `state:` and local — with any number of element types (`Tuple()` is bare
+  `Tuple`). An annotated tuple behaves exactly like an inferred one:
+
+  ```beamtalk
+  marker -> Tuple(Symbol, Reference | Nil) => {#emitted, self.spanContext}
+
+  countOf: entry :: Tuple(Symbol, Integer) -> Integer => entry at: 2   // inferred Integer
+  ```
+
+  `Tuple(A, B)` is assignable to bare `Tuple`, and a bare `Tuple` (or `Dynamic`)
+  flows into `Tuple(A, B)` gradually. Element types are checked slot by slot, and
+  an arity mismatch between two positional tuple types (`Tuple(A, B)` vs
+  `Tuple(A, B, C)`) is a type error.
 - **`{#ok, x}` is a `Tuple`, not a `Result`.** FFI `ok`/`error` conversion
   (ADR 0076) applies only to values *returned* from Erlang; arguments pass
   through unchanged. Use `Result ok:` / `Result error:` to build a `Result`.
@@ -1819,7 +1850,7 @@ self run: [:x :: (Integer | String) | x]
 - Data annotations (`field: x :: Integer = 0` on Value, `state: x :: Integer = 0` on Actor) are checked for defaults and assignments. When a type annotation is present, the default value is optional (`field: x :: Integer` / `state: x :: Integer`) — the type annotation is the contract, and `nil` is used internally.
 - Local variable annotations (`name :: Type := expr`) declare the binding's type at type-erasure boundaries. See [Local Variable Type Annotations](#local-variable-type-annotations) below.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
-- Block parameter annotations (`[:x :: Integer | ...]`) type the parameter and win over any inferred type (BT-4102); an annotation unrelated to the expected parameter type warns. Without an annotation, parameter types are inferred from the enclosing message signature, from a method's declared `-> Block(P, R)` return type (block literal as the tail expression or a top-level `^`), or from an annotated local (`f :: Block(P, R) := [:x | ...]`). Block literals inside `#{...}`/`#(...)` literals get no push-down; annotate their parameters. Type variables in a block parameter annotation do not see the method's type-parameter substitution (same as method parameters).
+- Block parameter annotations (`[:x :: Integer | ...]`) type the parameter and win over any inferred type (BT-4102); an annotation unrelated to the expected parameter type warns. Without an annotation, parameter types are inferred from the enclosing message signature, from a method's declared `-> Block(P, R)` return type (block literal as the tail expression or a top-level `^`), or from an annotated local (`f :: Block(P, R) := [:x | ...]`). Block literals inside `#{...}`/`#(...)` literals get no push-down; annotate their parameters. A method-local or class-level type variable in a method or block parameter annotation (`foo: x :: E`, `[:y :: E | ...]`) resolves through the enclosing method's substitution, which inside the method body is the identity: `E` is a rigid placeholder, the same type a `-> E` return annotation names, so it flows between parameters, block parameters and the return type without warnings. It is never `Dynamic`, never the callee's binding for a same-named variable, and is treated as compatible with any type in mismatch checks (BT-4210).
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
 ### Local Variable Type Annotations
@@ -4538,7 +4569,7 @@ x match: [
 // => 2
 ```
 
-**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). Dependent sizes and size expressions are only supported when the binary pattern is the whole arm pattern — nested ones must match the enclosing value first, then the binary. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). A size that names an earlier segment of the *same* binary, or a size expression, is only supported when the binary pattern is the whole arm pattern — match the enclosing value first, then the binary. A binary nested inside a tuple in a `match:` arm is matched after the tuple, so its sizes may name a variable the tuple or an earlier nested binary binds (`{n, <<head:n/binary, _/binary>>}`). Destructuring assignment does not accept nested patterns. A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
 
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. A zero-parameter block body alongside non-block arms warns (`MatchArmBlock`: "this `match:` arm answers a Block without running it"); a match whose every arm is a block literal is read as an intentional dispatch table and stays silent. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is additionally a compile error. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`). Suppress a deliberate block-valued arm with `@expect match_arm_block`, or the whole package with `match-arm-block = "off"` under `[diagnostics]`.
 
@@ -4550,6 +4581,18 @@ Bind the match's answer instead: `timeout := value match: [...]`.
 **Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
 
 **Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor` subclasses (BT-2870).
+
+**`Binary` is the one non-leaf exception (BT-4228).** `Binary` is `sealed` and `String` is its only subclass, so `b :: Binary` is accepted and compiles to a closed, constant-time *subclass-aware* test: it matches a bare binary (valid UTF-8 or not) **or** a `String`, agreeing with `isKindOf: Binary`. To tell bytes from text, put the `String` arm first:
+
+```beamtalk
+value match: [
+  s :: String -> #text;
+  b :: Binary -> #bytes;   // only bare binaries reach here
+  _ -> #other
+]
+```
+
+For exhaustiveness checking, a `b :: Binary` arm covers a `String` member of the scrutinee type, but a `Binary` member is not treated as a closed leaf (so `matchExhaustive:` over a `Binary | Nil` scrutinee cannot be proven; use `match:`).
 
 Four runtime-representation nuances (see ADR 0107 Implementation for the full codegen rationale):
 - **`Supervisor`/`DynamicSupervisor` subclasses use a distinct runtime shape.** A live supervisor reference is a 4-tuple tagged `'beamtalk_supervisor'` (not `'beamtalk_object'` like Actor subclasses, and not a tagged map like Value subclasses). `x :: MySupervisorSubclass` compiles to a tuple-tag check accepting `'beamtalk_supervisor'` at `element(1)` before comparing `element(2)` against the class name (BT-2870).
@@ -4578,7 +4621,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 | Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails (BT-663, BT-4096, BT-4097) |
 | Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
-| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only — see restrictions below (BT-2855, ADR 0107) |
+| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only (plus the sealed `Binary`, subclass-aware) — see restrictions below (BT-2855, ADR 0107) |
 
 **Exhaustiveness checking (BT-1299):** `match:` on a sealed type with constructor patterns must cover all known variants or include a wildcard `_` arm, or the compiler emits an error:
 
@@ -8166,7 +8209,7 @@ TestCase subclass: IntegrationTest
 
 **Key points:**
 - Declare test instance variables with `field:` (not `state:`) since TestCase is a Value subclass
-- `self.field := value` in the LAST statement of `setUp` returns the updated self — this is a special case for value-type field assignment (BT-833/BT-900), not the general rule that a bare assignment evaluates to the assigned value
+- `self.field := value` in the LAST statement of `setUp` returns the updated self — this is a special case for value-type field assignment (BT-833/BT-900), not the general rule that an assignment evaluates to the assigned value. It holds with or without parentheses: `(self.field := value)` as the last statement also returns the updated self (BT-4092)
 - Each test method receives the setUp'd value as `self` — mutations to actor references work normally, but `self` itself is immutable
 
 **Any statement after the last `self.field := value` silently drops that field** (BT-3391) — `setUp`'s return value is always its last expression's value, and only a trailing field assignment (or bare `self`) evaluates to the updated self. Adding one more line after your last assignment — a `super setUp` call, a log line, an unrelated local — makes `setUp` return THAT statement's value instead, and every field set above it reads back as its default in every test method, with no compile or runtime error:

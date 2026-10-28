@@ -6,6 +6,7 @@
 //! **DDD Context:** Semantic Analysis
 
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::class_hierarchy::DeclaredType;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::Span;
 use ecow::{EcoString, eco_format};
@@ -40,12 +41,21 @@ pub enum DynamicReason {
     /// Distinguished from every other reason (all of which mean "we don't
     /// have enough information to give a concrete type") because this one
     /// means the *opposite*: the author explicitly promised the value can be
-    /// anything. `merge_method_local_binding` treats this as authoritative —
-    /// it must survive being unified with any other binding, including a
-    /// concrete one from a sibling argument position — where every other
-    /// `DynamicReason` instead loses to a concrete binding observed
-    /// elsewhere.
+    /// anything. `merge_method_local_binding` and `join_branch_arms` treat
+    /// this as authoritative — it must survive being unified with any other
+    /// binding, including a concrete one from a sibling argument position or
+    /// branch arm — where every other `DynamicReason` instead loses to a
+    /// concrete binding observed elsewhere.
     ExplicitDynamic,
+    /// A branch join (e.g. `ifTrue:ifFalse:`'s shared `R`) where at least
+    /// one arm is `Dynamic` and another is concrete (BT-4207).
+    ///
+    /// The join is soundly `Dynamic` — collapsing it to the concrete arm
+    /// (`Dynamic | Nil` ⇒ `Nil`) would make later sends report spurious
+    /// DNUs. It is not a root cause: the `Dynamic` arm already produced
+    /// its own diagnostic (if any) at its source, so this reason does not
+    /// re-warn "Dynamic in typed class" on the enclosing expression.
+    DynamicBranch,
     /// Fallback — no specific reason available.
     Unknown,
 }
@@ -63,6 +73,7 @@ impl DynamicReason {
             Self::UntypedFfi => Some("untyped FFI"),
             Self::DynamicSpec => Some("FFI spec is Dynamic"),
             Self::ExplicitDynamic => Some("explicitly declared Dynamic"),
+            Self::DynamicBranch => Some("dynamic branch"),
             Self::Unknown => None,
         }
     }
@@ -1548,6 +1559,16 @@ pub(in crate::semantic_analysis) fn is_generic_type_param(name: &str) -> bool {
 // already had this split, via `InferredType::improper_cons_tail_display`'s
 // existing `Option<EcoString>` — that one carries no new struct here, only
 // its `validation.rs` renderer moved.)
+
+/// An instance-method override whose declared return type does not refine
+/// the one it inherits. Found by `validation.rs::override_return_widening`,
+/// rendered by `check_override_return_compatibility`, and consulted by
+/// `ProtocolRegistry::conformance_return_type_mismatches` (BT-4175).
+pub(crate) struct OverrideReturnWidening {
+    pub(crate) child_rt: DeclaredType,
+    pub(crate) parent_rt: DeclaredType,
+    pub(crate) parent_class: EcoString,
+}
 
 /// A declared-vs-inferred type mismatch on an assignment's type annotation
 /// (`x :: Declared := value`). Detected in `inference/assignment.rs`,

@@ -2451,7 +2451,7 @@ temp_directory_platform_default_test() ->
 %%% open:mode: / open:mode:do:
 %%%
 %%% These exercise do_open/3, mode_options/1, ensure_parent_dir/2 and
-%%% open_error/3 — the open path the FileHandle tests skip by constructing
+%%% file_error/5 — the open path the FileHandle tests skip by constructing
 %%% handles with beamtalk_file_handle:new/3 directly.
 %%% ============================================================================
 
@@ -2478,6 +2478,39 @@ open_mode_read_missing_file_test() ->
         },
         R
     ).
+
+%% BT-3970: classifying a posix failure never drops the term.
+open_mode_read_missing_file_keeps_reason_test() ->
+    #{'errReason' := #{error := #beamtalk_error{details = Details}}} =
+        beamtalk_file:'open:mode:'(<<"_bt_test_open_mode_absent.txt">>, read),
+    ?assertMatch(#{reason := enoent, path := <<"_bt_test_open_mode_absent.txt">>}, Details).
+
+file_error_classified_keeps_reason_test() ->
+    Classified = [{eacces, permission_denied, <<"Check file permissions">>}],
+    ?assertMatch(
+        #beamtalk_error{
+            kind = permission_denied,
+            selector = 'readAll:',
+            details = #{path := <<"p">>, reason := eacces}
+        },
+        beamtalk_file:file_error('readAll:', #{path => <<"p">>}, eacces, Classified, undefined)
+    ).
+
+file_error_unclassified_is_io_error_with_default_hint_test() ->
+    E = beamtalk_file:file_error(
+        'mkdirAll:', #{path => <<"p">>}, enospc, [], <<"Could not create directory">>
+    ),
+    ?assertMatch(
+        #beamtalk_error{kind = io_error, details = #{path := <<"p">>, reason := enospc}}, E
+    ),
+    ?assertEqual(
+        beamtalk_primitive:string_from_binary(<<"Could not create directory">>),
+        E#beamtalk_error.hint
+    ).
+
+file_error_no_default_hint_test() ->
+    E = beamtalk_file:file_error('lines:', #{path => <<"p">>}, eio, [], undefined),
+    ?assertEqual(undefined, E#beamtalk_error.hint).
 
 open_mode_write_truncates_test() ->
     with_temp_file("_bt_test_open_mode_write.txt", <<"0123456789">>, fun() ->

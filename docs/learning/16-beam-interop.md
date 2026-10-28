@@ -141,8 +141,10 @@ calling a Beamtalk actor from Erlang is identical to calling any gen_server.
 TestCase subclass: Ch16PracticalPatterns
 
   testCallingStringModule =>
-    // Erlang's string module for operations not yet in Beamtalk stdlib:
-    result := Erlang string uppercase: "hello"
+    // Erlang's string module for operations not yet in Beamtalk stdlib.
+    // It returns a raw binary, which Beamtalk sees as a Binary, not a
+    // String; `asString` validates it as UTF-8 and answers a Result:
+    result := (Erlang string uppercase: "hello") asString unwrap
     self assert: result equals: "HELLO"
 
   testCallingMathModule =>

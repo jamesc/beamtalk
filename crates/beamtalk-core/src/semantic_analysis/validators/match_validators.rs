@@ -266,6 +266,21 @@ const PHASE_A_PRIMITIVE_CLASSES: &[&str] = &[
     "Symbol",
 ];
 
+/// BT-4228: sealed, genuinely non-leaf classes whose entire subclass set is
+/// closed and known to codegen, so `x :: Class` compiles to a constant-time
+/// *subclass-aware* runtime test (agreeing with `isKindOf: Class`) without
+/// ADR 0107 Phase B's general subclass dispatch. `Binary` is `sealed` and
+/// `String` is its only subclass: `b :: Binary` matches a bare binary or a
+/// `String` (`generate_type_pattern`'s `wrap_binary_test`).
+///
+/// Accepted by [`validate_type_pattern_class`] but deliberately *not* a
+/// concrete leaf for [`is_concrete_leaf_class`]: a `Binary` scrutinee
+/// member is conservatively excluded from closed-union exhaustiveness
+/// reasoning. A `b :: Binary` arm still covers a `String` scrutinee member
+/// there, because the residual `difference` is hierarchy-aware
+/// (`String <: Binary`).
+const SEALED_CLOSED_HIERARCHY_CLASSES: &[&str] = &["Binary"];
+
 /// ADR 0107 Phase A: is `class_name` a concrete, exhaustively
 /// enumerable leaf class in the exact sense `Pattern::Type` patterns already
 /// require — the identical leaf check `validate_type_pattern_class`'s
@@ -274,14 +289,16 @@ const PHASE_A_PRIMITIVE_CLASSES: &[&str] = &[
 /// `type_checker::inference` (`is_closed_leaf_type_union`) can never disagree
 /// with what a `Type` pattern arm is legally allowed to test: a class this
 /// function accepts is always one a `binding :: class_name` arm could
-/// legally appear in, and vice versa.
+/// legally appear in. The converse does not hold for
+/// [`SEALED_CLOSED_HIERARCHY_CLASSES`] (BT-4228): `b :: Binary` is a legal
+/// arm, but a `Binary` scrutinee member is not a closed leaf.
 ///
 /// `Character` is excluded (shares `Integer`'s runtime representation, no
 /// distinguishing tag — see `validate_type_pattern_class`'s doc), and an
 /// unresolved class name is conservatively rejected (an exhaustiveness
 /// *gate* must not assume open-world unknowns are closed).
 pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarchy) -> bool {
-    if class_name == "Character" {
+    if class_name == "Character" || SEALED_CLOSED_HIERARCHY_CLASSES.contains(&class_name) {
         return false;
     }
     if PHASE_A_PRIMITIVE_CLASSES.contains(&class_name) {
@@ -452,7 +469,11 @@ fn validate_type_pattern_class(
 
     // Phase A's explicitly-named primitives are always valid — see
     // `PHASE_A_PRIMITIVE_CLASSES`'s doc for why they skip the leaf check.
-    if PHASE_A_PRIMITIVE_CLASSES.contains(&class_name) {
+    // `SEALED_CLOSED_HIERARCHY_CLASSES` (BT-4228) are non-leaf but their
+    // closed subclass set compiles to a subclass-aware test.
+    if PHASE_A_PRIMITIVE_CLASSES.contains(&class_name)
+        || SEALED_CLOSED_HIERARCHY_CLASSES.contains(&class_name)
+    {
         return;
     }
 
@@ -899,6 +920,52 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no diagnostics for Boolean, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-4228: `Binary` has a subclass (`String`) but is sealed with a
+    /// closed subclass set, so `b :: Binary` is accepted (subclass-aware
+    /// codegen) — yet it is still not a concrete leaf for closed-union
+    /// exhaustiveness reasoning.
+    #[test]
+    fn type_pattern_binary_accepted_but_not_concrete_leaf() {
+        let (module, hierarchy) = hierarchy_for("x match: [b :: Binary -> b; _ -> 0]");
+        assert!(
+            !hierarchy.direct_subclasses("Binary").is_empty(),
+            "precondition: Binary has a subclass (String)"
+        );
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for Binary, got: {diagnostics:?}"
+        );
+        assert!(!is_concrete_leaf_class("Binary", &hierarchy));
+    }
+
+    /// BT-4228: `wrap_binary_test` lowers `b :: Binary` to exactly two runtime
+    /// shapes (a bare binary or the `String` tag). That agrees with
+    /// `isKindOf: Binary` only while `Binary` is sealed and its whole subtree
+    /// is `{Binary, String}`. A new stdlib subclass must fail here first.
+    #[test]
+    fn sealed_closed_hierarchy_binary_subtree_is_exactly_string() {
+        let (_module, hierarchy) = hierarchy_for("x");
+        assert!(
+            hierarchy.get_class("Binary").is_some_and(|c| c.is_sealed),
+            "Binary must be sealed for `:: Binary` to be a closed two-shape test"
+        );
+        assert_eq!(
+            hierarchy.direct_subclasses("Binary"),
+            vec![EcoString::from("String")],
+            "`:: Binary` codegen assumes String is Binary's only subclass"
+        );
+        assert!(
+            hierarchy.get_class("String").is_some_and(|c| c.is_sealed),
+            "String must be sealed so no package can add a third `:: Binary` shape"
+        );
+        assert!(
+            hierarchy.direct_subclasses("String").is_empty(),
+            "`:: Binary` codegen assumes String has no subclasses"
         );
     }
 

@@ -81,7 +81,7 @@ fn repl_rows() -> Vec<String> {
 /// Lowers the REPL input `src` the way the REPL assembler lowers each
 /// statement (`local_producer_agreement_repl.rs`), answering the debug-build
 /// panic message (a verifier finding) or a codegen error, or `None`.
-fn repl_report(src: &str, fault_on: Option<LocalRebindFault>) -> Option<String> {
+pub(super) fn repl_report(src: &str, fault_on: Option<LocalRebindFault>) -> Option<String> {
     let (parsed, diags) = parse(lex_with_eof(src));
     assert!(diags.is_empty(), "malformed row:\n{src}\n{diags:?}");
     let statements: Vec<_> = parsed

@@ -22,10 +22,11 @@ typed Actor subclass: JsonValueStateActor
   state: value :: JsonValue
   state: count :: Integer = 0
 
-  initialize -> Integer =>
+  initialize -> Nil =>
     // Deliberately does NOT set self.value — JsonValue expands to
     // include Nil, so nil is a legitimate value here.
     self.count := 1
+    nil
 
   getValue -> JsonValue => self.value
 

@@ -6,8 +6,8 @@ use crate::core_erlang::CoreErlangGenerator;
 use crate::core_erlang::expr_shape::is_character_typed_receiver;
 use crate::core_erlang::gen_server::SpawnVariant;
 use beamtalk_core::ast::{
-    Block, Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector,
-    MethodDefinition, TypeAnnotation,
+    Block, ClassDefinition, Expression, ExpressionStatement, Identifier, KeywordPart, Literal,
+    MessageSelector, MethodDefinition, TypeAnnotation,
 };
 use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
 use std::collections::BTreeSet;
@@ -1178,6 +1178,19 @@ fn stdlib_instance_method(
     class_name: &str,
     selector: &str,
 ) -> Option<MethodDefinition> {
+    let class = stdlib_class(file, class_name)?;
+    let method = class
+        .methods
+        .iter()
+        .find(|m| m.selector.name() == selector)
+        .unwrap_or_else(|| panic!("{file} must define {class_name}>>{selector}"));
+    Some(method.clone())
+}
+
+/// Parses `stdlib/<file>` off disk and answers a clone of its `<class_name>`
+/// class, or `None` — after logging a skip — when the file is absent from
+/// this checkout. Panics if the file fails to parse or lacks the class.
+fn stdlib_class(file: &str, class_name: &str) -> Option<ClassDefinition> {
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("crates/")
@@ -1200,12 +1213,7 @@ fn stdlib_instance_method(
         .iter()
         .find(|c| c.name.name == class_name)
         .unwrap_or_else(|| panic!("{file} must define the {class_name} class"));
-    let method = class
-        .methods
-        .iter()
-        .find(|m| m.selector.name() == selector)
-        .unwrap_or_else(|| panic!("{file} must define {class_name}>>{selector}"));
-    Some(method.clone())
+    Some(class.clone())
 }
 
 /// Asserts `method`'s body is the single statement `<param> value` — it
@@ -1281,6 +1289,26 @@ fn single_branch_boolean_bodies_match_codegen_recognizer() {
                 [stmt] if matches!(&stmt.expression, Expression::Identifier(id) if id.name == "self")
             ),
             "{class_name}>>{selector} must answer `self` on the untaken path — \
+             update is_character_typed_receiver to match"
+        );
+    }
+
+    // BT-4231: `true and:` / `false or:` resolve to the `Boolean` bodies
+    // pinned below only while `True`/`False` do not override them. An
+    // override answering a Boolean (a fast path such as
+    // `and: aBlock => aBlock value == true`) would otherwise leave this test
+    // green while the recognizer routes a Boolean through Character dispatch.
+    for (file, class_name, selector) in [
+        ("stdlib/src/true.bt", "True", "and:"),
+        ("stdlib/src/false.bt", "False", "or:"),
+    ] {
+        let Some(class) = stdlib_class(file, class_name) else {
+            return;
+        };
+        assert!(
+            !class.methods.iter().any(|m| m.selector.name() == selector),
+            "{class_name} must not override {selector}: the recognizer assumes it \
+             inherits Boolean>>{selector} — pin the override's body here and \
              update is_character_typed_receiver to match"
         );
     }

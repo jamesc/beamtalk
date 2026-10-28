@@ -214,8 +214,9 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
 
   /// Test whether `needle` occurs as a contiguous byte sequence.
   ///
-  /// Compares raw bytes, so it works on non-UTF-8 haystacks. An empty
-  /// needle is always found (`true`), matching `String>>includesSubstring:`.
+  /// Compares raw bytes, so it works on non-UTF-8 haystacks. A `String`
+  /// needle is searched by its bytes. An empty needle is always found
+  /// (`true`), matching `String>>includesSubstring:`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -263,6 +264,12 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ((Binary fromBytes: #(104, 101, 108, 108, 111)) asString) unwrap   // => "hello"
   /// ((Binary fromBytes: #(255, 254)) asString) isError                 // => true
   /// ```
+  ///
+  /// BT-4175: this deliberately widens `Collection>>asString -> String` (and
+  /// `Printable`'s `asString -> String`) — a known unsoundness, so `:: Printable`
+  /// / `:: Collection` code statically sees `String` but a Binary answers a
+  /// `Result`. Suppress the override return-type warning here.
+  @expect type
   asString -> Result(String, Error) => @primitive
 
   /// Return this binary as a String without UTF-8 validation.

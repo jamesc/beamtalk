@@ -1165,9 +1165,12 @@ is claimed with `ets:take/2`: a row a caller re-creates for the pid afterwards
 
 The pids to check come from the rows themselves, not from the keys index
 (BT-4197): a row whose keys entry was lost (a `clear/0` racing a writer) is
-still found and reclaimed. Only local pids are ever checked; a remote pid
-(never recorded, see `record_dispatch/6`) is skipped, and a failure on one pid
-is logged and skipped so a bad row can never crash the gen_server.
+still found. A dead pid's rows are reclaimed; a live pid's missing keys
+entries are restored, so `get_stats/1` sees its rows again (BT-4206). A row
+of a remote pid is never written (`record_dispatch/6`), so one left by older
+code can never be live data: it is reclaimed too, and stops counting toward
+`?MAX_PID_KEYS`. The tables are heir-owned, so an unexpected failure here
+crashes the gen_server without losing them.
 """.
 sweep_dead_pids() ->
     case ets:info(?AGG_PID, size) of
@@ -1181,41 +1184,44 @@ sweep_dead_pids() ->
                 #{},
                 ?AGG_PID
             ),
-            maps:foreach(fun sweep_pid_rows_safe/2, ByPid)
+            maps:foreach(fun sweep_pid_rows/2, ByPid)
     end.
 
-sweep_pid_rows_safe(Pid, RowSelectors) ->
-    try
-        sweep_pid_rows(Pid, RowSelectors)
-    catch
-        Class:Reason ->
-            ?LOG_WARNING("Trace store sweep skipped a pid", #{
-                pid => Pid, class => Class, reason => Reason
-            }),
-            ok
+sweep_pid_rows(Pid, RowSelectors) ->
+    case is_local_live_pid(Pid) of
+        true -> restore_pid_keys(Pid, RowSelectors);
+        false -> reclaim_pid_rows(Pid, RowSelectors)
     end.
 
-sweep_pid_rows(Pid, RowSelectors) when is_pid(Pid), node(Pid) =:= node() ->
-    case erlang:is_process_alive(Pid) of
-        true ->
-            ok;
-        false ->
-            %% Selectors come from both indexes: the keys entry may be missing
-            %% (clear/0 race) and the row may be missing (writer crash).
-            Keys = [S || {_, S} <- ets:take(?AGG_PID_KEYS, Pid)],
-            Selectors = lists:usort(Keys ++ RowSelectors),
-            lists:foreach(
-                fun(Selector) ->
-                    case ets:take(?AGG_PID, {Pid, Selector}) of
-                        [{_Key, Ref, SlotBase, _Class}] -> release_slot(Ref, SlotBase);
-                        [] -> ok
-                    end
-                end,
-                Selectors
-            )
-    end;
-sweep_pid_rows(_RemoteOrMalformed, _RowSelectors) ->
-    ok.
+%% A local pid's liveness; `is_process_alive/1` raises `badarg` for a remote
+%% one, which is never live data here.
+is_local_live_pid(Pid) when is_pid(Pid), node(Pid) =:= node() ->
+    erlang:is_process_alive(Pid);
+is_local_live_pid(_RemoteOrMalformed) ->
+    false.
+
+%% Re-adds the keys entries a `clear/0` race dropped for a live pid's rows.
+restore_pid_keys(Pid, RowSelectors) ->
+    Indexed = [S || {_, S} <- ets:lookup(?AGG_PID_KEYS, Pid)],
+    lists:foreach(
+        fun(Selector) -> true = ets:insert(?AGG_PID_KEYS, {Pid, Selector}) end,
+        lists:usort(RowSelectors) -- Indexed
+    ).
+
+reclaim_pid_rows(Pid, RowSelectors) ->
+    %% Selectors come from both indexes: the keys entry may be missing
+    %% (clear/0 race) and the row may be missing (writer crash).
+    Keys = [S || {_, S} <- ets:take(?AGG_PID_KEYS, Pid)],
+    Selectors = lists:usort(Keys ++ RowSelectors),
+    lists:foreach(
+        fun(Selector) ->
+            case ets:take(?AGG_PID, {Pid, Selector}) of
+                [{_Key, Ref, SlotBase, _Class}] -> release_slot(Ref, SlotBase);
+                [] -> ok
+            end
+        end,
+        Selectors
+    ).
 
 -doc """
 Drop all per-actor aggregate data: every pid row's slot is claimed with
@@ -1407,7 +1413,8 @@ trace_event_to_map({
 Sanitize metadata map values for JSON serialization.
 JSX requires all values to be JSON-compatible (binaries, numbers, booleans,
 null, lists, maps). Atom values like `normal` from lifecycle events, pid
-values, and tuples must be converted to binary strings.
+values, and tuples must be converted to binary strings. Tagged `String`
+values pass through tagged (BT-4223); `export_traces` unwraps them for JSON.
 """.
 -spec sanitize_metadata(map()) -> map().
 sanitize_metadata(Meta) ->
@@ -1427,8 +1434,9 @@ sanitize_metadata(Meta) ->
 
 -doc """
 Tag sanitized metadata keys as Strings for Beamtalk lookup. Values pass
-through untouched: a user Binary stays a Binary (only generated display text
-would want tagging, and the two are indistinguishable here).
+through untouched: `sanitize_value/1` already kept a recorded `String` tagged
+(BT-4223) and a user Binary stays a Binary. Generated text (atoms and pids
+rendered as binaries) stays a bare binary, as before.
 """.
 -spec tag_metadata_keys(map()) -> map().
 tag_metadata_keys(Meta) ->
@@ -1439,9 +1447,12 @@ tag_metadata_keys(Meta) ->
 
 -doc "Convert a single value to a JSON-safe representation.".
 -spec sanitize_value(term()) -> term().
-sanitize_value({beamtalk_string, Bin}) when is_binary(Bin) ->
-    %% BT-4173: unwrap — without this a String falls into the ~p catch-all.
-    Bin;
+sanitize_value({beamtalk_string, Bin} = String) when is_binary(Bin) ->
+    %% BT-4223: a String stays a String, so `(trace at: "user") = "alice"`
+    %% holds for metadata recorded as a String (a user Binary stays a Binary
+    %% below). `export_traces` deep-unwraps the whole map for the JSON
+    %% encoder. Without this clause a String falls into the ~p catch-all.
+    String;
 sanitize_value(V) when is_binary(V) -> V;
 sanitize_value(V) when is_integer(V) -> V;
 sanitize_value(V) when is_float(V) -> V;

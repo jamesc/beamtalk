@@ -33,6 +33,9 @@ pub(crate) enum WellKnownClass {
     Nil,
     /// Block (closure) type — parameterised as `Block(P1, ..., Pn, R)`.
     Block,
+    /// Positional tuple type — `Tuple(T1, ..., Tn)` for any `n >= 0`
+    /// (variadic, not a fixed type-param list; BT-2254, ADR 0136, BT-4220).
+    Tuple,
     /// Integer literal type.
     Integer,
     /// String literal type.
@@ -59,6 +62,7 @@ impl WellKnownClass {
             Self::UndefinedObject => "UndefinedObject",
             Self::Nil => "Nil",
             Self::Block => "Block",
+            Self::Tuple => "Tuple",
             Self::Integer => "Integer",
             Self::String => "String",
             Self::Boolean => "Boolean",
@@ -80,6 +84,7 @@ impl WellKnownClass {
             "UndefinedObject" => Some(Self::UndefinedObject),
             "Nil" => Some(Self::Nil),
             "Block" => Some(Self::Block),
+            "Tuple" => Some(Self::Tuple),
             "Integer" => Some(Self::Integer),
             "String" => Some(Self::String),
             "Boolean" => Some(Self::Boolean),
@@ -103,6 +108,15 @@ impl WellKnownClass {
     pub(crate) fn is_nil_class(self) -> bool {
         matches!(self, Self::UndefinedObject | Self::Nil)
     }
+
+    /// Returns `true` if this class takes a *variadic* positional type-argument
+    /// list rather than a fixed, declared type-param list — `Block(P1, …, R)`
+    /// and `Tuple(T1, …, Tn)`. Such classes declare no `type_params`, so the
+    /// generic-arity check must not reject their type arguments.
+    #[must_use]
+    pub(crate) fn has_variadic_type_args(self) -> bool {
+        matches!(self, Self::Block | Self::Tuple)
+    }
 }
 
 #[cfg(test)]
@@ -115,6 +129,7 @@ mod tests {
             WellKnownClass::UndefinedObject,
             WellKnownClass::Nil,
             WellKnownClass::Block,
+            WellKnownClass::Tuple,
             WellKnownClass::Integer,
             WellKnownClass::String,
             WellKnownClass::Boolean,

@@ -217,6 +217,68 @@ ping_off_host_without_tls_is_false_test() ->
     ?assertNot(beamtalk_node:ping(beamtalk_node:from_atom(?OFF_HOST_NODE))).
 
 %%====================================================================
+%% shapeManifest / shapeSkew
+%%====================================================================
+
+%% Covers the `Name =:= node()` true branch in shapeManifest (lines 220, 222).
+%% beamtalk_class_registry:live_class_entries/0 returns [] gracefully when
+%% pg is not running, so no beamtalk_runtime app start is needed.
+shape_manifest_current_node_returns_ok_test() ->
+    Result = beamtalk_node:shapeManifest(beamtalk_node:current()),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', isOk := true}, Result),
+    ?assert(is_map(maps:get(okValue, Result))).
+
+%% Covers the connect_policy error branch in shapeManifest (line 224):
+%% off-host without TLS → insecure_distribution, selector stamped as shapeManifest.
+shape_manifest_off_host_without_tls_is_insecure_distribution_test() ->
+    Result = beamtalk_node:shapeManifest(beamtalk_node:from_atom(?OFF_HOST_NODE)),
+    ?assertMatch(
+        #{isOk := false, errReason := #{error := #beamtalk_error{kind = insecure_distribution}}},
+        Result
+    ),
+    #{errReason := #{error := Error}} = Result,
+    ?assertEqual(shapeManifest, Error#beamtalk_error.selector).
+
+%% Covers the `Name =:= node()` true branch in shapeSkew (line 268).
+shape_skew_current_node_is_zero_test() ->
+    Result = beamtalk_node:shapeSkew(beamtalk_node:current()),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', isOk := true, okValue := 0}, Result).
+
+%% Covers the `not member` false branch in shapeSkew (line 272):
+%% an off-host node we are not connected to answers node_down.
+shape_skew_disconnected_node_is_node_down_test() ->
+    Result = beamtalk_node:shapeSkew(beamtalk_node:from_atom(?OFF_HOST_NODE)),
+    ?assertMatch(
+        #{isOk := false, errReason := #{error := #beamtalk_error{kind = node_down}}},
+        Result
+    ).
+
+%%====================================================================
+%% introspect: off-host insecure_distribution (actors / supervisors)
+%%====================================================================
+
+%% Covers the `Name =/= node()` false branch in introspect (lines 341-344):
+%% actors/1 on an off-host node without TLS refuses before touching the network.
+actors_off_host_without_tls_is_insecure_distribution_test() ->
+    Result = beamtalk_node:actors(beamtalk_node:from_atom(?OFF_HOST_NODE)),
+    ?assertMatch(
+        #{isOk := false, errReason := #{error := #beamtalk_error{kind = insecure_distribution}}},
+        Result
+    ),
+    #{errReason := #{error := Error}} = Result,
+    ?assertEqual(actors, Error#beamtalk_error.selector).
+
+%% Same introspect path for supervisors/1.
+supervisors_off_host_without_tls_is_insecure_distribution_test() ->
+    Result = beamtalk_node:supervisors(beamtalk_node:from_atom(?OFF_HOST_NODE)),
+    ?assertMatch(
+        #{isOk := false, errReason := #{error := #beamtalk_error{kind = insecure_distribution}}},
+        Result
+    ),
+    #{errReason := #{error := Error}} = Result,
+    ?assertEqual(supervisors, Error#beamtalk_error.selector).
+
+%%====================================================================
 %% beamtalk_node_monitor: nodedown_reason normalisation
 %%====================================================================
 

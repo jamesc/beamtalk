@@ -2069,9 +2069,7 @@ fn test_segmented_binary_arm_splits() {
         ),
     ];
     let scrutinee = Expression::Identifier(Identifier::new("bin", Span::new(0, 3)));
-    let doc = generator
-        .generate_match_with(&scrutinee, &arms, None)
-        .unwrap();
+    let doc = generator.generate_match(&scrutinee, &arms).unwrap();
     let output = doc.to_pretty_string();
     assert!(
         output.matches("case ").count() >= 3,
@@ -2147,9 +2145,7 @@ fn test_segmented_binary_arm_hoists_size_expression_under_try() {
         ),
     ];
     let scrutinee = Expression::Identifier(Identifier::new("bin", Span::new(0, 3)));
-    let doc = generator
-        .generate_match_with(&scrutinee, &arms, None)
-        .unwrap();
+    let doc = generator.generate_match(&scrutinee, &arms).unwrap();
     let output = doc.to_pretty_string();
     assert!(
         output.contains("try ") && output.contains("catch <"),
@@ -2208,9 +2204,7 @@ fn test_trivial_parenthesized_size_stays_inline() {
         ),
     ];
     let scrutinee = Expression::Identifier(Identifier::new("bin", Span::new(0, 3)));
-    let doc = generator
-        .generate_match_with(&scrutinee, &arms, None)
-        .unwrap();
+    let doc = generator.generate_match(&scrutinee, &arms).unwrap();
     let output = doc.to_pretty_string();
     assert!(
         !output.contains("_Size"),
@@ -2264,7 +2258,7 @@ fn test_binary_pattern_forward_reference_is_clean_error() {
     )];
     let scrutinee = Expression::Identifier(Identifier::new("bin", Span::new(0, 3)));
     let err = generator
-        .generate_match_with(&scrutinee, &arms, None)
+        .generate_match(&scrutinee, &arms)
         .expect_err("forward size reference must fail codegen");
     assert!(
         err.to_string().contains('n'),
@@ -2320,7 +2314,7 @@ fn test_nested_split_requiring_binary_is_clean_error() {
     )];
     let scrutinee = Expression::Identifier(Identifier::new("pair", Span::new(0, 4)));
     let err = generator
-        .generate_match_with(&scrutinee, &arms, None)
+        .generate_match(&scrutinee, &arms)
         .expect_err("nested split-needing binary must fail codegen");
     assert!(
         err.to_string().contains("whole match-arm pattern"),

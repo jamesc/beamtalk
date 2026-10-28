@@ -21,9 +21,10 @@
 //! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Diagnostic philosophy
 
 use crate::ast::{Module, ProtocolDefinition, TypeAnnotation};
-use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::trait_expansion;
+use crate::semantic_analysis::type_checker::TypeChecker;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -41,6 +42,22 @@ pub struct ProtocolMethodRequirement {
     pub return_type: Option<EcoString>,
     /// Parameter type annotations. `None` elements mean the parameter type is unspecified.
     pub param_types: Vec<Option<EcoString>>,
+}
+
+/// A protocol requirement a class answers with an incompatible declared
+/// return type — see [`ProtocolRegistry::conformance_return_type_mismatches`].
+///
+/// **DDD Context:** Semantic Analysis — Value Object
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReturnTypeMismatch {
+    /// The requirement's selector (e.g. `asString`).
+    pub selector: EcoString,
+    /// The class whose method the selector resolves to.
+    pub defined_in: EcoString,
+    /// The resolved method's declared return type.
+    pub actual: DeclaredType,
+    /// The protocol requirement's declared return type.
+    pub expected: DeclaredType,
 }
 
 /// Information about a protocol in the registry.
@@ -609,6 +626,83 @@ impl ProtocolRegistry {
         }
 
         missing
+    }
+
+    /// The protocol requirements `class_name` resolves by selector but with a
+    /// declared return type that does not refine the requirement's declared
+    /// return type (BT-4175) — the return-type half of conformance that
+    /// [`missing_conformance_selectors`](Self::missing_conformance_selectors)
+    /// (selector presence only) does not cover.
+    ///
+    /// Kept separate from [`check_conformance`](Self::check_conformance)
+    /// rather than folded into its `Err(missing)`: a class with a widened
+    /// `asString` still *responds* to every selector (reflection,
+    /// `conformsTo:`, generic bounds and the "missing method" warning keep
+    /// their structural meaning); this is a distinct, warning-severity
+    /// soundness finding a caller reports alongside it. Same open-world gate
+    /// as `check_conformance` (unknown / DNU / cross-file receivers answer no
+    /// mismatches), and the same covariance rule as an inherited override —
+    /// [`TypeChecker::is_return_type_refinement`](crate::semantic_analysis::type_checker::TypeChecker::is_return_type_refinement).
+    /// Requirements or methods without a declared return type are skipped,
+    /// as is any requirement whose return type names one of the protocol's
+    /// own type parameters (no substitution context here). A mismatch that an
+    /// override introduces by widening an inherited, conforming return type
+    /// is skipped: the override check reports it once at the definition.
+    /// Instance side only.
+    #[must_use]
+    pub fn conformance_return_type_mismatches(
+        &self,
+        class_name: &str,
+        protocol_name: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Vec<ReturnTypeMismatch> {
+        let Some(protocol) = self.get(protocol_name) else {
+            return Vec::new();
+        };
+        if !receiver_knowledge::classify_receiver(class_name, hierarchy, false).is_closed_complete()
+        {
+            return Vec::new();
+        }
+        let mut mismatches = Vec::new();
+        for req in protocol.all_requirements(self) {
+            let Some(ref req_rt) = req.return_type else {
+                continue;
+            };
+            let expected = DeclaredType::parse(req_rt);
+            if expected.mentions_any(&protocol.type_params) {
+                continue;
+            }
+            let Some(method) = hierarchy.find_method(class_name, &req.selector) else {
+                continue;
+            };
+            let Some(ref actual) = method.return_type else {
+                continue;
+            };
+            if TypeChecker::is_return_type_refinement(actual, &expected, hierarchy) {
+                continue;
+            }
+            // An override that widens an inherited return type which already
+            // satisfies the protocol is reported once, at the override's
+            // definition, where `@expect type` can suppress a deliberate
+            // widening such as `Binary>>asString`. Re-reporting it at every
+            // call site that passes the class to a protocol-typed parameter
+            // would be noise the caller cannot fix. Skip only when the
+            // override check reports it (same decision, shared).
+            if TypeChecker::override_return_widening(&method.defined_in, &req.selector, hierarchy)
+                .is_some_and(|w| {
+                    TypeChecker::is_return_type_refinement(&w.parent_rt, &expected, hierarchy)
+                })
+            {
+                continue;
+            }
+            mismatches.push(ReturnTypeMismatch {
+                selector: req.selector.clone(),
+                defined_in: method.defined_in.clone(),
+                actual: actual.clone(),
+                expected,
+            });
+        }
+        mismatches
     }
 
     /// `true` when `class_name`'s *known* method surface resolves every

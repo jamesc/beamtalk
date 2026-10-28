@@ -1610,3 +1610,41 @@ fn a_put_of_a_field_is_not_an_arm_local_put() {
     )];
     assert_eq!(verify(&ir), Vec::new());
 }
+
+// ── StaleConstructSeed (BT-4206) ─────────────────────────────────────────
+
+/// A construct whose scratch map starts from `State` version `base`, after a
+/// spliced operand prelude that stepped `State` from 0 to 1.
+fn seeded_after_step(base: usize) -> Vec<ThreadedStmt> {
+    let step = ThreadedStmt::Bind {
+        target: state(1, FrameId::ROOT),
+        source: state(0, FrameId::ROOT),
+        op: BindOp::Direct(ValueRef::Literal("'_'")),
+        span: span(),
+    };
+    let mut tuple = build_construct_tuple(CARRIER, tuple_doc(), Vec::new(), span());
+    if let ThreadedStmt::ConstructTuple { scratch_base, .. } = &mut tuple {
+        *scratch_base = Some(state(base, FrameId::ROOT));
+    }
+    vec![build_method_body(
+        FrameId::ROOT,
+        Vec::new(),
+        vec![step, tuple, build_discard_locals(CARRIER, span())],
+    )]
+}
+
+#[test]
+fn a_seed_older_than_a_state_the_frame_already_bound_is_stale() {
+    // BT-4196: `self bump match: [...]` seeding from `State` before the
+    // scrutinee's `State1` step.
+    assert_eq!(
+        verify(&seeded_after_step(0)),
+        vec![VerifyError::StaleConstructSeed {
+            seed: state(0, FrameId::ROOT),
+            newest: state(1, FrameId::ROOT),
+            carrier: CARRIER.to_string(),
+            at: span(),
+        }]
+    );
+    assert_eq!(verify(&seeded_after_step(1)), Vec::new());
+}

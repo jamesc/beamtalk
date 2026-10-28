@@ -190,6 +190,10 @@ TestCase subclass: JsonTest
     @expect type
     self should: [Json parse: 42] raise: #type_error
 
+  testParseErrorKeepsReason =>
+    // BT-3970: the OTP json error term survives as reason
+    self assert: (Json parse: "[1,") error reason equals: #unexpected_end
+
   testClassIdentity =>
     // BT-802 (ADR 0036): class on class returns a real metaclass object
     self assert: (Json class) isMeta equals: true

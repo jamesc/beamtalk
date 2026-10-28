@@ -187,32 +187,80 @@ typed Object subclass: M
     );
 }
 
-// PIN-BUG BT-4207 (pre-existing on main, not introduced by BT-4102): a
-// genuinely Dynamic arm joined with a `nil` arm collapses to `Nil`
-// (`merge_method_local_binding`: Known beats Dynamic), so `x bar` warns.
-// When BT-4207 lands, flip these two to `no_dnu_on_nil`.
+// BT-4207: a genuinely Dynamic arm (`d foo`, `d` unannotated) joined with a
+// `nil` arm must stay Dynamic (`join_branch_arms`), not collapse to `Nil`.
 #[test]
-fn pin_bug_bt4207_dynamic_param_arm_collapses_to_nil() {
-    let src = r"
+fn dynamic_param_arm_does_not_collapse_to_nil() {
+    no_dnu_on_nil(
+        r"
 typed Object subclass: M
   run: flag :: Boolean with: d -> Integer =>
     x := flag ifTrue: [d foo] ifFalse: [nil]
     x bar
     1
-";
-    let diags = type_diagnostics(src);
-    assert!(mentions(&diags, "UndefinedObject"), "got: {diags:#?}");
+",
+    );
 }
 
 #[test]
-fn pin_bug_bt4207_dynamic_param_arm_swapped_collapses_to_nil() {
-    let src = r"
+fn dynamic_param_arm_swapped_does_not_collapse_to_nil() {
+    no_dnu_on_nil(
+        r"
 typed Object subclass: M
   run: flag :: Boolean with: d -> Integer =>
     x := flag ifTrue: [nil] ifFalse: [d foo]
     x bar
     1
-";
-    let diags = type_diagnostics(src);
-    assert!(mentions(&diags, "UndefinedObject"), "got: {diags:#?}");
+",
+    );
+}
+
+#[test]
+fn responds_to_dynamic_arm_nil_arm_does_not_collapse_to_nil() {
+    no_dnu_on_nil(
+        r"
+typed Object subclass: M
+  run: o :: Object -> Integer =>
+    x := (o respondsTo: #foo) ifTrue: [o foo] ifFalse: [nil]
+    x bar
+    1
+",
+    );
+}
+
+#[test]
+fn opaque_block_variable_arm_does_not_collapse_to_nil() {
+    no_dnu_on_nil(
+        r"
+typed Object subclass: M
+  run: flag :: Boolean with: blk :: Block -> Integer =>
+    x := flag ifTrue: blk ifFalse: [nil]
+    x bar
+    1
+",
+    );
+}
+
+/// Phase 1 of block push-down stands literal blocks in with a placeholder
+/// that must not count as an opaque (unknown) branch arm (BT-4207 review):
+/// `R`'s only Known binding comes from the typed block variable `first`;
+/// the literal `[2]` in the other `Block(R)` slot must not turn that into
+/// `DynamicBranch`, so the last literal block's `:v` is still pushed down as
+/// `Integer` and an unknown send on it reports against `Integer`.
+#[test]
+fn literal_block_placeholder_is_not_an_unknown_arm() {
+    let diags = type_diagnostics(
+        r"
+typed Object subclass: M
+  pick: a :: Block(R) or: b :: Block(R) then: c :: Block(R, Nil) -> Nil => nil
+  run: first :: Block(Integer) -> Nil =>
+    self pick: first or: [2] then: [:v | v fooBarBaz. nil]
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("Integer") && d.message.contains("fooBarBaz")),
+        "`:v` should be pushed down as Integer: {diags:#?}"
+    );
 }

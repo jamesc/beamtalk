@@ -161,7 +161,12 @@ impl TypeChecker {
             // `typed_class_context` (the Dynamic-in-typed-class warning) for
             // this call site, not `check_typed_method_annotations`.
             // `check_override_param_compatibility` is likewise never run for
-            // standalone definitions.
+            // standalone definitions. `check_override_return_compatibility`
+            // is: protocol conformance leaves inherited-widening mismatches to
+            // it, so an extension override must be checked too (BT-4175).
+            if !standalone.is_class_method {
+                self.check_override_return_compatibility(&standalone.method, class_name, hierarchy);
+            }
             self.check_method_body(
                 &standalone.method,
                 class_name,
@@ -227,8 +232,9 @@ impl TypeChecker {
     /// and selects which half of the `(class, selector, is_class_method)`
     /// key the inferred return type is cached under.
     /// `check_override` gates the override-compatibility check (instance
-    /// methods only — a class method or standalone definition has no
-    /// override relationship to validate here). `check_typed_annotations`
+    /// methods only — a class method has no override relationship to
+    /// validate; a standalone definition runs only the return-type half,
+    /// from its own call site). `check_typed_annotations`
     /// gates the typed-class annotation check independently of `is_typed`
     /// (standalone definitions never ran it, even when `is_typed` was true
     /// for `typed_class_context` purposes — preserved verbatim for
@@ -339,6 +345,7 @@ impl TypeChecker {
         self.check_return_type(method, &body_type, class_name, hierarchy);
         if check_override {
             self.check_override_param_compatibility(method, class_name, hierarchy);
+            self.check_override_return_compatibility(method, class_name, hierarchy);
         }
         self.check_no_self_in_params(method, class_name);
         if is_typed && check_typed_annotations {
@@ -370,9 +377,9 @@ impl TypeChecker {
     /// via [`type_resolver::resolve_type_annotation`]; untyped
     /// parameters are registered as `Dynamic`. Generic annotations (e.g.,
     /// `:: Result(Integer, Error)`) are resolved to `Known` with `type_args`.
-    /// Type parameters of enclosing generic classes (e.g., `T` in
-    /// `Result(T, E)`) resolve to `Dynamic` when no substitution context is
-    /// available.
+    /// A method-local or class-level type variable (`:: E`, or `T` in
+    /// `Result(T, E)`) resolves to its rigid placeholder `Known("E")`, not
+    /// `Dynamic` (BT-4210; see the comment in the body).
     /// Registering untyped params is necessary to prevent the bare-identifier
     /// state-field fallback in `infer_expr` from mis-inferring an untyped param
     /// as `self.<field>` when the parameter name shadows a state field name.
@@ -400,6 +407,19 @@ impl TypeChecker {
         protocol_registry: Option<&crate::semantic_analysis::protocol_registry::ProtocolRegistry>,
         ctx: &mut type_resolver::ResolutionContext<'_>,
     ) {
+        // BT-4210: inside a method body the method's own substitution is the
+        // identity. Its method-local type variables (and the class's type
+        // params) are bound only at call sites (`infer_method_local_params`);
+        // here they are rigid. The empty map plus the `Declared`-context
+        // resolver gives exactly that: an unbound `:: E` resolves to the
+        // opaque placeholder `Known("E")`. That is the same type a `-> E`
+        // return annotation (`check_return_type`) and `self`'s type args
+        // (`receiver_type_for_class`) resolve to, so `E` flows between them
+        // without a warning, and it never collapses to `Dynamic`. Mismatch
+        // checks treat the placeholder as compatible with anything
+        // (`detect_assignment_type_mismatch`, `type_args_compatible`).
+        // Block parameter annotations share this rule
+        // (`resolve_block_param_types`).
         let subst = type_resolver::SubstitutionMap::new();
         for param in parameters {
             let ty = match &param.type_annotation {
@@ -853,7 +873,8 @@ impl TypeChecker {
     /// not `Unknown` (no actionable message), and not `ExplicitDynamic`
     /// (the author already wrote `Dynamic` in a type annotation,
     /// so "add a type annotation" would be nonsensical advice for something
-    /// that already has one).
+    /// that already has one), and not `DynamicBranch` (a branch join whose
+    /// `Dynamic` arm already warned at its own source, BT-4207).
     fn detect_dynamic_in_typed_class(
         ty: &InferredType,
         typed_class_context: Option<&EcoString>,
@@ -867,6 +888,7 @@ impl TypeChecker {
                 | DynamicReason::DynamicSpec
                 | DynamicReason::Unknown
                 | DynamicReason::ExplicitDynamic
+                | DynamicReason::DynamicBranch
         ) {
             return None;
         }

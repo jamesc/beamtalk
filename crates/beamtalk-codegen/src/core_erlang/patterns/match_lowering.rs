@@ -75,20 +75,6 @@ impl CoreErlangGenerator {
         value: &Expression,
         arms: &[MatchArm],
     ) -> Result<Document<'static>> {
-        self.generate_match_with(value, arms, None)
-    }
-
-    /// [`Self::generate_match`] with the arms threaded by `producer` (a
-    /// local-threading producer's seeded scratch map and arm frame, BT-3947), or
-    /// by the actor-`State` rule ([`Self::match_needs_state_threading`]) when
-    /// `None`.
-    #[allow(clippy::too_many_lines)]
-    pub(in crate::core_erlang) fn generate_match_with(
-        &mut self,
-        value: &Expression,
-        arms: &[MatchArm],
-        producer: Option<&MatchThreading<'_>>,
-    ) -> Result<Document<'static>> {
         if arms.is_empty() {
             return Err(CodeGenError::UnsupportedFeature {
                 feature: "match expression with no arms".to_string(),
@@ -98,7 +84,7 @@ impl CoreErlangGenerator {
         let recv_tv = self.compile_match_scrutinee(value)?;
         let value_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
         let value_doc = self.threaded_value_doc(&recv_tv.value);
-        let inner = self.generate_match_after_scrutinee(arms, &value_doc, producer)?;
+        let inner = self.generate_match_after_scrutinee(arms, &value_doc, None)?;
         Ok(docvec![value_preamble, inner])
     }
 
@@ -121,9 +107,12 @@ impl CoreErlangGenerator {
         self.threaded_expression(value, recv_frame)
     }
 
-    /// The arms half of [`Self::generate_match_with`]: everything after the
+    /// The arms half of [`Self::generate_match`]: everything after the
     /// scrutinee has been compiled. Returns `let Match = <value> in case ...`
-    /// without the scrutinee's prelude (the caller places it).
+    /// without the scrutinee's prelude (the caller places it). `producer` is a
+    /// local-threading producer's seeded scratch map and arm frame (BT-3947,
+    /// [`Self::generate_match_producer`]); `None` threads the arms by the
+    /// actor-`State` rule ([`Self::match_needs_state_threading`]).
     #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_match_after_scrutinee(
         &mut self,
@@ -240,10 +229,11 @@ impl CoreErlangGenerator {
         // its bytes before the native binary match (see
         // `binary_match_scrutinee`) — a per-arm scrutinee rewrite the
         // single-scrutinee fast path below cannot express, so any binary
-        // arm routes the whole `match:` through the chain.
-        let has_binary_arm = arms
-            .iter()
-            .any(|arm| matches!(arm.pattern, Pattern::Binary { .. }));
+        // arm routes the whole `match:` through the chain. BT-4223: so does
+        // a binary nested inside a composite arm pattern — it is hoisted
+        // out and matched (unwrapped) after the outer pattern
+        // (`generate_nested_binary_arm`).
+        let has_binary_arm = arms.iter().any(|arm| pattern_has_binary(&arm.pattern));
 
         // Decide once, for the whole `match:`, whether any arm needs
         // actor state threading (e.g. an arm body that is a state-mutating
@@ -752,6 +742,17 @@ impl CoreErlangGenerator {
                 return self
                     .generate_segmented_binary_arm(match_var, arm, segments, rest, threading);
             }
+        } else {
+            // BT-4223: a binary nested inside a composite pattern can't
+            // unwrap a `String` element in native pattern position, so it
+            // is hoisted out to a fresh variable and matched afterwards.
+            let mut outer = arm.pattern.clone();
+            let mut hoisted = Vec::new();
+            self.hoist_nested_binaries(&mut outer, &mut hoisted);
+            if !hoisted.is_empty() {
+                return self
+                    .generate_nested_binary_arm(match_var, arm, &outer, &hoisted, rest, threading);
+            }
         }
 
         // Native arm: case _Match of <pattern> when guard -> body <_FT> when 'true' -> rest end
@@ -803,10 +804,45 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// Compiles the later arms of a match chain once and binds them to a
+    /// zero-arity `letrec` label, for an arm that falls through from several
+    /// sites (BT-4141). Returns the label's binding prefix (ending in `in `,
+    /// wrapped around the arm by the caller) and the `apply` every miss site
+    /// uses in place of a copy of the later arms.
+    ///
+    /// Without it each such arm embedded a full copy of the rest of the
+    /// chain at every miss site, so N consecutive Array/Type/binary arms
+    /// emitted O(k^N) Core. `erlc` shares a fallthrough the same way. A
+    /// `letrec` that is only applied is lambda-lifted to a local function
+    /// (no closure is allocated, unlike a `let`-bound fun). The label is
+    /// defined outside the arm's own `case`s, so the later arms' free
+    /// variables resolve exactly as before: the arm's pattern bindings are
+    /// popped before the rest is generated, and threading state (`StateAcc`,
+    /// the producer's base map) is bound outside the whole chain.
+    pub(super) fn generate_shared_rest(
+        &mut self,
+        match_var: &str,
+        rest_arms: &[MatchArm],
+        threading: Option<&MatchThreading<'_>>,
+    ) -> Result<(Document<'static>, Document<'static>)> {
+        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+        let label = self.fresh_temp_var("Fallthrough");
+        let bind = docvec![
+            "letrec ",
+            leaf::fname(label.clone(), 0),
+            " = fun () -> ",
+            rest_doc,
+            " in "
+        ];
+        let apply = docvec!["apply ", leaf::fname(label, 0), " ()"];
+        Ok((bind, apply))
+    }
+
     /// Compiles a single `Pattern::Array` match arm.
     ///
     /// Emits a three-level conditional check (`is_map` → class → size), then element
-    /// extractions via `at:` dispatch. `rest_doc` is cloned for all failure branches.
+    /// extractions via `at:` dispatch. Every failure branch applies the shared
+    /// fallthrough label ([`Self::generate_shared_rest`]).
     ///
     /// Takes `rest_arms` (not a pre-built `rest_doc`) so that the current arm's body
     /// is fully generated before any later arm's codegen advances generator state.
@@ -836,7 +872,7 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         // Generate rest AFTER the current arm body to prevent state leakage.
-        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
 
         // Build body section: element extractions + optional guard check.
         // Use `case 'true' of <'true'> when GUARD ->` (Core Erlang guard position) so that
@@ -872,6 +908,7 @@ impl CoreErlangGenerator {
         let no_match_class = self.fresh_temp_var("NoMatch");
 
         Ok(docvec![
+            rest_bind,
             "case call 'erlang':'is_map'(",
             leaf::var(match_var.to_string()),
             ") of ",
@@ -946,6 +983,170 @@ impl CoreErlangGenerator {
         (prefix, scrutinee)
     }
 
+    /// BT-4223: replaces every binary sub-pattern nested inside a composite
+    /// pattern (tuple, list, map value, constructor binding) with a fresh
+    /// variable, collecting `(variable, binary pattern)` pairs in source
+    /// order. A top-level binary arm is not hoisted — callers route it
+    /// through [`Self::binary_match_scrutinee`] directly.
+    fn hoist_nested_binaries(
+        &mut self,
+        pattern: &mut Pattern,
+        hoisted: &mut Vec<(String, Pattern)>,
+    ) {
+        match pattern {
+            Pattern::Tuple { elements, .. } => {
+                for elem in elements {
+                    self.hoist_binary_subpattern(elem, hoisted);
+                }
+            }
+            Pattern::List { elements, tail, .. } => {
+                for elem in elements {
+                    self.hoist_binary_subpattern(elem, hoisted);
+                }
+                if let Some(tail) = tail {
+                    self.hoist_binary_subpattern(tail, hoisted);
+                }
+            }
+            Pattern::Map { pairs, .. } => {
+                for pair in pairs {
+                    self.hoist_binary_subpattern(&mut pair.value, hoisted);
+                }
+            }
+            Pattern::Constructor { keywords, .. } => {
+                for (_, binding) in keywords {
+                    self.hoist_binary_subpattern(binding, hoisted);
+                }
+            }
+            // A top-level binary is matched by its own arm path; `Array`
+            // and `Type` sub-patterns are rejected by `generate_pattern`;
+            // leaves hold no sub-patterns.
+            Pattern::Binary { .. }
+            | Pattern::Array { .. }
+            | Pattern::Type { .. }
+            | Pattern::Wildcard(_)
+            | Pattern::Literal(..)
+            | Pattern::Nil(_)
+            | Pattern::Variable(_) => {}
+        }
+    }
+
+    /// One position of [`Self::hoist_nested_binaries`]: a binary sub-pattern
+    /// is swapped for a fresh variable; anything else is searched further.
+    fn hoist_binary_subpattern(&mut self, sub: &mut Pattern, hoisted: &mut Vec<(String, Pattern)>) {
+        if let Pattern::Binary { span, .. } = sub {
+            let tmp = self.fresh_temp_var("BinNested");
+            let replacement = Pattern::Variable(Identifier::new(tmp.as_str(), *span));
+            let binary = std::mem::replace(sub, replacement);
+            hoisted.push((tmp, binary));
+        } else {
+            self.hoist_nested_binaries(sub, hoisted);
+        }
+    }
+
+    /// Compiles a match arm whose composite pattern nests binary
+    /// sub-patterns (BT-4223).
+    ///
+    /// Strings are tagged `{'beamtalk_string', bytes}` (BT-4173), so a
+    /// native binary sub-pattern would never match a `String` element. The
+    /// binaries are hoisted to fresh variables (`outer`/`hoisted`, see
+    /// [`Self::hoist_nested_binaries`]); the outer pattern matches first,
+    /// then each hoisted value is unwrapped by
+    /// [`Self::binary_match_scrutinee`] — exactly like a top-level binary
+    /// arm — and matched against its binary pattern in a nested `case`.
+    /// The arm guard applies at the innermost level (every variable bound);
+    /// every level falls through to the later arms.
+    fn generate_nested_binary_arm(
+        &mut self,
+        match_var: &str,
+        arm: &MatchArm,
+        outer: &Pattern,
+        hoisted: &[(String, Pattern)],
+        rest_arms: &[MatchArm],
+        threading: Option<&MatchThreading<'_>>,
+    ) -> Result<Document<'static>> {
+        // Bind all pattern variables, generate guard + body first (mirror
+        // the array arm: later arms must not advance generator state first).
+        self.push_scope();
+        Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+            self.bind_var(name, core_var);
+        });
+        let mut guard_part = if let Some(guard) = &arm.guard {
+            let gd = self.generate_guard_expression(guard)?;
+            Some(docvec![" when ", gd])
+        } else {
+            None
+        };
+        let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
+        self.pop_scope();
+
+        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
+
+        // Each level runs after the outer pattern and every earlier hoisted
+        // binary have matched, so a segment size may name their variables
+        // (`{n, <<payload:n/binary>>}`): mirror exactly those bindings in
+        // scope while each binary pattern is lowered.
+        let outer_doc = self.generate_pattern(outer)?;
+        self.push_scope();
+        Self::collect_pattern_variables(outer, |name, core_var| {
+            self.bind_var(name, core_var);
+        });
+        let mut levels = Vec::with_capacity(hoisted.len());
+        for (var, binary) in hoisted {
+            let (prefix, scrutinee) = self.binary_match_scrutinee(var);
+            let pattern_doc = match self.generate_pattern(binary) {
+                Ok(doc) => doc,
+                Err(err) => {
+                    self.pop_scope();
+                    return Err(err);
+                }
+            };
+            Self::collect_pattern_variables(binary, |name, core_var| {
+                self.bind_var(name, core_var);
+            });
+            levels.push((prefix, scrutinee, pattern_doc));
+        }
+        self.pop_scope();
+
+        // Assemble innermost-first: the last level carries the guard.
+        let mut inner = body_doc;
+        for (prefix, scrutinee, pattern_doc) in levels.into_iter().rev() {
+            let guard = guard_part.take().unwrap_or(Document::Str(" when 'true'"));
+            let fallthrough = self.fresh_temp_var("NoMatch");
+            inner = docvec![
+                prefix,
+                "case ",
+                leaf::var(scrutinee),
+                " of <",
+                pattern_doc,
+                ">",
+                guard,
+                " -> ",
+                inner,
+                " <",
+                leaf::var(fallthrough),
+                "> when 'true' -> ",
+                rest_doc.clone(),
+                " end"
+            ];
+        }
+
+        let fallthrough = self.fresh_temp_var("NoMatch");
+        Ok(docvec![
+            rest_bind,
+            "case ",
+            leaf::var(match_var.to_string()),
+            " of <",
+            outer_doc,
+            "> when 'true' -> ",
+            inner,
+            " <",
+            leaf::var(fallthrough),
+            "> when 'true' -> ",
+            rest_doc,
+            " end"
+        ])
+    }
+
     fn generate_segmented_binary_arm(
         &mut self,
         match_var: &str,
@@ -969,7 +1170,7 @@ impl CoreErlangGenerator {
         let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
-        let rest_doc = self.generate_match_chain(match_var, rest_arms, threading)?;
+        let (rest_bind, rest_doc) = self.generate_shared_rest(match_var, rest_arms, threading)?;
 
         let plan = plan_binary_split(segments);
         debug_assert!(
@@ -983,6 +1184,7 @@ impl CoreErlangGenerator {
         let levels =
             self.build_segmented_levels(&scrutinee, arm.pattern.span(), segments, &plan)?;
         Ok(docvec![
+            rest_bind,
             scrutinee_prefix,
             self.assemble_segmented_levels(levels, guard_part, body_doc, &rest_doc)
         ])
@@ -1965,6 +2167,30 @@ fn size_vars(size: &Expression) -> Vec<&str> {
     let mut vars = Vec::new();
     inner(size, &mut vars);
     vars
+}
+
+/// Whether `pattern` is, or nests inside a composite pattern, a binary
+/// pattern (BT-4173/BT-4223): such an arm needs a per-arm `String` unwrap
+/// the all-native `case` fast path can't express.
+fn pattern_has_binary(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Binary { .. } => true,
+        Pattern::Tuple { elements, .. } => elements.iter().any(pattern_has_binary),
+        Pattern::List { elements, tail, .. } => {
+            elements.iter().any(pattern_has_binary)
+                || tail.as_deref().is_some_and(pattern_has_binary)
+        }
+        Pattern::Map { pairs, .. } => pairs.iter().any(|pair| pattern_has_binary(&pair.value)),
+        Pattern::Constructor { keywords, .. } => keywords
+            .iter()
+            .any(|(_, binding)| pattern_has_binary(binding)),
+        Pattern::Array { .. }
+        | Pattern::Type { .. }
+        | Pattern::Wildcard(_)
+        | Pattern::Literal(..)
+        | Pattern::Nil(_)
+        | Pattern::Variable(_) => false,
+    }
 }
 
 /// Span of a binary pattern needing segmented lowering nested inside a
