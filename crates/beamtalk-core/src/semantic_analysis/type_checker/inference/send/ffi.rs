@@ -258,6 +258,8 @@ impl TypeChecker {
             _ => false,
         }
     }
+
+    /// Extracts the Erlang function name and arity from a selector and arguments.
     ///
     /// For keyword selectors like `seq: 1 to: 10`, the function name is the first
     /// keyword ("seq") and the arity is the argument count.
