@@ -292,16 +292,16 @@ pub fn expr_first_parenthesised_operand(expr: &Expression) -> Option<Span> {
 /// cascade's folded first send, which is not an operand).
 ///
 /// Codegen and analysis match send operands directly, without peeling, on
-/// the strength of this invariant. Codegen's module entry calls it in test
-/// builds, so a driver that reaches the generator without running the pass
-/// fails the codegen tests instead of silently compiling `(e) foo`
-/// differently from `e foo`.
+/// the strength of this invariant. Codegen's module entry and the REPL
+/// assembler call it under `#[cfg(test)]` (the gate is the caller's, so the
+/// check costs nothing outside test builds), so a driver that reaches the
+/// generator without running the pass fails the codegen tests instead of
+/// silently compiling `(e) foo` differently from `e foo`.
 ///
 /// # Panics
 ///
 /// When a send operand of `module` is still parenthesised; the message names
 /// `context` (the entry that broke the invariant) and the operand's span.
-#[cfg(any(test, feature = "test"))]
 pub fn assert_operands_normalised(module: &Module, context: &str) {
     if let Some(span) = first_parenthesised_operand(module) {
         panic!(
@@ -318,7 +318,6 @@ pub fn assert_operands_normalised(module: &Module, context: &str) {
 /// # Panics
 ///
 /// When a send operand in `expressions` is still parenthesised.
-#[cfg(any(test, feature = "test"))]
 pub fn assert_expr_operands_normalised(expressions: &[Expression], context: &str) {
     if let Some(span) = expressions
         .iter()
