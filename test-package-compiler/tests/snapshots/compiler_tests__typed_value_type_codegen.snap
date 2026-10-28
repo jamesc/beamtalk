@@ -31,8 +31,8 @@ call 'maps':'get'('x', Self)
 'getY'/1 = fun (Self) ->
 call 'maps':'get'('y', Self)
 
-'distanceTo:'/2 = fun (Self, _other1) ->
-call 'bt@stdlib@typed_point':'dispatch'('distanceTo:', [_other1], Self)
+'distanceTo:'/2 = fun (Self, _other@1) ->
+call 'bt@stdlib@typed_point':'dispatch'('distanceTo:', [_other@1], Self)
 
 'printString'/1 = fun (Self) ->
 call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)

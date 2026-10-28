@@ -387,7 +387,7 @@ module 'binary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_con
     try call 'binary_operators':'dispatch'(Selector, Args, Self, State)
     of Result -> Result
     catch <Type, Error, Stacktrace> -> case {Type, Error} of
-        <{'throw', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}, State}
+        <{'throw', {'$bt_nlr', _SDNlrTok@1, _SDNlrVal@2, _SDNlrSt@3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok@1, _SDNlrVal@2, _SDNlrSt@3}, State}
         <_> when 'true' -> {'error', {Type, Error, Stacktrace}, State}
     end
 
@@ -396,8 +396,8 @@ module 'binary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_con
     case Selector of
         <'blockWithOp'> when 'true' ->
             case Args of
-                <[_x4, _y5]> when 'true' ->
-                    let _Result = let _BinLeft9 = _x4 in let _BinRight10 = let _BinLeft6 = _y5 in let _BinRight7 = 2 in case call 'erlang':'is_number'(_BinLeft6) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft6, _BinRight7) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft6, '*', [_BinRight7]) <_BinOpNoMatch8> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch8}) end in case call 'erlang':'is_number'(_BinLeft9) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft9, _BinRight10) of <_BinCoerceTry11> -> _BinCoerceTry11 catch <_BinCoerceType12, _BinCoerceError13, _BinCoerceStack14> -> case {_BinCoerceType12, _BinCoerceError13} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight10) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType12, _BinCoerceError13, _BinCoerceStack14) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight10, 'plusFromNumber:', [_BinLeft9], '+') <_BinCoerceNoMatch16> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch16}) end <_BinCoerceOther15> when 'true' -> primop 'raw_raise'(_BinCoerceType12, _BinCoerceError13, _BinCoerceStack14) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft9, '+', [_BinRight10]) <_BinOpNoMatch17> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch17}) end in {'reply', _Result, State}
+                <[_x@4, _y@5]> when 'true' ->
+                    let _Result = let _BinLeft@9 = _x@4 in let _BinRight@10 = let _BinLeft@6 = _y@5 in let _BinRight@7 = 2 in case call 'erlang':'is_number'(_BinLeft@6) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft@6, _BinRight@7) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@6, '*', [_BinRight@7]) <_BinOpNoMatch@8> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@8}) end in case call 'erlang':'is_number'(_BinLeft@9) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft@9, _BinRight@10) of <_BinCoerceTry@11> -> _BinCoerceTry@11 catch <_BinCoerceType@12, _BinCoerceError@13, _BinCoerceStack@14> -> case {_BinCoerceType@12, _BinCoerceError@13} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@10) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@12, _BinCoerceError@13, _BinCoerceStack@14) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@10, 'plusFromNumber:', [_BinLeft@9], '+') <_BinCoerceNoMatch@16> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@16}) end <_BinCoerceOther@15> when 'true' -> primop 'raw_raise'(_BinCoerceType@12, _BinCoerceError@13, _BinCoerceStack@14) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@9, '+', [_BinRight@10]) <_BinOpNoMatch@17> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@17}) end in {'reply', _Result, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <OtherSelector> when 'true' ->

@@ -387,7 +387,7 @@ module 'typed_class_warnings' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
     try call 'typed_class_warnings':'dispatch'(Selector, Args, Self, State)
     of Result -> Result
     catch <Type, Error, Stacktrace> -> case {Type, Error} of
-        <{'throw', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok1, _SDNlrVal2, _SDNlrSt3}, State}
+        <{'throw', {'$bt_nlr', _SDNlrTok@1, _SDNlrVal@2, _SDNlrSt@3}}> when 'true' -> {'error', {'$bt_nlr', _SDNlrTok@1, _SDNlrVal@2, _SDNlrSt@3}, State}
         <_> when 'true' -> {'error', {Type, Error, Stacktrace}, State}
     end
 
@@ -397,11 +397,11 @@ module 'typed_class_warnings' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
         <'getValue'> when 'true' ->
             let _Result = call 'maps':'get'('value', State) in {'reply', _Result, State}
         <'increment'> when 'true' ->
-            let _Val4 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val4, State) in let _Result = call 'maps':'get'('value', State1) in {'reply', _Result, State1}
+            let _Val@4 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val@4, State) in let _Result = call 'maps':'get'('value', State1) in {'reply', _Result, State1}
         <'add:'> when 'true' ->
             case Args of
-                <[_amount5]> when 'true' ->
-                    let _ExitReply16 = let _ = call 'beamtalk_actor_state':'store'(State) in let _Synced14 = let _BinLeft6 = call 'maps':'get'('value', State) in let _BinRight7 = _amount5 in try call 'erlang':'+'(_BinLeft6, _BinRight7) of <_BinCoerceTry8> -> _BinCoerceTry8 catch <_BinCoerceType9, _BinCoerceError10, _BinCoerceStack11> -> case {_BinCoerceType9, _BinCoerceError10} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight7) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType9, _BinCoerceError10, _BinCoerceStack11) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight7, 'plusFromNumber:', [_BinLeft6], '+') <_BinCoerceNoMatch13> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch13}) end <_BinCoerceOther12> when 'true' -> primop 'raw_raise'(_BinCoerceType9, _BinCoerceError10, _BinCoerceStack11) end in let State1 = call 'beamtalk_actor_state':'take'() in let _Val15 = _Synced14 in let State2 = call 'maps':'put'('value', _Val15, State1) in let _Result = call 'maps':'get'('value', State2) in {'reply', _Result, State2} in case _ExitReply16 of <{'reply', _, _ExitState17}> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(_ExitState17) in _ExitReply16 <_> when 'true' -> _ExitReply16 end
+                <[_amount@5]> when 'true' ->
+                    let _ExitReply@16 = let _ = call 'beamtalk_actor_state':'store'(State) in let _Synced@14 = let _BinLeft@6 = call 'maps':'get'('value', State) in let _BinRight@7 = _amount@5 in try call 'erlang':'+'(_BinLeft@6, _BinRight@7) of <_BinCoerceTry@8> -> _BinCoerceTry@8 catch <_BinCoerceType@9, _BinCoerceError@10, _BinCoerceStack@11> -> case {_BinCoerceType@9, _BinCoerceError@10} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@7) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@9, _BinCoerceError@10, _BinCoerceStack@11) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@7, 'plusFromNumber:', [_BinLeft@6], '+') <_BinCoerceNoMatch@13> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@13}) end <_BinCoerceOther@12> when 'true' -> primop 'raw_raise'(_BinCoerceType@9, _BinCoerceError@10, _BinCoerceStack@11) end in let State1 = call 'beamtalk_actor_state':'take'() in let _Val@15 = _Synced@14 in let State2 = call 'maps':'put'('value', _Val@15, State1) in let _Result = call 'maps':'get'('value', State2) in {'reply', _Result, State2} in case _ExitReply@16 of <{'reply', _, _ExitState@17}> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(_ExitState@17) in _ExitReply@16 <_> when 'true' -> _ExitReply@16 end
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <OtherSelector> when 'true' ->
