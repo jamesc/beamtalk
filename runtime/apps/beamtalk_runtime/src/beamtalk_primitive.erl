@@ -721,6 +721,8 @@ byte-level send to an unaligned tail.
 -spec send_bitstring(bitstring(), atom(), list()) -> term().
 send_bitstring(X, Selector, Args) ->
     Mod = module_for_value(X),
+    %% bt-catcher-audit: not-applicable-reraises - the only clause re-raises the
+    %% Bitstring DNU (with a hint) via raise_bitstring_dnu/2; nothing is swallowed.
     try
         Mod:dispatch(Selector, Args, X)
     catch
