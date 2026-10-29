@@ -550,8 +550,9 @@ These stay because method bodies and plain self-sends still thread: the
 convention with the state arms of `unwrap_dispatch_result/1`, the `State` slot
 of the actor NLR tuple, ADR 0118's self-send preludes, `strip_local_temps/1`,
 and `generate_discarding_self_dispatch` in method bodies (ADR 0118 owns it).
-`RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` (BT-3948) stays; it is about the
-actor loop frame. The locals rules stay: the `WriteKind::Local` half of
+`RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` (BT-3948) stayed; it was about the
+actor loop frame (BT-3947 deleted it once the closure-body frames and the
+evaluated-block producer lowered every shape). The locals rules stay: the `WriteKind::Local` half of
 `Tier2BlockNoReturnChannel` with `Escape::Ffi` (BT-3917), `Passed` and
 `Cascade`; `ALLOW_SET`, the other `DENY_SET` rows, `RIGHT_STATEMENTS` and
 `MatchArmWrite`; `report_nlr_out_of_ensure` and `nlr_dropped_local` (BT-3910,

@@ -1,0 +1,431 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3947 (closes BT-3948): runs the cells of
+// fixtures/bt3947inline_block_loop_{actor,class,value}.bt; the expected
+// values are the class-method answers. Each cell was a compile error in an
+// actor method under BT-3948's `InlineBlockLocalInLoop` row.
+
+TestCase subclass: Bt3947InlineBlockLoopTest
+
+  testActorCell0 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell0) equals: 6
+
+  testClassCell0 => self assert: (Bt3947InlineBlockLoopClass cell0) equals: 6
+
+  testValueCell0 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell0) equals: 6
+
+  testActorCell1 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell1) equals: 6
+
+  testClassCell1 => self assert: (Bt3947InlineBlockLoopClass cell1) equals: 6
+
+  testValueCell1 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell1) equals: 6
+
+  testActorCell2 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell2) equals: 9
+
+  testClassCell2 => self assert: (Bt3947InlineBlockLoopClass cell2) equals: 9
+
+  testValueCell2 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell2) equals: 9
+
+  testActorCell3 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell3) equals: 3
+
+  testClassCell3 => self assert: (Bt3947InlineBlockLoopClass cell3) equals: 3
+
+  testValueCell3 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell3) equals: 3
+
+  testActorCell4 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell4) equals: 9
+
+  testClassCell4 => self assert: (Bt3947InlineBlockLoopClass cell4) equals: 9
+
+  testValueCell4 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell4) equals: 9
+
+  testActorCell5 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell5) equals: 3
+
+  testClassCell5 => self assert: (Bt3947InlineBlockLoopClass cell5) equals: 3
+
+  testValueCell5 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell5) equals: 3
+
+  testActorCell6 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell6) equals: 3
+
+  testClassCell6 => self assert: (Bt3947InlineBlockLoopClass cell6) equals: 3
+
+  testValueCell6 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell6) equals: 3
+
+  testActorCell7 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell7) equals: 3
+
+  testClassCell7 => self assert: (Bt3947InlineBlockLoopClass cell7) equals: 3
+
+  testValueCell7 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell7) equals: 3
+
+  testActorCell8 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell8) equals: 3
+
+  testClassCell8 => self assert: (Bt3947InlineBlockLoopClass cell8) equals: 3
+
+  testValueCell8 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell8) equals: 3
+
+  testActorCell9 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell9) equals: 3
+
+  testClassCell9 => self assert: (Bt3947InlineBlockLoopClass cell9) equals: 3
+
+  testValueCell9 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell9) equals: 3
+
+  testActorCell10 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell10) equals: 6
+
+  testClassCell10 => self assert: (Bt3947InlineBlockLoopClass cell10) equals: 6
+
+  testValueCell10 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell10) equals: 6
+
+  testActorCell11 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell11) equals: 0
+
+  testClassCell11 => self assert: (Bt3947InlineBlockLoopClass cell11) equals: 0
+
+  testValueCell11 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell11) equals: 0
+
+  testActorCell12 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell12) equals: 3
+
+  testClassCell12 => self assert: (Bt3947InlineBlockLoopClass cell12) equals: 3
+
+  testValueCell12 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell12) equals: 3
+
+  testActorCell13 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell13) equals: 6
+
+  testClassCell13 => self assert: (Bt3947InlineBlockLoopClass cell13) equals: 6
+
+  testValueCell13 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell13) equals: 6
+
+  testActorCell14 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell14) equals: 3
+
+  testClassCell14 => self assert: (Bt3947InlineBlockLoopClass cell14) equals: 3
+
+  testValueCell14 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell14) equals: 3
+
+  testActorCell15 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell15) equals: 6
+
+  testClassCell15 => self assert: (Bt3947InlineBlockLoopClass cell15) equals: 6
+
+  testValueCell15 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell15) equals: 6
+
+  testActorCell16 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell16) equals: 6
+
+  testClassCell16 => self assert: (Bt3947InlineBlockLoopClass cell16) equals: 6
+
+  testValueCell16 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell16) equals: 6
+
+  testActorCell17 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell17) equals: 6
+
+  testClassCell17 => self assert: (Bt3947InlineBlockLoopClass cell17) equals: 6
+
+  testValueCell17 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell17) equals: 6
+
+  testActorCell18 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell18) equals: 6
+
+  testClassCell18 => self assert: (Bt3947InlineBlockLoopClass cell18) equals: 6
+
+  testValueCell18 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell18) equals: 6
+
+  testActorCell19 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell19) equals: 6
+
+  testClassCell19 => self assert: (Bt3947InlineBlockLoopClass cell19) equals: 6
+
+  testValueCell19 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell19) equals: 6
+
+  testActorCell20 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell20) equals: 6
+
+  testClassCell20 => self assert: (Bt3947InlineBlockLoopClass cell20) equals: 6
+
+  testValueCell20 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell20) equals: 6
+
+  testActorCell21 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell21) equals: 12
+
+  testClassCell21 => self assert: (Bt3947InlineBlockLoopClass cell21) equals: 12
+
+  testValueCell21 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell21) equals: 12
+
+  testActorCell22 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell22) equals: 24
+
+  testClassCell22 => self assert: (Bt3947InlineBlockLoopClass cell22) equals: 24
+
+  testValueCell22 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell22) equals: 24
+
+  testActorCell23 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell23) equals: 12
+
+  testClassCell23 => self assert: (Bt3947InlineBlockLoopClass cell23) equals: 12
+
+  testValueCell23 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell23) equals: 12
+
+  testActorCell24 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell24) equals: 9
+
+  testClassCell24 => self assert: (Bt3947InlineBlockLoopClass cell24) equals: 9
+
+  testValueCell24 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell24) equals: 9
+
+  testActorCell26 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell26) equals: 0
+
+  testClassCell26 => self assert: (Bt3947InlineBlockLoopClass cell26) equals: 0
+
+  testValueCell26 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell26) equals: 0
+
+  testActorCell27 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell27) equals: 3
+
+  testClassCell27 => self assert: (Bt3947InlineBlockLoopClass cell27) equals: 3
+
+  testValueCell27 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell27) equals: 3
+
+  testActorCell28 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell28) equals: 3
+
+  testClassCell28 => self assert: (Bt3947InlineBlockLoopClass cell28) equals: 3
+
+  testValueCell28 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell28) equals: 3
+
+  testActorCell29 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell29) equals: 3
+
+  testClassCell29 => self assert: (Bt3947InlineBlockLoopClass cell29) equals: 3
+
+  testValueCell29 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell29) equals: 3
+
+  testActorCell30 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell30) equals: 6
+
+  testClassCell30 => self assert: (Bt3947InlineBlockLoopClass cell30) equals: 6
+
+  testActorCell31 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell31) equals: 0
+
+  testClassCell31 => self assert: (Bt3947InlineBlockLoopClass cell31) equals: 0
+
+  testActorCell32 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell32) equals: 3
+
+  testClassCell32 => self assert: (Bt3947InlineBlockLoopClass cell32) equals: 3
+
+  testActorCell33 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell33) equals: 3
+
+  testClassCell33 => self assert: (Bt3947InlineBlockLoopClass cell33) equals: 3
+
+  testValueCell33 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell33) equals: 3
+
+  testActorCell34 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell34) equals: 3
+
+  testClassCell34 => self assert: (Bt3947InlineBlockLoopClass cell34) equals: 3
+
+  testValueCell34 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell34) equals: 3
+
+  testActorCell35 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell35) equals: 3
+
+  testClassCell35 => self assert: (Bt3947InlineBlockLoopClass cell35) equals: 3
+
+  testValueCell35 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell35) equals: 3
+
+  testActorCell36 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell36) equals: 3
+
+  testClassCell36 => self assert: (Bt3947InlineBlockLoopClass cell36) equals: 3
+
+  testValueCell36 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell36) equals: 3
+
+  testActorCell37 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell37) equals: 0
+
+  testClassCell37 => self assert: (Bt3947InlineBlockLoopClass cell37) equals: 0
+
+  testValueCell37 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell37) equals: 0
+
+  testActorCell38 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell38) equals: 6
+
+  testClassCell38 => self assert: (Bt3947InlineBlockLoopClass cell38) equals: 6
+
+  testValueCell38 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell38) equals: 6
+
+  testActorCell39 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell39) equals: 0
+
+  testClassCell39 => self assert: (Bt3947InlineBlockLoopClass cell39) equals: 0
+
+  testValueCell39 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell39) equals: 0
+
+  testActorCell40 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell40) equals: 0
+
+  testClassCell40 => self assert: (Bt3947InlineBlockLoopClass cell40) equals: 0
+
+  testValueCell40 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell40) equals: 0
+
+  testActorCell41 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell41) equals: 0
+
+  testClassCell41 => self assert: (Bt3947InlineBlockLoopClass cell41) equals: 0
+
+  testValueCell41 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell41) equals: 0
+
+  testActorCell42 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell42) equals: 1
+
+  testClassCell42 => self assert: (Bt3947InlineBlockLoopClass cell42) equals: 1
+
+  testActorCell43 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell43) equals: 3
+
+  testClassCell43 => self assert: (Bt3947InlineBlockLoopClass cell43) equals: 3
+
+  testValueCell43 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell43) equals: 3
+
+  testActorCell44 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell44) equals: 3
+
+  testClassCell44 => self assert: (Bt3947InlineBlockLoopClass cell44) equals: 3
+
+  testValueCell44 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell44) equals: 3
+
+  testActorCell45 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell45) equals: 3
+
+  testClassCell45 => self assert: (Bt3947InlineBlockLoopClass cell45) equals: 3
+
+  testValueCell45 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell45) equals: 3
+
+  testActorCell46 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell46) equals: 3
+
+  testClassCell46 => self assert: (Bt3947InlineBlockLoopClass cell46) equals: 3
+
+  testValueCell46 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell46) equals: 3
+
+  testActorCell47 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell47) equals: 3
+
+  testClassCell47 => self assert: (Bt3947InlineBlockLoopClass cell47) equals: 3
+
+  testValueCell47 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell47) equals: 3
+
+  testActorCell48 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell48) equals: 3
+
+  testClassCell48 => self assert: (Bt3947InlineBlockLoopClass cell48) equals: 3
+
+  testValueCell48 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell48) equals: 3
+
+  testActorCell49 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell49) equals: 3
+
+  testClassCell49 => self assert: (Bt3947InlineBlockLoopClass cell49) equals: 3
+
+  testValueCell49 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell49) equals: 3
+
+  testActorCell50 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell50) equals: 1
+
+  testClassCell50 => self assert: (Bt3947InlineBlockLoopClass cell50) equals: 1
+
+  testValueCell50 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell50) equals: 1
+
+  testActorCell51 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell51) equals: 9
+
+  testClassCell51 => self assert: (Bt3947InlineBlockLoopClass cell51) equals: 9
+
+  testValueCell51 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell51) equals: 9
+
+  testActorCell52 =>
+    self assert: (Bt3947InlineBlockLoopActor spawn cell52) equals: 9
+
+  testClassCell52 => self assert: (Bt3947InlineBlockLoopClass cell52) equals: 9
+
+  testValueCell52 =>
+    self assert: (Bt3947InlineBlockLoopValue new cell52) equals: 9
+
+  testActorStoredClosureInvokedAfterLoop =>
+    self assert: (Bt3947InlineBlockLoopActor spawn storedClosureInvokedAfterLoop) equals: 12
+
+  testActorStoredClosureInvokedInLoop =>
+    self assert: (Bt3947InlineBlockLoopActor spawn storedClosureInvokedInLoop) equals: 6
+
+  testClassStoredClosureInvokedAfterLoop =>
+    self assert: (Bt3947InlineBlockLoopClass storedClosureInvokedAfterLoop) equals: 12
+
+  testClassStoredClosureInvokedInLoop =>
+    self assert: (Bt3947InlineBlockLoopClass storedClosureInvokedInLoop) equals: 6
+
+  testValueStoredClosureInvokedAfterLoop =>
+    self assert: (Bt3947InlineBlockLoopValue new storedClosureInvokedAfterLoop) equals: 12
+
+  testValueStoredClosureInvokedInLoop =>
+    self assert: (Bt3947InlineBlockLoopValue new storedClosureInvokedInLoop) equals: 6
