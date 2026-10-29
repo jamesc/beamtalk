@@ -43,6 +43,12 @@ pub mod statement_probes;
 #[cfg(any(test, feature = "test"))]
 pub mod corpus_families;
 
+// BT-4274: the generated BT-3981 evaluated-block grid and its probe contexts,
+// shared by the ADR 0131 validator test in this crate and the verified-codegen
+// + `erlc` corpus in `beamtalk-codegen`.
+#[cfg(any(test, feature = "test"))]
+pub mod evaluated_block_grid;
+
 /// Test-only helpers: parsing, codegen assertions, and AST builders.
 ///
 /// Gated on `#[cfg(any(test, feature = "test"))]` to avoid prod binary
