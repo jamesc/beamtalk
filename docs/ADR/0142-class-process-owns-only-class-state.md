@@ -1,4 +1,4 @@
-# ADR 0143: The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller
+# ADR 0142: The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller
 
 ## Status
 Proposed (2026-10-29)
@@ -47,9 +47,9 @@ What the class process actually protects is **class variables**. ADR 0130
 made the class process their home for the duration of an invocation. A class
 with no class variables has nothing for the process to own.
 
-For Catalina, class-side sends are about 1% of per-message CPU (ADR 0142,
-Context), so this ADR is mostly about correctness and contention, not
-throughput.
+For Catalina, class-side sends are about 1% of per-message CPU (the
+`echo_c10_64B` profile recorded in epic BT-4291), so this ADR is mostly about
+correctness and contention, not throughput.
 
 ### Current state
 
@@ -72,12 +72,12 @@ Two mechanisms put class methods in the caller today:
      maintained by `beamtalk_class_shadow_flags`.
    - The flag is erased under a per-tag lock before an extension or ADR 0084
      runtime fun becomes visible.
-   - This is a guarded direct call (ADR 0142 §1), but it is used only for
+   - This is a guarded direct call (ADR 0025 amendment, 2026-10-29), but it is used only for
      self-sends inside an open class.
 
 ### Constraints
 
-- **ADR 0142 §1: the guard is the contract.** A direct call needs a run-time
+- **The guard is the contract** (ADR 0025 amendment, 2026-10-29). A direct call needs a run-time
   guard proving it reaches what dynamic dispatch would reach, with a
   byte-identical fallback.
 - **ADR 0130:**
@@ -167,22 +167,24 @@ case call 'beamtalk_class_shadow_flags':'direct_call_ok'('Point class', 'Point')
 end
 ```
 
-- `PointRef` is the class reference of ADR 0142 §3, passed as the real
-  `ClassSelf`. This retires the `nil` convention and its per-call prologue
+- `PointRef` is the class reference built from the compile-time registered
+  name (BT-4295), passed as the real `ClassSelf`. This retires the `nil` convention and its per-call prologue
   lookup (BT-4037).
 - An **inherited** class method sent to a literal receiver goes through the
   dynamic path, which itself now runs in the caller through the memo. No call
   site names a superclass module, so nothing goes stale when the hierarchy
   changes.
-- **When the flag is erased.** On every metadata write for `C`:
-  - reload;
-  - a change to class variables;
-  - `removeSelector:`;
-  - `put_class_method`;
-  - extension register or remove.
+- **When the flag is erased.**
+  - Today it is erased only when an extension is registered or removed
+    (`beamtalk_extensions:register`/`remove`), or when an ADR 0084 runtime
+    fun is installed (`beamtalk_class_metadata:set_runtime_class_methods/2`).
+    See `beamtalk_class_shadow_flags:set/2` (`:102`) and `clear/2` (`:139`).
+  - This ADR adds erasure on every other metadata write for `C`: reload,
+    a change to class variables, `removeSelector:`, and `put_class_method`.
 
-  It is erased under the existing per-tag lock, *before* the change becomes
-  visible. Until the flag is re-derived, call sites take the slow path.
+  Every erasure happens under the existing per-tag lock, *before* the change
+  becomes visible. Until the flag is re-derived, call sites take the slow
+  path.
 - This guard **replaces** the unguarded ADR 0129 static calls, which closes
   BT-4126, BT-4133 and BT-4134 for class methods.
 
@@ -376,10 +378,10 @@ Rejected (steelman C).
 
 ## Implementation
 
-All phases sit under epic BT-4112, after ADR 0142 Phase 0 (the differential
-harness).
+All phases sit under epic BT-4112, after BT-4292, the differential harness of
+epic BT-4291.
 
-**Phase 0 — differential rows (S).** Add these class-side rows to ADR 0142's
+**Phase 0 — differential rows (S).** Add these class-side rows to BT-4292's
 differential fixture:
 - an inherited class method touching a stateful parent's class variables
   (its error must not change);
@@ -455,9 +457,11 @@ class variables.
   their own process.
 
 ## References
-- Related issues: BT-4118, BT-4112 (epic), BT-4073, BT-4114, BT-4115,
+- Related issues: BT-4118, BT-4112 (epic), BT-4291 (guarded static dispatch
+  epic), BT-4292, BT-4295, BT-4073, BT-4114, BT-4115,
   BT-4126, BT-4133, BT-4134, BT-4037, BT-3700, BT-3022.
-- Related ADRs: 0142 (the guard contract this ADR applies), 0010, 0013, 0049,
+- Related ADRs: 0025 (its 2026-10-29 amendment is the guard contract this ADR
+  applies), 0010, 0013, 0049,
   0066, 0084, 0100, 0109, 0112, 0129, 0130, 0137.
 - Documentation: `benchmarks/vs-elixir/README.md`,
   `docs/development/benchmarks.md` (BT-3676/3690/3700),
