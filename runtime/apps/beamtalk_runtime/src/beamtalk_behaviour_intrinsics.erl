@@ -1111,7 +1111,12 @@ refuse_in_own_class_process(_ClassPid, _Selector) ->
 %% class to answer, bounded, before any side effect, and raise a structured
 %% `timeout` if it does not (the probe guards against a monitor held for
 %% another reason). A class that is merely busy is not waiting on the
-%% caller, so removal waits for it as before. `doc:` and the other
+%% caller, so removal waits for it as before. Limits, both failing before
+%% any side effect or no worse than before: the walk follows every monitor
+%% of a waiting process, so a busy class whose wait chain passes a process
+%% that monitors the caller for another reason is probed and can time out;
+%% and the check is one-shot, so a class that starts waiting on the caller
+%% after it can still hold `gen_server:stop/1` until its own call times out. `doc:` and the other
 %% primitives that message the class use a bounded `gen_server:call/2`
 %% before any side effect, so they already fail rather than hang.
 -define(CLASS_RESPONSIVE_TIMEOUT, 5000).

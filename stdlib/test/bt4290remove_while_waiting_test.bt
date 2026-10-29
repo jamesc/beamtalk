@@ -3,7 +3,8 @@
 
 // BT-4290: removing or renaming a class whose process is blocked waiting on
 // the caller raises a structured `timeout` instead of hanging, and changes
-// nothing first. Fixtures: fixtures/bt4290target.bt, fixtures/bt4290runner.bt.
+// nothing first. Fixtures: fixtures/bt4290target.bt, fixtures/bt4290runner.bt,
+// fixtures/bt4290relay.bt.
 
 TestCase subclass: Bt4290RemoveWhileWaitingTest
 
