@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4262: removing a class from inside one of its own class methods is
+// refused before any side effect, by `self` and by name.
+
+Actor subclass: Bt4262RemoveGuard
+
+  class removeSelf => self removeFromSystem
+
+  class removeByName =>
+    (Beamtalk classNamed: #Bt4262RemoveGuard) removeFromSystem
+
+  class renameSelf => self renameTo: #Bt4262RemoveGuardRenamed

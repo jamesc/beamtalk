@@ -29,6 +29,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 
 -export([
     class_send/3,
+    handle_class_self_call/1,
     lookup_direct_call/3,
     lookup_direct_constructor/3,
     class_super_dispatch/4,
@@ -267,10 +268,11 @@ lookup_direct_constructor_module(ClassPid, Selector, Arity) ->
 -doc """
 A send to a class from inside that class's own process (BT-4262).
 
-When the class does not understand `Selector` itself (no class-side extension,
-no local, inherited or runtime-installed class method:
-`class_understands_class_selector/2`), the class process's own lookup would
-miss and fall through to the class-object protocol (`Class -> Behaviour ->
+When only the `Class` chain can answer `Selector` (no class-side extension,
+no local, inherited or runtime-installed class method, and not a
+class-variable reflection send: `class_chain_only_send/3`, the external
+send's own check), the class process's own lookup would miss and fall
+through to the class-object protocol (`Class -> Behaviour ->
 ...`). That protocol runs as instance methods of the class object, not as a
 class method, so it answers here, in this process, through
 `class_self_protocol_fallthrough/4`: the same path a class-side `self`
@@ -280,22 +282,25 @@ answer when it runs in the class process.
 
 A selector the class itself understands would run one of its own class
 methods re-entrantly, which has no safe route, so it still raises the
-structured `dispatch_error` (`handle_class_self_call/1`).
+structured `dispatch_error` (`handle_class_self_call/1`). So does a protocol
+primitive that changes the class (`removeFromSystem`, `renameTo:`, `doc:`,
+...): `beamtalk_behaviour_intrinsics` refuses it up front, before any side
+effect.
 """.
 -spec class_send_from_own_process(selector(), list()) -> term() | no_return().
 class_send_from_own_process(Selector, Args) ->
-    case get(beamtalk_class_name) of
-        undefined ->
-            handle_class_self_call(Selector);
-        ClassName ->
-            case class_understands_class_selector(ClassName, Selector) of
-                true ->
-                    handle_class_self_call(Selector);
-                false ->
-                    class_self_protocol_fallthrough(
-                        ClassName, Selector, Args, receiver_tag(ClassName)
-                    )
-            end
+    %% The same decision the external send makes before skipping the class
+    %% process (`class_chain_only_send/3`), so the two cannot disagree: the
+    %% class-variable reflection sends (`hasField:`/`clearField:`), which only
+    %% the class process answers from its own state, stay on the
+    %% `dispatch_error` path.
+    case class_chain_only_send(self(), Selector, Args) of
+        {ok, ClassName, _Module} ->
+            class_self_protocol_fallthrough(
+                ClassName, Selector, Args, receiver_tag(ClassName)
+            );
+        error ->
+            handle_class_self_call(Selector)
     end.
 
 -doc """

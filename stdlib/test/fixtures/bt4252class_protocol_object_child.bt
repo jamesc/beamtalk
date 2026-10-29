@@ -41,4 +41,18 @@ Bt4252ClassProtocolObjectBase subclass: Bt4252ClassProtocolObjectChild
   // running in that process it raises `dispatch_error` (BT-4262).
   class selfSetDoc => self doc: "changed"
 
+  // Sends from the class process to the class looked up at run time
+  // (BT-4262; a literal class name in its own class method compiles to the
+  // class-side self-send): a selector only the `Class` chain answers runs in
+  // place; one the class defines, or a class-variable reflection send, still
+  // raises `dispatch_error`.
+  class byNamePrintString =>
+    (Beamtalk classNamed: #Bt4252ClassProtocolObjectChild) printString
+
+  class byNameDefinedSelector =>
+    (Beamtalk classNamed: #Bt4252ClassProtocolObjectChild) selfName
+
+  class byNameHasField =>
+    (Beamtalk classNamed: #Bt4252ClassProtocolObjectChild) hasField: #x
+
   foo => 1

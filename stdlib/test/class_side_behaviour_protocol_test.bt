@@ -125,6 +125,50 @@ TestCase subclass: ClassSideBehaviourProtocolTest
       Bt4252ClassProtocolObjectChild selfSetDoc
     ] raise: #dispatch_error
 
+  // BT-4262: `doc` follows an external `doc:` (the published copy is written
+  // by the setter).
+  testSelfDocFollowsExternalSetter =>
+    original := Bt4252ClassProtocolActorChild doc
+    Bt4252ClassProtocolActorChild doc: "Set from outside"
+    self assert: Bt4252ClassProtocolActorChild selfDoc equals: "Set from outside"
+    Bt4252ClassProtocolActorChild doc: original
+    self assert: Bt4252ClassProtocolActorChild selfDoc equals: original
+
+  // BT-4262: by-name sends from inside the class process.
+  testActorByNameProtocolSendInClassProcess =>
+    self assert: Bt4252ClassProtocolActorChild byNamePrintString equals: Bt4252ClassProtocolActorChild printString
+
+  testObjectByNameProtocolSendInClassProcess =>
+    self assert: Bt4252ClassProtocolObjectChild byNamePrintString equals: Bt4252ClassProtocolObjectChild printString
+
+  testActorByNameDefinedSelectorInClassProcessRaisesDispatchError =>
+    self should: [
+      Bt4252ClassProtocolActorChild byNameDefinedSelector
+    ] raise: #dispatch_error
+
+  testObjectByNameDefinedSelectorInClassProcessRaisesDispatchError =>
+    self should: [
+      Bt4252ClassProtocolObjectChild byNameDefinedSelector
+    ] raise: #dispatch_error
+
+  testActorByNameClassVarReflectionInClassProcessRaisesDispatchError =>
+    self should: [
+      Bt4252ClassProtocolActorChild byNameHasField
+    ] raise: #dispatch_error
+
+  // BT-4262: a primitive that changes the class is refused before any side
+  // effect, and the class is still there.
+  testRemoveFromSystemInClassProcessIsRefused =>
+    // An instance of the class: removal stops the class's actors first, so a
+    // refusal that came after that would leave it dead.
+    instance := Bt4262RemoveGuard spawn
+    self should: [Bt4262RemoveGuard removeSelf] raise: #dispatch_error
+    self should: [Bt4262RemoveGuard removeByName] raise: #dispatch_error
+    self should: [Bt4262RemoveGuard renameSelf] raise: #dispatch_error
+    self assert: Bt4262RemoveGuard name equals: #Bt4262RemoveGuard
+    self assert: instance isAlive
+    instance stop
+
   testActorClassMethodSelfIncludesSelector =>
     self assert: Bt4252ClassProtocolActorChild selfIncludesFoo equals: (Bt4252ClassProtocolActorChild includesSelector: #foo)
     self assert: Bt4252ClassProtocolActorChild selfIncludesFoo
