@@ -676,6 +676,47 @@ fn blank_line_preserved_before_package_qualified_standalone_method() {
     ));
 }
 
+// --- Comments before a standalone method stay above its target (BT-4253) ---
+//
+// The `Target >>` / `Target class >>` prefix goes on the signature line,
+// after the method's leading comments — never in front of them, which
+// spliced the comment into the signature and lost a line on the next run.
+
+#[test]
+fn comment_before_class_side_standalone_method_stays_above_it() {
+    assert_identity(concat!(
+        "Object subclass: Foo\n",
+        "\n",
+        "  peek: x => x\n",
+        "\n",
+        "// Class-side extensions hosted in this file: one\n",
+        "// two.\n",
+        "Foo class >> bar => 1\n",
+    ));
+}
+
+#[test]
+fn comment_before_instance_side_standalone_method_stays_above_it() {
+    assert_identity(concat!(
+        "// Instance-side comment.\n",
+        "Foo >> baz => 2\n",
+        "\n",
+        "// A package-qualified one.\n",
+        "json@Parser >> lenientParse: input => input\n",
+    ));
+}
+
+#[test]
+fn doc_comment_before_standalone_method_stays_above_it() {
+    // `///` before a standalone method is kept as a leading comment and
+    // separated by the orphaned-doc-comment blank line; the point here is
+    // that it is not spliced into the signature, and the output is stable.
+    let source = concat!("/// Doc for qux.\n", "Foo class >> qux => 3\n",);
+    let formatted = format_source(source).expect("formats");
+    assert_eq!(formatted, "/// Doc for qux.\n\nFoo class >> qux => 3\n");
+    assert_identity(&formatted);
+}
+
 // --- Blank line between a leading comment and its declaration ---
 //
 // `has_blank_line_before_first_comment` (`leading_blank_line`)

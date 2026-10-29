@@ -149,6 +149,26 @@ TestCase subclass: IsKindOfTest
     self assert: (nil isKindOf: Object)
     self deny: (nil isKindOf: Exception)
 
+  // --- BT-4221: built-in classes answered from a memoised decision ---
+
+  // Repeated checks (the second is a cache hit) agree with the first, and a
+  // bare binary — valid UTF-8 or not — is a Binary, never a String.
+  testBuiltinIsKindOfRepeated =>
+    invalid := Binary fromBytes: #(255, 254)
+    valid := Binary fromBytes: #(104, 105)
+    2
+      timesRepeat: [
+        self assert: ("hi" isKindOf: String)
+        self assert: ("hi" isKindOf: Binary)
+        self deny: (invalid isKindOf: String)
+        self assert: (invalid isKindOf: Binary)
+        self deny: (valid isKindOf: String)
+        self assert: (valid isKindOf: Binary)
+        self deny: (42 isKindOf: String)
+        self assert: (#(1) isKindOf: List)
+        self deny: (#(1) isKindOf: List class)
+      ]
+
   // A non-class argument takes the original `includesBehaviour:` route.
   testNonClassArgumentIsFalse =>
     @expect type

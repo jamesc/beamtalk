@@ -694,7 +694,7 @@ impl CoreErlangGenerator {
         hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
     ) -> bool {
         // The routing rule itself lives in `ClassHierarchy::compiles_as_actor` so
-        // semantic checks scoped to value-type methods read the same rule (BT-4092).
+        // the type checker's value-type method rules read the same rule (BT-4235).
         module
             .classes
             .first()

@@ -110,6 +110,15 @@ Erlang maps get: "k" with: #{"k" => 1}                 // raises RuntimeError: k
 
 For lookups like these, use the Beamtalk-side operations (`includes:`, `detect:`, `at:`), which compare `String`s by value. If an Erlang API must see raw binaries throughout, convert them in a native module you write.
 
+The compiler points these calls out. When an argument's static type nests a `String` inside a `List`, `Dictionary` (keys or values) or `Tuple`, at any depth, the call gets an `ffi-nested-string` hint at that argument:
+
+```text
+hint[ffi-nested-string]: Strings nested in this argument reach lists:member/2 as tagged Beamtalk Strings; an Erlang comparison against raw binaries won't match
+  help: use the Beamtalk-side operation (`includes:`, `at:`, `detect:`), or pass Symbols/raw binaries
+```
+
+A `self delegate` method on a `native:` `Object` gets the same hint at each such declared parameter, since its arguments cross the same boundary. The hint is silent for a top-level `String` (the boundary unwraps it), for `Dynamic` or unknown element types (no warning without evidence, ADR 0100), and for Beamtalk-owned modules. A call that only stores or reshuffles its data (`lists:reverse/1`) is harmless; suppress the hint there with `@expect ffi_nested_string`, or package-wide with `ffi-nested-string = "off"` under `[diagnostics]` in `beamtalk.toml`.
+
 FFI is the right choice when:
 - You need to call a handful of Erlang functions
 - The Erlang module is stateless or manages its own state externally

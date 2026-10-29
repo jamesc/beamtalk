@@ -908,11 +908,16 @@ fn record_send_target(
 }
 
 /// ADR 0137: a conservative, syntactic answer to "may this send to something
-/// other than `self` run user code in this process" — a superset of what
-/// codegen brackets (which also knows static operand types), so a construct
-/// that holds a bracketed call is always seen as holding one here. Read off
-/// the shared selector tables ([`send_user_code`],
+/// other than `self` run user code in this process". Read off the shared
+/// selector tables ([`send_user_code`],
 /// [`crate::state_threading_selectors::structural_binary`]).
+///
+/// It is not a superset of what codegen brackets: it leaves two classes to
+/// codegen, which knows static operand types and which loops it lowers in
+/// place. A binary operator never counts here, and neither does a loop or
+/// evaluated literal block (`SendUserCode::LoopOrClosureCall`). Codegen's
+/// loop mode selection therefore also asks its own classifier before it
+/// lets a loop drop its `State` (BT-4255, `expr_holds_bracketed_call`).
 fn send_may_run_user_code(
     receiver: &Expression,
     selector: &MessageSelector,
@@ -3134,6 +3139,41 @@ fn operand_sites_of_statement(stmt: &Expression, construct_operands: bool) -> Ve
         other => operands(other, &mut out),
     }
     out
+}
+
+/// The statements of `body` that compile to code: every one but the
+/// compile-time-only `@expect` directives. The one filter codegen's
+/// `collect_body_exprs` and the type checker's
+/// [`ends_with_self_field_write`] share, so the two always agree on which
+/// statement is a body's last.
+pub fn body_exprs(body: &[ExpressionStatement]) -> impl DoubleEndedIterator<Item = &Expression> {
+    body.iter()
+        .map(|stmt| &stmt.expression)
+        .filter(|expr| !matches!(expr, Expression::ExpectDirective { .. }))
+}
+
+/// BT-4235: whether `body`'s last statement ([`body_exprs`]), seen through
+/// statement-level parentheses (BT-4092), is a `self.<field> := …` write
+/// ([`is_self_field_target`]). On codegen's value-type body path such a
+/// method answers its updated `self` (BT-833), and the type checker infers
+/// the receiver type from this; codegen's `generate_vt_body_exprs_in_sites`
+/// makes the same decision on the same leaves. A body-level `^` ends the
+/// body where it stands (codegen emits nothing after it, `infer_stmts` stops
+/// there), so a write after one is dead and the answer is `false`.
+#[must_use]
+pub fn ends_with_self_field_write(body: &[ExpressionStatement]) -> bool {
+    let mut last = None;
+    for expr in body_exprs(body) {
+        let expr = expr.unwrap_parens();
+        if matches!(expr, Expression::Return { .. }) {
+            return false;
+        }
+        last = Some(expr);
+    }
+    matches!(
+        last,
+        Some(Expression::Assignment { target, .. }) if is_self_field_target(target)
+    )
 }
 
 /// Whether `target` is `self.<field>`, the target of a field or class-variable

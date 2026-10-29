@@ -153,3 +153,11 @@ TestCase subclass: Bt4121GuardedOpLoopTest
     m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
     b := self.a lastBlockWhileAdding: m times: 3
     self assert: (runner run: b) equals: 3
+
+  testNestedNonCarriedLoopKeepsClosureSlowPathWrites =>
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self assert: (self.a nestedPokeTo: m times: 3) equals: 63
+
+  testNestedNonCarriedLoopInBracketingLoopKeepsSlowPathWrites =>
+    m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self assert: (self.a nestedPokeBracketing: m times: 3) equals: 9

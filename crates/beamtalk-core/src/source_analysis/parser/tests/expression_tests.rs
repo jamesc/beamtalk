@@ -636,7 +636,7 @@ fn parse_super_field_access_is_allowed() {
 #[test]
 fn parse_super_with_cascade() {
     // Test that super with cascade parses correctly
-    // Note: Codegen currently rejects this (unclear semantics), but parser allows it
+    // Note: the parser allows it; semantic analysis rejects it (BT-4251)
     let module = parse_ok("super increment; getValue");
     assert_eq!(module.expressions.len(), 1);
 
