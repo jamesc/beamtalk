@@ -365,3 +365,29 @@ Actor subclass: Bt4121TallyActor
         b := [self.count]
       ]
     b
+
+  // BT-4255: a counted loop carrying a local, holding a nested `to:do:` that
+  // carries nothing (a runtime call with its block as a closure). The outer
+  // loop keeps a `State` to bracket that call with, so the closure's
+  // slow-path writes survive (and so does the carried local).
+  nestedPokeTo: m times: n =>
+    k := 0
+    1
+      to: n
+      do: [:i |
+        k := i
+        1 to: 2 do: [:j | m + m]
+      ]
+    (self.count * 10) + k
+
+  // Same, the outer loop bracketing its own guarded operator and the inner
+  // call a non-carried `timesRepeat:`.
+  nestedPokeBracketing: m times: n =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    1
+      to: n
+      do: [:i |
+        acc := acc + m
+        2 timesRepeat: [m + m]
+      ]
+    self.count
