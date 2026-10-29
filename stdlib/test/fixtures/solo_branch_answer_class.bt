@@ -1,0 +1,72 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4189: the class-method column of the solo-branch threading-answer matrix. Each
+// method runs `flag ifTrue: [<write>]` / `flag ifFalse: [<write>]` with a
+// block that writes an outer local, so the conditional compiles through the
+// mutation/threading path, in one position: method tail, `r := ...`, the
+// operand of a send, the arm of an outer conditional, a `collect:` body and an
+// `inject:into:` body. The non-taken branch answers the receiver
+// (`False>>ifTrue: => self`, `True>>ifFalse: => self`), never `nil`, and the
+// write does not happen. The expected answers are in
+// stdlib/test/solo_branch_threading_answer_test.bt.
+
+Object subclass: SoloBranchAnswerClass
+
+  class tailIfTrue: flag =>
+    t := 0
+    flag ifTrue: [t := t + 1]
+
+  class assignIfTrue: flag =>
+    t := 0
+    r := flag ifTrue: [t := t + 1]
+    #[r, t]
+
+  class operandIfTrue: flag =>
+    t := 0
+    s := (flag ifTrue: [t := t + 1]) printString
+    #[s, t]
+
+  class armIfTrue: flag =>
+    t := 0
+    r := flag isNil ifTrue: [#none] ifFalse: [flag ifTrue: [t := t + 1]]
+    #[r, t]
+
+  class collectIfTrue: flag =>
+    t := 0
+    rs := #(1) collect: [:_i | flag ifTrue: [t := t + 1]]
+    #[rs first, t]
+
+  class injectIfTrue: flag =>
+    t := 0
+    r := #(1) inject: #none into: [:_acc :_i | flag ifTrue: [t := t + 1]]
+    #[r, t]
+
+  class tailIfFalse: flag =>
+    t := 0
+    flag ifFalse: [t := t + 1]
+
+  class assignIfFalse: flag =>
+    t := 0
+    r := flag ifFalse: [t := t + 1]
+    #[r, t]
+
+  class operandIfFalse: flag =>
+    t := 0
+    s := (flag ifFalse: [t := t + 1]) printString
+    #[s, t]
+
+  class armIfFalse: flag =>
+    t := 0
+    r := flag isNil ifTrue: [#none] ifFalse: [flag ifFalse: [t := t + 1]]
+    #[r, t]
+
+  class collectIfFalse: flag =>
+    t := 0
+    rs := #(1) collect: [:_i | flag ifFalse: [t := t + 1]]
+    #[rs first, t]
+
+  class injectIfFalse: flag =>
+    t := 0
+    r := #(1) inject: #none into: [:_acc :_i | flag ifFalse: [t := t + 1]]
+    #[r, t]

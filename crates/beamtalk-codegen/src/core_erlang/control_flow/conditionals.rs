@@ -28,7 +28,7 @@
 //!     let StateAcc1 = call 'maps':'put'('count', _Val1, StateAcc) in
 //!     {_Val1, StateAcc1}
 //!   <'false'> when 'true' ->
-//!     {'nil', State0}
+//!     {_Cond1, State0}
 //!   <_CondNoMatch2> when 'true' ->
 //!     call 'erlang':'error'({'case_clause', _CondNoMatch2})
 //! end
@@ -36,6 +36,11 @@
 //!
 //! The caller (method body generator) unpacks `{Result, NewState}` via
 //! `element/2` to thread the new state to subsequent expressions.
+//!
+//! The non-taken arm answers the receiver (`_Cond1`), as dynamic dispatch
+//! does (`False>>ifTrue: => self`); `and:`/`or:` answer `false`/`true`. Both
+//! the pure and the mutation builders read that answer from one table,
+//! [`SoloBoolean`] (BT-4189).
 //!
 //! The trailing wildcard clause is unreachable at runtime — `flag`
 //! is always a genuine boolean here — but is required to make the `case`
@@ -341,6 +346,14 @@ pub(in crate::core_erlang) struct ArmFrame {
 pub(in crate::core_erlang) enum PureArm<'b> {
     /// The block's body compiled in place as the arm's plain value.
     Inline(&'b Block),
+    /// A single-block conditional's non-taken answer ([`SoloAnswer`]).
+    Answer(SoloAnswer),
+}
+
+/// BT-4189: what a single-block boolean conditional ([`SoloBoolean`])
+/// answers on the arm that does NOT run its block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum SoloAnswer {
     /// The receiver itself (`C`) — the non-taken solo-branch contract
     /// (`False>>ifTrue: => self`, `True>>ifFalse: => self`).
     Receiver,
@@ -348,6 +361,115 @@ pub(in crate::core_erlang) enum PureArm<'b> {
     /// (`Boolean>>and:`/`or:`, `stdlib/src/boolean.bt`). Stored as a
     /// `bool` and emitted via `leaf::atom` (typed leaves, ADR 0089).
     Literal(bool),
+}
+
+impl SoloAnswer {
+    /// The answer as a Core Erlang value, `cond_var` naming the
+    /// once-evaluated receiver. The one emission both the pure builder
+    /// ([`CoreErlangGenerator::generate_pure_boolean_case`]) and the
+    /// mutation builder
+    /// ([`CoreErlangGenerator::generate_solo_boolean_with_mutations_tuple`])
+    /// use.
+    pub(in crate::core_erlang) fn doc(self, cond_var: &str) -> Document<'static> {
+        match self {
+            SoloAnswer::Receiver => leaf::var(cond_var),
+            SoloAnswer::Literal(value) => leaf::atom(if value { "true" } else { "false" }),
+        }
+    }
+
+    /// The Boolean this answer evaluates to on a Boolean `receiver`. Test
+    /// oracles that model a conditional's result on a BEAM read it here
+    /// rather than restating the rule (BT-4189).
+    #[cfg(test)]
+    pub(in crate::core_erlang) fn evaluate(self, receiver: bool) -> bool {
+        match self {
+            SoloAnswer::Receiver => receiver,
+            SoloAnswer::Literal(value) => value,
+        }
+    }
+}
+
+/// BT-4189: the single-block boolean conditionals — `ifTrue:`, `ifFalse:`,
+/// `and:`, `or:` — and the ONE table of which receiver arm runs the block
+/// ([`SoloBoolean::block_on_true`]) and what the other arm answers
+/// ([`SoloBoolean::non_taken`]). Both the pure-inline path (BT-4070,
+/// [`CoreErlangGenerator::generate_solo_boolean_pure`]) and the
+/// mutation/threading path
+/// ([`CoreErlangGenerator::generate_solo_boolean_with_mutations_tuple`]) read
+/// it, so a non-taken arm can never answer differently depending on whether
+/// the block is pure (before BT-4189 the mutation path hard-coded `nil` for a
+/// non-taken `ifTrue:`/`ifFalse:`, where dispatch answers the receiver).
+///
+/// The table follows the stdlib definitions dynamic dispatch runs:
+/// `False>>ifTrue: => self`, `True>>ifFalse: => self` (`stdlib/src/false.bt`,
+/// `true.bt`), and `Boolean>>and:`/`or:` (`stdlib/src/boolean.bt`). It also
+/// names the selector atom ([`SoloBoolean::selector_atom`]), so a builder
+/// that falls back to a dynamic send for a non-Boolean receiver (the pure
+/// path's wildcard arm; BT-4244 for the mutation path) sends the same
+/// message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum SoloBoolean {
+    /// `R ifTrue: [B]`
+    IfTrue,
+    /// `R ifFalse: [B]`
+    IfFalse,
+    /// `R and: [B]`
+    And,
+    /// `R or: [B]`
+    Or,
+}
+
+impl SoloBoolean {
+    /// Every variant, for table-driven tests.
+    #[cfg(test)]
+    pub(in crate::core_erlang) const ALL: [SoloBoolean; 4] =
+        [Self::IfTrue, Self::IfFalse, Self::And, Self::Or];
+
+    /// The variant for a one-keyword selector, or `None` for any other.
+    pub(in crate::core_erlang) fn from_keyword(keyword: &str) -> Option<Self> {
+        match keyword {
+            "ifTrue:" => Some(Self::IfTrue),
+            "ifFalse:" => Some(Self::IfFalse),
+            "and:" => Some(Self::And),
+            "or:" => Some(Self::Or),
+            _ => None,
+        }
+    }
+
+    /// The selector, as the atom a dynamic send names.
+    pub(in crate::core_erlang) fn selector_atom(self) -> &'static str {
+        match self {
+            Self::IfTrue => "ifTrue:",
+            Self::IfFalse => "ifFalse:",
+            Self::And => "and:",
+            Self::Or => "or:",
+        }
+    }
+
+    /// `true` when the block runs on a `true` receiver (`ifTrue:`, `and:`).
+    pub(in crate::core_erlang) fn block_on_true(self) -> bool {
+        matches!(self, Self::IfTrue | Self::And)
+    }
+
+    /// What the arm that does not run the block answers.
+    pub(in crate::core_erlang) fn non_taken(self) -> SoloAnswer {
+        match self {
+            Self::IfTrue | Self::IfFalse => SoloAnswer::Receiver,
+            Self::And => SoloAnswer::Literal(false),
+            Self::Or => SoloAnswer::Literal(true),
+        }
+    }
+
+    /// `(true_arm, false_arm)` of the pure-inline `case`, built from
+    /// [`Self::block_on_true`] and [`Self::non_taken`].
+    pub(in crate::core_erlang) fn pure_arms(self, block: &Block) -> (PureArm<'_>, PureArm<'_>) {
+        let answer = PureArm::Answer(self.non_taken());
+        if self.block_on_true() {
+            (PureArm::Inline(block), answer)
+        } else {
+            (answer, PureArm::Inline(block))
+        }
+    }
 }
 
 /// Where a conditional's scratch map — element 2 of its result tuple, the
@@ -380,7 +502,7 @@ impl CoreErlangGenerator {
     /// Seeds the `__local__` keys for the outer locals a conditional's
     /// branches thread, returning `(seed_doc, base_state_var)`.
     ///
-    /// Each branch — including the synthetic non-taken branch (`{'nil', State}`)
+    /// Each branch — including the synthetic non-taken branch (`{<answer>, State}`)
     /// and any branch that does not itself write a given local — must return a
     /// state map that already contains every threaded `__local__` key, so the
     /// method-body sequencer's `maps:get/2` extraction never hits a missing key.
@@ -534,7 +656,7 @@ impl CoreErlangGenerator {
     /// `prelude` is any real `Bind`/`Statement` sequence that must run
     /// BEFORE the `case`'s condition binding (so an actor self-send's new
     /// `State`/`StateAcc` stays in scope inside the `case`), and `value` is the receiver's own
-    /// boolean/nil value to test. Shared by all six `generate_*_with_mutations`
+    /// boolean/nil value to test. Shared by all the `generate_*_with_mutations`
     /// generators below (previously each hand-duplicated this exact match —
     /// CLAUDE.md's no-duplicate-implementations rule). `frame` is the
     /// caller's own current frame ([`CoreErlangGenerator::current_frame`]),
@@ -923,12 +1045,12 @@ impl CoreErlangGenerator {
     /// non-taken-arm / absent-block-passthrough tuple — `{<value_doc>,
     /// <base_state>}` — through the shared
     /// [`family_slots::append_baseline_family_slots`] helper with `[State]`,
-    /// rather than each of the six `generate_*_with_mutations` producers
+    /// rather than each of the `generate_*_with_mutations` producers
     /// hand-rolling its own `"{lit, ", base_state, "}"` `Document` splice.
     /// Byte-identical to the hand-rolled shape: `append_family_slots`'s
     /// `base` here always carries one prior element (`value_doc`), so the
     /// helper always prepends `", "` before the (sole) family slot — the
-    /// exact `"{'nil', "` + var + `"}"` splice every call site built by hand.
+    /// exact `"{<answer>, "` + var + `"}"` splice every call site built by hand.
     ///
     /// `base_state` is a plain Core Erlang variable name, not necessarily a
     /// canonical `State{N}`/`StateAcc{N}` counter value —
@@ -1028,18 +1150,20 @@ impl CoreErlangGenerator {
         Ok(Self::with_producer_head(head, seed.base, tv))
     }
 
-    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
-    /// ifTrue: [block]` — the expression-position counterpart of
-    /// [`Self::generate_if_true_with_mutations_tuple`], whose raw tuple
+    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for a single-block
+    /// boolean conditional (`flag ifTrue: [block]`, `ifFalse:`, `and:`,
+    /// `or:` — [`SoloBoolean`]) — the expression-position counterpart of
+    /// [`Self::generate_solo_boolean_with_mutations_tuple`], whose raw tuple
     /// `Document` this wraps via
-    /// [`Self::control_flow_tuple_to_threaded_value`]. Called by
+    /// [`Self::conditional_tuple_to_threaded_value`]. Called by
     /// [`CoreErlangGenerator::threaded_expression`]'s inline-control-flow
     /// producer branch and by [`super::super::threaded_expr`]'s Actor-body
     /// consumers — never by [`super::super::intrinsics::CoreErlangGenerator::try_generate_boolean_protocol`],
     /// which keeps calling the `_tuple` builder directly for its own
     /// Document-returning contract.
-    pub(in crate::core_erlang) fn generate_if_true_with_mutations(
+    pub(in crate::core_erlang) fn generate_solo_boolean_with_mutations(
         &mut self,
+        sel: SoloBoolean,
         receiver: &Expression,
         block: &Block,
         tail: ProducerTail,
@@ -1048,19 +1172,27 @@ impl CoreErlangGenerator {
         let span = block.span;
         let frame = self.current_frame();
         let scratch = self.conditional_scratch(frame);
-        let tuple_doc =
-            self.generate_if_true_with_mutations_tuple(receiver, block, scratch, producer)?;
+        let tuple_doc = self
+            .generate_solo_boolean_with_mutations_tuple(sel, receiver, block, scratch, producer)?;
         self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
     }
 
-    /// Generates inline code for `flag ifTrue: [block]` in actor context
-    /// when the block contains field mutations.
+    /// Generates inline code for a single-block boolean conditional
+    /// (`flag ifTrue: [block]`, `ifFalse:`, `and:`, `or:`) when the block
+    /// contains field mutations or threaded local writes (or the receiver is
+    /// itself an actor self-send needing threading — see
+    /// `compile_conditional_receiver`).
     ///
     /// Returns `{Result, NewState}`:
-    /// - True branch: `{block_result, mutated_state}`
-    /// - False branch: `{'nil', unchanged_state}`
-    pub(in crate::core_erlang) fn generate_if_true_with_mutations_tuple(
+    /// - The arm that runs the block: `{block_result, mutated_state}`.
+    /// - The non-taken arm: `{<answer>, unchanged_state}`, where `<answer>`
+    ///   comes from [`SoloBoolean::non_taken`] — the table the pure path reads
+    ///   too — so it matches dynamic dispatch: the receiver for
+    ///   `ifTrue:`/`ifFalse:` (`False>>ifTrue: => self`), the literal
+    ///   `false`/`true` for `and:`/`or:` (BT-4189).
+    pub(in crate::core_erlang) fn generate_solo_boolean_with_mutations_tuple(
         &mut self,
+        sel: SoloBoolean,
         receiver: &Expression,
         block: &Block,
         scratch: ScratchStart,
@@ -1072,26 +1204,35 @@ impl CoreErlangGenerator {
         let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
-        // seed threaded outer-locals so the non-taken (false) branch and
-        // the post-conditional extraction always see the `__local__` keys.
+        // seed threaded outer-locals so the non-taken branch and the
+        // post-conditional extraction always see the `__local__` keys.
         let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
         let arm_frame = self.conditional_arm_frame(&[block], producer);
 
         // ADR 0111 Addendum 5: `generate_conditional_branch_inline`
-        // now builds, `verify()`s, and `render()`s this arm's real per-frame
-        // `ThreadedIr` internally — the pre-migration
-        // `check_branch_frame_linearity` scalar-synthesis scaffolding check
-        // that used to run here is gone; `NonLinearVersion`/`UnboundVersion`
-        // are live checks against the real IR now.
+        // builds, `verify()`s, and `render()`s this arm's real per-frame
+        // `ThreadedIr` internally.
         let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
         // explicit wildcard so this boolean `case` is statically
         // exhaustive — see `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("CondNoMatch");
-        // ADR 0122 Decision 3/BT-3514: the non-taken (false) arm's
-        // {'nil', <state>} tuple, through the shared family emission
-        // helper with [State] rather than a hand-rolled splice.
-        let false_tuple = self.conditional_baseline_tuple(Document::Str("'nil'"), &base_state);
+        // The taken arm threads from the seeded base state; the non-taken
+        // arm's `{<answer>, <state>}` tuple goes through the shared family
+        // emission helper with [State] (ADR 0122 Decision 3/BT-3514), its
+        // answer read from the one `SoloBoolean` table (BT-4189).
+        let taken = docvec![
+            "let StateAcc = ",
+            leaf::var(base_state.clone()),
+            " in ",
+            branch_doc,
+        ];
+        let answer = self.conditional_baseline_tuple(sel.non_taken().doc(&cond_var), &base_state);
+        let (true_doc, false_doc) = if sel.block_on_true() {
+            (taken, answer)
+        } else {
+            (answer, taken)
+        };
 
         Ok(docvec![
             cond_preamble,
@@ -1102,12 +1243,10 @@ impl CoreErlangGenerator {
             cond_val_doc,
             " in case ",
             leaf::var(cond_var),
-            " of <'true'> when 'true' -> let StateAcc = ",
-            leaf::var(base_state.clone()),
-            " in ",
-            branch_doc,
+            " of <'true'> when 'true' -> ",
+            true_doc,
             " <'false'> when 'true' -> ",
-            false_tuple,
+            false_doc,
             no_match_fallback,
             " end",
         ])
@@ -1156,242 +1295,8 @@ impl CoreErlangGenerator {
     }
 
     /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
-    /// ifFalse: [block]` — see [`Self::generate_if_true_with_mutations`]'s
-    /// doc comment for the shape every one of these producers shares.
-    pub(in crate::core_erlang) fn generate_if_false_with_mutations(
-        &mut self,
-        receiver: &Expression,
-        block: &Block,
-        tail: ProducerTail,
-        producer: bool,
-    ) -> Result<ThreadedValue> {
-        let span = block.span;
-        let frame = self.current_frame();
-        let scratch = self.conditional_scratch(frame);
-        let tuple_doc =
-            self.generate_if_false_with_mutations_tuple(receiver, block, scratch, producer)?;
-        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
-    }
-
-    /// Generates inline code for `flag ifFalse: [block]` in actor context
-    /// when the block contains field mutations.
-    ///
-    /// Returns `{Result, NewState}`:
-    /// - True branch: `{'nil', unchanged_state}`
-    /// - False branch: `{block_result, mutated_state}`
-    pub(in crate::core_erlang) fn generate_if_false_with_mutations_tuple(
-        &mut self,
-        receiver: &Expression,
-        block: &Block,
-        scratch: ScratchStart,
-        producer: bool,
-    ) -> Result<Document<'static>> {
-        let recv_frame = self.current_frame();
-        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
-        let cond_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
-        let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
-        let cond_var = self.fresh_temp_var("Cond");
-        let outer_state = self.current_state_var();
-        // seed threaded outer-locals so the non-taken (true) branch and
-        // the post-conditional extraction always see the `__local__` keys.
-        let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[block], producer);
-
-        // ADR 0111 Addendum 5: see generate_if_true_with_mutations'
-        // matching comment — real per-frame verify() now runs inside
-        // generate_conditional_branch_inline itself.
-        let (branch_doc, _branch_final) =
-            self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
-        // explicit wildcard so this boolean `case` is statically
-        // exhaustive — see `case_clause_fallback`'s doc comment.
-        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
-        // ADR 0122 Decision 3/BT-3514: the non-taken (true) arm's
-        // {'nil', <state>} tuple, through the shared family emission
-        // helper with [State] rather than a hand-rolled splice.
-        let true_tuple = self.conditional_baseline_tuple(Document::Str("'nil'"), &base_state);
-
-        Ok(docvec![
-            cond_preamble,
-            seed_doc,
-            "let ",
-            leaf::var(cond_var.clone()),
-            " = ",
-            cond_val_doc,
-            " in case ",
-            leaf::var(cond_var),
-            " of <'true'> when 'true' -> ",
-            true_tuple,
-            " <'false'> when 'true' -> let StateAcc = ",
-            leaf::var(base_state),
-            " in ",
-            branch_doc,
-            no_match_fallback,
-            " end",
-        ])
-    }
-
-    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
-    /// and: [block]` — see [`Self::generate_if_true_with_mutations`]'s doc
-    /// comment for the shape every one of these producers shares.
-    pub(in crate::core_erlang) fn generate_and_with_mutations(
-        &mut self,
-        receiver: &Expression,
-        block: &Block,
-        tail: ProducerTail,
-        producer: bool,
-    ) -> Result<ThreadedValue> {
-        let span = block.span;
-        let frame = self.current_frame();
-        let scratch = self.conditional_scratch(frame);
-        let tuple_doc =
-            self.generate_and_with_mutations_tuple(receiver, block, scratch, producer)?;
-        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
-    }
-
-    /// generates inline code for `flag and: [block]` in actor
-    /// context when the block contains field mutations (or the receiver is
-    /// itself an actor self-send needing threading — see
-    /// `compile_conditional_receiver`).
-    ///
-    /// Structurally identical to [`Self::generate_if_true_with_mutations`] —
-    /// `and:` short-circuits to the *literal* `false` on the non-taken path
-    /// rather than `ifTrue:`'s `nil`, matching `boolean.bt`'s own
-    /// self-hosted definition (`and: aBlock => self ifTrue: aBlock ifFalse:
-    /// [false]`), so the inlined fast path stays behaviorally identical to
-    /// the generic-dispatch path it replaces.
-    ///
-    /// Returns `{Result, NewState}`:
-    /// - True branch: `{block_result, mutated_state}`
-    /// - False branch: `{'false', unchanged_state}`
-    pub(in crate::core_erlang) fn generate_and_with_mutations_tuple(
-        &mut self,
-        receiver: &Expression,
-        block: &Block,
-        scratch: ScratchStart,
-        producer: bool,
-    ) -> Result<Document<'static>> {
-        let recv_frame = self.current_frame();
-        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
-        let cond_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
-        let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
-        let cond_var = self.fresh_temp_var("Cond");
-        let outer_state = self.current_state_var();
-        // seed threaded outer-locals so the non-taken (false) branch and
-        // the post-conditional extraction always see the `__local__` keys.
-        let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[block], producer);
-
-        let (branch_doc, _branch_final) =
-            self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
-        // explicit wildcard so this boolean `case` is statically
-        // exhaustive — see `case_clause_fallback`'s doc comment.
-        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
-        // ADR 0122 Decision 3/BT-3514: the non-taken (false) arm's
-        // {'false', <state>} tuple, through the shared family emission
-        // helper with [State] rather than a hand-rolled splice.
-        let false_tuple = self.conditional_baseline_tuple(Document::Str("'false'"), &base_state);
-
-        Ok(docvec![
-            cond_preamble,
-            seed_doc,
-            "let ",
-            leaf::var(cond_var.clone()),
-            " = ",
-            cond_val_doc,
-            " in case ",
-            leaf::var(cond_var),
-            " of <'true'> when 'true' -> let StateAcc = ",
-            leaf::var(base_state.clone()),
-            " in ",
-            branch_doc,
-            " <'false'> when 'true' -> ",
-            false_tuple,
-            no_match_fallback,
-            " end",
-        ])
-    }
-
-    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
-    /// or: [block]` — see [`Self::generate_if_true_with_mutations`]'s doc
-    /// comment for the shape every one of these producers shares.
-    pub(in crate::core_erlang) fn generate_or_with_mutations(
-        &mut self,
-        receiver: &Expression,
-        block: &Block,
-        tail: ProducerTail,
-        producer: bool,
-    ) -> Result<ThreadedValue> {
-        let span = block.span;
-        let frame = self.current_frame();
-        let scratch = self.conditional_scratch(frame);
-        let tuple_doc =
-            self.generate_or_with_mutations_tuple(receiver, block, scratch, producer)?;
-        self.conditional_tuple_to_threaded_value(tuple_doc, frame, span, &[block], tail, producer)
-    }
-
-    /// generates inline code for `flag or: [block]` in actor
-    /// context when the block contains field mutations (or the receiver is
-    /// itself an actor self-send needing threading).
-    ///
-    /// The mirror image of [`Self::generate_and_with_mutations`] — see its
-    /// doc comment. `or:`'s non-taken (true) path short-circuits to the
-    /// literal `true`, matching `boolean.bt`'s `or: aBlock => self ifTrue:
-    /// [true] ifFalse: aBlock`.
-    ///
-    /// Returns `{Result, NewState}`:
-    /// - True branch: `{'true', unchanged_state}`
-    /// - False branch: `{block_result, mutated_state}`
-    pub(in crate::core_erlang) fn generate_or_with_mutations_tuple(
-        &mut self,
-        receiver: &Expression,
-        block: &Block,
-        scratch: ScratchStart,
-        producer: bool,
-    ) -> Result<Document<'static>> {
-        let recv_frame = self.current_frame();
-        let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
-        let cond_preamble = self.threaded_prelude_doc(&recv_tv.prelude);
-        let cond_val_doc = self.threaded_value_doc(&recv_tv.value);
-        let cond_var = self.fresh_temp_var("Cond");
-        let outer_state = self.current_state_var();
-        // seed threaded outer-locals so the non-taken (true) branch and
-        // the post-conditional extraction always see the `__local__` keys.
-        let (seed_doc, base_state) = self.seed_scratch_locals(&[block], scratch, &outer_state);
-        let arm_frame = self.conditional_arm_frame(&[block], producer);
-
-        let (branch_doc, _branch_final) =
-            self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
-        // explicit wildcard so this boolean `case` is statically
-        // exhaustive — see `case_clause_fallback`'s doc comment.
-        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
-        // ADR 0122 Decision 3/BT-3514: the non-taken (true) arm's
-        // {'true', <state>} tuple, through the shared family emission
-        // helper with [State] rather than a hand-rolled splice.
-        let true_tuple = self.conditional_baseline_tuple(Document::Str("'true'"), &base_state);
-
-        Ok(docvec![
-            cond_preamble,
-            seed_doc,
-            "let ",
-            leaf::var(cond_var.clone()),
-            " = ",
-            cond_val_doc,
-            " in case ",
-            leaf::var(cond_var),
-            " of <'true'> when 'true' -> ",
-            true_tuple,
-            " <'false'> when 'true' -> let StateAcc = ",
-            leaf::var(base_state),
-            " in ",
-            branch_doc,
-            no_match_fallback,
-            " end",
-        ])
-    }
-
-    /// ADR 0118 phase 4: the [`ThreadedValue`] producer for `flag
     /// ifTrue: [t_block] ifFalse: [f_block]` — see
-    /// [`Self::generate_if_true_with_mutations`]'s doc comment for the
+    /// [`Self::generate_solo_boolean_with_mutations`]'s doc comment for the
     /// shape every one of these producers shares.
     pub(in crate::core_erlang) fn generate_if_true_if_false_with_mutations(
         &mut self,
@@ -1498,7 +1403,7 @@ impl CoreErlangGenerator {
     /// keyword order, so this generator itself doesn't need to know which
     /// selector produced the call). Generalizes the single-block
     /// `ifNotNil:`-only generator this replaces (see
-    /// [`Self::generate_if_true_with_mutations`]'s doc comment for the
+    /// [`Self::generate_solo_boolean_with_mutations`]'s doc comment for the
     /// producer shape every one of these shares) so `ifNil:` and the
     /// two-block forms get the same inline-case treatment instead of
     /// falling through to a plain Tier 1 closure that discards a nested
@@ -1569,7 +1474,7 @@ impl CoreErlangGenerator {
         let (seed_doc, base_state) = self.seed_scratch_locals(&seed_blocks, scratch, &outer_state);
         let arm_frame = self.conditional_arm_frame(&seed_blocks, producer);
 
-        // ADR 0111 Addendum 5: see generate_if_true_with_mutations'
+        // ADR 0111 Addendum 5: see generate_solo_boolean_with_mutations'
         // matching comment — real per-frame verify() now runs inside
         // generate_conditional_branch_inline itself.
         let nil_arm = if let Some(block) = nil_block {
@@ -1606,47 +1511,31 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-4070: the pure-inline producer for `R ifTrue: [B]` — the
-    /// expression-position counterpart of
-    /// [`Self::generate_if_true_with_mutations_tuple`], but a plain value,
-    /// not a `{Result, NewState}` tuple: the gate
+    /// BT-4070: the pure-inline producer for a single-block boolean
+    /// conditional (`R ifTrue: [B]`, `ifFalse:`, `and:`, `or:` —
+    /// [`SoloBoolean`]) — the expression-position counterpart of
+    /// [`Self::generate_solo_boolean_with_mutations_tuple`], but a plain
+    /// value, not a `{Result, NewState}` tuple: the gate
     /// ([`Self::try_generate_pure_boolean_conditional`]) guarantees no block
     /// or receiver needs threading, so no state is threaded and no classifier
     /// change is needed (`control_flow_has_mutations` is false, the plain
-    /// consumer path). Matches dynamic dispatch exactly: the non-taken
-    /// (false) arm answers the receiver (`False>>ifTrue: => self`), NOT
-    /// `nil` (the mutation path's `{'nil', State}` is a pre-existing
-    /// divergence, pinned by
-    /// `test_if_true_mutation_bypasses_runtime_dispatch` — follow-up, not
-    /// touched here).
-    pub(in crate::core_erlang) fn generate_if_true_pure(
+    /// consumer path). Matches dynamic dispatch exactly: the arms come from
+    /// the [`SoloBoolean`] table the mutation builder reads too, so a
+    /// non-taken `ifTrue:`/`ifFalse:` answers the receiver
+    /// (`False>>ifTrue: => self`) on both paths (BT-4189).
+    pub(in crate::core_erlang) fn generate_solo_boolean_pure(
         &mut self,
+        sel: SoloBoolean,
         receiver: &Expression,
         block: &Block,
         fallback_args: &[Expression],
     ) -> Result<Document<'static>> {
+        let (true_arm, false_arm) = sel.pure_arms(block);
         self.generate_pure_boolean_case(
             receiver,
-            "ifTrue:",
-            PureArm::Inline(block),
-            PureArm::Receiver,
-            fallback_args,
-        )
-    }
-
-    /// BT-4070: the pure-inline producer for `R ifFalse: [B]` — the mirror
-    /// of [`Self::generate_if_true_pure`] (`True>>ifFalse: => self`).
-    pub(in crate::core_erlang) fn generate_if_false_pure(
-        &mut self,
-        receiver: &Expression,
-        block: &Block,
-        fallback_args: &[Expression],
-    ) -> Result<Document<'static>> {
-        self.generate_pure_boolean_case(
-            receiver,
-            "ifFalse:",
-            PureArm::Receiver,
-            PureArm::Inline(block),
+            sel.selector_atom(),
+            true_arm,
+            false_arm,
             fallback_args,
         )
     }
@@ -1668,44 +1557,9 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// BT-4070: the pure-inline producer for `R and: [B]`. The non-taken
-    /// (false) arm is the literal `false`, matching `Boolean>>and:`
-    /// (`stdlib/src/boolean.bt`: `self ifTrue: aBlock ifFalse: [false]`).
-    pub(in crate::core_erlang) fn generate_and_pure(
-        &mut self,
-        receiver: &Expression,
-        block: &Block,
-        fallback_args: &[Expression],
-    ) -> Result<Document<'static>> {
-        self.generate_pure_boolean_case(
-            receiver,
-            "and:",
-            PureArm::Inline(block),
-            PureArm::Literal(false),
-            fallback_args,
-        )
-    }
-
-    /// BT-4070: the pure-inline producer for `R or: [B]`. The non-taken
-    /// (true) arm is the literal `true`, matching `Boolean>>or:`
-    /// (`stdlib/src/boolean.bt`: `self ifTrue: [true] ifFalse: aBlock`).
-    pub(in crate::core_erlang) fn generate_or_pure(
-        &mut self,
-        receiver: &Expression,
-        block: &Block,
-        fallback_args: &[Expression],
-    ) -> Result<Document<'static>> {
-        self.generate_pure_boolean_case(
-            receiver,
-            "or:",
-            PureArm::Literal(true),
-            PureArm::Inline(block),
-            fallback_args,
-        )
-    }
-
-    /// BT-4070: the shared core behind the five `generate_*_pure`
-    /// builders — `R <sel> [blocks]` with literal, non-mutating blocks as an
+    /// BT-4070: the shared core behind the pure-inline builders
+    /// ([`Self::generate_solo_boolean_pure`],
+    /// [`Self::generate_if_true_if_false_pure`]) — `R <sel> [blocks]` with literal, non-mutating blocks as an
     /// inline `case` over the once-evaluated receiver `C`:
     ///
     /// ```erlang
@@ -1815,8 +1669,7 @@ impl CoreErlangGenerator {
                 self.pop_scope();
                 body
             }
-            PureArm::Receiver => Ok(leaf::var(cond_var)),
-            PureArm::Literal(value) => Ok(leaf::atom(if value { "true" } else { "false" })),
+            PureArm::Answer(answer) => Ok(answer.doc(cond_var)),
         }
     }
 
@@ -1980,19 +1833,18 @@ impl CoreErlangGenerator {
             return Ok(None);
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        if let (Some(solo), [Expression::Block(block)]) =
+            (SoloBoolean::from_keyword(&sel), arguments.as_slice())
+        {
+            return Ok(Some(self.generate_solo_boolean_with_mutations(
+                solo,
+                receiver,
+                block,
+                tail,
+                root_producer,
+            )?));
+        }
         let tv = match (sel.as_str(), arguments.as_slice()) {
-            ("and:", [Expression::Block(block)]) => {
-                self.generate_and_with_mutations(receiver, block, tail, root_producer)?
-            }
-            ("or:", [Expression::Block(block)]) => {
-                self.generate_or_with_mutations(receiver, block, tail, root_producer)?
-            }
-            ("ifTrue:", [Expression::Block(block)]) => {
-                self.generate_if_true_with_mutations(receiver, block, tail, root_producer)?
-            }
-            ("ifFalse:", [Expression::Block(block)]) => {
-                self.generate_if_false_with_mutations(receiver, block, tail, root_producer)?
-            }
             (
                 "ifTrue:ifFalse:",
                 [
@@ -3717,7 +3569,8 @@ mod tests {
     #[test]
     fn test_if_true_mutation_bypasses_runtime_dispatch() {
         // Actor ifTrue: with field mutation compiles to inline case (not runtime dispatch).
-        // Also verifies the non-taken (false) branch returns {'nil', State}.
+        // Also verifies the non-taken (false) branch answers the receiver,
+        // `{_CondN, State}` (BT-4189: `False>>ifTrue: => self`, not `nil`).
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  inc: flag =>\n    flag ifTrue: [self.n := self.n + 1].\n    self.n\n";
         let code = codegen(src);
         assert!(
@@ -3734,11 +3587,8 @@ mod tests {
             !code.contains(", 'ifTrue:', ["),
             "ifTrue: with mutation should NOT use runtime dispatch. Got:\n{code}"
         );
-        // Non-taken branch returns {'nil', unchanged_state} with StateAcc naming
-        assert!(
-            code.contains("{'nil',"),
-            "Non-taken branch should return {{'nil', State}}. Got:\n{code}"
-        );
+        // Non-taken branch answers the receiver with unchanged state.
+        assert_non_taken_answers_receiver(&code, "false");
         assert!(
             code.contains("StateAcc"),
             "Branch bodies should use StateAcc naming. Got:\n{code}"
@@ -3803,11 +3653,57 @@ mod tests {
             code.contains("maps':'put'('n'"),
             "False branch should update 'n' via maps:put. Got:\n{code}"
         );
-        // True arm returns nil with unchanged state, as {'nil', State}
+        // True arm answers the receiver with unchanged state (BT-4189:
+        // `True>>ifFalse: => self`, not `nil`).
+        assert_non_taken_answers_receiver(&code, "true");
+    }
+
+    /// BT-4189: the `<'arm'>` clause of a single-block conditional answers
+    /// `{_CondN, State}` — the receiver the `case` scrutinises — and no
+    /// non-taken arm answers `nil`.
+    fn assert_non_taken_answers_receiver(code: &str, arm: &str) {
+        let head = format!("<'{arm}'> when 'true' -> {{");
+        let at = code
+            .find(&head)
+            .unwrap_or_else(|| panic!("no `{head}` non-taken arm. Got:\n{code}"));
+        let answer = code[at + head.len()..]
+            .split(',')
+            .next()
+            .unwrap_or_default()
+            .trim();
         assert!(
-            code.contains("{'nil',"),
-            "True arm of ifFalse: should return {{'nil', State}}. Got:\n{code}"
+            answer.starts_with("_Cond") && code.contains(&format!("case {answer} of")),
+            "non-taken `{arm}` arm should answer the receiver `case` var, got `{answer}`. Got:\n{code}"
         );
+        assert!(
+            !code.contains("{'nil',"),
+            "no non-taken arm should answer nil. Got:\n{code}"
+        );
+    }
+
+    /// BT-4189: the one `SoloBoolean` table agrees with the stdlib
+    /// definitions dynamic dispatch runs, and the pure arms are built from
+    /// it (exactly one arm runs the block).
+    #[test]
+    fn solo_boolean_table_matches_dispatch() {
+        for sel in SoloBoolean::ALL {
+            assert_eq!(SoloBoolean::from_keyword(sel.selector_atom()), Some(sel));
+            let expected = match sel {
+                SoloBoolean::IfTrue => (true, SoloAnswer::Receiver),
+                SoloBoolean::IfFalse => (false, SoloAnswer::Receiver),
+                SoloBoolean::And => (true, SoloAnswer::Literal(false)),
+                SoloBoolean::Or => (false, SoloAnswer::Literal(true)),
+            };
+            assert_eq!((sel.block_on_true(), sel.non_taken()), expected, "{sel:?}");
+            let block = Block::new(Vec::new(), Vec::new(), Span::default());
+            let (t, f) = sel.pure_arms(&block);
+            let inline = |a: PureArm<'_>| matches!(a, PureArm::Inline(_));
+            assert_eq!(
+                (inline(t), inline(f)),
+                (sel.block_on_true(), !sel.block_on_true())
+            );
+        }
+        assert_eq!(SoloBoolean::from_keyword("ifTrue:ifFalse:"), None);
     }
 
     #[test]

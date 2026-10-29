@@ -1,0 +1,142 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4189: the actor column of the solo-branch threading-answer matrix. Each
+// method runs `flag ifTrue: [<write>]` / `flag ifFalse: [<write>]` with a
+// block that writes an outer local (unprefixed methods) or a
+// field (`field...` methods), so the conditional compiles through the
+// mutation/threading path, in one position: method tail, `r := ...`, the
+// operand of a send, the arm of an outer conditional, a `collect:` body and an
+// `inject:into:` body. The non-taken branch answers the receiver
+// (`False>>ifTrue: => self`, `True>>ifFalse: => self`), never `nil`, and the
+// write does not happen. The expected answers are in
+// stdlib/test/solo_branch_threading_answer_test.bt.
+
+Actor subclass: SoloBranchAnswerActor
+  state: x = 0
+
+  x => self.x
+
+  tailIfTrue: flag =>
+    t := 0
+    flag ifTrue: [t := t + 1]
+
+  assignIfTrue: flag =>
+    t := 0
+    r := flag ifTrue: [t := t + 1]
+    #[r, t]
+
+  operandIfTrue: flag =>
+    t := 0
+    s := (flag ifTrue: [t := t + 1]) printString
+    #[s, t]
+
+  armIfTrue: flag =>
+    t := 0
+    r := flag isNil ifTrue: [#none] ifFalse: [flag ifTrue: [t := t + 1]]
+    #[r, t]
+
+  collectIfTrue: flag =>
+    t := 0
+    rs := #(1) collect: [:_i | flag ifTrue: [t := t + 1]]
+    #[rs first, t]
+
+  injectIfTrue: flag =>
+    t := 0
+    r := #(1) inject: #none into: [:_acc :_i | flag ifTrue: [t := t + 1]]
+    #[r, t]
+
+  tailIfFalse: flag =>
+    t := 0
+    flag ifFalse: [t := t + 1]
+
+  assignIfFalse: flag =>
+    t := 0
+    r := flag ifFalse: [t := t + 1]
+    #[r, t]
+
+  operandIfFalse: flag =>
+    t := 0
+    s := (flag ifFalse: [t := t + 1]) printString
+    #[s, t]
+
+  armIfFalse: flag =>
+    t := 0
+    r := flag isNil ifTrue: [#none] ifFalse: [flag ifFalse: [t := t + 1]]
+    #[r, t]
+
+  collectIfFalse: flag =>
+    t := 0
+    rs := #(1) collect: [:_i | flag ifFalse: [t := t + 1]]
+    #[rs first, t]
+
+  injectIfFalse: flag =>
+    t := 0
+    r := #(1) inject: #none into: [:_acc :_i | flag ifFalse: [t := t + 1]]
+    #[r, t]
+
+  fieldTailIfTrue: flag =>
+    self.x := 0
+    flag ifTrue: [self.x := self.x + 1]
+
+  fieldAssignIfTrue: flag =>
+    self.x := 0
+    r := flag ifTrue: [self.x := self.x + 1]
+    #[r, self.x]
+
+  fieldOperandIfTrue: flag =>
+    self.x := 0
+    s := (flag ifTrue: [self.x := self.x + 1]) printString
+    #[s, self.x]
+
+  fieldArmIfTrue: flag =>
+    self.x := 0
+    r := flag isNil ifTrue: [
+      #none
+    ] ifFalse: [flag ifTrue: [self.x := self.x + 1]]
+    #[r, self.x]
+
+  fieldCollectIfTrue: flag =>
+    self.x := 0
+    rs := #(1) collect: [:_i | flag ifTrue: [self.x := self.x + 1]]
+    #[rs first, self.x]
+
+  fieldInjectIfTrue: flag =>
+    self.x := 0
+    r := #(1) inject: #none into: [:_acc :_i |
+      flag ifTrue: [self.x := self.x + 1]
+    ]
+    #[r, self.x]
+
+  fieldTailIfFalse: flag =>
+    self.x := 0
+    flag ifFalse: [self.x := self.x + 1]
+
+  fieldAssignIfFalse: flag =>
+    self.x := 0
+    r := flag ifFalse: [self.x := self.x + 1]
+    #[r, self.x]
+
+  fieldOperandIfFalse: flag =>
+    self.x := 0
+    s := (flag ifFalse: [self.x := self.x + 1]) printString
+    #[s, self.x]
+
+  fieldArmIfFalse: flag =>
+    self.x := 0
+    r := flag isNil ifTrue: [
+      #none
+    ] ifFalse: [flag ifFalse: [self.x := self.x + 1]]
+    #[r, self.x]
+
+  fieldCollectIfFalse: flag =>
+    self.x := 0
+    rs := #(1) collect: [:_i | flag ifFalse: [self.x := self.x + 1]]
+    #[rs first, self.x]
+
+  fieldInjectIfFalse: flag =>
+    self.x := 0
+    r := #(1) inject: #none into: [:_acc :_i |
+      flag ifFalse: [self.x := self.x + 1]
+    ]
+    #[r, self.x]
