@@ -76,9 +76,17 @@ fn compile_failure(context: grid::Context, src: &str, probes: &[&str]) -> Option
     }
 }
 
+/// How a module is compiled: [`compile_failure`]'s signature, a parameter so
+/// a test can inject a failure that only the batched module shows.
+type Compile = dyn Fn(grid::Context, &str, &[&str]) -> Option<String>;
+
 /// The cells of `cells` in `context` as one module, each its own probe method
-/// (`probe0`, `probe1`, ...), through [`compile_failure`]: one `erlc` run.
-fn compile_batch_failure(cells: &[Cell], context: grid::Context) -> Option<String> {
+/// (`probe0`, `probe1`, ...), through `compile`: one `erlc` run.
+fn compile_batch_failure(
+    cells: &[Cell],
+    context: grid::Context,
+    compile: &Compile,
+) -> Option<String> {
     let probes: Vec<(String, String)> = cells
         .iter()
         .filter(|c| c.context == context)
@@ -86,26 +94,41 @@ fn compile_batch_failure(cells: &[Cell], context: grid::Context) -> Option<Strin
         .map(|(i, cell)| (format!("probe{i}"), cell.body()))
         .collect();
     let names: Vec<&str> = probes.iter().map(|(name, _)| name.as_str()).collect();
-    compile_failure(context, &grid::grid_source(context, &probes), &names)
+    compile(context, &grid::grid_source(context, &probes), &names)
 }
 
-/// Every cell of the grid whose host is in `hosts`, in every context: one
-/// module per context holding every cell as its own probe method, and one
-/// module per cell only when that fails, so a failure names its cell.
-fn evaluated_block_grid_corpus(hosts: &[&'static str]) {
-    let cells = grid::cells_of(hosts);
+/// The failures of `cells` under `compile`: per context, the batched module
+/// first, and each cell on its own only when the batch fails, so a failure
+/// names its cell. A batch failure no single cell explains (a collision
+/// between methods of one module: fresh temps, fun names, `method_info`,
+/// duplicate letrec names) is a failure of its own, labelled `batch
+/// (<context>)`, which names no pin.
+fn grid_failures(cells: &[Cell], compile: &Compile) -> Vec<String> {
     let mut failures: Vec<String> = Vec::new();
     for &context in CONTEXTS {
-        if compile_batch_failure(&cells, context).is_none() {
+        let Some(batch) = compile_batch_failure(cells, context, compile) else {
             continue;
-        }
+        };
+        let before = failures.len();
         for cell in cells.iter().filter(|c| c.context == context) {
             let src = cell.source();
-            if let Some(why) = compile_failure(context, &src, &["probe"]) {
+            if let Some(why) = compile(context, &src, &["probe"]) {
                 failures.push(format!("{}\n  {why}\n{src}", cell.label()));
             }
         }
+        if failures.len() == before {
+            failures.push(format!(
+                "batch ({context:?}): no single cell fails\n  {batch}"
+            ));
+        }
     }
+    failures
+}
+
+/// Every cell of the grid whose host is in `hosts`, in every context
+/// ([`grid_failures`]), compiles, or fails exactly as pinned.
+fn evaluated_block_grid_corpus(hosts: &[&'static str]) {
+    let failures = grid_failures(&grid::cells_of(hosts), &compile_failure);
     let failing: Vec<&str> = failures
         .iter()
         .map(|f| f.lines().next().unwrap_or_default())
@@ -176,7 +199,7 @@ fn the_evaluated_block_grid_corpus_fails_without_the_bt3982_producer() {
         let cells = grid::cells_of(&[host]);
         for &context in CONTEXTS {
             let failure = fault::with(LocalRebindFault::EvaluatedBlockNotAProducer, || {
-                compile_batch_failure(&cells, context)
+                compile_batch_failure(&cells, context, &compile_failure)
             });
             if context == grid::Context::Actor {
                 assert!(failure.is_some(), "{host}: the actor cells compile");
@@ -185,4 +208,28 @@ fn the_evaluated_block_grid_corpus_fails_without_the_bt3982_producer() {
             }
         }
     }
+}
+
+/// A failure only the batched module shows (here injected: any module with
+/// more than one probe fails) is reported, not dropped because every cell
+/// compiles on its own.
+#[test]
+fn a_batch_only_evaluated_block_grid_corpus_failure_is_reported() {
+    let batch_only = |_: grid::Context, _: &str, probes: &[&str]| {
+        (probes.len() > 1).then(|| "injected batch-only failure".to_string())
+    };
+    let failures = grid_failures(&grid::cells_of(&["method"]), &batch_only);
+    let labels: Vec<&str> = failures
+        .iter()
+        .map(|f| f.lines().next().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "batch (Actor): no single cell fails",
+            "batch (Class): no single cell fails",
+            "batch (Value): no single cell fails",
+        ]
+    );
+    assert!(labels.iter().all(|l| !PINNED_FAILURES.contains(l)));
 }
