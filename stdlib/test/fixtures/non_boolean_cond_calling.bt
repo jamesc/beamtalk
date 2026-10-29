@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4244: a non-Boolean receiver whose `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+// call the block they are given. An inline boolean conditional sends the
+// message to it, so the block runs here, outside the inline `case`. Each
+// answer tags the selector that ran. See
+// stdlib/test/non_boolean_conditional_receiver_test.bt.
+
+Value subclass: NonBooleanCondCalling
+
+  ifTrue: aBlock => #[#ifTrue, aBlock value]
+
+  ifFalse: aBlock => #[#ifFalse, aBlock value]
+
+  ifTrue: _trueBlock ifFalse: falseBlock => #[#ifTrueIfFalse, falseBlock value]

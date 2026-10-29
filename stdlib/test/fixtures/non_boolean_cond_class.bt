@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4244: the class-method column of the non-Boolean conditional receiver
+// matrix. `pure...` methods have arms that write nothing (the pure-inline
+// lowering); `local...` methods have an arm that writes an outer local (the
+// mutation lowering). Both send the selector to a receiver that is not a
+// Boolean. The expected answers are in
+// stdlib/test/non_boolean_conditional_receiver_test.bt.
+
+Object subclass: NonBooleanCondClass
+
+  class pureIfTrue: x => x ifTrue: [1]
+
+  class pureIfFalse: x => x ifFalse: [1]
+
+  class pureIfTrueIfFalse: x => x ifTrue: [1] ifFalse: [2]
+
+  class localIfTrue: x =>
+    t := 0
+    r := x ifTrue: [t := t + 1]
+    #[r, t]
+
+  class localIfFalse: x =>
+    t := 0
+    r := x ifFalse: [t := t + 1]
+    #[r, t]
+
+  class localIfTrueIfFalse: x =>
+    t := 0
+    r := x ifTrue: [t := 1] ifFalse: [t := 2]
+    #[r, t]
+
+  class localTailIfTrue: x =>
+    t := 0
+    x ifTrue: [t := t + 1]
+
+  class localCollectIfTrue: x =>
+    t := 0
+    rs := #(1) collect: [:_i | x ifTrue: [t := t + 1]]
+    #[rs first, t]

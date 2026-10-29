@@ -389,6 +389,17 @@ impl SoloAnswer {
     }
 }
 
+/// The two-block boolean conditional's selector, as the atom its non-Boolean
+/// fallback send names ([`CoreErlangGenerator::boolean_fallback_send`]).
+pub(in crate::core_erlang) const IF_TRUE_IF_FALSE: &str = "ifTrue:ifFalse:";
+
+/// BT-4244: the hint of the `stateful_block_dispatch` error a conditional's
+/// fallback closure raises when a non-Boolean receiver's method calls an arm
+/// whose state effects only the inline conditional can thread
+/// ([`CoreErlangGenerator::fallback_block_doc`]).
+const FALLBACK_WRITING_BLOCK_HINT: &str =
+    "A non-Boolean receiver called a conditional's block that only runs inline";
+
 /// BT-4189: the single-block boolean conditionals — `ifTrue:`, `ifFalse:`,
 /// `and:`, `or:` — and the ONE table of which receiver arm runs the block
 /// ([`SoloBoolean::block_on_true`]) and what the other arm answers
@@ -1219,9 +1230,15 @@ impl CoreErlangGenerator {
         // `ThreadedIr` internally.
         let (branch_doc, _branch_final) =
             self.with_branch_context(|this| this.conditional_arm(block, arm_frame.as_ref()))?;
-        // explicit wildcard so this boolean `case` is statically
-        // exhaustive — see `case_clause_fallback`'s doc comment.
-        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+        // BT-4244: a non-Boolean receiver sends the message, as the pure
+        // path does; the clause also keeps the `case` statically exhaustive
+        // (see `case_clause_fallback`'s doc comment).
+        let no_match_fallback = self.mutation_boolean_fallback_clause(
+            &cond_var,
+            sel.selector_atom(),
+            &[block],
+            &base_state,
+        )?;
         // The taken arm threads from the seeded base state; the non-taken
         // arm's `{<answer>, <state>}` tuple goes through the shared family
         // emission helper with [State] (ADR 0122 Decision 3/BT-3514), its
@@ -1447,9 +1464,15 @@ impl CoreErlangGenerator {
         // NonLinearVersion violation — the check that used to run here
         // (`check_branch_frame_linearity`) is gone; real per-frame
         // verification now happens where the IR is actually built.
-        // explicit wildcard so this boolean `case` is statically
-        // exhaustive — see `case_clause_fallback`'s doc comment.
-        let no_match_fallback = self.case_clause_fallback("CondNoMatch");
+        // BT-4244: a non-Boolean receiver sends the message, as the pure
+        // path does; the clause also keeps the `case` statically exhaustive
+        // (see `case_clause_fallback`'s doc comment).
+        let no_match_fallback = self.mutation_boolean_fallback_clause(
+            &cond_var,
+            IF_TRUE_IF_FALSE,
+            &[true_block, false_block],
+            &base_state,
+        )?;
 
         Ok(docvec![
             cond_preamble,
@@ -1465,7 +1488,7 @@ impl CoreErlangGenerator {
             " in ",
             true_branch_doc,
             " <'false'> when 'true' -> let StateAcc = ",
-            leaf::var(base_state),
+            leaf::var(base_state.clone()),
             " in ",
             false_branch_doc,
             no_match_fallback,
@@ -1606,7 +1629,6 @@ impl CoreErlangGenerator {
         sel: SoloBoolean,
         receiver: &Expression,
         block: &Block,
-        fallback_args: &[Expression],
     ) -> Result<Document<'static>> {
         let (true_arm, false_arm) = sel.pure_arms(block);
         self.generate_pure_boolean_case(
@@ -1614,7 +1636,7 @@ impl CoreErlangGenerator {
             sel.selector_atom(),
             true_arm,
             false_arm,
-            fallback_args,
+            &[block],
         )
     }
 
@@ -1624,14 +1646,13 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         true_block: &Block,
         false_block: &Block,
-        fallback_args: &[Expression],
     ) -> Result<Document<'static>> {
         self.generate_pure_boolean_case(
             receiver,
-            "ifTrue:ifFalse:",
+            IF_TRUE_IF_FALSE,
             PureArm::Inline(true_block),
             PureArm::Inline(false_block),
-            fallback_args,
+            &[true_block, false_block],
         )
     }
 
@@ -1679,7 +1700,7 @@ impl CoreErlangGenerator {
         selector_atom: &'static str,
         true_arm: PureArm<'_>,
         false_arm: PureArm<'_>,
-        fallback_args: &[Expression],
+        blocks: &[&Block],
     ) -> Result<Document<'static>> {
         let recv_frame = self.current_frame();
         let recv_tv = self.compile_conditional_receiver(receiver, recv_frame)?;
@@ -1688,25 +1709,7 @@ impl CoreErlangGenerator {
         let cond_var = self.fresh_temp_var("Cond");
         let true_doc = self.pure_arm_doc(true_arm, &cond_var)?;
         let false_doc = self.pure_arm_doc(false_arm, &cond_var)?;
-        // Decline pure-inline inside the fallback closures (same
-        // save/restore shape as `while_loops.rs` — bind the result,
-        // restore, then `?`, so an error never leaks the flag): without
-        // this, nested pure conditionals emit 2^n copies of the innermost
-        // arm. Warnings are deduplicated across the loop: the fallback
-        // lowers the same AST the inline arm already reported, so exact
-        // repeats are dropped — but lowering-specific findings survive.
-        let prev = std::mem::replace(&mut self.decline_pure_boolean_inline, true);
-        let warn_len = self.codegen_warnings.len();
-        let closures: Result<Vec<_>> = fallback_args
-            .iter()
-            .map(|a| self.expression_doc(a))
-            .collect();
-        self.decline_pure_boolean_inline = prev;
-        let new_warnings = self.codegen_warnings.split_off(warn_len);
-        self.dedup_append_codegen_warnings(new_warnings);
-        let closure_docs = closures?;
-        let fallback =
-            Self::runtime_send_call(leaf::var(cond_var.clone()), selector_atom, closure_docs);
+        let fallback = self.boolean_fallback_send(&cond_var, selector_atom, blocks)?;
         let no_match_var = self.fresh_temp_var("CondNoMatch");
 
         Ok(docvec![
@@ -1726,6 +1729,156 @@ impl CoreErlangGenerator {
             "> when 'true' -> ",
             fallback,
             " end",
+        ])
+    }
+
+    /// BT-4244: the dynamic send a boolean conditional's wildcard arm makes for
+    /// a receiver that is neither `true` nor `false`:
+    /// `beamtalk_message_dispatch:send(<cond_var>, '<selector>', [<blocks>])`.
+    /// It is the one fallback every inline boolean lowering uses: the pure
+    /// `case` ([`Self::generate_pure_boolean_case`]), the mutation `case`s
+    /// ([`Self::mutation_boolean_fallback_clause`]) and the value-type
+    /// conditionals. A user-defined `ifTrue:` therefore runs, and any other
+    /// receiver raises a structured `does_not_understand`, whether or not an
+    /// arm writes state.
+    ///
+    /// The arms go to the send as real blocks ([`Self::fallback_block_doc`]),
+    /// compiled while pure-inline is declined (same save/restore shape as
+    /// `while_loops.rs`: bind the result, restore, then `?`, so an error never
+    /// leaks the flag). They run only for a non-Boolean receiver, so inlining
+    /// buys nothing there, and inlining inside them would duplicate nested
+    /// blocks exponentially (each level compiles its blocks both inline and as
+    /// fallback closures). Codegen warnings are deduplicated for the same
+    /// reason: the closures lower the same AST the inline arms already
+    /// reported, and `add_codegen_warning` does not dedup, while
+    /// lowering-specific findings are kept (see
+    /// `dedup_append_codegen_warnings`).
+    pub(in crate::core_erlang) fn boolean_fallback_send(
+        &mut self,
+        cond_var: &str,
+        selector_atom: &str,
+        blocks: &[&Block],
+    ) -> Result<Document<'static>> {
+        let prev = std::mem::replace(&mut self.decline_pure_boolean_inline, true);
+        let warn_len = self.codegen_warnings.len();
+        let closures: Result<Vec<_>> = blocks
+            .iter()
+            .map(|block| self.fallback_block_doc(block, selector_atom))
+            .collect();
+        self.decline_pure_boolean_inline = prev;
+        let new_warnings = self.codegen_warnings.split_off(warn_len);
+        self.dedup_append_codegen_warnings(new_warnings);
+        Ok(Self::runtime_send_call(
+            leaf::var(cond_var.to_string()),
+            selector_atom,
+            closures?,
+        ))
+    }
+
+    /// BT-4244: one block argument of [`Self::boolean_fallback_send`]: the
+    /// block as the closure the fully dynamic send would pass
+    /// ([`Self::generate_block`]), so ADR 0133's escaping-block rules apply to
+    /// it once a non-Boolean receiver's method runs it: an actor field write
+    /// goes through the cell (ADR 0137) and a class-variable write is in place
+    /// (ADR 0130).
+    ///
+    /// A block that writes what no escaping block can write (a captured local,
+    /// ADR 0133, or a value-type field, [`Self::check_closure_field_writes`])
+    /// is not a compile error here: the inline arms thread that write, and
+    /// only a receiver that is not a Boolean reaches this closure. Nor is a
+    /// block that touches the actor's state where the send cannot be
+    /// bracketed (`stub_state`, [`Self::conditional_fallback_stubs_state`]).
+    /// Either is passed as a `fun` of the block's arity that raises
+    /// `stateful_block_dispatch` when called, the error a Tier 2 block raises
+    /// when generic dispatch calls it, so the send still runs (and DNUs, or
+    /// reaches a user `ifTrue:`) and the block's state effects are never
+    /// silently lost.
+    fn fallback_block_doc(
+        &mut self,
+        block: &Block,
+        selector_atom: &str,
+    ) -> Result<Document<'static>> {
+        if self.fallback_passes_closure(block) {
+            return self.generate_block(block);
+        }
+        let params: Vec<Document<'static>> = block
+            .parameters
+            .iter()
+            .map(|_| leaf::var(self.fresh_temp_var("FbArg")))
+            .collect();
+        let raise = self.generate_stateful_block_dispatch_error(
+            selector_atom,
+            "Block",
+            FALLBACK_WRITING_BLOCK_HINT,
+        );
+        Ok(docvec![
+            "fun (",
+            beamtalk_cerl_doc::join(params, &Document::Str(", ")),
+            ") -> ",
+            raise,
+        ])
+    }
+
+    /// BT-4244: whether [`Self::fallback_block_doc`] passes `block` as a real
+    /// closure (`true`) or as a raising stub (`false`). The one decision both
+    /// the closure emission and the bracket
+    /// ([`Self::mutation_boolean_fallback_clause`]) read, so a fallback whose
+    /// blocks are all stubs is never bracketed.
+    fn fallback_passes_closure(&self, block: &Block) -> bool {
+        let analysis = crate::core_erlang::block_analysis::analyze_block(block);
+        !self.conditional_arms_write_outer_locals(&[block])
+            && self.check_closure_field_writes(block, &analysis).is_ok()
+            && !(self.conditional_fallback_stubs_state()
+                && self.analysis_touches_actor_state(&analysis))
+    }
+
+    /// BT-4244: the wildcard clause of a mutation-path boolean `case`
+    /// ([`Self::generate_solo_boolean_with_mutations_tuple`],
+    /// [`Self::generate_if_true_if_false_with_mutations_tuple`]): the shared
+    /// dynamic send ([`Self::boolean_fallback_send`]) in the `{Result,
+    /// NewState}` shape the other arms answer. Before BT-4244 it raised a raw
+    /// `case_clause`, where the pure path sends the message.
+    ///
+    /// In an actor instance method whose frame holds a whole `State`, the
+    /// send is bracketed ([`Self::conditional_fallback_brackets`]) when a
+    /// block passed as a closure touches the actor's state: the closures it passes read and
+    /// write the actor's fields through the cell, so the arm stores
+    /// `base_state` first and answers the reloaded cell as its state (and
+    /// the method stores its final `State` on exit, `with_exit_store`). A
+    /// fallback whose blocks touch nothing of the actor's needs no bracket
+    /// and costs the method no exit store. Elsewhere nothing the closures
+    /// can do reaches the scratch map (a captured local is never written by
+    /// one, and a block touching the actor's state is a stub where the send
+    /// cannot bracket, [`Self::fallback_block_doc`]), so the arm answers
+    /// `base_state` unchanged, as the non-taken arm does.
+    fn mutation_boolean_fallback_clause(
+        &mut self,
+        cond_var: &str,
+        selector_atom: &str,
+        blocks: &[&Block],
+        base_state: &str,
+    ) -> Result<Document<'static>> {
+        let send = self.boolean_fallback_send(cond_var, selector_atom, blocks)?;
+        let span = blocks.first().map(|b| b.span).unwrap_or_default();
+        let no_match_var = self.fresh_temp_var("CondNoMatch");
+        // Bracket only when a block passed as a real closure touches the
+        // actor's state: a stub touches nothing.
+        let brackets = self.conditional_fallback_brackets()
+            && blocks.iter().any(|block| {
+                self.fallback_passes_closure(block) && self.block_touches_actor_state(block)
+            });
+        let body = if brackets {
+            let bracket = self.bracket_conditional_fallback(send, base_state, span);
+            let tuple = self.conditional_baseline_tuple(leaf::var(bracket.result), &bracket.state);
+            docvec![bracket.prelude, tuple]
+        } else {
+            self.conditional_baseline_tuple(send, base_state)
+        };
+        Ok(docvec![
+            " <",
+            leaf::var(no_match_var),
+            "> when 'true' -> ",
+            body,
         ])
     }
 
@@ -3675,11 +3828,9 @@ mod tests {
             "True branch should update 'n' via maps:put. Got:\n{code}"
         );
         // The untyped `self.n + 1` keeps its operator guard (whose fallback
-        // sends `+`, BT-3925); the conditional itself is never sent.
-        assert!(
-            !code.contains(", 'ifTrue:', ["),
-            "ifTrue: with mutation should NOT use runtime dispatch. Got:\n{code}"
-        );
+        // sends `+`, BT-3925); the conditional itself is sent only for a
+        // non-Boolean receiver (BT-4244).
+        crate::core_erlang::tests::assert_selector_sent_only_by_fallback(&code, "ifTrue:");
         // Non-taken branch answers the receiver with unchanged state.
         assert_non_taken_answers_receiver(&code, "false");
         assert!(
@@ -3706,20 +3857,9 @@ mod tests {
         // The conditional must compile to an inline case, NOT a runtime dispatch.
         // A runtime `send(_, 'ifTrue:', [Fun])` returns `nil` on the false branch, so
         // the sequencer's `element(2, _)` unpack crashes with badarg (regression).
-        //
-        // ADR 0087 Phase 2: `register_class/0` now bakes a methodXref
-        // index that lists `ifTrue:` as a sent selector (metadata, not dispatch).
-        // Exclude that line so the assertion still checks only for a real runtime
-        // dispatch of the selector.
-        let code_no_xref: String = code
-            .lines()
-            .filter(|line| !line.contains("'methodXref'"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            !code_no_xref.contains("'ifTrue:'"),
-            "nested-op-in-branch must inline ifTrue: (no runtime 'ifTrue:' dispatch). Got:\n{code}"
-        );
+        // The only send is the non-Boolean receiver's fallback (BT-4244), whose
+        // arm answers the `{Result, State}` shape too.
+        crate::core_erlang::tests::assert_selector_sent_only_by_fallback(&code, "ifTrue:");
         // The outer local 'sum' is seeded into the StateAcc before the branch.
         assert!(
             code.contains("maps':'put'('__local__sum'"),
@@ -3772,6 +3912,190 @@ mod tests {
             !code.contains("{'nil',"),
             "no non-taken arm should answer nil. Got:\n{code}"
         );
+    }
+
+    /// BT-4244: the wildcard clause of `code`'s (first) mutation-path
+    /// conditional, from `CondNoMatch` to the `case`'s `end`.
+    /// BT-4244: `(depth, CondNoMatch count, code bytes)` for each nesting
+    /// depth 1..=6 of `wrap(level, inner)` nested conditionals, in a class
+    /// body built by `class(body)`.
+    fn nested_sizes(
+        class: impl Fn(&str) -> String,
+        wrap: impl Fn(usize, &str) -> String,
+    ) -> Vec<(usize, usize, usize)> {
+        (1..=6)
+            .map(|depth| {
+                let mut body = String::from("0");
+                for level in (0..depth).rev() {
+                    body = wrap(level, &body);
+                }
+                let code = codegen(&class(&body));
+                // The arms reach the fallback as real closures (the shape in
+                // question), not raising stubs.
+                assert!(
+                    !code.contains("'stateful_block_dispatch'"),
+                    "depth {depth}: expected real fallback closures:\n{code}"
+                );
+                (depth, code.matches("CondNoMatch").count(), code.len())
+            })
+            .collect()
+    }
+
+    /// BT-4244: no doubling per level. One fallback clause per level (a
+    /// nested conditional lowered inline again inside each enclosing
+    /// fallback closure would double the clauses), and each level's added
+    /// bytes at most 1.5x the previous level's (doubling would be 2x; each
+    /// fallback closure holding its subtree once, as dynamic sends, is the
+    /// quadratic shape the pure path has too, whose step ratio falls
+    /// towards 1).
+    fn assert_grows_linearly(label: &str, sizes: &[(usize, usize, usize)]) {
+        eprintln!("{label}: (depth, CondNoMatch, bytes) = {sizes:?}");
+        for &(depth, clauses, _) in sizes {
+            assert_eq!(
+                clauses, depth,
+                "{label}: one fallback clause per level: {sizes:?}"
+            );
+        }
+        let steps: Vec<usize> = sizes.windows(2).map(|p| p[1].2 - p[0].2).collect();
+        for pair in steps.windows(2) {
+            assert!(
+                2 * pair[1] <= 3 * pair[0],
+                "{label}: byte growth per level rises from {} to {} (doubling?): {sizes:?}",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+
+    /// BT-4244: a mutation-path conditional nested in another's arm is
+    /// compiled inline and again inside the outer fallback closure, so the
+    /// code must not double per nesting level (a fallback closure's own
+    /// nested conditionals must not repeat the whole tree). Pins linear
+    /// growth in actor (field-reading arms, passed as real closures at the
+    /// method root), value-type and class-method (arms writing block temps
+    /// inside a loop body) code; the REPL shape is
+    /// `crates/beamtalk-repl/tests/repl_nested_conditional_size.rs`.
+    #[test]
+    fn nested_mutation_conditionals_grow_linearly() {
+        let actor = nested_sizes(
+            |body| format!("Actor subclass: C\n  state: n = 0\n\n  run: x =>\n    {body}\n"),
+            |level, inner| format!("x ifTrue: [self.n. {inner}. {level}]"),
+        );
+        assert_grows_linearly("actor", &actor);
+        assert!(
+            actor[0].1 >= 1,
+            "the actor shape takes the mutation path: {actor:?}"
+        );
+        let value = nested_sizes(
+            |body| format!("Value subclass: C\n  run: x =>\n    #(1) do: [:i | {body}]\n"),
+            |level, inner| format!("x ifTrue: [y{level} := i. {inner}. y{level}]"),
+        );
+        assert_grows_linearly("value type", &value);
+        let class = nested_sizes(
+            |body| format!("Object subclass: C\n  class run: x =>\n    #(1) do: [:i | {body}]\n"),
+            |level, inner| format!("x ifTrue: [y{level} := i. {inner}. y{level}]"),
+        );
+        assert_grows_linearly("class method", &class);
+    }
+
+    fn fallback_clause(code: &str) -> &str {
+        let start = code
+            .find("<_CondNoMatch@")
+            .unwrap_or_else(|| panic!("no CondNoMatch clause:\n{code}"));
+        let rest = &code[start..];
+        &rest[..rest.find(" end").unwrap_or(rest.len())]
+    }
+
+    /// BT-4244: in every context the mutation path's wildcard sends the
+    /// selector (never a raw `case_clause`), as the pure path's does.
+    #[test]
+    fn mutation_fallback_sends_the_selector_in_every_context() {
+        let cases = [
+            (
+                "actor field",
+                "Actor subclass: C\n  state: n = 0\n\n  run: x =>\n    x ifTrue: [self.n := 1]\n    self.n\n",
+                "ifTrue:",
+            ),
+            (
+                "actor local",
+                "Actor subclass: C\n  state: n = 0\n\n  run: x =>\n    t := 0\n    x ifFalse: [t := 1]\n    t\n",
+                "ifFalse:",
+            ),
+            (
+                "class local",
+                "Object subclass: C\n  class run: x =>\n    t := 0\n    r := x ifTrue: [t := 1] ifFalse: [t := 2]\n    #[r, t]\n",
+                "ifTrue:ifFalse:",
+            ),
+            (
+                "value-type local",
+                "Value subclass: C\n  run: x =>\n    t := 0\n    r := x ifTrue: [t := 1]\n    #[r, t]\n",
+                "ifTrue:",
+            ),
+            (
+                "value-type field",
+                "TestCase subclass: C\n  field: n = 0\n\n  run: x =>\n    r := x ifTrue: [self.n := 1]\n    r\n",
+                "ifTrue:",
+            ),
+        ];
+        for (label, src, selector) in cases {
+            let code = codegen(src);
+            assert!(
+                !code.contains("{'case_clause', _CondNoMatch"),
+                "{label}: the wildcard must not raise case_clause:\n{code}"
+            );
+            crate::core_erlang::tests::assert_selector_sent_only_by_fallback(&code, selector);
+        }
+    }
+
+    /// BT-4244: an actor field-writing arm reaches the non-Boolean receiver's
+    /// method as a cell closure, and the send is bracketed: store the
+    /// scratch map, send, answer the reloaded cell as the arm's state.
+    #[test]
+    fn actor_field_fallback_brackets_the_send() {
+        let code = codegen(
+            "Actor subclass: C\n  state: n = 0\n\n  run: x =>\n    x ifTrue: [self.n := 1]\n    self.n\n",
+        );
+        let clause = fallback_clause(&code);
+        let store = clause.find("'beamtalk_actor_state':'store'(");
+        let send = clause.find("'beamtalk_message_dispatch':'send'(");
+        let take = clause.find("'beamtalk_actor_state':'take'()");
+        assert!(
+            store < send && send < take && store.is_some(),
+            "store, send, take in order:\n{clause}"
+        );
+        assert!(
+            clause.contains("'beamtalk_actor_state':'put'(Self, 'n'"),
+            "the closure writes the field through the cell:\n{clause}"
+        );
+    }
+
+    /// BT-4244: an arm that writes a captured local or a value-type field
+    /// cannot run as a closure, so the fallback passes a raising stub (and
+    /// no bracket, the stub touches nothing).
+    #[test]
+    fn unthreadable_arm_fallback_passes_a_raising_stub() {
+        for src in [
+            "Actor subclass: C\n  state: n = 0\n\n  run: x =>\n    t := 0\n    x ifTrue: [t := 1]\n    t\n",
+            // A local write that also reads a field: still a stub, so still
+            // no bracket (and no exit store for the method).
+            "Actor subclass: C\n  state: count :: Integer = 0\n\n  run: flag =>\n    n := 0\n    flag ifTrue: [n := self.count + 1]\n    n\n",
+            "TestCase subclass: C\n  field: n = 0\n\n  run: x =>\n    r := x ifTrue: [self.n := 1]\n    r\n",
+        ] {
+            let code = codegen(src);
+            let clause = fallback_clause(&code);
+            assert!(
+                clause.contains("'stateful_block_dispatch'"),
+                "the stub raises stateful_block_dispatch:\n{clause}"
+            );
+            assert!(
+                !clause.contains("'beamtalk_actor_state':'store'("),
+                "a stub-only fallback is not bracketed:\n{clause}"
+            );
+            assert!(
+                !code.contains("_ExitReply"),
+                "a stub-only fallback adds no exit store:\n{code}"
+            );
+        }
     }
 
     /// BT-4189: the one `SoloBoolean` table agrees with the stdlib
@@ -3910,10 +4234,7 @@ mod tests {
             code.contains("case "),
             "Value type ifTrue: with local mutation should generate inline case. Got:\n{code}"
         );
-        assert!(
-            !code.contains("'beamtalk_message_dispatch':'send'"),
-            "Value type ifTrue: with mutation should NOT use runtime dispatch. Got:\n{code}"
-        );
+        crate::core_erlang::tests::assert_selector_sent_only_by_fallback(&code, "ifTrue:");
     }
 
     #[test]
