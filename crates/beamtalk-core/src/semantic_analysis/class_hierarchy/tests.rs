@@ -2340,6 +2340,7 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -2391,6 +2392,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -2433,6 +2435,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

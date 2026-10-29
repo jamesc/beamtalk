@@ -37,6 +37,12 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
 """.
 -include("beamtalk.hrl").
 
+%% BT-4115: the class-name atom a class-literal send (`Error signal: m`) passes
+%% in place of the class object. `nil` is excluded: it is the class-self of a
+%% direct-called class method (BT-4029), not a class name, and keeps the
+%% generic `Exception` fallback.
+-define(IS_CLASS_NAME_ATOM(X), (is_atom(X) andalso X =/= nil)).
+
 -export([
     wrap/1,
     wrap_raw/1,
@@ -50,6 +56,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     reraise/4,
     matches_class/2,
     dispatch/3,
+    frames/1,
     has_method/1,
     signal/1,
     signal_message/1,
@@ -59,6 +66,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     class_signal_message/2,
     class_signal_message_reason/3,
     class_signal_kind/4,
+    is_signal/1,
     kind_to_class/1,
     class_to_kind/1,
     classify_kind/1,
@@ -247,15 +255,19 @@ error's class field directly if it is a registered exception subclass
 (a user-defined error subclass).
 """.
 -spec wrap(#beamtalk_error{} | term()) -> map().
-wrap(#beamtalk_error{kind = Kind, class = ErrorClass} = Error) ->
-    Class =
-        case is_exception_class(ErrorClass) of
-            true -> ErrorClass;
-            false -> kind_to_class(Kind)
-        end,
-    #{'$beamtalk_class' => Class, error => Error};
+wrap(#beamtalk_error{} = Error) ->
+    #{'$beamtalk_class' => exception_class(Error), error => Error};
 wrap(Other) ->
     wrap_raw(Other).
+
+%% The `$beamtalk_class` a `#beamtalk_error{}` is wrapped as: its own class when
+%% that is an exception class, else the class for its kind.
+-spec exception_class(#beamtalk_error{}) -> atom().
+exception_class(#beamtalk_error{kind = Kind, class = ErrorClass}) ->
+    case is_exception_class(ErrorClass) of
+        true -> ErrorClass;
+        false -> kind_to_class(Kind)
+    end.
 
 -doc """
 Map a raw Erlang error reason to its Beamtalk error kind.
@@ -518,15 +530,22 @@ reraise(Type, Reason, Stacktrace, Context) ->
 -doc """
 Idempotent exception wrapper with stacktrace capture.
 
-Like ensure_wrapped/1 but also stores the Erlang stacktrace as a list
-of StackFrame objects on the exception tagged map.
+Like ensure_wrapped/1 but also records the Erlang stacktrace on the
+exception tagged map, under the internal `raw_stacktrace` key (BT-4115).
+
+The stacktrace is stored raw (see `capture_stacktrace/1`) and only turned
+into StackFrame objects when something reads it (`frames/1`). Building
+frames resolves every module to its class with a scan of the whole class
+table, and almost no handler reads `e stackTrace`, so doing it on every
+catch made a raise far more expensive than it needed to be.
 """.
 -spec ensure_wrapped(term(), list()) -> map().
 ensure_wrapped(#{'$beamtalk_class' := _} = Already, Stacktrace) ->
-    Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+    %% Drop a legacy `stacktrace` key so the map keeps one stacktrace source.
+    maps:remove(stacktrace, Already#{raw_stacktrace => capture_stacktrace(Stacktrace)});
 ensure_wrapped(Other, Stacktrace) ->
     Wrapped = wrap(Other),
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
+    Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace)}.
 
 -doc """
 Idempotent exception wrapper with Erlang exception type.
@@ -542,10 +561,13 @@ ExitError/ThrowError classes are used instead of RuntimeError.
 %% generic exit/throw clauses below); every branch that substitutes a Beamtalk
 %% exception for the caught term re-raises that exception as an `error`.
 ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace) ->
-    Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error};
+    %% Drop a legacy `stacktrace` key so the map keeps one stacktrace source.
+    maps:remove(stacktrace, Already#{
+        raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error
+    });
 ensure_wrapped(_Type, #beamtalk_error{} = Error, Stacktrace) ->
     Wrapped = wrap(Error),
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error};
+    Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
 ensure_wrapped(error, undef, Stacktrace) ->
     Message =
         case Stacktrace of
@@ -573,7 +595,7 @@ ensure_wrapped(error, undef, Stacktrace) ->
         details = #{reason => undef}
     },
     Wrapped = #{'$beamtalk_class' => kind_to_class(runtime_error), error => GenError},
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error};
+    Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
 ensure_wrapped(exit, Reason, Stacktrace) ->
     Error = #beamtalk_error{
         kind = erlang_exit,
@@ -586,7 +608,7 @@ ensure_wrapped(exit, Reason, Stacktrace) ->
         details = #{reason => Reason}
     },
     Wrapped = wrap(Error),
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => exit};
+    Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => exit};
 ensure_wrapped(throw, Reason, Stacktrace) ->
     %% Unwrap future_rejected errors (thrown from beamtalk_future:await/*)
     %% Future rejects with {future_rejected, ActualError} where ActualError may be:
@@ -618,10 +640,10 @@ ensure_wrapped(throw, Reason, Stacktrace) ->
             },
             Wrapped = wrap(Error)
     end,
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => CaughtType};
+    Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => CaughtType};
 ensure_wrapped(_Type, Other, Stacktrace) ->
     Wrapped = wrap(Other),
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error}.
+    Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error}.
 
 -doc """
 Idempotent exception wrapper with a dispatch breadcrumb.
@@ -642,15 +664,15 @@ ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already0, Stacktrace, _Context
     %% Innermost classification already applied — preserve it and any stacktrace it
     %% already carries. Backfill from this frame only when absent, so stacktrace
     %% capture never regresses versus ensure_wrapped/3 (which always attached one).
-    case Already of
-        #{stacktrace := _} -> Already;
-        _ -> Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}
+    case has_stacktrace(Already) of
+        true -> Already;
+        false -> Already#{raw_stacktrace => capture_stacktrace(Stacktrace)}
     end;
 ensure_wrapped(error, Reason, Stacktrace, Context) when
     map_size(Context) > 0, Reason =/= undef, not is_record(Reason, beamtalk_error)
 ->
     Wrapped = wrap_raw(Reason, Context),
-    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace), erlang_class => error};
+    Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
 ensure_wrapped(Type, Reason, Stacktrace, _Context) ->
     ensure_wrapped(Type, Reason, Stacktrace).
 
@@ -692,19 +714,16 @@ dispatch('details', [], _) ->
 dispatch('printString', [], #{error := Error}) ->
     %% BT-4170: `format/1` renders raw bytes; `printString` answers a `String`.
     beamtalk_primitive:string_from_binary(beamtalk_error:format(Error));
-dispatch('stackTrace', [], #{stacktrace := Frames}) ->
-    Frames;
-dispatch('stackTrace', [], _) ->
-    %% No stacktrace captured (e.g., signal-time error without catch)
-    [];
+dispatch('stackTrace', [], Self) ->
+    %% `[]` when no stacktrace was captured (e.g. a signal-time error without
+    %% a catch).
+    frames(Self);
 dispatch('class', [], #{'$beamtalk_class' := Class}) ->
     Class;
 dispatch('signal', [], Self) ->
     signal_instance(Self);
-dispatch('pass', [], #{erlang_class := Class, stacktrace := Frames0} = Self) ->
-    pass(Class, Frames0, Self);
 dispatch('pass', [], #{erlang_class := Class} = Self) ->
-    pass(Class, [], Self);
+    pass(Class, raise_stacktrace(Self), Self);
 dispatch('pass', [], Self) ->
     %% Never caught (e.g. a fresh `Exception new`) — behaves exactly like signal.
     signal_instance(Self);
@@ -721,7 +740,7 @@ wrap_hint(Hint) when is_binary(Hint) ->
 
 -spec signal_instance(map()) -> no_return().
 signal_instance(#{error := Error}) ->
-    beamtalk_error:raise(Error);
+    raise_signal(Error);
 signal_instance(#{'$beamtalk_class' := ClassName}) ->
     %% New exception instance (no error field yet) — create and raise
     signal_from_class(ClassName).
@@ -734,16 +753,75 @@ wrapped exception's `details.reason` is exactly the term that was caught, and
 `pass` then re-raises that term with that class. Every other case re-raises the
 wrapped exception itself as an `error` (the caught value already was a Beamtalk
 exception, or was substituted by one, e.g. an unwrapped rejected future). The
-stacktrace is rebuilt from the stored StackFrame objects (argument values were
-already dropped at catch time).
+stacktrace is the one captured at catch time (`raise_stacktrace/1`; argument
+values were already dropped then).
 """.
 -spec pass(atom(), list(), map()) -> no_return().
-pass(Class, Frames, #{error := #beamtalk_error{details = #{reason := Reason}}}) when
+pass(Class, Stacktrace, #{error := #beamtalk_error{details = #{reason := Reason}}}) when
     Class =:= exit; Class =:= throw
 ->
-    erlang:raise(Class, Reason, rebuild_stacktrace(Frames));
-pass(_Class, Frames, Self) ->
-    erlang:raise(error, Self, rebuild_stacktrace(Frames)).
+    erlang:raise(Class, Reason, Stacktrace);
+pass(_Class, Stacktrace, Self) ->
+    erlang:raise(error, Self, Stacktrace).
+
+-doc """
+Normalise a caught Erlang stacktrace for storage under `raw_stacktrace`
+(BT-4115).
+
+A frame whose third element is the argument list (the top frame of a
+`function_clause`/`undef`) is reduced to its arity, so no argument terms (funs,
+pids, large binaries) are retained or shipped across processes or nodes, just
+as the StackFrame objects built from it never carried them. Everything else is
+kept as caught, so `pass` can re-raise it directly.
+""".
+-spec capture_stacktrace(term()) -> list().
+capture_stacktrace(Stacktrace) when is_list(Stacktrace) ->
+    [drop_frame_args(Frame) || Frame <- Stacktrace];
+capture_stacktrace(_) ->
+    [].
+
+-spec drop_frame_args(term()) -> term().
+drop_frame_args({M, F, Args, Location}) when is_list(Args) ->
+    {M, F, length(Args), Location};
+drop_frame_args(Frame) ->
+    Frame.
+
+-doc """
+Whether an exception already carries a captured stacktrace, under either the
+`raw_stacktrace` key or the legacy `stacktrace` key (StackFrame objects, as
+built by an older node or code version before BT-4115).
+""".
+-spec has_stacktrace(map()) -> boolean().
+has_stacktrace(Exception) ->
+    is_map_key(raw_stacktrace, Exception) orelse is_map_key(stacktrace, Exception).
+
+-doc """
+The StackFrame objects for an exception's captured stacktrace (BT-4115).
+
+Built here, when read, from the raw stacktrace stored at catch time, so class
+names are resolved at read time rather than at catch time. An exception that
+arrived from another node therefore resolves its class names against the
+reading node's class table, not the node that caught it. Falls back to a
+legacy `stacktrace` key (already-built StackFrame objects from an older node or
+code version), and answers `[]` when nothing was captured.
+""".
+-spec frames(map()) -> list().
+frames(#{raw_stacktrace := Raw}) ->
+    beamtalk_stack_frame:wrap(Raw);
+frames(#{stacktrace := Frames}) when is_list(Frames) ->
+    Frames;
+frames(_) ->
+    [].
+
+%% The Erlang stacktrace `pass` re-raises with: the raw capture as-is, else one
+%% rebuilt from legacy StackFrame objects, else none.
+-spec raise_stacktrace(map()) -> list().
+raise_stacktrace(#{raw_stacktrace := Raw}) ->
+    Raw;
+raise_stacktrace(#{stacktrace := Frames}) ->
+    rebuild_stacktrace(Frames);
+raise_stacktrace(_) ->
+    [].
 
 -spec rebuild_stacktrace(term()) -> list().
 rebuild_stacktrace(Frames) when is_list(Frames) ->
@@ -847,6 +925,36 @@ has_method('pass') -> true;
 has_method(_) -> false.
 
 -doc """
+Raise `Error` as a deliberate Beamtalk signal (BT-4115).
+
+The Exception signal API (`signal`, `signal:`, `signal:reason:`, class- and
+instance-side) raises through here. It wraps like `beamtalk_error:raise/1` and
+also sets the internal `'$beamtalk_signal'` marker, which `is_signal/1` tests.
+Errors raised by `beamtalk_error:raise/1` never carry it: runtime errors
+(does_not_understand, type_error, arity, FFI errors), and also `self error:`
+and `signalKind:class:selector:hint:`, which stdlib code uses for runtime
+errors such as index_out_of_bounds. So the marker tells a deliberate signal
+from a runtime failure whatever kind a caller chose.
+""".
+-spec raise_signal(#beamtalk_error{}) -> no_return().
+raise_signal(#beamtalk_error{} = Error) ->
+    %% Built in one step, not wrap/1 then an update, to allocate one map.
+    error(#{
+        '$beamtalk_class' => exception_class(Error),
+        error => Error,
+        '$beamtalk_signal' => true
+    }).
+
+-doc """
+Was this raised value a deliberate signal (`raise_signal/1`), rather than a
+runtime error or a raw Erlang crash? It is the one place that reads the
+marker `raise_signal/1` sets.
+""".
+-spec is_signal(term()) -> boolean().
+is_signal(#{'$beamtalk_signal' := true, error := #beamtalk_error{}}) -> true;
+is_signal(_) -> false.
+
+-doc """
 Raise an exception.
 
 Used internally for various error signaling scenarios.
@@ -854,7 +962,7 @@ Used internally for various error signaling scenarios.
 -spec signal(Kind :: atom()) -> no_return().
 signal(Kind) when is_atom(Kind) ->
     Error = beamtalk_error:new(Kind, 'Exception'),
-    beamtalk_error:raise(Error).
+    raise_signal(Error).
 
 -doc """
 Raise a new Error exception with the given message.
@@ -872,7 +980,7 @@ signal_message({beamtalk_string, _} = Message) ->
         hint = undefined,
         details = #{}
     },
-    beamtalk_error:raise(Error);
+    raise_signal(Error);
 signal_message(Message) when is_binary(Message) ->
     signal_message(beamtalk_primitive:string_from_binary(Message));
 signal_message(Message) when is_atom(Message) ->
@@ -902,7 +1010,7 @@ signal_message({beamtalk_string, _} = Message, ExceptionClass, Details) ->
         hint = undefined,
         details = Details
     },
-    beamtalk_error:raise(Error);
+    raise_signal(Error);
 signal_message(Message, ExceptionClass, Details) when is_binary(Message) ->
     signal_message(beamtalk_primitive:string_from_binary(Message), ExceptionClass, Details);
 signal_message(Message, ExceptionClass, Details) when is_atom(Message) ->
@@ -926,7 +1034,7 @@ signal_from_class(ClassName) ->
         hint = undefined,
         details = #{}
     },
-    beamtalk_error:raise(Error).
+    raise_signal(Error).
 
 -doc """
 Class-side signal: raise an exception with message from a class object.
@@ -934,9 +1042,13 @@ Class-side signal: raise an exception with message from a class object.
 Called by `Exception signal: "msg"` or `MyCustomError signal: "msg"`.
 Extracts the class name from the ClassSelf record and delegates to signal_message/2.
 """.
--spec class_signal_message(term(), #beamtalk_object{} | term()) -> no_return().
+-spec class_signal_message(term(), #beamtalk_object{} | atom() | term()) -> no_return().
 class_signal_message(Message, #beamtalk_object{class = ClassTag}) ->
     ClassName = strip_class_suffix(ClassTag),
+    signal_message(Message, ClassName);
+class_signal_message(Message, ClassName) when ?IS_CLASS_NAME_ATOM(ClassName) ->
+    %% BT-4115: a class-literal send (`Error signal: m`) raises in the caller
+    %% and passes the class-name atom, used as-is.
     signal_message(Message, ClassName);
 class_signal_message(Message, _ClassSelf) ->
     %% Fallback: if ClassSelf is not a beamtalk_object, signal as generic Exception
@@ -952,6 +1064,9 @@ cross-process propagation.
 -spec class_signal_message_reason(term(), term(), #beamtalk_object{} | term()) -> no_return().
 class_signal_message_reason(Message, Reason, #beamtalk_object{class = ClassTag}) ->
     signal_message(Message, strip_class_suffix(ClassTag), #{signal_reason => Reason});
+class_signal_message_reason(Message, Reason, ClassName) when ?IS_CLASS_NAME_ATOM(ClassName) ->
+    %% BT-4115: class-literal send raised in the caller (see class_signal_message/2).
+    signal_message(Message, ClassName, #{signal_reason => Reason});
 class_signal_message_reason(Message, Reason, _ClassSelf) ->
     signal_message(Message, 'Exception', #{signal_reason => Reason}).
 
@@ -961,9 +1076,12 @@ Class-side signal: raise an exception from a class object (no message).
 Called by `Exception signal` or `MyCustomError signal`.
 Extracts the class name from the ClassSelf record and delegates to signal_from_class/1.
 """.
--spec class_signal(#beamtalk_object{} | term()) -> no_return().
+-spec class_signal(#beamtalk_object{} | atom() | term()) -> no_return().
 class_signal(#beamtalk_object{class = ClassTag}) ->
     ClassName = strip_class_suffix(ClassTag),
+    signal_from_class(ClassName);
+class_signal(ClassName) when ?IS_CLASS_NAME_ATOM(ClassName) ->
+    %% BT-4115: class-literal send raised in the caller (see class_signal_message/2).
     signal_from_class(ClassName);
 class_signal(_ClassSelf) ->
     signal_from_class('Exception').
@@ -984,4 +1102,7 @@ by which `Exception` subclass it was sent to.
 -spec class_signal_kind(atom(), atom(), atom(), {beamtalk_string, binary()} | binary()) ->
     no_return().
 class_signal_kind(Kind, Class, Selector, Hint) ->
+    %% Not raise_signal/1: stdlib collections use this for runtime errors
+    %% (index_out_of_bounds, empty_collection), which must keep an error-level
+    %% record when they escape a class method (BT-4115).
     beamtalk_error:raise(beamtalk_error:new(Kind, Class, Selector, Hint)).

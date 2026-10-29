@@ -46,11 +46,16 @@ on a many-classes system from turning into O(frames × classes) ETS scans.
 
 Earlier versions of this function (and `module_to_class_map/0`) built this
 map via a live class-registry scan with a `gen_server:call` per registered
-class (`beamtalk_class_registry:live_class_entries/0`). Since `wrap/1` runs
+class (`beamtalk_class_registry:live_class_entries/0`). Since `wrap/1` then ran
 on every Beamtalk exception via `beamtalk_exception_handler.erl`, a single
 momentarily-slow or call-cycle-blocked class process could stall or deadlock
 unrelated exception handling system-wide — fixed by moving to the ETS-backed
 fold, which needs no live process at all.
+
+Since BT-4115 a catch no longer calls this: `beamtalk_exception_handler`
+stores the raw stacktrace (arguments reduced to arities) and calls `wrap/1`
+only when something reads the frames (`beamtalk_exception_handler:frames/1`,
+behind `e stackTrace`). So class names are resolved at read time.
 """.
 -spec wrap(list()) -> list().
 wrap(Stacktrace) when is_list(Stacktrace) ->

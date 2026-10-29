@@ -618,12 +618,7 @@ fn is_character_typed_receiver_recurses_through_uppercase_lowercase() {
 /// method (dispatch misrouted to Integer's BIF module).
 #[test]
 fn character_bt_character_returning_methods_match_codegen_recognizer() {
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates/")
-        .parent()
-        .expect("repo root")
-        .to_path_buf();
+    let repo_root = crate::core_erlang::tests::repo_root();
     let character_bt_path = repo_root.join("stdlib/src/character.bt");
     let Ok(source) = std::fs::read_to_string(&character_bt_path) else {
         eprintln!(
@@ -1203,12 +1198,7 @@ fn stdlib_instance_method(
 /// class, or `None` — after logging a skip — when the file is absent from
 /// this checkout. Panics if the file fails to parse or lacks the class.
 fn stdlib_class(file: &str, class_name: &str) -> Option<ClassDefinition> {
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates/")
-        .parent()
-        .expect("repo root")
-        .to_path_buf();
+    let repo_root = crate::core_erlang::tests::repo_root();
     let path = repo_root.join(file);
     let Ok(source) = std::fs::read_to_string(&path) else {
         eprintln!("skipping: {} not present in this checkout", path.display());

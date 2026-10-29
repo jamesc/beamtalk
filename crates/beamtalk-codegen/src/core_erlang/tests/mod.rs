@@ -111,25 +111,21 @@ pub(crate) fn repo_root() -> std::path::PathBuf {
         .expect("beamtalk-codegen must be two directories below the repo root")
 }
 
-/// Recursively collects every `.bt`/`.btscript` file under `dir` into `out`,
-/// in sorted path order. A missing or unreadable `dir` adds nothing.
-pub(crate) fn collect_source_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<std::fs::DirEntry> = entries.filter_map(std::result::Result::ok).collect();
-    entries.sort_by_key(std::fs::DirEntry::path);
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_source_files(&path, out);
-        } else if matches!(
-            path.extension().and_then(std::ffi::OsStr::to_str),
-            Some("bt" | "btscript")
-        ) {
-            out.push(path);
-        }
+/// Collects every `.bt` / `.btscript` file under each of `dirs` (relative to
+/// `root`) into one sorted vec.  Panics if any directory cannot be walked —
+/// all corpus directories exist in the repo, so a walk error means something
+/// unexpected went wrong and the test should not silently pass with fewer
+/// files than expected.
+pub(crate) fn corpus_files(root: &std::path::Path, dirs: &[&str]) -> Vec<std::path::PathBuf> {
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    for dir in dirs {
+        files.extend(
+            beamtalk_core::file_walker::FileWalker::format_files()
+                .walk_pathbuf(&root.join(dir))
+                .unwrap_or_else(|e| panic!("walking corpus dir {dir}: {e:?}")),
+        );
     }
+    files
 }
 
 /// Parses `src` and normalises it the way analysis and codegen see it: with
@@ -259,6 +255,7 @@ mod arm_local_slot_verifier_corpus;
 mod arm_operand_carrier_corpus;
 mod block_value_arity_agreement;
 mod branch_context;
+mod caller_safe_class_primitive;
 mod cascade_operand_state_corpus;
 mod class_side_operand_producer_corpus;
 mod closed_fun_state_version;

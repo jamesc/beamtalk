@@ -226,8 +226,9 @@ impl LoopFamilyParam {
 struct BodyEffects {
     /// Condition block has state effects (field writes or self-sends).
     cond_has_state_effects: bool,
-    /// ADR 0137: the body holds a call bracketed with a `State` store/reload
-    /// (actor instance method).
+    /// ADR 0137: the body (or condition) holds a call bracketed with a
+    /// `State` store/reload (actor instance method), as the block analysis
+    /// or codegen's own classifier sees it (BT-4255).
     body_has_synced_sends: bool,
     /// BT-4121: the body or condition holds a guarded operator (read off
     /// the same classifier the send emitter exempts). A hybrid loop cannot
@@ -401,8 +402,14 @@ impl BodyEffects {
             .last()
             .is_some_and(|s| matches!(s.expression, Expression::DestructureAssignment { .. }));
 
+        // BT-4255: with the sends only codegen classifies (a loop or
+        // evaluated block that carries nothing is a runtime call with its
+        // blocks as closures): a loop that drops its `State` has nothing to
+        // bracket them with.
         let body_has_synced_sends = generator.synced_calls_active()
-            && block_analysis::analyze_block(body).has_synced_user_code_sends();
+            && (block_analysis::analyze_block(body).has_synced_user_code_sends()
+                || generator.block_holds_bracketed_call(body)
+                || condition.is_some_and(|c| generator.expr_holds_bracketed_call(c)));
 
         let has_guarded_operator = generator.block_contains_guarded_operator(body)
             || condition.is_some_and(|c| generator.expr_contains_guarded_operator(c));

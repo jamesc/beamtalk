@@ -222,6 +222,7 @@ impl ClassHierarchy {
                             .into(),
                     ),
                     origin: None,
+                    primitive: None,
                 },
                 MethodInfo {
                     selector: "conformingClasses".into(),
@@ -237,6 +238,7 @@ impl ClassHierarchy {
                         format!("Return the classes conforming to the `{name}` protocol.").into(),
                     ),
                     origin: None,
+                    primitive: None,
                 },
             ];
             self.classes.insert(
@@ -700,6 +702,7 @@ impl ClassHierarchy {
                     .collect(),
                 doc: None,
                 origin: None,
+                primitive: None,
             };
             if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
                 let methods = match key.side {

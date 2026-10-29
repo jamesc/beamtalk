@@ -889,11 +889,16 @@ fn record_send_target(
 }
 
 /// ADR 0137: a conservative, syntactic answer to "may this send to something
-/// other than `self` run user code in this process" — a superset of what
-/// codegen brackets (which also knows static operand types), so a construct
-/// that holds a bracketed call is always seen as holding one here. Read off
-/// the shared selector tables ([`send_user_code`],
+/// other than `self` run user code in this process". Read off the shared
+/// selector tables ([`send_user_code`],
 /// [`crate::state_threading_selectors::structural_binary`]).
+///
+/// It is not a superset of what codegen brackets: it leaves two classes to
+/// codegen, which knows static operand types and which loops it lowers in
+/// place. A binary operator never counts here, and neither does a loop or
+/// evaluated literal block (`SendUserCode::LoopOrClosureCall`). Codegen's
+/// loop mode selection therefore also asks its own classifier before it
+/// lets a loop drop its `State` (BT-4255, `expr_holds_bracketed_call`).
 fn send_may_run_user_code(
     receiver: &Expression,
     selector: &MessageSelector,

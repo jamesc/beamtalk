@@ -36,6 +36,9 @@ Test groups:
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
+%% Logger handler callback for the BT-4115 relay-logging tests.
+-export([log/2]).
+
 %% Selector used in undef-classification tests.
 -define(TEST_SELECTOR, bt999_dispatch_test_method).
 
@@ -3030,3 +3033,96 @@ class_send_not_found_fallthrough_does_not_message_stalled_class_test_() ->
                     end)}
             ]
         end}.
+
+%%% ----------------------------------------------------------------------------
+%%% BT-4115: a class method's deliberate `signal:` is relayed to the caller,
+%%% which owns reporting it, so the class process logs it at debug only. A raw
+%%% Erlang crash still logs at error with the class-side stacktrace, which the
+%%% relay does not carry.
+%%% ----------------------------------------------------------------------------
+
+%% Logger handler callback for the relay-logging test below.
+log(LogEvent, #{config := #{parent := Parent}}) ->
+    Parent ! {bt4115_log_event, LogEvent},
+    ok.
+
+relayed_class_method_raise_log_level_test_() ->
+    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
+        [
+            {"caught Error signal: in a class method logs exactly one debug event",
+                fun test_relayed_signal_not_logged_at_error/0},
+            {"a raw Erlang crash in a class method still logs at error",
+                fun test_relayed_raw_error_logged_at_error/0},
+            {"a does_not_understand in a class method still logs at error",
+                fun test_relayed_dnu_logged_at_error/0}
+        ]
+    end}.
+
+test_relayed_signal_not_logged_at_error() ->
+    Events = relay_log_events('BT4115SignalLogClass', testSignal, fun(Pid) ->
+        ?assertError(
+            #{'$beamtalk_class' := 'Error', error := #beamtalk_error{class = 'Error'}},
+            beamtalk_class_dispatch:class_send(Pid, testSignal, [])
+        )
+    end),
+    assert_relay_logged_at_debug_only(Events).
+
+test_relayed_raw_error_logged_at_error() ->
+    Events = relay_log_events('BT4115RaiseLogClass', testRaise, fun(Pid) ->
+        ?assertError(_, beamtalk_class_dispatch:class_send(Pid, testRaise, []))
+    end),
+    ?assertMatch([#{level := error, meta := #{stacktrace := [_ | _]}}], Events).
+
+test_relayed_dnu_logged_at_error() ->
+    %% A runtime error has the same wrapped exception shape as a signal, but
+    %% no signal marker: it must keep its error-level, class-side record.
+    Events = relay_log_events('BT4115DnuLogClass', testDnu, fun(Pid) ->
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand}},
+            beamtalk_class_dispatch:class_send(Pid, testDnu, [])
+        )
+    end),
+    ?assertMatch([#{level := error, meta := #{stacktrace := [_ | _]}}], Events).
+
+%% Start a one-method class, run Body against it with every log level captured,
+%% and answer the "Class method ~p:~p failed" events it produced.
+relay_log_events(ClassName, Selector, Body) ->
+    OldLevel = maps:get(level, logger:get_primary_config()),
+    ok = logger:set_primary_config(level, all),
+    HandlerId = bt4115_relay_log_handler,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => self()}, level => all
+    }),
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{Selector => <<>>},
+        class_state => #{}
+    }),
+    try
+        Body(Pid),
+        %% The handler runs in the class process, before its reply reaches us,
+        %% so every event is already in the mailbox.
+        drain_relay_events([])
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, OldLevel),
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+drain_relay_events(Acc) ->
+    receive
+        {bt4115_log_event, #{msg := {"Class method ~p:~p failed", _}} = Event} ->
+            drain_relay_events([Event | Acc]);
+        {bt4115_log_event, _} ->
+            drain_relay_events(Acc)
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+
+assert_relay_logged_at_debug_only(Events) ->
+    ?assertMatch([#{level := debug}], Events).

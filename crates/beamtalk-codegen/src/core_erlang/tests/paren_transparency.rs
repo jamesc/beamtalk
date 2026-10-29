@@ -624,7 +624,7 @@ fn check_corpus(name: &str, sources: &[String], outcome: fn(&Module) -> String) 
 }
 
 fn stdlib_test_dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test")
+    super::repo_root().join("stdlib/test")
 }
 
 // Slow tier (`just test-corpus`: the `_corpus` suffix puts these in the
