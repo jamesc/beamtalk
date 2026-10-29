@@ -378,11 +378,53 @@ pub struct InitializeAssignsSummary {
     pub has_dynamic_writer: bool,
 }
 
+/// Number of leading [`PROCESS_BOUND_CLASS_SELECTORS`] entries that are the
+/// process-state constructors ([`DIRECT_CALL_EXCLUDED_SELECTORS`]).
+const PROCESS_STATE_CONSTRUCTOR_COUNT: usize = 4;
+
+/// The class-side selectors that keep their class-process (or dedicated)
+/// routing whatever the class declares (ADR 0142 §1 rule 3). The single copy
+/// of the list: codegen emits it into every class's `__beamtalk_meta/0` as
+/// `'process_bound_class_selectors'`, so the runtime reads it as generated
+/// metadata and never keeps its own copy (the Erlang clauses that route part
+/// of it are pinned to the emitted list by
+/// `beamtalk_process_bound_selectors_tests`).
+///
+/// - `new`, `new:`, `startLink`, `startLink:`: process-state constructors
+///   (ADR 0129); `basicNew`/`basicNewWith` read `beamtalk_class_name` /
+///   `beamtalk_class_module` from the class process's dictionary. These come
+///   first: they are also [`DIRECT_CALL_EXCLUDED_SELECTORS`].
+/// - `spawn`, `spawnWith:`: actor instantiation, with dedicated
+///   `beamtalk_class_dispatch:class_send_plain/3` clauses.
+/// - `supervise`, `spawnAs:`, `spawnWith:as:` (with `spawn`, `spawnWith:`
+///   above): the `Supervisor`/`DynamicSupervisor` routing selectors, started in
+///   the caller before `class_send_plain/3` (ADR 0135 §1).
+/// - `runAll`, `runAll:`, `run:`, `run:method:`: the `TestCase` run selectors,
+///   which answer `test_spawn` and need the class gen_server's `noreply`.
+const PROCESS_BOUND_CLASS_SELECTORS: &[&str] = &[
+    "new",
+    "new:",
+    "startLink",
+    "startLink:",
+    "spawn",
+    "spawnWith:",
+    "supervise",
+    "spawnAs:",
+    "spawnWith:as:",
+    "runAll",
+    "runAll:",
+    "run:",
+    "run:method:",
+];
+
 /// Selectors that depend on `gen_server` process state and must NOT be called
 /// directly: supervisor constructors (`startLink` family) and the
 /// `basicNew`/`basicNewWith` constructors (`new`/`new:`), which read
 /// `beamtalk_class_name`/`beamtalk_class_module` from the process dictionary.
-const DIRECT_CALL_EXCLUDED_SELECTORS: &[&str] = &["startLink", "startLink:", "new", "new:"];
+/// The constructor prefix of [`PROCESS_BOUND_CLASS_SELECTORS`], not a copy.
+const DIRECT_CALL_EXCLUDED_SELECTORS: &[&str] = PROCESS_BOUND_CLASS_SELECTORS
+    .split_at(PROCESS_STATE_CONSTRUCTOR_COUNT)
+    .0;
 
 impl ClassInfo {
     /// Whether a class registered under `module` is module-less
@@ -429,6 +471,14 @@ impl ClassInfo {
     #[must_use]
     pub fn is_direct_call_excluded_selector(selector: &str) -> bool {
         DIRECT_CALL_EXCLUDED_SELECTORS.contains(&selector)
+    }
+
+    /// The process-bound class-side selectors (ADR 0142 §1 rule 3), in a fixed
+    /// order: see [`PROCESS_BOUND_CLASS_SELECTORS`]. Codegen emits them into
+    /// every class's `__beamtalk_meta/0`.
+    #[must_use]
+    pub fn process_bound_class_selectors() -> &'static [&'static str] {
+        PROCESS_BOUND_CLASS_SELECTORS
     }
 
     /// Build a `ClassInfo` from a parsed `ClassDefinition` AST node.

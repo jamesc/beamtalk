@@ -17,11 +17,19 @@ reads per send. Each writer now mirrors its state into a `persistent_term`
 flag, so the guard in `beamtalk_class_dispatch:class_self_direct_ok/4` is one
 constant-time term read with no ETS access (BT-3700 folded the reads; see below).
 
-Two independent kinds:
+Three independent kinds:
 - `extension` keyed by the class-object tag (e.g. `'Counter class'`): set while
   any extension is registered under that tag.
 - `runtime_fun` keyed by the class name: set while the class has runtime-
   installed class-method funs.
+- `class_vars` keyed by the class name (ADR 0142 §1 rule 1, BT-4299): set while
+  the class declares class variables (`classState:`). Not a shadow: it mirrors
+  the class-metadata fact `beamtalk_class_metadata:put_class_variables/2`
+  publishes from the compiled `__beamtalk_meta/0` (`class_field_kinds`) or the
+  builder's `classState`, never re-derived from source here. Its single writer
+  is that function, run from the class's own gen_server (`init/1`, reload,
+  rename), like `runtime_fun`. Absent means "declares none" (only a row that
+  never went through a class process lacks the fact).
 
 The flags are conservative: a stale `true` only costs the slow path (the
 hierarchy walk is always correct); `runtime_fun` writers set the flag *before* making the
@@ -41,19 +49,33 @@ tag in `beamtalk_extensions`.)
 BT-3700: the send-path guard reads ONE key, the derived "direct call is safe"
 flag, keyed by the bare class-object tag (`'Counter class'`, a bare atom: hashing
 an atom key is ~3x cheaper than a tuple key, and the tag contains a space so it
-cannot collide with another module's `persistent_term` key). It is `true`
+cannot collide with another module's `persistent_term` key). It is present
 exactly while the class is ready, has no `extension` flag and no `runtime_fun`
-flag; absent means "take the always-correct hierarchy walk".
+flag; absent means "take the always-correct hierarchy walk". Its value folds
+the `class_vars` input in (BT-4299), so both questions stay one read:
+- `true`: no shadow and no class variables. `direct_call_ok/2` holds (ADR 0142
+  §1 rule 1: the method may run outside the class process).
+- `class_vars`: no shadow, but the class declares class variables, so only its
+  class process may run the method. `direct_call_ok/2` is false;
+  `shadow_free/2` (the open class-side self-send guard, which already runs
+  inside the class process) is still true, so that path is unchanged.
 
 Single writer per derived key, by construction, not by convention: every write
 and erase of it runs under one per-tag `global` lock (`with_tag_lock/2`), and the
 lock holder re-derives the answer from the raw flags above, never from the
 reader's view.
-- Invalidation (`set/2`, either kind): under the lock, raise the raw flag, then
-  erase the derived key. Both happen before the caller makes the shadow visible
+- Invalidation (`set/2`, any kind): under the lock, raise the raw flag, then
+  erase the derived key. Both happen before the caller makes the change visible
   (`beamtalk_extensions:register/5` raises the flag before its row insert;
-  `beamtalk_class_metadata:set_runtime_class_methods/2` before the gate opens),
-  so a send that can see a shadow cannot see a derived `true`.
+  `beamtalk_class_metadata:set_runtime_class_methods/2` before the gate opens;
+  `beamtalk_class_metadata:put_class_variables/2` before the row field), so a
+  send that can see a shadow or a class variable cannot see a derived `true`.
+- Erasure on every other class-metadata write (`invalidate/1`, ADR 0142 §2,
+  BT-4299): under the lock, erase the derived key before the write lands. Called
+  on reload (`beamtalk_object_class:apply_class_info/2`), a class-side
+  `removeSelector:`, a runtime `put_class_method`, and row removal
+  (`beamtalk_class_metadata:delete/1`); a class-variable change erases through
+  `set_class_vars/2`. The next send re-derives from the raw flags.
 - Install (`direct_call_ok/2` miss, lazy): outside the lock, cheap pre-check of
   the raw flags (a permanently shadowed class never takes the lock per send);
   then under the lock re-check ready and both raw flags and put the key. An
@@ -73,7 +95,11 @@ actual transitions write (set when unset, erase when set); both are rare
     is_set/2,
     is_shadowed/2,
     direct_call_ok/2,
+    shadow_free/2,
     is_direct_flag_set/1,
+    direct_flag_value/1,
+    invalidate/1,
+    set_class_vars/2,
     mark_ready/0,
     is_ready/0,
     with_tag_lock/2
@@ -85,8 +111,10 @@ actual transitions write (set when unset, erase when set); both are rare
 %% helpers are inlined so the miss branch is not a chain of calls.
 -compile({inline, [key/2, is_set/2, is_shadowed/2, is_ready/0]}).
 
--type kind() :: extension | runtime_fun.
--export_type([kind/0]).
+-type kind() :: extension | runtime_fun | class_vars.
+%% The derived flag's installed value (BT-4299; see the moduledoc).
+-type derived() :: true | class_vars.
+-export_type([kind/0, derived/0]).
 
 -spec key(kind(), atom()) -> {beamtalk_class_shadow, kind(), atom()}.
 key(Kind, Name) -> {beamtalk_class_shadow, Kind, Name}.
@@ -114,16 +142,53 @@ set(Kind, Name) ->
 
 -spec class_tag(kind(), atom()) -> atom().
 class_tag(extension, Tag) -> Tag;
-class_tag(runtime_fun, Name) -> beamtalk_class_registry:class_object_tag(Name).
+class_tag(runtime_fun, Name) -> beamtalk_class_registry:class_object_tag(Name);
+class_tag(class_vars, Name) -> beamtalk_class_registry:class_object_tag(Name).
 
 -spec erase_direct_flag(atom()) -> ok.
 erase_direct_flag(Tag) ->
     case persistent_term:get(Tag, false) of
-        true ->
-            _ = persistent_term:erase(Tag),
+        false ->
             ok;
         _ ->
+            _ = persistent_term:erase(Tag),
             ok
+    end.
+
+-doc """
+Erase `ClassName`'s derived direct-call flag under the per-tag lock (ADR 0142
+§2, BT-4299), so the next send re-derives it from the raw flags. Call it before
+a class-metadata write for the class becomes visible: reload, a class-side
+`removeSelector:`, a runtime `put_class_method`, row removal. Must never be
+called from inside `with_tag_lock/2`.
+""".
+-spec invalidate(atom()) -> ok.
+invalidate(ClassName) ->
+    Tag = beamtalk_class_registry:class_object_tag(ClassName),
+    with_tag_lock(Tag, fun() -> erase_direct_flag(Tag) end).
+
+-doc """
+Mirror the class-metadata fact "`ClassName` declares class variables" into the
+`class_vars` raw flag (BT-4299). Every transition erases the derived flag under
+the per-tag lock before returning: raising the fact makes `direct_call_ok/2`
+false before the caller publishes it; dropping it lets the next send re-derive
+`true`. No-op when unchanged. Called only by
+`beamtalk_class_metadata:put_class_variables/2`.
+""".
+-spec set_class_vars(atom(), boolean()) -> ok.
+set_class_vars(ClassName, true) ->
+    set(class_vars, ClassName);
+set_class_vars(ClassName, false) ->
+    Key = key(class_vars, ClassName),
+    case persistent_term:get(Key, false) of
+        false ->
+            ok;
+        true ->
+            Tag = class_tag(class_vars, ClassName),
+            with_tag_lock(Tag, fun() ->
+                _ = persistent_term:erase(Key),
+                erase_direct_flag(Tag)
+            end)
     end.
 
 -doc """
@@ -160,42 +225,72 @@ is_shadowed(ClassTag, ClassName) ->
     is_set(extension, ClassTag) orelse is_set(runtime_fun, ClassName).
 
 -doc """
-BT-3700: the guard of the compiled class-side self-send fast path: one
-`persistent_term` read of the derived flag keyed by `ClassTag`. A miss falls to
-`install_direct_flag/2`, which derives the answer from the raw flags (ready, no
-`extension`, no `runtime_fun`) and installs the flag when safe.
+ADR 0142 §1 rule 1 (BT-4299): true exactly when the class is ready, nothing
+shadows its compiled class methods (no `extension`, no `runtime_fun`) and it
+declares no class variables. One `persistent_term` read of the derived flag
+keyed by `ClassTag`; a miss falls to `install_direct_flag/2`, which derives the
+value from the raw flags and installs it when the class is not shadowed.
 """.
 -spec direct_call_ok(atom(), atom()) -> boolean().
 direct_call_ok(ClassTag, ClassName) ->
     case persistent_term:get(ClassTag, false) of
         true -> true;
-        _ -> install_direct_flag(ClassTag, ClassName)
+        class_vars -> false;
+        _ -> install_direct_flag(ClassTag, ClassName) =:= true
     end.
 
--doc "True while the derived direct-call flag for `ClassTag` is installed (test hook).".
+-doc """
+BT-3700: the guard of the compiled class-side self-send fast path, which runs
+inside the class process already: true while the class is ready and nothing
+shadows its compiled class methods, whatever its class variables. The same
+single read of the derived flag as `direct_call_ok/2`; either installed value
+means "not shadowed".
+""".
+-spec shadow_free(atom(), atom()) -> boolean().
+shadow_free(ClassTag, ClassName) ->
+    case persistent_term:get(ClassTag, false) of
+        false -> install_direct_flag(ClassTag, ClassName) =/= false;
+        _ -> true
+    end.
+
+-doc "True while the derived flag for `ClassTag` is installed, with either value (test hook).".
 -spec is_direct_flag_set(atom()) -> boolean().
 is_direct_flag_set(ClassTag) ->
-    persistent_term:get(ClassTag, false) =:= true.
+    persistent_term:get(ClassTag, false) =/= false.
 
--spec raw_safe(atom(), atom()) -> boolean().
-raw_safe(ClassTag, ClassName) ->
-    is_ready() andalso not is_shadowed(ClassTag, ClassName).
+-doc "The installed derived value for `ClassTag`, `false` when absent (test hook).".
+-spec direct_flag_value(atom()) -> derived() | false.
+direct_flag_value(ClassTag) ->
+    persistent_term:get(ClassTag, false).
 
--spec install_direct_flag(atom(), atom()) -> boolean().
-install_direct_flag(ClassTag, ClassName) ->
-    %% Cheap pre-check without the lock: a shadowed or not-yet-ready class must
-    %% not take a global lock per send.
-    case raw_safe(ClassTag, ClassName) of
+%% The derived value the raw flags imply; `false` while not ready or shadowed.
+-spec derive(atom(), atom()) -> derived() | false.
+derive(ClassTag, ClassName) ->
+    case is_ready() andalso not is_shadowed(ClassTag, ClassName) of
         false ->
             false;
         true ->
+            case is_set(class_vars, ClassName) of
+                true -> class_vars;
+                false -> true
+            end
+    end.
+
+-spec install_direct_flag(atom(), atom()) -> derived() | false.
+install_direct_flag(ClassTag, ClassName) ->
+    %% Cheap pre-check without the lock: a shadowed or not-yet-ready class must
+    %% not take a global lock per send.
+    case derive(ClassTag, ClassName) of
+        false ->
+            false;
+        _ ->
             with_tag_lock(ClassTag, fun() ->
-                case raw_safe(ClassTag, ClassName) of
-                    true ->
-                        persistent_term:put(ClassTag, true),
-                        true;
+                case derive(ClassTag, ClassName) of
                     false ->
-                        false
+                        false;
+                    Value ->
+                        persistent_term:put(ClassTag, Value),
+                        Value
                 end
             end)
     end.

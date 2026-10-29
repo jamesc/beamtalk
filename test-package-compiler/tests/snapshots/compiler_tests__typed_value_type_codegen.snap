@@ -181,6 +181,7 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
       'class_method_info' => ~{'x:y:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 2,
       'direct_class_methods' => ~{'x:y:' => 'class_x:y:'}~,
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:']
     }~
         }~
@@ -219,6 +220,7 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
       'class_method_info' => ~{'x:y:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 2,
       'direct_class_methods' => ~{'x:y:' => 'class_x:y:'}~,
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:']
     }~
 
