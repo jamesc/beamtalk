@@ -710,26 +710,31 @@ send(X, Selector, Args) ->
 Dispatch to an unaligned `Bitstring` (ADR 0141, BT-4139).
 
 A `Bitstring` deliberately does not understand the byte protocol of
-`Binary`/`Collection` (`size`, `do:`, `toBytes`, …). A selector it lacks
-raises the structured `does_not_understand` error with a hint that names
-the bit size and the bit-level protocol, rather than the generic
-spelling hint — the most likely cause is a byte-level send to an
-unaligned tail. Selectors it understands (its own, `Object`'s, and
-extensions) dispatch through its compiled class module as usual.
+`Binary`/`Collection` (`size`, `do:`, `toBytes`, …). The send dispatches
+through the compiled class module as usual (its own methods, `Object`'s,
+the reflection arms, extensions); when the hierarchy walk ends in the
+`does_not_understand` for *this* selector on a `Bitstring`, the error is
+re-raised with a hint that names the bit size and the bit-level protocol
+instead of the generic spelling hint — the most likely cause is a
+byte-level send to an unaligned tail.
 """.
 -spec send_bitstring(bitstring(), atom(), list()) -> term().
 send_bitstring(X, Selector, Args) ->
     Mod = module_for_value(X),
-    case Mod:has_method(Selector) of
-        true ->
-            Mod:dispatch(Selector, Args, X);
-        false ->
-            raise_bitstring_dnu(X, Selector)
+    try
+        Mod:dispatch(Selector, Args, X)
+    catch
+        error:#{
+            error := #beamtalk_error{
+                kind = does_not_understand, class = 'Bitstring', selector = Selector
+            } = Error
+        } ->
+            raise_bitstring_dnu(X, Error)
     end.
 
--doc "Raise the `Bitstring` `does_not_understand` error (see `send_bitstring/3`).".
--spec raise_bitstring_dnu(bitstring(), atom()) -> no_return().
-raise_bitstring_dnu(X, Selector) ->
+-doc "Re-raise a `Bitstring` `does_not_understand` with the bit-size hint.".
+-spec raise_bitstring_dnu(bitstring(), #beamtalk_error{}) -> no_return().
+raise_bitstring_dnu(X, Error) ->
     Hint = iolist_to_binary(
         io_lib:format(
             "a Bitstring is not byte-aligned (~B bits); use 'bitSize'/'toBits', "
@@ -737,9 +742,7 @@ raise_bitstring_dnu(X, Selector) ->
             [bit_size(X)]
         )
     ),
-    Error0 = beamtalk_error:new(does_not_understand, 'Bitstring'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).
+    beamtalk_error:raise(beamtalk_error:with_hint(Error, Hint)).
 
 -doc """
 Tagged map dispatch — resolves the map's class once through

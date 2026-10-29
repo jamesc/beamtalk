@@ -85,10 +85,14 @@ tail size
 ### Where the does-not-understand error is raised
 
 The error is the structured `does_not_understand` (`#beamtalk_error{}`, class
-`Bitstring`, the selector), with the hint above. It is raised by
-`beamtalk_primitive:send/3`'s bitstring arm: a selector that
-`bt@stdlib@bitstring:has_method/1` rejects raises it directly; every other
-selector dispatches through the compiled class as usual.
+`Bitstring`, the selector), with the hint above. It comes from
+`beamtalk_primitive:send/3`'s bitstring arm: the send dispatches through the
+compiled class as usual, and when the hierarchy walk ends in the
+`does_not_understand` for that selector on a `Bitstring`, the arm re-raises
+it with the bit-size hint. The reflection arms (`fieldNames`, `fieldAt:`,
+`hasField:`) are still reached: a Bitstring has no fields, so `fieldNames`
+answers `#()`, `hasField:` answers `false` and `fieldAt:` raises
+`immutable_value`, as for a primitive class.
 
 It is deliberately **not** a `Bitstring>>doesNotUnderstand:args:` override in
 `bitstring.bt`. A class that overrides `doesNotUnderstand:args:` is "open" to
