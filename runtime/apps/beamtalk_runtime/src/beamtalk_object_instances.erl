@@ -110,8 +110,10 @@ count(Class) when is_atom(Class) ->
 The class a local pid was registered under, or `undefined` (a pid that was
 never registered, a remote pid, or the registry not running). One `ets:lookup`
 on the pid-keyed index — O(1) however many instances are live (BT-4113).
-When a pid was registered under several classes, the latest registration
-wins.
+Invariant: a pid is registered under one class (`spawn` registers each
+actor once). The index keeps one row per pid, so if a pid were registered
+under several classes the latest registration would win, and unregistering
+any of them would leave `class_of/1` answering `undefined`.
 """.
 -spec class_of(pid()) -> class_name() | undefined.
 class_of(Pid) ->

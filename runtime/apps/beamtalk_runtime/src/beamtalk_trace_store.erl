@@ -233,7 +233,9 @@ serialize_dispatch_flag(Fun) ->
         try
             gen_server:call(?MODULE, {dispatch_flag, Fun}, infinity)
         catch
-            exit:{noproc, _} -> {ok, Fun()}
+            %% Not running, or died mid-call: run unserialized. A restarted
+            %% trace store refreshes the flag again in init/1.
+            exit:_ -> {ok, Fun()}
         end,
     case Reply of
         {ok, Result} -> Result;
@@ -1157,10 +1159,21 @@ telemetry_handlers() ->
         {beamtalk_trace_store_vm_measurements, [vm, memory], fun ?MODULE:handle_vm_measurements/4}
     ].
 
--doc "The trace store's telemetry handler ids (refused by `Telemetry detach:`).".
+-doc """
+The trace store's telemetry handler ids, refused by `Telemetry attach:` and
+`Telemetry detach:`. Includes the retired pre-BT-4113 dispatch ids, which
+`attach_telemetry_handlers/0` detaches on every (re)start: a user handler
+under one of those ids would otherwise be silently dropped.
+""".
 -spec telemetry_handler_ids() -> [atom()].
 telemetry_handler_ids() ->
-    [Id || {Id, _EventName, _Handler} <- telemetry_handlers()].
+    [Id || {Id, _EventName, _Handler} <- telemetry_handlers()] ++ retired_telemetry_handler_ids().
+
+%% Pre-BT-4113 dispatch handler ids. An older trace store can leave them
+%% attached across a hot upgrade, and their functions are gone.
+-spec retired_telemetry_handler_ids() -> [atom()].
+retired_telemetry_handler_ids() ->
+    [beamtalk_trace_store_dispatch_stop, beamtalk_trace_store_dispatch_exception].
 
 -doc """
 Attach telemetry event handlers.
@@ -1168,12 +1181,7 @@ Detach first to handle restarts after crash (terminate/2 not called on kill).
 """.
 attach_telemetry_handlers() ->
     detach_telemetry_handlers(),
-    %% Pre-BT-4113 dispatch handlers, left attached by an older trace store
-    %% across a hot upgrade: their functions are gone, so drop them.
-    lists:foreach(
-        fun beamtalk_telemetry:detach_handler/1,
-        [beamtalk_trace_store_dispatch_stop, beamtalk_trace_store_dispatch_exception]
-    ),
+    lists:foreach(fun beamtalk_telemetry:detach_handler/1, retired_telemetry_handler_ids()),
     lists:foreach(
         fun({Id, EventName, Handler}) ->
             ok = telemetry:attach(Id, EventName, Handler, #{})
