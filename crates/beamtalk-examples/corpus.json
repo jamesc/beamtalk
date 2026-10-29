@@ -1780,7 +1780,7 @@
         "set",
         "throw"
       ],
-      "source": "// Basic match with literals\nx match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]\n\n// Variable binding in patterns\n42 match: [n -> n + 1]\n// => 43\n\n// Symbol matching\nstatus match: [#ok -> \"success\"; #error -> \"failure\"; _ -> \"unknown\"]\n\n// String matching\ngreeting match: [\"hello\" -> \"hi\"; _ -> \"huh?\"]\n\n// Guard clauses with when:\nx match: [\n  n when: [n > 100] -> \"big\";\n  n when: [n > 10] -> \"medium\";\n  _ -> \"small\"\n]\n\n// Negative number patterns\ntemp match: [-1 -> \"minus one\"; 0 -> \"zero\"; _ -> \"other\"]\n\n// Match on computed expression\n(3 + 4) match: [7 -> \"correct\"; _ -> \"wrong\"]\n\n// Array destructuring in match arms (BT-1296)\n#[10, 20] match: [\n  #[h, t] -> h + t;\n  _ -> 0\n]\n// => 30\n\n// Dict/map destructuring in match arms (BT-1296)\n#{#event => \"click\", #x => 5} match: [\n  #{#event => evName} -> evName;\n  _ -> \"unknown\"\n]\n// => \"click\"\n\n// Nested array patterns\n#[#[1, 2], 3] match: [\n  #[#[a, b], c] -> a + b + c;\n  _ -> 0\n]\n// => 6\n\n// Constructor patterns (Result ok:/error: only in this release)\n(Result ok: 42) match: [\n  Result ok: v    -> v;\n  Result error: _ -> 0\n]\n// => 42\n\n// Binary patterns (BT-663; BT-4096, BT-4097)\n(Binary fromBytes: #(3, 104, 105, 33, 99)) match: [\n  <<n:8, payload:n/binary, rest/binary>> -> payload toBytes;\n  _ -> #()\n]\n// => #(104, 105, 33): a size may be a literal, a variable bound by an\n// earlier segment, a parameter/local, or a parenthesized expression.\n(Binary fromBytes: #(10, 9)) match: [\n  <<0:1, v:7, rest/binary>> -> v;\n  _ -> -1\n]\n// => 10: integer literal values match exactly.\n(Binary fromBytes: #(234, 7)) match: [\n  <<_:3, v:5, rest/bits>> -> v;\n  _ -> -1\n]\n// => 10: bits/bitstring match possibly-unaligned bits.\n\n// Nil pattern — matches nil exactly (BT-2854, ADR 0107)\nvalue := nil\nvalue match: [\n  nil -> \"was nil\";\n  s :: String -> s;\n  _ -> \"other\"\n]\n// => \"was nil\"\n\n// Type patterns — bind and test runtime class (BT-2855, ADR 0107)\nx := \"hello\"\nx match: [\n  nil -> \"nil\";\n  s :: String -> s size;\n  n :: Integer -> n + 1;\n  _ -> \"other\"\n]\n// => 5\n\n// Guard scoped over the type-pattern binding\nx := 42\nx match: [\n  n :: Integer when: [n > 100] -> \"big\";\n  n :: Integer -> \"small\";\n  _ -> \"other\"\n]\n// => \"small\"\n\n// Mixing type patterns with literal and wildcard patterns\nx := \"hi\"\nx match: [\n  nil -> 0;\n  s :: String -> s size;\n  _ -> -1\n]\n// => 2",
+      "source": "// Basic match with literals\nx match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]\n\n// Variable binding in patterns\n42 match: [n -> n + 1]\n// => 43\n\n// Symbol matching\nstatus match: [#ok -> \"success\"; #error -> \"failure\"; _ -> \"unknown\"]\n\n// String matching\ngreeting match: [\"hello\" -> \"hi\"; _ -> \"huh?\"]\n\n// Guard clauses with when:\nx match: [\n  n when: [n > 100] -> \"big\";\n  n when: [n > 10] -> \"medium\";\n  _ -> \"small\"\n]\n\n// Negative number patterns\ntemp match: [-1 -> \"minus one\"; 0 -> \"zero\"; _ -> \"other\"]\n\n// Match on computed expression\n(3 + 4) match: [7 -> \"correct\"; _ -> \"wrong\"]\n\n// Array destructuring in match arms (BT-1296)\n#[10, 20] match: [\n  #[h, t] -> h + t;\n  _ -> 0\n]\n// => 30\n\n// Dict/map destructuring in match arms (BT-1296)\n#{#event => \"click\", #x => 5} match: [\n  #{#event => evName} -> evName;\n  _ -> \"unknown\"\n]\n// => \"click\"\n\n// Nested array patterns\n#[#[1, 2], 3] match: [\n  #[#[a, b], c] -> a + b + c;\n  _ -> 0\n]\n// => 6\n\n// Constructor patterns (Result ok:/error: only in this release)\n(Result ok: 42) match: [\n  Result ok: v    -> v;\n  Result error: _ -> 0\n]\n// => 42\n\n// Binary patterns (BT-663; BT-4096, BT-4097)\n(Binary fromBytes: #(3, 104, 105, 33, 99)) match: [\n  <<n:8, payload:n/binary, rest/binary>> -> payload toBytes;\n  _ -> #()\n]\n// => #(104, 105, 33): a size may be a literal, a variable bound by an\n// earlier segment, a parameter/local, or a parenthesized expression.\n(Binary fromBytes: #(10, 9)) match: [\n  <<0:1, v:7, rest/binary>> -> v;\n  _ -> -1\n]\n// => 10: integer literal values match exactly.\n(Binary fromBytes: #(234, 7)) match: [\n  <<_:3, v:5, rest/bits>> -> v;\n  _ -> -1\n]\n// => 10: bits/bitstring match possibly-unaligned bits.\n(Binary fromBytes: #(234)) match: [\n  <<_:3, rest/bits>> -> rest class;\n  _ -> nil\n]\n// => Bitstring: an unaligned tail is a Bitstring (ADR 0141); use\n// bitSize/toBits on it, not the byte protocol. An aligned tail is a Binary.\n\n// Nil pattern — matches nil exactly (BT-2854, ADR 0107)\nvalue := nil\nvalue match: [\n  nil -> \"was nil\";\n  s :: String -> s;\n  _ -> \"other\"\n]\n// => \"was nil\"\n\n// Type patterns — bind and test runtime class (BT-2855, ADR 0107)\nx := \"hello\"\nx match: [\n  nil -> \"nil\";\n  s :: String -> s size;\n  n :: Integer -> n + 1;\n  _ -> \"other\"\n]\n// => 5\n\n// Guard scoped over the type-pattern binding\nx := 42\nx match: [\n  n :: Integer when: [n > 100] -> \"big\";\n  n :: Integer -> \"small\";\n  _ -> \"other\"\n]\n// => \"small\"\n\n// Mixing type patterns with literal and wildcard patterns\nx := \"hi\"\nx match: [\n  nil -> 0;\n  s :: String -> s size;\n  _ -> -1\n]\n// => 2",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3044,6 +3044,34 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-292",
+      "title": "Bitstring — Unaligned Bits (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set",
+        "string conversion",
+        "toString",
+        "to_string"
+      ],
+      "source": "tail := (Binary fromBytes: #(234)) match: [<<_:3, rest/bitstring>> -> rest]\ntail class                // => Bitstring\ntail bitSize              // => 5\ntail toBits               // => #(0, 1, 0, 1, 0)  (most significant bit first)\ntail printString          // => \"<<10:5>>\"  (Erlang notation)\ntail asBinary isError     // => true  (kind #unaligned_bitstring)\n(Binary fromBytes: #(1, 2)) bitSize   // => 16",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-293",
+      "title": "Bitstring — Unaligned Bits (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "tail size\n// => does_not_understand: Bitstring does not understand 'size'\n//    Hint: a Bitstring is not byte-aligned (5 bits); use 'bitSize'/'toBits',\n//    or 'asBinary' to check alignment",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-294",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3053,7 +3081,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-295",
+      "id": "docs-beamtalk-language-features-block-297",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3072,23 +3100,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-296",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "#() rest                   // => #()\n#() take: 3                // => #()\n#() drop: 3                // => #()\n#() sum                    // => 0 (identity element, unlike max/min)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
       "id": "docs-beamtalk-language-features-block-298",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "(1 to: 10) at: 1     // => 1\n(1 to: 10) at: 11    // raises index_out_of_bounds\n(1 to: 0) at: 1       // raises index_out_of_bounds (not empty_collection)",
+      "source": "#() rest                   // => #()\n#() take: 3                // => #()\n#() drop: 3                // => #()\n#() sum                    // => 0 (identity element, unlike max/min)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3122,6 +3140,16 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-300",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "(1 to: 10) at: 1     // => 1\n(1 to: 10) at: 11    // raises index_out_of_bounds\n(1 to: 0) at: 1       // raises index_out_of_bounds (not empty_collection)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-302",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3134,7 +3162,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-301",
+      "id": "docs-beamtalk-language-features-block-303",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3144,7 +3172,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-302",
+      "id": "docs-beamtalk-language-features-block-304",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3160,7 +3188,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-303",
+      "id": "docs-beamtalk-language-features-block-305",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3184,7 +3212,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-304",
+      "id": "docs-beamtalk-language-features-block-306",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3203,7 +3231,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-305",
+      "id": "docs-beamtalk-language-features-block-307",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3224,7 +3252,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-306",
+      "id": "docs-beamtalk-language-features-block-308",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3237,7 +3265,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-307",
+      "id": "docs-beamtalk-language-features-block-309",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3250,38 +3278,6 @@
         "where"
       ],
       "source": "(Stream from: 1) printString\n// => Stream(from: 1)\n\n(Stream on: #(1, 2, 3)) printString\n// => Stream(on: [...])\n\n((Stream from: 1) select: [:n | n isEven]) printString\n// => Stream(from: 1) | select: [...]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-308",
-      "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "where"
-      ],
-      "source": "// Eager — List methods return a List immediately\n#(1, 2, 3, 4, 5) select: [:n | n > 2]\n// => [3,4,5]  (a List)\n\n// Lazy — stream methods return a Stream (unevaluated)\n(#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]\n// => Stream  (unevaluated — call asList or take: to materialize)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-309",
-      "title": "File Streaming (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "where"
-      ],
-      "source": "// Read lines lazily\n(File lines: \"data.csv\") do: [:line | Transcript show: line]\n\n// Pipeline composition\n(File lines: \"app.log\") select: [:l | l includes: \"ERROR\"]\n\n// Block-scoped handle for explicit lifecycle control\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10\n]\n// handle closed automatically when block exits",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3301,6 +3297,38 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-310",
+      "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "where"
+      ],
+      "source": "// Eager — List methods return a List immediately\n#(1, 2, 3, 4, 5) select: [:n | n > 2]\n// => [3,4,5]  (a List)\n\n// Lazy — stream methods return a Stream (unevaluated)\n(#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]\n// => Stream  (unevaluated — call asList or take: to materialize)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-311",
+      "title": "File Streaming (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "where"
+      ],
+      "source": "// Read lines lazily\n(File lines: \"data.csv\") do: [:line | Transcript show: line]\n\n// Pipeline composition\n(File lines: \"app.log\") select: [:l | l includes: \"ERROR\"]\n\n// Block-scoped handle for explicit lifecycle control\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10\n]\n// handle closed automatically when block exits",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-312",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3310,7 +3338,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-311",
+      "id": "docs-beamtalk-language-features-block-313",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3331,7 +3359,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-312",
+      "id": "docs-beamtalk-language-features-block-314",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3350,7 +3378,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-314",
+      "id": "docs-beamtalk-language-features-block-316",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3368,7 +3396,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-315",
+      "id": "docs-beamtalk-language-features-block-317",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3383,7 +3411,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-316",
+      "id": "docs-beamtalk-language-features-block-318",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3393,7 +3421,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-317",
+      "id": "docs-beamtalk-language-features-block-319",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3431,7 +3459,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-320",
+      "id": "docs-beamtalk-language-features-block-322",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3454,7 +3482,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-321",
+      "id": "docs-beamtalk-language-features-block-323",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3464,7 +3492,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-324",
+      "id": "docs-beamtalk-language-features-block-326",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3474,7 +3502,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-325",
+      "id": "docs-beamtalk-language-features-block-327",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3497,7 +3525,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-327",
+      "id": "docs-beamtalk-language-features-block-329",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3509,16 +3537,6 @@
         "set"
       ],
       "source": "q2 := q enqueue: 1\nq3 := q2 enqueue: 2\nresult := q3 dequeue         // => {1, <Queue with [2]>}\nvalue := result at: 1       // => 1\nrest := result at: 2        // => Queue containing [2]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-328",
-      "title": "Other Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "q peek                        // => front element without removing (raises empty_queue if empty)\nq isEmpty                     // => true or false\nq size                        // => number of elements (O(n))",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3538,6 +3556,16 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-330",
+      "title": "Other Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "q peek                        // => front element without removing (raises empty_queue if empty)\nq isEmpty                     // => true or false\nq size                        // => number of elements (O(n))",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-332",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3550,7 +3578,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-331",
+      "id": "docs-beamtalk-language-features-block-333",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3573,7 +3601,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-332",
+      "id": "docs-beamtalk-language-features-block-334",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3601,7 +3629,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-333",
+      "id": "docs-beamtalk-language-features-block-335",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3629,7 +3657,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-336",
+      "id": "docs-beamtalk-language-features-block-338",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3660,7 +3688,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-337",
+      "id": "docs-beamtalk-language-features-block-339",
       "title": "Shared Tests — Abstract Test Cases (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3688,7 +3716,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-338",
+      "id": "docs-beamtalk-language-features-block-340",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -17912,10 +17940,11 @@
         "testMatchSkippedFlagBits",
         "testMatchSplitWithHoistedExpression",
         "testMatchThreeChunks",
+        "testMatchUnalignedBitstringTail",
         "testMatchWildcardBinary",
         "testSizeOnlyParameterIsUsed"
       ],
-      "source": "// BT-663: Tests for binary pattern matching in match: expressions.\n// Covers integer segments, binary segments, and guards.\n\nTestCase subclass: BinaryPatternsTest\n\n  testMatchFirstByteOfString =>\n    // Strings are UTF-8 binaries; \"A\" is byte 65\n    result := \"ABC\" match: [\n      <<first:8, _/binary>> -> first;\n      _ -> 0\n    ]\n    self assert: result equals: 65\n\n  testMatchRestBinary =>\n    // Extract the tail of a binary after the first byte\n    result := \"ABC\" match: [\n      <<_:8, rest/binary>> -> rest size;\n      _ -> 0\n    ]\n    self assert: result equals: 2\n\n  testMatchWildcardBinary =>\n    // Wildcard binary segment matches any binary\n    result := \"hello\" match: [\n      <<_/binary>> -> true;\n      _ -> false\n    ]\n    self assert: result\n\n  testMatchIntegerSegmentFallthrough =>\n    // When no arm matches, fall through to wildcard\n    result := \"X\" match: [\n      <<first:8, _/binary>> when: [first > 200] -> \"high\";\n      _ -> \"low\"\n    ]\n    self assert: result equals: \"low\"\n\n  testMatchLengthPrefixedPayload =>\n    // BT-4096: a segment size may name a variable bound by an earlier segment\n    bin := Binary fromBytes: #(3, 104, 105, 33, 99)\n    result := bin match: [\n      <<n:8, payload:n/binary, rest/binary>> -> {n, payload toBytes, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 3\n    self assert: (result at: 2) equals: #(104, 105, 33)\n    self assert: (result at: 3) equals: #(99)\n\n  testMatchLengthPrefixedIncompleteFallsThrough =>\n    // BT-4096: fewer bytes buffered than the bound size claims — no match\n    bin := Binary fromBytes: #(10, 1, 2)\n    result := bin match: [\n      <<n:8, payload:n/binary, rest/binary>> -> payload;\n      _ -> nil\n    ]\n    self assert: result isNil\n\n  testMatchBitsSegment =>\n    // BT-4097: bits/bitstring segments (234 = 0b11101010)\n    bin := Binary fromBytes: #(234, 7)\n    result := bin match: [\n      <<flags:3, v:5, rest/bitstring>> -> {flags, v, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 7\n    self assert: (result at: 2) equals: 10\n    self assert: (result at: 3) equals: #(7)\n\n  testMatchBitstringTailChained =>\n    // BT-4097: an unaligned rest/bits tail matches again as a bitstring\n    bin := Binary fromBytes: #(234)\n    result := bin match: [\n      <<_:3, rest/bitstring>> -> (rest match: [\n        <<v:5>> -> v;\n        _ -> -1\n      ]);\n      _ -> -1\n    ]\n    self assert: result equals: 10\n\n  testMatchLiteralSegmentValue =>\n    // BT-4097: integer literal segment values (10 = 0b00001010)\n    bin := Binary fromBytes: #(10, 9)\n    result := bin match: [\n      <<0:1, v:7, rest/binary>> -> {v, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 10\n    self assert: (result at: 2) equals: #(9)\n\n  testMatchLiteralSegmentValueFallsThrough =>\n    // BT-4097: first bit is 1 (138 = 0b10001010), so <<0:1, ...>> rejects it\n    bin := Binary fromBytes: #(138, 9)\n    result := bin match: [\n      <<0:1, v:7, rest/binary>> -> v;\n      _ -> nil\n    ]\n    self assert: result isNil\n\n  testMatchSizeExpression =>\n    // BT-4097: parenthesized size expressions (234 = 0b11_101010)\n    q := 2\n    bin := Binary fromBytes: #(234, 7)\n    result := bin match: [\n      <<a:(4 - q), b:(4 + q), rest/binary>> -> {a, b, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 3\n    self assert: (result at: 2) equals: 42\n    self assert: (result at: 3) equals: #(7)\n\n  testMatchSkippedFlagBits =>\n    // BT-4097: sizes from locals (skip is used only as a size — no\n    // unused-variable warning under --warnings-as-errors)\n    p := 5\n    skip := 8 - p\n    bin := Binary fromBytes: #(234)\n    result := bin match: [\n      <<_f:skip, v:p, rest/binary>> -> v;\n      _ -> -1\n    ]\n    self assert: result equals: 10\n\n  testSizeOnlyParameterIsUsed =>\n    // BT-4097: n is used only as a segment size — no unused-parameter warning\n    self assert: (self take: 2 from: (Binary fromBytes: #(7, 8, 9))) toBytes equals: #(7, 8)\n\n  take: n :: Integer from: bin :: Binary -> Binary =>\n    bin match: [\n      <<payload:n/binary, _/binary>> -> payload;\n      _ -> Binary fromBytes: #()\n    ]\n\n  testMatchMultipleWildcardsInBinary =>\n    // BT-4098: every _ in one pattern is a fresh anonymous variable\n    result := (Binary fromBytes: #(1)) match: [\n      <<_:1, _:7>> -> true;\n      _ -> false\n    ]\n    self assert: result\n\n  testMatchRaisingSizeExpressionFallsThrough =>\n    // Review finding 1: a raising size fails the arm, never crashes the\n    // match — including against a non-binary scrutinee. A computed\n    // negative size simply never matches.\n    q := 0\n    bin := Binary fromBytes: #(1, 2, 3)\n    self\n      assert: (bin match: [\n        <<a:(4 / q), rest/binary>> -> a;\n        _ -> #fallback\n      ])\n      equals: #fallback\n    self\n      assert: (42 match: [\n        <<a:(4 / q), rest/binary>> -> a;\n        _ -> #fallback\n      ])\n      equals: #fallback\n    self\n      assert: (bin match: [\n        <<a:(1 - 5), rest/binary>> -> a;\n        _ -> #fallback\n      ])\n      equals: #fallback\n\n  testMatchNegativeLiteralValue =>\n    // Review finding 8: `<<-1:8/signed>>` matches 255, both spellings.\n    bin := Binary fromBytes: #(255, 9)\n    self\n      assert: (bin match: [\n        <<-1:8/signed, rest/binary>> -> rest toBytes;\n        _ -> #()\n      ])\n      equals: #(9)\n    self\n      assert: (bin match: [\n        <<-1:8/signed, rest/binary>> -> rest toBytes;\n        _ -> #()\n      ])\n      equals: #(9)\n\n  testMatchSplitWithHoistedExpression =>\n    // Review finding 8: size expression over a pattern-bound variable —\n    // split at `a`, hoist `(n + 2)` between the matches. 234 is 0b11101010.\n    bin := Binary fromBytes: #(3, 234, 7)\n    result := bin match: [\n      <<n:8, a:(n + 2), rest/bitstring>> -> {n, a, rest};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 3\n    self assert: (result at: 2) equals: 29\n    tail := (result at: 3) match: [\n      <<b:3, c:8>> -> {b, c};\n      _ -> nil\n    ]\n    self assert: (tail at: 1) equals: 2\n    self assert: (tail at: 2) equals: 7\n\n  testMatchGuardedSegmentedArmFallsThrough =>\n    // Review finding 8: the guard applies innermost; rejection falls\n    // through to the next (also segmented) arm.\n    bin := Binary fromBytes: #(3, 1, 2, 3)\n    self\n      assert: (bin match: [\n        <<n:8, p:n/binary>> when: [n > 100] -> #big;\n        <<n:8, p:n/binary>> -> #small;\n        _ -> #none\n      ])\n      equals: #small\n\n  testMatchThreeChunks =>\n    // Review finding 8: two split points in one arm.\n    bin := Binary fromBytes: #(8, 2, 9, 9, 9)\n    result := bin match: [\n      <<n:8, m:n/integer, p:m/binary, rest/binary>> -> {n, m, p toBytes, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 8\n    self assert: (result at: 2) equals: 2\n    self assert: (result at: 3) equals: #(9, 9)\n    self assert: (result at: 4) equals: #(9)\n\n  testMatchNativeBeforeSegmentedArm =>\n    // Review finding 8: a native binary arm ahead of a segmented one.\n    bin := Binary fromBytes: #(3, 1, 2, 3)\n    self\n      assert: (bin match: [\n        <<1:8, _/binary>> -> #one;\n        <<n:8, p:n/binary>> -> #prefixed;\n        _ -> #none\n      ])\n      equals: #prefixed\n\n  testMatchNestedTrivialParenthesizedSize =>\n    // Review finding 6: `<<a:(8)>>` inlines — no hoist, so nesting is fine.\n    bin := Binary fromBytes: #(10, 9)\n    pair := {#ok, bin}\n    self\n      assert: (pair match: [\n        {#ok, <<a:(8), rest/binary>>} -> a;\n        _ -> -1\n      ])\n      equals: 10\n\n  // BT-4223: a binary pattern nested inside a composite pattern unwraps a\n  // `String` element to its bytes, like a top-level binary arm does.\n  testMatchNestedBinaryInTupleMatchesString =>\n    result := {#ok, \"GET /x\"} match: [\n      {#ok, <<71, 69, 84, 32, rest/binary>>} -> rest toBytes;\n      _ -> nil\n    ]\n    self assert: result equals: #(47, 120)\n\n  testMatchNestedBinaryInTupleMatchesBareBinary =>\n    pair := {#ok, Binary fromBytes: #(71, 69, 84, 32, 47)}\n    result := pair match: [\n      {#ok, <<71, 69, 84, 32, rest/binary>>} -> rest toBytes;\n      _ -> nil\n    ]\n    self assert: result equals: #(47)\n\n  testMatchNestedBinaryNoMatchFallsThrough =>\n    result := {#ok, \"PUT /x\"} match: [\n      {#ok, <<71, 69, 84, 32, rest/binary>>} -> rest toBytes;\n      {#ok, <<80, 85, 84, 32, _/binary>>} -> #put;\n      _ -> nil\n    ]\n    self assert: result equals: #put\n\n  testMatchNestedBinaryNonBinaryFallsThrough =>\n    result := {#ok, 42} match: [\n      {#ok, <<_:8, _/binary>>} -> #binary;\n      {#ok, n} -> n\n    ]\n    self assert: result equals: 42\n\n  testMatchNestedBinaryGuardSeesSegments =>\n    // The guard runs after every nested binary has matched.\n    result := {\"A\", \"B\"} match: [\n      {<<a:8>>, <<b:8>>} when: [a > b] -> #descending;\n      {<<a:8>>, <<b:8>>} -> {a, b};\n      _ -> nil\n    ]\n    self assert: result equals: {65, 66}\n\n  testMatchNestedBinarySizeNamesOuterVariable =>\n    // A nested binary matches after the enclosing tuple, so its segment\n    // size may name a variable the tuple bound.\n    pair := {2, \"hello\"}\n    result := pair match: [\n      {n, <<head:n/binary, _/binary>>} -> head toBytes;\n      _ -> nil\n    ]\n    self assert: result equals: #(104, 101)",
+      "source": "// BT-663: Tests for binary pattern matching in match: expressions.\n// Covers integer segments, binary segments, and guards.\n\nTestCase subclass: BinaryPatternsTest\n\n  testMatchFirstByteOfString =>\n    // Strings are UTF-8 binaries; \"A\" is byte 65\n    result := \"ABC\" match: [\n      <<first:8, _/binary>> -> first;\n      _ -> 0\n    ]\n    self assert: result equals: 65\n\n  testMatchRestBinary =>\n    // Extract the tail of a binary after the first byte\n    result := \"ABC\" match: [\n      <<_:8, rest/binary>> -> rest size;\n      _ -> 0\n    ]\n    self assert: result equals: 2\n\n  testMatchWildcardBinary =>\n    // Wildcard binary segment matches any binary\n    result := \"hello\" match: [\n      <<_/binary>> -> true;\n      _ -> false\n    ]\n    self assert: result\n\n  testMatchIntegerSegmentFallthrough =>\n    // When no arm matches, fall through to wildcard\n    result := \"X\" match: [\n      <<first:8, _/binary>> when: [first > 200] -> \"high\";\n      _ -> \"low\"\n    ]\n    self assert: result equals: \"low\"\n\n  testMatchLengthPrefixedPayload =>\n    // BT-4096: a segment size may name a variable bound by an earlier segment\n    bin := Binary fromBytes: #(3, 104, 105, 33, 99)\n    result := bin match: [\n      <<n:8, payload:n/binary, rest/binary>> -> {n, payload toBytes, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 3\n    self assert: (result at: 2) equals: #(104, 105, 33)\n    self assert: (result at: 3) equals: #(99)\n\n  testMatchLengthPrefixedIncompleteFallsThrough =>\n    // BT-4096: fewer bytes buffered than the bound size claims — no match\n    bin := Binary fromBytes: #(10, 1, 2)\n    result := bin match: [\n      <<n:8, payload:n/binary, rest/binary>> -> payload;\n      _ -> nil\n    ]\n    self assert: result isNil\n\n  testMatchBitsSegment =>\n    // BT-4097: bits/bitstring segments (234 = 0b11101010)\n    bin := Binary fromBytes: #(234, 7)\n    result := bin match: [\n      <<flags:3, v:5, rest/bitstring>> -> {flags, v, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 7\n    self assert: (result at: 2) equals: 10\n    // The tail is 8 bits, byte-aligned, so it is a Binary (ADR 0141).\n    self assert: (result at: 3) equals: #(7)\n\n  testMatchUnalignedBitstringTail =>\n    // BT-4139: an unaligned tail is a Bitstring — read it with\n    // bitSize/toBits; the byte protocol is not understood (ADR 0141).\n    bin := Binary fromBytes: #(234)\n    rest := bin match: [\n      <<_:3, r/bitstring>> -> r;\n      _ -> nil\n    ]\n    self assert: rest class equals: Bitstring\n    self assert: rest bitSize equals: 5\n    self assert: rest toBits equals: #(0, 1, 0, 1, 0)\n    self should: [rest perform: #toBytes] raise: #does_not_understand\n    self should: [rest perform: #size] raise: #does_not_understand\n\n  testMatchBitstringTailChained =>\n    // BT-4097: an unaligned rest/bits tail matches again as a bitstring\n    bin := Binary fromBytes: #(234)\n    result := bin match: [\n      <<_:3, rest/bitstring>> -> (rest match: [\n        <<v:5>> -> v;\n        _ -> -1\n      ]);\n      _ -> -1\n    ]\n    self assert: result equals: 10\n\n  testMatchLiteralSegmentValue =>\n    // BT-4097: integer literal segment values (10 = 0b00001010)\n    bin := Binary fromBytes: #(10, 9)\n    result := bin match: [\n      <<0:1, v:7, rest/binary>> -> {v, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 10\n    self assert: (result at: 2) equals: #(9)\n\n  testMatchLiteralSegmentValueFallsThrough =>\n    // BT-4097: first bit is 1 (138 = 0b10001010), so <<0:1, ...>> rejects it\n    bin := Binary fromBytes: #(138, 9)\n    result := bin match: [\n      <<0:1, v:7, rest/binary>> -> v;\n      _ -> nil\n    ]\n    self assert: result isNil\n\n  testMatchSizeExpression =>\n    // BT-4097: parenthesized size expressions (234 = 0b11_101010)\n    q := 2\n    bin := Binary fromBytes: #(234, 7)\n    result := bin match: [\n      <<a:(4 - q), b:(4 + q), rest/binary>> -> {a, b, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 3\n    self assert: (result at: 2) equals: 42\n    self assert: (result at: 3) equals: #(7)\n\n  testMatchSkippedFlagBits =>\n    // BT-4097: sizes from locals (skip is used only as a size — no\n    // unused-variable warning under --warnings-as-errors)\n    p := 5\n    skip := 8 - p\n    bin := Binary fromBytes: #(234)\n    result := bin match: [\n      <<_f:skip, v:p, rest/binary>> -> v;\n      _ -> -1\n    ]\n    self assert: result equals: 10\n\n  testSizeOnlyParameterIsUsed =>\n    // BT-4097: n is used only as a segment size — no unused-parameter warning\n    self assert: (self take: 2 from: (Binary fromBytes: #(7, 8, 9))) toBytes equals: #(7, 8)\n\n  take: n :: Integer from: bin :: Binary -> Binary =>\n    bin match: [\n      <<payload:n/binary, _/binary>> -> payload;\n      _ -> Binary fromBytes: #()\n    ]\n\n  testMatchMultipleWildcardsInBinary =>\n    // BT-4098: every _ in one pattern is a fresh anonymous variable\n    result := (Binary fromBytes: #(1)) match: [\n      <<_:1, _:7>> -> true;\n      _ -> false\n    ]\n    self assert: result\n\n  testMatchRaisingSizeExpressionFallsThrough =>\n    // Review finding 1: a raising size fails the arm, never crashes the\n    // match — including against a non-binary scrutinee. A computed\n    // negative size simply never matches.\n    q := 0\n    bin := Binary fromBytes: #(1, 2, 3)\n    self\n      assert: (bin match: [\n        <<a:(4 / q), rest/binary>> -> a;\n        _ -> #fallback\n      ])\n      equals: #fallback\n    self\n      assert: (42 match: [\n        <<a:(4 / q), rest/binary>> -> a;\n        _ -> #fallback\n      ])\n      equals: #fallback\n    self\n      assert: (bin match: [\n        <<a:(1 - 5), rest/binary>> -> a;\n        _ -> #fallback\n      ])\n      equals: #fallback\n\n  testMatchNegativeLiteralValue =>\n    // Review finding 8: `<<-1:8/signed>>` matches 255, both spellings.\n    bin := Binary fromBytes: #(255, 9)\n    self\n      assert: (bin match: [\n        <<-1:8/signed, rest/binary>> -> rest toBytes;\n        _ -> #()\n      ])\n      equals: #(9)\n    self\n      assert: (bin match: [\n        <<-1:8/signed, rest/binary>> -> rest toBytes;\n        _ -> #()\n      ])\n      equals: #(9)\n\n  testMatchSplitWithHoistedExpression =>\n    // Review finding 8: size expression over a pattern-bound variable —\n    // split at `a`, hoist `(n + 2)` between the matches. 234 is 0b11101010.\n    bin := Binary fromBytes: #(3, 234, 7)\n    result := bin match: [\n      <<n:8, a:(n + 2), rest/bitstring>> -> {n, a, rest};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 3\n    self assert: (result at: 2) equals: 29\n    // BT-4139: the 11-bit tail is a Bitstring (ADR 0141).\n    self assert: (result at: 3) class equals: Bitstring\n    self assert: (result at: 3) bitSize equals: 11\n    self assert: (result at: 3) toBits equals: #(0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1)\n    tail := (result at: 3) match: [\n      <<b:3, c:8>> -> {b, c};\n      _ -> nil\n    ]\n    self assert: (tail at: 1) equals: 2\n    self assert: (tail at: 2) equals: 7\n\n  testMatchGuardedSegmentedArmFallsThrough =>\n    // Review finding 8: the guard applies innermost; rejection falls\n    // through to the next (also segmented) arm.\n    bin := Binary fromBytes: #(3, 1, 2, 3)\n    self\n      assert: (bin match: [\n        <<n:8, p:n/binary>> when: [n > 100] -> #big;\n        <<n:8, p:n/binary>> -> #small;\n        _ -> #none\n      ])\n      equals: #small\n\n  testMatchThreeChunks =>\n    // Review finding 8: two split points in one arm.\n    bin := Binary fromBytes: #(8, 2, 9, 9, 9)\n    result := bin match: [\n      <<n:8, m:n/integer, p:m/binary, rest/binary>> -> {n, m, p toBytes, rest toBytes};\n      _ -> nil\n    ]\n    self assert: (result at: 1) equals: 8\n    self assert: (result at: 2) equals: 2\n    self assert: (result at: 3) equals: #(9, 9)\n    self assert: (result at: 4) equals: #(9)\n\n  testMatchNativeBeforeSegmentedArm =>\n    // Review finding 8: a native binary arm ahead of a segmented one.\n    bin := Binary fromBytes: #(3, 1, 2, 3)\n    self\n      assert: (bin match: [\n        <<1:8, _/binary>> -> #one;\n        <<n:8, p:n/binary>> -> #prefixed;\n        _ -> #none\n      ])\n      equals: #prefixed\n\n  testMatchNestedTrivialParenthesizedSize =>\n    // Review finding 6: `<<a:(8)>>` inlines — no hoist, so nesting is fine.\n    bin := Binary fromBytes: #(10, 9)\n    pair := {#ok, bin}\n    self\n      assert: (pair match: [\n        {#ok, <<a:(8), rest/binary>>} -> a;\n        _ -> -1\n      ])\n      equals: 10\n\n  // BT-4223: a binary pattern nested inside a composite pattern unwraps a\n  // `String` element to its bytes, like a top-level binary arm does.\n  testMatchNestedBinaryInTupleMatchesString =>\n    result := {#ok, \"GET /x\"} match: [\n      {#ok, <<71, 69, 84, 32, rest/binary>>} -> rest toBytes;\n      _ -> nil\n    ]\n    self assert: result equals: #(47, 120)\n\n  testMatchNestedBinaryInTupleMatchesBareBinary =>\n    pair := {#ok, Binary fromBytes: #(71, 69, 84, 32, 47)}\n    result := pair match: [\n      {#ok, <<71, 69, 84, 32, rest/binary>>} -> rest toBytes;\n      _ -> nil\n    ]\n    self assert: result equals: #(47)\n\n  testMatchNestedBinaryNoMatchFallsThrough =>\n    result := {#ok, \"PUT /x\"} match: [\n      {#ok, <<71, 69, 84, 32, rest/binary>>} -> rest toBytes;\n      {#ok, <<80, 85, 84, 32, _/binary>>} -> #put;\n      _ -> nil\n    ]\n    self assert: result equals: #put\n\n  testMatchNestedBinaryNonBinaryFallsThrough =>\n    result := {#ok, 42} match: [\n      {#ok, <<_:8, _/binary>>} -> #binary;\n      {#ok, n} -> n\n    ]\n    self assert: result equals: 42\n\n  testMatchNestedBinaryGuardSeesSegments =>\n    // The guard runs after every nested binary has matched.\n    result := {\"A\", \"B\"} match: [\n      {<<a:8>>, <<b:8>>} when: [a > b] -> #descending;\n      {<<a:8>>, <<b:8>>} -> {a, b};\n      _ -> nil\n    ]\n    self assert: result equals: {65, 66}\n\n  testMatchNestedBinarySizeNamesOuterVariable =>\n    // A nested binary matches after the enclosing tuple, so its segment\n    // size may name a variable the tuple bound.\n    pair := {2, \"hello\"}\n    result := pair match: [\n      {n, <<head:n/binary, _/binary>>} -> head toBytes;\n      _ -> nil\n    ]\n    self assert: result equals: #(104, 101)",
       "explanation": "BT-663: Tests for binary pattern matching in match: expressions. Covers integer segments, binary segments, and guards."
     },
     {
@@ -18144,6 +18173,89 @@
       ],
       "source": "// BUnit tests for the BindingsView class (ADR 0081 Phase 4 / BT-2367).\n//\n// BUnit runs in compiled context with no live REPL session and no running\n// workspace meta process, so a workspace-scoped view reads empty here. Live\n// read + write-through against a real session and a real workspace are covered\n// by tests/repl-protocol/cases/session_object.btscript (session-locals view +\n// the synchronous Workspace bindings view). These tests verify the\n// Dictionary-protocol shape and the empty-view read behaviour.\n\nTestCase subclass: BindingsViewTest\n  field: view = nil\n\n  setUp =>\n    // A workspace-scoped view is just a tagged map (no liveness/PID needed),\n    // so it can be minted directly. Reads return empty in the BUnit context.\n    self.view := (Erlang beamtalk_session_primitives) bindingsView\n    self\n\n  // ===== Dictionary-protocol selectors present =====\n  testIncludesSelectorAt => self assert: (BindingsView includesSelector: #at:)\n\n  testIncludesSelectorAtPut =>\n    self assert: (BindingsView includesSelector: #at:put:)\n\n  testIncludesSelectorRemoveKey =>\n    self assert: (BindingsView includesSelector: #removeKey:)\n\n  testIncludesSelectorIncludesKey =>\n    self assert: (BindingsView includesSelector: #includesKey:)\n\n  testIncludesSelectorKeys =>\n    self assert: (BindingsView includesSelector: #keys)\n\n  testIncludesSelectorValues =>\n    self assert: (BindingsView includesSelector: #values)\n\n  testIncludesSelectorSize =>\n    self assert: (BindingsView includesSelector: #size)\n\n  testIncludesSelectorDo => self assert: (BindingsView includesSelector: #do:)\n\n  testIncludesSelectorPrintString =>\n    self assert: (BindingsView includesSelector: #printString)\n\n  testInheritsFromObject => self assert: (BindingsView inheritsFrom: Object)\n\n  // ===== Empty-view reads (no workspace meta in BUnit) =====\n  testEmptyViewSizeIsZero => self assert: self.view size equals: 0\n\n  testEmptyViewKeysIsEmpty => self assert: (self.view keys isEmpty)\n\n  testEmptyViewValuesIsEmpty => self assert: (self.view values isEmpty)\n\n  testAbsentKeyReturnsNil => self assert: (self.view at: #noSuchBinding) isNil\n\n  testIncludesKeyFalseForAbsent =>\n    self deny: (self.view includesKey: #noSuchBinding)\n\n  // ===== printString renders like a Dictionary =====\n  testPrintStringRendersLikeDictionary =>\n    self assert: self.view printString equals: \"#\\{}\"",
       "explanation": "BUnit tests for the BindingsView class (ADR 0081 Phase 4 / BT-2367).  BUnit runs in compiled context with no live REPL session and no running workspace meta process, so a workspace-scoped view reads empty here. Live read + write-through against a real session and a real workspace are covered by tests/repl-protocol/cases/session_object.btscript (session-locals view + the synchronous Workspace bindings view). These tests verify the Dictionary-protocol shape and the empty-view read behaviour."
+    },
+    {
+      "id": "stdlib-test-bitstring-test",
+      "title": "BitstringTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "BitstringTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "bitstring_test",
+        "classify:",
+        "duck typing",
+        "exclude",
+        "extends",
+        "field",
+        "filter",
+        "filter out",
+        "filtering",
+        "find",
+        "first match",
+        "for each",
+        "for-each",
+        "forEach",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "interface",
+        "iterate",
+        "iteration",
+        "loop",
+        "map",
+        "mapping",
+        "member",
+        "method check",
+        "mutate",
+        "mutation",
+        "object",
+        "oneBit",
+        "property",
+        "protocol",
+        "rejectedOneArg",
+        "rejectedUnary",
+        "search",
+        "set",
+        "sevenBits",
+        "string conversion",
+        "subclassing",
+        "tail",
+        "testAlignedTailIsABinary",
+        "testAsBinaryIsAlwaysAnError",
+        "testBinaryBitSize",
+        "testBinaryConcatABinaryStaysABinary",
+        "testBinaryConcatABitstringIsATypeError",
+        "testBinaryPatternDoesNotMatchABitstring",
+        "testBitSize",
+        "testBitstringMatchesAgainAsBits",
+        "testByteSelectorsAreNotUnderstood",
+        "testConcatReachingAByteBoundaryIsABinary",
+        "testConcatStayingUnalignedIsABitstring",
+        "testConcatWithABinary",
+        "testConcatWithANonBitstringIsATypeError",
+        "testConcatWithAStringJoinsItsBytes",
+        "testDisplayString",
+        "testEmptyTailIsABinary",
+        "testEquality",
+        "testFieldAccessOnABitstringIsStructured",
+        "testFieldNamesIsEmpty",
+        "testNotUnderstoodHintNamesBitSizeAndProtocol",
+        "testNotUnderstoodIsStructured",
+        "testPrintString",
+        "testPrintStringNestedInACollection",
+        "testProtocolSelectorsAreUnderstood",
+        "testToBits",
+        "testTypePatterns",
+        "testUnalignedTailIsABitstring",
+        "toString",
+        "to_string",
+        "transform",
+        "where"
+      ],
+      "source": "// BT-4139 / ADR 0141: Bitstring, the sealed class of unaligned bitstrings.\n// Pins every row of the protocol table, every deliberately-rejected byte\n// selector, the aligned/unaligned boundary, and the type patterns.\n\nTestCase subclass: BitstringTest\n\n  // 234 = 0b11101010: dropping 3 bits leaves 0b01010 (10, 5 bits).\n  tail => (Binary fromBytes: #(234)) match: [<<_:3, rest/bitstring>> -> rest]\n\n  // 255 split as 1 bit + 7 bits: <<1:1>> and <<127:7>>.\n  oneBit =>\n    (Binary fromBytes: #(255)) match: [<<a:1/bitstring, _/bitstring>> -> a]\n\n  sevenBits => (Binary fromBytes: #(255)) match: [<<_:1, b:7/bitstring>> -> b]\n\n  classify: x =>\n    x match: [\n      b :: Bitstring -> #bitstring;\n      b :: Binary -> #binary;\n      _ -> #other\n    ]\n\n  // === Class ===\n  testUnalignedTailIsABitstring =>\n    self assert: self tail class equals: Bitstring\n    self assert: (self tail isKindOf: Bitstring)\n    self deny: (self tail isKindOf: Binary)\n    self deny: (self tail isKindOf: Collection)\n\n  testAlignedTailIsABinary =>\n    rest := (Binary fromBytes: #(234, 7)) match: [<<_:8, r/bitstring>> -> r]\n    self assert: rest class equals: Binary\n    self assert: rest toBytes equals: #(7)\n\n  testEmptyTailIsABinary =>\n    // Zero bits is a whole number of bytes.\n    rest := (Binary fromBytes: #(234)) match: [<<_:8, r/bitstring>> -> r]\n    self assert: rest class equals: Binary\n    self assert: rest bitSize equals: 0\n\n  // === Protocol ===\n  testBitSize =>\n    self assert: self tail bitSize equals: 5\n    self assert: self oneBit bitSize equals: 1\n    self assert: self sevenBits bitSize equals: 7\n\n  testBinaryBitSize =>\n    self assert: (Binary fromBytes: #(1, 2)) bitSize equals: 16\n    self assert: (Binary fromBytes: #()) bitSize equals: 0\n    // A String counts its UTF-8 bytes, not graphemes.\n    self assert: \"é\" bitSize equals: 16\n\n  testToBits =>\n    self assert: self tail toBits equals: #(0, 1, 0, 1, 0)\n    self assert: self oneBit toBits equals: #(1)\n    self assert: self sevenBits toBits equals: #(1, 1, 1, 1, 1, 1, 1)\n\n  testConcatReachingAByteBoundaryIsABinary =>\n    joined := self oneBit concat: self sevenBits\n    self assert: joined class equals: Binary\n    self assert: joined toBytes equals: #(255)\n\n  testConcatStayingUnalignedIsABitstring =>\n    joined := self oneBit concat: self oneBit\n    self assert: joined class equals: Bitstring\n    self assert: joined toBits equals: #(1, 1)\n\n  testConcatWithABinary =>\n    joined := self tail concat: (Binary fromBytes: #(255))\n    self assert: joined class equals: Bitstring\n    self assert: joined bitSize equals: 13\n    self assert: joined toBits equals: #(0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1)\n\n  testConcatWithAStringJoinsItsBytes =>\n    joined := self tail concat: \"A\"\n    self assert: joined class equals: Bitstring\n    self assert: joined toBits equals: #(0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1)\n\n  testConcatWithANonBitstringIsATypeError =>\n    self should: [self tail concat: 42] raise: #type_error\n\n  testAsBinaryIsAlwaysAnError =>\n    result := self tail asBinary\n    self assert: result isError\n    self assert: result error kind equals: #unaligned_bitstring\n    self assert: (result error hint includesSubstring: \"bitSize\")\n    self assert: (result error hint includesSubstring: \"toBits\")\n\n  testPrintString =>\n    self assert: self tail printString equals: \"<<10:5>>\"\n    self assert: self oneBit printString equals: \"<<1:1>>\"\n    joined := self tail concat: (Binary fromBytes: #(255))\n    self assert: joined printString equals: \"<<87,31:5>>\"\n\n  testDisplayString => self assert: self tail displayString equals: \"<<10:5>>\"\n\n  testPrintStringNestedInACollection =>\n    self assert: {self tail, 1} printString equals: \"\\{<<10:5>>, 1}\"\n\n  testFieldNamesIsEmpty =>\n    // A Bitstring is a raw BEAM term with no fields. Sent dynamically: the\n    // inline `fieldNames` intrinsic mishandles every non-map value receiver\n    // (BT-4264).\n    self assert: (self tail perform: #fieldNames) equals: #()\n\n  testFieldAccessOnABitstringIsStructured =>\n    // No fields: a dynamic fieldAt: raises the same structured\n    // immutable_value as a primitive class, never a raw function_clause.\n    self should: [\n      self tail perform: #fieldAt: withArguments: #(#x)\n    ] raise: #immutable_value\n    self deny: (self tail perform: #hasField: withArguments: #(#x))\n\n  testBinaryConcatABitstringIsATypeError =>\n    // ADR 0141: Binary>>concat: is bytes-only (typed Binary -> Binary);\n    // bits are joined from the Bitstring side.\n    self should: [\n      (Binary fromBytes: #(255)) concat: self tail\n    ] raise: #type_error\n    self should: [\"A\" concat: self tail] raise: #type_error\n\n  testBinaryConcatABinaryStaysABinary =>\n    joined := (Binary fromBytes: #(1)) concat: (Binary fromBytes: #(2))\n    self assert: joined class equals: Binary\n\n  testEquality =>\n    self assert: self tail =:= self tail\n    self assert: self tail == self tail\n    self deny: self oneBit =:= self tail\n    self assert: self tail hash equals: self tail hash\n\n  // === Rejected byte protocol ===\n  rejectedUnary =>\n    #(#size, #toBytes, #asString, #asStringUnchecked, #asBase64, #asBase64Url, #asHex, #isEmpty, #notEmpty)\n\n  rejectedOneArg =>\n    #(#do:, #at:, #byteAt:, #includesSubstring:, #indexOf:, #collect:, #select:, #reject:, #detect:, #includes:)\n\n  testByteSelectorsAreNotUnderstood =>\n    self rejectedUnary\n      do: [:sel |\n        self should: [self tail perform: sel] raise: #does_not_understand\n        self deny: (self tail respondsTo: sel)\n      ]\n    self rejectedOneArg\n      do: [:sel |\n        self should: [\n          self tail perform: sel withArguments: #(1)\n        ] raise: #does_not_understand\n        self deny: (self tail respondsTo: sel)\n      ]\n    self should: [self tail part: 0 size: 1] raise: #does_not_understand\n    self should: [\n      self tail inject: 0 into: [:a :b | a + b]\n    ] raise: #does_not_understand\n\n  testNotUnderstoodHintNamesBitSizeAndProtocol =>\n    hint := [self tail perform: #size] on: Error do: [:e | e hint]\n    self assert: hint equals: \"a Bitstring is not byte-aligned (5 bits); use 'bitSize'/'toBits', or 'asBinary' to check alignment\"\n\n  testNotUnderstoodIsStructured =>\n    err := [self tail perform: #toBytes] on: Error do: [:e | e]\n    self assert: err kind equals: #does_not_understand\n    self assert: err selector equals: #toBytes\n\n  testProtocolSelectorsAreUnderstood =>\n    #(#bitSize, #toBits, #concat:, #asBinary, #printString, #displayString, #class, #hash) do: [:sel |\n      self assert: (self tail respondsTo: sel)\n    ]\n\n  // === Patterns ===\n  testTypePatterns =>\n    self assert: (self classify: self tail) equals: #bitstring\n    self assert: (self classify: (Binary fromBytes: #(1))) equals: #binary\n    self assert: (self classify: \"s\") equals: #binary\n    self assert: (self classify: 42) equals: #other\n\n  testBinaryPatternDoesNotMatchABitstring =>\n    result := self tail match: [\n      b :: Binary -> #binary;\n      _ -> #other\n    ]\n    self assert: result equals: #other\n\n  testBitstringMatchesAgainAsBits =>\n    result := self tail match: [\n      <<a:2, b:3>> -> {a, b};\n      _ -> nil\n    ]\n    self assert: result equals: {1, 2}",
+      "explanation": "BT-4139 / ADR 0141: Bitstring, the sealed class of unaligned bitstrings. Pins every row of the protocol table, every deliberately-rejected byte selector, the aligned/unaligned boundary, and the type patterns."
     },
     {
       "id": "stdlib-test-block-evaluation-test",
@@ -21642,6 +21754,67 @@
       ],
       "source": "// BT-773: self and explicit class name in class methods should both use\n// direct dispatch (not actor message send) to avoid deadlock\n// BT-1201: class method assigning result of self classMethod to local var\n\nTestCase subclass: ClassSelfDispatchTest\n\n  testSelfNewInClassMethod =>\n    // self new: in a class method uses direct dispatch\n    self assert: (ClassSelfDispatch makeSelf: 42) x equals: 42\n\n  testExplicitClassNameNewInClassMethod =>\n    // ClassName new: in a class method should also use direct dispatch\n    // Before BT-773, this would deadlock because it routed through class_send\n    self assert: (ClassSelfDispatch makeExplicit: 99) x equals: 99\n\n  testLocalVarAssignmentOfClassMethodResult =>\n    // BT-1201: `obj := self makeSelf: v. obj` must generate valid Core Erlang.\n    // Previously produced `in  in` causing a core_parse_error.\n    self assert: (ClassSelfDispatch makeViaLocal: 7) x equals: 7\n\n  testChainedClassMethodCallViaLocalVar =>\n    // BT-1201: two class methods chained via local var\n    self assert: ClassSelfDispatch fortytwo equals: 42",
       "explanation": "BT-773: self and explicit class name in class methods should both use direct dispatch (not actor message send) to avoid deadlock BT-1201: class method assigning result of self classMethod to local var"
+    },
+    {
+      "id": "stdlib-test-class-side-behaviour-protocol-test",
+      "title": "ClassSideBehaviourProtocolTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ClassSideBehaviourProtocolTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "async",
+        "class_side_behaviour_protocol_test",
+        "concurrent",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "testActorClassMethodSelfDocInClassProcessRaisesDispatchError",
+        "testActorClassMethodSelfIncludesSelector",
+        "testActorClassMethodSelfName",
+        "testActorClassMethodSelfSuperclass",
+        "testActorClassMethodSuperName",
+        "testActorClassMethodSuperNameInClosure",
+        "testActorClassMethodSuperSuperclass",
+        "testActorInheritedClassMethodAnswersForReceiver",
+        "testObjectClassMethodSelfDocInClassProcessRaisesDispatchError",
+        "testObjectClassMethodSelfIncludesSelector",
+        "testObjectClassMethodSelfName",
+        "testObjectClassMethodSelfSuperclass",
+        "testObjectClassMethodSuperName",
+        "testObjectClassMethodSuperNameInClosure",
+        "testObjectClassMethodSuperSuperclass",
+        "testObjectInheritedClassMethodAnswersForReceiver",
+        "testSealedDirectCalledClassMethodSelfDoc",
+        "testSealedDirectCalledClassMethodSelfName",
+        "testSealedDirectCalledClassMethodSelfSuperclass",
+        "testSealedDirectCalledClassMethodSuperName",
+        "testSealedDirectCalledClassMethodSuperNameInClosure",
+        "testSealedDirectCalledClassMethodSuperSuperclass",
+        "testValueClassMethodSelfName",
+        "testValueClassMethodSelfSuperclass",
+        "testValueClassMethodSuperName",
+        "testValueClassMethodSuperNameInClosure",
+        "testValueClassMethodSuperSuperclass",
+        "testValueInheritedClassMethodAnswersForReceiver"
+      ],
+      "source": "// BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to `self`\n// or `super` from a class method answer what the external send to the class\n// object answers. The class-method chain does not define them, so the runtime\n// falls through to the class-object protocol (Class -> Behaviour -> ...), the\n// same chain the type checker resolves them against.\n//\n// Fixtures: stdlib/test/fixtures/bt4252class_protocol_*.bt\n\nTestCase subclass: ClassSideBehaviourProtocolTest\n\n  testActorClassMethodSelfName =>\n    self assert: Bt4252ClassProtocolActorChild selfName equals: Bt4252ClassProtocolActorChild name\n\n  testActorClassMethodSuperName =>\n    self assert: Bt4252ClassProtocolActorChild superName equals: #Bt4252ClassProtocolActorChild\n\n  testActorClassMethodSelfSuperclass =>\n    self assert: Bt4252ClassProtocolActorChild selfSuperclass equals: Bt4252ClassProtocolActorBase\n\n  testActorClassMethodSuperSuperclass =>\n    self assert: Bt4252ClassProtocolActorChild superSuperclass equals: Bt4252ClassProtocolActorBase\n\n  testActorClassMethodSuperNameInClosure =>\n    self assert: Bt4252ClassProtocolActorChild superNameInClosure equals: #(#Bt4252ClassProtocolActorChild)\n\n  testActorInheritedClassMethodAnswersForReceiver =>\n    self assert: Bt4252ClassProtocolActorChild inheritedSelfName equals: #Bt4252ClassProtocolActorChild\n    self assert: Bt4252ClassProtocolActorChild inheritedSuperName equals: #Bt4252ClassProtocolActorChild\n\n  testObjectClassMethodSelfName =>\n    self assert: Bt4252ClassProtocolObjectChild selfName equals: Bt4252ClassProtocolObjectChild name\n\n  testObjectClassMethodSuperName =>\n    self assert: Bt4252ClassProtocolObjectChild superName equals: #Bt4252ClassProtocolObjectChild\n\n  testObjectClassMethodSelfSuperclass =>\n    self assert: Bt4252ClassProtocolObjectChild selfSuperclass equals: Bt4252ClassProtocolObjectBase\n\n  testObjectClassMethodSuperSuperclass =>\n    self assert: Bt4252ClassProtocolObjectChild superSuperclass equals: Bt4252ClassProtocolObjectBase\n\n  testObjectClassMethodSuperNameInClosure =>\n    self assert: Bt4252ClassProtocolObjectChild superNameInClosure equals: #(#Bt4252ClassProtocolObjectChild)\n\n  testObjectInheritedClassMethodAnswersForReceiver =>\n    self assert: Bt4252ClassProtocolObjectChild inheritedSelfName equals: #Bt4252ClassProtocolObjectChild\n    self assert: Bt4252ClassProtocolObjectChild inheritedSuperName equals: #Bt4252ClassProtocolObjectChild\n\n  testValueClassMethodSelfName =>\n    self assert: Bt4252ClassProtocolValueChild selfName equals: Bt4252ClassProtocolValueChild name\n\n  testValueClassMethodSuperName =>\n    self assert: Bt4252ClassProtocolValueChild superName equals: #Bt4252ClassProtocolValueChild\n\n  testValueClassMethodSelfSuperclass =>\n    self assert: Bt4252ClassProtocolValueChild selfSuperclass equals: Bt4252ClassProtocolValueBase\n\n  testValueClassMethodSuperSuperclass =>\n    self assert: Bt4252ClassProtocolValueChild superSuperclass equals: Bt4252ClassProtocolValueBase\n\n  testValueClassMethodSuperNameInClosure =>\n    self assert: Bt4252ClassProtocolValueChild superNameInClosure equals: #(#Bt4252ClassProtocolValueChild)\n\n  testValueInheritedClassMethodAnswersForReceiver =>\n    self assert: Bt4252ClassProtocolValueChild inheritedSelfName equals: #Bt4252ClassProtocolValueChild\n    self assert: Bt4252ClassProtocolValueChild inheritedSuperName equals: #Bt4252ClassProtocolValueChild\n\n  testSealedDirectCalledClassMethodSelfName =>\n    self assert: Bt4252ClassProtocolSealed selfName equals: Bt4252ClassProtocolSealed name\n\n  testSealedDirectCalledClassMethodSuperName =>\n    self assert: Bt4252ClassProtocolSealed superName equals: #Bt4252ClassProtocolSealed\n\n  testSealedDirectCalledClassMethodSelfSuperclass =>\n    self assert: Bt4252ClassProtocolSealed selfSuperclass equals: Bt4252ClassProtocolObjectBase\n\n  testSealedDirectCalledClassMethodSuperSuperclass =>\n    self assert: Bt4252ClassProtocolSealed superSuperclass equals: Bt4252ClassProtocolObjectBase\n\n  testSealedDirectCalledClassMethodSuperNameInClosure =>\n    self assert: Bt4252ClassProtocolSealed superNameInClosure equals: #(#Bt4252ClassProtocolSealed)\n\n  // `doc`'s primitive `gen_server:call`s the class process, which cannot\n  // answer from inside one of its own class methods: a structured\n  // `dispatch_error` naming the send (like any send back to the running\n  // class), not a raw `calling_self` exit. BT-4262 tracks making it answer.\n  testActorClassMethodSelfDocInClassProcessRaisesDispatchError =>\n    self should: [Bt4252ClassProtocolActorChild selfDoc] raise: #dispatch_error\n    selector := [\n      Bt4252ClassProtocolActorChild selfDoc\n    ] on: Exception do: [:e | e selector]\n    self assert: selector equals: #doc\n\n  testObjectClassMethodSelfDocInClassProcessRaisesDispatchError =>\n    self should: [Bt4252ClassProtocolObjectChild selfDoc] raise: #dispatch_error\n\n  testActorClassMethodSelfIncludesSelector =>\n    self assert: Bt4252ClassProtocolActorChild selfIncludesFoo equals: (Bt4252ClassProtocolActorChild includesSelector: #foo)\n    self assert: Bt4252ClassProtocolActorChild selfIncludesFoo\n    self deny: Bt4252ClassProtocolActorChild selfIncludesBar\n\n  testObjectClassMethodSelfIncludesSelector =>\n    self assert: Bt4252ClassProtocolObjectChild selfIncludesFoo equals: (Bt4252ClassProtocolObjectChild includesSelector: #foo)\n    self assert: Bt4252ClassProtocolObjectChild selfIncludesFoo\n    self deny: Bt4252ClassProtocolObjectChild selfIncludesBar\n\n  testSealedDirectCalledClassMethodSelfDoc =>\n    self assert: Bt4252ClassProtocolSealed selfDoc equals: Bt4252ClassProtocolSealed doc",
+      "explanation": "BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to `self` or `super` from a class method answer what the external send to the class object answers. The class-method chain does not define them, so the runtime falls through to the class-object protocol (Class -> Behaviour -> ...), the same chain the type checker resolves them against.  Fixtures: stdlib/test/fixtures/bt4252class_protocol_*.bt"
     },
     {
       "id": "stdlib-test-class-side-facades-test",
@@ -37717,6 +37890,182 @@
       ],
       "source": "// BT-4178 fixture: an outer loop carrying a local accumulator encloses an\n// inner loop that reads an actor field. The inner read must see the actor\n// state, never the outer loop's accumulator.\n\nActor subclass: Bt4178NestedReadActor\n  state: n = 7\n\n  n => self.n\n\n  // Not nested: a tuple-accumulator `do:` that reads the field.\n  flatReading: xs =>\n    k := 0\n    xs\n      do: [:j |\n        k := self.n\n        j\n      ]\n    k\n\n  // Not nested: a tuple-accumulator `collect:` that reads the field.\n  collectReading: xs =>\n    k := 0\n    r := xs\n      collect: [:j |\n        k := self.n\n        j\n      ]\n    k + r size\n\n  // Not nested: a tuple-accumulator `inject:into:` that reads the field.\n  injectFieldReading: xs =>\n    k := 0\n    s := xs\n      inject: 0\n      into: [:a :m |\n        k := self.n\n        a + m\n      ]\n    s + (k * 100)\n\n  // Dictionary `do:` and `keysAndValuesDo:` folds that read the field.\n  dictReading =>\n    k := 0\n    j := 0\n    #{#a => 1} do: [:v | k := self.n + v]\n    #{#a => 1} keysAndValuesDo: [:key :v | j := self.n + v]\n    k + j\n\n  // The inner fold opens the outer fold's body, before any write there.\n  firstStatementReading: xs =>\n    acc := 0\n    k := 0\n    xs\n      do: [:m |\n        #(1)\n          do: [:j |\n            k := self.n\n            j\n          ]\n        acc := acc + m\n      ]\n    acc + (k * 100)\n\n  // Integer accumulator; inner `do:` reads the field.\n  sumReading: xs =>\n    acc := 0\n    k := 0\n    xs\n      do: [:m |\n        acc := acc + m\n        #(1)\n          do: [:j |\n            k := self.n\n            j\n          ]\n      ]\n    acc + (k * 100)\n\n  // Untyped accumulator dispatching through a guarded operator.\n  moneyReading: xs =>\n    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: Bt4121TallyActor spawn\n    k := 0\n    xs\n      do: [:m |\n        acc := acc + m\n        #(1)\n          do: [:j |\n            k := self.n\n            j\n          ]\n      ]\n    acc cents + (k * 1000)\n\n  // Three levels deep.\n  deepReading: xs =>\n    acc := 0\n    k := 0\n    xs\n      do: [:m |\n        acc := acc + m\n        #(1)\n          do: [:j |\n            #(2)\n              do: [:q |\n                k := self.n\n                q\n              ]\n          ]\n      ]\n    acc + (k * 100)\n\n  // Inner `whileTrue:`.\n  whileReading: xs =>\n    acc := 0\n    k := 0\n    xs\n      do: [:m |\n        acc := acc + m\n        i := 1\n        [i > 0]\n          whileTrue: [\n            k := self.n\n            i := i - 1\n          ]\n      ]\n    acc + (k * 100)\n\n  // Inner counted loop.\n  toDoReading: xs =>\n    acc := 0\n    k := 0\n    xs\n      do: [:m |\n        acc := acc + m\n        1 to: 2 do: [:j | k := self.n + j]\n      ]\n    acc + (k * 100)\n\n  // Inner field write, then read.\n  writeReading: xs =>\n    acc := 0\n    k := 0\n    xs\n      do: [:m |\n        acc := acc + m\n        #(1)\n          do: [:j |\n            self.n := self.n + 1\n            k := self.n\n          ]\n      ]\n    acc + (k * 100)\n\n  // Outer `whileTrue:` carrying the accumulator.\n  outerWhileReading =>\n    acc := 0\n    k := 0\n    i := 3\n    [i > 0]\n      whileTrue: [\n        acc := acc + i\n        i := i - 1\n        #(1)\n          do: [:j |\n            k := self.n\n            j\n          ]\n      ]\n    acc + (k * 100)\n\n  // Outer `inject:into:`.\n  injectReading: xs =>\n    k := 0\n    s := xs\n      inject: 0\n      into: [:acc :m |\n        #(1)\n          do: [:j |\n            k := self.n\n            j\n          ]\n        acc + m\n      ]\n    s + (k * 100)",
       "explanation": "BT-4178 fixture: an outer loop carrying a local accumulator encloses an inner loop that reads an actor field. The inner read must see the actor state, never the outer loop's accumulator."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4252class-protocol-actor-base",
+      "title": "Bt4252ClassProtocolActorBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "Bt4252ClassProtocolActorBase",
+        "actor",
+        "async",
+        "bt4252class_protocol_actor_base",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "inheritedSelfName",
+        "inheritedSuperName",
+        "process",
+        "subclassing"
+      ],
+      "source": "// BT-4252: superclass of Bt4252ClassProtocolActorChild. Its class methods\n// send Behaviour-protocol selectors to `self`/`super`; inherited by the\n// child, they answer for the receiving subclass.\n\nActor subclass: Bt4252ClassProtocolActorBase\n\n  class inheritedSelfName => self name\n\n  class inheritedSuperName => super name",
+      "explanation": "BT-4252: superclass of Bt4252ClassProtocolActorChild. Its class methods send Behaviour-protocol selectors to `self`/`super`; inherited by the child, they answer for the receiving subclass."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4252class-protocol-actor-child",
+      "title": "Bt4252ClassProtocolActorChild",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4252ClassProtocolActorBase",
+        "Bt4252ClassProtocolActorChild",
+        "async",
+        "bt4252class_protocol_actor_child",
+        "concurrent",
+        "extends",
+        "foo",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "map",
+        "mapping",
+        "object",
+        "process",
+        "selfDoc",
+        "selfIncludesBar",
+        "selfIncludesFoo",
+        "selfName",
+        "selfSuperclass",
+        "subclassing",
+        "superName",
+        "superNameInClosure",
+        "superSuperclass",
+        "transform"
+      ],
+      "source": "// BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to\n// `self`/`super` from Actor class methods answer what the external send\n// (`Bt4252ClassProtocolActorChild name`) answers.\n\nBt4252ClassProtocolActorBase subclass: Bt4252ClassProtocolActorChild\n\n  class selfName => self name\n\n  class superName => super name\n\n  class selfSuperclass => self superclass\n\n  class superSuperclass => super superclass\n\n  class superNameInClosure => #(1) collect: [:x | super name]\n\n  // `includesSelector:` lost its dedicated codegen path (BT-4252), so it\n  // reaches `Behaviour>>includesSelector:` through the protocol fallthrough.\n  class selfIncludesFoo => self includesSelector: #foo\n\n  class selfIncludesBar => self includesSelector: #bar\n\n  // `doc`'s primitive messages the class process, so from a class method\n  // running in that process it raises `dispatch_error` (BT-4262).\n  class selfDoc => self doc\n\n  foo => 1",
+      "explanation": "BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to `self`/`super` from Actor class methods answer what the external send (`Bt4252ClassProtocolActorChild name`) answers."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4252class-protocol-object-base",
+      "title": "Bt4252ClassProtocolObjectBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4252ClassProtocolObjectBase",
+        "Object",
+        "bt4252class_protocol_object_base",
+        "extends",
+        "inherit",
+        "inheritance",
+        "inheritedSelfName",
+        "inheritedSuperName",
+        "object",
+        "subclassing"
+      ],
+      "source": "// BT-4252: superclass of Bt4252ClassProtocolObjectChild. Its class methods\n// send Behaviour-protocol selectors to `self`/`super`; inherited by the\n// child, they answer for the receiving subclass.\n\nObject subclass: Bt4252ClassProtocolObjectBase\n\n  class inheritedSelfName => self name\n\n  class inheritedSuperName => super name",
+      "explanation": "BT-4252: superclass of Bt4252ClassProtocolObjectChild. Its class methods send Behaviour-protocol selectors to `self`/`super`; inherited by the child, they answer for the receiving subclass."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4252class-protocol-object-child",
+      "title": "Bt4252ClassProtocolObjectChild",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4252ClassProtocolObjectBase",
+        "Bt4252ClassProtocolObjectChild",
+        "bt4252class_protocol_object_child",
+        "extends",
+        "foo",
+        "inherit",
+        "inheritance",
+        "map",
+        "mapping",
+        "object",
+        "selfDoc",
+        "selfIncludesBar",
+        "selfIncludesFoo",
+        "selfName",
+        "selfSuperclass",
+        "subclassing",
+        "superName",
+        "superNameInClosure",
+        "superSuperclass",
+        "transform"
+      ],
+      "source": "// BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to\n// `self`/`super` from Object class methods answer what the external send\n// (`Bt4252ClassProtocolObjectChild name`) answers.\n\nBt4252ClassProtocolObjectBase subclass: Bt4252ClassProtocolObjectChild\n\n  class selfName => self name\n\n  class superName => super name\n\n  class selfSuperclass => self superclass\n\n  class superSuperclass => super superclass\n\n  class superNameInClosure => #(1) collect: [:x | super name]\n\n  // `includesSelector:` lost its dedicated codegen path (BT-4252), so it\n  // reaches `Behaviour>>includesSelector:` through the protocol fallthrough.\n  class selfIncludesFoo => self includesSelector: #foo\n\n  class selfIncludesBar => self includesSelector: #bar\n\n  // `doc`'s primitive messages the class process, so from a class method\n  // running in that process it raises `dispatch_error` (BT-4262).\n  class selfDoc => self doc\n\n  foo => 1",
+      "explanation": "BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to `self`/`super` from Object class methods answer what the external send (`Bt4252ClassProtocolObjectChild name`) answers."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4252class-protocol-sealed",
+      "title": "Bt4252ClassProtocolSealed",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4252ClassProtocolObjectBase",
+        "Bt4252ClassProtocolSealed",
+        "bt4252class_protocol_sealed",
+        "extends",
+        "inherit",
+        "inheritance",
+        "map",
+        "mapping",
+        "object",
+        "selfDoc",
+        "selfName",
+        "selfSuperclass",
+        "subclassing",
+        "superName",
+        "superNameInClosure",
+        "superSuperclass",
+        "transform"
+      ],
+      "source": "// BT-4252: Behaviour-protocol selectors sent to `self`/`super` from\n// `class sealed` methods of a sealed, stateless class, which are\n// direct-called in the caller (ADR 0129 Phase 0b).\n\nsealed Bt4252ClassProtocolObjectBase subclass: Bt4252ClassProtocolSealed\n\n  class sealed selfName => self name\n\n  class sealed superName => super name\n\n  class sealed selfSuperclass => self superclass\n\n  class sealed superSuperclass => super superclass\n\n  class sealed superNameInClosure => #(1) collect: [:x | super name]\n\n  // Direct-called in the caller, so even `doc` (whose primitive messages the\n  // class process) answers.\n  class sealed selfDoc => self doc",
+      "explanation": "BT-4252: Behaviour-protocol selectors sent to `self`/`super` from `class sealed` methods of a sealed, stateless class, which are direct-called in the caller (ADR 0129 Phase 0b)."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4252class-protocol-value-base",
+      "title": "Bt4252ClassProtocolValueBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4252ClassProtocolValueBase",
+        "Value",
+        "bt4252class_protocol_value_base",
+        "extends",
+        "inherit",
+        "inheritance",
+        "inheritedSelfName",
+        "inheritedSuperName",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-4252: superclass of Bt4252ClassProtocolValueChild. Its class methods\n// send Behaviour-protocol selectors to `self`/`super`; inherited by the\n// child, they answer for the receiving subclass.\n\nValue subclass: Bt4252ClassProtocolValueBase\n\n  class inheritedSelfName => self name\n\n  class inheritedSuperName => super name",
+      "explanation": "BT-4252: superclass of Bt4252ClassProtocolValueChild. Its class methods send Behaviour-protocol selectors to `self`/`super`; inherited by the child, they answer for the receiving subclass."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4252class-protocol-value-child",
+      "title": "Bt4252ClassProtocolValueChild",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4252ClassProtocolValueBase",
+        "Bt4252ClassProtocolValueChild",
+        "bt4252class_protocol_value_child",
+        "extends",
+        "inherit",
+        "inheritance",
+        "map",
+        "mapping",
+        "object",
+        "selfName",
+        "selfSuperclass",
+        "subclassing",
+        "superName",
+        "superNameInClosure",
+        "superSuperclass",
+        "transform"
+      ],
+      "source": "// BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to\n// `self`/`super` from Value class methods answer what the external send\n// (`Bt4252ClassProtocolValueChild name`) answers.\n\nBt4252ClassProtocolValueBase subclass: Bt4252ClassProtocolValueChild\n\n  class selfName => self name\n\n  class superName => super name\n\n  class selfSuperclass => self superclass\n\n  class superSuperclass => super superclass\n\n  class superNameInClosure => #(1) collect: [:x | super name]",
+      "explanation": "BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to `self`/`super` from Value class methods answer what the external send (`Bt4252ClassProtocolValueChild name`) answers."
     },
     {
       "id": "stdlib-test-fixtures-calculator",

@@ -85,6 +85,9 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 -export([includes_substring/2, index_of/2]).
 -export([asBase64/1, asBase64Url/1, asHex/1]).
 
+%% Instance methods — bit size, shared with Bitstring (ADR 0141, BT-4139)
+-export([bitSize/1]).
+
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
@@ -346,7 +349,10 @@ part(_Bin, _Pos, _Len) ->
 Concatenate two binaries.
 
 BT-4170: either side may be a tagged `String` (`String` is a `Binary`
-of its UTF-8 bytes); the result is always a bare `Binary`.
+of its UTF-8 bytes); the result is always a bare `Binary`. ADR 0141: an
+unaligned `Bitstring` argument is a `type_error` — `Binary>>concat:` is
+typed `Binary -> Binary`, so answering a Bitstring would break every
+byte-level send on its result; bits are joined from the Bitstring side.
 """.
 -spec concat(binary_or_string(), binary_or_string()) -> binary().
 concat({beamtalk_string, RawA}, B) when is_binary(RawA) ->
@@ -358,7 +364,22 @@ concat(A, B) when is_binary(A), is_binary(B) ->
 concat(A, _B) when not is_binary(A) ->
     raise_type_error(concat, <<"Receiver must be a Binary">>);
 concat(_A, _B) ->
-    raise_type_error(concat, <<"Argument must be a Binary">>).
+    raise_type_error(
+        concat,
+        <<"Argument must be a Binary; join a Bitstring from the Bitstring side (Bitstring>>concat:)">>
+    ).
+
+-doc """
+Bit count of a binary: 8 times its byte count (ADR 0141). A `String`
+counts its UTF-8 bytes.
+""".
+-spec bitSize(binary_or_string()) -> non_neg_integer().
+bitSize({beamtalk_string, Raw}) when is_binary(Raw) ->
+    bit_size(Raw);
+bitSize(Bin) when is_binary(Bin) ->
+    bit_size(Bin);
+bitSize(_) ->
+    raise_type_error(bitSize, <<"Receiver must be a Binary">>).
 
 -doc "Convert binary to list of byte integers.".
 -spec to_bytes(binary_or_string()) -> [non_neg_integer()].

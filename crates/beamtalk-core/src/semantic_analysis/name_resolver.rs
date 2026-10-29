@@ -23,6 +23,17 @@ use crate::ast_walker::cascade_shared_receiver;
 use crate::semantic_analysis::scope::{BindingKind, Scope};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
+/// Where a `super` occurrence sits (BT-4258, [`NameResolver::resolve_super`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SuperUse {
+    /// The receiver of a message send: `super foo`.
+    Receiver,
+    /// The receiver of a field access: `super.count`.
+    FieldAccess,
+    /// Anywhere else: `(super) foo`, `x := super`, `^ super`, an argument.
+    Value,
+}
+
 /// Name resolution domain service.
 ///
 /// **DDD Context:** Semantic Analysis - Domain Service
@@ -206,6 +217,47 @@ impl NameResolver {
         self.scope.pop(); // Exit method scope
     }
 
+    /// Checks one occurrence of `super` at `span`, used as `kind`.
+    ///
+    /// `super` can only be used inside a method body (depth >= 2; depth 0 is
+    /// the module, 1 a class, 2+ a method or block). ADR 0084: a
+    /// `classMethods:` block IS a class-method body even when it appears as a
+    /// cascade argument (possibly at the REPL top level, depth < 2), so
+    /// `super` is allowed there.
+    ///
+    /// BT-4258: inside a method, `super` is only the receiver of a message
+    /// send, where it picks where the method lookup starts. It is not a value:
+    /// parenthesised, assigned, returned, passed as an argument or used as a
+    /// field-access receiver there is nothing for it to evaluate to, and code
+    /// generation has no lowering for it.
+    fn resolve_super(&mut self, span: Span, kind: SuperUse) {
+        if self.scope.current_depth() < 2 && self.builder_class_method_depth == 0 {
+            self.diagnostics.push(Diagnostic::error(
+                "super can only be used inside a method body",
+                span,
+            ).with_hint("Move this code into a method — `super` sends the same message to the parent class implementation"));
+            return;
+        }
+        let hint = match kind {
+            SuperUse::Receiver => return,
+            SuperUse::FieldAccess => {
+                "Fields are read and written through `self`, e.g. `self.count`"
+            }
+            SuperUse::Value => {
+                "Send the message to `super` directly, e.g. `super printString` \
+                 rather than `(super) printString`; to use the receiver itself \
+                 as a value, write `self`"
+            }
+        };
+        self.diagnostics.push(
+            Diagnostic::error(
+                "`super` can only be used as the receiver of a message send",
+                span,
+            )
+            .with_hint(hint),
+        );
+    }
+
     /// Resolves an expression, checking for undefined variables and defining new bindings.
     #[allow(clippy::too_many_lines)] // one arm per Expression variant; irreducible
     fn resolve_expression(&mut self, expr: &Expression) {
@@ -260,14 +312,24 @@ impl NameResolver {
                 arguments,
                 ..
             } => {
-                self.resolve_expression(receiver);
+                // BT-4258: the receiver of a send is the one place `super` means
+                // something (it picks where the method lookup starts).
+                if let Super(span) = receiver.as_ref() {
+                    self.resolve_super(*span, SuperUse::Receiver);
+                } else {
+                    self.resolve_expression(receiver);
+                }
                 for arg in arguments {
                     self.resolve_expression(arg);
                 }
             }
 
             FieldAccess { receiver, .. } => {
-                self.resolve_expression(receiver);
+                if let Super(span) = receiver.as_ref() {
+                    self.resolve_super(*span, SuperUse::FieldAccess);
+                } else {
+                    self.resolve_expression(receiver);
+                }
             }
 
             Cascade {
@@ -351,18 +413,10 @@ impl NameResolver {
                 }
             }
 
+            // Reached only where `super` is used as a value: a send's or field
+            // access's receiver is handled in its own arm above.
             Super(span) => {
-                // super can only be used inside a method body (depth >= 2).
-                // Depth 0 = module, 1 = class, 2+ = method/block.
-                // ADR 0084: a `classMethods:` block IS a class-method
-                // body even when it appears as a cascade argument (possibly at the
-                // REPL top level, depth < 2), so allow super there.
-                if self.scope.current_depth() < 2 && self.builder_class_method_depth == 0 {
-                    self.diagnostics.push(Diagnostic::error(
-                        "super can only be used inside a method body",
-                        *span,
-                    ).with_hint("Move this code into a method — `super` sends the same message to the parent class implementation"));
-                }
+                self.resolve_super(*span, SuperUse::Value);
             }
 
             Literal(..)

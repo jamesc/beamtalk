@@ -109,6 +109,12 @@ pub(in crate::core_erlang) struct ClassContext {
     /// on a genuine miss — see that method's doc for the full resolution
     /// order.
     pub class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry,
+    /// Class names declared by more than one package in this generation's
+    /// scope (BT-4151) — see
+    /// [`beamtalk_core::semantic_analysis::shadowed_class_names`]. Such a
+    /// name collides into one last-wins runtime class, so no send to it may
+    /// pin a compile-time module. Set once by the driver before generation.
+    pub shadowed_class_names: std::collections::HashSet<ecow::EcoString>,
     /// Selectors of sealed methods in the current class.
     /// Used to generate standalone functions and direct call dispatch.
     pub sealed_method_selectors: std::collections::HashSet<String>,
@@ -184,6 +190,7 @@ impl ClassContext {
             class_method_selectors: std::collections::HashSet::new(),
             sealed_class_method_selectors: std::collections::HashSet::new(),
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
+            shadowed_class_names: std::collections::HashSet::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,
             in_class_method: false,

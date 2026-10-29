@@ -6,6 +6,7 @@
     {"class": "Character", "sample": null},
     {"class": "String", "sample": "{beamtalk_string, <<\"s\">>}"},
     {"class": "Binary", "sample": "<<255>>"},
+    {"class": "Bitstring", "sample": "<<2:3>>"},
     {"class": "Symbol", "sample": "foo"},
     {"class": "True", "sample": "true"},
     {"class": "False", "sample": "false"},

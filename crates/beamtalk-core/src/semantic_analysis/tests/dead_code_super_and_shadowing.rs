@@ -449,6 +449,115 @@ fn separate_super_sends_and_other_cascades_are_not_errors() {
     assert!(errors.is_empty(), "{errors:?}");
 }
 
+// --- `super` only as a send's receiver (BT-4258) ---
+
+/// The "`super` can only be used as the receiver" errors `analyse` reports
+/// for `body` compiled as a method `run` of `kind` (`Actor`/`Object`), on the
+/// instance side or (`class_side`) the class side.
+fn super_value_errors(kind: &str, class_side: bool, body: &str) -> Vec<Diagnostic> {
+    let side = if class_side { "class " } else { "" };
+    let src = format!("{kind} subclass: Probe\n  {side}run => {body}");
+    analyse(&parse_module(&src))
+        .diagnostics
+        .into_iter()
+        .filter(|d| {
+            d.message
+                .contains("can only be used as the receiver of a message send")
+        })
+        .collect()
+}
+
+#[test]
+fn super_used_as_a_value_is_an_error() {
+    // Each shape failed in codegen (`'super' must be used with a message
+    // send`) before it was reported here.
+    let value_uses = [
+        "(super) printString",
+        "((super)) printString",
+        "(super) printString; size",
+        "y := super. y",
+        "^ super",
+        "super",
+        "3 max: super",
+        "#(1) collect: [:e | super]",
+        "#(super)",
+        "super.count",
+    ];
+    for kind in ["Actor", "Object"] {
+        for class_side in [false, true] {
+            for body in value_uses {
+                let errors = super_value_errors(kind, class_side, body);
+                assert_eq!(
+                    errors.len(),
+                    1,
+                    "{kind} (class side: {class_side}) `{body}`: {errors:?}"
+                );
+                assert_eq!(errors[0].severity, Severity::Error);
+            }
+        }
+    }
+}
+
+#[test]
+fn super_value_error_points_at_super_with_a_hint() {
+    let src = "Object subclass: Probe\n  run => (super) printString";
+    let errors = super_value_errors("Object", false, "(super) printString");
+    let start = u32::try_from(src.find("super").unwrap()).unwrap();
+    assert_eq!(errors[0].span, Span::new(start, start + 5));
+    assert!(
+        errors[0]
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("super printString") && h.contains("`self`")),
+        "{errors:?}"
+    );
+    let field = super_value_errors("Object", false, "super.count");
+    assert!(
+        field[0]
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("self.count")),
+        "{field:?}"
+    );
+}
+
+#[test]
+fn super_as_a_receiver_is_not_a_value_error() {
+    let receiver_uses = [
+        "super printString",
+        "super printString: 2",
+        "(super printString) size",
+        "[super printString] value",
+        "super == self",
+        "#(1) collect: [:e | super printString]",
+    ];
+    for kind in ["Actor", "Object"] {
+        for class_side in [false, true] {
+            for body in receiver_uses {
+                let errors = super_value_errors(kind, class_side, body);
+                assert!(errors.is_empty(), "{kind} `{body}`: {errors:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn super_outside_a_method_reports_only_the_scope_error() {
+    // At module level the existing scope error stands alone; the position
+    // error is not stacked on top of it.
+    let result = analyse(&parse_module("x := super"));
+    let messages: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("super"))
+        .map(|d| d.message.to_string())
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["super can only be used inside a method body".to_string()]
+    );
+}
+
 // --- Variable shadowing tests ---
 
 #[test]

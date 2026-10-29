@@ -158,7 +158,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 ### Binary (`stdlib/src/binary.bt`)
 
 **Class:** `Binary` — superclass: `Collection` — `@sealed typed` ([ADR 0086](ADR/0086-string-subclass-of-binary.md))
-**Methods:** 22/22 implemented (100%)
+**Methods:** 23/23 implemented (100%)
 **Note:** Byte-level data and serialization. Parent of String. Maps to Erlang `binary()`.
 
 | Selector | Mechanism | Status | Notes |
@@ -172,6 +172,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `class fromBase64Url:` | pure BT (Erlang FFI) | ✅ | Decode a URL-safe (RFC 4648 §5) base64 string |
 | `class fromHex:` | pure BT (Erlang FFI) | ✅ | Decode a hexadecimal string |
 | `size` | @primitive selector | ✅ | Byte count |
+| `bitSize` | native delegate | ✅ | Bit count (8 × byte count); shared with `Bitstring` (ADR 0141) |
 | `do:` | @primitive selector | ✅ | Iterate bytes |
 | `printString` | @primitive selector | ✅ | Developer representation |
 | `at:` | @primitive selector | ✅ | 1-based byte access |
@@ -185,6 +186,21 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `asBase64` | pure BT (Erlang FFI) | ✅ | Standard (RFC 4648 §4) base64 encoding |
 | `asBase64Url` | pure BT (Erlang FFI) | ✅ | URL-safe (RFC 4648 §5) base64 encoding |
 | `asHex` | pure BT (Erlang FFI) | ✅ | Lowercase hexadecimal encoding |
+
+### Bitstring (`stdlib/src/bitstring.bt`)
+
+**Class:** `Bitstring` — superclass: `Value` — `sealed typed`, `native: beamtalk_bitstring` ([ADR 0141](ADR/0141-bitstring-sealed-class-for-unaligned-bitstrings.md))
+**Methods:** 6/6 implemented (100%)
+**Note:** An Erlang `bitstring()` that is not byte-aligned. Sibling of `Binary`; the byte protocol of `Binary`/`Collection` is deliberately not understood.
+
+| Selector | Mechanism | Status | Notes |
+|----------|-----------|--------|-------|
+| `bitSize` | native delegate | ✅ | Number of bits |
+| `toBits` | native delegate | ✅ | List of 0/1, most significant bit first |
+| `concat:` | native delegate | ✅ | Joined bits: `Binary` when byte-aligned, else `Bitstring` |
+| `asBinary` | native delegate | ✅ | Always `Result error:` of kind `#unaligned_bitstring` |
+| `printString` | native delegate | ✅ | Erlang notation, e.g. `<<2:3>>` |
+| `displayString` | native delegate | ✅ | Same as `printString` |
 
 ### Number (`stdlib/src/number.bt`)
 
