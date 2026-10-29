@@ -2513,9 +2513,7 @@ impl CoreErlangGenerator {
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
                         let error_hint = self.fresh_var("Err");
-                        let hint = leaf::binary_lit(
-                            "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance",
-                        );
+                        let hint = leaf::binary_lit(super::errors::VALUE_IMMUTABLE_SLOT_HINT);
 
                         let call_doc = docvec![
                             "let ",
