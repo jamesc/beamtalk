@@ -714,8 +714,8 @@ reports the same message at the same span. No operation is surface-specific.
   `beamtalk-core`'s `block_facts`, proved by the `value_position_assignment_agreement`
   tests in `beamtalk-codegen` (methods) and `beamtalk-repl` (eval and trace):
   codegen drops no such assignment. `^t := e` is legal on every surface; inside
-  the protected block of an `ensure:` whose cleanup reads `t` the throw hands the
-  cleanup the written value (BT-3947, BT-3912), and elsewhere the
+  the protected block of an `ensure:` whose cleanup reads `t` it is a permanent
+  compile error (ADR 0133, BT-4063: the cleanup would read the old value), and elsewhere the
   `dead_returned_assignment` lint (`beamtalk lint`) warns that the write is dead.
 - **Narrowing (BT-3841).** The statement-position half of the temporary
   check was measured on a BEAM (`just measure-adr0131-statements`, tables

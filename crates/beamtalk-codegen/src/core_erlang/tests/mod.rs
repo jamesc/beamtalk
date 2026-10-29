@@ -271,6 +271,7 @@ mod fresh_temp_namespace;
 mod gen_server;
 mod guarded_op_loops;
 mod hybrid_field_rebind_corpus;
+mod inline_block_local_in_loop_corpus;
 mod late_reconcile_conformance;
 mod local_assignment_producer;
 mod local_producer_agreement;
