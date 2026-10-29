@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4267: ActorStateNameProbe — user locals spelled like the actor
+// state-threading variables (`State`, `StateN`, `StateAcc`, `StateAccN`).
+// Each method binds such a local, writes a field (which threads the actor
+// state through those variables), then reads the local back.
+
+Actor subclass: ActorStateNameProbe
+  state: n = 0
+
+  localState: x =>
+    state := x
+    self.n := state + 1
+    self.n
+
+  localStateN: x =>
+    state1 := x
+    state2 := x + 1
+    self.n := 1
+    self.n := 2
+    self.n := 3
+    state1 + state2
+
+  loopStateAcc =>
+    i := 0
+    [i < 2]
+      whileTrue: [
+        stateAcc := 10
+        self.n := self.n + stateAcc
+        i := i + 1
+      ]
+    self.n
+
+  loopStateAcc1 =>
+    #(1, 2)
+      do: [:k |
+        stateAcc1 := k * 10
+        self.n := self.n + 1
+        self.n := self.n + stateAcc1
+      ]
+    self.n
+
+  destructuredState: x =>
+    {state, _} := {x, 0}
+    self.n := 1
+    state
+
+  matchedState: x =>
+    x match: [state -> [
+      self.n := 1
+      state
+    ] value]
+
+  getN => self.n

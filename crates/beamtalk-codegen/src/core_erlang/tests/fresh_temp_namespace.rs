@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-4140, BT-4247: compiler-owned Core Erlang variables never alias a
+//! BT-4140, BT-4247, BT-4267: compiler-owned Core Erlang variables never alias a
 //! user-bindable name.
 //!
 //! **BT-4140 (temps).** User `_`-prefixed identifiers used to map into Core
@@ -29,8 +29,19 @@
 //! ([`VariableContext::to_core_var`]), which no hand-written name (no marker)
 //! and no temp (digits after the marker) can spell. [`HAND_WRITTEN`] is the
 //! audit of every hand-written name the corpus emits, and
-//! [`hand_written_underscore_names_match_the_audit`] fails on a new one or a
+//! [`hand_written_names_match_the_audit`] fails on a new one or a
 //! user name that reaches Core unmapped.
+//!
+//! **BT-4267 (capitalized hand-written names).** Lowercase user identifiers
+//! were only capitalized (`state` → `State`), which spelled the actor
+//! state-threading family codegen writes by hand: in an actor method,
+//! `state := x. self.n := state + 1` lowered to `let State = X in …
+//! 'beamtalk_actor_state':'store'(State)`, replacing the actor's state with
+//! the user's value (a `function_clause` crash), and `state1 := x` read after
+//! a field write answered the actor's own state map. Every lowercase user
+//! identifier now carries the marker too (`state` → `State@`);
+//! [`HAND_WRITTEN_CAPITALIZED`] audits the capitalized names the corpus emits
+//! (`State`, `StateAcc`, `Args`, `ClassSelf`, …).
 
 use super::{assert_compiles_through_erlc, codegen, corpus_files, repo_root};
 use crate::core_erlang::variable_context::{TEMP_MARKER, VariableContext, text_mentions_var};
@@ -138,9 +149,22 @@ fn temps_and_user_names_are_disjoint() {
             let versioned = crate::core_erlang::util::versioned_var(&core, 3);
             let (_, after) = versioned.rsplit_once(TEMP_MARKER).unwrap();
             assert!(after.starts_with('_'), "`{versioned}` could spell a temp");
+        } else if name.starts_with(|c: char| c.is_ascii_lowercase()) {
+            // BT-4267: capitalized plus the marker, so it can't spell a
+            // hand-written name (`State`, `State1`, `StateAcc`, …), and it
+            // starts with an uppercase letter, so it can't spell a temp.
+            assert_eq!(
+                core.strip_suffix(TEMP_MARKER).map(str::len),
+                Some(name.len())
+            );
+            let versioned = crate::core_erlang::util::versioned_var(&core, 3);
+            assert!(
+                versioned.starts_with(|c: char| c.is_ascii_uppercase()),
+                "`{versioned}` could spell a temp"
+            );
         } else {
-            assert!(!core.contains(TEMP_MARKER), "`{name}` → `{core}`");
-            assert!(!core.starts_with('_'), "`{name}` → `{core}`");
+            // An uppercase-initial name is compiler-owned; it passes through.
+            assert_eq!(core, name);
         }
     }
 }
@@ -275,6 +299,182 @@ const HAND_WRITTEN: &[&str] = &[
     "_WireVersion",
 ];
 
+/// The capitalized audit (BT-4267): every hand-written Core variable name
+/// starting with an uppercase letter that production codegen emits over the
+/// corpus, after [`normalise_capitalized`] (trailing counter digits dropped,
+/// so `State` covers `State1`…, `StateAcc` covers `StateAcc1`…).
+///
+/// None can share a binding with user code: a lowercase user identifier maps
+/// to its capitalized spelling plus [`TEMP_MARKER`] (`state` → `State@`), and
+/// none of these contains the marker. Before BT-4267 the actor
+/// state-threading family (`State`, `StateN`, `StateAcc`, `StateAccN`) was
+/// reachable: an actor method's `state := x` rebound the actor state the
+/// following field write stored (see the module doc). The rest are bound
+/// outside user statements (`gen_server` callbacks, `dispatch`/4, spawn,
+/// `register_class`, generated adapter funs, `@primitive` bodies) or are the
+/// method prologue's own parameters (`Self`, `ClassSelf`, `Args`,
+/// `Selector`).
+///
+/// A name added here must be hand-written (never derived from a user
+/// identifier) and must not contain [`TEMP_MARKER`].
+const HAND_WRITTEN_CAPITALIZED: &[&str] = &[
+    "Acc",
+    "AccList",
+    "AckState",
+    "ArErr",
+    "Args",
+    "ArityTuple",
+    "BoolAcc",
+    "CastArgs",
+    "CastBuiltStack",
+    "CastError",
+    "CastException",
+    "CastNewState",
+    "CastPropCtx",
+    "CastReason",
+    "CastSelector",
+    "CastStacktrace",
+    "CastType",
+    "CatchError",
+    "CatchStack",
+    "CatchType",
+    "CheckedArgs",
+    "ChildFields",
+    "ClassName",
+    "ClassSelf",
+    "ClassifiedError",
+    "CleanCastNewState",
+    "CleanInfoNewState",
+    "CleanNewState",
+    "CleanState",
+    "ClfName",
+    "ClfNewState",
+    "ClrErr",
+    "Config",
+    "ContErr",
+    "ContRest",
+    "Continue",
+    "CountAcc",
+    "D4Error",
+    "D4Result",
+    "DefaultState",
+    "DispArg",
+    "DispR",
+    "DispatchError",
+    "DnuClass",
+    "DnuErr",
+    "DnuHint",
+    "DnuSelector",
+    "Elem",
+    "EncErr",
+    "EncodedError",
+    "EncodedResult",
+    "ErrState",
+    "Error",
+    "ExtError",
+    "ExtFun",
+    "ExtLookup",
+    "ExtLookupResult",
+    "ExtResult",
+    "ExtState",
+    "Extra",
+    "FaName",
+    "FinalState",
+    "FoundFlag",
+    "FoundItem",
+    "From",
+    "GroupMap",
+    "H",
+    "HfName",
+    "HintMsg",
+    "HookPid",
+    "HookReason",
+    "ImmErr",
+    "InfoBuiltStack",
+    "InfoError",
+    "InfoException",
+    "InfoReason",
+    "InfoStacktrace",
+    "InfoType",
+    "InheritedResult",
+    "InheritedState",
+    "InitArgs",
+    "InitCleanState",
+    "InitErr",
+    "InitNewState",
+    "IvaErr",
+    "IvaName",
+    "IvapName",
+    "IvapNewState",
+    "IvapRest",
+    "IvapResult",
+    "IvapTuple",
+    "IvapVal",
+    "Key",
+    "MatchList",
+    "MergedState",
+    "Methods",
+    "MonRef",
+    "Msg",
+    "Name",
+    "NewState",
+    "NewVal",
+    "NoMatchList",
+    "OldVsn",
+    "OtherSelector",
+    "ParentState",
+    "PerfClass",
+    "PerfErr",
+    "PerfOther",
+    "PerfResult",
+    "PerfSel",
+    "Pid",
+    "Policy",
+    "PropCtx",
+    "PsClass",
+    "PsStr",
+    "PwaArgs",
+    "PwaClass",
+    "PwaErr",
+    "PwaOther",
+    "PwaRest",
+    "PwaResult",
+    "PwaSel",
+    "Reason",
+    "RegResult",
+    "Result",
+    "RtClass",
+    "RtSel",
+    "RtSelector",
+    "Selector",
+    "Self",
+    "ServerName",
+    "SlotArg",
+    "SpawnCrashReason",
+    "SpawnErr",
+    "Spec",
+    "Stacktrace",
+    "StartResult",
+    "State",
+    "StateAcc",
+    "StillDropping",
+    "StillTaking",
+    "T",
+    "TyErr",
+    "Type",
+    "TypeErr",
+    "WireMsg",
+    "WireReplyVal",
+    "X",
+];
+
+/// `name` with a trailing counter dropped (`State3` → `State`,
+/// `SpawnErr0` → `SpawnErr`), so one audit entry covers every version.
+fn normalise_capitalized(name: &str) -> &str {
+    let stripped = name.trim_end_matches(|c: char| c.is_ascii_digit());
+    if stripped.is_empty() { name } else { stripped }
+}
+
 /// `name` with a trailing counter (`_Ext3`, `_InitErrClass0b`) or a
 /// protocol suffix (`_ProtoReg_Printable`) dropped, so one audit entry covers
 /// every instance.
@@ -293,10 +493,28 @@ fn normalise(name: &str) -> &str {
     }
 }
 
-/// Every `_`-prefixed variable token in rendered Core Erlang (string and
-/// atom literals, character literals and comments skipped), except the bare
+/// Every `_`-prefixed variable token in rendered Core Erlang, except the bare
 /// wildcard `_`.
 fn underscore_vars(core: &str) -> Vec<&str> {
+    var_tokens(core)
+        .into_iter()
+        .filter(|t| t.starts_with('_'))
+        .collect()
+}
+
+/// Every variable token in rendered Core Erlang that starts with an
+/// uppercase letter.
+fn capitalized_vars(core: &str) -> Vec<&str> {
+    var_tokens(core)
+        .into_iter()
+        .filter(|t| t.starts_with(|c: char| c.is_ascii_uppercase()))
+        .collect()
+}
+
+/// Every variable token in rendered Core Erlang (string and atom literals,
+/// character literals and comments skipped): a name starting with `_` (the
+/// bare wildcard excluded) or an uppercase letter.
+fn var_tokens(core: &str) -> Vec<&str> {
     let b = core.as_bytes();
     let is_name_byte = |c: u8| c == b'_' || c == b'@' || c.is_ascii_alphanumeric();
     let mut out = Vec::new();
@@ -322,7 +540,9 @@ fn underscore_vars(core: &str) -> Vec<&str> {
                     i += 1;
                 }
                 let token = &core[start..i];
-                if token.len() > 1 && token.starts_with('_') {
+                if (token.len() > 1 && token.starts_with('_'))
+                    || token.starts_with(|c: char| c.is_ascii_uppercase())
+                {
                     out.push(token);
                 }
             }
@@ -332,19 +552,74 @@ fn underscore_vars(core: &str) -> Vec<&str> {
     out
 }
 
-/// The guard (BT-4247), over every `.bt`/`.btscript` file in the stdlib and
-/// the examples:
+/// The [`HAND_WRITTEN_CAPITALIZED`] half of the corpus guard (BT-4267).
+#[derive(Default)]
+struct CapitalizedAudit {
+    emitted: BTreeSet<&'static str>,
+    unlisted: BTreeSet<String>,
+}
+
+impl CapitalizedAudit {
+    /// A lowercase user identifier always carries the marker, so every
+    /// marker-free capitalized variable in `core` must be hand-written.
+    fn scan(&mut self, core: &str, rel: &str) {
+        for var in capitalized_vars(core) {
+            if var.contains(TEMP_MARKER) {
+                continue;
+            }
+            let name = normalise_capitalized(var);
+            match HAND_WRITTEN_CAPITALIZED.iter().find(|&&h| h == name) {
+                Some(h) => {
+                    self.emitted.insert(h);
+                }
+                None => {
+                    self.unlisted.insert(format!("{var} ({rel})"));
+                }
+            }
+        }
+    }
+
+    fn assert_complete(self) {
+        assert!(
+            self.unlisted.is_empty(),
+            "production codegen emits a marker-free capitalized variable missing from \
+             `HAND_WRITTEN_CAPITALIZED`: either a user identifier reached Core without \
+             `to_core_var` (it could alias `State` or another hand-written name), or a \
+             new hand-written name needs auditing (no `@`, never derived from a user \
+             identifier) and listing:\n  {}",
+            self.unlisted.into_iter().collect::<Vec<_>>().join("\n  ")
+        );
+        let stale: Vec<&&str> = HAND_WRITTEN_CAPITALIZED
+            .iter()
+            .filter(|h| !self.emitted.contains(**h))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "`HAND_WRITTEN_CAPITALIZED` lists names the corpus no longer emits; remove \
+             them: {stale:?}"
+        );
+        assert!(
+            HAND_WRITTEN_CAPITALIZED
+                .iter()
+                .all(|h| !h.contains(TEMP_MARKER)),
+            "a hand-written name must not contain `{TEMP_MARKER}`"
+        );
+    }
+}
+
+/// The guard (BT-4247, BT-4267), over every `.bt`/`.btscript` file in the
+/// stdlib and the examples:
 ///
 /// - every `_`-prefixed Core variable without [`TEMP_MARKER`] is a
-///   hand-written name listed in [`HAND_WRITTEN`] — a new one fails until it
-///   is audited;
+///   hand-written name listed in [`HAND_WRITTEN`], and every capitalized one
+///   is listed in [`HAND_WRITTEN_CAPITALIZED`] — a new one fails until it is
+///   audited, and so does a user identifier that bypassed
+///   [`VariableContext::to_core_var`] (it would carry no marker);
 /// - no user `_`-identifier of the source file reaches Core under its own
-///   spelling (every user binding went through
-///   [`VariableContext::to_core_var`]);
-/// - every [`HAND_WRITTEN`] entry is still emitted, so the audit never goes
-///   stale.
+///   spelling;
+/// - every audit entry is still emitted, so neither list goes stale.
 #[test]
-fn hand_written_underscore_names_match_the_audit() {
+fn hand_written_names_match_the_audit() {
     let root = repo_root();
     let files = corpus_files(
         &root,
@@ -365,6 +640,7 @@ fn hand_written_underscore_names_match_the_audit() {
     let mut emitted: BTreeSet<&'static str> = BTreeSet::new();
     let mut unlisted: BTreeSet<String> = BTreeSet::new();
     let mut unmapped: Vec<String> = Vec::new();
+    let mut capitalized = CapitalizedAudit::default();
     for (i, path) in files.iter().enumerate() {
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
@@ -402,7 +678,7 @@ fn hand_written_underscore_names_match_the_audit() {
                     emitted.insert(h);
                 }
                 // A user spelling of a hand-written name is told apart by
-                // `user_names_spelled_like_hand_written_names_stay_distinct`.
+                // `user_names_spelled_like_hand_written_names_stay_distinct_over_the_corpus`.
                 None if user_names.contains(var) => {
                     unmapped.push(format!("{rel}: user `{var}`"));
                 }
@@ -411,6 +687,7 @@ fn hand_written_underscore_names_match_the_audit() {
                 }
             }
         }
+        capitalized.scan(&core, &rel);
     }
 
     unmapped.sort();
@@ -436,15 +713,15 @@ fn hand_written_underscore_names_match_the_audit() {
         stale.is_empty(),
         "`HAND_WRITTEN` lists names the corpus no longer emits; remove them: {stale:?}"
     );
+    capitalized.assert_complete();
     assert!(
         HAND_WRITTEN.iter().all(|h| !h.contains(TEMP_MARKER)),
         "a hand-written name must not contain `{TEMP_MARKER}`"
     );
 }
 
-/// Method shapes a user `_`-binding is tried in: each binds `{n}` to the
-/// argument, runs generated code that may bind hand-written names, then
-/// answers `{n}`.
+/// Method shapes a user binding is tried in: each binds `{n}`, runs
+/// generated code that may bind hand-written names, then reads `{n}`.
 const SHAPES: &[&str] = &[
     // Tier 1 block body: a discarded statement between the binding and the read
     // (`_Unit`, the reachable site).
@@ -458,11 +735,21 @@ const SHAPES: &[&str] = &[
     "Actor subclass: Foo\n  state: k = 0\n  run: x =>\n    {n} := x.\n    self.k := x + 1.\n    {n}\n",
     "Actor subclass: Foo\n  state: k = 0\n  run: x =>\n    [:y | {n} := y. self.k := y. {n}] value: x\n",
     "Value subclass: Foo\n  field: k = 0\n  run: x =>\n    {n} := x.\n    x + 1.\n    {n}\n",
+    // BT-4267: the actor state-threading family — field writes bind `StateN`,
+    // loop bodies `StateAcc`/`StateAccN`, a destructure or `match:` arm binds
+    // before a write.
+    "Actor subclass: Foo\n  state: k = 0\n  run: x =>\n    {n} := x.\n    self.k := 1.\n    self.k := 2.\n    self.k := 3.\n    {n}\n",
+    "Actor subclass: Foo\n  state: k = 0\n  run: x =>\n    {n} := x.\n    #(1, 2) do: [:i | self.k := self.k + i].\n    {n}\n",
+    "Actor subclass: Foo\n  state: k = 0\n  run: x =>\n    #(1, 2) do: [:i | {n} := i. self.k := self.k + {n}].\n    self.k\n",
+    "Actor subclass: Foo\n  state: k = 0\n  run: x =>\n    i := 0.\n    [i < 2] whileTrue: [{n} := i. self.k := self.k + {n}. i := i + 1].\n    self.k\n",
+    "Actor subclass: Foo\n  state: k = 0\n  run: x =>\n    {{n}, _} := {x, 0}\n    self.k := 1.\n    {n}\n",
+    "Actor subclass: Foo\n  state: k = 0\n  run: x =>\n    x match: [\n      {n} -> [self.k := 1. {n}] value\n    ]\n",
 ];
 
-/// The marker-free `_`-variables of `core`, sorted with repeats.
+/// The marker-free variables of `core` (hand-written names, `_`-prefixed and
+/// capitalized), sorted with repeats.
 fn hand_written_vars(core: &str) -> Vec<&str> {
-    let mut vars: Vec<&str> = underscore_vars(core)
+    let mut vars: Vec<&str> = var_tokens(core)
         .into_iter()
         .filter(|v| !v.contains(TEMP_MARKER))
         .collect();
@@ -470,34 +757,90 @@ fn hand_written_vars(core: &str) -> Vec<&str> {
     vars
 }
 
-/// A repro per audited name (BT-4247): a user variable spelled exactly like
-/// each [`HAND_WRITTEN`] name (with a counter, as most are emitted), in every
-/// [`SHAPES`] method, compiles through `erlc` and leaves the module's
-/// marker-free `_`-variables exactly as a neutral user name does — the user
-/// binding never takes the hand-written spelling, so it can neither shadow
-/// nor be shadowed by one. Runtime: `stdlib/test/hand_written_name_shadowing_test.bt`.
+/// Identifiers the [`SHAPES`] use themselves; a user spelling equal to one
+/// would change the shape's meaning rather than test a collision.
+const SHAPE_IDENTIFIERS: &[&str] = &["x", "y", "i", "k", "e", "self"];
+
+/// Every user spelling tried in [`SHAPES`]: each [`HAND_WRITTEN`] name and
+/// each [`HAND_WRITTEN_CAPITALIZED`] name with its first letter lowercased
+/// (`State` → `state`), bare and with the counters `0` and `1` (most are
+/// emitted with a counter: `State1`, `StateAcc1`, …).
+fn user_spellings_of_hand_written_names() -> Vec<String> {
+    let lowercased = HAND_WRITTEN_CAPITALIZED.iter().map(|h| {
+        let mut chars = h.chars();
+        let first = chars.next().unwrap().to_ascii_lowercase();
+        format!("{first}{}", chars.as_str())
+    });
+    HAND_WRITTEN
+        .iter()
+        .map(|h| (*h).to_string())
+        .chain(lowercased)
+        .filter(|base| !SHAPE_IDENTIFIERS.contains(&base.as_str()))
+        .flat_map(|base| [format!("{base}0"), format!("{base}1"), base])
+        .collect()
+}
+
+/// A repro per audited name (BT-4247, BT-4267): a user variable spelled
+/// like each hand-written name ([`user_spellings_of_hand_written_names`]), in
+/// every [`SHAPES`] method, leaves the module's marker-free variables exactly
+/// as a neutral user name does — the user binding never takes the
+/// hand-written spelling, so it can neither shadow nor be shadowed by one —
+/// and the reachable spellings compile through `erlc`. Runtime:
+/// `stdlib/test/hand_written_name_shadowing_test.bt`.
+///
+/// About 13k small modules, so it runs in the corpus tier (`_corpus` suffix);
+/// [`actor_state_family_spellings_stay_distinct`] is the fast-tier smoke for
+/// the spellings that were reachable.
 #[test]
-fn user_names_spelled_like_hand_written_names_stay_distinct() {
-    const NEUTRAL: &str = "_neutral";
+fn user_names_spelled_like_hand_written_names_stay_distinct_over_the_corpus() {
+    let spellings = user_spellings_of_hand_written_names();
+    assert_spellings_stay_distinct(&spellings);
+}
+
+/// BT-4267's reachable family, in the fast tier: `state`, `stateN`,
+/// `stateAcc` and `stateAccN` as user locals in every [`SHAPES`] method stay
+/// distinct from the actor-state threading variables
+/// ([`reachable_spellings_compile_through_erlc`] compiles them). Runtime:
+/// `stdlib/test/actor_state_name_shadowing_test.bt`.
+#[test]
+fn actor_state_family_spellings_stay_distinct() {
+    let spellings: Vec<String> = ["state", "state1", "state2", "stateAcc", "stateAcc1"]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    assert_spellings_stay_distinct(&spellings);
+}
+
+fn assert_spellings_stay_distinct(spellings: &[String]) {
     for shape in SHAPES {
-        let neutral = codegen(&shape.replace("{n}", NEUTRAL));
+        let neutral = codegen(&shape.replace("{n}", "neutral"));
         let expected = hand_written_vars(&neutral);
-        for &hand in HAND_WRITTEN {
-            for name in [format!("{hand}0"), format!("{hand}1"), hand.to_string()] {
-                let src = shape.replace("{n}", &name);
-                let out = codegen(&src);
-                assert_eq!(
-                    hand_written_vars(&out),
-                    expected,
-                    "user `{name}` changed the module's hand-written `_`-names: it \
-                     reached Core under its own spelling.\nSource:\n{src}\nCore:\n{out}"
-                );
-            }
+        for name in spellings {
+            let src = shape.replace("{n}", name);
+            let out = codegen(&src);
+            assert_eq!(
+                hand_written_vars(&out),
+                expected,
+                "user `{name}` changed the module's hand-written names: it \
+                 reached Core under its own spelling.\nSource:\n{src}\nCore:\n{out}"
+            );
         }
-        // `erlc` per shape for the reachable spelling and a counter-suffixed
-        // one (a duplicate pattern variable would be rejected here); the
-        // comparison above already covers every name.
-        for name in ["_Unit", "_BuilderState0"] {
+    }
+}
+
+/// `erlc` per shape for the spellings that were reachable (a duplicate or an
+/// unbound pattern variable would be rejected here): BT-4247's `_`-names in
+/// every shape, BT-4267's actor-state family in the actor shapes, where it
+/// was bound. The comparison in [`assert_spellings_stay_distinct`] covers
+/// every other name.
+#[test]
+fn reachable_spellings_compile_through_erlc() {
+    for shape in SHAPES {
+        let mut names = vec!["_Unit", "_BuilderState0"];
+        if shape.starts_with("Actor") {
+            names.extend(["state", "state1", "stateAcc", "stateAcc1"]);
+        }
+        for name in names {
             assert_compiles_through_erlc("test", &codegen(&shape.replace("{n}", name)));
         }
     }

@@ -1,0 +1,756 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3947 (closes BT-3948): a literal block applied in place that assigns a
+// local of its own, in a loop or fold body or a loop condition. BT-3948 made
+// the actor shapes a compile error (they failed erlc or answered a carrier);
+// they answer what the class-method twin answers now.
+
+Object subclass: Bt3947InlineBlockLoopClass
+  classState: n = 0
+
+  class cell0 =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        t := t + ([:z |
+          w := 0
+          z > 0 ifTrue: [w := z]
+          w
+        ] value: i)
+      ]
+    t
+
+  class cell1 =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        t := t + ([:z |
+          w := z
+          w
+        ] value: i)
+      ]
+    t
+
+  class cell2 =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        t := t + ([:z |
+          z := z + 1
+          z
+        ] value: i)
+      ]
+    t
+
+  class cell3 =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        t := t + ([
+          v := 1
+          v
+        ] value)
+      ]
+    t
+
+  class cell4 =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        t := t + ([:z :y |
+          v := z + y
+          v
+        ] value: i value: 1)
+      ]
+    t
+
+  class cell5 =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        t := t + 1
+        [:z |
+          w := z
+          w
+        ] value: i
+      ]
+    t
+
+  class cell6 =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        t := t + 1
+        r := [:z |
+          w := z
+          w
+        ] value: i
+        r
+      ]
+    t
+
+  class cell7 =>
+    t := 0
+    [t < 3]
+      whileTrue: [
+        t := t + ([:z |
+          w := z
+          w
+        ] value: 1)
+      ]
+    t
+
+  class cell8 =>
+    t := 0
+    3
+      timesRepeat: [
+        t := t + ([:z |
+          w := z
+          w
+        ] value: 1)
+      ]
+    t
+
+  class cell9 =>
+    t := 0
+    c := true
+    1
+      to: 3
+      do: [:i |
+        t := t + 1
+        c
+          ifTrue: [
+            [:z |
+              w := z
+              w
+            ] value: i
+          ]
+      ]
+    t
+
+  class cell10 =>
+    t := 0
+    c := true
+    1
+      to: 3
+      do: [:i |
+        c
+          ifTrue: [
+            t := t + ([:z |
+              w := z
+              w
+            ] value: i)
+          ]
+      ]
+    t
+
+  class cell11 =>
+    t := 0
+    c := true
+    1
+      to: 3
+      do: [:i |
+        c
+          and: [
+            ([:z |
+              w := z
+              w
+            ] value: i) > 0
+          ]
+      ]
+    t
+
+  class cell12 =>
+    t := 0
+    c := true
+    1
+      to: 3
+      do: [:i |
+        c
+          ifTrue: [
+            t := ([:z |
+              w := z
+              w
+            ] value: i)
+          ]
+      ]
+    t
+
+  class cell13 =>
+    t := 0
+    c := true
+    1
+      to: 3
+      do: [:i |
+        c
+          ifTrue: [
+            c
+              ifTrue: [
+                t := t + ([:z |
+                  w := z
+                  w
+                ] value: i)
+              ]
+          ]
+      ]
+    t
+
+  class cell14 =>
+    t := 0
+    c := true
+    [t < 3]
+      whileTrue: [
+        t := t + 1
+        c
+          and: [
+            ([:z |
+              w := z
+              w
+            ] value: 1) > 0
+          ]
+      ]
+    t
+
+  class cell15 =>
+    t := 0
+    c := true
+    c
+      ifTrue: [
+        1
+          to: 3
+          do: [:i |
+            t := t + ([:z |
+              w := z
+              w
+            ] value: i)
+          ]
+      ]
+    t
+
+  class cell16 =>
+    t := 0
+    [
+      1
+        to: 3
+        do: [:i |
+          t := t + ([:z |
+            w := z
+            w
+          ] value: i)
+        ]
+    ] on: Error do: [:e | 0]
+    t
+
+  class cell17 =>
+    t := 0
+    [
+      1
+        to: 3
+        do: [:i |
+          t := t + ([:z |
+            w := z
+            w
+          ] value: i)
+        ]
+    ] ensure: [0]
+    t
+
+  class cell18 =>
+    t := 0
+    [
+      1
+        to: 3
+        do: [:i |
+          t := t + ([:z |
+            w := z
+            w
+          ] value: i)
+        ]
+    ] value
+    t
+
+  class cell19 =>
+    t := 0
+    #(1)
+      do: [:e |
+        1
+          to: 3
+          do: [:i |
+            t := t + ([:z |
+              w := z
+              w
+            ] value: i)
+          ]
+      ]
+    t
+
+  class cell20 =>
+    t := 0
+    c := true
+    c
+      ifTrue: [
+        c
+          ifTrue: [
+            1
+              to: 3
+              do: [:i |
+                t := t + ([:z |
+                  w := z
+                  w
+                ] value: i)
+              ]
+          ]
+      ]
+    t
+
+  class cell21 =>
+    t := 0
+    2
+      timesRepeat: [
+        1
+          to: 3
+          do: [:i |
+            t := t + ([:z |
+              w := z
+              w
+            ] value: i)
+          ]
+      ]
+    t
+
+  class cell22 =>
+    t := 0
+    1
+      to: 2
+      do: [:j |
+        1
+          to: 2
+          do: [:k |
+            1
+              to: 3
+              do: [:i |
+                t := t + ([:z |
+                  w := z
+                  w
+                ] value: i)
+              ]
+          ]
+      ]
+    t
+
+  class cell23 =>
+    t := 0
+    q := 0
+    1
+      to: 2
+      do: [:j |
+        q := q + 1
+        1
+          to: 3
+          do: [:i |
+            t := t + ([:z |
+              w := z
+              w
+            ] value: i)
+          ]
+      ]
+    t
+
+  class cell24 =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        #(1, 2)
+          do: [:e |
+            t := t + ([:z |
+              w := z
+              w
+            ] value: e)
+          ]
+      ]
+    t
+
+  class cell26 =>
+    t := 0
+    c := true
+    c
+      ifTrue: [
+        1
+          to: 3
+          do: [:i |
+            [:z |
+              w := z
+              w
+            ] value: i
+          ]
+      ]
+    t
+
+  class cell27 =>
+    t := 0
+    [
+      [:z |
+        #(1) do: [:e | _w := e]
+        z
+      ] value: t
+      t < 3
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell28 =>
+    t := 0
+    [
+      [:z | #(1) do: [:e | e > 0 ifTrue: [_w := e]]] value: t
+      t < 3
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell29 =>
+    t := 0
+    [
+      [:z | [:y | y > 0 ifTrue: [_w := y]] value: z] value: t
+      t < 3
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell30 =>
+    t := 0
+    c := true
+    1
+      to: 3
+      do: [:i |
+        self.n := self.n + 1
+        c
+          ifTrue: [
+            t := t + ([:z |
+              w := z
+              w
+            ] value: i)
+          ]
+      ]
+    t
+
+  class cell31 =>
+    t := 0
+    c := true
+    1
+      to: 3
+      do: [:i |
+        self.n := self.n + 1
+        c
+          and: [
+            ([:z |
+              w := z
+              w
+            ] value: i) > 0
+          ]
+      ]
+    t
+
+  class cell32 =>
+    t := 0
+    [
+      ([:z |
+        w := z
+        w
+      ] value: t) < 3
+    ]
+      whileTrue: [
+        self.n := self.n + 1
+        t := t + 1
+      ]
+    t
+
+  class cell33 =>
+    t := 0
+    [
+      ([:z |
+        z > 5 ifTrue: [z := 0]
+        z
+      ] value: t) < 3
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell34 =>
+    t := 0
+    [
+      ([:z |
+        z > 0 ifTrue: [_w := z]
+        z
+      ] value: t) < 3
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell35 =>
+    t := 0
+    [
+      [:z |
+        w := z
+        w
+      ] value: t
+      t < 3
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell36 =>
+    t := 0
+    [
+      [:z |
+        z > 0 ifTrue: [_w := z]
+        z
+      ] value: t
+      t < 3
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell37 =>
+    t := 0
+    [
+      ([:z |
+        w := z
+        w
+      ] value: t) < 0
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell38 =>
+    t := 0
+    [
+      ([:z |
+        w := z
+        w
+      ] value: t) > 5
+    ] whileFalse: [t := t + 1]
+    t
+
+  class cell39 =>
+    t := 0
+    [
+      ([:z |
+        w := z
+        w
+      ] value: t) < 0
+    ] whileTrue: [t := 5]
+    t
+
+  class cell40 =>
+    t := 0
+    [
+      t < 3
+        and: [
+          ([:z |
+            w := z
+            w
+          ] value: t) > 0
+        ]
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell41 =>
+    t := 0
+    [
+      t < 3
+        ifTrue: [
+          ([:z |
+            w := z
+            w
+          ] value: t) > 0
+        ]
+        ifFalse: [false]
+    ] whileTrue: [t := t + 1]
+    t
+
+  class cell42 =>
+    self.n := 0
+    [
+      [
+        w := 3
+        w
+      ] value
+      self.n < 1
+    ] whileTrue: [self.n := self.n + 1]
+    self.n
+
+  class cell43 =>
+    r := 0
+    i := 0
+    [i < 1]
+      whileTrue: [
+        i := i + 1
+        r := [
+          n := 3
+          n
+        ] value
+      ]
+    r
+
+  class cell44 =>
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        r := 3
+        [
+          [
+            n := 3
+            n
+          ] value
+        ] value
+      ]
+    r
+
+  class cell45 =>
+    c := true
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        r := 3
+        c
+          ifTrue: [
+            [
+              n := 4
+              n
+            ] value
+          ]
+          ifFalse: [0]
+      ]
+    r
+
+  class cell46 =>
+    c := true
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        c
+          ifTrue: [
+            r := [
+              n := 3
+              n
+            ] value
+          ]
+          ifFalse: [0]
+      ]
+    r
+
+  class cell47 =>
+    r := 0
+    1
+      timesRepeat: [
+        r := 3
+        [
+          [
+            n := 3
+            n
+          ] value
+        ] value
+      ]
+    r
+
+  class cell48 =>
+    c := true
+    r := 0
+    1
+      timesRepeat: [
+        r := 3
+        c
+          ifTrue: [
+            [
+              n := 4
+              n
+            ] value
+          ]
+          ifFalse: [0]
+      ]
+    r
+
+  class cell49 =>
+    c := true
+    r := 0
+    1
+      timesRepeat: [
+        c
+          ifTrue: [
+            r := [
+              n := 3
+              n
+            ] value
+          ]
+          ifFalse: [0]
+      ]
+    r
+
+  class cell50 =>
+    i := 0
+    [i >= 1]
+      whileFalse: [
+        i := i + 1
+        [
+          n := 3
+          n
+        ] value
+      ]
+    i
+
+  class cell51 =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        t := t + ([
+          [
+            n := 3
+            n
+          ] value
+        ] value)
+      ]
+    t
+
+  class cell52 =>
+    t := 0
+    1 to: 3 do: [:i | t := t + ([:z | z + 1] value: i)]
+    t
+
+  // Cell 25 (BT-3948's conservative `fs add: [:x | [:z | w := z. w] value: x]`,
+  // never measured): a closure whose body evaluates a block that assigns its
+  // own local, stored in the loop body and invoked after the loop, and one
+  // invoked inside the loop.
+  class storedClosureInvokedAfterLoop =>
+    fs := #()
+    1
+      to: 3
+      do: [:i |
+        fs := fs
+          add: [:x |
+            [:z |
+              w := z + i
+              w
+            ] value: x
+          ]
+      ]
+    fs inject: 0 into: [:a :f | a + (f value: 2)]
+
+  class storedClosureInvokedInLoop =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        f := [:x |
+          [:z |
+            w := z
+            w
+          ] value: x
+        ]
+        t := t + (f value: i)
+      ]
+    t

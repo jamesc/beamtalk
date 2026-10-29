@@ -1847,9 +1847,9 @@ impl CoreErlangGenerator {
         let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
         for stmt in body {
             sites.extend(
-                Self::loop_or_fold_sites(self.registered_body_producer_site_exprs(
-                    stmt, false, true,
-                ))
+                Self::loop_or_fold_sites(
+                    self.registered_body_producer_site_exprs(stmt, false, true),
+                )
                 .into_iter()
                 .map(Expression::span),
             );

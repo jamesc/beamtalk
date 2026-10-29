@@ -16,7 +16,8 @@ TestCase subclass: Bt3939Tier2InlinedTest
     self assert: (Bt3939Tier2InlinedActor spawn arm: true) equals: #(3)
 
   // The plain-fun form (`r := [n := 0. xs do: [...]. n] value` in an FFI block
-  // that writes no captured local) is a compile error: BT-3981, pinned in
-  // `semantic_analysis/tests/local_threading.rs` (PIN-BUG BT-3947).
+  // that writes no captured local) was a compile error under BT-3981; BT-3982
+  // lowers it (`semantic_analysis/tests/local_threading.rs`,
+  // `evaluated_block_under_any_enclosing_construct_is_accepted`).
   testNestedArmBindingAnswersPostLoopValue =>
     self assert: (Bt3939Tier2InlinedActor spawn nested: true) equals: #(3)

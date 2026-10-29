@@ -394,7 +394,7 @@ body's writes. The same holds for the statement form `t := t + 1. ^t`
 reads the old `t`, silently). So a `^` out of the protected block of an
 `ensure:` (written in that block or in a block literal nested in it) whose
 cleanup reads a local, bound outside the `ensure:`, that block writes stays a
-compile error (`UnmigratedLocalThreading`, BT-3947 lowers it), reported by
+compile error (`UnmigratedLocalThreading`; permanent, ADR 0133 and BT-4063), reported by
 the one recognizer in `validators/local_threading.rs`
 (`report_nlr_out_of_ensure`) with the hint to keep the `^` out of the protected
 block; `dead_returned_assignment` asks the compiler and stays silent inside

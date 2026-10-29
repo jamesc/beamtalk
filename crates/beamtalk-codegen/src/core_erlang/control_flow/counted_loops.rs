@@ -762,12 +762,12 @@ mod tests {
             code.contains("letrec"),
             "to:do: with local mutation should generate a letrec. Got:\n{code}"
         );
-        // Fun signature must be (<gensym'd counter>, Sum), not (_, StateAcc).
+        // Fun signature must be (<gensym'd counter>, Sum@), not (_, StateAcc).
         // the counter is gensym'd (e.g. `_loopidx3`) so it can never
-        // collide with a user local named `i` (→ Core `I`).
+        // collide with a user local named `i` (→ Core `I@`).
         assert!(
-            code.contains("= fun (_loopidx") && code.contains(", Sum) ->"),
-            "direct-params: letrec fun should have gensym'd counter + Sum params. Got:\n{code}"
+            code.contains("= fun (_loopidx") && code.contains(", Sum@) ->"),
+            "direct-params: letrec fun should have gensym'd counter + Sum@ params. Got:\n{code}"
         );
         assert!(
             !code.contains(", StateAcc) ->"),
@@ -792,7 +792,7 @@ mod tests {
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    3 timesRepeat: [sum := sum + 1]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            code.contains("= fun (_loopidx") && code.contains(", Sum) ->"),
+            code.contains("= fun (_loopidx") && code.contains(", Sum@) ->"),
             "timesRepeat: direct-params: letrec fun should have gensym'd counter + Sum. Got:\n{code}"
         );
         assert!(
@@ -811,7 +811,7 @@ mod tests {
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            code.contains("= fun (_loopidx") && code.contains(", Sum) ->"),
+            code.contains("= fun (_loopidx") && code.contains(", Sum@) ->"),
             "to:by:do: direct-params: letrec fun should have gensym'd counter + Sum. Got:\n{code}"
         );
         assert!(
@@ -840,7 +840,7 @@ mod tests {
         );
         // Fun signature must NOT have State — mutated field 'n' is a direct param.
         assert!(
-            !code.contains(", Sum, State) ->"),
+            !code.contains(", Sum@, State) ->"),
             "full-extract: letrec fun must not have State as param. Got:\n{code}"
         );
         assert!(
@@ -878,7 +878,7 @@ mod tests {
         let code = codegen(src);
         // No State in fun signature.
         assert!(
-            !code.contains(", Sum, State) ->"),
+            !code.contains(", Sum@, State) ->"),
             "timesRepeat: full-extract: must not have State as param. Got:\n{code}"
         );
         assert!(
@@ -909,7 +909,7 @@ mod tests {
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := i. self.n := sum]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            !code.contains(", Sum, State) ->"),
+            !code.contains(", Sum@, State) ->"),
             "to:by:do: full-extract: must not have State as param. Got:\n{code}"
         );
         assert!(

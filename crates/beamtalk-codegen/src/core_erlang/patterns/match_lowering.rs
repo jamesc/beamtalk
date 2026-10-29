@@ -2007,6 +2007,7 @@ impl CoreErlangGenerator {
                 "true" => Ok(Document::Str("'true'")),
                 "false" => Ok(Document::Str("'false'")),
                 "nil" => Ok(Document::Str("'nil'")),
+                "self" => Ok(leaf::var(self.receiver_var())),
                 _ => {
                     if let Some(var_name) = self.lookup_var(&id.name) {
                         Ok(leaf::var(var_name.clone()))

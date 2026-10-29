@@ -342,8 +342,8 @@ fn lower_and_render_tuple_acc_unpack_renders_element_chain() {
     let rendered = lower_and_render(&ir).to_pretty_string();
     assert_eq!(
         rendered,
-        "let Sum1 = call 'erlang':'element'(1, StateAcc) in \
-         let Count1 = call 'erlang':'element'(2, StateAcc) in "
+        "let Sum@1 = call 'erlang':'element'(1, StateAcc) in \
+         let Count@1 = call 'erlang':'element'(2, StateAcc) in "
     );
 }
 
@@ -360,5 +360,5 @@ fn lower_and_render_tuple_acc_unpack_respects_gate_slots_offset() {
         span: span(),
     }];
     let rendered = lower_and_render(&ir).to_pretty_string();
-    assert_eq!(rendered, "let N1 = call 'erlang':'element'(3, AccSt0) in ");
+    assert_eq!(rendered, "let N@1 = call 'erlang':'element'(3, AccSt0) in ");
 }

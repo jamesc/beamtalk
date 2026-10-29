@@ -433,7 +433,10 @@ const FOLD_BODY_OUTERS: &[(&str, Under)] = &[
     ("xs select: [:x | {s}. true]", Under::Fold),
     ("xs reject: [:x | {s}. false]", Under::Fold),
     ("xs detect: [:x | {s}. false] ifNone: [0]", Under::Fold),
-    ("xs collect: [:w | xs inject: 0 into: [:a :x | {s}]]", Under::Fold),
+    (
+        "xs collect: [:w | xs inject: 0 into: [:a :x | {s}]]",
+        Under::Fold,
+    ),
     ("xs do: [:x | flag ifTrue: [{s}]]", Under::EnclosingFold),
     ("xs do: [:x | [{s}] value]", Under::EnclosingFold),
     ("xs do: [:x | 2 timesRepeat: [{s}]]", Under::EnclosingFold),
@@ -511,7 +514,9 @@ fn every_fold_body_operand_corpus_program_compiles_clean_and_unpacks_its_carrier
             }
         }
         if !clause(&codegen(&src), "go:").contains("let _ThreadedResult") {
-            failures.push(format!("the carrier construct should be a producer:\n{src}"));
+            failures.push(format!(
+                "the carrier construct should be a producer:\n{src}"
+            ));
             continue;
         }
         let methods = &mut per_outer[cell.outer];
@@ -557,5 +562,8 @@ fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
         missed.len(),
         missed.join("\n")
     );
-    assert!(reported >= 690, "only {reported} programs reported the fault");
+    assert!(
+        reported >= 690,
+        "only {reported} programs reported the fault"
+    );
 }

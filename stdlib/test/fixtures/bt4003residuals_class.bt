@@ -48,7 +48,7 @@ Object subclass: Bt4003ResidualsClass
 
   // Item 3: class variables are written in place, so a state fold answers
   // right as an operand in a fold body too.
-  // BT-4287: the actor shapes of `testStateFoldAsAnOperandInAFoldBody`.
+  // BT-4287: the actor shapes of `testActorStateFoldAsAnOperandInAFoldBody`.
   class injectArgInInject =>
     self.n := 0
     r := #(1, 2) inject: 0 into: [:a :x | a + (self.items inject: 0 into: [:b :y | b + self bump])]

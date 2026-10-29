@@ -20,7 +20,7 @@ also rejects some correct code:
 |---|---|---|
 | BT-3922 (#4426) | Block assigns `self.field` and escapes | Compile error (`WriteKind::ObjectState`) |
 | BT-3936 (#4450) | Self-send in a closure changes state, change lost | Runtime `stateful_block_dispatch` (`closure_self_dispatch_state_guard`) |
-| BT-3948 (#4444) | Inline-block local in an actor loop body, unbound `StateAcc` | `RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` |
+| BT-3948 (#4444) | Inline-block local in an actor loop body, unbound `StateAcc` | `RESIDUAL_DENY_SET` `InlineBlockLocalInLoop`; deleted by BT-3947 (closure-body frames and the evaluated-block producer) |
 | BT-3971 (#4442) | Tier 2 body ending in `[...] value` answers `{Value, State}` | `CodeGenError::UnsupportedFeature` |
 | BT-3952 (#4452) | Block reads `self.field`, is stored or passed to a self-send, reads stale | Compile error for every such read |
 | BT-3981 (#4448) | Evaluated `[...] value` in an actor leaks `{Value, State}` | `RESIDUAL_DENY_SET` `EvaluatedBlockValue`; deleted by BT-3982 (the block is a producer wherever it sits) |
@@ -550,8 +550,9 @@ These stay because method bodies and plain self-sends still thread: the
 convention with the state arms of `unwrap_dispatch_result/1`, the `State` slot
 of the actor NLR tuple, ADR 0118's self-send preludes, `strip_local_temps/1`,
 and `generate_discarding_self_dispatch` in method bodies (ADR 0118 owns it).
-`RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` (BT-3948) stays; it is about the
-actor loop frame. The locals rules stay: the `WriteKind::Local` half of
+`RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` (BT-3948) stayed; it was about the
+actor loop frame (BT-3947 deleted it once the closure-body frames and the
+evaluated-block producer lowered every shape). The locals rules stay: the `WriteKind::Local` half of
 `Tier2BlockNoReturnChannel` with `Escape::Ffi` (BT-3917), `Passed` and
 `Cascade`; `ALLOW_SET`, the other `DENY_SET` rows, `RIGHT_STATEMENTS` and
 `MatchArmWrite`; `report_nlr_out_of_ensure` and `nlr_dropped_local` (BT-3910,

@@ -231,7 +231,7 @@ fn test_type_pattern_binds_value_to_binding_name() {
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.contains("Path = "),
+        output.contains("Path@ = "),
         "binding should be bound via a `let` to the matched value. Got: {output}"
     );
 }

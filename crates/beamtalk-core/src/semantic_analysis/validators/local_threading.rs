@@ -959,54 +959,6 @@ pub(crate) enum Residual {
     /// not a producer there: a guard that writes, or a `match:` at no producer
     /// site (the subject of another `match:`).
     MatchArmWrite,
-    /// BT-3948: an actor `[:z | ...] value: x` (a literal block applied in
-    /// place) whose body assigns a local of its own, with a loop among the
-    /// enclosing blocks. The loop frame carries its locals as parameters (no
-    /// `StateAcc`) while the block body is lowered as a state-threading
-    /// scope. Measured on a BEAM (the rows marked conservative below were
-    /// not measured failing; BT-3947 flips them with the rest), these fail
-    /// `erlc` (unbound `StateAcc`), raise, or answer a `{Value, Locals}` carrier instead of the value:
-    /// the send in a `whileTrue:`/`whileFalse:` condition (also with a
-    /// state-touching body, and as a statement of the condition unless the
-    /// block is one statement with every assignment in an arm); in the
-    /// loop's own body when it rebinds an outer local and touches no state;
-    /// below conditional arms of the body (`ifTrue:`, `and:`, `ifNil:`...)
-    /// unless it is `r := [..] value: i` of a fresh local, or a statement of
-    /// an arm in a state-touching body; and whenever the innermost loop sits
-    /// inside another block (a method-level arm, `on:do:`, `ensure:`,
-    /// `value`, a `do:` body or another loop) or has a `do:`/`collect:`/
-    /// `inject:` body below it. A loop body that touches state, `do:`/
-    /// `collect:` bodies outside a loop, and class and value-type methods
-    /// answer right. A `to:do:` directly in a non-rebinding `to:do:` also
-    /// answered right, but `timesRepeat:` outside it and a third level did
-    /// not, and the block roles do not tell them apart, so it is rejected.
-    ///
-    /// Conservative rejections (no BEAM measurement of a failure; the
-    /// anchor on the innermost loop rejects them and BT-3947 flips them): a
-    /// loop inside a closure stored by `add:` or inside a non-arm block, a
-    /// loop in a method-level arm whose block is statement-only, and a
-    /// `to:do:` in a non-rebinding `to:do:` (measured right). Every other
-    /// denied shape in the pin test was measured failing or answering wrong.
-    InlineBlockLocalInLoop,
-    /// BT-4003: in an actor method, a loop or fold whose block sends to `self`
-    /// or writes a field, and writes no outer local (one that does is a
-    /// local-threading producer, the Phase 0 check's), used as an operand
-    /// inside the body of another loop or fold. Measured on a BEAM: an `inject:into:` as a binary or keyword
-    /// argument crashes (`Tuple does not understand 'plusFromNumber:'`) or
-    /// answers the raw `{Value, State}` pair, a `do:` as a receiver drops
-    /// every write, and a `collect:` whose block writes a field drops half of
-    /// them. Measured right, and accepted: the statement of the body, the
-    /// value of an assignment in it, and a `collect:`/`select:` whose block
-    /// writes no field (only sends to `self`) as the receiver of a message.
-    /// The same folds at the method level, and class and value-type methods,
-    /// answer right (a value-type self-send never changes the caller's
-    /// `self`; a value-type fold that writes a field in a fold body is already
-    /// a codegen error). BT-4276: the search for the enclosing loop or fold
-    /// stops at the nearest closure boundary, so the same fold inside a block
-    /// literal that is not run in place in that body (stored, returned, or
-    /// passed to a method) is judged by the closure's own context; measured
-    /// right in `stdlib/test/bt4276fold_in_closure_test.bt`.
-    StateFoldOperandInFold,
 }
 
 /// One [`RESIDUAL_DENY_SET`] row: `shape` is an error in `contexts`.
@@ -1029,10 +981,19 @@ struct ResidualDenied {
 /// deleted the `LoopConditionArmWrite` row, BT-3912 the `GroupByValue` row. The
 /// `MatchArmWrite` row (BT-3947, BT-3912) is narrowed to the `match:`s that are
 /// not producers where they sit; BT-3913 retires it with the other position
-/// rows. The `InlineBlockLocalInLoop` row (BT-3948) stays: BT-3912's closure
-/// frames lower the shapes below a conditional arm and a loop in another block,
-/// but a `value:` applied in place in a loop frame that carries its locals as
-/// parameters still emits an unbound `StateAcc`.
+/// rows. BT-3947 deleted the `InlineBlockLocalInLoop` row (BT-3948: an actor
+/// block applied in place that assigns its own local, in a loop body or
+/// condition): with BT-3912's closure frames and BT-3982's evaluated-block
+/// producer every shape it denied answers right on a BEAM
+/// (`bt3947inline_block_loop_test.bt`), and the codegen corpus
+/// `inline_block_local_in_loop_corpus.rs` compiles the generated grid.
+/// BT-4287 deleted the `StateFoldOperandInFold` row (BT-4003: an actor loop or
+/// fold that threads only `State`, as an operand inside a loop or fold body):
+/// codegen registers it as a producer site of every frame that lowers it
+/// (`is_family_only_fold_value_site`), so its `{Value, State}` carrier is
+/// bound and unpacked in that frame; measured right in
+/// `bt4003residuals_test.bt`, and the codegen corpus
+/// `arm_operand_carrier_corpus.rs` compiles the generated grid.
 const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
     // Class, value-type and actor methods since BT-3817; the REPL since
     // BT-3909 (maintainer-approved REPL output change: the same input drew
@@ -1043,13 +1004,6 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         contexts: &[Class, ValueType, Actor, Repl],
         issue: "BT-3875",
         fixed_by: "BT-3913",
-    },
-    // Closure bodies need a frame identity of their own (BT-3947 item 2).
-    ResidualDenied {
-        shape: Residual::InlineBlockLocalInLoop,
-        contexts: &[Actor],
-        issue: "BT-3948",
-        fixed_by: "BT-3947",
     },
 ];
 
@@ -2250,12 +2204,6 @@ struct Walker<'d> {
     /// current statement's [`loop_body_producer_sites`] — and `None` for any
     /// other block (an arm, a handler, a protected body, a closure).
     frame_sites: Vec<Option<FrameSites>>,
-    /// Whether the local being assigned by the assignment whose value is
-    /// being walked was not bound before it ([`Residual::InlineBlockLocalInLoop`]).
-    assign_target_fresh: bool,
-    /// The in-place block sends already reported as
-    /// [`Residual::InlineBlockLocalInLoop`].
-    inline_local_reported: Vec<Span>,
     /// Set by a send's walk just before it descends into a block operand that
     /// is a threaded frame body; consumed by [`Walker::block`].
     pending_frame_body: Option<FrameBody>,
@@ -2298,8 +2246,6 @@ impl<'d> Walker<'d> {
             depth: 0,
             block_frames: Vec::new(),
             containers: Vec::new(),
-            assign_target_fresh: false,
-            inline_local_reported: Vec::new(),
             last_statements: Vec::new(),
             outer_stateful: false,
             direct_blocks: Vec::new(),
@@ -2503,10 +2449,7 @@ impl<'d> Walker<'d> {
             }
             Expression::Assignment { target, value, .. } => match target.as_ref() {
                 Expression::Identifier(id) => {
-                    let fresh = !self.is_bound(&id.name);
-                    let outer = std::mem::replace(&mut self.assign_target_fresh, fresh);
                     self.operand(value, Position::AssignValue { nested });
-                    self.assign_target_fresh = outer;
                     self.define(&id.name);
                     self.note_block_binding(&id.name, value);
                 }
@@ -2535,7 +2478,6 @@ impl<'d> Walker<'d> {
                 arguments,
                 ..
             } => {
-                self.check_residuals(expr, position);
                 self.check_construct(expr, position);
                 let lookup_producer = self.lookup_producers.contains(&expr.unwrap_parens().span());
                 let dispatched = self.is_actor_self_send_fold(expr);
@@ -3352,244 +3294,6 @@ impl<'d> Walker<'d> {
             }
             _ => Escape::Passed(selector.clone()),
         }
-    }
-
-    /// The [`RESIDUAL_DENY_SET`] checks of a send.
-    fn check_residuals(&mut self, expr: &Expression, position: Position) {
-        // BT-3948's check first: a site it reports is not reported twice.
-        self.check_inline_block_local_in_loop(expr, position);
-        self.check_state_fold_operand_in_fold(expr, position);
-    }
-
-    /// [`Residual::StateFoldOperandInFold`] (BT-4003): see the shape's
-    /// documentation for what was measured.
-    fn check_state_fold_operand_in_fold(&mut self, expr: &Expression, position: Position) {
-        let Some(row) = residual_denied(Residual::StateFoldOperandInFold, self.context) else {
-            return;
-        };
-        // BT-4276: a loop or fold body counts only up to the nearest closure
-        // boundary (`Container::Other`, a block value with a frame of its
-        // own). A fold inside a closure that sits in a `do:` body is judged
-        // by the closure's own context: the closure's body does not run per
-        // iteration of the `do:`. Blocks run in place (arms, protected
-        // bodies, handlers, evaluated blocks) are looked through.
-        if !self
-            .containers
-            .iter()
-            .rev()
-            .take_while(|c| **c != Container::Other)
-            .any(|c| {
-                matches!(
-                    c,
-                    Container::DoBody
-                        | Container::ListOpBody
-                        | Container::LoopBody
-                        | Container::CountedLoopBody
-                )
-            })
-        {
-            return;
-        }
-        let Some(construct) = local_threading_construct(expr) else {
-            return;
-        };
-        if !matches!(
-            construct.family,
-            LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
-        ) {
-            return;
-        }
-        // One that writes an outer local is a local-threading producer, judged
-        // (and measured right where accepted) by the Phase 0 check.
-        if !construct_outer_local_writes(&construct, &|name| self.is_bound(name)).is_empty() {
-            return;
-        }
-        let effects: Vec<_> = construct
-            .blocks
-            .iter()
-            .flat_map(|b| &b.body)
-            .map(|stmt| {
-                crate::semantic_analysis::facts::compute_state_effects_for_expr(
-                    &stmt.expression,
-                    false,
-                )
-            })
-            .collect();
-        if !effects.iter().any(|e| e.any()) {
-            return;
-        }
-        let writes_field = effects.iter().any(|e| e.field_write);
-        let accepted = match position {
-            Position::Statement | Position::AssignValue { .. } => true,
-            Position::Receiver => {
-                !writes_field && matches!(construct.selector.as_str(), "collect:" | "select:")
-            }
-            _ => false,
-        };
-        if accepted {
-            return;
-        }
-        self.diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "a `{selector}` whose block sends to `self` or writes a field is {position} \
-                     inside the body of another loop or collection operation, which is not \
-                     supported yet in {context}: its state changes would be lost or its value \
-                     would be wrong ({issue}, until {fixed_by})",
-                    selector = construct.selector,
-                    context = self.context,
-                    issue = row.issue,
-                    fixed_by = row.fixed_by,
-                ),
-                expr.span(),
-            )
-            .with_hint(
-                "assign its value to a local in a statement of the body (`r := ...`) and use \
-                 the local here",
-            )
-            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
-        );
-    }
-
-    /// [`Residual::InlineBlockLocalInLoop`] (BT-3948): see the shape's
-    /// documentation for what was measured. The block writes no outer local
-    /// (the Phase 0 check's business); it assigns a local of its own or one
-    /// of its parameters, anywhere in its body. The shape is anchored on the
-    /// innermost enclosing loop block.
-    #[allow(clippy::too_many_lines)] // one measured rule per loop position, each documented
-    fn check_inline_block_local_in_loop(&mut self, expr: &Expression, position: Position) {
-        let Some(row) = residual_denied(Residual::InlineBlockLocalInLoop, self.context) else {
-            return;
-        };
-        let Some(l) = self
-            .containers
-            .iter()
-            .rposition(|c| matches!(c, Container::LoopBody | Container::CountedLoopBody))
-        else {
-            return;
-        };
-        let Some(construct) = local_threading_construct(expr)
-            .filter(|c| c.family == LocalThreadingFamily::BlockValue)
-        else {
-            return;
-        };
-        let Some(block) = construct.blocks.first().copied() else {
-            return;
-        };
-        if !self.writes_of(block).is_empty() {
-            return;
-        }
-        let params: HashSet<&str> = block.parameters.iter().map(|p| p.name.as_str()).collect();
-        // Every block literal below the applied block, and which of them are
-        // the arms of a conditional send.
-        let mut all_blocks: Vec<(Span, bool)> = Vec::new();
-        let mut arm_blocks: Vec<Span> = Vec::new();
-        for stmt in &block.body {
-            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| match e {
-                Expression::Block(b) => all_blocks.push((b.span, false)),
-                Expression::MessageSend {
-                    selector,
-                    arguments,
-                    ..
-                } if Container::of(&selector.name(), false) == Container::Arm => {
-                    arm_blocks.extend(arguments.iter().filter_map(|a| match a {
-                        Expression::Block(b) => Some(b.span),
-                        _ => None,
-                    }));
-                }
-                _ => {}
-            });
-        }
-        for (span, is_arm) in &mut all_blocks {
-            *is_arm = arm_blocks.contains(span);
-        }
-        let mut local: Option<(EcoString, Span)> = None;
-        // Whether some assignment to a local is not inside only conditional
-        // arms: the BT-3911 condition cell is positive, so a statement of
-        // the block, an operand, or any `do:` body, closure, evaluated or
-        // protected block between the assignment and the applied block
-        // leaves it.
-        let mut outside_arms = false;
-        for stmt in &block.body {
-            crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-                let Expression::Assignment { target, .. } = e else {
-                    return;
-                };
-                let Expression::Identifier(id) = target.as_ref() else {
-                    return;
-                };
-                if !params.contains(id.name.as_str()) && self.is_bound(&id.name) {
-                    return;
-                }
-                let span = e.span();
-                let mut chain = all_blocks
-                    .iter()
-                    .filter(|(b, _)| b.start() <= span.start() && span.end() <= b.end())
-                    .peekable();
-                if chain.peek().is_none() || chain.any(|(_, is_arm)| !is_arm) {
-                    outside_arms = true;
-                }
-                if local.is_none() {
-                    local = Some((id.name.clone(), span));
-                }
-            });
-        }
-        let Some((name, span)) = local else {
-            return;
-        };
-        // A nested in-place block inside one already reported adds nothing.
-        if self
-            .inline_local_reported
-            .iter()
-            .any(|r| r.start() <= expr.span().start() && expr.span().end() <= r.end())
-        {
-            return;
-        }
-        let below = &self.containers[l + 1..];
-        // A loop condition is not a frame body (`frame_sites` is `None`).
-        let in_condition = self.frame_sites.get(l).is_some_and(Option::is_none);
-        let denied = if in_condition {
-            // Right only for the BT-3911 cell: a statement of the condition
-            // whose block is one statement with every assignment in an arm.
-            !(l == 0
-                && below.is_empty()
-                && position == Position::Statement
-                && block.body.len() == 1
-                && !outside_arms)
-        } else if l > 0 || !below.iter().all(|c| *c == Container::Arm) {
-            // Inside another block, or a `do:`/`collect:`/`inject:` body
-            // below the loop.
-            true
-        } else if below.is_empty() {
-            self.direct_blocks.first() == Some(&true) && !self.outer_stateful
-        } else {
-            // Below arms of the body: right for `r := [..] value: i` of a
-            // fresh local, and for a statement of an arm when the body
-            // touches state.
-            !((matches!(position, Position::AssignValue { .. }) && self.assign_target_fresh)
-                || (self.outer_stateful && position == Position::Statement))
-        };
-        if !denied {
-            return;
-        }
-        self.inline_local_reported.push(expr.span());
-        self.diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "a block evaluated in place assigns its local `{name}` inside a loop, \
-                     which an actor method does not lower yet ({issue}, until {fixed_by})",
-                    issue = row.issue,
-                    fixed_by = row.fixed_by,
-                ),
-                expr.span(),
-            )
-            .with_hint(
-                "move the block's work into a method, or compute the value without \
-                 assigning a local inside the block",
-            )
-            .with_note(format!("`{name}` is assigned here"), Some(span))
-            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
-        );
     }
 
     /// A `match:` arm that assigns an outer local, in a `match:` that is not a
