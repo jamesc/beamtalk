@@ -89,6 +89,7 @@ pub use class_module_registry::{
 pub use collision_checker::{
     DepInfo, DependencyRegistry, build_dependency_registry, build_dependency_registry_with_graph,
     check_collision_at_use_sites, check_stdlib_reservation, check_transitive_dep_usage,
+    shadowed_class_names,
 };
 pub use definite_assignment::{
     admits_nil_type_annotation, is_nilable_type_annotation, is_nilable_type_name,

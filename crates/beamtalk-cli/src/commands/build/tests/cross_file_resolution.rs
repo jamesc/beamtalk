@@ -1344,3 +1344,88 @@ fn bt4039_cross_file_alias_union_integer_default_draws_no_type_mismatch() {
         "Expected no false state-default mismatch, got: {diagnostics:?}"
     );
 }
+
+/// BT-4151: compiles `app`'s `src/widget.bt` (a sealed Value class whose own
+/// method sends to a `Widget`-typed parameter) as `module_name`, against its
+/// own Pass 1 index plus, when `rival_package` is set, that package's
+/// same-named `Widget` — as a dependency would contribute it — and returns
+/// the generated `.core` text.
+fn compile_own_widget_against(module_name: &str, rival_package: Option<&str>) -> String {
+    let temp = TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let widget_src = "sealed Value subclass: Widget\n  field: x :: Integer = 0\n  \
+                      same: other :: Widget -> Integer =>\n    other x\n";
+    let src_path = root.join("app/src");
+    fs::create_dir_all(&src_path).unwrap();
+    write_test_file(&src_path.join("widget.bt"), widget_src);
+    let source_files = vec![src_path.join("widget.bt")];
+    let (class_module_index, class_superclass_index, mut all_class_infos, _ext, _asts) =
+        build_class_module_index(&source_files, Some(&src_path), "app").unwrap();
+    if let Some(rival) = rival_package {
+        let dep_src = root.join(rival).join("src");
+        fs::create_dir_all(&dep_src).unwrap();
+        write_test_file(&dep_src.join("widget.bt"), widget_src);
+        let (_, _, dep_infos, _, _) =
+            build_class_module_index(&[dep_src.join("widget.bt")], Some(&dep_src), rival).unwrap();
+        all_class_infos.extend(dep_infos);
+    }
+    let build_dir = root.join("_build");
+    fs::create_dir_all(&build_dir).unwrap();
+    let core_file = build_dir.join(format!("{module_name}.core"));
+    let options = beamtalk_core::CompilerOptions {
+        current_package: Some("app".to_string()),
+        ..default_options()
+    };
+    compile_file(
+        &src_path.join("widget.bt"),
+        module_name,
+        &core_file,
+        &options,
+        &CompileContext {
+            hierarchy: ClassHierarchyContext {
+                class_module_index,
+                class_superclass_index,
+                pre_loaded_classes: all_class_infos,
+                ..ClassHierarchyContext::default()
+            },
+            ..CompileContext::default()
+        },
+        None,
+    )
+    .expect("widget should compile");
+    fs::read_to_string(&core_file).unwrap()
+}
+
+#[test]
+fn own_sealed_class_shadowed_by_a_dependency_stays_dynamic_in_its_own_file() {
+    // Analysis drops the dependency's same-named `Widget` from this file's
+    // cross-file classes; codegen must still see it, because both classes
+    // collide into one last-wins runtime class.
+    let core = compile_own_widget_against("bt@app@widget", Some("json"));
+    assert!(
+        !core.contains("'dispatch'('x'"),
+        "a sealed class shadowed by a dependency must not direct-dispatch. Got:\n{core}"
+    );
+}
+
+#[test]
+fn own_sealed_class_without_a_rival_sends_direct_in_its_own_file() {
+    // Positive control: its own Pass 1 entry is the class itself, not a rival.
+    let core = compile_own_widget_against("bt@app@widget", None);
+    assert!(
+        core.contains("call 'bt@app@widget':'dispatch'('x'"),
+        "an unshadowed sealed class should direct-dispatch. Got:\n{core}"
+    );
+}
+
+#[test]
+fn own_sealed_class_in_unqualified_test_module_is_not_its_own_rival() {
+    // BT-4152 shape: `beamtalk test` emits `bt@<stem>` (no package in the
+    // module name) while Pass 1 stamps the class with `app`. That entry is
+    // still the class itself, so the send stays direct.
+    let core = compile_own_widget_against("bt@widget", None);
+    assert!(
+        core.contains("call 'bt@widget':'dispatch'('x'"),
+        "a test-module class must not be flagged as shadowing itself. Got:\n{core}"
+    );
+}
