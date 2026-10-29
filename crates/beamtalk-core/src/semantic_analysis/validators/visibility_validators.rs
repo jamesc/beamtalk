@@ -2109,6 +2109,7 @@ mod tests {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -2172,6 +2173,7 @@ mod tests {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             }],
             class_methods: vec![],
             class_variables: vec![],

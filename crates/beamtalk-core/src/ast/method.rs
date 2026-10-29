@@ -150,6 +150,27 @@ impl MethodDefinition {
         )
     }
 
+    /// The primitive name when the method body is exactly one quoted
+    /// `@primitive "<name>"` pragma (e.g. `class signal: msg => @primitive
+    /// "classSignal:"`), else `None`.
+    ///
+    /// Bare structural intrinsics (`@primitive basicNew`) answer `None`: only
+    /// a quoted name identifies a selector-keyed runtime primitive.
+    #[must_use]
+    pub fn quoted_primitive_name(&self) -> Option<&EcoString> {
+        match self.body.as_slice() {
+            [stmt] => match &stmt.expression {
+                Expression::Primitive {
+                    name,
+                    is_quoted: true,
+                    ..
+                } => Some(name),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Creates a new method definition.
     #[must_use]
     pub fn new(

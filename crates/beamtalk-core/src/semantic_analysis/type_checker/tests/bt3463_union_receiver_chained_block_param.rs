@@ -325,6 +325,7 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![MethodInfo {
             selector: eco_string("spawn:"),
@@ -339,6 +340,7 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_variables: vec![],
         type_params: vec![],
@@ -379,6 +381,7 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_variables: vec![],
         type_params: vec![],

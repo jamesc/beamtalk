@@ -186,6 +186,7 @@ mod tests {
             doc: None,
 
             origin: None,
+            primitive: None,
         }
     }
 
