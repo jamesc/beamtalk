@@ -790,7 +790,9 @@ has_stacktrace(Exception) ->
 The StackFrame objects for an exception's captured stacktrace (BT-4115).
 
 Built here, when read, from the raw stacktrace stored at catch time, so class
-names are resolved at read time rather than at catch time. Falls back to a
+names are resolved at read time rather than at catch time. An exception that
+arrived from another node therefore resolves its class names against the
+reading node's class table, not the node that caught it. Falls back to a
 legacy `stacktrace` key (already-built StackFrame objects from an older node or
 code version), and answers `[]` when nothing was captured.
 """.

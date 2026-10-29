@@ -269,9 +269,11 @@ over Elixir from the table.
   +22,347 words, 61 µs, 360x `raise`/`rescue`. BT-4115 removed all three: a
   class-literal `Error signal:` calls its caller-safe primitive
   (`beamtalk_exception_handler:class_signal_message/2`) in the caller, a
-  relayed class-method error is logged at debug level, and the stack frames
-  are built only when `e stackTrace` reads them. A raise now costs about
-  123 reductions and 171 words per operation (8b, single-row diagnosis run),
+  `signal:` relayed out of a class method is logged at debug level (a raw
+  Erlang crash there still logs at error, with its stacktrace), and the stack
+  frames are built only when `e stackTrace` reads them. A raise now costs
+  about 123 reductions and 171 words per operation (8b, 7 rounds,
+  `results/bench-bt4115-after.md`),
   most of it wrapping the caught error and matching it against the handler's
   class.
 
@@ -358,3 +360,11 @@ side, main → PR. Rows not listed did not move.
   Non-FFI rows match the same base run-for-run; multi-process rows (3b, 3c,
   7a, 7b, 8b) wobble a few words between run configurations with or without
   this change.
+- **BT-4115 (#4654)** moves a class-literal `Error signal:` out of the Error
+  class process into the caller, stops logging a relayed signal at error
+  level, and builds the stack frames only when `e stackTrace` reads them
+  (7 rounds, idle machine, `results/bench-bt4115-before.md` = main c5b7f23,
+  `results/bench-bt4115-after.md` = the #4654 branch). Beamtalk side, before →
+  after: 8b with a raise 2425 red / 22,970 w / 183 µs → **123 / 171 /
+  5.0 µs** (Elixir 13.1 / 36 / 0.6 µs). 8a without a raise is unchanged at
+  21.1 / 21.

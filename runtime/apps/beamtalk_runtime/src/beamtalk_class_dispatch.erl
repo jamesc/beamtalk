@@ -1056,18 +1056,8 @@ apply_class_extension_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
             ),
             {error, undef_in_body};
         ErrClass:Error:ErrST ->
-            %% Relayed to the caller, so debug-level: see
-            %% apply_compiled_class_method/6 (BT-4115).
-            ?LOG_DEBUG(
-                "Class-side extension ~p:~p failed",
-                [ClassName, Selector],
-                #{
-                    class => ClassName,
-                    selector => Selector,
-                    reason => beamtalk_error:format_reason(ErrClass, Error),
-                    stacktrace => ErrST,
-                    domain => [beamtalk, runtime]
-                }
+            log_relayed_raise(
+                "Class-side extension ~p:~p failed", ClassName, Selector, ErrClass, Error, ErrST
             ),
             {error, {raised, ErrClass, Error, ErrST}}
     end.
@@ -1242,18 +1232,8 @@ apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
             ),
             {error, undef_in_body};
         ErrClass:Error:ErrST ->
-            %% Relayed to the caller, so debug-level: see
-            %% apply_compiled_class_method/6 (BT-4115).
-            ?LOG_DEBUG(
-                "Runtime class method ~p:~p failed",
-                [ClassName, Selector],
-                #{
-                    class => ClassName,
-                    selector => Selector,
-                    reason => beamtalk_error:format_reason(ErrClass, Error),
-                    stacktrace => ErrST,
-                    domain => [beamtalk, runtime]
-                }
+            log_relayed_raise(
+                "Runtime class method ~p:~p failed", ClassName, Selector, ErrClass, Error, ErrST
             ),
             {error, {raised, ErrClass, Error, ErrST}}
     end.
@@ -1288,14 +1268,30 @@ apply_compiled_class_method(
         error:undef:ST ->
             classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST);
         ErrClass:Error:ErrST ->
-            %% BT-4115: debug, not error. The error is relayed as {raised, ...}
-            %% and re-raised in the calling process, which owns reporting it
-            %% (an uncaught one still reaches the caller's crash/REPL report).
-            %% At error level every caught `Error signal:` built a formatted
-            %% event here only for the domain filter to drop it; ?LOG_DEBUG's
-            %% level check skips building it.
+            log_relayed_raise(
+                "Class method ~p:~p failed", ClassName, Selector, ErrClass, Error, ErrST
+            ),
+            {error, {raised, ErrClass, Error, ErrST}}
+    end.
+
+-doc """
+Log a class method's raise before it is relayed to the caller as
+`{raised, ...}` (BT-4115).
+
+A deliberate Beamtalk signal (`is_beamtalk_signal/2`) is logged at debug: the
+calling process re-raises it and owns reporting it, and `?LOG_DEBUG`'s level
+check skips building an event for every caught `Error signal:`. Anything else
+(badarith, badmatch, function_clause, a failed FFI call, a raw throw or exit)
+is a crash inside the class method and is logged at error with its
+stacktrace: the relay re-raises with the caller's stacktrace, so this event is
+the only record of where in the class method it failed.
+""".
+-spec log_relayed_raise(string(), class_name(), selector(), atom(), term(), list()) -> ok.
+log_relayed_raise(Format, ClassName, Selector, ErrClass, Error, ErrST) ->
+    case is_beamtalk_signal(ErrClass, Error) of
+        true ->
             ?LOG_DEBUG(
-                "Class method ~p:~p failed",
+                Format,
                 [ClassName, Selector],
                 #{
                     class => ClassName,
@@ -1304,9 +1300,31 @@ apply_compiled_class_method(
                     stacktrace => ErrST,
                     domain => [beamtalk, runtime]
                 }
-            ),
-            {error, {raised, ErrClass, Error, ErrST}}
-    end.
+            );
+        false ->
+            ?LOG_ERROR(
+                Format,
+                [ClassName, Selector],
+                #{
+                    class => ClassName,
+                    selector => Selector,
+                    reason => beamtalk_error:format_reason(ErrClass, Error),
+                    stacktrace => ErrST,
+                    domain => [beamtalk, runtime]
+                }
+            )
+    end,
+    ok.
+
+-doc """
+Is this raise a deliberate Beamtalk signal? Every Beamtalk exception
+(`signal:`, `signal`, and runtime errors raised through
+`beamtalk_error:raise/1`) is raised as `error` with the wrapped
+`#{'$beamtalk_class' := _, error := #beamtalk_error{}}` exception object.
+""".
+-spec is_beamtalk_signal(atom(), term()) -> boolean().
+is_beamtalk_signal(error, #{'$beamtalk_class' := _, error := #beamtalk_error{}}) -> true;
+is_beamtalk_signal(_ErrClass, _Error) -> false.
 
 -spec classify_undef(class_name(), class_name(), atom(), selector(), atom(), list()) ->
     {error, #beamtalk_error{}} | {error, undef_in_body}.

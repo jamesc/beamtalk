@@ -3035,8 +3035,10 @@ class_send_not_found_fallthrough_does_not_message_stalled_class_test_() ->
         end}.
 
 %%% ----------------------------------------------------------------------------
-%%% BT-4115: a class method's raise is relayed to the caller, which owns
-%%% reporting it, so the class process logs it at debug, never at error.
+%%% BT-4115: a class method's deliberate `signal:` is relayed to the caller,
+%%% which owns reporting it, so the class process logs it at debug only. A raw
+%%% Erlang crash still logs at error with the class-side stacktrace, which the
+%%% relay does not carry.
 %%% ----------------------------------------------------------------------------
 
 %% Logger handler callback for the relay-logging test below.
@@ -3044,13 +3046,13 @@ log(LogEvent, #{config := #{parent := Parent}}) ->
     Parent ! {bt4115_log_event, LogEvent},
     ok.
 
-relayed_class_method_raise_not_logged_at_error_test_() ->
+relayed_class_method_raise_log_level_test_() ->
     {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
         [
-            {"caught Error signal: in a class method logs no error event",
+            {"caught Error signal: in a class method logs exactly one debug event",
                 fun test_relayed_signal_not_logged_at_error/0},
-            {"a raw error in a class method logs no error event",
-                fun test_relayed_raw_error_not_logged_at_error/0}
+            {"a raw Erlang crash in a class method still logs at error",
+                fun test_relayed_raw_error_logged_at_error/0}
         ]
     end}.
 
@@ -3063,11 +3065,11 @@ test_relayed_signal_not_logged_at_error() ->
     end),
     assert_relay_logged_at_debug_only(Events).
 
-test_relayed_raw_error_not_logged_at_error() ->
+test_relayed_raw_error_logged_at_error() ->
     Events = relay_log_events('BT4115RaiseLogClass', testRaise, fun(Pid) ->
         ?assertError(_, beamtalk_class_dispatch:class_send(Pid, testRaise, []))
     end),
-    assert_relay_logged_at_debug_only(Events).
+    ?assertMatch([#{level := error, meta := #{stacktrace := [_ | _]}}], Events).
 
 %% Start a one-method class, run Body against it with every log level captured,
 %% and answer the "Class method ~p:~p failed" events it produced.
